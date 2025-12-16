@@ -1,12 +1,11 @@
-use crate::error::{CompileError, CompileResult, ErrorKind};
+//! Lexer for the Rue programming language.
+//!
+//! Converts source text into a sequence of tokens for parsing.
 
-/// Source span for error reporting
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
+use rue_error::{CompileError, CompileResult, ErrorKind};
+use rue_span::Span;
 
+/// Token kinds in the Rue language.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
     // Keywords
@@ -50,22 +49,26 @@ impl TokenKind {
     }
 }
 
+/// A token with its kind and source span.
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
 }
 
+/// Lexer that converts source text into tokens.
 pub struct Lexer<'a> {
     source: &'a str,
     pos: usize,
 }
 
 impl<'a> Lexer<'a> {
+    /// Create a new lexer for the given source text.
     pub fn new(source: &'a str) -> Self {
         Self { source, pos: 0 }
     }
 
+    /// Tokenize the entire source, returning all tokens.
     pub fn tokenize(&mut self) -> CompileResult<Vec<Token>> {
         let mut tokens = Vec::new();
         loop {
@@ -82,12 +85,12 @@ impl<'a> Lexer<'a> {
     fn next_token(&mut self) -> CompileResult<Token> {
         self.skip_whitespace();
 
-        let start = self.pos;
+        let start = self.pos as u32;
 
         let Some(c) = self.peek() else {
             return Ok(Token {
                 kind: TokenKind::Eof,
-                span: Span { start, end: start },
+                span: Span::point(start),
             });
         };
 
@@ -124,10 +127,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     return Err(CompileError::new(
                         ErrorKind::UnexpectedCharacter('-'),
-                        Span {
-                            start,
-                            end: self.pos,
-                        },
+                        Span::new(start, self.pos as u32),
                     ));
                 }
             }
@@ -137,20 +137,14 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 return Err(CompileError::new(
                     ErrorKind::UnexpectedCharacter(c),
-                    Span {
-                        start,
-                        end: self.pos,
-                    },
+                    Span::new(start, self.pos as u32),
                 ));
             }
         };
 
         Ok(Token {
             kind,
-            span: Span {
-                start,
-                end: self.pos,
-            },
+            span: Span::new(start, self.pos as u32),
         })
     }
 
@@ -163,10 +157,7 @@ impl<'a> Lexer<'a> {
         let value = text.parse().map_err(|_| {
             CompileError::new(
                 ErrorKind::InvalidInteger,
-                Span {
-                    start,
-                    end: self.pos,
-                },
+                Span::new(start as u32, self.pos as u32),
             )
         })?;
         Ok(TokenKind::Int(value))
@@ -247,5 +238,14 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err.kind, ErrorKind::UnexpectedCharacter('@')));
+    }
+
+    #[test]
+    fn test_spans() {
+        let mut lexer = Lexer::new("fn main");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert_eq!(tokens[0].span, Span::new(0, 2)); // "fn"
+        assert_eq!(tokens[1].span, Span::new(3, 7)); // "main"
     }
 }

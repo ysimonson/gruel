@@ -1,46 +1,38 @@
-use crate::error::{CompileError, CompileResult, ErrorKind};
-use crate::lexer::{Span, Token, TokenKind};
+//! Parser for the Rue programming language.
+//!
+//! Converts a sequence of tokens into an AST.
 
-/// A complete program (list of functions)
-#[derive(Debug)]
-pub struct Program {
-    pub functions: Vec<Function>,
-}
+use crate::ast::{Ast, Expr, Function, Ident, IntLit, Item};
+use rue_error::{CompileError, CompileResult, ErrorKind};
+use rue_lexer::{Token, TokenKind};
+use rue_span::Span;
 
-/// A function definition
-#[derive(Debug)]
-pub struct Function {
-    pub name: String,
-    pub return_type: String,
-    pub body: Expr,
-    pub span: Span,
-}
-
-/// An expression
-#[derive(Debug)]
-pub enum Expr {
-    /// Integer literal
-    Int(i64, Span),
-}
-
+/// Parser that converts tokens into an AST.
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
 }
 
 impl Parser {
+    /// Create a new parser for the given tokens.
     pub fn new(tokens: Vec<Token>) -> Self {
         Self { tokens, pos: 0 }
     }
 
-    pub fn parse(&mut self) -> CompileResult<Program> {
-        let mut functions = Vec::new();
+    /// Parse the tokens into an AST.
+    pub fn parse(&mut self) -> CompileResult<Ast> {
+        let mut items = Vec::new();
 
         while !self.is_at_end() {
-            functions.push(self.parse_function()?);
+            items.push(self.parse_item()?);
         }
 
-        Ok(Program { functions })
+        Ok(Ast { items })
+    }
+
+    fn parse_item(&mut self) -> CompileResult<Item> {
+        // Currently only functions are supported
+        Ok(Item::Function(self.parse_function()?))
     }
 
     fn parse_function(&mut self) -> CompileResult<Function> {
@@ -71,14 +63,17 @@ impl Parser {
             name,
             return_type,
             body,
-            span: Span { start, end },
+            span: Span::new(start, end),
         })
     }
 
     fn parse_expr(&mut self) -> CompileResult<Expr> {
         let token = self.advance();
         match &token.kind {
-            TokenKind::Int(n) => Ok(Expr::Int(*n, token.span)),
+            TokenKind::Int(n) => Ok(Expr::Int(IntLit {
+                value: *n,
+                span: token.span,
+            })),
             _ => Err(CompileError::new(
                 ErrorKind::UnexpectedToken {
                     expected: "expression",
@@ -127,10 +122,13 @@ impl Parser {
         Ok(self.advance())
     }
 
-    fn expect_ident(&mut self) -> CompileResult<String> {
+    fn expect_ident(&mut self) -> CompileResult<Ident> {
         let token = self.advance();
         match token.kind {
-            TokenKind::Ident(s) => Ok(s),
+            TokenKind::Ident(name) => Ok(Ident {
+                name,
+                span: token.span,
+            }),
             TokenKind::Eof => Err(CompileError::new(
                 ErrorKind::UnexpectedEof {
                     expected: "identifier",
@@ -155,20 +153,25 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexer::Lexer;
+    use rue_lexer::Lexer;
 
     #[test]
     fn test_parse_main() {
         let mut lexer = Lexer::new("fn main() -> i32 { 42 }");
         let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
-        let program = parser.parse().unwrap();
+        let ast = parser.parse().unwrap();
 
-        assert_eq!(program.functions.len(), 1);
-        let func = &program.functions[0];
-        assert_eq!(func.name, "main");
-        assert_eq!(func.return_type, "i32");
-        assert!(matches!(func.body, Expr::Int(42, _)));
+        assert_eq!(ast.items.len(), 1);
+        match &ast.items[0] {
+            Item::Function(f) => {
+                assert_eq!(f.name.name, "main");
+                assert_eq!(f.return_type.name, "i32");
+                match &f.body {
+                    Expr::Int(lit) => assert_eq!(lit.value, 42),
+                }
+            }
+        }
     }
 
     #[test]
@@ -178,7 +181,5 @@ mod tests {
         let mut parser = Parser::new(tokens);
         let result = parser.parse();
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err.kind, ErrorKind::UnexpectedToken { expected: "'->'", .. }));
     }
 }

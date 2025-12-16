@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use annotate_snippets::{Level, Renderer, Snippet};
-use rue_compiler::{generate_elf, CompileError, ErrorKind, Lexer, Parser, Span};
+use rue_compiler::{compile, CompileError, ErrorKind};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -24,46 +24,27 @@ fn main() {
     });
 
     // Compile
-    if let Err(e) = compile(&source, source_path, output_path) {
-        print_error(&e, &source, source_path);
-        std::process::exit(1);
+    match compile(&source) {
+        Ok(elf) => {
+            // Write output
+            if let Err(e) = fs::write(output_path, &elf) {
+                eprintln!("Error writing {}: {}", output_path, e);
+                std::process::exit(1);
+            }
+
+            // Make executable
+            let path = Path::new(output_path);
+            let mut perms = fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(path, perms).unwrap();
+
+            println!("Compiled {} -> {}", source_path, output_path);
+        }
+        Err(e) => {
+            print_error(&e, &source, source_path);
+            std::process::exit(1);
+        }
     }
-
-    println!("Compiled {} -> {}", source_path, output_path);
-}
-
-fn compile(source: &str, source_path: &str, output_path: &str) -> Result<(), CompileError> {
-    let mut lexer = Lexer::new(source);
-    let tokens = lexer.tokenize()?;
-
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse()?;
-
-    // Check for main function
-    if !program.functions.iter().any(|f| f.name == "main") {
-        return Err(CompileError::new(
-            ErrorKind::NoMainFunction,
-            Span::default(),
-        ));
-    }
-
-    let elf = generate_elf(&program);
-
-    // Write output
-    fs::write(output_path, &elf).map_err(|_| {
-        CompileError::new(
-            ErrorKind::UnexpectedCharacter('\0'), // Placeholder - we should add an IO error kind
-            Span::default(),
-        )
-    })?;
-
-    // Make executable
-    let path = Path::new(output_path);
-    let mut perms = fs::metadata(path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(path, perms).unwrap();
-
-    Ok(())
 }
 
 fn print_error(error: &CompileError, source: &str, source_path: &str) {
@@ -71,20 +52,23 @@ fn print_error(error: &CompileError, source: &str, source_path: &str) {
     let renderer = Renderer::plain();
 
     // For errors without a span (like NoMainFunction), just print the message
-    if error.span.start == 0 && error.span.end == 0 && matches!(error.kind, ErrorKind::NoMainFunction) {
+    if error.span.start == 0
+        && error.span.end == 0
+        && matches!(error.kind, ErrorKind::NoMainFunction)
+    {
         let report = Level::Error.title(&message);
         eprintln!("{}", renderer.render(report));
         return;
     }
 
-    let report = Level::Error
-        .title(&message)
-        .snippet(
-            Snippet::source(source)
-                .origin(source_path)
-                .fold(true)
-                .annotation(Level::Error.span(error.span.start..error.span.end)),
-        );
+    let report = Level::Error.title(&message).snippet(
+        Snippet::source(source)
+            .origin(source_path)
+            .fold(true)
+            .annotation(
+                Level::Error.span(error.span.start as usize..error.span.end as usize),
+            ),
+    );
 
     eprintln!("{}", renderer.render(report));
 }

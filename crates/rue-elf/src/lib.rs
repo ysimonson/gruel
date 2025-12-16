@@ -1,54 +1,13 @@
-use crate::parser::{Program, Expr};
+//! ELF binary generation for the Rue compiler.
+//!
+//! Generates minimal ELF64 executables for Linux x86-64.
 
-/// Generate a minimal ELF64 executable for Linux x86-64.
+/// Build a minimal ELF64 executable from machine code.
 ///
 /// The generated binary:
 /// - Has a single PT_LOAD segment containing everything
-/// - Entry point calls exit syscall with the return value of main()
-pub fn generate_elf(program: &Program) -> Vec<u8> {
-    // Find main function
-    let main_fn = program
-        .functions
-        .iter()
-        .find(|f| f.name == "main")
-        .expect("no main function found");
-
-    // Get the return value
-    let exit_code = match &main_fn.body {
-        Expr::Int(n, _) => *n as i32,
-    };
-
-    // Build the code section
-    let code = generate_code(exit_code);
-
-    // Build the ELF
-    build_elf(&code)
-}
-
-/// Generate x86-64 machine code that exits with the given code.
-fn generate_code(exit_code: i32) -> Vec<u8> {
-    let mut code = Vec::new();
-
-    // mov edi, <exit_code>  ; first arg to syscall
-    // Encoding: BF <imm32>
-    code.push(0xBF);
-    code.extend_from_slice(&exit_code.to_le_bytes());
-
-    // mov eax, 60  ; syscall number for exit
-    // Encoding: B8 <imm32>
-    code.push(0xB8);
-    code.extend_from_slice(&60_i32.to_le_bytes());
-
-    // syscall
-    // Encoding: 0F 05
-    code.push(0x0F);
-    code.push(0x05);
-
-    code
-}
-
-/// Build a minimal ELF64 executable.
-fn build_elf(code: &[u8]) -> Vec<u8> {
+/// - Entry point executes the provided code directly
+pub fn build_elf(code: &[u8]) -> Vec<u8> {
     // Memory layout constants
     const BASE_ADDR: u64 = 0x400000;
     const ELF_HEADER_SIZE: u64 = 64;
@@ -59,18 +18,18 @@ fn build_elf(code: &[u8]) -> Vec<u8> {
     let entry_point = BASE_ADDR + code_offset;
     let file_size = HEADER_SIZE + code.len() as u64;
 
-    let mut elf = Vec::new();
+    let mut elf = Vec::with_capacity(file_size as usize);
 
     // ===== ELF Header (64 bytes) =====
 
     // e_ident: ELF magic number and identification
     elf.extend_from_slice(&[
-        0x7F, b'E', b'L', b'F',  // Magic number
-        2,                       // 64-bit
-        1,                       // Little endian
-        1,                       // ELF version 1
-        0,                       // OS/ABI: System V
-        0, 0, 0, 0, 0, 0, 0, 0,  // Padding
+        0x7F, b'E', b'L', b'F', // Magic number
+        2,    // 64-bit
+        1,    // Little endian
+        1,    // ELF version 1
+        0,    // OS/ABI: System V
+        0, 0, 0, 0, 0, 0, 0, 0, // Padding
     ]);
 
     // e_type: Executable file
@@ -149,28 +108,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate_code() {
-        let code = generate_code(42);
-        // mov edi, 42 (BF 2A 00 00 00)
-        // mov eax, 60 (B8 3C 00 00 00)
-        // syscall (0F 05)
-        assert_eq!(code.len(), 12);
-        assert_eq!(code[0], 0xBF);
-        assert_eq!(code[1], 42);
-        assert_eq!(code[5], 0xB8);
-        assert_eq!(code[6], 60);
-        assert_eq!(code[10], 0x0F);
-        assert_eq!(code[11], 0x05);
+    fn test_elf_magic() {
+        let elf = build_elf(&[]);
+        assert_eq!(&elf[0..4], &[0x7F, b'E', b'L', b'F']);
     }
 
     #[test]
-    fn test_elf_header() {
+    fn test_elf_64bit() {
         let elf = build_elf(&[]);
-        // Check ELF magic
-        assert_eq!(&elf[0..4], &[0x7F, b'E', b'L', b'F']);
-        // Check it's 64-bit
-        assert_eq!(elf[4], 2);
-        // Check it's little endian
-        assert_eq!(elf[5], 1);
+        assert_eq!(elf[4], 2); // 64-bit
+    }
+
+    #[test]
+    fn test_elf_little_endian() {
+        let elf = build_elf(&[]);
+        assert_eq!(elf[5], 1); // Little endian
+    }
+
+    #[test]
+    fn test_elf_header_size() {
+        let elf = build_elf(&[]);
+        // Header should be 64 + 56 = 120 bytes minimum
+        assert!(elf.len() >= 120);
     }
 }
