@@ -62,24 +62,20 @@ impl<'a> Lower<'a> {
                 // Get the vreg holding the return value
                 let value_vreg = self.get_vreg(*value_ref);
 
-                // For now, we emit an exit syscall with the return value.
-                // In a real compiler, we'd emit a ret instruction and let
-                // the caller handle the calling convention.
-
-                // Move return value to edi (first arg to syscall)
+                // Move return value to rdi (first argument per System V AMD64 ABI).
+                // We emit a 64-bit mov (mov rdi, src) even though __rue_exit takes
+                // an i32 status code. The upper 32 bits are ignored by the callee.
+                // Using rdi instead of edi avoids needing a separate 32-bit mov path.
                 self.mir.push(X86Inst::MovRR {
                     dst: Operand::Physical(Reg::Rdi),
                     src: Operand::Virtual(value_vreg),
                 });
 
-                // Move syscall number (60 = exit) to eax
-                self.mir.push(X86Inst::MovRI32 {
-                    dst: Operand::Physical(Reg::Rax),
-                    imm: 60,
+                // Call the runtime's __rue_exit function.
+                // This function never returns (it calls the exit syscall).
+                self.mir.push(X86Inst::CallRel {
+                    symbol: "__rue_exit".to_string(),
                 });
-
-                // syscall
-                self.mir.push(X86Inst::Syscall);
             }
         }
     }
@@ -117,12 +113,11 @@ mod tests {
 
         let mir = Lower::new(&air).lower();
 
-        // Should have 4 instructions:
+        // Should have 3 instructions:
         // 1. mov v0, 42
         // 2. mov rdi, v0
-        // 3. mov rax, 60
-        // 4. syscall
-        assert_eq!(mir.instructions().len(), 4);
+        // 3. call __rue_exit
+        assert_eq!(mir.instructions().len(), 3);
 
         // Check first instruction is mov v0, 42
         match &mir.instructions()[0] {
@@ -133,8 +128,13 @@ mod tests {
             _ => panic!("expected MovRI32"),
         }
 
-        // Check syscall is last
-        assert!(matches!(mir.instructions()[3], X86Inst::Syscall));
+        // Check call __rue_exit is last
+        match &mir.instructions()[2] {
+            X86Inst::CallRel { symbol } => {
+                assert_eq!(symbol, "__rue_exit");
+            }
+            _ => panic!("expected CallRel"),
+        }
     }
 
     #[test]

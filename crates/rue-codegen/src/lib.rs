@@ -70,10 +70,15 @@ mod tests {
         // Should generate working code
         assert!(!machine_code.code.is_empty());
 
-        // Last two bytes should be syscall (0F 05)
+        // Code should end with call rel32 (E8 xx xx xx xx)
+        // The last 5 bytes should be the call instruction
         let len = machine_code.code.len();
-        assert_eq!(machine_code.code[len - 2], 0x0F);
-        assert_eq!(machine_code.code[len - 1], 0x05);
+        assert!(len >= 5);
+        assert_eq!(machine_code.code[len - 5], 0xE8); // call opcode
+
+        // Should have one relocation for __rue_exit
+        assert_eq!(machine_code.relocations.len(), 1);
+        assert_eq!(machine_code.relocations[0].symbol, "__rue_exit");
     }
 
     #[test]

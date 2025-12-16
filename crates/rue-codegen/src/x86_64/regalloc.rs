@@ -89,8 +89,8 @@ impl RegAlloc {
                 *dst = Self::rewrite_operand(allocation, *dst);
                 *src = Self::rewrite_operand(allocation, *src);
             }
-            X86Inst::Syscall | X86Inst::Ret => {
-                // No operands to rewrite
+            X86Inst::CallRel { .. } | X86Inst::Syscall | X86Inst::Ret => {
+                // No register operands to rewrite
             }
         }
     }

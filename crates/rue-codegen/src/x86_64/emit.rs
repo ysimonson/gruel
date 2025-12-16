@@ -4,11 +4,13 @@
 //! machine code bytes.
 
 use super::mir::{Reg, X86Inst, X86Mir};
+use super::EmittedRelocation;
 
 /// X86-64 instruction emitter.
 pub struct Emitter<'a> {
     mir: &'a X86Mir,
     code: Vec<u8>,
+    relocations: Vec<EmittedRelocation>,
 }
 
 impl<'a> Emitter<'a> {
@@ -17,15 +19,18 @@ impl<'a> Emitter<'a> {
         Self {
             mir,
             code: Vec::new(),
+            relocations: Vec::new(),
         }
     }
 
     /// Emit machine code for all instructions.
-    pub fn emit(mut self) -> Vec<u8> {
+    ///
+    /// Returns (code bytes, relocations).
+    pub fn emit(mut self) -> (Vec<u8>, Vec<EmittedRelocation>) {
         for inst in self.mir.iter() {
             self.emit_inst(inst);
         }
-        self.code
+        (self.code, self.relocations)
     }
 
     /// Emit a single instruction.
@@ -39,6 +44,9 @@ impl<'a> Emitter<'a> {
             }
             X86Inst::MovRR { dst, src } => {
                 self.emit_mov_rr(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::CallRel { symbol } => {
+                self.emit_call_rel(symbol);
             }
             X86Inst::Syscall => {
                 self.emit_syscall();
@@ -128,6 +136,29 @@ impl<'a> Emitter<'a> {
     fn emit_ret(&mut self) {
         self.code.push(0xC3);
     }
+
+    /// Emit `call rel32` with a relocation.
+    ///
+    /// Encoding: E8 rel32
+    /// The rel32 is a placeholder (0x00000000) that will be patched by the linker.
+    fn emit_call_rel(&mut self, symbol: &str) {
+        // Opcode: E8 (call rel32)
+        self.code.push(0xE8);
+
+        // The relocation offset points to the rel32 displacement
+        let reloc_offset = self.code.len() as u64;
+
+        // Placeholder for rel32 (will be filled by linker)
+        self.code.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        // Record relocation: PC-relative, addend = -4 because the displacement
+        // is calculated from the end of the instruction (after the 4-byte displacement)
+        self.relocations.push(EmittedRelocation {
+            offset: reloc_offset,
+            symbol: symbol.to_string(),
+            addend: -4,
+        });
+    }
 }
 
 #[cfg(test)]
@@ -138,7 +169,7 @@ mod tests {
     fn emit_single(inst: X86Inst) -> Vec<u8> {
         let mut mir = X86Mir::new();
         mir.push(inst);
-        Emitter::new(&mir).emit()
+        Emitter::new(&mir).emit().0
     }
 
     #[test]
@@ -260,7 +291,7 @@ mod tests {
         });
         mir.push(X86Inst::Syscall);
 
-        let code = Emitter::new(&mir).emit();
+        let (code, _) = Emitter::new(&mir).emit();
 
         // 41 BA 2A 00 00 00  mov r10d, 42
         // 4C 89 D7           mov rdi, r10
@@ -275,5 +306,24 @@ mod tests {
                 0x0F, 0x05                          // syscall
             ]
         );
+    }
+
+    #[test]
+    fn test_call_rel() {
+        let mut mir = X86Mir::new();
+        mir.push(X86Inst::CallRel {
+            symbol: "__rue_exit".into(),
+        });
+
+        let (code, relocs) = Emitter::new(&mir).emit();
+
+        // call rel32 -> E8 00 00 00 00
+        assert_eq!(code, vec![0xE8, 0x00, 0x00, 0x00, 0x00]);
+
+        // Should have one relocation
+        assert_eq!(relocs.len(), 1);
+        assert_eq!(relocs[0].offset, 1); // After the opcode
+        assert_eq!(relocs[0].symbol, "__rue_exit");
+        assert_eq!(relocs[0].addend, -4);
     }
 }

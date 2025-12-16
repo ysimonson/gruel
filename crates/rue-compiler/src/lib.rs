@@ -5,10 +5,25 @@
 //!
 //! It re-exports types from the component crates for convenience.
 
+/// The rue-runtime staticlib archive bytes, embedded at compile time.
+/// This is linked into every Rue executable.
+static RUNTIME_BYTES: &[u8] = include_bytes!("librue_runtime.a");
+
+/// Validate that the embedded runtime archive is well-formed.
+///
+/// This is called by tests to ensure the runtime is valid at build time.
+/// Returns an error message if validation fails.
+pub fn validate_runtime() -> Result<(), String> {
+    Archive::parse(RUNTIME_BYTES)
+        .map(|_| ())
+        .map_err(|e| format!("embedded rue-runtime archive is invalid: {}", e))
+}
+
 // Re-export commonly used types
 pub use rue_air::{Air, AnalyzedFunction, Sema, Type};
 pub use rue_codegen::{CodeGen, X86Mir};
-pub use rue_linker::{Linker, ObjectBuilder, ObjectFile};
+pub use rue_linker::{Archive, CodeRelocation, Linker, ObjectBuilder, ObjectFile};
+use rue_linker::RelocationType;
 pub use rue_error::{CompileError, CompileResult, ErrorKind};
 pub use rue_intern::{Interner, Symbol};
 pub use rue_lexer::{Lexer, Token, TokenKind};
@@ -69,17 +84,40 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
     let machine_code = codegen.generate();
 
     // Phase 6: Build object file
-    let obj_bytes = ObjectBuilder::new("main")
-        .code(machine_code.code)
-        .build();
+    let mut obj_builder = ObjectBuilder::new("main").code(machine_code.code);
+
+    // Add relocations from codegen (convert emitted relocations to linker relocations).
+    // We use PLT32 for call instructions since this is the standard relocation type
+    // for function calls on x86-64. While we're doing static linking without a PLT,
+    // PLT32 and PC32 are treated identically by the linker for direct calls.
+    // Using PLT32 follows the convention established by GCC/Clang.
+    for reloc in machine_code.relocations {
+        obj_builder = obj_builder.relocation(CodeRelocation {
+            offset: reloc.offset,
+            symbol: reloc.symbol,
+            rel_type: RelocationType::Plt32,
+            addend: reloc.addend,
+        });
+    }
+
+    let obj_bytes = obj_builder.build();
 
     // Phase 7: Link to executable
     let obj = ObjectFile::parse(&obj_bytes)
         .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
 
     let mut linker = Linker::new();
+
+    // Add the user's compiled code
     linker
         .add_object(obj)
+        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+
+    // Add the runtime library
+    let runtime = Archive::parse(RUNTIME_BYTES)
+        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+    linker
+        .add_archive(runtime)
         .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
 
     let elf = linker
@@ -97,6 +135,13 @@ pub fn generate_mir(air: &Air) -> X86Mir {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_embedded_runtime_is_valid() {
+        // Validate that the embedded runtime archive parses correctly.
+        // This catches issues with the embedded archive at test time.
+        validate_runtime().expect("embedded runtime should be valid");
+    }
 
     #[test]
     fn test_compile_simple() {

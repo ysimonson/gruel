@@ -185,6 +185,12 @@ pub enum X86Inst {
     /// `mov dst, src` - Move register to register.
     MovRR { dst: Operand, src: Operand },
 
+    /// `call symbol` - Call a function by symbol name (PC-relative).
+    ///
+    /// The symbol will be resolved by the linker. This emits a `call rel32`
+    /// instruction with a relocation for the target address.
+    CallRel { symbol: String },
+
     /// `syscall` - Invoke system call.
     Syscall,
 
@@ -198,6 +204,7 @@ impl fmt::Display for X86Inst {
             X86Inst::MovRI32 { dst, imm } => write!(f, "mov {}, {}", dst, imm),
             X86Inst::MovRI64 { dst, imm } => write!(f, "mov {}, {}", dst, imm),
             X86Inst::MovRR { dst, src } => write!(f, "mov {}, {}", dst, src),
+            X86Inst::CallRel { symbol } => write!(f, "call {}", symbol),
             X86Inst::Syscall => write!(f, "syscall"),
             X86Inst::Ret => write!(f, "ret"),
         }

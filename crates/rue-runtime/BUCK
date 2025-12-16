@@ -1,0 +1,20 @@
+rust_library(
+    name = "rue-runtime",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "rue_runtime",
+    # Force static linkage to ensure the [staticlib] subtarget is available
+    preferred_linkage = "static",
+    # Minimize output size and ensure no_std compatibility
+    rustc_flags = [
+        "-Cpanic=abort",
+        "-Copt-level=z",
+        "-Clto=true",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "rue-runtime-test",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "rue_runtime",
+)

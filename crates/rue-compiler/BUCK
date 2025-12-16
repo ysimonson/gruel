@@ -1,6 +1,10 @@
+# The runtime staticlib is mapped into src/ so it can be embedded with include_bytes!
 rust_library(
     name = "rue-compiler",
     srcs = glob(["src/**/*.rs"]),
+    mapped_srcs = {
+        "//crates/rue-runtime:rue-runtime[staticlib]": "src/librue_runtime.a",
+    },
     deps = [
         "//crates/rue-air:rue-air",
         "//crates/rue-codegen:rue-codegen",
@@ -18,6 +22,9 @@ rust_library(
 rust_test(
     name = "rue-compiler-test",
     srcs = glob(["src/**/*.rs"]),
+    mapped_srcs = {
+        "//crates/rue-runtime:rue-runtime[staticlib]": "src/librue_runtime.a",
+    },
     deps = [
         "//crates/rue-air:rue-air",
         "//crates/rue-codegen:rue-codegen",

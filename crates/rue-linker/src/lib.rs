@@ -2,6 +2,7 @@
 //!
 //! This linker handles:
 //! - Reading ELF64 relocatable object files (.o)
+//! - Reading ar archives (.a) containing object files
 //! - Creating ELF64 relocatable object files
 //! - Resolving symbols between objects
 //! - Applying relocations
@@ -9,10 +10,12 @@
 //!
 //! It's intentionally minimal - just enough to link Rue code with its runtime.
 
+mod archive;
 mod elf;
 mod emit;
 mod linker;
 
+pub use archive::{Archive, ArchiveError};
 pub use elf::{ObjectFile, Section, Symbol, Relocation, RelocationType};
 pub use emit::{ObjectBuilder, CodeRelocation};
 pub use linker::{Linker, LinkError};

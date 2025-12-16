@@ -1,6 +1,7 @@
 //! The linker - combines object files and produces an executable.
 
 use std::collections::HashMap;
+use crate::archive::Archive;
 use crate::elf::{ObjectFile, Symbol, SymbolBinding, RelocationType};
 
 /// Linker errors.
@@ -77,6 +78,120 @@ impl Linker {
         }
 
         self.objects.push(obj);
+        Ok(())
+    }
+
+    /// Add objects from an ar archive selectively based on symbol resolution.
+    ///
+    /// This implements traditional archive linking semantics:
+    /// - Only include objects that define symbols we currently need
+    /// - Iterate until no new objects are added
+    ///
+    /// This avoids pulling in unnecessary objects (like compiler_builtins
+    /// intrinsics) that might have their own unresolved dependencies.
+    pub fn add_archive(&mut self, archive: Archive) -> Result<(), LinkError> {
+        // Convert to a Vec we can index into
+        let archive_objects: Vec<ObjectFile> = archive.objects.into_iter().collect();
+
+        // Build an index of which archive objects define which symbols
+        let mut symbol_to_obj: HashMap<String, usize> = HashMap::new();
+        for (obj_idx, obj) in archive_objects.iter().enumerate() {
+            for sym in &obj.symbols {
+                if sym.section_index.is_some()
+                    && (sym.binding == SymbolBinding::Global || sym.binding == SymbolBinding::Weak)
+                    && !sym.name.is_empty()
+                {
+                    symbol_to_obj.insert(sym.name.clone(), obj_idx);
+                }
+            }
+        }
+
+        // Also build an index of undefined symbols in each archive object
+        let mut obj_undefined: Vec<Vec<String>> = Vec::with_capacity(archive_objects.len());
+        for obj in &archive_objects {
+            let mut undef = Vec::new();
+            for sym in &obj.symbols {
+                if sym.section_index.is_none()
+                    && sym.binding == SymbolBinding::Global
+                    && !sym.name.is_empty()
+                {
+                    undef.push(sym.name.clone());
+                }
+            }
+            obj_undefined.push(undef);
+        }
+
+        // Track which archive objects we've selected and which symbols are defined
+        let mut selected: Vec<bool> = vec![false; archive_objects.len()];
+        let mut defined_symbols: std::collections::HashSet<String> = self
+            .global_symbols
+            .keys()
+            .cloned()
+            .collect();
+
+        // Iterate until we reach a fixed point
+        loop {
+            // Collect undefined symbols from currently linked objects and selected archive objects
+            let mut undefined: Vec<String> = Vec::new();
+
+            // From already-linked objects
+            for obj in &self.objects {
+                for sym in &obj.symbols {
+                    if sym.section_index.is_none()
+                        && sym.binding == SymbolBinding::Global
+                        && !sym.name.is_empty()
+                        && !defined_symbols.contains(&sym.name)
+                    {
+                        undefined.push(sym.name.clone());
+                    }
+                }
+            }
+
+            // From selected archive objects
+            for (idx, selected_flag) in selected.iter().enumerate() {
+                if *selected_flag {
+                    for sym_name in &obj_undefined[idx] {
+                        if !defined_symbols.contains(sym_name) {
+                            undefined.push(sym_name.clone());
+                        }
+                    }
+                }
+            }
+
+            // Try to resolve undefined symbols from the archive
+            let mut added_any = false;
+            for sym_name in undefined {
+                if let Some(&obj_idx) = symbol_to_obj.get(&sym_name) {
+                    if !selected[obj_idx] {
+                        selected[obj_idx] = true;
+                        added_any = true;
+
+                        // Add defined symbols from this object
+                        for sym in &archive_objects[obj_idx].symbols {
+                            if sym.section_index.is_some()
+                                && (sym.binding == SymbolBinding::Global
+                                    || sym.binding == SymbolBinding::Weak)
+                                && !sym.name.is_empty()
+                            {
+                                defined_symbols.insert(sym.name.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !added_any {
+                break;
+            }
+        }
+
+        // Now actually add the selected objects
+        for (idx, obj) in archive_objects.into_iter().enumerate() {
+            if selected[idx] {
+                self.add_object(obj)?;
+            }
+        }
+
         Ok(())
     }
 
