@@ -3,6 +3,42 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+alias(
+    name = "annotate-snippets",
+    actual = ":annotate-snippets-0.11.5",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "annotate-snippets-0.11.5",
+    srcs = [
+        "vendor/annotate-snippets-0.11.5/examples/expected_type.rs",
+        "vendor/annotate-snippets-0.11.5/examples/expected_type.svg",
+        "vendor/annotate-snippets-0.11.5/examples/footer.rs",
+        "vendor/annotate-snippets-0.11.5/examples/footer.svg",
+        "vendor/annotate-snippets-0.11.5/examples/format.rs",
+        "vendor/annotate-snippets-0.11.5/examples/format.svg",
+        "vendor/annotate-snippets-0.11.5/examples/multislice.rs",
+        "vendor/annotate-snippets-0.11.5/examples/multislice.svg",
+        "vendor/annotate-snippets-0.11.5/src/lib.rs",
+        "vendor/annotate-snippets-0.11.5/src/renderer/display_list.rs",
+        "vendor/annotate-snippets-0.11.5/src/renderer/margin.rs",
+        "vendor/annotate-snippets-0.11.5/src/renderer/mod.rs",
+        "vendor/annotate-snippets-0.11.5/src/renderer/styled_buffer.rs",
+        "vendor/annotate-snippets-0.11.5/src/renderer/stylesheet.rs",
+        "vendor/annotate-snippets-0.11.5/src/snippet.rs",
+    ],
+    crate = "annotate_snippets",
+    crate_root = "vendor/annotate-snippets-0.11.5/src/lib.rs",
+    edition = "2021",
+    features = ["default"],
+    visibility = [],
+    deps = [
+        ":anstyle-1.0.13",
+        ":unicode-width-0.2.2",
+    ],
+)
+
 cargo.rust_library(
     name = "anstream-0.6.21",
     srcs = [
@@ -2756,6 +2792,22 @@ cargo.rust_library(
     crate = "unicode_ident",
     crate_root = "vendor/unicode-ident-1.0.22/src/lib.rs",
     edition = "2018",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "unicode-width-0.2.2",
+    srcs = [
+        "vendor/unicode-width-0.2.2/src/lib.rs",
+        "vendor/unicode-width-0.2.2/src/tables.rs",
+    ],
+    crate = "unicode_width",
+    crate_root = "vendor/unicode-width-0.2.2/src/lib.rs",
+    edition = "2021",
+    features = [
+        "cjk",
+        "default",
+    ],
     visibility = [],
 )
 

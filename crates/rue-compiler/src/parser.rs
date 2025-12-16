@@ -1,4 +1,5 @@
-use crate::lexer::{Token, TokenKind, Span};
+use crate::error::{CompileError, CompileResult, ErrorKind};
+use crate::lexer::{Span, Token, TokenKind};
 
 /// A complete program (list of functions)
 #[derive(Debug)]
@@ -32,53 +33,59 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
-    pub fn parse(&mut self) -> Program {
+    pub fn parse(&mut self) -> CompileResult<Program> {
         let mut functions = Vec::new();
 
         while !self.is_at_end() {
-            functions.push(self.parse_function());
+            functions.push(self.parse_function()?);
         }
 
-        Program { functions }
+        Ok(Program { functions })
     }
 
-    fn parse_function(&mut self) -> Function {
+    fn parse_function(&mut self) -> CompileResult<Function> {
         let start = self.current().span.start;
 
         // fn
-        self.expect(TokenKind::Fn);
+        self.expect(TokenKind::Fn)?;
 
         // name
-        let name = self.expect_ident();
+        let name = self.expect_ident()?;
 
         // ()
-        self.expect(TokenKind::LParen);
-        self.expect(TokenKind::RParen);
+        self.expect(TokenKind::LParen)?;
+        self.expect(TokenKind::RParen)?;
 
         // -> Type
-        self.expect(TokenKind::Arrow);
-        let return_type = self.expect_ident();
+        self.expect(TokenKind::Arrow)?;
+        let return_type = self.expect_ident()?;
 
         // { body }
-        self.expect(TokenKind::LBrace);
-        let body = self.parse_expr();
-        self.expect(TokenKind::RBrace);
+        self.expect(TokenKind::LBrace)?;
+        let body = self.parse_expr()?;
+        self.expect(TokenKind::RBrace)?;
 
         let end = self.tokens[self.pos.saturating_sub(1)].span.end;
 
-        Function {
+        Ok(Function {
             name,
             return_type,
             body,
             span: Span { start, end },
-        }
+        })
     }
 
-    fn parse_expr(&mut self) -> Expr {
+    fn parse_expr(&mut self) -> CompileResult<Expr> {
         let token = self.advance();
         match &token.kind {
-            TokenKind::Int(n) => Expr::Int(*n, token.span),
-            _ => panic!("expected expression, got {:?}", token.kind),
+            TokenKind::Int(n) => Ok(Expr::Int(*n, token.span)),
+            _ => Err(CompileError::new(
+                ErrorKind::UnexpectedToken {
+                    expected: "expression",
+                    found: token.kind.name().to_string(),
+                },
+                token.span,
+            )),
         }
     }
 
@@ -98,18 +105,45 @@ impl Parser {
         token
     }
 
-    fn expect(&mut self, expected: TokenKind) {
-        if !self.check(&expected) {
-            panic!("expected {:?}, got {:?}", expected, self.current().kind);
+    fn expect(&mut self, expected: TokenKind) -> CompileResult<Token> {
+        if self.is_at_end() {
+            return Err(CompileError::new(
+                ErrorKind::UnexpectedEof {
+                    expected: expected.name(),
+                },
+                self.current().span,
+            ));
         }
-        self.advance();
+        if !self.check(&expected) {
+            let current = self.current();
+            return Err(CompileError::new(
+                ErrorKind::UnexpectedToken {
+                    expected: expected.name(),
+                    found: current.kind.name().to_string(),
+                },
+                current.span,
+            ));
+        }
+        Ok(self.advance())
     }
 
-    fn expect_ident(&mut self) -> String {
+    fn expect_ident(&mut self) -> CompileResult<String> {
         let token = self.advance();
         match token.kind {
-            TokenKind::Ident(s) => s,
-            _ => panic!("expected identifier, got {:?}", token.kind),
+            TokenKind::Ident(s) => Ok(s),
+            TokenKind::Eof => Err(CompileError::new(
+                ErrorKind::UnexpectedEof {
+                    expected: "identifier",
+                },
+                token.span,
+            )),
+            _ => Err(CompileError::new(
+                ErrorKind::UnexpectedToken {
+                    expected: "identifier",
+                    found: token.kind.name().to_string(),
+                },
+                token.span,
+            )),
         }
     }
 
@@ -126,14 +160,25 @@ mod tests {
     #[test]
     fn test_parse_main() {
         let mut lexer = Lexer::new("fn main() -> i32 { 42 }");
-        let tokens = lexer.tokenize();
+        let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
-        let program = parser.parse();
+        let program = parser.parse().unwrap();
 
         assert_eq!(program.functions.len(), 1);
         let func = &program.functions[0];
         assert_eq!(func.name, "main");
         assert_eq!(func.return_type, "i32");
         assert!(matches!(func.body, Expr::Int(42, _)));
+    }
+
+    #[test]
+    fn test_missing_return_type() {
+        let mut lexer = Lexer::new("fn main() { 42 }");
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::UnexpectedToken { expected: "'->'", .. }));
     }
 }
