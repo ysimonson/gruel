@@ -29,6 +29,18 @@ struct Case {
     /// Optional substring that should appear in the error message
     #[serde(default)]
     error_contains: Option<String>,
+    /// Expected exact error output (golden test)
+    #[serde(default)]
+    expected_error: Option<String>,
+    /// Expected RIR dump (golden test)
+    #[serde(default)]
+    expected_rir: Option<String>,
+    /// Expected AIR dump (golden test)
+    #[serde(default)]
+    expected_air: Option<String>,
+    /// Expected MIR dump (golden test)
+    #[serde(default)]
+    expected_mir: Option<String>,
     #[serde(default)]
     skip: bool,
 }
@@ -90,6 +102,40 @@ fn load_spec_files(cases_dir: &Path) -> Vec<(String, SpecFile)> {
     specs
 }
 
+/// Normalize a string for golden test comparison.
+/// This trims trailing whitespace from each line and ensures consistent line endings.
+/// Also normalizes file paths to "<source>" for error message comparisons.
+fn normalize_golden(s: &str) -> String {
+    s.lines()
+        .map(|line| line.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+/// Normalize error output for golden test comparison.
+/// Replaces the temp file path with a placeholder "<source>".
+fn normalize_error_output(s: &str, source_path: &Path) -> String {
+    let path_str = source_path.to_string_lossy();
+    let normalized = s.replace(path_str.as_ref(), "<source>");
+    normalize_golden(&normalized)
+}
+
+/// Compare actual output against expected golden output.
+fn check_golden(actual: &str, expected: &str, label: &str) -> Result<(), Failed> {
+    let actual_normalized = normalize_golden(actual);
+    let expected_normalized = normalize_golden(expected);
+
+    if actual_normalized != expected_normalized {
+        return Err(format!(
+            "{} mismatch:\n--- expected ---\n{}\n--- actual ---\n{}\n",
+            label, expected_normalized, actual_normalized
+        ).into());
+    }
+    Ok(())
+}
+
 /// Run a single test case.
 fn run_test_case(case: &Case, rue_binary: &Path) -> Result<(), Failed> {
     // Create a temporary directory for this test
@@ -103,6 +149,66 @@ fn run_test_case(case: &Case, rue_binary: &Path) -> Result<(), Failed> {
     source_file
         .write_all(case.source.as_bytes())
         .map_err(|e| format!("Failed to write source: {}", e))?;
+
+    // Check for golden IR tests (RIR, AIR, MIR)
+    if case.expected_rir.is_some() || case.expected_air.is_some() || case.expected_mir.is_some() {
+        // Run dump commands and check golden output
+        if let Some(ref expected) = case.expected_rir {
+            let output = Command::new(rue_binary)
+                .arg("--dump-rir")
+                .arg(&source_path)
+                .output()
+                .map_err(|e| format!("Failed to run rue --dump-rir: {}", e))?;
+
+            if !output.status.success() {
+                return Err(format!(
+                    "rue --dump-rir failed:\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                ).into());
+            }
+
+            let actual = String::from_utf8_lossy(&output.stdout);
+            check_golden(&actual, expected, "RIR")?;
+        }
+
+        if let Some(ref expected) = case.expected_air {
+            let output = Command::new(rue_binary)
+                .arg("--dump-air")
+                .arg(&source_path)
+                .output()
+                .map_err(|e| format!("Failed to run rue --dump-air: {}", e))?;
+
+            if !output.status.success() {
+                return Err(format!(
+                    "rue --dump-air failed:\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                ).into());
+            }
+
+            let actual = String::from_utf8_lossy(&output.stdout);
+            check_golden(&actual, expected, "AIR")?;
+        }
+
+        if let Some(ref expected) = case.expected_mir {
+            let output = Command::new(rue_binary)
+                .arg("--dump-mir")
+                .arg(&source_path)
+                .output()
+                .map_err(|e| format!("Failed to run rue --dump-mir: {}", e))?;
+
+            if !output.status.success() {
+                return Err(format!(
+                    "rue --dump-mir failed:\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                ).into());
+            }
+
+            let actual = String::from_utf8_lossy(&output.stdout);
+            check_golden(&actual, expected, "MIR")?;
+        }
+
+        return Ok(());
+    }
 
     // Compile with rue
     let compile_output = Command::new(rue_binary)
@@ -124,7 +230,19 @@ fn run_test_case(case: &Case, rue_binary: &Path) -> Result<(), Failed> {
             .into());
         }
 
-        // Check error message if specified
+        // Check exact error message (golden test)
+        if let Some(ref expected) = case.expected_error {
+            let actual_normalized = normalize_error_output(&stderr, &source_path);
+            let expected_normalized = normalize_golden(expected);
+            if actual_normalized != expected_normalized {
+                return Err(format!(
+                    "Error mismatch:\n--- expected ---\n{}\n--- actual ---\n{}\n",
+                    expected_normalized, actual_normalized
+                ).into());
+            }
+        }
+
+        // Check error message contains substring
         if let Some(ref expected_error) = case.error_contains {
             if !stderr.contains(expected_error) {
                 return Err(format!(

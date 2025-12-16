@@ -1,0 +1,100 @@
+[section]
+id = "4.1"
+name = "IR Dumps"
+description = "Golden tests for intermediate representation dumps."
+
+[[case]]
+name = "simple_return_rir"
+source = "fn main() -> i32 { 42 }"
+expected_rir = """
+%0 = const 42
+%1 = fn main() -> i32 {
+    %0
+}
+"""
+
+[[case]]
+name = "simple_return_air"
+source = "fn main() -> i32 { 42 }"
+expected_air = """
+function main:
+air (return_type: i32) {
+    %0 : i32 = const 42
+    %1 : i32 = ret %0
+}
+"""
+
+[[case]]
+name = "simple_return_mir"
+source = "fn main() -> i32 { 42 }"
+expected_mir = """
+function main:
+    mov v0, 42
+    mov rdi, v0
+    mov rax, 60
+    syscall
+"""
+
+[[case]]
+name = "zero_rir"
+source = "fn main() -> i32 { 0 }"
+expected_rir = """
+%0 = const 0
+%1 = fn main() -> i32 {
+    %0
+}
+"""
+
+[[case]]
+name = "zero_air"
+source = "fn main() -> i32 { 0 }"
+expected_air = """
+function main:
+air (return_type: i32) {
+    %0 : i32 = const 0
+    %1 : i32 = ret %0
+}
+"""
+
+[[case]]
+name = "zero_mir"
+source = "fn main() -> i32 { 0 }"
+expected_mir = """
+function main:
+    mov v0, 0
+    mov rdi, v0
+    mov rax, 60
+    syscall
+"""
+
+[[case]]
+name = "max_exit_code_rir"
+source = "fn main() -> i32 { 255 }"
+expected_rir = """
+%0 = const 255
+%1 = fn main() -> i32 {
+    %0
+}
+"""
+
+[[case]]
+name = "max_exit_code_air"
+source = "fn main() -> i32 { 255 }"
+expected_air = """
+function main:
+air (return_type: i32) {
+    %0 : i32 = const 255
+    %1 : i32 = ret %0
+}
+"""
+
+[[case]]
+name = "max_exit_code_mir"
+source = "fn main() -> i32 { 255 }"
+expected_mir = """
+function main:
+    mov v0, 255
+    mov rdi, v0
+    mov rax, 60
+    syscall
+"""

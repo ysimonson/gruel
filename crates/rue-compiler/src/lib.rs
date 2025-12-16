@@ -7,19 +7,26 @@
 
 // Re-export commonly used types
 pub use rue_air::{Air, AnalyzedFunction, Sema, Type};
-pub use rue_codegen::CodeGen;
+pub use rue_codegen::{CodeGen, X86Mir};
 pub use rue_elf::build_elf;
 pub use rue_error::{CompileError, CompileResult, ErrorKind};
 pub use rue_intern::{Interner, Symbol};
 pub use rue_lexer::{Lexer, Token, TokenKind};
 pub use rue_parser::{Ast, Expr, Function, Parser};
-pub use rue_rir::{AstGen, Rir};
+pub use rue_rir::{AstGen, Rir, RirPrinter};
 pub use rue_span::Span;
 
-/// Compile source code to an ELF binary.
+/// Intermediate compilation state, allowing inspection at each stage.
+pub struct CompileState {
+    pub interner: Interner,
+    pub rir: Rir,
+    pub functions: Vec<AnalyzedFunction>,
+}
+
+/// Compile source code through all phases up to (but not including) codegen.
 ///
-/// This is the main entry point for compilation.
-pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
+/// Returns the compile state which can be inspected for debugging.
+pub fn compile_to_air(source: &str) -> CompileResult<CompileState> {
     // Phase 1: Lexing
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize()?;
@@ -37,8 +44,22 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
     let sema = Sema::new(&rir, &interner);
     let functions = sema.analyze_all()?;
 
+    Ok(CompileState {
+        interner,
+        rir,
+        functions,
+    })
+}
+
+/// Compile source code to an ELF binary.
+///
+/// This is the main entry point for compilation.
+pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
+    let state = compile_to_air(source)?;
+
     // Check for main function
-    let main_fn = functions
+    let main_fn = state
+        .functions
         .iter()
         .find(|f| f.name == "main")
         .ok_or_else(|| CompileError::new(ErrorKind::NoMainFunction, Span::default()))?;
@@ -51,6 +72,11 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
     let elf = build_elf(&machine_code.code);
 
     Ok(elf)
+}
+
+/// Generate X86Mir from AIR (for debugging/inspection).
+pub fn generate_mir(air: &Air) -> X86Mir {
+    rue_codegen::x86_64::Lower::new(air).lower()
 }
 
 #[cfg(test)]

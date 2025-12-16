@@ -3,6 +3,8 @@
 //! Instructions are stored in a dense array and referenced by index.
 //! This provides good cache locality and efficient traversal.
 
+use std::fmt;
+
 use rue_intern::Symbol;
 use rue_span::Span;
 
@@ -128,6 +130,58 @@ pub enum InstData {
         /// Number of instructions in the block
         len: u32,
     },
+}
+
+impl fmt::Display for InstRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "%{}", self.0)
+    }
+}
+
+/// Printer for RIR that resolves symbols to their string values.
+pub struct RirPrinter<'a, 'b> {
+    rir: &'a Rir,
+    interner: &'b rue_intern::Interner,
+}
+
+impl<'a, 'b> RirPrinter<'a, 'b> {
+    /// Create a new RIR printer.
+    pub fn new(rir: &'a Rir, interner: &'b rue_intern::Interner) -> Self {
+        Self { rir, interner }
+    }
+
+    /// Format the RIR as a string.
+    pub fn to_string(&self) -> String {
+        let mut out = String::new();
+        for (inst_ref, inst) in self.rir.iter() {
+            out.push_str(&format!("{} = ", inst_ref));
+            match &inst.data {
+                InstData::IntConst(v) => {
+                    out.push_str(&format!("const {}\n", v));
+                }
+                InstData::FnDecl { name, return_type, body } => {
+                    let name_str = self.interner.get(*name);
+                    let ret_str = self.interner.get(*return_type);
+                    out.push_str(&format!("fn {}() -> {} {{\n", name_str, ret_str));
+                    out.push_str(&format!("    {}\n", body));
+                    out.push_str("}\n");
+                }
+                InstData::Ret(inner) => {
+                    out.push_str(&format!("ret {}\n", inner));
+                }
+                InstData::Block { extra_start, len } => {
+                    out.push_str(&format!("block({}, {})\n", extra_start, len));
+                }
+            }
+        }
+        out
+    }
+}
+
+impl fmt::Display for RirPrinter<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
 }
 
 #[cfg(test)]

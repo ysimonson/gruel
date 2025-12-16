@@ -13,7 +13,7 @@
 //! instructions but uses virtual registers. Register allocation then maps
 //! virtual registers to physical registers before final emission.
 
-mod x86_64;
+pub mod x86_64;
 
 pub use x86_64::{generate, MachineCode};
 

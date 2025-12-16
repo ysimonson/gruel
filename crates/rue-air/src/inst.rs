@@ -2,6 +2,8 @@
 //!
 //! Like RIR, instructions are stored densely and referenced by index.
 
+use std::fmt;
+
 use crate::types::Type;
 use rue_span::Span;
 
@@ -94,6 +96,26 @@ pub enum AirInstData {
 
     /// Return from function
     Ret(AirRef),
+}
+
+impl fmt::Display for AirRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "%{}", self.0)
+    }
+}
+
+impl fmt::Display for Air {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "air (return_type: {}) {{", self.return_type.name())?;
+        for (inst_ref, inst) in self.iter() {
+            write!(f, "    {} : {} = ", inst_ref, inst.ty.name())?;
+            match &inst.data {
+                AirInstData::Const(v) => writeln!(f, "const {}", v)?,
+                AirInstData::Ret(inner) => writeln!(f, "ret {}", inner)?,
+            }
+        }
+        writeln!(f, "}}")
+    }
 }
 
 #[cfg(test)]

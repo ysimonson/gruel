@@ -1,0 +1,67 @@
+[section]
+id = "5.1"
+name = "Error Message Golden Tests"
+description = "Golden tests for exact error message formatting."
+
+[[case]]
+name = "negative_integer_error"
+source = "fn main() -> i32 { -1 }"
+compile_fail = true
+expected_error = """
+error: unexpected character: -
+ --> <source>:1:20
+  |
+1 | fn main() -> i32 { -1 }
+  |                    ^
+  |
+"""
+
+[[case]]
+name = "missing_main_error"
+source = "fn foo() -> i32 { 42 }"
+compile_fail = true
+expected_error = """
+error: no main function found
+"""
+
+[[case]]
+name = "missing_return_type_error"
+source = "fn main() { 42 }"
+compile_fail = true
+expected_error = """
+error: expected '->', found '{'
+ --> <source>:1:11
+  |
+1 | fn main() { 42 }
+  |           ^
+  |
+"""
+
+[[case]]
+name = "unexpected_character_at"
+source = "fn main() -> i32 { @ }"
+compile_fail = true
+expected_error = """
+error: unexpected character: @
+ --> <source>:1:20
+  |
+1 | fn main() -> i32 { @ }
+  |                    ^
+  |
+"""
+
+[[case]]
+name = "empty_file_error"
+source = ""
+compile_fail = true
+expected_error = """
+error: no main function found
+"""
+
+[[case]]
+name = "only_comment_error"
+source = "// just a comment"
+compile_fail = true
+expected_error = """
+error: no main function found
+"""
