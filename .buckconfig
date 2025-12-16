@@ -1,0 +1,22 @@
+[cells]
+root = .
+prelude = prelude
+toolchains = toolchains
+
+[external_cells]
+prelude = bundled
+
+[cell_aliases]
+buck = prelude
+fbcode = prelude
+fbsource = prelude
+config = prelude
+
+[parser]
+target_platform_detector_spec = target:root//...->prelude//platforms:default
+
+[rust]
+edition = 2024
+
+[buck2]
+materializations = deferred
