@@ -1,0 +1,36 @@
+[section]
+id = "2.1"
+name = "Functions"
+description = "Function declarations with the fn keyword. The entry point must be named 'main'."
+
+[[case]]
+name = "simple_main"
+source = "fn main() -> i32 { 0 }"
+exit_code = 0
+
+[[case]]
+name = "main_returns_value"
+source = "fn main() -> i32 { 123 }"
+exit_code = 123
+
+[[case]]
+name = "main_multiline"
+source = """
+fn main() -> i32 {
+    42
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "main_with_comment"
+source = """
+// Entry point
+fn main() -> i32 { 42 }
+"""
+exit_code = 42
+
+[[case]]
+name = "type_annotation_i32"
+source = "fn main() -> i32 { 99 }"
+exit_code = 99

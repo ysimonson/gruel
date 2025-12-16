@@ -10,7 +10,7 @@ pub struct Program {
 #[derive(Debug)]
 pub struct Function {
     pub name: String,
-    pub return_type: Option<String>,
+    pub return_type: String,
     pub body: Expr,
     pub span: Span,
 }
@@ -55,13 +55,9 @@ impl Parser {
         self.expect(TokenKind::LParen);
         self.expect(TokenKind::RParen);
 
-        // optional -> Type
-        let return_type = if self.check(&TokenKind::Arrow) {
-            self.advance();
-            Some(self.expect_ident())
-        } else {
-            None
-        };
+        // -> Type
+        self.expect(TokenKind::Arrow);
+        let return_type = self.expect_ident();
 
         // { body }
         self.expect(TokenKind::LBrace);
@@ -137,7 +133,7 @@ mod tests {
         assert_eq!(program.functions.len(), 1);
         let func = &program.functions[0];
         assert_eq!(func.name, "main");
-        assert_eq!(func.return_type, Some("i32".to_string()));
+        assert_eq!(func.return_type, "i32");
         assert!(matches!(func.body, Expr::Int(42, _)));
     }
 }

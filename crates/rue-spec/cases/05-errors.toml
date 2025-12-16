@@ -1,0 +1,63 @@
+[section]
+id = "3.1"
+name = "Compilation Errors"
+description = "Programs that should fail to compile."
+
+[[case]]
+name = "negative_integer"
+source = "fn main() -> i32 { -1 }"
+compile_fail = true
+error_contains = "unexpected character: -"
+
+[[case]]
+name = "missing_main"
+source = "fn foo() -> i32 { 42 }"
+compile_fail = true
+error_contains = "no main function found"
+
+[[case]]
+name = "unexpected_character"
+source = "fn main() -> i32 { @ }"
+compile_fail = true
+error_contains = "unexpected character"
+
+[[case]]
+name = "empty_file"
+source = ""
+compile_fail = true
+error_contains = "no main function found"
+
+[[case]]
+name = "only_comment"
+source = "// just a comment"
+compile_fail = true
+error_contains = "no main function found"
+
+[[case]]
+name = "incomplete_function"
+source = "fn main()"
+compile_fail = true
+
+# Note: return type annotation is required
+# See 04-functions.toml for valid function tests
+
+[[case]]
+name = "missing_body"
+source = "fn main() -> i32"
+compile_fail = true
+
+[[case]]
+name = "unclosed_brace"
+source = "fn main() -> i32 { 42"
+compile_fail = true
+
+[[case]]
+name = "extra_close_brace"
+source = "fn main() -> i32 { 42 } }"
+compile_fail = true
+
+[[case]]
+name = "missing_return_type"
+source = "fn main() { 42 }"
+compile_fail = true
+error_contains = "expected Arrow"

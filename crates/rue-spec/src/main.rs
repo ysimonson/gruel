@@ -21,7 +21,14 @@ struct Section {
 struct Case {
     name: String,
     source: String,
-    exit_code: i32,
+    /// Expected exit code (for successful compilation)
+    exit_code: Option<i32>,
+    /// If true, compilation should fail
+    #[serde(default)]
+    compile_fail: bool,
+    /// Optional substring that should appear in the error message
+    #[serde(default)]
+    error_contains: Option<String>,
     #[serde(default)]
     skip: bool,
 }
@@ -104,11 +111,39 @@ fn run_test_case(case: &Case, rue_binary: &Path) -> Result<(), Failed> {
         .output()
         .map_err(|e| format!("Failed to run rue compiler: {}", e))?;
 
-    if !compile_output.status.success() {
+    let compile_succeeded = compile_output.status.success();
+    let stderr = String::from_utf8_lossy(&compile_output.stderr);
+
+    if case.compile_fail {
+        // Expected to fail compilation
+        if compile_succeeded {
+            return Err(format!(
+                "Expected compilation to fail, but it succeeded\n  source: {}",
+                case.source
+            )
+            .into());
+        }
+
+        // Check error message if specified
+        if let Some(ref expected_error) = case.error_contains {
+            if !stderr.contains(expected_error) {
+                return Err(format!(
+                    "Error message mismatch:\n  expected to contain: {}\n  actual stderr: {}\n  source: {}",
+                    expected_error, stderr, case.source
+                )
+                .into());
+            }
+        }
+
+        return Ok(());
+    }
+
+    // Expected to succeed
+    if !compile_succeeded {
         return Err(format!(
             "Compilation failed:\nstdout: {}\nstderr: {}",
             String::from_utf8_lossy(&compile_output.stdout),
-            String::from_utf8_lossy(&compile_output.stderr)
+            stderr
         )
         .into());
     }
@@ -119,7 +154,9 @@ fn run_test_case(case: &Case, rue_binary: &Path) -> Result<(), Failed> {
         .map_err(|e| format!("Failed to run compiled binary: {}", e))?;
 
     let actual_exit_code = run_output.status.code().unwrap_or(-1);
-    let expected_exit_code = case.exit_code;
+    let expected_exit_code = case.exit_code.ok_or_else(|| {
+        "Test case should have exit_code when compile_fail is false".to_string()
+    })?;
 
     if actual_exit_code != expected_exit_code {
         return Err(format!(
