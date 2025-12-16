@@ -35,6 +35,9 @@ pub enum ErrorKind {
         expected: String,
         found: String,
     },
+
+    // Linker errors
+    LinkError(String),
 }
 
 impl CompileError {
@@ -69,6 +72,7 @@ impl CompileError {
             ErrorKind::TypeMismatch { expected, found } => {
                 format!("type mismatch: expected {}, found {}", expected, found)
             }
+            ErrorKind::LinkError(msg) => format!("link error: {}", msg),
         }
     }
 }

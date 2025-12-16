@@ -9,6 +9,7 @@
 pub use rue_air::{Air, AnalyzedFunction, Sema, Type};
 pub use rue_codegen::{CodeGen, X86Mir};
 pub use rue_elf::build_elf;
+pub use rue_linker::{Linker, ObjectBuilder, ObjectFile};
 pub use rue_error::{CompileError, CompileResult, ErrorKind};
 pub use rue_intern::{Interner, Symbol};
 pub use rue_lexer::{Lexer, Token, TokenKind};
@@ -68,8 +69,23 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
     let codegen = CodeGen::new(&main_fn.air);
     let machine_code = codegen.generate();
 
-    // Phase 6: ELF generation
-    let elf = build_elf(&machine_code.code);
+    // Phase 6: Build object file
+    let obj_bytes = ObjectBuilder::new("main")
+        .code(machine_code.code)
+        .build();
+
+    // Phase 7: Link to executable
+    let obj = ObjectFile::parse(&obj_bytes)
+        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+
+    let mut linker = Linker::new();
+    linker
+        .add_object(obj)
+        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+
+    let elf = linker
+        .link("main")
+        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
 
     Ok(elf)
 }
