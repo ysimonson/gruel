@@ -8,3 +8,13 @@ rust_library(
     ],
     visibility = ["PUBLIC"],
 )
+
+rust_test(
+    name = "rue-parser-test",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/rue-error:rue-error",
+        "//crates/rue-lexer:rue-lexer",
+        "//crates/rue-span:rue-span",
+    ],
+)

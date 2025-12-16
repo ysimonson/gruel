@@ -7,3 +7,12 @@ rust_library(
     ],
     visibility = ["PUBLIC"],
 )
+
+rust_test(
+    name = "rue-codegen-test",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/rue-air:rue-air",
+        "//crates/rue-span:rue-span",
+    ],
+)

@@ -7,3 +7,12 @@ rust_library(
     ],
     visibility = ["PUBLIC"],
 )
+
+rust_test(
+    name = "rue-lexer-test",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/rue-error:rue-error",
+        "//crates/rue-span:rue-span",
+    ],
+)

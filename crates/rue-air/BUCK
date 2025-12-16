@@ -11,3 +11,16 @@ rust_library(
     ],
     visibility = ["PUBLIC"],
 )
+
+rust_test(
+    name = "rue-air-test",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/rue-error:rue-error",
+        "//crates/rue-intern:rue-intern",
+        "//crates/rue-lexer:rue-lexer",
+        "//crates/rue-parser:rue-parser",
+        "//crates/rue-rir:rue-rir",
+        "//crates/rue-span:rue-span",
+    ],
+)

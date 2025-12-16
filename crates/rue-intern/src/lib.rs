@@ -210,15 +210,17 @@ mod tests {
     #[test]
     fn test_len() {
         let mut interner = Interner::new();
-        assert_eq!(interner.len(), 0);
+        // Well-known symbols (i32, ()) are pre-interned
+        let initial_len = interner.len();
+        assert_eq!(initial_len, 2);
 
         interner.intern("a");
-        assert_eq!(interner.len(), 1);
+        assert_eq!(interner.len(), initial_len + 1);
 
         interner.intern("b");
-        assert_eq!(interner.len(), 2);
+        assert_eq!(interner.len(), initial_len + 2);
 
         interner.intern("a"); // duplicate
-        assert_eq!(interner.len(), 2);
+        assert_eq!(interner.len(), initial_len + 2);
     }
 }
