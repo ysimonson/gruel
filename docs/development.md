@@ -20,7 +20,7 @@ rue/
 │   ├── rue-rir/       # Untyped IR
 │   ├── rue-air/       # Typed IR + semantic analysis
 │   ├── rue-codegen/   # Machine code generation
-│   ├── rue-elf/       # ELF executable generation
+│   ├── rue-linker/    # Object file creation and linking
 │   ├── rue-error/     # Error types
 │   ├── rue-span/      # Source locations
 │   ├── rue-intern/    # String interning

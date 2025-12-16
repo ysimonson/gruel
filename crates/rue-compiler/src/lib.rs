@@ -8,7 +8,6 @@
 // Re-export commonly used types
 pub use rue_air::{Air, AnalyzedFunction, Sema, Type};
 pub use rue_codegen::{CodeGen, X86Mir};
-pub use rue_elf::build_elf;
 pub use rue_linker::{Linker, ObjectBuilder, ObjectFile};
 pub use rue_error::{CompileError, CompileResult, ErrorKind};
 pub use rue_intern::{Interner, Symbol};

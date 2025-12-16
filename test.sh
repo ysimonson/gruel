@@ -15,7 +15,7 @@ echo "Running unit tests..."
     //crates/rue-rir:rue-rir-test \
     //crates/rue-air:rue-air-test \
     //crates/rue-codegen:rue-codegen-test \
-    //crates/rue-elf:rue-elf-test \
+    //crates/rue-linker:rue-linker-test \
     //crates/rue-compiler:rue-compiler-test
 
 # Get the path to the rue binary (this also builds it if needed)

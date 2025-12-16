@@ -46,7 +46,12 @@ Source Code
      │
      ▼
 ┌─────────┐
-│  ELF    │  rue-elf: Wraps machine code in ELF executable
+│ Object  │  rue-linker: Creates relocatable object file
+└────┬────┘
+     │
+     ▼
+┌─────────┐
+│  Link   │  rue-linker: Links objects into ELF executable
 └─────────┘
 ```
 
@@ -108,8 +113,13 @@ Key types:
 - `Operand` - Virtual register, physical register, or immediate
 - `X86Inst` - Individual machine instruction
 
-### `rue-elf`
-Wraps raw machine code in a minimal ELF executable. Currently produces a statically-linked executable that uses the Linux `exit` syscall.
+### `rue-linker`
+A minimal linker for the Rue compiler. Handles:
+- **Object file creation** (`ObjectBuilder`): Creates ELF64 relocatable object files (.o) from machine code
+- **Object file parsing** (`ObjectFile`): Reads ELF64 relocatable objects
+- **Linking** (`Linker`): Combines object files, resolves symbols, applies relocations, and produces a final ELF64 executable
+
+The linker supports standard x86-64 relocation types (PC32, PLT32, Abs64, Abs32, Abs32S) and handles symbol resolution including weak symbols. This architecture enables future multi-file compilation and linking with external libraries.
 
 ### `rue-compiler`
 Orchestrates the full pipeline. Provides:
