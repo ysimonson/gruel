@@ -70,6 +70,19 @@ pub enum ErrorKind {
     BreakOutsideLoop,
     ContinueOutsideLoop,
 
+    // Intrinsic errors
+    UnknownIntrinsic(String),
+    IntrinsicWrongArgCount {
+        name: String,
+        expected: usize,
+        found: usize,
+    },
+    IntrinsicTypeMismatch {
+        name: String,
+        expected: String,
+        found: String,
+    },
+
     // Linker errors
     LinkError(String),
 }
@@ -172,6 +185,29 @@ impl fmt::Display for ErrorKind {
             }
             ErrorKind::BreakOutsideLoop => write!(f, "'break' outside of loop"),
             ErrorKind::ContinueOutsideLoop => write!(f, "'continue' outside of loop"),
+            ErrorKind::UnknownIntrinsic(name) => write!(f, "unknown intrinsic '@{}'", name),
+            ErrorKind::IntrinsicWrongArgCount { name, expected, found } => {
+                if *expected == 1 {
+                    write!(
+                        f,
+                        "intrinsic '@{}' expects {} argument, found {}",
+                        name, expected, found
+                    )
+                } else {
+                    write!(
+                        f,
+                        "intrinsic '@{}' expects {} arguments, found {}",
+                        name, expected, found
+                    )
+                }
+            }
+            ErrorKind::IntrinsicTypeMismatch { name, expected, found } => {
+                write!(
+                    f,
+                    "intrinsic '@{}' expects {}, found {}",
+                    name, expected, found
+                )
+            }
             ErrorKind::LinkError(msg) => write!(f, "link error: {}", msg),
         }
     }

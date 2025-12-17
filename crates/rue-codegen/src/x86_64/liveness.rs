@@ -217,7 +217,12 @@ fn uses(inst: &X86Inst) -> Vec<VReg> {
         | X86Inst::Setge { .. } => {
             // Only defines dst, reads flags (implicit)
         }
-        X86Inst::Movzx { src, .. } => {
+        X86Inst::Movzx { src, .. }
+        | X86Inst::Movsx8To64 { src, .. }
+        | X86Inst::Movsx16To64 { src, .. }
+        | X86Inst::Movsx32To64 { src, .. }
+        | X86Inst::Movzx8To64 { src, .. }
+        | X86Inst::Movzx16To64 { src, .. } => {
             add_if_virtual(src, &mut result);
         }
         X86Inst::Pop { .. } => {
@@ -292,7 +297,12 @@ fn defs(inst: &X86Inst) -> Vec<VReg> {
         | X86Inst::Setge { dst } => {
             add_if_virtual(dst, &mut result);
         }
-        X86Inst::Movzx { dst, .. } => {
+        X86Inst::Movzx { dst, .. }
+        | X86Inst::Movsx8To64 { dst, .. }
+        | X86Inst::Movsx16To64 { dst, .. }
+        | X86Inst::Movsx32To64 { dst, .. }
+        | X86Inst::Movzx8To64 { dst, .. }
+        | X86Inst::Movzx16To64 { dst, .. } => {
             add_if_virtual(dst, &mut result);
         }
         X86Inst::Pop { dst } => {

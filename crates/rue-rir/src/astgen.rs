@@ -219,6 +219,15 @@ impl<'a> AstGen<'a> {
                     span: field_expr.span,
                 })
             }
+            Expr::IntrinsicCall(intrinsic) => {
+                let name = self.interner.intern(&intrinsic.name.name);
+                let args: Vec<_> = intrinsic.args.iter().map(|a| self.gen_expr(a)).collect();
+
+                self.rir.add_inst(Inst {
+                    data: InstData::Intrinsic { name, args },
+                    span: intrinsic.span,
+                })
+            }
         }
     }
 

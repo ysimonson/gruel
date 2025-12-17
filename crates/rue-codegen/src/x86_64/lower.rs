@@ -1201,6 +1201,110 @@ impl<'a> Lower<'a> {
                 }
             }
 
+            AirInstData::Intrinsic { name, args } => {
+                // Handle intrinsic calls
+                // Currently only @dbg is supported
+                if name == "dbg" {
+                    // Get the argument
+                    let arg_ref = args[0];
+                    let arg_vreg = self.get_vreg(arg_ref);
+                    let arg_type = self.air.get(arg_ref).ty;
+
+                    // Determine the runtime function to call based on argument type
+                    let runtime_fn = match arg_type {
+                        Type::Bool => "__rue_dbg_bool",
+                        Type::I8 | Type::I16 | Type::I32 | Type::I64 => "__rue_dbg_i64",
+                        Type::U8 | Type::U16 | Type::U32 | Type::U64 => "__rue_dbg_u64",
+                        _ => unreachable!("@dbg only supports scalars"),
+                    };
+
+                    // For signed types smaller than 64-bit, we need sign extension
+                    // For unsigned types smaller than 64-bit, we need zero extension
+                    // Move argument to RDI (first argument register)
+                    match arg_type {
+                        Type::I8 => {
+                            // Sign-extend i8 to i64
+                            self.mir.push(X86Inst::MovRR {
+                                dst: Operand::Physical(Reg::Rax),
+                                src: Operand::Virtual(arg_vreg),
+                            });
+                            self.mir.push(X86Inst::Movsx8To64 {
+                                dst: Operand::Physical(Reg::Rdi),
+                                src: Operand::Physical(Reg::Rax),
+                            });
+                        }
+                        Type::I16 => {
+                            // Sign-extend i16 to i64
+                            self.mir.push(X86Inst::MovRR {
+                                dst: Operand::Physical(Reg::Rax),
+                                src: Operand::Virtual(arg_vreg),
+                            });
+                            self.mir.push(X86Inst::Movsx16To64 {
+                                dst: Operand::Physical(Reg::Rdi),
+                                src: Operand::Physical(Reg::Rax),
+                            });
+                        }
+                        Type::I32 => {
+                            // Sign-extend i32 to i64
+                            self.mir.push(X86Inst::MovRR {
+                                dst: Operand::Physical(Reg::Rax),
+                                src: Operand::Virtual(arg_vreg),
+                            });
+                            self.mir.push(X86Inst::Movsx32To64 {
+                                dst: Operand::Physical(Reg::Rdi),
+                                src: Operand::Physical(Reg::Rax),
+                            });
+                        }
+                        Type::U8 => {
+                            // Zero-extend u8 to u64
+                            self.mir.push(X86Inst::MovRR {
+                                dst: Operand::Physical(Reg::Rax),
+                                src: Operand::Virtual(arg_vreg),
+                            });
+                            self.mir.push(X86Inst::Movzx8To64 {
+                                dst: Operand::Physical(Reg::Rdi),
+                                src: Operand::Physical(Reg::Rax),
+                            });
+                        }
+                        Type::U16 => {
+                            // Zero-extend u16 to u64
+                            self.mir.push(X86Inst::MovRR {
+                                dst: Operand::Physical(Reg::Rax),
+                                src: Operand::Virtual(arg_vreg),
+                            });
+                            self.mir.push(X86Inst::Movzx16To64 {
+                                dst: Operand::Physical(Reg::Rdi),
+                                src: Operand::Physical(Reg::Rax),
+                            });
+                        }
+                        Type::U32 => {
+                            // Zero-extend u32 to u64 (just move, upper bits auto-zeroed)
+                            self.mir.push(X86Inst::MovRR {
+                                dst: Operand::Physical(Reg::Rdi),
+                                src: Operand::Virtual(arg_vreg),
+                            });
+                        }
+                        Type::I64 | Type::U64 | Type::Bool => {
+                            // Already 64-bit or bool (treated as 64-bit)
+                            self.mir.push(X86Inst::MovRR {
+                                dst: Operand::Physical(Reg::Rdi),
+                                src: Operand::Virtual(arg_vreg),
+                            });
+                        }
+                        _ => unreachable!(),
+                    }
+
+                    // Call the runtime function
+                    self.mir.push(X86Inst::CallRel {
+                        symbol: runtime_fn.to_string(),
+                    });
+
+                    // @dbg returns unit, but we still need a result vreg
+                    let result_vreg = self.mir.alloc_vreg();
+                    self.value_map[air_ref.as_u32() as usize] = Some(result_vreg);
+                }
+            }
+
             AirInstData::StructInit { struct_id: _, fields } => {
                 // Struct initialization: evaluate all fields and save their vregs.
                 // The actual storage to stack slots is handled by Alloc.
@@ -1422,8 +1526,8 @@ impl<'a> Lower<'a> {
             | AirInstData::BoolConst(_)
             | AirInstData::Param { .. }
             | AirInstData::Alloc { .. } => unreachable!(),
-            // Ret and Call shouldn't appear in loop body/condition normally
-            AirInstData::Ret(_) | AirInstData::Call { .. } => {}
+            // Ret, Call, and Intrinsic shouldn't appear in loop body/condition normally
+            AirInstData::Ret(_) | AirInstData::Call { .. } | AirInstData::Intrinsic { .. } => {}
             // Break and Continue have no dependencies to clear
             AirInstData::Break | AirInstData::Continue => {}
         }

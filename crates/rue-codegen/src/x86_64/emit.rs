@@ -323,6 +323,21 @@ impl<'a> Emitter<'a> {
             X86Inst::Movzx { dst, src } => {
                 self.emit_movzx(dst.as_physical(), src.as_physical());
             }
+            X86Inst::Movsx8To64 { dst, src } => {
+                self.emit_movsx8_to64(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::Movsx16To64 { dst, src } => {
+                self.emit_movsx16_to64(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::Movsx32To64 { dst, src } => {
+                self.emit_movsxd(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::Movzx8To64 { dst, src } => {
+                self.emit_movzx8_to64(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::Movzx16To64 { dst, src } => {
+                self.emit_movzx16_to64(dst.as_physical(), src.as_physical());
+            }
             X86Inst::TestRR { src1, src2 } => {
                 self.emit_test_rr(src1.as_physical(), src2.as_physical());
             }
@@ -981,6 +996,115 @@ impl<'a> Emitter<'a> {
         // Two-byte opcode: 0F B6 (movzx r32, r/m8)
         self.code.push(0x0F);
         self.code.push(0xB6);
+
+        // ModR/M: mod=11, reg=dst, r/m=src
+        let modrm = 0xC0 | ((dst_enc & 7) << 3) | (src_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `movsx r64, r8` - Sign-extend 8-bit to 64-bit.
+    ///
+    /// Encoding: REX.W 0F BE /r (movsx r64, r/m8)
+    fn emit_movsx8_to64(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX.W prefix (always needed for 64-bit destination)
+        let rex = 0x48
+            | if dst.needs_rex() { 0x04 } else { 0x00 } // REX.R
+            | if src.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+        self.code.push(rex);
+
+        // Two-byte opcode: 0F BE (movsx r64, r/m8)
+        self.code.push(0x0F);
+        self.code.push(0xBE);
+
+        // ModR/M: mod=11, reg=dst, r/m=src
+        let modrm = 0xC0 | ((dst_enc & 7) << 3) | (src_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `movsx r64, r16` - Sign-extend 16-bit to 64-bit.
+    ///
+    /// Encoding: REX.W 0F BF /r (movsx r64, r/m16)
+    fn emit_movsx16_to64(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX.W prefix (always needed for 64-bit destination)
+        let rex = 0x48
+            | if dst.needs_rex() { 0x04 } else { 0x00 } // REX.R
+            | if src.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+        self.code.push(rex);
+
+        // Two-byte opcode: 0F BF (movsx r64, r/m16)
+        self.code.push(0x0F);
+        self.code.push(0xBF);
+
+        // ModR/M: mod=11, reg=dst, r/m=src
+        let modrm = 0xC0 | ((dst_enc & 7) << 3) | (src_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `movsxd r64, r32` - Sign-extend 32-bit to 64-bit.
+    ///
+    /// Encoding: REX.W 63 /r (movsxd r64, r/m32)
+    fn emit_movsxd(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX.W prefix (always needed for 64-bit destination)
+        let rex = 0x48
+            | if dst.needs_rex() { 0x04 } else { 0x00 } // REX.R
+            | if src.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+        self.code.push(rex);
+
+        // Opcode: 63 (movsxd r64, r/m32)
+        self.code.push(0x63);
+
+        // ModR/M: mod=11, reg=dst, r/m=src
+        let modrm = 0xC0 | ((dst_enc & 7) << 3) | (src_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `movzx r64, r8` - Zero-extend 8-bit to 64-bit.
+    ///
+    /// Encoding: REX.W 0F B6 /r (movzx r64, r/m8)
+    fn emit_movzx8_to64(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX.W prefix (always needed for 64-bit destination)
+        let rex = 0x48
+            | if dst.needs_rex() { 0x04 } else { 0x00 } // REX.R
+            | if src.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+        self.code.push(rex);
+
+        // Two-byte opcode: 0F B6 (movzx r64, r/m8)
+        self.code.push(0x0F);
+        self.code.push(0xB6);
+
+        // ModR/M: mod=11, reg=dst, r/m=src
+        let modrm = 0xC0 | ((dst_enc & 7) << 3) | (src_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `movzx r64, r16` - Zero-extend 16-bit to 64-bit.
+    ///
+    /// Encoding: REX.W 0F B7 /r (movzx r64, r/m16)
+    fn emit_movzx16_to64(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX.W prefix (always needed for 64-bit destination)
+        let rex = 0x48
+            | if dst.needs_rex() { 0x04 } else { 0x00 } // REX.R
+            | if src.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+        self.code.push(rex);
+
+        // Two-byte opcode: 0F B7 (movzx r64, r/m16)
+        self.code.push(0x0F);
+        self.code.push(0xB7);
 
         // ModR/M: mod=11, reg=dst, r/m=src
         let modrm = 0xC0 | ((dst_enc & 7) << 3) | (src_enc & 7);

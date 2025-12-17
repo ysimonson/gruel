@@ -106,6 +106,8 @@ pub enum LogosTokenKind {
     Comma,
     #[token(".")]
     Dot,
+    #[token("@")]
+    At,
 }
 
 use crate::{Token, TokenKind};
@@ -150,6 +152,7 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::Semi => TokenKind::Semi,
             LogosTokenKind::Comma => TokenKind::Comma,
             LogosTokenKind::Dot => TokenKind::Dot,
+            LogosTokenKind::At => TokenKind::At,
         }
     }
 }
@@ -223,11 +226,19 @@ mod tests {
 
     #[test]
     fn test_logos_unexpected_character() {
-        let mut lexer = LogosLexer::new("fn main() { @ }");
+        let mut lexer = LogosLexer::new("fn main() { $ }");
         let result = lexer.tokenize();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err.kind, ErrorKind::UnexpectedCharacter('@')));
+        assert!(matches!(err.kind, ErrorKind::UnexpectedCharacter('$')));
+    }
+
+    #[test]
+    fn test_logos_at_token() {
+        let mut lexer = LogosLexer::new("@dbg");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::At));
+        assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "dbg"));
     }
 
     #[test]

@@ -56,7 +56,8 @@ pub enum TokenKind {
     Colon,
     Semi,
     Comma,
-    Dot,  // .
+    Dot, // .
+    At,  // @
 
     // Special
     Eof,
@@ -103,6 +104,7 @@ impl TokenKind {
             TokenKind::Semi => "';'",
             TokenKind::Comma => "','",
             TokenKind::Dot => "'.'",
+            TokenKind::At => "'@'",
             TokenKind::Eof => "end of file",
         }
     }

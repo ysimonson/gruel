@@ -115,6 +115,57 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 ///     mov edi, eax
 ///     call __rue_exit
 /// ```
+/// Program entry point.
+///
+/// The Linux kernel starts execution here with RSP 16-byte aligned.
+/// The System V AMD64 ABI expects RSP to be 8-byte aligned at function entry
+/// (i.e., 16-byte aligned before `call` pushes the return address).
+///
+/// `_start` bridges this gap by:
+/// 1. Aligning the stack for function calls (sub $8, %rsp)
+/// 2. Calling `main` (the user's entry point)
+/// 3. Passing the return value to `__rue_exit`
+///
+/// # ABI
+///
+/// ```text
+/// _start:
+///     sub $8, %rsp      ; align stack (kernel gives 16-byte, we need 8-byte before call)
+///     call main         ; call user's main function
+///     mov %eax, %edi    ; pass return value as exit code
+///     call __rue_exit   ; exit (never returns)
+/// ```
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn _start() -> ! {
+    use core::arch::asm;
+
+    // main is defined by the user's code
+    unsafe extern "C" {
+        fn main() -> i32;
+    }
+
+    let exit_code: i32;
+    // SAFETY: We're setting up the stack frame and calling main, which is
+    // the expected behavior for a program entry point.
+    unsafe {
+        asm!(
+            // Stack alignment: kernel starts us with 16-byte aligned RSP.
+            // The `call main` will push 8 bytes (return address), making RSP
+            // 8-byte aligned when main starts - exactly what the ABI expects.
+            // But first we need to align to 16 bytes before call, so subtract 8.
+            "sub rsp, 8",
+            "call {main}",
+            // Return value is in eax
+            "mov edi, eax",
+            main = sym main,
+            out("edi") exit_code,
+            clobber_abi("C"),
+        );
+    }
+    platform::exit(exit_code)
+}
+
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __rue_exit(status: i32) -> ! {
@@ -169,6 +220,61 @@ pub extern "C" fn __rue_div_by_zero() -> ! {
 pub extern "C" fn __rue_overflow() -> ! {
     platform::write_stderr(b"error: integer overflow\n");
     platform::exit(101)
+}
+
+/// Debug intrinsic: print a signed 64-bit integer.
+///
+/// Called by `@dbg(expr)` when the expression is a signed integer type.
+/// Prints the value followed by a newline to stdout.
+///
+/// # ABI
+///
+/// ```text
+/// extern "C" fn __rue_dbg_i64(value: i64)
+/// ```
+///
+/// - `value` is passed in the `rdi` register (System V AMD64 ABI)
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn __rue_dbg_i64(value: i64) {
+    platform::print_i64(value);
+}
+
+/// Debug intrinsic: print an unsigned 64-bit integer.
+///
+/// Called by `@dbg(expr)` when the expression is an unsigned integer type.
+/// Prints the value followed by a newline to stdout.
+///
+/// # ABI
+///
+/// ```text
+/// extern "C" fn __rue_dbg_u64(value: u64)
+/// ```
+///
+/// - `value` is passed in the `rdi` register (System V AMD64 ABI)
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn __rue_dbg_u64(value: u64) {
+    platform::print_u64(value);
+}
+
+/// Debug intrinsic: print a boolean.
+///
+/// Called by `@dbg(expr)` when the expression is a boolean.
+/// Prints "true" or "false" followed by a newline to stdout.
+///
+/// # ABI
+///
+/// ```text
+/// extern "C" fn __rue_dbg_bool(value: i64)
+/// ```
+///
+/// - `value` is passed in the `rdi` register (System V AMD64 ABI)
+/// - Non-zero values are treated as true, zero as false
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn __rue_dbg_bool(value: i64) {
+    platform::print_bool(value != 0);
 }
 
 // Re-export platform functions for tests

@@ -36,6 +36,9 @@ const SYS_EXIT: i64 = 60;
 /// Standard error file descriptor.
 const STDERR: i64 = 2;
 
+/// Standard output file descriptor.
+const STDOUT: i64 = 1;
+
 /// Write bytes to a file descriptor.
 ///
 /// This is a thin wrapper around the Linux `write(2)` syscall.
@@ -144,6 +147,100 @@ pub fn write_stderr(msg: &[u8]) {
     // Best-effort: ignore errors since we're typically about to exit
     // and there's no way to report the error anyway
     let _ = write_all(STDERR, msg);
+}
+
+/// Write a message to stdout.
+///
+/// This is a best-effort write operation similar to `write_stderr`.
+///
+/// # Arguments
+///
+/// * `msg` - The bytes to write to stdout
+pub fn write_stdout(msg: &[u8]) {
+    let _ = write_all(STDOUT, msg);
+}
+
+/// Convert a signed 64-bit integer to a decimal string and write it to stdout.
+///
+/// Handles negative numbers by printing a leading '-'.
+pub fn print_i64(value: i64) {
+    // Buffer for decimal digits (max 20 digits for i64 + sign + newline)
+    let mut buf = [0u8; 22];
+    let mut pos = buf.len() - 1;
+
+    // Always end with newline
+    buf[pos] = b'\n';
+    pos -= 1;
+
+    let is_negative = value < 0;
+    // Handle the absolute value (special case for i64::MIN)
+    let mut abs_value = if value == i64::MIN {
+        // i64::MIN cannot be negated, handle specially
+        // We'll print the digits manually
+        9223372036854775808u64
+    } else if is_negative {
+        (-value) as u64
+    } else {
+        value as u64
+    };
+
+    // Generate digits in reverse order
+    if abs_value == 0 {
+        buf[pos] = b'0';
+        pos -= 1;
+    } else {
+        while abs_value > 0 {
+            buf[pos] = b'0' + (abs_value % 10) as u8;
+            abs_value /= 10;
+            pos -= 1;
+        }
+    }
+
+    // Add sign if negative
+    if is_negative {
+        buf[pos] = b'-';
+        pos -= 1;
+    }
+
+    // Write from pos+1 to end
+    write_stdout(&buf[pos + 1..]);
+}
+
+/// Convert an unsigned 64-bit integer to a decimal string and write it to stdout.
+pub fn print_u64(value: u64) {
+    // Buffer for decimal digits (max 20 digits for u64 + newline)
+    let mut buf = [0u8; 22];
+    let mut pos = buf.len() - 1;
+
+    // Always end with newline
+    buf[pos] = b'\n';
+    pos -= 1;
+
+    let mut val = value;
+
+    // Generate digits in reverse order
+    if val == 0 {
+        buf[pos] = b'0';
+        pos -= 1;
+    } else {
+        while val > 0 {
+            buf[pos] = b'0' + (val % 10) as u8;
+            val /= 10;
+            pos -= 1;
+        }
+    }
+
+    // Write from pos+1 to end
+    write_stdout(&buf[pos + 1..]);
+}
+
+/// Print a boolean value to stdout ("true\n" or "false\n").
+pub fn print_bool(value: bool) {
+    if value {
+        write_stdout(b"true\n");
+    } else {
+        write_stdout(b"false\n");
+    }
 }
 
 /// Exit the process with the given status code.

@@ -251,6 +251,21 @@ pub enum X86Inst {
     /// `movzx dst, src` - Move with zero-extend (byte to dword).
     Movzx { dst: Operand, src: Operand },
 
+    /// `movsx dst, src` - Sign-extend 8-bit to 64-bit.
+    Movsx8To64 { dst: Operand, src: Operand },
+
+    /// `movsx dst, src` - Sign-extend 16-bit to 64-bit.
+    Movsx16To64 { dst: Operand, src: Operand },
+
+    /// `movsxd dst, src` - Sign-extend 32-bit to 64-bit.
+    Movsx32To64 { dst: Operand, src: Operand },
+
+    /// `movzx dst, src` - Zero-extend 8-bit to 64-bit.
+    Movzx8To64 { dst: Operand, src: Operand },
+
+    /// `movzx dst, src` - Zero-extend 16-bit to 64-bit.
+    Movzx16To64 { dst: Operand, src: Operand },
+
     /// `test src1, src2` - Bitwise AND, set flags, discard result.
     TestRR { src1: Operand, src2: Operand },
 
@@ -361,6 +376,11 @@ impl fmt::Display for X86Inst {
             X86Inst::Setle { dst } => write!(f, "setle {}", dst),
             X86Inst::Setge { dst } => write!(f, "setge {}", dst),
             X86Inst::Movzx { dst, src } => write!(f, "movzx {}, {}", dst, src),
+            X86Inst::Movsx8To64 { dst, src } => write!(f, "movsx {}, byte {}", dst, src),
+            X86Inst::Movsx16To64 { dst, src } => write!(f, "movsx {}, word {}", dst, src),
+            X86Inst::Movsx32To64 { dst, src } => write!(f, "movsxd {}, {}", dst, src),
+            X86Inst::Movzx8To64 { dst, src } => write!(f, "movzx {}, byte {}", dst, src),
+            X86Inst::Movzx16To64 { dst, src } => write!(f, "movzx {}, word {}", dst, src),
             X86Inst::TestRR { src1, src2 } => write!(f, "test {}, {}", src1, src2),
             X86Inst::Jz { label } => write!(f, "jz {}", label),
             X86Inst::Jnz { label } => write!(f, "jnz {}", label),

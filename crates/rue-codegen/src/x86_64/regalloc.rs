@@ -443,6 +443,136 @@ impl RegAlloc {
                 }
             }
 
+            X86Inst::Movsx8To64 { dst, src } => {
+                let src_op = self.load_operand(mir, src, Reg::Rax);
+                match self.get_allocation(dst) {
+                    Some(Allocation::Register(reg)) => {
+                        mir.push(X86Inst::Movsx8To64 {
+                            dst: Operand::Physical(reg),
+                            src: src_op,
+                        });
+                    }
+                    Some(Allocation::Spill(offset)) => {
+                        mir.push(X86Inst::Movsx8To64 {
+                            dst: Operand::Physical(Reg::Rax),
+                            src: src_op,
+                        });
+                        mir.push(X86Inst::MovMR {
+                            base: Reg::Rbp,
+                            offset,
+                            src: Operand::Physical(Reg::Rax),
+                        });
+                    }
+                    None => {
+                        mir.push(X86Inst::Movsx8To64 { dst, src: src_op });
+                    }
+                }
+            }
+
+            X86Inst::Movsx16To64 { dst, src } => {
+                let src_op = self.load_operand(mir, src, Reg::Rax);
+                match self.get_allocation(dst) {
+                    Some(Allocation::Register(reg)) => {
+                        mir.push(X86Inst::Movsx16To64 {
+                            dst: Operand::Physical(reg),
+                            src: src_op,
+                        });
+                    }
+                    Some(Allocation::Spill(offset)) => {
+                        mir.push(X86Inst::Movsx16To64 {
+                            dst: Operand::Physical(Reg::Rax),
+                            src: src_op,
+                        });
+                        mir.push(X86Inst::MovMR {
+                            base: Reg::Rbp,
+                            offset,
+                            src: Operand::Physical(Reg::Rax),
+                        });
+                    }
+                    None => {
+                        mir.push(X86Inst::Movsx16To64 { dst, src: src_op });
+                    }
+                }
+            }
+
+            X86Inst::Movsx32To64 { dst, src } => {
+                let src_op = self.load_operand(mir, src, Reg::Rax);
+                match self.get_allocation(dst) {
+                    Some(Allocation::Register(reg)) => {
+                        mir.push(X86Inst::Movsx32To64 {
+                            dst: Operand::Physical(reg),
+                            src: src_op,
+                        });
+                    }
+                    Some(Allocation::Spill(offset)) => {
+                        mir.push(X86Inst::Movsx32To64 {
+                            dst: Operand::Physical(Reg::Rax),
+                            src: src_op,
+                        });
+                        mir.push(X86Inst::MovMR {
+                            base: Reg::Rbp,
+                            offset,
+                            src: Operand::Physical(Reg::Rax),
+                        });
+                    }
+                    None => {
+                        mir.push(X86Inst::Movsx32To64 { dst, src: src_op });
+                    }
+                }
+            }
+
+            X86Inst::Movzx8To64 { dst, src } => {
+                let src_op = self.load_operand(mir, src, Reg::Rax);
+                match self.get_allocation(dst) {
+                    Some(Allocation::Register(reg)) => {
+                        mir.push(X86Inst::Movzx8To64 {
+                            dst: Operand::Physical(reg),
+                            src: src_op,
+                        });
+                    }
+                    Some(Allocation::Spill(offset)) => {
+                        mir.push(X86Inst::Movzx8To64 {
+                            dst: Operand::Physical(Reg::Rax),
+                            src: src_op,
+                        });
+                        mir.push(X86Inst::MovMR {
+                            base: Reg::Rbp,
+                            offset,
+                            src: Operand::Physical(Reg::Rax),
+                        });
+                    }
+                    None => {
+                        mir.push(X86Inst::Movzx8To64 { dst, src: src_op });
+                    }
+                }
+            }
+
+            X86Inst::Movzx16To64 { dst, src } => {
+                let src_op = self.load_operand(mir, src, Reg::Rax);
+                match self.get_allocation(dst) {
+                    Some(Allocation::Register(reg)) => {
+                        mir.push(X86Inst::Movzx16To64 {
+                            dst: Operand::Physical(reg),
+                            src: src_op,
+                        });
+                    }
+                    Some(Allocation::Spill(offset)) => {
+                        mir.push(X86Inst::Movzx16To64 {
+                            dst: Operand::Physical(Reg::Rax),
+                            src: src_op,
+                        });
+                        mir.push(X86Inst::MovMR {
+                            base: Reg::Rbp,
+                            offset,
+                            src: Operand::Physical(Reg::Rax),
+                        });
+                    }
+                    None => {
+                        mir.push(X86Inst::Movzx16To64 { dst, src: src_op });
+                    }
+                }
+            }
+
             X86Inst::Pop { dst } => {
                 match self.get_allocation(dst) {
                     Some(Allocation::Register(reg)) => {

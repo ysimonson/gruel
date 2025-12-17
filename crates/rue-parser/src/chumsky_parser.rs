@@ -6,8 +6,8 @@
 use crate::ast::{
     AssignStatement, AssignTarget, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr,
     CallExpr, ContinueExpr, Expr, FieldDecl, FieldExpr, FieldInit, Function, Ident, IfExpr, IntLit,
-    Item, LetStatement, Param, ParenExpr, Statement, StructDecl, StructLitExpr, UnaryExpr, UnaryOp,
-    WhileExpr,
+    IntrinsicCallExpr, Item, LetStatement, Param, ParenExpr, Statement, StructDecl, StructLitExpr,
+    UnaryExpr, UnaryOp, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -349,7 +349,22 @@ where
         });
 
     // Block expression
-    let block_expr = block_parser(expr);
+    let block_expr = block_parser(expr.clone());
+
+    // Intrinsic call: @name(args)
+    let intrinsic_call = just(TokenKind::At)
+        .ignore_then(ident_parser())
+        .then(
+            args_parser(expr)
+                .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)),
+        )
+        .map_with(|(name, args), e| {
+            Expr::IntrinsicCall(IntrinsicCallExpr {
+                name,
+                args,
+                span: to_rue_span(e.span()),
+            })
+        });
 
     // Primary expression (before field access)
     let primary = choice((
@@ -360,6 +375,7 @@ where
         continue_expr,
         if_expr,
         while_expr,
+        intrinsic_call,
         ident_or_call_or_struct,
         paren_expr,
         block_expr,

@@ -105,6 +105,8 @@ pub enum Expr {
     StructLit(StructLitExpr),
     /// Field access (e.g., `point.x`)
     Field(FieldExpr),
+    /// Intrinsic call (e.g., `@dbg(42)`)
+    IntrinsicCall(IntrinsicCallExpr),
 }
 
 /// An integer literal.
@@ -199,6 +201,16 @@ pub struct IfExpr {
 #[derive(Debug, Clone)]
 pub struct CallExpr {
     /// Function name
+    pub name: Ident,
+    /// Arguments
+    pub args: Vec<Expr>,
+    pub span: Span,
+}
+
+/// An intrinsic call expression (e.g., `@dbg(42)`).
+#[derive(Debug, Clone)]
+pub struct IntrinsicCallExpr {
+    /// Intrinsic name (without the @)
     pub name: Ident,
     /// Arguments
     pub args: Vec<Expr>,
@@ -319,6 +331,7 @@ impl Expr {
             Expr::Continue(continue_expr) => continue_expr.span,
             Expr::StructLit(struct_lit) => struct_lit.span,
             Expr::Field(field_expr) => field_expr.span,
+            Expr::IntrinsicCall(intrinsic) => intrinsic.span,
         }
     }
 }

@@ -1128,6 +1128,58 @@ impl<'a> Sema<'a> {
                     span: inst.span,
                 }))
             }
+
+            InstData::Intrinsic { name, args } => {
+                let intrinsic_name = self.interner.get(*name).to_string();
+
+                // Currently only @dbg is supported
+                if intrinsic_name != "dbg" {
+                    return Err(CompileError::new(
+                        ErrorKind::UnknownIntrinsic(intrinsic_name),
+                        inst.span,
+                    ));
+                }
+
+                // @dbg expects exactly one argument
+                if args.len() != 1 {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: intrinsic_name,
+                            expected: 1,
+                            found: args.len(),
+                        },
+                        inst.span,
+                    ));
+                }
+
+                // Infer the argument type (we accept any scalar type)
+                let arg_type = self.infer_type(args[0], &ctx.locals, ctx.params)?;
+
+                // Check that argument is a scalar (integer or bool)
+                let is_scalar = arg_type.is_integer() || arg_type == Type::Bool;
+                if !is_scalar {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicTypeMismatch {
+                            name: intrinsic_name,
+                            expected: "integer or bool".to_string(),
+                            found: arg_type.name().to_string(),
+                        },
+                        inst.span,
+                    ));
+                }
+
+                // Analyze the argument with its inferred type
+                let arg_ref = self.analyze_inst(air, args[0], arg_type, ctx)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Intrinsic {
+                        name: intrinsic_name,
+                        args: vec![arg_ref],
+                    },
+                    ty: Type::Unit,
+                    span: inst.span,
+                }))
+            }
         }
     }
 
@@ -1315,6 +1367,7 @@ impl<'a> Sema<'a> {
                 Ok(struct_field.ty)
             }
             InstData::FieldSet { .. } => Ok(Type::Unit),
+            InstData::Intrinsic { .. } => Ok(Type::Unit),
         }
     }
 }

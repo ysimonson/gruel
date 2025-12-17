@@ -131,8 +131,9 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
         .map_err(|e| CompileError::without_span(ErrorKind::LinkError(e.to_string())))?;
 
     // Phase 7: Link to executable
+    // Use _start from the runtime as the entry point (it will call main)
     let elf = linker
-        .link("main")
+        .link("_start")
         .map_err(|e| CompileError::without_span(ErrorKind::LinkError(e.to_string())))?;
 
     Ok(elf)

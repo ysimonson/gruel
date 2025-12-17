@@ -190,6 +190,14 @@ pub enum AirInstData {
         args: Vec<AirRef>,
     },
 
+    /// Intrinsic call (e.g., @dbg)
+    Intrinsic {
+        /// Intrinsic name (without @)
+        name: String,
+        /// Argument AIR refs
+        args: Vec<AirRef>,
+    },
+
     /// Reference to a function parameter
     Param {
         /// Parameter index (0-based)
@@ -285,6 +293,16 @@ impl fmt::Display for Air {
                 AirInstData::Ret(inner) => writeln!(f, "ret {}", inner)?,
                 AirInstData::Call { name, args } => {
                     write!(f, "call {}(", name)?;
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", arg)?;
+                    }
+                    writeln!(f, ")")?;
+                }
+                AirInstData::Intrinsic { name, args } => {
+                    write!(f, "intrinsic @{}(", name)?;
                     for (i, arg) in args.iter().enumerate() {
                         if i > 0 {
                             write!(f, ", ")?;
