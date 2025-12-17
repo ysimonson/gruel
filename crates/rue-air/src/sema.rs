@@ -1145,6 +1145,14 @@ impl<'a> Sema<'a> {
             Ok(Type::I32)
         } else if type_sym == well_known.i64 {
             Ok(Type::I64)
+        } else if type_sym == well_known.u8 {
+            Ok(Type::U8)
+        } else if type_sym == well_known.u16 {
+            Ok(Type::U16)
+        } else if type_sym == well_known.u32 {
+            Ok(Type::U32)
+        } else if type_sym == well_known.u64 {
+            Ok(Type::U64)
         } else if type_sym == well_known.bool {
             Ok(Type::Bool)
         } else if let Some(&struct_id) = self.structs.get(&type_sym) {
@@ -1159,10 +1167,20 @@ impl<'a> Sema<'a> {
     }
 
     /// Get the number of ABI slots required for a type.
-    /// Scalar types (i8, i16, i32, i64, bool) use 1 slot, structs use 1 slot per field.
+    /// Scalar types (i8, i16, i32, i64, u8, u16, u32, u64, bool) use 1 slot, structs use 1 slot per field.
     fn abi_slot_count(&self, ty: Type) -> u32 {
         match ty {
-            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Bool | Type::Unit | Type::Error => 1,
+            Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::Bool
+            | Type::Unit
+            | Type::Error => 1,
             Type::Struct(struct_id) => self.struct_defs[struct_id.0 as usize].field_count() as u32,
         }
     }

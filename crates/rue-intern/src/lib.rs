@@ -42,6 +42,14 @@ pub struct WellKnown {
     pub i32: Symbol,
     /// The `i64` type
     pub i64: Symbol,
+    /// The `u8` type
+    pub u8: Symbol,
+    /// The `u16` type
+    pub u16: Symbol,
+    /// The `u32` type
+    pub u32: Symbol,
+    /// The `u64` type
+    pub u64: Symbol,
     /// The `bool` type
     pub bool: Symbol,
     /// The `()` unit type (currently not used in syntax)
@@ -56,6 +64,10 @@ impl WellKnown {
             i16: interner.intern_inner("i16"),
             i32: interner.intern_inner("i32"),
             i64: interner.intern_inner("i64"),
+            u8: interner.intern_inner("u8"),
+            u16: interner.intern_inner("u16"),
+            u32: interner.intern_inner("u32"),
+            u64: interner.intern_inner("u64"),
             bool: interner.intern_inner("bool"),
             unit: interner.intern_inner("()"),
         }
@@ -222,9 +234,9 @@ mod tests {
     #[test]
     fn test_len() {
         let mut interner = Interner::new();
-        // Well-known symbols (i8, i16, i32, i64, bool, ()) are pre-interned
+        // Well-known symbols (i8, i16, i32, i64, u8, u16, u32, u64, bool, ()) are pre-interned
         let initial_len = interner.len();
-        assert_eq!(initial_len, 6);
+        assert_eq!(initial_len, 10);
 
         interner.intern("a");
         assert_eq!(interner.len(), initial_len + 1);

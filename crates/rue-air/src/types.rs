@@ -17,6 +17,14 @@ pub enum Type {
     I32,
     /// 64-bit signed integer
     I64,
+    /// 8-bit unsigned integer
+    U8,
+    /// 16-bit unsigned integer
+    U16,
+    /// 32-bit unsigned integer
+    U32,
+    /// 64-bit unsigned integer
+    U64,
     /// Boolean
     Bool,
     /// The unit type (for functions that don't return a value)
@@ -71,6 +79,10 @@ impl Type {
             Type::I16 => "i16",
             Type::I32 => "i32",
             Type::I64 => "i64",
+            Type::U8 => "u8",
+            Type::U16 => "u16",
+            Type::U32 => "u32",
+            Type::U64 => "u64",
             Type::Bool => "bool",
             Type::Unit => "()",
             Type::Struct(_) => "<struct>",
@@ -80,7 +92,17 @@ impl Type {
 
     /// Check if this type is an integer type.
     pub fn is_integer(&self) -> bool {
-        matches!(self, Type::I8 | Type::I16 | Type::I32 | Type::I64)
+        matches!(
+            self,
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+        )
     }
 
     /// Check if this is an error type.

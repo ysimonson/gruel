@@ -1,0 +1,308 @@
+[section]
+id = "17.1"
+name = "Unsigned Integer Types"
+description = "Support for u8, u16, u32, and u64 unsigned integer types."
+
+# =============================================================================
+# u8 Type
+# =============================================================================
+
+[[case]]
+name = "u8_return"
+source = "fn main() -> u8 { 42 }"
+exit_code = 42
+
+[[case]]
+name = "u8_zero"
+source = "fn main() -> u8 { 0 }"
+exit_code = 0
+
+[[case]]
+name = "u8_max_positive"
+source = "fn main() -> u8 { 127 }"
+exit_code = 127
+
+[[case]]
+name = "u8_variable"
+source = """
+fn main() -> u8 {
+    let x: u8 = 50;
+    x
+}
+"""
+exit_code = 50
+
+[[case]]
+name = "u8_arithmetic"
+source = """
+fn main() -> u8 {
+    let a: u8 = 10;
+    let b: u8 = 5;
+    a + b
+}
+"""
+exit_code = 15
+
+[[case]]
+name = "u8_param"
+source = """
+fn double(x: u8) -> u8 { x + x }
+fn main() -> u8 { double(21) }
+"""
+exit_code = 42
+
+# =============================================================================
+# u16 Type
+# =============================================================================
+
+[[case]]
+name = "u16_return"
+source = "fn main() -> u16 { 100 }"
+exit_code = 100
+
+[[case]]
+name = "u16_zero"
+source = "fn main() -> u16 { 0 }"
+exit_code = 0
+
+[[case]]
+name = "u16_variable"
+source = """
+fn main() -> u16 {
+    let x: u16 = 200;
+    x
+}
+"""
+exit_code = 200
+
+[[case]]
+name = "u16_arithmetic"
+source = """
+fn main() -> u16 {
+    let a: u16 = 100;
+    let b: u16 = 50;
+    a - b
+}
+"""
+exit_code = 50
+
+[[case]]
+name = "u16_param"
+source = """
+fn add(x: u16, y: u16) -> u16 { x + y }
+fn main() -> u16 { add(30, 12) }
+"""
+exit_code = 42
+
+# =============================================================================
+# u32 Type
+# =============================================================================
+
+[[case]]
+name = "u32_return"
+source = "fn main() -> u32 { 42 }"
+exit_code = 42
+
+[[case]]
+name = "u32_zero"
+source = "fn main() -> u32 { 0 }"
+exit_code = 0
+
+[[case]]
+name = "u32_variable"
+source = """
+fn main() -> u32 {
+    let x: u32 = 123;
+    x
+}
+"""
+exit_code = 123
+
+[[case]]
+name = "u32_arithmetic"
+source = """
+fn main() -> u32 {
+    let a: u32 = 20;
+    let b: u32 = 22;
+    a + b
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "u32_param"
+source = """
+fn triple(x: u32) -> u32 { x + x + x }
+fn main() -> u32 { triple(14) }
+"""
+exit_code = 42
+
+# =============================================================================
+# u64 Type
+# =============================================================================
+
+[[case]]
+name = "u64_return"
+source = "fn main() -> u64 { 42 }"
+exit_code = 42
+
+[[case]]
+name = "u64_zero"
+source = "fn main() -> u64 { 0 }"
+exit_code = 0
+
+[[case]]
+name = "u64_variable"
+source = """
+fn main() -> u64 {
+    let x: u64 = 123;
+    x
+}
+"""
+exit_code = 123
+
+[[case]]
+name = "u64_arithmetic"
+source = """
+fn main() -> u64 {
+    let a: u64 = 20;
+    let b: u64 = 22;
+    a + b
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "u64_param"
+source = """
+fn triple(x: u64) -> u64 { x + x + x }
+fn main() -> u64 { triple(14) }
+"""
+exit_code = 42
+
+# =============================================================================
+# Type Mismatch Errors - Unsigned vs Unsigned (different sizes)
+# =============================================================================
+
+[[case]]
+name = "type_mismatch_u8_u32"
+source = """
+fn main() -> u32 {
+    let x: u8 = 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_u32_u64"
+source = """
+fn main() -> u64 {
+    let x: u32 = 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_arithmetic_u8_u32"
+source = """
+fn main() -> u32 {
+    let a: u8 = 10;
+    let b: u32 = 20;
+    a + b
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_arithmetic_u16_u64"
+source = """
+fn main() -> u64 {
+    let a: u16 = 10;
+    let b: u64 = 20;
+    a + b
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+# =============================================================================
+# Type Mismatch Errors - Signed vs Unsigned
+# =============================================================================
+
+[[case]]
+name = "type_mismatch_i32_u32"
+source = """
+fn main() -> u32 {
+    let x: i32 = 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_u32_i32"
+source = """
+fn main() -> i32 {
+    let x: u32 = 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_i8_u8"
+source = """
+fn main() -> u8 {
+    let x: i8 = 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_arithmetic_i32_u32"
+source = """
+fn main() -> i32 {
+    let a: i32 = 10;
+    let b: u32 = 20;
+    a + b
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+# =============================================================================
+# Function Argument Type Mismatch Errors
+# =============================================================================
+
+[[case]]
+name = "type_mismatch_function_arg_u8_u32"
+source = """
+fn foo(x: u32) -> u32 { x }
+fn main() -> u32 {
+    let y: u8 = 10;
+    foo(y)
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_function_arg_i32_u32"
+source = """
+fn foo(x: u32) -> u32 { x }
+fn main() -> u32 {
+    let y: i32 = 10;
+    foo(y)
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
