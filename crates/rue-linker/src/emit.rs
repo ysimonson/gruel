@@ -298,6 +298,7 @@ fn align_up(value: usize, align: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elf::ObjectFile;
 
     #[test]
     fn test_simple_object() {
@@ -330,5 +331,155 @@ mod tests {
 
         // Basic validation
         assert_eq!(&obj[0..4], b"\x7FELF");
+    }
+
+    #[test]
+    fn test_align_up() {
+        assert_eq!(align_up(0, 8), 0);
+        assert_eq!(align_up(1, 8), 8);
+        assert_eq!(align_up(7, 8), 8);
+        assert_eq!(align_up(8, 8), 8);
+        assert_eq!(align_up(9, 8), 16);
+        assert_eq!(align_up(16, 16), 16);
+        assert_eq!(align_up(17, 16), 32);
+    }
+
+    #[test]
+    fn test_roundtrip_simple() {
+        // Create an object and verify we can parse it back
+        let built = ObjectBuilder::new("test_func")
+            .code(vec![0x48, 0x89, 0xC0, 0xC3]) // mov rax, rax; ret
+            .build();
+
+        let parsed = ObjectFile::parse(&built).expect("should parse built object");
+
+        // Verify the symbol exists
+        let sym = parsed.find_symbol("test_func");
+        assert!(sym.is_some(), "should find test_func symbol");
+        let sym = sym.unwrap();
+        assert!(sym.section_index.is_some(), "symbol should be defined");
+    }
+
+    #[test]
+    fn test_roundtrip_with_relocation() {
+        let built = ObjectBuilder::new("caller")
+            .code(vec![
+                0xE8, 0x00, 0x00, 0x00, 0x00, // call (placeholder)
+                0xC3, // ret
+            ])
+            .relocation(CodeRelocation {
+                offset: 1,
+                symbol: "callee".into(),
+                rel_type: RelocationType::Pc32,
+                addend: -4,
+            })
+            .build();
+
+        let parsed = ObjectFile::parse(&built).expect("should parse built object");
+
+        // Verify the caller symbol exists
+        let caller = parsed.find_symbol("caller");
+        assert!(caller.is_some(), "should find caller symbol");
+
+        // Verify the callee symbol exists (as undefined)
+        let callee = parsed.find_symbol("callee");
+        assert!(callee.is_some(), "should find callee symbol");
+        let callee = callee.unwrap();
+        assert!(callee.section_index.is_none(), "callee should be undefined");
+
+        // Verify relocations exist
+        let text_section = parsed.sections.iter()
+            .find(|s| s.name == ".text")
+            .expect("should have .text section");
+        assert_eq!(text_section.relocations.len(), 1, "should have one relocation");
+        assert_eq!(text_section.relocations[0].offset, 1);
+        assert_eq!(text_section.relocations[0].addend, -4);
+    }
+
+    #[test]
+    fn test_multiple_relocations() {
+        let built = ObjectBuilder::new("multi_caller")
+            .code(vec![
+                0xE8, 0x00, 0x00, 0x00, 0x00, // call func1
+                0xE8, 0x00, 0x00, 0x00, 0x00, // call func2
+                0xE8, 0x00, 0x00, 0x00, 0x00, // call func1 again
+                0xC3, // ret
+            ])
+            .relocation(CodeRelocation {
+                offset: 1,
+                symbol: "func1".into(),
+                rel_type: RelocationType::Pc32,
+                addend: -4,
+            })
+            .relocation(CodeRelocation {
+                offset: 6,
+                symbol: "func2".into(),
+                rel_type: RelocationType::Plt32,
+                addend: -4,
+            })
+            .relocation(CodeRelocation {
+                offset: 11,
+                symbol: "func1".into(),
+                rel_type: RelocationType::Pc32,
+                addend: -4,
+            })
+            .build();
+
+        let parsed = ObjectFile::parse(&built).expect("should parse built object");
+
+        // Verify the text section has 3 relocations
+        let text_section = parsed.sections.iter()
+            .find(|s| s.name == ".text")
+            .expect("should have .text section");
+        assert_eq!(text_section.relocations.len(), 3, "should have three relocations");
+
+        // func1 should only appear once in the symbol table
+        let func1_count = parsed.symbols.iter()
+            .filter(|s| s.name == "func1")
+            .count();
+        assert_eq!(func1_count, 1, "func1 should appear once in symbol table");
+    }
+
+    #[test]
+    fn test_empty_code() {
+        let built = ObjectBuilder::new("empty_func")
+            .code(vec![])
+            .build();
+
+        let parsed = ObjectFile::parse(&built).expect("should parse empty object");
+        let sym = parsed.find_symbol("empty_func");
+        assert!(sym.is_some());
+    }
+
+    #[test]
+    fn test_various_relocation_types() {
+        let built = ObjectBuilder::new("reloc_test")
+            .code(vec![0u8; 32])
+            .relocation(CodeRelocation {
+                offset: 0,
+                symbol: "abs64_sym".into(),
+                rel_type: RelocationType::Abs64,
+                addend: 0,
+            })
+            .relocation(CodeRelocation {
+                offset: 8,
+                symbol: "abs32_sym".into(),
+                rel_type: RelocationType::Abs32,
+                addend: 0,
+            })
+            .relocation(CodeRelocation {
+                offset: 12,
+                symbol: "abs32s_sym".into(),
+                rel_type: RelocationType::Abs32S,
+                addend: 0,
+            })
+            .build();
+
+        let parsed = ObjectFile::parse(&built).expect("should parse object with various reloc types");
+
+        let text_section = parsed.sections.iter()
+            .find(|s| s.name == ".text")
+            .expect("should have .text section");
+        assert_eq!(text_section.relocations.len(), 3);
     }
 }

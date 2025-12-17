@@ -354,24 +354,65 @@ impl Linker {
             match rel_type {
                 RelocationType::Pc32 | RelocationType::Plt32 => {
                     // S + A - P, where S is symbol address, A is addend, P is place
-                    let value = (target_addr as i64 + addend - pc as i64) as i32;
+                    let value = target_addr as i64 + addend - pc as i64;
+                    // Check for overflow: value must fit in i32
+                    if value < i32::MIN as i64 || value > i32::MAX as i64 {
+                        return Err(LinkError::RelocationOverflow {
+                            symbol: sym_name.clone(),
+                            rel_type: format!("{:?}", rel_type),
+                        });
+                    }
+                    if patch_offset + 4 > merged_code.len() {
+                        return Err(LinkError::UnsupportedRelocation(
+                            format!("patch offset {} out of bounds", patch_offset)
+                        ));
+                    }
                     merged_code[patch_offset..patch_offset + 4]
-                        .copy_from_slice(&value.to_le_bytes());
+                        .copy_from_slice(&(value as i32).to_le_bytes());
                 }
                 RelocationType::Abs64 => {
                     let value = (target_addr as i64 + addend) as u64;
+                    if patch_offset + 8 > merged_code.len() {
+                        return Err(LinkError::UnsupportedRelocation(
+                            format!("patch offset {} out of bounds", patch_offset)
+                        ));
+                    }
                     merged_code[patch_offset..patch_offset + 8]
                         .copy_from_slice(&value.to_le_bytes());
                 }
                 RelocationType::Abs32 => {
-                    let value = (target_addr as i64 + addend) as u32;
+                    let value = target_addr as i64 + addend;
+                    // Check for overflow: value must fit in u32
+                    if value < 0 || value > u32::MAX as i64 {
+                        return Err(LinkError::RelocationOverflow {
+                            symbol: sym_name.clone(),
+                            rel_type: "Abs32".to_string(),
+                        });
+                    }
+                    if patch_offset + 4 > merged_code.len() {
+                        return Err(LinkError::UnsupportedRelocation(
+                            format!("patch offset {} out of bounds", patch_offset)
+                        ));
+                    }
                     merged_code[patch_offset..patch_offset + 4]
-                        .copy_from_slice(&value.to_le_bytes());
+                        .copy_from_slice(&(value as u32).to_le_bytes());
                 }
                 RelocationType::Abs32S => {
-                    let value = (target_addr as i64 + addend) as i32;
+                    let value = target_addr as i64 + addend;
+                    // Check for overflow: value must fit in i32
+                    if value < i32::MIN as i64 || value > i32::MAX as i64 {
+                        return Err(LinkError::RelocationOverflow {
+                            symbol: sym_name.clone(),
+                            rel_type: "Abs32S".to_string(),
+                        });
+                    }
+                    if patch_offset + 4 > merged_code.len() {
+                        return Err(LinkError::UnsupportedRelocation(
+                            format!("patch offset {} out of bounds", patch_offset)
+                        ));
+                    }
                     merged_code[patch_offset..patch_offset + 4]
-                        .copy_from_slice(&value.to_le_bytes());
+                        .copy_from_slice(&(value as i32).to_le_bytes());
                 }
                 RelocationType::Unknown(t) => {
                     return Err(LinkError::UnsupportedRelocation(format!("unknown type {}", t)));
@@ -442,6 +483,8 @@ fn align_up(value: u64, align: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::emit::{ObjectBuilder, CodeRelocation};
+    use crate::elf::ObjectFile;
 
     #[test]
     fn test_align_up() {
@@ -449,5 +492,329 @@ mod tests {
         assert_eq!(align_up(1, 16), 16);
         assert_eq!(align_up(16, 16), 16);
         assert_eq!(align_up(17, 16), 32);
+    }
+
+    #[test]
+    fn test_linker_default() {
+        let linker = Linker::default();
+        assert_eq!(linker.base_addr, 0x400000);
+        assert!(linker.objects.is_empty());
+        assert!(linker.global_symbols.is_empty());
+    }
+
+    #[test]
+    fn test_link_error_display() {
+        assert_eq!(
+            LinkError::UndefinedSymbol("foo".into()).to_string(),
+            "undefined symbol: foo"
+        );
+        assert_eq!(
+            LinkError::DuplicateSymbol("bar".into()).to_string(),
+            "duplicate symbol: bar"
+        );
+        assert_eq!(
+            LinkError::UnsupportedRelocation("test".into()).to_string(),
+            "unsupported relocation: test"
+        );
+        assert_eq!(
+            LinkError::RelocationOverflow {
+                symbol: "sym".into(),
+                rel_type: "Pc32".into(),
+            }.to_string(),
+            "relocation overflow for sym (Pc32)"
+        );
+    }
+
+    #[test]
+    fn test_simple_link() {
+        // Build a simple object with main that just returns
+        let obj_bytes = ObjectBuilder::new("main")
+            .code(vec![
+                0xB8, 0x2A, 0x00, 0x00, 0x00, // mov eax, 42
+                0xC3,                         // ret
+            ])
+            .build();
+
+        let obj = ObjectFile::parse(&obj_bytes).unwrap();
+
+        let mut linker = Linker::new();
+        linker.add_object(obj).unwrap();
+
+        let elf = linker.link("main").unwrap();
+
+        // Check ELF magic
+        assert_eq!(&elf[0..4], b"\x7FELF");
+        // Check it's an executable
+        assert_eq!(elf[16], 2); // ET_EXEC
+    }
+
+    #[test]
+    fn test_undefined_entry_point() {
+        let obj_bytes = ObjectBuilder::new("not_main")
+            .code(vec![0xC3])
+            .build();
+
+        let obj = ObjectFile::parse(&obj_bytes).unwrap();
+
+        let mut linker = Linker::new();
+        linker.add_object(obj).unwrap();
+
+        let result = linker.link("main");
+        assert!(matches!(result, Err(LinkError::UndefinedSymbol(_))));
+    }
+
+    #[test]
+    fn test_link_two_objects() {
+        // Build callee object
+        let callee_bytes = ObjectBuilder::new("callee")
+            .code(vec![
+                0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+                0xC3,                         // ret
+            ])
+            .build();
+
+        // Build caller object (main) that calls callee
+        let caller_bytes = ObjectBuilder::new("main")
+            .code(vec![
+                0xE8, 0x00, 0x00, 0x00, 0x00, // call callee (placeholder)
+                0xC3,                         // ret
+            ])
+            .relocation(CodeRelocation {
+                offset: 1,
+                symbol: "callee".into(),
+                rel_type: RelocationType::Pc32,
+                addend: -4,
+            })
+            .build();
+
+        let callee = ObjectFile::parse(&callee_bytes).unwrap();
+        let caller = ObjectFile::parse(&caller_bytes).unwrap();
+
+        let mut linker = Linker::new();
+        linker.add_object(callee).unwrap();
+        linker.add_object(caller).unwrap();
+
+        let elf = linker.link("main").unwrap();
+
+        // Check it's a valid executable
+        assert_eq!(&elf[0..4], b"\x7FELF");
+        assert_eq!(elf[16], 2); // ET_EXEC
+    }
+
+    #[test]
+    fn test_duplicate_symbol_error() {
+        let obj1_bytes = ObjectBuilder::new("duplicate")
+            .code(vec![0xC3])
+            .build();
+
+        let obj2_bytes = ObjectBuilder::new("duplicate")
+            .code(vec![0x90, 0xC3]) // nop, ret
+            .build();
+
+        let obj1 = ObjectFile::parse(&obj1_bytes).unwrap();
+        let obj2 = ObjectFile::parse(&obj2_bytes).unwrap();
+
+        let mut linker = Linker::new();
+        linker.add_object(obj1).unwrap();
+
+        let result = linker.add_object(obj2);
+        assert!(matches!(result, Err(LinkError::DuplicateSymbol(_))));
+    }
+
+    #[test]
+    fn test_undefined_symbol_in_relocation() {
+        // Build object that references undefined symbol
+        let obj_bytes = ObjectBuilder::new("main")
+            .code(vec![
+                0xE8, 0x00, 0x00, 0x00, 0x00, // call undefined_func
+                0xC3,
+            ])
+            .relocation(CodeRelocation {
+                offset: 1,
+                symbol: "undefined_func".into(),
+                rel_type: RelocationType::Pc32,
+                addend: -4,
+            })
+            .build();
+
+        let obj = ObjectFile::parse(&obj_bytes).unwrap();
+
+        let mut linker = Linker::new();
+        linker.add_object(obj).unwrap();
+
+        let result = linker.link("main");
+        assert!(matches!(result, Err(LinkError::UndefinedSymbol(_))));
+    }
+
+    #[test]
+    fn test_elf_header_structure() {
+        let obj_bytes = ObjectBuilder::new("main")
+            .code(vec![0xC3])
+            .build();
+
+        let obj = ObjectFile::parse(&obj_bytes).unwrap();
+
+        let mut linker = Linker::new();
+        linker.add_object(obj).unwrap();
+
+        let elf = linker.link("main").unwrap();
+
+        // Check ELF header fields
+        assert_eq!(&elf[0..4], b"\x7FELF");  // Magic
+        assert_eq!(elf[4], 2);               // 64-bit
+        assert_eq!(elf[5], 1);               // Little endian
+        assert_eq!(elf[6], 1);               // ELF version
+        assert_eq!(elf[16], 2);              // ET_EXEC
+        assert_eq!(u16::from_le_bytes([elf[18], elf[19]]), 0x3E); // x86-64
+
+        // Check entry point is set (bytes 24-31)
+        let entry = u64::from_le_bytes(elf[24..32].try_into().unwrap());
+        assert!(entry >= 0x400000, "entry point should be at or above base address");
+    }
+
+    #[test]
+    fn test_program_header_structure() {
+        let obj_bytes = ObjectBuilder::new("main")
+            .code(vec![0xC3])
+            .build();
+
+        let obj = ObjectFile::parse(&obj_bytes).unwrap();
+
+        let mut linker = Linker::new();
+        linker.add_object(obj).unwrap();
+
+        let elf = linker.link("main").unwrap();
+
+        // Program header starts at offset 64 (after ELF header)
+        let ph_offset = 64;
+
+        // p_type = PT_LOAD (1)
+        let p_type = u32::from_le_bytes(elf[ph_offset..ph_offset+4].try_into().unwrap());
+        assert_eq!(p_type, 1);
+
+        // p_flags = PF_R | PF_W | PF_X (7)
+        let p_flags = u32::from_le_bytes(elf[ph_offset+4..ph_offset+8].try_into().unwrap());
+        assert_eq!(p_flags, 7);
+    }
+
+    #[test]
+    fn test_linker_is_send_and_sync() {
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+
+        assert_send::<Linker>();
+        assert_sync::<Linker>();
+    }
+
+    /// Integration test: full emit → parse → link cycle with multiple functions
+    #[test]
+    fn test_full_emit_parse_link_cycle() {
+        // Create three functions: main calls helper1 and helper2
+
+        // helper1: returns 10
+        let helper1_bytes = ObjectBuilder::new("helper1")
+            .code(vec![
+                0xB8, 0x0A, 0x00, 0x00, 0x00, // mov eax, 10
+                0xC3,                         // ret
+            ])
+            .build();
+
+        // helper2: returns 32
+        let helper2_bytes = ObjectBuilder::new("helper2")
+            .code(vec![
+                0xB8, 0x20, 0x00, 0x00, 0x00, // mov eax, 32
+                0xC3,                         // ret
+            ])
+            .build();
+
+        // main: calls helper1, saves result, calls helper2, adds results
+        // This tests multiple relocations and cross-object references
+        let main_bytes = ObjectBuilder::new("main")
+            .code(vec![
+                // call helper1
+                0xE8, 0x00, 0x00, 0x00, 0x00, // call helper1 (offset 1)
+                // push rax (save result)
+                0x50,
+                // call helper2
+                0xE8, 0x00, 0x00, 0x00, 0x00, // call helper2 (offset 7)
+                // pop rbx
+                0x5B,
+                // add eax, ebx
+                0x01, 0xD8,
+                // ret
+                0xC3,
+            ])
+            .relocation(CodeRelocation {
+                offset: 1,
+                symbol: "helper1".into(),
+                rel_type: RelocationType::Pc32,
+                addend: -4,
+            })
+            .relocation(CodeRelocation {
+                offset: 7,
+                symbol: "helper2".into(),
+                rel_type: RelocationType::Pc32,
+                addend: -4,
+            })
+            .build();
+
+        // Parse all objects
+        let helper1 = ObjectFile::parse(&helper1_bytes).expect("parse helper1");
+        let helper2 = ObjectFile::parse(&helper2_bytes).expect("parse helper2");
+        let main = ObjectFile::parse(&main_bytes).expect("parse main");
+
+        // Verify symbols were parsed correctly
+        assert!(helper1.find_symbol("helper1").is_some());
+        assert!(helper2.find_symbol("helper2").is_some());
+        assert!(main.find_symbol("main").is_some());
+
+        // Link all together
+        let mut linker = Linker::new();
+        linker.add_object(helper1).expect("add helper1");
+        linker.add_object(helper2).expect("add helper2");
+        linker.add_object(main).expect("add main");
+
+        let elf = linker.link("main").expect("link");
+
+        // Verify the resulting ELF
+        assert_eq!(&elf[0..4], b"\x7FELF", "should have ELF magic");
+        assert_eq!(elf[16], 2, "should be ET_EXEC");
+
+        // Verify entry point is reasonable
+        let entry = u64::from_le_bytes(elf[24..32].try_into().unwrap());
+        assert!(entry >= 0x400000, "entry should be at/above base addr");
+        assert!(entry < 0x500000, "entry should be reasonable");
+
+        // Verify we have actual code after headers (offset 120 = 64 + 56)
+        assert!(elf.len() > 120, "should have content after headers");
+    }
+
+    /// Test that unknown relocation types are rejected
+    #[test]
+    fn test_unknown_relocation_type() {
+        let obj_bytes = ObjectBuilder::new("main")
+            .code(vec![0x00; 8])
+            .relocation(CodeRelocation {
+                offset: 0,
+                symbol: "target".into(),
+                rel_type: RelocationType::Unknown(99),
+                addend: 0,
+            })
+            .build();
+
+        // Also need a target object
+        let target_bytes = ObjectBuilder::new("target")
+            .code(vec![0xC3])
+            .build();
+
+        let obj = ObjectFile::parse(&obj_bytes).unwrap();
+        let target = ObjectFile::parse(&target_bytes).unwrap();
+
+        let mut linker = Linker::new();
+        linker.add_object(obj).unwrap();
+        linker.add_object(target).unwrap();
+
+        let result = linker.link("main");
+        assert!(matches!(result, Err(LinkError::UnsupportedRelocation(_))));
     }
 }

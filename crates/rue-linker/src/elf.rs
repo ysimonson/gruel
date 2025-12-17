@@ -7,6 +7,40 @@
 
 use std::collections::HashMap;
 
+/// Helper to read a u16 from a byte slice at a given offset.
+/// Panics if offset + 2 > slice.len(), so caller must ensure bounds.
+#[inline]
+fn read_u16(data: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([data[offset], data[offset + 1]])
+}
+
+/// Helper to read a u32 from a byte slice at a given offset.
+/// Panics if offset + 4 > slice.len(), so caller must ensure bounds.
+#[inline]
+fn read_u32(data: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+}
+
+/// Helper to read a u64 from a byte slice at a given offset.
+/// Panics if offset + 8 > slice.len(), so caller must ensure bounds.
+#[inline]
+fn read_u64(data: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes([
+        data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+        data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7],
+    ])
+}
+
+/// Helper to read an i64 from a byte slice at a given offset.
+/// Panics if offset + 8 > slice.len(), so caller must ensure bounds.
+#[inline]
+fn read_i64(data: &[u8], offset: usize) -> i64 {
+    i64::from_le_bytes([
+        data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+        data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7],
+    ])
+}
+
 /// A parsed ELF64 relocatable object file.
 #[derive(Debug)]
 pub struct ObjectFile {
@@ -168,6 +202,12 @@ pub enum ParseError {
     InvalidSymbol(String),
     /// Invalid string table.
     InvalidStringTable,
+    /// Invalid section header string table index.
+    InvalidShstrndx,
+    /// Section data out of bounds.
+    SectionOutOfBounds(String),
+    /// Relocation data out of bounds.
+    RelocationOutOfBounds,
 }
 
 impl std::fmt::Display for ParseError {
@@ -182,6 +222,9 @@ impl std::fmt::Display for ParseError {
             ParseError::InvalidSection(s) => write!(f, "invalid section: {}", s),
             ParseError::InvalidSymbol(s) => write!(f, "invalid symbol: {}", s),
             ParseError::InvalidStringTable => write!(f, "invalid string table"),
+            ParseError::InvalidShstrndx => write!(f, "invalid section header string table index"),
+            ParseError::SectionOutOfBounds(s) => write!(f, "section data out of bounds: {}", s),
+            ParseError::RelocationOutOfBounds => write!(f, "relocation data out of bounds"),
         }
     }
 }
@@ -223,11 +266,16 @@ impl ObjectFile {
             return Err(ParseError::NotX86_64);
         }
 
-        // Parse header fields
-        let e_shoff = u64::from_le_bytes(data[40..48].try_into().unwrap()) as usize;
-        let e_shentsize = u16::from_le_bytes([data[58], data[59]]) as usize;
-        let e_shnum = u16::from_le_bytes([data[60], data[61]]) as usize;
-        let e_shstrndx = u16::from_le_bytes([data[62], data[63]]) as usize;
+        // Parse header fields - safe because we checked data.len() >= 64 above
+        let e_shoff = read_u64(data, 40) as usize;
+        let e_shentsize = read_u16(data, 58) as usize;
+        let e_shnum = read_u16(data, 60) as usize;
+        let e_shstrndx = read_u16(data, 62) as usize;
+
+        // ELF64 section headers are 64 bytes
+        if e_shentsize < 64 && e_shnum > 0 {
+            return Err(ParseError::InvalidSection("section header size too small".into()));
+        }
 
         // Parse section headers
         let mut sections = Vec::new();
@@ -257,16 +305,18 @@ impl ObjectFile {
             }
 
             let sh = &data[sh_offset..sh_offset + e_shentsize];
-            let name_offset = u32::from_le_bytes(sh[0..4].try_into().unwrap());
-            let sh_type = u32::from_le_bytes(sh[4..8].try_into().unwrap());
-            let flags = u64::from_le_bytes(sh[8..16].try_into().unwrap());
-            let _addr = u64::from_le_bytes(sh[16..24].try_into().unwrap());
-            let offset = u64::from_le_bytes(sh[24..32].try_into().unwrap());
-            let size = u64::from_le_bytes(sh[32..40].try_into().unwrap());
-            let link = u32::from_le_bytes(sh[40..44].try_into().unwrap());
-            let info = u32::from_le_bytes(sh[44..48].try_into().unwrap());
-            let align = u64::from_le_bytes(sh[48..56].try_into().unwrap());
-            let entsize = u64::from_le_bytes(sh[56..64].try_into().unwrap());
+            // Bounds are guaranteed by the check above (sh_offset + e_shentsize <= data.len())
+            // and e_shentsize >= 64 for valid ELF64 section headers
+            let name_offset = read_u32(sh, 0);
+            let sh_type = read_u32(sh, 4);
+            let flags = read_u64(sh, 8);
+            let _addr = read_u64(sh, 16);
+            let offset = read_u64(sh, 24);
+            let size = read_u64(sh, 32);
+            let link = read_u32(sh, 40);
+            let info = read_u32(sh, 44);
+            let align = read_u64(sh, 48);
+            let entsize = read_u64(sh, 56);
 
             // SHT_SYMTAB = 2
             if sh_type == 2 {
@@ -288,8 +338,16 @@ impl ObjectFile {
         }
 
         // Get section name string table
+        if e_shstrndx >= raw_sections.len() {
+            return Err(ParseError::InvalidShstrndx);
+        }
         let shstrtab = &raw_sections[e_shstrndx];
-        let shstrtab_data = &data[shstrtab.offset as usize..(shstrtab.offset + shstrtab.size) as usize];
+        let shstrtab_end = shstrtab.offset.checked_add(shstrtab.size)
+            .ok_or_else(|| ParseError::SectionOutOfBounds("shstrtab overflow".into()))?;
+        if shstrtab_end as usize > data.len() {
+            return Err(ParseError::SectionOutOfBounds("shstrtab".into()));
+        }
+        let shstrtab_data = &data[shstrtab.offset as usize..shstrtab_end as usize];
 
         // Helper to read null-terminated string
         let read_string = |strtab: &[u8], offset: usize| -> Result<String, ParseError> {
@@ -323,7 +381,12 @@ impl ObjectFile {
             }
 
             let section_data = if raw.size > 0 && raw.offset > 0 {
-                data[raw.offset as usize..(raw.offset + raw.size) as usize].to_vec()
+                let section_end = raw.offset.checked_add(raw.size)
+                    .ok_or_else(|| ParseError::SectionOutOfBounds(format!("{} overflow", name)))?;
+                if section_end as usize > data.len() {
+                    return Err(ParseError::SectionOutOfBounds(name.clone()));
+                }
+                data[raw.offset as usize..section_end as usize].to_vec()
             } else {
                 Vec::new()
             };
@@ -359,20 +422,40 @@ impl ObjectFile {
             let symtab = &raw_sections[symtab_i];
             let strtab = &raw_sections[strtab_i];
 
-            let strtab_data = &data[strtab.offset as usize..(strtab.offset + strtab.size) as usize];
-            let symtab_data = &data[symtab.offset as usize..(symtab.offset + symtab.size) as usize];
+            // Validate strtab bounds
+            let strtab_end = strtab.offset.checked_add(strtab.size)
+                .ok_or_else(|| ParseError::InvalidSymbol("strtab overflow".into()))?;
+            if strtab_end as usize > data.len() {
+                return Err(ParseError::InvalidSymbol("strtab out of bounds".into()));
+            }
+            let strtab_data = &data[strtab.offset as usize..strtab_end as usize];
 
+            // Validate symtab bounds
+            let symtab_end = symtab.offset.checked_add(symtab.size)
+                .ok_or_else(|| ParseError::InvalidSymbol("symtab overflow".into()))?;
+            if symtab_end as usize > data.len() {
+                return Err(ParseError::InvalidSymbol("symtab out of bounds".into()));
+            }
+            let symtab_data = &data[symtab.offset as usize..symtab_end as usize];
+
+            if symtab.entsize == 0 {
+                return Err(ParseError::InvalidSymbol("zero entsize".into()));
+            }
             let sym_count = symtab.size / symtab.entsize;
             for i in 0..sym_count {
                 let sym_offset = (i * symtab.entsize) as usize;
+                if sym_offset + 24 > symtab_data.len() {
+                    return Err(ParseError::InvalidSymbol("symbol entry out of bounds".into()));
+                }
                 let sym = &symtab_data[sym_offset..sym_offset + 24];
 
-                let st_name = u32::from_le_bytes(sym[0..4].try_into().unwrap());
+                // Bounds guaranteed by check above (sym_offset + 24 <= symtab_data.len())
+                let st_name = read_u32(sym, 0);
                 let st_info = sym[4];
                 let _st_other = sym[5];
-                let st_shndx = u16::from_le_bytes([sym[6], sym[7]]);
-                let st_value = u64::from_le_bytes(sym[8..16].try_into().unwrap());
-                let st_size = u64::from_le_bytes(sym[16..24].try_into().unwrap());
+                let st_shndx = read_u16(sym, 6);
+                let st_value = read_u64(sym, 8);
+                let st_size = read_u64(sym, 16);
 
                 let name = read_string(strtab_data, st_name as usize)?;
 
@@ -422,16 +505,30 @@ impl ObjectFile {
                 continue;
             }
 
-            let rela_data = &data[raw.offset as usize..(raw.offset + raw.size) as usize];
+            // Validate relocation section bounds
+            let rela_end = raw.offset.checked_add(raw.size)
+                .ok_or(ParseError::RelocationOutOfBounds)?;
+            if rela_end as usize > data.len() {
+                return Err(ParseError::RelocationOutOfBounds);
+            }
+            let rela_data = &data[raw.offset as usize..rela_end as usize];
+
+            if raw.entsize == 0 {
+                continue; // Skip malformed relocation sections
+            }
             let rela_count = raw.size / raw.entsize;
 
             for j in 0..rela_count {
                 let rela_offset = (j * raw.entsize) as usize;
+                if rela_offset + 24 > rela_data.len() {
+                    return Err(ParseError::RelocationOutOfBounds);
+                }
                 let rela = &rela_data[rela_offset..rela_offset + 24];
 
-                let r_offset = u64::from_le_bytes(rela[0..8].try_into().unwrap());
-                let r_info = u64::from_le_bytes(rela[8..16].try_into().unwrap());
-                let r_addend = i64::from_le_bytes(rela[16..24].try_into().unwrap());
+                // Bounds guaranteed by check above (rela_offset + 24 <= rela_data.len())
+                let r_offset = read_u64(rela, 0);
+                let r_info = read_u64(rela, 8);
+                let r_addend = read_i64(rela, 16);
 
                 let r_sym = (r_info >> 32) as usize;
                 let r_type = (r_info & 0xffffffff) as u32;
@@ -473,5 +570,182 @@ mod tests {
     #[test]
     fn test_parse_error_display() {
         assert_eq!(ParseError::InvalidMagic.to_string(), "invalid ELF magic number");
+        assert_eq!(ParseError::TooShort.to_string(), "file is too short to be a valid ELF");
+        assert_eq!(ParseError::Not64Bit.to_string(), "not a 64-bit ELF file");
+        assert_eq!(ParseError::NotLittleEndian.to_string(), "not a little-endian ELF file");
+        assert_eq!(ParseError::NotRelocatable.to_string(), "not a relocatable object file");
+        assert_eq!(ParseError::NotX86_64.to_string(), "not an x86-64 object file");
+        assert_eq!(ParseError::InvalidSection("test".into()).to_string(), "invalid section: test");
+        assert_eq!(ParseError::InvalidSymbol("test".into()).to_string(), "invalid symbol: test");
+        assert_eq!(ParseError::InvalidStringTable.to_string(), "invalid string table");
+        assert_eq!(ParseError::InvalidShstrndx.to_string(), "invalid section header string table index");
+        assert_eq!(ParseError::SectionOutOfBounds("test".into()).to_string(), "section data out of bounds: test");
+        assert_eq!(ParseError::RelocationOutOfBounds.to_string(), "relocation data out of bounds");
+    }
+
+    #[test]
+    fn test_too_short() {
+        let data = [0u8; 32];
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::TooShort)));
+    }
+
+    #[test]
+    fn test_invalid_magic() {
+        let mut data = [0u8; 64];
+        data[0..4].copy_from_slice(b"NOTF");
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::InvalidMagic)));
+    }
+
+    #[test]
+    fn test_not_64bit() {
+        let mut data = [0u8; 64];
+        data[0..4].copy_from_slice(b"\x7FELF");
+        data[4] = 1; // 32-bit
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::Not64Bit)));
+    }
+
+    #[test]
+    fn test_not_little_endian() {
+        let mut data = [0u8; 64];
+        data[0..4].copy_from_slice(b"\x7FELF");
+        data[4] = 2; // 64-bit
+        data[5] = 2; // Big endian
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::NotLittleEndian)));
+    }
+
+    #[test]
+    fn test_not_relocatable() {
+        let mut data = [0u8; 64];
+        data[0..4].copy_from_slice(b"\x7FELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little endian
+        data[16..18].copy_from_slice(&2_u16.to_le_bytes()); // ET_EXEC instead of ET_REL
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::NotRelocatable)));
+    }
+
+    #[test]
+    fn test_not_x86_64() {
+        let mut data = [0u8; 64];
+        data[0..4].copy_from_slice(b"\x7FELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little endian
+        data[16..18].copy_from_slice(&1_u16.to_le_bytes()); // ET_REL
+        data[18..20].copy_from_slice(&0x03_u16.to_le_bytes()); // EM_386 instead of EM_X86_64
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::NotX86_64)));
+    }
+
+    #[test]
+    fn test_section_header_size_too_small() {
+        let mut data = [0u8; 64];
+        data[0..4].copy_from_slice(b"\x7FELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little endian
+        data[16..18].copy_from_slice(&1_u16.to_le_bytes()); // ET_REL
+        data[18..20].copy_from_slice(&0x3E_u16.to_le_bytes()); // EM_X86_64
+        data[58..60].copy_from_slice(&32_u16.to_le_bytes()); // e_shentsize = 32 (too small)
+        data[60..62].copy_from_slice(&1_u16.to_le_bytes()); // e_shnum = 1
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::InvalidSection(_))));
+    }
+
+    #[test]
+    fn test_invalid_shstrndx() {
+        let mut data = [0u8; 64];
+        data[0..4].copy_from_slice(b"\x7FELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little endian
+        data[16..18].copy_from_slice(&1_u16.to_le_bytes()); // ET_REL
+        data[18..20].copy_from_slice(&0x3E_u16.to_le_bytes()); // EM_X86_64
+        data[58..60].copy_from_slice(&64_u16.to_le_bytes()); // e_shentsize = 64
+        data[60..62].copy_from_slice(&0_u16.to_le_bytes()); // e_shnum = 0
+        data[62..64].copy_from_slice(&5_u16.to_le_bytes()); // e_shstrndx = 5 (invalid)
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::InvalidShstrndx)));
+    }
+
+    #[test]
+    fn test_section_out_of_bounds() {
+        // Create a minimal valid ELF header with one section that points out of bounds
+        let mut data = vec![0u8; 64 + 64]; // header + one section header
+        data[0..4].copy_from_slice(b"\x7FELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little endian
+        data[16..18].copy_from_slice(&1_u16.to_le_bytes()); // ET_REL
+        data[18..20].copy_from_slice(&0x3E_u16.to_le_bytes()); // EM_X86_64
+        data[40..48].copy_from_slice(&64_u64.to_le_bytes()); // e_shoff = 64
+        data[58..60].copy_from_slice(&64_u16.to_le_bytes()); // e_shentsize = 64
+        data[60..62].copy_from_slice(&1_u16.to_le_bytes()); // e_shnum = 1
+        data[62..64].copy_from_slice(&0_u16.to_le_bytes()); // e_shstrndx = 0
+
+        // Section header at offset 64
+        // sh_type = SHT_STRTAB (3) to make it a string table
+        let sh_offset = 64;
+        data[sh_offset + 4..sh_offset + 8].copy_from_slice(&3_u32.to_le_bytes()); // sh_type = SHT_STRTAB
+        // sh_offset pointing way out of bounds
+        data[sh_offset + 24..sh_offset + 32].copy_from_slice(&1000_u64.to_le_bytes());
+        data[sh_offset + 32..sh_offset + 40].copy_from_slice(&100_u64.to_le_bytes()); // size
+
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::SectionOutOfBounds(_))));
+    }
+
+    #[test]
+    fn test_section_flags() {
+        let empty = SectionFlags::empty();
+        assert!(!empty.contains(SectionFlags::WRITE));
+        assert!(!empty.contains(SectionFlags::ALLOC));
+        assert!(!empty.contains(SectionFlags::EXEC));
+
+        let write_alloc = SectionFlags::WRITE | SectionFlags::ALLOC;
+        assert!(write_alloc.contains(SectionFlags::WRITE));
+        assert!(write_alloc.contains(SectionFlags::ALLOC));
+        assert!(!write_alloc.contains(SectionFlags::EXEC));
+
+        let mut flags = SectionFlags::empty();
+        flags |= SectionFlags::EXEC;
+        assert!(flags.contains(SectionFlags::EXEC));
+    }
+
+    #[test]
+    fn test_relocation_type_from_elf() {
+        assert_eq!(RelocationType::from_elf(1), RelocationType::Abs64);
+        assert_eq!(RelocationType::from_elf(2), RelocationType::Pc32);
+        assert_eq!(RelocationType::from_elf(4), RelocationType::Plt32);
+        assert_eq!(RelocationType::from_elf(10), RelocationType::Abs32);
+        assert_eq!(RelocationType::from_elf(11), RelocationType::Abs32S);
+        assert_eq!(RelocationType::from_elf(99), RelocationType::Unknown(99));
+    }
+
+    #[test]
+    fn test_symbol_binding_and_type() {
+        // Test that the enum variants are distinct
+        assert_ne!(SymbolBinding::Local, SymbolBinding::Global);
+        assert_ne!(SymbolBinding::Global, SymbolBinding::Weak);
+
+        assert_ne!(SymbolType::None, SymbolType::Func);
+        assert_ne!(SymbolType::Func, SymbolType::Object);
+    }
+
+    #[test]
+    fn test_read_helpers() {
+        let data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        assert_eq!(read_u16(&data, 0), 0x0201);
+        assert_eq!(read_u32(&data, 0), 0x04030201);
+        assert_eq!(read_u64(&data, 0), 0x0807060504030201);
+        assert_eq!(read_i64(&data, 0), 0x0807060504030201_i64);
+    }
+
+    #[test]
+    fn test_empty_object_file() {
+        // Create a minimal valid ELF with no sections
+        let mut data = vec![0u8; 64];
+        data[0..4].copy_from_slice(b"\x7FELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little endian
+        data[16..18].copy_from_slice(&1_u16.to_le_bytes()); // ET_REL
+        data[18..20].copy_from_slice(&0x3E_u16.to_le_bytes()); // EM_X86_64
+        data[58..60].copy_from_slice(&64_u16.to_le_bytes()); // e_shentsize = 64
+        data[60..62].copy_from_slice(&0_u16.to_le_bytes()); // e_shnum = 0
+        data[62..64].copy_from_slice(&0_u16.to_le_bytes()); // e_shstrndx = 0
+
+        // This should fail because shstrndx=0 but there are no sections
+        assert!(matches!(ObjectFile::parse(&data), Err(ParseError::InvalidShstrndx)));
     }
 }
