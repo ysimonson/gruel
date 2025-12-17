@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::mir::{Operand, VReg, X86Inst, X86Mir};
+use super::mir::{Operand, Reg, VReg, X86Inst, X86Mir};
 
 /// Live range for a virtual register.
 ///
@@ -40,6 +40,9 @@ pub struct LivenessInfo {
     /// For each instruction, which vregs are live after it executes.
     /// This is useful for determining which registers are in use at any point.
     pub live_at: Vec<HashSet<VReg>>,
+    /// For each instruction index, the physical registers clobbered by that instruction.
+    /// This is used to prevent allocating vregs to registers that would be clobbered.
+    pub clobbers_at: Vec<Vec<Reg>>,
 }
 
 impl LivenessInfo {
@@ -60,6 +63,25 @@ impl LivenessInfo {
             _ => false,
         }
     }
+
+    /// Get the physical registers clobbered at a given instruction index.
+    pub fn clobbers_at(&self, inst_idx: usize) -> &[Reg] {
+        &self.clobbers_at[inst_idx]
+    }
+
+    /// Check if a physical register is clobbered while a vreg is live.
+    ///
+    /// Returns true if `reg` is clobbered by any instruction during the live range of `vreg`.
+    pub fn is_clobbered_during(&self, vreg: VReg, reg: Reg) -> bool {
+        if let Some(range) = self.ranges.get(&vreg) {
+            for idx in range.start..=range.end {
+                if idx < self.clobbers_at.len() && self.clobbers_at[idx].contains(&reg) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 /// Compute liveness information for X86Mir.
@@ -71,7 +93,10 @@ pub fn analyze(mir: &X86Mir) -> LivenessInfo {
     let mut first_def: HashMap<VReg, usize> = HashMap::new();
     let mut last_use: HashMap<VReg, usize> = HashMap::new();
 
-    // Forward pass: find definitions and uses
+    // Track clobbers at each instruction
+    let mut clobbers_at: Vec<Vec<Reg>> = Vec::with_capacity(num_insts);
+
+    // Forward pass: find definitions, uses, and clobbers
     for (idx, inst) in instructions.iter().enumerate() {
         // Record uses (reads) first - this is important because a use before def
         // in the same instruction means the value was live before
@@ -91,6 +116,9 @@ pub fn analyze(mir: &X86Mir) -> LivenessInfo {
             // If this is also the first use, update last_use
             last_use.entry(vreg).or_insert(idx);
         }
+
+        // Record clobbers
+        clobbers_at.push(inst.clobbers().to_vec());
     }
 
     // Build live ranges
@@ -111,7 +139,11 @@ pub fn analyze(mir: &X86Mir) -> LivenessInfo {
         }
     }
 
-    LivenessInfo { ranges, live_at }
+    LivenessInfo {
+        ranges,
+        live_at,
+        clobbers_at,
+    }
 }
 
 /// Get virtual registers used (read) by an instruction.
@@ -141,6 +173,10 @@ fn uses(inst: &X86Inst) -> Vec<VReg> {
             // dst is both read and written (dst = dst op src)
             add_if_virtual(dst, &mut result);
             add_if_virtual(src, &mut result);
+        }
+        X86Inst::AddRI { dst, .. } => {
+            // dst is both read and written (dst = dst + imm)
+            add_if_virtual(dst, &mut result);
         }
         X86Inst::ImulRR { dst, src } => {
             add_if_virtual(dst, &mut result);
@@ -231,6 +267,7 @@ fn defs(inst: &X86Inst) -> Vec<VReg> {
             // Writes to memory, not to a register
         }
         X86Inst::AddRR { dst, .. }
+        | X86Inst::AddRI { dst, .. }
         | X86Inst::SubRR { dst, .. }
         | X86Inst::ImulRR { dst, .. } => {
             add_if_virtual(dst, &mut result);

@@ -305,3 +305,59 @@ fn sum6(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32) -> i32 {
 fn main() -> i32 { sum6(1, 2, 3, 4, 5, 27) }
 """
 exit_code = 42
+
+[[case]]
+name = "function_with_seven_params"
+description = "Test with seven parameters (7th goes on stack per System V AMD64)"
+source = """
+fn sum7(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) -> i32 {
+    a + b + c + d + e + f + g
+}
+fn main() -> i32 { sum7(1, 2, 3, 4, 5, 6, 21) }
+"""
+exit_code = 42
+
+[[case]]
+name = "function_with_eight_params"
+description = "Test with eight parameters (7th and 8th go on stack)"
+source = """
+fn sum8(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32, h: i32) -> i32 {
+    a + b + c + d + e + f + g + h
+}
+fn main() -> i32 { sum8(1, 2, 3, 4, 5, 6, 7, 14) }
+"""
+exit_code = 42
+
+[[case]]
+name = "function_with_ten_params"
+description = "Test with ten parameters (last four go on stack)"
+source = """
+fn sum10(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32, h: i32, i: i32, j: i32) -> i32 {
+    a + b + c + d + e + f + g + h + i + j
+}
+fn main() -> i32 { sum10(1, 2, 3, 4, 5, 6, 7, 8, 9, -3) }
+"""
+exit_code = 42
+
+[[case]]
+name = "stack_params_with_expressions"
+description = "Test stack parameters passed as expressions"
+source = """
+fn sum7(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) -> i32 {
+    a + b + c + d + e + f + g
+}
+fn main() -> i32 { sum7(1, 2, 3, 4, 5, 6, 10 * 2 + 1) }
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_call_with_many_params"
+description = "Test calling many-param functions from other functions"
+source = """
+fn add7(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) -> i32 {
+    a + b + c + d + e + f + g
+}
+fn double(x: i32) -> i32 { x + x }
+fn main() -> i32 { double(add7(1, 2, 3, 4, 5, 6, 0)) }
+"""
+exit_code = 42

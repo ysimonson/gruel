@@ -211,10 +211,10 @@ impl<'a> Lower<'a> {
                 self.mir.push(X86Inst::Label { name: ok_label });
 
                 // Division on x86 uses EDX:EAX / divisor -> quotient in EAX, remainder in EDX
-                // TODO: The register allocator doesn't know RAX/RDX are clobbered here.
-                // Once we have real liveness analysis, we'll need register constraints or
-                // explicit clobber sets to prevent the allocator from placing live values
-                // in RAX/RDX across division operations.
+                // Note: The register allocator only uses callee-saved registers (R12-R15, RBX),
+                // avoiding RAX/RDX entirely. If the allocator is expanded to use more registers,
+                // it can use X86Inst::clobbers() and LivenessInfo::is_clobbered_during() to
+                // avoid placing live values in registers that would be clobbered.
                 // 1. Move dividend to EAX
                 self.mir.push(X86Inst::MovRR {
                     dst: Operand::Physical(Reg::Rax),
@@ -803,24 +803,21 @@ impl<'a> Lower<'a> {
 
             AirInstData::Call { name, args } => {
                 // Function call using System V AMD64 ABI
+                // First 6 args go in registers: RDI, RSI, RDX, RCX, R8, R9
+                // Remaining args are passed on the stack (right-to-left)
                 let result_vreg = self.mir.alloc_vreg();
                 self.value_map[air_ref.as_u32() as usize] = Some(result_vreg);
 
                 // Evaluate all arguments first to get their vregs
                 let arg_vregs: Vec<_> = args.iter().map(|a| self.get_vreg(*a)).collect();
 
-                // To avoid clobbering issues with argument registers, we use a
-                // two-phase approach:
-                // 1. Push all argument values onto the stack (using RAX as scratch)
-                // 2. Pop them into the argument registers
-                //
-                // This ensures that even if argument vregs are allocated to
-                // argument registers, their values are saved before any
-                // argument register is modified.
+                let num_reg_args = arg_vregs.len().min(ARG_REGS.len());
+                let num_stack_args = arg_vregs.len().saturating_sub(ARG_REGS.len());
 
-                // Phase 1: Push all arguments in reverse order
-                // After this, stack looks like: [arg0][arg1]...[argN-1] <- rsp
-                for arg_vreg in arg_vregs.iter().rev() {
+                // Phase 1: Push stack arguments (args 7+) in reverse order
+                // Per System V AMD64 ABI, stack args are pushed right-to-left
+                // so that arg7 ends up closest to RSP
+                for arg_vreg in arg_vregs.iter().skip(ARG_REGS.len()).rev() {
                     // Move to RAX first (in case vreg is spilled)
                     self.mir.push(X86Inst::MovRR {
                         dst: Operand::Physical(Reg::Rax),
@@ -832,22 +829,38 @@ impl<'a> Lower<'a> {
                     });
                 }
 
-                // Phase 2: Pop into argument registers (forward order)
-                let num_args = arg_vregs.len().min(ARG_REGS.len());
-                for i in 0..num_args {
-                    self.mir.push(X86Inst::Pop {
-                        dst: Operand::Physical(ARG_REGS[i]),
+                // Phase 2: Push register arguments onto stack temporarily
+                // This avoids clobbering issues when vregs are in arg registers
+                for arg_vreg in arg_vregs.iter().take(num_reg_args).rev() {
+                    self.mir.push(X86Inst::MovRR {
+                        dst: Operand::Physical(Reg::Rax),
+                        src: Operand::Virtual(*arg_vreg),
+                    });
+                    self.mir.push(X86Inst::Push {
+                        src: Operand::Physical(Reg::Rax),
                     });
                 }
 
-                if arg_vregs.len() > ARG_REGS.len() {
-                    panic!("More than 6 arguments not yet supported");
+                // Phase 3: Pop into argument registers (forward order)
+                for i in 0..num_reg_args {
+                    self.mir.push(X86Inst::Pop {
+                        dst: Operand::Physical(ARG_REGS[i]),
+                    });
                 }
 
                 // Call the function
                 self.mir.push(X86Inst::CallRel {
                     symbol: name.clone(),
                 });
+
+                // Clean up stack arguments (if any)
+                if num_stack_args > 0 {
+                    let stack_space = (num_stack_args * 8) as i32;
+                    self.mir.push(X86Inst::AddRI {
+                        dst: Operand::Physical(Reg::Rsp),
+                        imm: stack_space,
+                    });
+                }
 
                 // Return value is in RAX - move to result vreg
                 self.mir.push(X86Inst::MovRR {

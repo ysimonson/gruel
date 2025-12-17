@@ -337,6 +337,10 @@ impl RegAlloc {
                 self.emit_binop(mir, dst, src, |d, s| X86Inst::AddRR { dst: d, src: s });
             }
 
+            X86Inst::AddRI { dst, imm } => {
+                self.emit_unop_imm(mir, dst, imm, |d, i| X86Inst::AddRI { dst: d, imm: i });
+            }
+
             X86Inst::SubRR { dst, src } => {
                 self.emit_binop(mir, dst, src, |d, s| X86Inst::SubRR { dst: d, src: s });
             }

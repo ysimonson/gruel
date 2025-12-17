@@ -198,6 +198,9 @@ pub enum X86Inst {
     /// `sub dst, src` - Subtract src from dst (dst = dst - src).
     SubRR { dst: Operand, src: Operand },
 
+    /// `add dst, imm` - Add immediate to register (dst = dst + imm).
+    AddRI { dst: Operand, imm: i32 },
+
     /// `imul dst, src` - Signed multiply (dst = dst * src).
     ImulRR { dst: Operand, src: Operand },
 
@@ -288,6 +291,37 @@ pub enum X86Inst {
     Push { src: Operand },
 }
 
+impl X86Inst {
+    /// Returns physical registers clobbered by this instruction.
+    ///
+    /// This information is used by the register allocator to avoid assigning
+    /// virtual registers to physical registers that would be clobbered.
+    pub fn clobbers(&self) -> &'static [Reg] {
+        match self {
+            // Division clobbers RAX (quotient) and RDX (remainder)
+            X86Inst::IdivR { .. } => &[Reg::Rax, Reg::Rdx],
+            // CDQ sign-extends EAX into EDX, clobbering RDX
+            X86Inst::Cdq => &[Reg::Rdx],
+            // Function calls clobber all caller-saved registers per System V AMD64 ABI
+            X86Inst::CallRel { .. } => &[
+                Reg::Rax,
+                Reg::Rcx,
+                Reg::Rdx,
+                Reg::Rsi,
+                Reg::Rdi,
+                Reg::R8,
+                Reg::R9,
+                Reg::R10,
+                Reg::R11,
+            ],
+            // Syscall clobbers RAX (return value), RCX (saved RIP), R11 (saved RFLAGS)
+            X86Inst::Syscall => &[Reg::Rax, Reg::Rcx, Reg::R11],
+            // All other instructions don't clobber additional registers
+            _ => &[],
+        }
+    }
+}
+
 impl fmt::Display for X86Inst {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -309,6 +343,7 @@ impl fmt::Display for X86Inst {
                 }
             }
             X86Inst::AddRR { dst, src } => write!(f, "add {}, {}", dst, src),
+            X86Inst::AddRI { dst, imm } => write!(f, "add {}, {}", dst, imm),
             X86Inst::SubRR { dst, src } => write!(f, "sub {}, {}", dst, src),
             X86Inst::ImulRR { dst, src } => write!(f, "imul {}, {}", dst, src),
             X86Inst::Neg { dst } => write!(f, "neg {}", dst),
