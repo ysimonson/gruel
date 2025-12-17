@@ -380,6 +380,21 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Neg { operand } => {
+                // Special case: -2147483648 (MIN_I32)
+                // The literal 2147483648 exceeds i32::MAX, but -2147483648 is valid.
+                // We detect this pattern and fold it to a constant to avoid overflow.
+                let operand_inst = self.rir.get(*operand);
+                if let InstData::IntConst(value) = &operand_inst.data {
+                    if *value == 2147483648 {
+                        // Fold to MIN_I32 constant directly
+                        return Ok(air.add_inst(AirInst {
+                            data: AirInstData::Const(-2147483648_i64),
+                            ty: Type::I32,
+                            span: inst.span,
+                        }));
+                    }
+                }
+
                 let operand_ref = self.analyze_inst(air, *operand, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
