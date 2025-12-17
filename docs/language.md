@@ -24,7 +24,8 @@ Rue is in early development. The implemented feature set is minimal:
 | Variables | ✓ Implemented |
 | If/else expressions | ✓ Implemented |
 | Logical operators | ✓ Implemented |
-| Loops | Planned |
+| While loops | ✓ Implemented |
+| Break/continue | ✓ Implemented |
 
 ## Specification Tests
 
@@ -43,6 +44,8 @@ The executable specification lives in `crates/rue-spec/cases/`:
 | `09-variables.toml` | 2.2 | Local variables |
 | `10-conditionals.toml` | 10.1 | If/else expressions and comparisons |
 | `11-logical-operators.toml` | 11.1 | Logical operators (!, &&, \|\|) |
+| `12-while-loops.toml` | 12.1 | While loops |
+| `13-break-continue.toml` | 13.1 | Break and continue statements |
 
 Each `.toml` file contains test cases that define expected behavior:
 
@@ -286,6 +289,88 @@ fn main() -> i32 {
 }
 ```
 
+### While Loops
+
+`while` loops repeat a block of code while a condition is true:
+
+```rue
+fn main() -> i32 {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 10 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum  // returns 55
+}
+```
+
+The condition must be of type `bool`. While loops evaluate to unit type `()`.
+
+### Break and Continue
+
+`break` exits the innermost loop immediately:
+
+```rue
+fn main() -> i32 {
+    let mut x = 0;
+    while true {
+        x = x + 1;
+        if x == 5 {
+            break;
+        }
+    }
+    x  // returns 5
+}
+```
+
+`continue` skips to the next iteration of the innermost loop:
+
+```rue
+fn main() -> i32 {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 10 {
+        i = i + 1;
+        if i % 2 == 0 {
+            continue;  // skip even numbers
+        }
+        sum = sum + i;
+    }
+    sum  // returns 25 (1+3+5+7+9)
+}
+```
+
+Both `break` and `continue` must appear inside a loop. Using them outside a loop is a compile-time error:
+
+```rue
+fn main() -> i32 {
+    break;  // ERROR: 'break' outside of loop
+    0
+}
+```
+
+In nested loops, `break` and `continue` affect only the innermost loop:
+
+```rue
+fn main() -> i32 {
+    let mut total = 0;
+    let mut outer = 0;
+    while outer < 3 {
+        let mut inner = 0;
+        while true {
+            inner = inner + 1;
+            total = total + 1;
+            if inner == 2 {
+                break;  // exits inner loop only
+            }
+        }
+        outer = outer + 1;
+    }
+    total  // returns 6 (2 iterations * 3 outer loops)
+}
+```
+
 ### Runtime Errors
 
 Division by zero and integer overflow cause runtime errors:
@@ -316,9 +401,11 @@ multiplicative = unary { ("*" | "/" | "%") unary } ;
 unary          = "-" unary | "!" unary | postfix ;
 postfix        = primary [ "(" [ args ] ")" ] ;
 args           = expression { "," expression } ;
-primary        = INTEGER | BOOL | IDENT | "(" expression ")" | block_expr | if_expr ;
+primary        = INTEGER | BOOL | IDENT | "(" expression ")" | block_expr
+               | if_expr | while_expr | "break" | "continue" ;
 block_expr     = "{" block "}" ;
 if_expr        = "if" expression "{" block "}" [ "else" "{" block "}" ] ;
+while_expr     = "while" expression "{" block "}" ;
 
 BOOL           = "true" | "false" ;
 ```
@@ -327,6 +414,7 @@ BOOL           = "true" | "false" ;
 
 See `docs/design-decisions.md` (ADR-009) for language philosophy. Planned additions include:
 
-- Loops: `while`, `loop`
+- `loop` keyword (infinite loop)
+- Labeled loops and labeled break/continue
 - Structs and user-defined types
 - Memory safety model (influenced by Hylo/Swift/Rust)

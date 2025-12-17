@@ -3,9 +3,9 @@
 //! Converts a sequence of tokens into an AST.
 
 use crate::ast::{
-    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, CallExpr, Expr, Function,
-    Ident, IfExpr, IntLit, Item, LetStatement, Param, ParenExpr, Statement, UnaryExpr, UnaryOp,
-    WhileExpr,
+    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallExpr,
+    ContinueExpr, Expr, Function, Ident, IfExpr, IntLit, Item, LetStatement, Param, ParenExpr,
+    Statement, UnaryExpr, UnaryOp, WhileExpr,
 };
 use rue_error::{CompileError, CompileResult, ErrorKind};
 use rue_lexer::{Token, TokenKind};
@@ -171,8 +171,8 @@ impl Parser {
                         ));
                     }
                 }
-            } else if matches!(&expr, Expr::If(_) | Expr::While(_)) {
-                // If and while expressions don't require semicolon when used as statements
+            } else if matches!(&expr, Expr::If(_) | Expr::While(_) | Expr::Break(_) | Expr::Continue(_)) {
+                // If, while, break, and continue don't require semicolon when used as statements
                 statements.push(Statement::Expr(expr));
             } else {
                 return Err(CompileError::new(
@@ -507,6 +507,14 @@ impl Parser {
             TokenKind::While => {
                 self.parse_while_expr()
             }
+            TokenKind::Break => {
+                self.advance();
+                Ok(Expr::Break(BreakExpr { span: token.span }))
+            }
+            TokenKind::Continue => {
+                self.advance();
+                Ok(Expr::Continue(ContinueExpr { span: token.span }))
+            }
             _ => Err(CompileError::new(
                 ErrorKind::UnexpectedToken {
                     expected: "expression",
@@ -619,8 +627,8 @@ impl Parser {
                         ));
                     }
                 }
-            } else if matches!(expr, Expr::If(_) | Expr::While(_) | Expr::Block(_)) {
-                // If, while, and block expressions that end with } don't need semicolon
+            } else if matches!(expr, Expr::If(_) | Expr::While(_) | Expr::Block(_) | Expr::Break(_) | Expr::Continue(_)) {
+                // If, while, block, break, and continue don't need semicolon
                 statements.push(Statement::Expr(expr));
             } else {
                 return Err(CompileError::new(

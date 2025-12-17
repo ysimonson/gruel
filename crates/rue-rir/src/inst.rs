@@ -166,6 +166,12 @@ pub enum InstData {
         body: InstRef,
     },
 
+    /// Break: exits the innermost loop
+    Break,
+
+    /// Continue: jumps to the next iteration of the innermost loop
+    Continue,
+
     /// Function definition
     /// Contains: name symbol, parameters, return type symbol, body instruction ref
     FnDecl {
@@ -316,6 +322,12 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 }
                 InstData::Loop { cond, body } => {
                     out.push_str(&format!("loop {}, {}\n", cond, body));
+                }
+                InstData::Break => {
+                    out.push_str("break\n");
+                }
+                InstData::Continue => {
+                    out.push_str("continue\n");
                 }
                 InstData::FnDecl { name, params, return_type, body } => {
                     let name_str = self.interner.get(*name);

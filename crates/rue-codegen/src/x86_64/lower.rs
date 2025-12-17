@@ -9,6 +9,15 @@ use rue_air::{Air, AirInstData, AirRef, Type};
 
 use super::mir::{Operand, Reg, VReg, X86Inst, X86Mir};
 
+/// Context for the current loop being lowered.
+/// Used to support break and continue statements.
+struct LoopContext {
+    /// Label to jump to for `continue` (loop start, where condition is re-evaluated).
+    continue_label: String,
+    /// Label to jump to for `break` (loop end, exits the loop).
+    break_label: String,
+}
+
 /// AIR to X86Mir lowering.
 pub struct Lower<'a> {
     air: &'a Air,
@@ -26,6 +35,9 @@ pub struct Lower<'a> {
     num_params: u32,
     /// Function name for this function (for generating internal labels).
     fn_name: String,
+    /// Stack of loop contexts for nested loops.
+    /// Used to resolve break and continue targets.
+    loop_stack: Vec<LoopContext>,
 }
 
 /// Argument passing registers per System V AMD64 ABI.
@@ -43,6 +55,7 @@ impl<'a> Lower<'a> {
             num_locals,
             num_params,
             fn_name: fn_name.to_string(),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -641,6 +654,12 @@ impl<'a> Lower<'a> {
                 let loop_start = self.new_label("loop_start");
                 let loop_end = self.new_label("loop_end");
 
+                // Push the loop context for break/continue support
+                self.loop_stack.push(LoopContext {
+                    continue_label: loop_start.clone(),
+                    break_label: loop_end.clone(),
+                });
+
                 // Loop start label
                 self.mir.push(X86Inst::Label { name: loop_start.clone() });
 
@@ -691,6 +710,9 @@ impl<'a> Lower<'a> {
                 // Loop end label
                 self.mir.push(X86Inst::Label { name: loop_end });
 
+                // Pop the loop context now that the loop is done
+                self.loop_stack.pop();
+
                 // Loop doesn't produce a value (Unit type), but we need something
                 // in the value_map. Use a dummy vreg with 0.
                 let vreg = self.mir.alloc_vreg();
@@ -699,6 +721,31 @@ impl<'a> Lower<'a> {
                     dst: Operand::Virtual(vreg),
                     imm: 0,
                 });
+            }
+
+            AirInstData::Break => {
+                // Break: exit the innermost loop by jumping to its end label.
+                // The loop context was validated by Sema, so we know we're in a loop.
+                let ctx = self.loop_stack.last().expect("break outside loop should be caught by sema");
+                let break_label = ctx.break_label.clone();
+
+                // Jump to loop end. No vreg allocation needed - break is a diverging
+                // control flow statement, so any code after it is unreachable.
+                self.mir.push(X86Inst::Jmp { label: break_label });
+            }
+
+            AirInstData::Continue => {
+                // Continue: skip to the next iteration by jumping to the loop start.
+                // We DON'T clear loop values here - that's done at the end of each iteration.
+                // The values will be cleared when we reach the jump back at the normal
+                // end of the loop body. If we cleared here, we'd corrupt the ongoing
+                // lowering process.
+                let ctx = self.loop_stack.last().expect("continue outside loop should be caught by sema");
+                let continue_label = ctx.continue_label.clone();
+
+                // Jump to loop start (condition check). No vreg allocation needed -
+                // continue is a diverging control flow statement.
+                self.mir.push(X86Inst::Jmp { label: continue_label });
             }
 
             AirInstData::Ret(value_ref) => {
@@ -989,6 +1036,8 @@ impl<'a> Lower<'a> {
             | AirInstData::Alloc { .. } => unreachable!(),
             // Ret and Call shouldn't appear in loop body/condition normally
             AirInstData::Ret(_) | AirInstData::Call { .. } => {}
+            // Break and Continue have no dependencies to clear
+            AirInstData::Break | AirInstData::Continue => {}
         }
     }
 }

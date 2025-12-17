@@ -47,6 +47,10 @@ pub enum ErrorKind {
         found: usize,
     },
 
+    // Control flow errors
+    BreakOutsideLoop,
+    ContinueOutsideLoop,
+
     // Linker errors
     LinkError(String),
 }
@@ -128,6 +132,8 @@ impl fmt::Display for ErrorKind {
                     write!(f, "expected {} arguments, found {}", expected, found)
                 }
             }
+            ErrorKind::BreakOutsideLoop => write!(f, "'break' outside of loop"),
+            ErrorKind::ContinueOutsideLoop => write!(f, "'continue' outside of loop"),
             ErrorKind::LinkError(msg) => write!(f, "link error: {}", msg),
         }
     }

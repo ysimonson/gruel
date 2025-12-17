@@ -74,6 +74,10 @@ pub enum Expr {
     While(WhileExpr),
     /// Function call (e.g., `foo(1, 2)`)
     Call(CallExpr),
+    /// Break statement (exits the innermost loop)
+    Break(BreakExpr),
+    /// Continue statement (skips to the next iteration of the innermost loop)
+    Continue(ContinueExpr),
 }
 
 /// An integer literal.
@@ -219,6 +223,18 @@ pub struct WhileExpr {
     pub span: Span,
 }
 
+/// A break expression (exits the innermost loop).
+#[derive(Debug)]
+pub struct BreakExpr {
+    pub span: Span,
+}
+
+/// A continue expression (skips to the next iteration of the innermost loop).
+#[derive(Debug)]
+pub struct ContinueExpr {
+    pub span: Span,
+}
+
 impl Expr {
     /// Get the span of this expression.
     pub fn span(&self) -> Span {
@@ -233,6 +249,8 @@ impl Expr {
             Expr::If(if_expr) => if_expr.span,
             Expr::While(while_expr) => while_expr.span,
             Expr::Call(call) => call.span,
+            Expr::Break(break_expr) => break_expr.span,
+            Expr::Continue(continue_expr) => continue_expr.span,
         }
     }
 }

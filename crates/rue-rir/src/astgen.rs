@@ -164,6 +164,14 @@ impl<'a> AstGen<'a> {
                     span: call.span,
                 })
             }
+            Expr::Break(break_expr) => self.rir.add_inst(Inst {
+                data: InstData::Break,
+                span: break_expr.span,
+            }),
+            Expr::Continue(continue_expr) => self.rir.add_inst(Inst {
+                data: InstData::Continue,
+                span: continue_expr.span,
+            }),
         }
     }
 

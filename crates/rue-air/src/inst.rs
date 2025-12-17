@@ -149,6 +149,12 @@ pub enum AirInstData {
         body: AirRef,
     },
 
+    /// Break: exits the innermost loop
+    Break,
+
+    /// Continue: jumps to the next iteration of the innermost loop
+    Continue,
+
     // Variable operations
     /// Allocate local variable with initial value
     /// Returns the slot index
@@ -240,6 +246,8 @@ impl fmt::Display for Air {
                 AirInstData::Loop { cond, body } => {
                     writeln!(f, "loop {}, {}", cond, body)?
                 }
+                AirInstData::Break => writeln!(f, "break")?,
+                AirInstData::Continue => writeln!(f, "continue")?,
                 AirInstData::Alloc { slot, init } => writeln!(f, "alloc ${} = {}", slot, init)?,
                 AirInstData::Load { slot } => writeln!(f, "load ${}", slot)?,
                 AirInstData::Store { slot, value } => writeln!(f, "store ${} = {}", slot, value)?,
