@@ -751,7 +751,19 @@ impl Parser {
     }
 
     fn current(&self) -> &Token {
-        &self.tokens[self.pos]
+        // Safety: We rely on the lexer always producing an EOF token at the end.
+        // This assertion provides a clear error message if that invariant is violated,
+        // rather than panicking with an unclear index-out-of-bounds error.
+        debug_assert!(
+            self.pos < self.tokens.len(),
+            "parser position {} exceeds token count {}; lexer should always produce EOF token",
+            self.pos,
+            self.tokens.len()
+        );
+        // Use get() with a fallback to the last token (EOF) for safety in release builds
+        self.tokens.get(self.pos).unwrap_or_else(|| {
+            self.tokens.last().expect("token stream should never be empty")
+        })
     }
 
     fn check(&self, kind: &TokenKind) -> bool {
@@ -759,7 +771,7 @@ impl Parser {
     }
 
     fn advance(&mut self) -> Token {
-        let token = self.tokens[self.pos].clone();
+        let token = self.current().clone();
         if !self.is_at_end() {
             self.pos += 1;
         }
