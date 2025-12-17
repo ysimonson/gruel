@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use annotate_snippets::{Level, Renderer, Snippet};
-use rue_compiler::{compile, compile_to_air, generate_mir, CompileError, ErrorKind};
+use rue_compiler::{compile, compile_to_air, generate_mir, CompileError};
 use rue_rir::RirPrinter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,26 +146,21 @@ fn main() {
 }
 
 fn print_error(error: &CompileError, source: &str, source_path: &str) {
-    let message = error.message();
+    let message = error.to_string();
     let renderer = Renderer::plain();
 
-    // For errors without a span (like NoMainFunction), just print the message
-    if error.span.start == 0
-        && error.span.end == 0
-        && matches!(error.kind, ErrorKind::NoMainFunction)
-    {
+    // For errors without a span, just print the message
+    let Some(span) = error.span() else {
         let report = Level::Error.title(&message);
         eprintln!("{}", renderer.render(report));
         return;
-    }
+    };
 
     let report = Level::Error.title(&message).snippet(
         Snippet::source(source)
             .origin(source_path)
             .fold(true)
-            .annotation(
-                Level::Error.span(error.span.start as usize..error.span.end as usize),
-            ),
+            .annotation(Level::Error.span(span.start as usize..span.end as usize)),
     );
 
     eprintln!("{}", renderer.render(report));

@@ -4,16 +4,20 @@
 //! pipeline. Errors carry source location information for diagnostic rendering.
 
 use rue_span::Span;
+use std::fmt;
 
-/// A compilation error with source location information.
+/// A compilation error with optional source location information.
+///
+/// Some errors (like `NoMainFunction` or `LinkError`) don't have a meaningful
+/// source location. Use `has_span()` to check before rendering location info.
 #[derive(Debug, Clone)]
 pub struct CompileError {
     pub kind: ErrorKind,
-    pub span: Span,
+    span: Option<Span>,
 }
 
 /// The kind of compilation error.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
     // Lexer errors
     UnexpectedCharacter(char),
@@ -51,7 +55,19 @@ impl CompileError {
     /// Create a new error with the given kind and span.
     #[inline]
     pub fn new(kind: ErrorKind, span: Span) -> Self {
-        Self { kind, span }
+        Self {
+            kind,
+            span: Some(span),
+        }
+    }
+
+    /// Create an error without a source location.
+    ///
+    /// Use this for errors that don't correspond to a specific source location,
+    /// such as "no main function found" or linker errors.
+    #[inline]
+    pub fn without_span(kind: ErrorKind) -> Self {
+        Self { kind, span: None }
     }
 
     /// Create an error at a specific position (zero-length span).
@@ -59,45 +75,60 @@ impl CompileError {
     pub fn at(kind: ErrorKind, pos: u32) -> Self {
         Self {
             kind,
-            span: Span::point(pos),
+            span: Some(Span::point(pos)),
         }
     }
 
-    /// Get a human-readable message for this error.
-    pub fn message(&self) -> String {
-        match &self.kind {
-            ErrorKind::UnexpectedCharacter(c) => format!("unexpected character: {}", c),
-            ErrorKind::InvalidInteger => "invalid integer literal".to_string(),
+    /// Returns true if this error has source location information.
+    #[inline]
+    pub fn has_span(&self) -> bool {
+        self.span.is_some()
+    }
+
+    /// Get the span, if present.
+    #[inline]
+    pub fn span(&self) -> Option<Span> {
+        self.span
+    }
+}
+
+impl fmt::Display for CompileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)
+    }
+}
+
+impl std::error::Error for CompileError {}
+
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ErrorKind::UnexpectedCharacter(c) => write!(f, "unexpected character: {}", c),
+            ErrorKind::InvalidInteger => write!(f, "invalid integer literal"),
             ErrorKind::UnexpectedToken { expected, found } => {
-                format!("expected {}, found {}", expected, found)
+                write!(f, "expected {}, found {}", expected, found)
             }
             ErrorKind::UnexpectedEof { expected } => {
-                format!("unexpected end of file, expected {}", expected)
+                write!(f, "unexpected end of file, expected {}", expected)
             }
-            ErrorKind::NoMainFunction => "no main function found".to_string(),
-            ErrorKind::UndefinedVariable(name) => format!("undefined variable '{}'", name),
-            ErrorKind::UndefinedFunction(name) => format!("undefined function '{}'", name),
+            ErrorKind::NoMainFunction => write!(f, "no main function found"),
+            ErrorKind::UndefinedVariable(name) => write!(f, "undefined variable '{}'", name),
+            ErrorKind::UndefinedFunction(name) => write!(f, "undefined function '{}'", name),
             ErrorKind::AssignToImmutable(name) => {
-                format!("cannot assign to immutable variable '{}'", name)
+                write!(f, "cannot assign to immutable variable '{}'", name)
             }
-            ErrorKind::UnknownType(name) => format!("unknown type '{}'", name),
+            ErrorKind::UnknownType(name) => write!(f, "unknown type '{}'", name),
             ErrorKind::TypeMismatch { expected, found } => {
-                format!("type mismatch: expected {}, found {}", expected, found)
+                write!(f, "type mismatch: expected {}, found {}", expected, found)
             }
             ErrorKind::WrongArgumentCount { expected, found } => {
                 if *expected == 1 {
-                    format!(
-                        "expected {} argument, found {}",
-                        expected, found
-                    )
+                    write!(f, "expected {} argument, found {}", expected, found)
                 } else {
-                    format!(
-                        "expected {} arguments, found {}",
-                        expected, found
-                    )
+                    write!(f, "expected {} arguments, found {}", expected, found)
                 }
             }
-            ErrorKind::LinkError(msg) => format!("link error: {}", msg),
+            ErrorKind::LinkError(msg) => write!(f, "link error: {}", msg),
         }
     }
 }
@@ -105,55 +136,127 @@ impl CompileError {
 /// Result type for compilation operations.
 pub type CompileResult<T> = Result<T, CompileError>;
 
-/// A collection of compilation errors.
-///
-/// Some phases may collect multiple errors before failing.
-#[derive(Debug, Default)]
-pub struct Errors {
-    errors: Vec<CompileError>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl Errors {
-    /// Create a new empty error collection.
-    pub fn new() -> Self {
-        Self::default()
+    #[test]
+    fn test_error_with_span() {
+        let span = Span::new(10, 20);
+        let error = CompileError::new(ErrorKind::InvalidInteger, span);
+
+        assert!(error.has_span());
+        assert_eq!(error.span(), Some(span));
+        assert_eq!(error.to_string(), "invalid integer literal");
     }
 
-    /// Add an error to the collection.
-    pub fn push(&mut self, error: CompileError) {
-        self.errors.push(error);
+    #[test]
+    fn test_error_without_span() {
+        let error = CompileError::without_span(ErrorKind::NoMainFunction);
+
+        assert!(!error.has_span());
+        assert_eq!(error.span(), None);
+        assert_eq!(error.to_string(), "no main function found");
     }
 
-    /// Returns true if there are no errors.
-    pub fn is_empty(&self) -> bool {
-        self.errors.is_empty()
+    #[test]
+    fn test_error_at_position() {
+        let error = CompileError::at(ErrorKind::InvalidInteger, 42);
+
+        assert!(error.has_span());
+        assert_eq!(error.span(), Some(Span::point(42)));
     }
 
-    /// Returns the number of errors.
-    pub fn len(&self) -> usize {
-        self.errors.len()
+    #[test]
+    fn test_unexpected_character_message() {
+        let error = CompileError::without_span(ErrorKind::UnexpectedCharacter('@'));
+        assert_eq!(error.to_string(), "unexpected character: @");
     }
 
-    /// Iterate over the errors.
-    pub fn iter(&self) -> impl Iterator<Item = &CompileError> {
-        self.errors.iter()
+    #[test]
+    fn test_unexpected_token_message() {
+        let error = CompileError::without_span(ErrorKind::UnexpectedToken {
+            expected: "identifier",
+            found: "'+'".to_string(),
+        });
+        assert_eq!(error.to_string(), "expected identifier, found '+'");
     }
 
-    /// Convert to a Result, failing if there are any errors.
-    pub fn into_result<T>(self, value: T) -> CompileResult<T> {
-        if let Some(first) = self.errors.into_iter().next() {
-            Err(first)
-        } else {
-            Ok(value)
-        }
+    #[test]
+    fn test_unexpected_eof_message() {
+        let error = CompileError::without_span(ErrorKind::UnexpectedEof {
+            expected: "'}'",
+        });
+        assert_eq!(error.to_string(), "unexpected end of file, expected '}'");
     }
-}
 
-impl IntoIterator for Errors {
-    type Item = CompileError;
-    type IntoIter = std::vec::IntoIter<CompileError>;
+    #[test]
+    fn test_undefined_variable_message() {
+        let error = CompileError::without_span(ErrorKind::UndefinedVariable("foo".to_string()));
+        assert_eq!(error.to_string(), "undefined variable 'foo'");
+    }
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.errors.into_iter()
+    #[test]
+    fn test_undefined_function_message() {
+        let error = CompileError::without_span(ErrorKind::UndefinedFunction("bar".to_string()));
+        assert_eq!(error.to_string(), "undefined function 'bar'");
+    }
+
+    #[test]
+    fn test_assign_to_immutable_message() {
+        let error = CompileError::without_span(ErrorKind::AssignToImmutable("x".to_string()));
+        assert_eq!(error.to_string(), "cannot assign to immutable variable 'x'");
+    }
+
+    #[test]
+    fn test_unknown_type_message() {
+        let error = CompileError::without_span(ErrorKind::UnknownType("Foo".to_string()));
+        assert_eq!(error.to_string(), "unknown type 'Foo'");
+    }
+
+    #[test]
+    fn test_type_mismatch_message() {
+        let error = CompileError::without_span(ErrorKind::TypeMismatch {
+            expected: "i32".to_string(),
+            found: "bool".to_string(),
+        });
+        assert_eq!(error.to_string(), "type mismatch: expected i32, found bool");
+    }
+
+    #[test]
+    fn test_wrong_argument_count_singular() {
+        let error = CompileError::without_span(ErrorKind::WrongArgumentCount {
+            expected: 1,
+            found: 3,
+        });
+        assert_eq!(error.to_string(), "expected 1 argument, found 3");
+    }
+
+    #[test]
+    fn test_wrong_argument_count_plural() {
+        let error = CompileError::without_span(ErrorKind::WrongArgumentCount {
+            expected: 2,
+            found: 0,
+        });
+        assert_eq!(error.to_string(), "expected 2 arguments, found 0");
+    }
+
+    #[test]
+    fn test_link_error_message() {
+        let error = CompileError::without_span(ErrorKind::LinkError("undefined symbol".to_string()));
+        assert_eq!(error.to_string(), "link error: undefined symbol");
+    }
+
+    #[test]
+    fn test_error_kind_equality() {
+        assert_eq!(ErrorKind::InvalidInteger, ErrorKind::InvalidInteger);
+        assert_eq!(ErrorKind::NoMainFunction, ErrorKind::NoMainFunction);
+        assert_ne!(ErrorKind::InvalidInteger, ErrorKind::NoMainFunction);
+    }
+
+    #[test]
+    fn test_error_implements_std_error() {
+        fn assert_error<T: std::error::Error>() {}
+        assert_error::<CompileError>();
     }
 }

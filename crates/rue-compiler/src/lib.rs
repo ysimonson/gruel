@@ -77,7 +77,7 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
         .functions
         .iter()
         .find(|f| f.name == "main")
-        .ok_or_else(|| CompileError::new(ErrorKind::NoMainFunction, Span::default()))?;
+        .ok_or_else(|| CompileError::without_span(ErrorKind::NoMainFunction))?;
 
     let mut linker = Linker::new();
 
@@ -107,24 +107,24 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
 
         // Phase 6: Parse and add object file to linker
         let obj = ObjectFile::parse(&obj_bytes)
-            .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+            .map_err(|e| CompileError::without_span(ErrorKind::LinkError(e.to_string())))?;
 
         linker
             .add_object(obj)
-            .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+            .map_err(|e| CompileError::without_span(ErrorKind::LinkError(e.to_string())))?;
     }
 
     // Add the runtime library
     let runtime = Archive::parse(RUNTIME_BYTES)
-        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+        .map_err(|e| CompileError::without_span(ErrorKind::LinkError(e.to_string())))?;
     linker
         .add_archive(runtime)
-        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+        .map_err(|e| CompileError::without_span(ErrorKind::LinkError(e.to_string())))?;
 
     // Phase 7: Link to executable
     let elf = linker
         .link("main")
-        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+        .map_err(|e| CompileError::without_span(ErrorKind::LinkError(e.to_string())))?;
 
     Ok(elf)
 }
