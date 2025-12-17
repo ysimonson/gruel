@@ -17,7 +17,7 @@ Rue is in early development. The implemented feature set is minimal:
 |---------|--------|
 | Integer literals | ✓ Implemented |
 | Boolean literals | ✓ Implemented |
-| Functions | ✓ Basic (no parameters) |
+| Functions | ✓ With parameters and calls |
 | Line comments | ✓ Implemented |
 | Arithmetic operators | ✓ Implemented |
 | Comparison operators | ✓ Implemented |
@@ -35,7 +35,7 @@ The executable specification lives in `crates/rue-spec/cases/`:
 | `01-integers.toml` | 1.1 | Integer literals and exit codes |
 | `02-comments.toml` | 1.3 | Line comments |
 | `03-whitespace.toml` | 1.4 | Whitespace handling |
-| `04-functions.toml` | 2.1 | Function declarations |
+| `04-functions.toml` | 2.1 | Function declarations, parameters, and calls |
 | `05-errors.toml` | 3.1 | Compilation errors |
 | `06-ir-dumps.toml` | 4.1 | IR output golden tests |
 | `07-error-golden.toml` | 5.1 | Error message golden tests |
@@ -62,6 +62,53 @@ Run specs with `./test.sh` or directly with `buck2 run //crates/rue-spec:rue-spe
 ```rue
 fn main() -> i32 {
     0
+}
+```
+
+### Functions
+
+Functions are declared with the `fn` keyword, followed by the function name, parameters in parentheses, a return type, and a body:
+
+```rue
+fn add(x: i32, y: i32) -> i32 {
+    x + y
+}
+
+fn main() -> i32 {
+    add(40, 2)
+}
+```
+
+Parameters must have explicit type annotations. The return type is also required.
+
+Functions can call other functions:
+
+```rue
+fn double(x: i32) -> i32 {
+    x + x
+}
+
+fn quadruple(x: i32) -> i32 {
+    double(double(x))
+}
+
+fn main() -> i32 {
+    quadruple(10)  // returns 40
+}
+```
+
+Functions must be defined before `main`. The `main` function is the program's entry point and must return `i32`.
+
+Recursion is supported:
+
+```rue
+fn factorial(n: i32) -> i32 {
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+fn main() -> i32 {
+    factorial(5)  // returns 120
 }
 ```
 
@@ -252,7 +299,9 @@ fn main() -> i32 { 2147483647 + 1 }   // runtime error: integer overflow
 
 ```ebnf
 program        = { function } ;
-function       = "fn" IDENT "(" ")" "->" type "{" block "}" ;
+function       = "fn" IDENT "(" [ params ] ")" "->" type "{" block "}" ;
+params         = param { "," param } ;
+param          = IDENT ":" type ;
 block          = { statement } expression ;
 statement      = let_stmt | assign_stmt ;
 let_stmt       = "let" [ "mut" ] IDENT [ ":" type ] "=" expression ";" ;
@@ -264,7 +313,9 @@ and_expr       = comparison { "&&" comparison } ;
 comparison     = additive { ("==" | "!=" | "<" | ">" | "<=" | ">=") additive } ;
 additive       = multiplicative { ("+" | "-") multiplicative } ;
 multiplicative = unary { ("*" | "/" | "%") unary } ;
-unary          = "-" unary | "!" unary | primary ;
+unary          = "-" unary | "!" unary | postfix ;
+postfix        = primary [ "(" [ args ] ")" ] ;
+args           = expression { "," expression } ;
 primary        = INTEGER | BOOL | IDENT | "(" expression ")" | block_expr | if_expr ;
 block_expr     = "{" block "}" ;
 if_expr        = "if" expression "{" block "}" [ "else" "{" block "}" ] ;
@@ -277,6 +328,5 @@ BOOL           = "true" | "false" ;
 See `docs/design-decisions.md` (ADR-009) for language philosophy. Planned additions include:
 
 - Loops: `while`, `loop`
-- Functions with parameters
 - Structs and user-defined types
 - Memory safety model (influenced by Hylo/Swift/Rust)

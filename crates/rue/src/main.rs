@@ -99,14 +99,14 @@ fn main() {
                     }
                     DumpMode::Air => {
                         for func in &state.functions {
-                            println!("function main:");
+                            println!("function {}:", func.name);
                             println!("{}", func.air);
                         }
                     }
                     DumpMode::Mir => {
                         for func in &state.functions {
-                            let mir = generate_mir(&func.air, func.num_locals);
-                            println!("function main:");
+                            let mir = generate_mir(&func.air, func.num_locals, func.num_params, &func.name);
+                            println!("function {}:", func.name);
                             println!("{}", mir);
                         }
                     }

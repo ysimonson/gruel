@@ -3,8 +3,8 @@
 //! Converts a sequence of tokens into an AST.
 
 use crate::ast::{
-    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, Expr, Function, Ident, IfExpr,
-    IntLit, Item, LetStatement, ParenExpr, Statement, UnaryExpr, UnaryOp,
+    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, CallExpr, Expr, Function,
+    Ident, IfExpr, IntLit, Item, LetStatement, Param, ParenExpr, Statement, UnaryExpr, UnaryOp,
 };
 use rue_error::{CompileError, CompileResult, ErrorKind};
 use rue_lexer::{Token, TokenKind};
@@ -47,8 +47,9 @@ impl Parser {
         // name
         let name = self.expect_ident()?;
 
-        // ()
+        // ( params )
         self.expect(TokenKind::LParen)?;
+        let params = self.parse_params()?;
         self.expect(TokenKind::RParen)?;
 
         // -> Type
@@ -62,8 +63,47 @@ impl Parser {
 
         Ok(Function {
             name,
+            params,
             return_type,
             body,
+            span: Span::new(start, end),
+        })
+    }
+
+    /// Parse function parameters: `name: type, name: type, ...`
+    fn parse_params(&mut self) -> CompileResult<Vec<Param>> {
+        let mut params = Vec::new();
+
+        // Check for empty parameter list
+        if self.check(&TokenKind::RParen) {
+            return Ok(params);
+        }
+
+        // Parse first parameter
+        params.push(self.parse_param()?);
+
+        // Parse remaining parameters
+        while self.check(&TokenKind::Comma) {
+            self.advance(); // consume comma
+            params.push(self.parse_param()?);
+        }
+
+        Ok(params)
+    }
+
+    /// Parse a single parameter: `name: type`
+    fn parse_param(&mut self) -> CompileResult<Param> {
+        let start = self.current().span.start;
+
+        let name = self.expect_ident()?;
+        self.expect(TokenKind::Colon)?;
+        let ty = self.expect_ident()?;
+
+        let end = self.tokens[self.pos.saturating_sub(1)].span.end;
+
+        Ok(Param {
+            name,
+            ty,
             span: Span::new(start, end),
         })
     }
@@ -403,12 +443,23 @@ impl Parser {
                 }))
             }
             TokenKind::Ident(name) => {
-                let name = name.clone();
+                let name_str = name.clone();
+                let ident_span = token.span;
                 self.advance();
-                Ok(Expr::Ident(Ident {
-                    name,
-                    span: token.span,
-                }))
+
+                // Check for function call
+                if self.check(&TokenKind::LParen) {
+                    let call = self.parse_call(Ident {
+                        name: name_str,
+                        span: ident_span,
+                    })?;
+                    Ok(Expr::Call(call))
+                } else {
+                    Ok(Expr::Ident(Ident {
+                        name: name_str,
+                        span: ident_span,
+                    }))
+                }
             }
             TokenKind::LParen => {
                 let start = token.span.start;
@@ -472,6 +523,48 @@ impl Parser {
             else_block,
             span: Span::new(start, end),
         }))
+    }
+
+    /// Parse a function call: `name(args...)`
+    /// The name identifier has already been parsed.
+    fn parse_call(&mut self, name: Ident) -> CompileResult<CallExpr> {
+        let start = name.span.start;
+
+        // (
+        self.expect(TokenKind::LParen)?;
+
+        // Parse arguments
+        let args = self.parse_args()?;
+
+        // )
+        let close = self.expect(TokenKind::RParen)?;
+
+        Ok(CallExpr {
+            name,
+            args,
+            span: Span::new(start, close.span.end),
+        })
+    }
+
+    /// Parse function call arguments: `expr, expr, ...`
+    fn parse_args(&mut self) -> CompileResult<Vec<Expr>> {
+        let mut args = Vec::new();
+
+        // Check for empty argument list
+        if self.check(&TokenKind::RParen) {
+            return Ok(args);
+        }
+
+        // Parse first argument
+        args.push(self.parse_expr()?);
+
+        // Parse remaining arguments
+        while self.check(&TokenKind::Comma) {
+            self.advance(); // consume comma
+            args.push(self.parse_expr()?);
+        }
+
+        Ok(args)
     }
 
     /// Parse a block expression and return the BlockExpr directly (not wrapped in Expr).

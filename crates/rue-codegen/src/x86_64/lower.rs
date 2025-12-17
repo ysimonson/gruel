@@ -17,20 +17,32 @@ pub struct Lower<'a> {
     value_map: Vec<Option<VReg>>,
     /// Label counter for generating unique labels.
     label_counter: u32,
-    /// Whether this function has a stack frame (num_locals > 0).
+    /// Whether this function has a stack frame (num_locals > 0 or num_params > 0).
     /// Used to emit proper epilogue before returns.
     has_frame: bool,
+    /// Number of local variable slots.
+    num_locals: u32,
+    /// Number of parameters for this function.
+    num_params: u32,
+    /// Function name for this function (for generating internal labels).
+    fn_name: String,
 }
+
+/// Argument passing registers per System V AMD64 ABI.
+const ARG_REGS: [Reg; 6] = [Reg::Rdi, Reg::Rsi, Reg::Rdx, Reg::Rcx, Reg::R8, Reg::R9];
 
 impl<'a> Lower<'a> {
     /// Create a new lowering pass.
-    pub fn new(air: &'a Air, num_locals: u32) -> Self {
+    pub fn new(air: &'a Air, num_locals: u32, num_params: u32, fn_name: &str) -> Self {
         Self {
             air,
             mir: X86Mir::new(),
             value_map: vec![None; air.len()],
             label_counter: 0,
-            has_frame: num_locals > 0,
+            has_frame: num_locals > 0 || num_params > 0,
+            num_locals,
+            num_params,
+            fn_name: fn_name.to_string(),
         }
     }
 
@@ -614,27 +626,39 @@ impl<'a> Lower<'a> {
                 // Get the vreg holding the return value
                 let value_vreg = self.get_vreg(*value_ref);
 
-                // Move return value to rdi (first argument per System V AMD64 ABI).
-                // We emit a 64-bit mov (mov rdi, src) even though __rue_exit takes
-                // an i32 status code. The upper 32 bits are ignored by the callee.
-                // Using rdi instead of edi avoids needing a separate 32-bit mov path.
-                self.mir.push(X86Inst::MovRR {
-                    dst: Operand::Physical(Reg::Rdi),
-                    src: Operand::Virtual(value_vreg),
-                });
+                if self.fn_name == "main" {
+                    // Main function: call __rue_exit with the return value
+                    // Move return value to rdi (first argument per System V AMD64 ABI).
+                    self.mir.push(X86Inst::MovRR {
+                        dst: Operand::Physical(Reg::Rdi),
+                        src: Operand::Virtual(value_vreg),
+                    });
 
-                // Emit epilogue to restore stack frame before the call.
-                // This is technically not needed since __rue_exit never returns,
-                // but it's good practice for when we add real function returns.
-                if self.has_frame {
-                    self.emit_epilogue();
+                    // Emit epilogue to restore stack frame before the call.
+                    if self.has_frame {
+                        self.emit_epilogue();
+                    }
+
+                    // Call the runtime's __rue_exit function.
+                    // This function never returns (it calls the exit syscall).
+                    self.mir.push(X86Inst::CallRel {
+                        symbol: "__rue_exit".to_string(),
+                    });
+                } else {
+                    // Non-main function: return normally with value in RAX
+                    self.mir.push(X86Inst::MovRR {
+                        dst: Operand::Physical(Reg::Rax),
+                        src: Operand::Virtual(value_vreg),
+                    });
+
+                    // Emit epilogue to restore stack frame
+                    if self.has_frame {
+                        self.emit_epilogue();
+                    }
+
+                    // Return to caller
+                    self.mir.push(X86Inst::Ret);
                 }
-
-                // Call the runtime's __rue_exit function.
-                // This function never returns (it calls the exit syscall).
-                self.mir.push(X86Inst::CallRel {
-                    symbol: "__rue_exit".to_string(),
-                });
             }
 
             AirInstData::Block { statements, value } => {
@@ -653,6 +677,90 @@ impl<'a> Lower<'a> {
                 // The block's value is the result - use the value's vreg directly
                 let value_vreg = self.get_vreg(*value);
                 self.value_map[air_ref.as_u32() as usize] = Some(value_vreg);
+            }
+
+            AirInstData::Param { index } => {
+                // Parameters are saved to the stack in the function prologue.
+                // They are stored at slots num_locals + index (after local variables).
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                if (*index as usize) < ARG_REGS.len() {
+                    // Parameter was in a register, now saved to stack at slot num_locals + index
+                    let slot = self.num_locals + *index;
+                    let offset = self.local_offset(slot);
+                    self.mir.push(X86Inst::MovRM {
+                        dst: Operand::Virtual(vreg),
+                        base: Reg::Rbp,
+                        offset,
+                    });
+                } else {
+                    // Parameter is on the stack (beyond first 6)
+                    // Stack layout after call: [return addr][arg7][arg8]...
+                    // After push rbp: [saved rbp][return addr][arg7][arg8]...
+                    // So arg7 is at [rbp + 16], arg8 at [rbp + 24], etc.
+                    let stack_offset = 16 + ((*index as i32) - 6) * 8;
+                    self.mir.push(X86Inst::MovRM {
+                        dst: Operand::Virtual(vreg),
+                        base: Reg::Rbp,
+                        offset: stack_offset,
+                    });
+                }
+            }
+
+            AirInstData::Call { name, args } => {
+                // Function call using System V AMD64 ABI
+                let result_vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(result_vreg);
+
+                // Evaluate all arguments first to get their vregs
+                let arg_vregs: Vec<_> = args.iter().map(|a| self.get_vreg(*a)).collect();
+
+                // To avoid clobbering issues with argument registers, we use a
+                // two-phase approach:
+                // 1. Push all argument values onto the stack (using RAX as scratch)
+                // 2. Pop them into the argument registers
+                //
+                // This ensures that even if argument vregs are allocated to
+                // argument registers, their values are saved before any
+                // argument register is modified.
+
+                // Phase 1: Push all arguments in reverse order
+                // After this, stack looks like: [arg0][arg1]...[argN-1] <- rsp
+                for arg_vreg in arg_vregs.iter().rev() {
+                    // Move to RAX first (in case vreg is spilled)
+                    self.mir.push(X86Inst::MovRR {
+                        dst: Operand::Physical(Reg::Rax),
+                        src: Operand::Virtual(*arg_vreg),
+                    });
+                    // Push RAX
+                    self.mir.push(X86Inst::Push {
+                        src: Operand::Physical(Reg::Rax),
+                    });
+                }
+
+                // Phase 2: Pop into argument registers (forward order)
+                let num_args = arg_vregs.len().min(ARG_REGS.len());
+                for i in 0..num_args {
+                    self.mir.push(X86Inst::Pop {
+                        dst: Operand::Physical(ARG_REGS[i]),
+                    });
+                }
+
+                if arg_vregs.len() > ARG_REGS.len() {
+                    panic!("More than 6 arguments not yet supported");
+                }
+
+                // Call the function
+                self.mir.push(X86Inst::CallRel {
+                    symbol: name.clone(),
+                });
+
+                // Return value is in RAX - move to result vreg
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(result_vreg),
+                    src: Operand::Physical(Reg::Rax),
+                });
             }
         }
     }
@@ -718,7 +826,7 @@ mod tests {
             span: Span::new(0, 2),
         });
 
-        let mir = Lower::new(&air, 0).lower();
+        let mir = Lower::new(&air, 0, 0, "main").lower();
 
         // Should have 3 instructions:
         // 1. mov v0, 42
@@ -761,7 +869,7 @@ mod tests {
             span: Span::new(0, 2),
         });
 
-        let mir = Lower::new(&air, 0).lower();
+        let mir = Lower::new(&air, 0, 0, "main").lower();
 
         // First instruction should be 64-bit move
         match &mir.instructions()[0] {

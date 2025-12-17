@@ -28,17 +28,24 @@ use rue_air::Air;
 pub struct CodeGen<'a> {
     air: &'a Air,
     num_locals: u32,
+    num_params: u32,
+    fn_name: String,
 }
 
 impl<'a> CodeGen<'a> {
     /// Create a new code generator for the given AIR.
-    pub fn new(air: &'a Air, num_locals: u32) -> Self {
-        Self { air, num_locals }
+    pub fn new(air: &'a Air, num_locals: u32, num_params: u32, fn_name: &str) -> Self {
+        Self {
+            air,
+            num_locals,
+            num_params,
+            fn_name: fn_name.to_string(),
+        }
     }
 
     /// Generate machine code from the AIR.
     pub fn generate(self) -> MachineCode {
-        x86_64::generate(self.air, self.num_locals)
+        x86_64::generate(self.air, self.num_locals, self.num_params, &self.fn_name)
     }
 }
 
@@ -65,7 +72,7 @@ mod tests {
         });
 
         // Test the old-style API
-        let codegen = CodeGen::new(&air, 0);
+        let codegen = CodeGen::new(&air, 0, 0, "main");
         let machine_code = codegen.generate();
 
         // Should generate working code
@@ -99,7 +106,7 @@ mod tests {
         });
 
         // Test the new direct API
-        let machine_code = generate(&air, 0);
+        let machine_code = generate(&air, 0, 0, "main");
         assert!(!machine_code.code.is_empty());
     }
 }

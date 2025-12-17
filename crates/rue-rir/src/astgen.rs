@@ -49,6 +49,17 @@ impl<'a> AstGen<'a> {
         let name = self.interner.intern(&func.name.name);
         let return_type = self.interner.intern(&func.return_type.name);
 
+        // Intern parameters
+        let params: Vec<_> = func
+            .params
+            .iter()
+            .map(|p| {
+                let param_name = self.interner.intern(&p.name.name);
+                let param_type = self.interner.intern(&p.ty.name);
+                (param_name, param_type)
+            })
+            .collect();
+
         // Generate body expression
         let body = self.gen_expr(&func.body);
 
@@ -56,6 +67,7 @@ impl<'a> AstGen<'a> {
         self.rir.add_inst(Inst {
             data: InstData::FnDecl {
                 name,
+                params,
                 return_type,
                 body,
             },
@@ -133,6 +145,15 @@ impl<'a> AstGen<'a> {
                         else_block,
                     },
                     span: if_expr.span,
+                })
+            }
+            Expr::Call(call) => {
+                let name = self.interner.intern(&call.name.name);
+                let args: Vec<_> = call.args.iter().map(|a| self.gen_expr(a)).collect();
+
+                self.rir.add_inst(Inst {
+                    data: InstData::Call { name, args },
+                    span: call.span,
                 })
             }
         }
@@ -230,10 +251,12 @@ mod tests {
         match &fn_inst.data {
             InstData::FnDecl {
                 name,
+                params,
                 return_type,
                 body,
             } => {
                 assert_eq!(interner.get(*name), "main");
+                assert!(params.is_empty());
                 assert_eq!(interner.get(*return_type), "i32");
                 // Body should be the int constant
                 let body_inst = rir.get(*body);

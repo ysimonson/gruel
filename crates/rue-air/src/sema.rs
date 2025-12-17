@@ -19,6 +19,8 @@ pub struct AnalyzedFunction {
     pub air: Air,
     /// Number of local variable slots needed
     pub num_locals: u32,
+    /// Number of parameters
+    pub num_params: u32,
 }
 
 /// Information about a local variable.
@@ -32,25 +34,54 @@ struct LocalVar {
     is_mut: bool,
 }
 
+/// Information about a function parameter.
+#[derive(Debug, Clone)]
+struct ParamInfo {
+    /// Parameter index (0-based)
+    index: u32,
+    /// Parameter type
+    ty: Type,
+}
+
+/// Information about a function.
+#[derive(Debug, Clone)]
+struct FunctionInfo {
+    /// Parameter types (in order)
+    param_types: Vec<Type>,
+    /// Return type
+    return_type: Type,
+}
+
 /// Semantic analyzer that converts RIR to AIR.
 pub struct Sema<'a> {
     rir: &'a Rir,
     interner: &'a Interner,
+    /// Function table: maps function name symbols to their info
+    functions: HashMap<Symbol, FunctionInfo>,
 }
 
 impl<'a> Sema<'a> {
     /// Create a new semantic analyzer.
     pub fn new(rir: &'a Rir, interner: &'a Interner) -> Self {
-        Self { rir, interner }
+        Self {
+            rir,
+            interner,
+            functions: HashMap::new(),
+        }
     }
 
     /// Analyze all functions in the RIR.
-    pub fn analyze_all(&self) -> CompileResult<Vec<AnalyzedFunction>> {
-        let mut functions = Vec::new();
+    pub fn analyze_all(&mut self) -> CompileResult<Vec<AnalyzedFunction>> {
+        // First pass: collect function signatures
+        self.collect_function_signatures()?;
+
+        // Second pass: analyze function bodies
+        let mut result = Vec::new();
 
         for (_, inst) in self.rir.iter() {
             if let InstData::FnDecl {
                 name,
+                params,
                 return_type,
                 body,
             } = &inst.data
@@ -58,27 +89,83 @@ impl<'a> Sema<'a> {
                 let fn_name = self.interner.get(*name).to_string();
                 let ret_type = self.resolve_type(*return_type, inst.span)?;
 
-                let (air, num_locals) = self.analyze_function(ret_type, *body)?;
+                // Resolve parameter types
+                let param_info: Vec<(Symbol, Type)> = params
+                    .iter()
+                    .map(|(pname, ptype)| {
+                        let ty = self.resolve_type(*ptype, inst.span)?;
+                        Ok((*pname, ty))
+                    })
+                    .collect::<CompileResult<Vec<_>>>()?;
 
-                functions.push(AnalyzedFunction {
+                let (air, num_locals) = self.analyze_function(ret_type, &param_info, *body)?;
+
+                result.push(AnalyzedFunction {
                     name: fn_name,
                     air,
                     num_locals,
+                    num_params: params.len() as u32,
                 });
             }
         }
 
-        Ok(functions)
+        Ok(result)
+    }
+
+    /// First pass: collect all function signatures for forward reference
+    fn collect_function_signatures(&mut self) -> CompileResult<()> {
+        for (_, inst) in self.rir.iter() {
+            if let InstData::FnDecl {
+                name,
+                params,
+                return_type,
+                ..
+            } = &inst.data
+            {
+                let ret_type = self.resolve_type(*return_type, inst.span)?;
+                let param_types: Vec<Type> = params
+                    .iter()
+                    .map(|(_, ptype)| self.resolve_type(*ptype, inst.span))
+                    .collect::<CompileResult<Vec<_>>>()?;
+
+                self.functions.insert(
+                    *name,
+                    FunctionInfo {
+                        param_types,
+                        return_type: ret_type,
+                    },
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Analyze a single function, producing AIR.
-    fn analyze_function(&self, return_type: Type, body: InstRef) -> CompileResult<(Air, u32)> {
+    fn analyze_function(
+        &self,
+        return_type: Type,
+        params: &[(Symbol, Type)],
+        body: InstRef,
+    ) -> CompileResult<(Air, u32)> {
         let mut air = Air::new(return_type);
         let mut locals: HashMap<Symbol, LocalVar> = HashMap::new();
+        let mut param_map: HashMap<Symbol, ParamInfo> = HashMap::new();
         let mut next_slot: u32 = 0;
 
+        // Add parameters to the param map
+        for (index, (pname, ptype)) in params.iter().enumerate() {
+            param_map.insert(
+                *pname,
+                ParamInfo {
+                    index: index as u32,
+                    ty: *ptype,
+                },
+            );
+        }
+
         // Analyze the body expression
-        let body_ref = self.analyze_inst(&mut air, body, return_type, &mut locals, &mut next_slot)?;
+        let body_ref =
+            self.analyze_inst(&mut air, body, return_type, &mut locals, &param_map, &mut next_slot)?;
 
         // Add implicit return
         air.add_inst(AirInst {
@@ -97,6 +184,7 @@ impl<'a> Sema<'a> {
         inst_ref: InstRef,
         expected_type: Type,
         locals: &mut HashMap<Symbol, LocalVar>,
+        params: &HashMap<Symbol, ParamInfo>,
         next_slot: &mut u32,
     ) -> CompileResult<AirRef> {
         let inst = self.rir.get(inst_ref);
@@ -147,8 +235,8 @@ impl<'a> Sema<'a> {
 
             InstData::Add { lhs, rhs } => {
                 // Both operands must be i32 for now
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Add(lhs_ref, rhs_ref),
@@ -158,8 +246,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Sub { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Sub(lhs_ref, rhs_ref),
@@ -169,8 +257,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Mul { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Mul(lhs_ref, rhs_ref),
@@ -180,8 +268,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Div { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Div(lhs_ref, rhs_ref),
@@ -191,8 +279,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Mod { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Mod(lhs_ref, rhs_ref),
@@ -203,8 +291,8 @@ impl<'a> Sema<'a> {
 
             // Comparison operators: operands must be i32, result is bool
             InstData::Eq { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Eq(lhs_ref, rhs_ref),
@@ -214,8 +302,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Ne { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Ne(lhs_ref, rhs_ref),
@@ -225,8 +313,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Lt { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Lt(lhs_ref, rhs_ref),
@@ -236,8 +324,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Gt { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Gt(lhs_ref, rhs_ref),
@@ -247,8 +335,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Le { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Le(lhs_ref, rhs_ref),
@@ -258,8 +346,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Ge { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Ge(lhs_ref, rhs_ref),
@@ -270,8 +358,8 @@ impl<'a> Sema<'a> {
 
             // Logical operators: operands and result are all bool
             InstData::And { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::Bool, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::Bool, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::Bool, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::Bool, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::And(lhs_ref, rhs_ref),
@@ -281,8 +369,8 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Or { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::Bool, locals, next_slot)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::Bool, locals, next_slot)?;
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::Bool, locals, params, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::Bool, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Or(lhs_ref, rhs_ref),
@@ -292,7 +380,7 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Neg { operand } => {
-                let operand_ref = self.analyze_inst(air, *operand, Type::I32, locals, next_slot)?;
+                let operand_ref = self.analyze_inst(air, *operand, Type::I32, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Neg(operand_ref),
@@ -302,7 +390,7 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Not { operand } => {
-                let operand_ref = self.analyze_inst(air, *operand, Type::Bool, locals, next_slot)?;
+                let operand_ref = self.analyze_inst(air, *operand, Type::Bool, locals, params, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Not(operand_ref),
@@ -313,7 +401,7 @@ impl<'a> Sema<'a> {
 
             InstData::Branch { cond, then_block, else_block } => {
                 // Condition must be bool
-                let cond_ref = self.analyze_inst(air, *cond, Type::Bool, locals, next_slot)?;
+                let cond_ref = self.analyze_inst(air, *cond, Type::Bool, locals, params, next_slot)?;
 
                 // Determine the result type:
                 // - If else is present, both branches must have the same type
@@ -323,12 +411,12 @@ impl<'a> Sema<'a> {
                     let saved_locals = locals.clone();
 
                     // Analyze then branch
-                    let then_ref = self.analyze_inst(air, *then_block, expected_type, locals, next_slot)?;
+                    let then_ref = self.analyze_inst(air, *then_block, expected_type, locals, params, next_slot)?;
                     let then_type = air.get(then_ref).ty;
 
                     // Restore locals and analyze else branch
                     *locals = saved_locals.clone();
-                    let else_ref = self.analyze_inst(air, *else_b, then_type, locals, next_slot)?;
+                    let else_ref = self.analyze_inst(air, *else_b, then_type, locals, params, next_slot)?;
                     let else_type = air.get(else_ref).ty;
 
                     // Check types match
@@ -360,7 +448,7 @@ impl<'a> Sema<'a> {
                     let saved_locals = locals.clone();
 
                     // Analyze then branch (can be any type, we'll ignore it)
-                    let then_ref = self.analyze_inst(air, *then_block, Type::Unit, locals, next_slot)?;
+                    let then_ref = self.analyze_inst(air, *then_block, Type::Unit, locals, params, next_slot)?;
 
                     // Restore locals
                     *locals = saved_locals;
@@ -395,11 +483,11 @@ impl<'a> Sema<'a> {
                     }
                 } else {
                     // Infer type from initializer
-                    self.infer_type(*init, locals)?
+                    self.infer_type(*init, locals, params)?
                 };
 
                 // Analyze the initializer with the expected type
-                let init_ref = self.analyze_inst(air, *init, var_type, locals, next_slot)?;
+                let init_ref = self.analyze_inst(air, *init, var_type, locals, params, next_slot)?;
 
                 // Allocate a new slot
                 let slot = *next_slot;
@@ -424,7 +512,18 @@ impl<'a> Sema<'a> {
             }
 
             InstData::VarRef { name } => {
-                // Look up the variable
+                // First check if it's a parameter
+                if let Some(param_info) = params.get(name) {
+                    return Ok(air.add_inst(AirInst {
+                        data: AirInstData::Param {
+                            index: param_info.index,
+                        },
+                        ty: param_info.ty,
+                        span: inst.span,
+                    }));
+                }
+
+                // Look up the variable in locals
                 let name_str = self.interner.get(*name);
                 let local = locals.get(name).ok_or_else(|| {
                     CompileError::new(
@@ -463,7 +562,7 @@ impl<'a> Sema<'a> {
                 let ty = local.ty;
 
                 // Analyze the value
-                let value_ref = self.analyze_inst(air, *value, ty, locals, next_slot)?;
+                let value_ref = self.analyze_inst(air, *value, ty, locals, params, next_slot)?;
 
                 // Emit store instruction
                 Ok(air.add_inst(AirInst {
@@ -479,7 +578,7 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Ret(inner) => {
-                let inner_ref = self.analyze_inst(air, *inner, expected_type, locals, next_slot)?;
+                let inner_ref = self.analyze_inst(air, *inner, expected_type, locals, params, next_slot)?;
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Ret(inner_ref),
                     ty: expected_type,
@@ -508,7 +607,7 @@ impl<'a> Sema<'a> {
                     // statements (let, assign, expr;) don't need type checking
                     // against the block's expected type
                     let inst_expected_type = if is_last { expected_type } else { Type::Unit };
-                    let air_ref = self.analyze_inst(air, inst_ref, inst_expected_type, locals, next_slot)?;
+                    let air_ref = self.analyze_inst(air, inst_ref, inst_expected_type, locals, params, next_slot)?;
 
                     if is_last {
                         last_ref = Some(air_ref);
@@ -536,6 +635,75 @@ impl<'a> Sema<'a> {
                         span: inst.span,
                     }))
                 }
+            }
+
+            InstData::Call { name, args } => {
+                // Look up the function
+                let fn_name_str = self.interner.get(*name).to_string();
+                let fn_info = self.functions.get(name).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::UndefinedFunction(fn_name_str.clone()),
+                        inst.span,
+                    )
+                })?;
+
+                // Check argument count
+                if args.len() != fn_info.param_types.len() {
+                    let expected = fn_info.param_types.len();
+                    let found = args.len();
+                    return Err(CompileError::new(
+                        ErrorKind::WrongArgumentCount { expected, found },
+                        inst.span,
+                    ));
+                }
+
+                // Analyze arguments with expected parameter types
+                let mut arg_refs = Vec::new();
+                for (arg, expected_param_type) in args.iter().zip(&fn_info.param_types) {
+                    let arg_ref = self.analyze_inst(air, *arg, *expected_param_type, locals, params, next_slot)?;
+                    arg_refs.push(arg_ref);
+                }
+
+                let return_type = fn_info.return_type;
+
+                // Check that return type matches expected type (if we have an expectation)
+                if expected_type != Type::Unit && return_type != expected_type && !return_type.is_error() {
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: expected_type.name().to_string(),
+                            found: return_type.name().to_string(),
+                        },
+                        inst.span,
+                    ));
+                }
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Call {
+                        name: fn_name_str,
+                        args: arg_refs,
+                    },
+                    ty: return_type,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::ParamRef { index, name } => {
+                // Look up the parameter type from the params map
+                let param_info = params.get(name).ok_or_else(|| {
+                    let name_str = self.interner.get(*name);
+                    CompileError::new(
+                        ErrorKind::UndefinedVariable(name_str.to_string()),
+                        inst.span,
+                    )
+                })?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Param {
+                        index: *index,
+                    },
+                    ty: param_info.ty,
+                    span: inst.span,
+                }))
             }
         }
     }
@@ -572,6 +740,7 @@ impl<'a> Sema<'a> {
         &self,
         inst_ref: InstRef,
         locals: &HashMap<Symbol, LocalVar>,
+        params: &HashMap<Symbol, ParamInfo>,
     ) -> CompileResult<Type> {
         let inst = self.rir.get(inst_ref);
 
@@ -594,6 +763,11 @@ impl<'a> Sema<'a> {
             | InstData::Or { .. }
             | InstData::Not { .. } => Ok(Type::Bool),
             InstData::VarRef { name } => {
+                // First check parameters
+                if let Some(param_info) = params.get(name) {
+                    return Ok(param_info.ty);
+                }
+                // Then check locals
                 let name_str = self.interner.get(*name);
                 let local = locals.get(name).ok_or_else(|| {
                     CompileError::new(
@@ -610,12 +784,34 @@ impl<'a> Sema<'a> {
                 } else {
                     let inst_refs = self.rir.get_extra(*extra_start, *len);
                     let last_ref = InstRef::from_raw(inst_refs[inst_refs.len() - 1]);
-                    self.infer_type(last_ref, locals)
+                    self.infer_type(last_ref, locals, params)
                 }
             }
             InstData::Branch { then_block, .. } => {
                 // The type of an if/else is the type of either branch (they should match)
-                self.infer_type(*then_block, locals)
+                self.infer_type(*then_block, locals, params)
+            }
+            InstData::Call { name, .. } => {
+                // Infer the return type from the function signature
+                let fn_info = self.functions.get(name).ok_or_else(|| {
+                    let fn_name_str = self.interner.get(*name);
+                    CompileError::new(
+                        ErrorKind::UndefinedFunction(fn_name_str.to_string()),
+                        inst.span,
+                    )
+                })?;
+                Ok(fn_info.return_type)
+            }
+            InstData::ParamRef { name, .. } => {
+                // Look up the parameter type
+                let param_info = params.get(name).ok_or_else(|| {
+                    let name_str = self.interner.get(*name);
+                    CompileError::new(
+                        ErrorKind::UndefinedVariable(name_str.to_string()),
+                        inst.span,
+                    )
+                })?;
+                Ok(param_info.ty)
             }
             InstData::Alloc { .. } | InstData::Assign { .. } | InstData::Ret(_) => Ok(Type::Unit),
             InstData::FnDecl { .. } => {
@@ -642,7 +838,7 @@ mod tests {
         let astgen = AstGen::new(&ast, &mut interner);
         let rir = astgen.generate();
 
-        let sema = Sema::new(&rir, &interner);
+        let mut sema = Sema::new(&rir, &interner);
         sema.analyze_all()
     }
 

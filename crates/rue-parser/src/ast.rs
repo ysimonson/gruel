@@ -23,11 +23,24 @@ pub enum Item {
 pub struct Function {
     /// Function name
     pub name: Ident,
+    /// Function parameters
+    pub params: Vec<Param>,
     /// Return type
     pub return_type: Ident,
     /// Function body
     pub body: Expr,
     /// Span covering the entire function
+    pub span: Span,
+}
+
+/// A function parameter.
+#[derive(Debug)]
+pub struct Param {
+    /// Parameter name
+    pub name: Ident,
+    /// Parameter type
+    pub ty: Ident,
+    /// Span covering the entire parameter
     pub span: Span,
 }
 
@@ -57,6 +70,8 @@ pub enum Expr {
     Block(BlockExpr),
     /// If expression (e.g., `if cond { a } else { b }`)
     If(IfExpr),
+    /// Function call (e.g., `foo(1, 2)`)
+    Call(CallExpr),
 }
 
 /// An integer literal.
@@ -147,6 +162,16 @@ pub struct IfExpr {
     pub span: Span,
 }
 
+/// A function call expression.
+#[derive(Debug)]
+pub struct CallExpr {
+    /// Function name
+    pub name: Ident,
+    /// Arguments
+    pub args: Vec<Expr>,
+    pub span: Span,
+}
+
 /// A statement (does not produce a value).
 #[derive(Debug)]
 pub enum Statement {
@@ -194,6 +219,7 @@ impl Expr {
             Expr::Paren(paren) => paren.span,
             Expr::Block(block) => block.span,
             Expr::If(if_expr) => if_expr.span,
+            Expr::Call(call) => call.span,
         }
     }
 }

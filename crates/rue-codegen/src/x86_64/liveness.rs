@@ -187,6 +187,9 @@ fn uses(inst: &X86Inst) -> Vec<VReg> {
         X86Inst::Pop { .. } => {
             // Only defines
         }
+        X86Inst::Push { src } => {
+            add_if_virtual(src, &mut result);
+        }
         X86Inst::Cdq
         | X86Inst::Jz { .. }
         | X86Inst::Jnz { .. }
@@ -257,6 +260,9 @@ fn defs(inst: &X86Inst) -> Vec<VReg> {
         }
         X86Inst::Pop { dst } => {
             add_if_virtual(dst, &mut result);
+        }
+        X86Inst::Push { .. } => {
+            // Only reads, no definition
         }
         X86Inst::Cdq
         | X86Inst::Jz { .. }

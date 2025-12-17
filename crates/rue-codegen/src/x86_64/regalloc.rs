@@ -15,24 +15,21 @@ use std::collections::HashSet;
 use super::liveness::{self, LiveRange, LivenessInfo};
 use super::mir::{Operand, Reg, VReg, X86Inst, X86Mir};
 
-/// Available registers for allocation (caller-saved, not used for special purposes).
+/// Available registers for allocation.
 ///
-/// We avoid:
+/// We ONLY use callee-saved registers for general allocation. This ensures
+/// that values survive across function calls without needing explicit save/restore.
+/// Caller-saved registers (rax, rcx, rdx, rsi, rdi, r8-r11) are avoided because
+/// they get clobbered by function calls.
+///
+/// We also avoid:
 /// - rsp (stack pointer)
 /// - rbp (frame pointer)
-/// - rax, rdx (used implicitly by idiv for division/modulo)
+/// - rax, rdx (used implicitly by idiv, and rax for scratch)
 ///
-/// The registers are ordered by preference. We prefer caller-saved registers
-/// that aren't commonly used for special purposes.
+/// When we run out of callee-saved registers, values are spilled to the stack.
 const ALLOCATABLE_REGS: &[Reg] = &[
-    Reg::R10, // First choice - caller-saved, not used for args
-    Reg::R11, // Second choice - caller-saved, not used for args
-    Reg::Rcx, // Can use when not needed for args
-    Reg::Rsi, // Can use when not needed for args
-    Reg::R8,  // Can use when not needed for args
-    Reg::R9,  // Can use when not needed for args
-    Reg::Rdi, // Can use when not needed for exit call
-    Reg::R12, // Callee-saved, but we can use them for now
+    Reg::R12, // Callee-saved
     Reg::R13, // Callee-saved
     Reg::R14, // Callee-saved
     Reg::R15, // Callee-saved
@@ -60,6 +57,8 @@ pub struct RegAlloc {
     next_spill_offset: i32,
     /// Number of spill slots used.
     num_spills: u32,
+    /// Callee-saved registers that were used and need to be saved/restored.
+    used_callee_saved: Vec<Reg>,
 }
 
 impl RegAlloc {
@@ -81,6 +80,7 @@ impl RegAlloc {
             liveness,
             next_spill_offset,
             num_spills: 0,
+            used_callee_saved: Vec::new(),
         }
     }
 
@@ -100,8 +100,8 @@ impl RegAlloc {
         self.mir
     }
 
-    /// Perform register allocation and return both the MIR and the number of spill slots used.
-    pub fn allocate_with_spills(mut self) -> (X86Mir, u32) {
+    /// Perform register allocation and return the MIR, spill count, and used callee-saved registers.
+    pub fn allocate_with_spills(mut self) -> (X86Mir, u32, Vec<Reg>) {
         // Phase 1: Assign physical registers (or spill) to virtual registers
         self.assign_registers();
 
@@ -109,7 +109,8 @@ impl RegAlloc {
         self.rewrite_instructions();
 
         let num_spills = self.num_spills;
-        (self.mir, num_spills)
+        let used_callee_saved = self.used_callee_saved;
+        (self.mir, num_spills, used_callee_saved)
     }
 
     /// Assign physical registers to all virtual registers using linear scan.
@@ -148,6 +149,10 @@ impl RegAlloc {
                 // Assign this register
                 self.allocation[vreg.index() as usize] = Some(Allocation::Register(reg));
                 active.push((vreg, reg, range.end));
+                // Track callee-saved register usage
+                if !self.used_callee_saved.contains(&reg) {
+                    self.used_callee_saved.push(reg);
+                }
             } else {
                 // No free register - need to spill
                 // Strategy: spill the vreg with the longest remaining live range
@@ -457,6 +462,11 @@ impl RegAlloc {
                 }
             }
 
+            X86Inst::Push { src } => {
+                let src_op = self.load_operand(mir, src, Reg::Rax);
+                mir.push(X86Inst::Push { src: src_op });
+            }
+
             // Instructions without register operands pass through unchanged
             X86Inst::Cdq => mir.push(X86Inst::Cdq),
             X86Inst::Jz { label } => mir.push(X86Inst::Jz { label }),
@@ -634,10 +644,10 @@ mod tests {
 
         let mir = RegAlloc::new(mir, 0).allocate();
 
-        // v0 should be allocated to R10 (first allocatable)
+        // v0 should be allocated to R12 (first allocatable)
         match &mir.instructions()[0] {
             X86Inst::MovRI32 { dst, imm } => {
-                assert_eq!(*dst, Operand::Physical(Reg::R10));
+                assert_eq!(*dst, Operand::Physical(Reg::R12));
                 assert_eq!(*imm, 42);
             }
             _ => panic!("expected MovRI32"),
@@ -685,12 +695,12 @@ mod tests {
 
         let mir = RegAlloc::new(mir, 0).allocate();
 
-        // Both can be allocated to R10 since they don't interfere
+        // Both can be allocated to R12 since they don't interfere
         match (&mir.instructions()[0], &mir.instructions()[1]) {
             (X86Inst::MovRI32 { dst: d0, .. }, X86Inst::MovRI32 { dst: d1, .. }) => {
-                // They should both get R10 since v0 is dead before v1 is defined
-                assert_eq!(*d0, Operand::Physical(Reg::R10));
-                assert_eq!(*d1, Operand::Physical(Reg::R10));
+                // They should both get R12 since v0 is dead before v1 is defined
+                assert_eq!(*d0, Operand::Physical(Reg::R12));
+                assert_eq!(*d1, Operand::Physical(Reg::R12));
             }
             _ => panic!("expected two MovRI32"),
         }

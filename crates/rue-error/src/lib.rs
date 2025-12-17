@@ -31,11 +31,16 @@ pub enum ErrorKind {
     // Semantic errors
     NoMainFunction,
     UndefinedVariable(String),
+    UndefinedFunction(String),
     AssignToImmutable(String),
     UnknownType(String),
     TypeMismatch {
         expected: String,
         found: String,
+    },
+    WrongArgumentCount {
+        expected: usize,
+        found: usize,
     },
 
     // Linker errors
@@ -71,12 +76,26 @@ impl CompileError {
             }
             ErrorKind::NoMainFunction => "no main function found".to_string(),
             ErrorKind::UndefinedVariable(name) => format!("undefined variable '{}'", name),
+            ErrorKind::UndefinedFunction(name) => format!("undefined function '{}'", name),
             ErrorKind::AssignToImmutable(name) => {
                 format!("cannot assign to immutable variable '{}'", name)
             }
             ErrorKind::UnknownType(name) => format!("unknown type '{}'", name),
             ErrorKind::TypeMismatch { expected, found } => {
                 format!("type mismatch: expected {}, found {}", expected, found)
+            }
+            ErrorKind::WrongArgumentCount { expected, found } => {
+                if *expected == 1 {
+                    format!(
+                        "expected {} argument, found {}",
+                        expected, found
+                    )
+                } else {
+                    format!(
+                        "expected {} arguments, found {}",
+                        expected, found
+                    )
+                }
             }
             ErrorKind::LinkError(msg) => format!("link error: {}", msg),
         }

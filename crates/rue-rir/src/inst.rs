@@ -161,11 +161,29 @@ pub enum InstData {
     },
 
     /// Function definition
-    /// Contains: name symbol, return type symbol, body instruction ref
+    /// Contains: name symbol, parameters, return type symbol, body instruction ref
     FnDecl {
         name: Symbol,
+        /// Parameter symbols and their type symbols: [(param_name, param_type), ...]
+        params: Vec<(Symbol, Symbol)>,
         return_type: Symbol,
         body: InstRef,
+    },
+
+    /// Function call
+    Call {
+        /// Function name
+        name: Symbol,
+        /// Argument instruction refs
+        args: Vec<InstRef>,
+    },
+
+    /// Reference to a function parameter
+    ParamRef {
+        /// Parameter index (0-based)
+        index: u32,
+        /// Parameter name (for error messages)
+        name: Symbol,
     },
 
     /// Return value from function
@@ -290,15 +308,39 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         out.push_str(&format!("branch {}, {}\n", cond, then_block));
                     }
                 }
-                InstData::FnDecl { name, return_type, body } => {
+                InstData::FnDecl { name, params, return_type, body } => {
                     let name_str = self.interner.get(*name);
                     let ret_str = self.interner.get(*return_type);
-                    out.push_str(&format!("fn {}() -> {} {{\n", name_str, ret_str));
+                    let params_str: Vec<String> = params
+                        .iter()
+                        .map(|(pname, ptype)| {
+                            format!(
+                                "{}: {}",
+                                self.interner.get(*pname),
+                                self.interner.get(*ptype)
+                            )
+                        })
+                        .collect();
+                    out.push_str(&format!(
+                        "fn {}({}) -> {} {{\n",
+                        name_str,
+                        params_str.join(", "),
+                        ret_str
+                    ));
                     out.push_str(&format!("    {}\n", body));
                     out.push_str("}\n");
                 }
                 InstData::Ret(inner) => {
                     out.push_str(&format!("ret {}\n", inner));
+                }
+                InstData::Call { name, args } => {
+                    let name_str = self.interner.get(*name);
+                    let args_str: Vec<String> = args.iter().map(|a| format!("{}", a)).collect();
+                    out.push_str(&format!("call {}({})\n", name_str, args_str.join(", ")));
+                }
+                InstData::ParamRef { index, name } => {
+                    let name_str = self.interner.get(*name);
+                    out.push_str(&format!("param {} ({})\n", index, name_str));
                 }
                 InstData::Block { extra_start, len } => {
                     out.push_str(&format!("block({}, {})\n", extra_start, len));

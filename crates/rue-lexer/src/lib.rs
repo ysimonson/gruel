@@ -48,6 +48,7 @@ pub enum TokenKind {
     Arrow, // ->
     Colon,
     Semi,
+    Comma,
 
     // Special
     Eof,
@@ -88,6 +89,7 @@ impl TokenKind {
             TokenKind::Arrow => "'->'",
             TokenKind::Colon => "':'",
             TokenKind::Semi => "';'",
+            TokenKind::Comma => "','",
             TokenKind::Eof => "end of file",
         }
     }
@@ -162,6 +164,10 @@ impl<'a> Lexer<'a> {
             ';' => {
                 self.advance();
                 TokenKind::Semi
+            }
+            ',' => {
+                self.advance();
+                TokenKind::Comma
             }
             '+' => {
                 self.advance();

@@ -311,3 +311,116 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "undefined variable"
+
+# =============================================================================
+# Function Call Errors
+# =============================================================================
+
+[[case]]
+name = "undefined_function"
+source = """
+fn main() -> i32 {
+    foo(42)
+}
+"""
+compile_fail = true
+error_contains = "undefined function"
+
+[[case]]
+name = "wrong_argument_count_too_few"
+source = """
+fn add(x: i32, y: i32) -> i32 { x + y }
+fn main() -> i32 { add(1) }
+"""
+compile_fail = true
+error_contains = "expected 2 arguments"
+
+[[case]]
+name = "wrong_argument_count_too_many"
+source = """
+fn add(x: i32, y: i32) -> i32 { x + y }
+fn main() -> i32 { add(1, 2, 3) }
+"""
+compile_fail = true
+error_contains = "expected 2 arguments"
+
+[[case]]
+name = "wrong_argument_count_zero"
+source = """
+fn identity(x: i32) -> i32 { x }
+fn main() -> i32 { identity() }
+"""
+compile_fail = true
+error_contains = "expected 1 argument"
+
+[[case]]
+name = "argument_type_mismatch"
+source = """
+fn double(x: i32) -> i32 { x + x }
+fn main() -> i32 { double(true) }
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "return_type_mismatch_in_call"
+source = """
+fn returns_bool() -> bool { true }
+fn main() -> i32 { returns_bool() + 1 }
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "call_missing_close_paren"
+source = """
+fn foo(x: i32) -> i32 { x }
+fn main() -> i32 { foo(42 }
+"""
+compile_fail = true
+error_contains = "expected ')'"
+
+[[case]]
+name = "param_missing_type"
+source = """
+fn foo(x) -> i32 { x }
+fn main() -> i32 { foo(42) }
+"""
+compile_fail = true
+error_contains = "expected ':'"
+
+[[case]]
+name = "param_missing_colon"
+source = """
+fn foo(x i32) -> i32 { x }
+fn main() -> i32 { foo(42) }
+"""
+compile_fail = true
+error_contains = "expected ':'"
+
+[[case]]
+name = "param_unknown_type"
+source = """
+fn foo(x: bar) -> i32 { 0 }
+fn main() -> i32 { foo(42) }
+"""
+compile_fail = true
+error_contains = "expected type"
+
+[[case]]
+name = "trailing_comma_in_params"
+description = "Trailing commas are not allowed in parameter lists"
+source = """
+fn foo(x: i32,) -> i32 { x }
+fn main() -> i32 { foo(42) }
+"""
+compile_fail = true
+
+[[case]]
+name = "trailing_comma_in_args"
+description = "Trailing commas are not allowed in argument lists"
+source = """
+fn foo(x: i32) -> i32 { x }
+fn main() -> i32 { foo(42,) }
+"""
+compile_fail = true

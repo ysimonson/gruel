@@ -170,6 +170,20 @@ pub enum AirInstData {
     /// Return from function
     Ret(AirRef),
 
+    /// Function call
+    Call {
+        /// Function name
+        name: String,
+        /// Argument AIR refs
+        args: Vec<AirRef>,
+    },
+
+    /// Reference to a function parameter
+    Param {
+        /// Parameter index (0-based)
+        index: u32,
+    },
+
     /// Block expression with statements and final value.
     /// Used to group side-effect statements with their result value,
     /// enabling demand-driven lowering for short-circuit evaluation.
@@ -221,6 +235,17 @@ impl fmt::Display for Air {
                 AirInstData::Load { slot } => writeln!(f, "load ${}", slot)?,
                 AirInstData::Store { slot, value } => writeln!(f, "store ${} = {}", slot, value)?,
                 AirInstData::Ret(inner) => writeln!(f, "ret {}", inner)?,
+                AirInstData::Call { name, args } => {
+                    write!(f, "call {}(", name)?;
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", arg)?;
+                    }
+                    writeln!(f, ")")?;
+                }
+                AirInstData::Param { index } => writeln!(f, "param {}", index)?,
                 AirInstData::Block { statements, value } => {
                     write!(f, "block [")?;
                     for (i, s) in statements.iter().enumerate() {

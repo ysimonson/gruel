@@ -283,6 +283,9 @@ pub enum X86Inst {
 
     /// `pop dst` - Pop value from stack into register.
     Pop { dst: Operand },
+
+    /// `push src` - Push value from register onto stack.
+    Push { src: Operand },
 }
 
 impl fmt::Display for X86Inst {
@@ -334,6 +337,7 @@ impl fmt::Display for X86Inst {
             X86Inst::Syscall => write!(f, "syscall"),
             X86Inst::Ret => write!(f, "ret"),
             X86Inst::Pop { dst } => write!(f, "pop {}", dst),
+            X86Inst::Push { src } => write!(f, "push {}", src),
         }
     }
 }

@@ -56,7 +56,7 @@ pub fn compile_to_air(source: &str) -> CompileResult<CompileState> {
     let rir = astgen.generate();
 
     // Phase 4: Semantic analysis (RIR to AIR)
-    let sema = Sema::new(&rir, &interner);
+    let mut sema = Sema::new(&rir, &interner);
     let functions = sema.analyze_all()?;
 
     Ok(CompileState {
@@ -73,45 +73,46 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
     let state = compile_to_air(source)?;
 
     // Check for main function
-    let main_fn = state
+    let _main_fn = state
         .functions
         .iter()
         .find(|f| f.name == "main")
         .ok_or_else(|| CompileError::new(ErrorKind::NoMainFunction, Span::default()))?;
 
-    // Phase 5: Code generation (AIR to machine code)
-    let codegen = CodeGen::new(&main_fn.air, main_fn.num_locals);
-    let machine_code = codegen.generate();
-
-    // Phase 6: Build object file
-    let mut obj_builder = ObjectBuilder::new("main").code(machine_code.code);
-
-    // Add relocations from codegen (convert emitted relocations to linker relocations).
-    // We use PLT32 for call instructions since this is the standard relocation type
-    // for function calls on x86-64. While we're doing static linking without a PLT,
-    // PLT32 and PC32 are treated identically by the linker for direct calls.
-    // Using PLT32 follows the convention established by GCC/Clang.
-    for reloc in machine_code.relocations {
-        obj_builder = obj_builder.relocation(CodeRelocation {
-            offset: reloc.offset,
-            symbol: reloc.symbol,
-            rel_type: RelocationType::Plt32,
-            addend: reloc.addend,
-        });
-    }
-
-    let obj_bytes = obj_builder.build();
-
-    // Phase 7: Link to executable
-    let obj = ObjectFile::parse(&obj_bytes)
-        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
-
     let mut linker = Linker::new();
 
-    // Add the user's compiled code
-    linker
-        .add_object(obj)
-        .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+    // Phase 5: Code generation (AIR to machine code) for ALL functions
+    for func in &state.functions {
+        let codegen = CodeGen::new(&func.air, func.num_locals, func.num_params, &func.name);
+        let machine_code = codegen.generate();
+
+        // Build object file for this function
+        let mut obj_builder = ObjectBuilder::new(&func.name).code(machine_code.code);
+
+        // Add relocations from codegen (convert emitted relocations to linker relocations).
+        // We use PLT32 for call instructions since this is the standard relocation type
+        // for function calls on x86-64. While we're doing static linking without a PLT,
+        // PLT32 and PC32 are treated identically by the linker for direct calls.
+        // Using PLT32 follows the convention established by GCC/Clang.
+        for reloc in machine_code.relocations {
+            obj_builder = obj_builder.relocation(CodeRelocation {
+                offset: reloc.offset,
+                symbol: reloc.symbol,
+                rel_type: RelocationType::Plt32,
+                addend: reloc.addend,
+            });
+        }
+
+        let obj_bytes = obj_builder.build();
+
+        // Phase 6: Parse and add object file to linker
+        let obj = ObjectFile::parse(&obj_bytes)
+            .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+
+        linker
+            .add_object(obj)
+            .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
+    }
 
     // Add the runtime library
     let runtime = Archive::parse(RUNTIME_BYTES)
@@ -120,6 +121,7 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
         .add_archive(runtime)
         .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
 
+    // Phase 7: Link to executable
     let elf = linker
         .link("main")
         .map_err(|e| CompileError::new(ErrorKind::LinkError(e.to_string()), Span::default()))?;
@@ -128,8 +130,8 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
 }
 
 /// Generate X86Mir from AIR (for debugging/inspection).
-pub fn generate_mir(air: &Air, num_locals: u32) -> X86Mir {
-    rue_codegen::x86_64::Lower::new(air, num_locals).lower()
+pub fn generate_mir(air: &Air, num_locals: u32, num_params: u32, fn_name: &str) -> X86Mir {
+    rue_codegen::x86_64::Lower::new(air, num_locals, num_params, fn_name).lower()
 }
 
 #[cfg(test)]
