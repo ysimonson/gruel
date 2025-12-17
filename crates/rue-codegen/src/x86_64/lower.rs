@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use rue_air::{Air, AirInstData, AirRef, Type};
+use rue_air::{Air, AirInstData, AirRef, StructId, Type};
 
 use super::mir::{Operand, Reg, VReg, X86Inst, X86Mir};
 
@@ -33,7 +33,7 @@ pub struct Lower<'a> {
     has_frame: bool,
     /// Number of local variable slots.
     num_locals: u32,
-    /// Number of parameters for this function.
+    /// Number of ABI parameter slots for this function.
     num_params: u32,
     /// Function name for this function (for generating internal labels).
     fn_name: String,
@@ -43,6 +43,8 @@ pub struct Lower<'a> {
     /// Maps StructInit AIR refs to their field vregs.
     /// Used by Alloc to store all struct fields to consecutive stack slots.
     struct_field_vregs: HashMap<AirRef, Vec<VReg>>,
+    /// Maps StructId to field count. Populated lazily from AIR instructions.
+    struct_field_counts: HashMap<StructId, u32>,
 }
 
 /// Argument passing registers per System V AMD64 ABI.
@@ -51,6 +53,26 @@ const ARG_REGS: [Reg; 6] = [Reg::Rdi, Reg::Rsi, Reg::Rdx, Reg::Rcx, Reg::R8, Reg
 impl<'a> Lower<'a> {
     /// Create a new lowering pass.
     pub fn new(air: &'a Air, num_locals: u32, num_params: u32, fn_name: &str) -> Self {
+        // Collect struct field counts from StructInit and FieldGet instructions in AIR
+        let mut struct_field_counts: HashMap<StructId, u32> = HashMap::new();
+        for (_, inst) in air.iter() {
+            match &inst.data {
+                AirInstData::StructInit { struct_id, fields } => {
+                    struct_field_counts.insert(*struct_id, fields.len() as u32);
+                }
+                AirInstData::FieldGet { struct_id, field_index, .. } => {
+                    // Update if we see a higher field index
+                    let entry = struct_field_counts.entry(*struct_id).or_insert(0);
+                    *entry = (*entry).max(*field_index + 1);
+                }
+                AirInstData::FieldSet { struct_id, field_index, .. } => {
+                    let entry = struct_field_counts.entry(*struct_id).or_insert(0);
+                    *entry = (*entry).max(*field_index + 1);
+                }
+                _ => {}
+            }
+        }
+
         Self {
             air,
             mir: X86Mir::new(),
@@ -62,7 +84,13 @@ impl<'a> Lower<'a> {
             fn_name: fn_name.to_string(),
             loop_stack: Vec::new(),
             struct_field_vregs: HashMap::new(),
+            struct_field_counts,
         }
+    }
+
+    /// Get the number of fields for a struct type.
+    fn struct_field_count(&self, struct_id: StructId) -> u32 {
+        *self.struct_field_counts.get(&struct_id).unwrap_or(&1)
     }
 
     /// Calculate the stack offset for a local variable slot.
@@ -891,19 +919,89 @@ impl<'a> Lower<'a> {
                 // Function call using System V AMD64 ABI
                 // First 6 args go in registers: RDI, RSI, RDX, RCX, R8, R9
                 // Remaining args are passed on the stack (right-to-left)
+                //
+                // For struct arguments, each field is passed as a separate ABI argument.
                 let result_vreg = self.mir.alloc_vreg();
                 self.value_map[air_ref.as_u32() as usize] = Some(result_vreg);
 
-                // Evaluate all arguments first to get their vregs
-                let arg_vregs: Vec<_> = args.iter().map(|a| self.get_vreg(*a)).collect();
+                // Flatten all arguments: for structs, collect each field as a separate ABI arg.
+                let mut flattened_vregs: Vec<VReg> = Vec::new();
+                for arg in args {
+                    let arg_type = self.air.get(*arg).ty;
+                    match arg_type {
+                        Type::Struct(_struct_id) => {
+                            // Struct argument: need to pass all fields as separate ABI args.
+                            // Look at the AIR instruction to determine how to get the fields.
+                            let arg_data = self.air.get(*arg).data.clone();
+                            match &arg_data {
+                                AirInstData::Load { slot } => {
+                                    // Struct from local variable: load each field from consecutive slots
+                                    let field_count = match arg_type {
+                                        Type::Struct(sid) => self.struct_field_count(sid),
+                                        _ => unreachable!(),
+                                    };
+                                    // Load each field into a vreg
+                                    for field_idx in 0..field_count {
+                                        let field_vreg = self.mir.alloc_vreg();
+                                        let field_slot = slot + field_idx;
+                                        let offset = self.local_offset(field_slot);
+                                        self.mir.push(X86Inst::MovRM {
+                                            dst: Operand::Virtual(field_vreg),
+                                            base: Reg::Rbp,
+                                            offset,
+                                        });
+                                        flattened_vregs.push(field_vreg);
+                                    }
+                                }
+                                AirInstData::Param { index } => {
+                                    // Struct from parameter: load each field from consecutive param slots
+                                    let field_count = match arg_type {
+                                        Type::Struct(sid) => self.struct_field_count(sid),
+                                        _ => unreachable!(),
+                                    };
+                                    for field_idx in 0..field_count {
+                                        let field_vreg = self.mir.alloc_vreg();
+                                        let param_slot = self.num_locals + index + field_idx;
+                                        let offset = self.local_offset(param_slot);
+                                        self.mir.push(X86Inst::MovRM {
+                                            dst: Operand::Virtual(field_vreg),
+                                            base: Reg::Rbp,
+                                            offset,
+                                        });
+                                        flattened_vregs.push(field_vreg);
+                                    }
+                                }
+                                AirInstData::StructInit { .. } => {
+                                    // Struct literal: get field vregs from struct_field_vregs
+                                    // First ensure the struct init is lowered
+                                    self.demand_lower(*arg);
+                                    if let Some(field_vregs) = self.struct_field_vregs.get(arg) {
+                                        flattened_vregs.extend(field_vregs.iter().copied());
+                                    } else {
+                                        // Fallback: just use the single vreg
+                                        flattened_vregs.push(self.get_vreg(*arg));
+                                    }
+                                }
+                                _ => {
+                                    // Other struct expression: just use single vreg (may not work correctly)
+                                    flattened_vregs.push(self.get_vreg(*arg));
+                                }
+                            }
+                        }
+                        _ => {
+                            // Non-struct argument: single vreg
+                            flattened_vregs.push(self.get_vreg(*arg));
+                        }
+                    }
+                }
 
-                let num_reg_args = arg_vregs.len().min(ARG_REGS.len());
-                let num_stack_args = arg_vregs.len().saturating_sub(ARG_REGS.len());
+                let num_reg_args = flattened_vregs.len().min(ARG_REGS.len());
+                let num_stack_args = flattened_vregs.len().saturating_sub(ARG_REGS.len());
 
                 // Phase 1: Push stack arguments (args 7+) in reverse order
                 // Per System V AMD64 ABI, stack args are pushed right-to-left
                 // so that arg7 ends up closest to RSP
-                for arg_vreg in arg_vregs.iter().skip(ARG_REGS.len()).rev() {
+                for arg_vreg in flattened_vregs.iter().skip(ARG_REGS.len()).rev() {
                     // Move to RAX first (in case vreg is spilled)
                     self.mir.push(X86Inst::MovRR {
                         dst: Operand::Physical(Reg::Rax),
@@ -917,7 +1015,7 @@ impl<'a> Lower<'a> {
 
                 // Phase 2: Push register arguments onto stack temporarily
                 // This avoids clobbering issues when vregs are in arg registers
-                for arg_vreg in arg_vregs.iter().take(num_reg_args).rev() {
+                for arg_vreg in flattened_vregs.iter().take(num_reg_args).rev() {
                     self.mir.push(X86Inst::MovRR {
                         dst: Operand::Physical(Reg::Rax),
                         src: Operand::Virtual(*arg_vreg),
@@ -988,7 +1086,9 @@ impl<'a> Lower<'a> {
 
             AirInstData::FieldGet { base, struct_id: _, field_index } => {
                 // Field access: load from base_slot + field_index.
-                // The base should be a Load from the struct variable's slot.
+                // The base can be:
+                // - Load: struct is a local variable
+                // - Param: struct is a function parameter
                 let vreg = self.mir.alloc_vreg();
                 self.value_map[air_ref.as_u32() as usize] = Some(vreg);
 
@@ -996,9 +1096,20 @@ impl<'a> Lower<'a> {
                 let base_data = self.air.get(*base).data.clone();
                 match &base_data {
                     AirInstData::Load { slot } => {
-                        // Load from slot + field_index
+                        // Local variable: load from slot + field_index
                         let actual_slot = slot + field_index;
                         let offset = self.local_offset(actual_slot);
+                        self.mir.push(X86Inst::MovRM {
+                            dst: Operand::Virtual(vreg),
+                            base: Reg::Rbp,
+                            offset,
+                        });
+                    }
+                    AirInstData::Param { index } => {
+                        // Struct parameter: load from param_slot + field_index.
+                        // Parameters are stored at [num_locals + index] in the stack frame.
+                        let param_slot = self.num_locals + index + field_index;
+                        let offset = self.local_offset(param_slot);
                         self.mir.push(X86Inst::MovRM {
                             dst: Operand::Virtual(vreg),
                             base: Reg::Rbp,

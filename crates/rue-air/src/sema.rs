@@ -19,8 +19,10 @@ pub struct AnalyzedFunction {
     pub air: Air,
     /// Number of local variable slots needed
     pub num_locals: u32,
-    /// Number of parameters
-    pub num_params: u32,
+    /// Number of ABI slots used by parameters.
+    /// For scalar types (i32, bool), each parameter uses 1 slot.
+    /// For struct types, each field uses 1 slot (flattened ABI).
+    pub num_param_slots: u32,
 }
 
 /// Information about a local variable.
@@ -37,8 +39,10 @@ struct LocalVar {
 /// Information about a function parameter.
 #[derive(Debug, Clone)]
 struct ParamInfo {
-    /// Parameter index (0-based)
-    index: u32,
+    /// Starting ABI slot for this parameter (0-based).
+    /// For scalar types, this is the single slot.
+    /// For struct types, this is the first field's slot.
+    abi_slot: u32,
     /// Parameter type
     ty: Type,
 }
@@ -127,13 +131,13 @@ impl<'a> Sema<'a> {
                     })
                     .collect::<CompileResult<Vec<_>>>()?;
 
-                let (air, num_locals) = self.analyze_function(ret_type, &param_info, *body)?;
+                let (air, num_locals, num_param_slots) = self.analyze_function(ret_type, &param_info, *body)?;
 
                 result.push(AnalyzedFunction {
                     name: fn_name,
                     air,
                     num_locals,
-                    num_params: params.len() as u32,
+                    num_param_slots,
                 });
             }
         }
@@ -197,25 +201,31 @@ impl<'a> Sema<'a> {
     }
 
     /// Analyze a single function, producing AIR.
+    /// Returns (air, num_locals, num_param_slots).
     fn analyze_function(
         &self,
         return_type: Type,
         params: &[(Symbol, Type)],
         body: InstRef,
-    ) -> CompileResult<(Air, u32)> {
+    ) -> CompileResult<(Air, u32, u32)> {
         let mut air = Air::new(return_type);
         let mut param_map: HashMap<Symbol, ParamInfo> = HashMap::new();
 
-        // Add parameters to the param map
-        for (index, (pname, ptype)) in params.iter().enumerate() {
+        // Add parameters to the param map, tracking ABI slot offsets.
+        // Each parameter starts at the next available ABI slot.
+        // For struct parameters, the slot count is the number of fields.
+        let mut next_abi_slot: u32 = 0;
+        for (pname, ptype) in params.iter() {
             param_map.insert(
                 *pname,
                 ParamInfo {
-                    index: index as u32,
+                    abi_slot: next_abi_slot,
                     ty: *ptype,
                 },
             );
+            next_abi_slot += self.abi_slot_count(*ptype);
         }
+        let num_param_slots = next_abi_slot;
 
         // Create analysis context
         let mut ctx = AnalysisContext {
@@ -235,7 +245,7 @@ impl<'a> Sema<'a> {
             span: self.rir.get(body).span,
         });
 
-        Ok((air, ctx.next_slot))
+        Ok((air, ctx.next_slot, num_param_slots))
     }
 
     /// Analyze an RIR instruction, producing AIR instructions.
@@ -631,9 +641,11 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
+                    // Emit Param with the ABI slot (not the parameter index).
+                    // For struct parameters, this is the starting slot of the first field.
                     return Ok(air.add_inst(AirInst {
                         data: AirInstData::Param {
-                            index: param_info.index,
+                            index: param_info.abi_slot,
                         },
                         ty,
                         span: inst.span,
@@ -866,8 +878,8 @@ impl<'a> Sema<'a> {
                 }))
             }
 
-            InstData::ParamRef { index, name } => {
-                // Look up the parameter type from the params map
+            InstData::ParamRef { index: _, name } => {
+                // Look up the parameter type and ABI slot from the params map
                 let param_info = ctx.params.get(name).ok_or_else(|| {
                     let name_str = self.interner.get(*name);
                     CompileError::new(
@@ -876,9 +888,10 @@ impl<'a> Sema<'a> {
                     )
                 })?;
 
+                // Use the ABI slot (not the RIR index) for proper struct parameter handling
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Param {
-                        index: *index,
+                        index: param_info.abi_slot,
                     },
                     ty: param_info.ty,
                     span: inst.span,
@@ -1125,6 +1138,15 @@ impl<'a> Sema<'a> {
                 ErrorKind::UnknownType(type_name.to_string()),
                 span,
             ))
+        }
+    }
+
+    /// Get the number of ABI slots required for a type.
+    /// Scalar types (i32, bool) use 1 slot, structs use 1 slot per field.
+    fn abi_slot_count(&self, ty: Type) -> u32 {
+        match ty {
+            Type::I32 | Type::Bool | Type::Unit | Type::Error => 1,
+            Type::Struct(struct_id) => self.struct_defs[struct_id.0 as usize].field_count() as u32,
         }
     }
 

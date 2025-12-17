@@ -83,7 +83,7 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
 
     // Phase 5: Code generation (AIR to machine code) for ALL functions
     for func in &state.functions {
-        let codegen = CodeGen::new(&func.air, func.num_locals, func.num_params, &func.name);
+        let codegen = CodeGen::new(&func.air, func.num_locals, func.num_param_slots, &func.name);
         let machine_code = codegen.generate();
 
         // Build object file for this function
