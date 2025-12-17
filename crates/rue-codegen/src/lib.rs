@@ -20,13 +20,14 @@ pub use x86_64::{generate, MachineCode};
 // Re-export commonly used types for convenience
 pub use x86_64::{Operand, Reg, VReg, X86Inst, X86Mir};
 
-use rue_air::Air;
+use rue_air::{Air, StructDef};
 
 /// Code generator that wraps the x86-64 backend.
 ///
 /// This provides a similar API to the old CodeGen for compatibility.
 pub struct CodeGen<'a> {
     air: &'a Air,
+    struct_defs: &'a [StructDef],
     num_locals: u32,
     num_params: u32,
     fn_name: String,
@@ -34,9 +35,16 @@ pub struct CodeGen<'a> {
 
 impl<'a> CodeGen<'a> {
     /// Create a new code generator for the given AIR.
-    pub fn new(air: &'a Air, num_locals: u32, num_params: u32, fn_name: &str) -> Self {
+    pub fn new(
+        air: &'a Air,
+        struct_defs: &'a [StructDef],
+        num_locals: u32,
+        num_params: u32,
+        fn_name: &str,
+    ) -> Self {
         Self {
             air,
+            struct_defs,
             num_locals,
             num_params,
             fn_name: fn_name.to_string(),
@@ -45,7 +53,13 @@ impl<'a> CodeGen<'a> {
 
     /// Generate machine code from the AIR.
     pub fn generate(self) -> MachineCode {
-        x86_64::generate(self.air, self.num_locals, self.num_params, &self.fn_name)
+        x86_64::generate(
+            self.air,
+            self.struct_defs,
+            self.num_locals,
+            self.num_params,
+            &self.fn_name,
+        )
     }
 }
 
@@ -72,7 +86,7 @@ mod tests {
         });
 
         // Test the old-style API
-        let codegen = CodeGen::new(&air, 0, 0, "main");
+        let codegen = CodeGen::new(&air, &[], 0, 0, "main");
         let machine_code = codegen.generate();
 
         // Should generate working code
@@ -106,7 +120,7 @@ mod tests {
         });
 
         // Test the new direct API
-        let machine_code = generate(&air, 0, 0, "main");
+        let machine_code = generate(&air, &[], 0, 0, "main");
         assert!(!machine_code.code.is_empty());
     }
 }

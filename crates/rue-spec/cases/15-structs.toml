@@ -790,3 +790,360 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "type mismatch"
+
+# =============================================================================
+# Structs as Function Return Types
+# =============================================================================
+
+[[case]]
+name = "struct_return_single_field"
+description = "Return struct with single field from function"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn make_value() -> Value {
+    Value { n: 42 }
+}
+
+fn main() -> i32 {
+    let v = make_value();
+    v.n
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_two_fields"
+description = "Return struct with two fields from function"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn make_point() -> Point {
+    Point { x: 10, y: 32 }
+}
+
+fn main() -> i32 {
+    let p = make_point();
+    p.x + p.y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_multiple_fields"
+description = "Return struct with multiple fields from function"
+source = """
+struct Data {
+    a: i32,
+    b: i32,
+    c: i32,
+    d: i32,
+}
+
+fn make_data() -> Data {
+    Data { a: 10, b: 20, c: 7, d: 5 }
+}
+
+fn main() -> i32 {
+    let d = make_data();
+    d.a + d.b + d.c + d.d
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_with_params"
+description = "Return struct built from function parameters"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn make_point(x: i32, y: i32) -> Point {
+    Point { x: x, y: y }
+}
+
+fn main() -> i32 {
+    let p = make_point(10, 32);
+    p.x + p.y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_computed_fields"
+description = "Return struct with computed field values"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn double_point(x: i32, y: i32) -> Point {
+    Point { x: x * 2, y: y * 2 }
+}
+
+fn main() -> i32 {
+    let p = double_point(5, 16);
+    p.x + p.y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_use_multiple_fields"
+description = "Use multiple fields from returned struct"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn origin() -> Point {
+    Point { x: 0, y: 0 }
+}
+
+fn make_point() -> Point {
+    Point { x: 20, y: 22 }
+}
+
+fn main() -> i32 {
+    let o = origin();
+    let p = make_point();
+    o.x + o.y + p.x + p.y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_pass_to_function"
+description = "Pass returned struct to another function"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn make_point() -> Point {
+    Point { x: 10, y: 32 }
+}
+
+fn sum_point(p: Point) -> i32 {
+    p.x + p.y
+}
+
+fn main() -> i32 {
+    sum_point(make_point())
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_chain"
+description = "Chain struct return through multiple functions"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn make_value(n: i32) -> Value {
+    Value { n: n }
+}
+
+fn double_value(v: Value) -> Value {
+    make_value(v.n * 2)
+}
+
+fn main() -> i32 {
+    let v1 = make_value(11);
+    let v2 = double_value(v1);
+    v2.n + v1.n - 1
+}
+"""
+exit_code = 32
+
+[[case]]
+name = "struct_return_bool_field"
+description = "Return struct with bool field"
+source = """
+struct Flags {
+    active: bool,
+    count: i32,
+}
+
+fn make_flags(active: bool, count: i32) -> Flags {
+    Flags { active: active, count: count }
+}
+
+fn main() -> i32 {
+    let f = make_flags(true, 42);
+    if f.active { f.count } else { 0 }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_nested_call"
+description = "Struct return in nested function call"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn make_point(x: i32, y: i32) -> Point {
+    Point { x: x, y: y }
+}
+
+fn add_points(p1: Point, p2: Point) -> Point {
+    make_point(p1.x + p2.x, p1.y + p2.y)
+}
+
+fn main() -> i32 {
+    let p = add_points(make_point(5, 10), make_point(15, 12));
+    p.x + p.y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_conditional"
+description = "Return struct from conditional expression"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn choose_value(flag: bool) -> Value {
+    if flag {
+        Value { n: 42 }
+    } else {
+        Value { n: 0 }
+    }
+}
+
+fn main() -> i32 {
+    let v = choose_value(true);
+    v.n
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_from_param"
+description = "Return struct parameter directly"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn identity(p: Point) -> Point {
+    p
+}
+
+fn main() -> i32 {
+    let p = identity(Point { x: 10, y: 32 });
+    p.x + p.y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_modified_param"
+description = "Return modified struct from parameter"
+source = """
+struct Counter {
+    value: i32,
+}
+
+fn increment(c: Counter) -> Counter {
+    Counter { value: c.value + 1 }
+}
+
+fn main() -> i32 {
+    let c1 = Counter { value: 41 };
+    let c2 = increment(c1);
+    c2.value
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_return_recursive"
+description = "Return struct from recursive function (single-field to avoid branch multi-value issue)"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn countdown(v: Value) -> Value {
+    if v.n <= 0 {
+        v
+    } else {
+        countdown(Value { n: v.n - 1 })
+    }
+}
+
+fn main() -> i32 {
+    let result = countdown(Value { n: 42 });
+    result.n
+}
+"""
+exit_code = 0
+
+# =============================================================================
+# Struct Return Error Cases
+# =============================================================================
+
+[[case]]
+name = "struct_return_wrong_type"
+description = "Return wrong struct type from function"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+struct Size {
+    width: i32,
+    height: i32,
+}
+
+fn make_point() -> Point {
+    Size { width: 10, height: 20 }
+}
+
+fn main() -> i32 {
+    let p = make_point();
+    p.x
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "struct_return_i32_instead"
+description = "Return i32 where struct expected"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn make_value() -> Value {
+    42
+}
+
+fn main() -> i32 {
+    let v = make_value();
+    v.n
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"

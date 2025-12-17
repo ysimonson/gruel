@@ -22,7 +22,7 @@ pub use lower::Lower;
 pub use mir::{Operand, Reg, VReg, X86Mir, X86Inst};
 pub use regalloc::RegAlloc;
 
-use rue_air::Air;
+use rue_air::{Air, StructDef};
 
 /// A relocation emitted during code generation.
 ///
@@ -52,9 +52,15 @@ pub struct MachineCode {
 /// Generate machine code from AIR.
 ///
 /// This is the main entry point for x86-64 code generation.
-pub fn generate(air: &Air, num_locals: u32, num_params: u32, fn_name: &str) -> MachineCode {
+pub fn generate(
+    air: &Air,
+    struct_defs: &[StructDef],
+    num_locals: u32,
+    num_params: u32,
+    fn_name: &str,
+) -> MachineCode {
     // Phase 1: Lower AIR to X86Mir with virtual registers
-    let mir = Lower::new(air, num_locals, num_params, fn_name).lower();
+    let mir = Lower::new(air, struct_defs, num_locals, num_params, fn_name).lower();
 
     // Phase 2: Allocate physical registers (may add spill slots)
     // Spill slots go after both locals AND parameters to avoid conflicts

@@ -20,7 +20,7 @@ pub fn validate_runtime() -> Result<(), String> {
 }
 
 // Re-export commonly used types
-pub use rue_air::{Air, AnalyzedFunction, Sema, Type};
+pub use rue_air::{Air, AnalyzedFunction, Sema, StructDef, Type};
 pub use rue_codegen::{CodeGen, X86Mir};
 pub use rue_linker::{Archive, CodeRelocation, Linker, ObjectBuilder, ObjectFile};
 use rue_linker::RelocationType;
@@ -36,6 +36,7 @@ pub struct CompileState {
     pub interner: Interner,
     pub rir: Rir,
     pub functions: Vec<AnalyzedFunction>,
+    pub struct_defs: Vec<StructDef>,
 }
 
 /// Compile source code through all phases up to (but not including) codegen.
@@ -58,11 +59,13 @@ pub fn compile_to_air(source: &str) -> CompileResult<CompileState> {
     // Phase 4: Semantic analysis (RIR to AIR)
     let mut sema = Sema::new(&rir, &interner);
     let functions = sema.analyze_all()?;
+    let struct_defs = sema.struct_defs().to_vec();
 
     Ok(CompileState {
         interner,
         rir,
         functions,
+        struct_defs,
     })
 }
 
@@ -83,7 +86,13 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
 
     // Phase 5: Code generation (AIR to machine code) for ALL functions
     for func in &state.functions {
-        let codegen = CodeGen::new(&func.air, func.num_locals, func.num_param_slots, &func.name);
+        let codegen = CodeGen::new(
+            &func.air,
+            &state.struct_defs,
+            func.num_locals,
+            func.num_param_slots,
+            &func.name,
+        );
         let machine_code = codegen.generate();
 
         // Build object file for this function
@@ -130,8 +139,14 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
 }
 
 /// Generate X86Mir from AIR (for debugging/inspection).
-pub fn generate_mir(air: &Air, num_locals: u32, num_params: u32, fn_name: &str) -> X86Mir {
-    rue_codegen::x86_64::Lower::new(air, num_locals, num_params, fn_name).lower()
+pub fn generate_mir(
+    air: &Air,
+    struct_defs: &[StructDef],
+    num_locals: u32,
+    num_params: u32,
+    fn_name: &str,
+) -> X86Mir {
+    rue_codegen::x86_64::Lower::new(air, struct_defs, num_locals, num_params, fn_name).lower()
 }
 
 #[cfg(test)]

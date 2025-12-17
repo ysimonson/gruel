@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use rue_air::{Air, AirInstData, AirRef, StructId, Type};
+use rue_air::{Air, AirInstData, AirRef, StructDef, StructId, Type};
 
 use super::mir::{Operand, Reg, VReg, X86Inst, X86Mir};
 
@@ -23,6 +23,7 @@ struct LoopContext {
 /// AIR to X86Mir lowering.
 pub struct Lower<'a> {
     air: &'a Air,
+    struct_defs: &'a [StructDef],
     mir: X86Mir,
     /// Maps AIR instruction refs to the vreg holding their result.
     value_map: Vec<Option<VReg>>,
@@ -43,38 +44,29 @@ pub struct Lower<'a> {
     /// Maps StructInit AIR refs to their field vregs.
     /// Used by Alloc to store all struct fields to consecutive stack slots.
     struct_field_vregs: HashMap<AirRef, Vec<VReg>>,
-    /// Maps StructId to field count. Populated lazily from AIR instructions.
-    struct_field_counts: HashMap<StructId, u32>,
 }
 
 /// Argument passing registers per System V AMD64 ABI.
 const ARG_REGS: [Reg; 6] = [Reg::Rdi, Reg::Rsi, Reg::Rdx, Reg::Rcx, Reg::R8, Reg::R9];
 
+/// Return value registers per System V AMD64 ABI.
+/// Small structs (≤16 bytes) are returned in RAX and RDX.
+/// We extend this to use more registers for larger structs using the same
+/// pattern as arguments (for simplicity in early implementation).
+const RET_REGS: [Reg; 6] = [Reg::Rax, Reg::Rdx, Reg::Rcx, Reg::R8, Reg::R9, Reg::R10];
+
 impl<'a> Lower<'a> {
     /// Create a new lowering pass.
-    pub fn new(air: &'a Air, num_locals: u32, num_params: u32, fn_name: &str) -> Self {
-        // Collect struct field counts from StructInit and FieldGet instructions in AIR
-        let mut struct_field_counts: HashMap<StructId, u32> = HashMap::new();
-        for (_, inst) in air.iter() {
-            match &inst.data {
-                AirInstData::StructInit { struct_id, fields } => {
-                    struct_field_counts.insert(*struct_id, fields.len() as u32);
-                }
-                AirInstData::FieldGet { struct_id, field_index, .. } => {
-                    // Update if we see a higher field index
-                    let entry = struct_field_counts.entry(*struct_id).or_insert(0);
-                    *entry = (*entry).max(*field_index + 1);
-                }
-                AirInstData::FieldSet { struct_id, field_index, .. } => {
-                    let entry = struct_field_counts.entry(*struct_id).or_insert(0);
-                    *entry = (*entry).max(*field_index + 1);
-                }
-                _ => {}
-            }
-        }
-
+    pub fn new(
+        air: &'a Air,
+        struct_defs: &'a [StructDef],
+        num_locals: u32,
+        num_params: u32,
+        fn_name: &str,
+    ) -> Self {
         Self {
             air,
+            struct_defs,
             mir: X86Mir::new(),
             value_map: vec![None; air.len()],
             label_counter: 0,
@@ -84,13 +76,15 @@ impl<'a> Lower<'a> {
             fn_name: fn_name.to_string(),
             loop_stack: Vec::new(),
             struct_field_vregs: HashMap::new(),
-            struct_field_counts,
         }
     }
 
     /// Get the number of fields for a struct type.
     fn struct_field_count(&self, struct_id: StructId) -> u32 {
-        *self.struct_field_counts.get(&struct_id).unwrap_or(&1)
+        self.struct_defs
+            .get(struct_id.0 as usize)
+            .map(|def| def.field_count() as u32)
+            .unwrap_or(1)
     }
 
     /// Calculate the stack offset for a local variable slot.
@@ -339,14 +333,14 @@ impl<'a> Lower<'a> {
             }
 
             AirInstData::Alloc { slot, init } => {
-                // Check if the init is a StructInit - if so, store all fields
+                // Check if the init is a struct type - if so, store all fields
                 // to consecutive slots instead of just the first field.
-                let init_data = self.air.get(*init).data.clone();
-                if let AirInstData::StructInit { .. } = &init_data {
-                    // Lower the StructInit first to get all field vregs
+                let init_type = self.air.get(*init).ty;
+                if matches!(init_type, Type::Struct(_)) {
+                    // Lower the init first to get all field vregs
                     self.demand_lower(*init);
 
-                    // Get the field vregs that were saved by StructInit
+                    // Get the field vregs that were saved by StructInit or Call
                     if let Some(field_vregs) = self.struct_field_vregs.get(init).cloned() {
                         // Store each field to consecutive slots
                         for (i, field_vreg) in field_vregs.iter().enumerate() {
@@ -361,7 +355,7 @@ impl<'a> Lower<'a> {
                     } else {
                         // Fallback: just use the single vreg (shouldn't happen)
                         let init_vreg = self.value_map[init.as_u32() as usize]
-                            .expect("StructInit should be lowered");
+                            .expect("struct init should be lowered");
                         let offset = self.local_offset(*slot);
                         self.mir.push(X86Inst::MovMR {
                             base: Reg::Rbp,
@@ -815,11 +809,15 @@ impl<'a> Lower<'a> {
             }
 
             AirInstData::Ret(value_ref) => {
-                // Get the vreg holding the return value
-                let value_vreg = self.get_vreg(*value_ref);
+                // Check if we're returning a struct
+                let return_type = self.air.return_type();
+                let is_struct_return = matches!(return_type, Type::Struct(_));
 
                 if self.fn_name == "main" {
                     // Main function: call __rue_exit with the return value
+                    // Get the vreg holding the return value (for main, it's always i32)
+                    let value_vreg = self.get_vreg(*value_ref);
+
                     // Move return value to rdi (first argument per System V AMD64 ABI).
                     self.mir.push(X86Inst::MovRR {
                         dst: Operand::Physical(Reg::Rdi),
@@ -836,8 +834,117 @@ impl<'a> Lower<'a> {
                     self.mir.push(X86Inst::CallRel {
                         symbol: "__rue_exit".to_string(),
                     });
+                } else if is_struct_return {
+                    // Non-main function returning a struct: return all fields in registers
+                    let struct_id = match return_type {
+                        Type::Struct(sid) => sid,
+                        _ => unreachable!(),
+                    };
+                    let field_count = self.struct_field_count(struct_id);
+
+                    // Get field values based on what kind of value we're returning
+                    let value_data = self.air.get(*value_ref).data.clone();
+                    match &value_data {
+                        AirInstData::StructInit { .. } => {
+                            // Returning a struct literal - get field vregs from struct_field_vregs
+                            self.demand_lower(*value_ref);
+                            if let Some(field_vregs) = self.struct_field_vregs.get(value_ref).cloned() {
+                                // Move each field to the corresponding return register
+                                for (i, field_vreg) in field_vregs.iter().enumerate() {
+                                    if i < RET_REGS.len() {
+                                        self.mir.push(X86Inst::MovRR {
+                                            dst: Operand::Physical(RET_REGS[i]),
+                                            src: Operand::Virtual(*field_vreg),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        AirInstData::Param { index } => {
+                            // Returning a struct parameter - load each field from param slots
+                            for field_idx in 0..field_count {
+                                let param_slot = self.num_locals + index + field_idx;
+                                let offset = self.local_offset(param_slot);
+                                // Load field to return register
+                                self.mir.push(X86Inst::MovRM {
+                                    dst: Operand::Physical(RET_REGS[field_idx as usize]),
+                                    base: Reg::Rbp,
+                                    offset,
+                                });
+                            }
+                        }
+                        AirInstData::Load { slot } => {
+                            // Returning a local struct variable - load each field from slots
+                            for field_idx in 0..field_count {
+                                let actual_slot = slot + field_idx;
+                                let offset = self.local_offset(actual_slot);
+                                self.mir.push(X86Inst::MovRM {
+                                    dst: Operand::Physical(RET_REGS[field_idx as usize]),
+                                    base: Reg::Rbp,
+                                    offset,
+                                });
+                            }
+                        }
+                        AirInstData::Call { .. } => {
+                            // Returning result of another function call that returns a struct
+                            // The call will have already set up struct_field_vregs for us
+                            self.demand_lower(*value_ref);
+                            if let Some(field_vregs) = self.struct_field_vregs.get(value_ref).cloned() {
+                                for (i, field_vreg) in field_vregs.iter().enumerate() {
+                                    if i < RET_REGS.len() {
+                                        self.mir.push(X86Inst::MovRR {
+                                            dst: Operand::Physical(RET_REGS[i]),
+                                            src: Operand::Virtual(*field_vreg),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        AirInstData::Branch { .. } => {
+                            // Returning from conditional expression
+                            // This case is tricky - we need to handle it differently
+                            // For now, just lower the branch and use its result
+                            // (this works for single-field structs but needs more work for multi-field)
+                            self.demand_lower(*value_ref);
+                            if let Some(field_vregs) = self.struct_field_vregs.get(value_ref).cloned() {
+                                for (i, field_vreg) in field_vregs.iter().enumerate() {
+                                    if i < RET_REGS.len() {
+                                        self.mir.push(X86Inst::MovRR {
+                                            dst: Operand::Physical(RET_REGS[i]),
+                                            src: Operand::Virtual(*field_vreg),
+                                        });
+                                    }
+                                }
+                            } else {
+                                // Fallback: just use the single vreg (first field only)
+                                let value_vreg = self.value_map[value_ref.as_u32() as usize]
+                                    .expect("branch should be lowered");
+                                self.mir.push(X86Inst::MovRR {
+                                    dst: Operand::Physical(Reg::Rax),
+                                    src: Operand::Virtual(value_vreg),
+                                });
+                            }
+                        }
+                        _ => {
+                            // Fallback for other cases - just use single vreg
+                            let value_vreg = self.get_vreg(*value_ref);
+                            self.mir.push(X86Inst::MovRR {
+                                dst: Operand::Physical(Reg::Rax),
+                                src: Operand::Virtual(value_vreg),
+                            });
+                        }
+                    }
+
+                    // Emit epilogue to restore stack frame
+                    if self.has_frame {
+                        self.emit_epilogue();
+                    }
+
+                    // Return to caller
+                    self.mir.push(X86Inst::Ret);
                 } else {
-                    // Non-main function: return normally with value in RAX
+                    // Non-main function returning a scalar: return normally with value in RAX
+                    let value_vreg = self.get_vreg(*value_ref);
                     self.mir.push(X86Inst::MovRR {
                         dst: Operand::Physical(Reg::Rax),
                         src: Operand::Virtual(value_vreg),
@@ -982,6 +1089,17 @@ impl<'a> Lower<'a> {
                                         flattened_vregs.push(self.get_vreg(*arg));
                                     }
                                 }
+                                AirInstData::Call { .. } => {
+                                    // Struct returned from another function call
+                                    // The call will have set up struct_field_vregs for us
+                                    self.demand_lower(*arg);
+                                    if let Some(field_vregs) = self.struct_field_vregs.get(arg) {
+                                        flattened_vregs.extend(field_vregs.iter().copied());
+                                    } else {
+                                        // Fallback: just use the single vreg
+                                        flattened_vregs.push(self.get_vreg(*arg));
+                                    }
+                                }
                                 _ => {
                                     // Other struct expression: just use single vreg (may not work correctly)
                                     flattened_vregs.push(self.get_vreg(*arg));
@@ -1046,11 +1164,41 @@ impl<'a> Lower<'a> {
                     });
                 }
 
-                // Return value is in RAX - move to result vreg
-                self.mir.push(X86Inst::MovRR {
-                    dst: Operand::Virtual(result_vreg),
-                    src: Operand::Physical(Reg::Rax),
-                });
+                // Check if the call returns a struct
+                let call_result_type = self.air.get(air_ref).ty;
+                if let Type::Struct(struct_id) = call_result_type {
+                    // Struct return: receive all fields from return registers
+                    let field_count = self.struct_field_count(struct_id);
+
+                    let mut field_vregs = Vec::new();
+                    for field_idx in 0..field_count {
+                        let field_vreg = self.mir.alloc_vreg();
+                        if (field_idx as usize) < RET_REGS.len() {
+                            self.mir.push(X86Inst::MovRR {
+                                dst: Operand::Virtual(field_vreg),
+                                src: Operand::Physical(RET_REGS[field_idx as usize]),
+                            });
+                        }
+                        field_vregs.push(field_vreg);
+                    }
+
+                    // Save field vregs for Alloc to use
+                    self.struct_field_vregs.insert(air_ref, field_vregs.clone());
+
+                    // Use first field as representative vreg
+                    if let Some(&first_vreg) = field_vregs.first() {
+                        self.mir.push(X86Inst::MovRR {
+                            dst: Operand::Virtual(result_vreg),
+                            src: Operand::Virtual(first_vreg),
+                        });
+                    }
+                } else {
+                    // Scalar return: value is in RAX - move to result vreg
+                    self.mir.push(X86Inst::MovRR {
+                        dst: Operand::Virtual(result_vreg),
+                        src: Operand::Physical(Reg::Rax),
+                    });
+                }
             }
 
             AirInstData::StructInit { struct_id: _, fields } => {
@@ -1306,7 +1454,7 @@ mod tests {
             span: Span::new(0, 2),
         });
 
-        let mir = Lower::new(&air, 0, 0, "main").lower();
+        let mir = Lower::new(&air, &[], 0, 0, "main").lower();
 
         // Should have 3 instructions:
         // 1. mov v0, 42
@@ -1349,7 +1497,7 @@ mod tests {
             span: Span::new(0, 2),
         });
 
-        let mir = Lower::new(&air, 0, 0, "main").lower();
+        let mir = Lower::new(&air, &[], 0, 0, "main").lower();
 
         // First instruction should be 64-bit move
         match &mir.instructions()[0] {

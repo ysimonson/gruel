@@ -105,7 +105,13 @@ fn main() {
                     }
                     DumpMode::Mir => {
                         for func in &state.functions {
-                            let mir = generate_mir(&func.air, func.num_locals, func.num_param_slots, &func.name);
+                            let mir = generate_mir(
+                                &func.air,
+                                &state.struct_defs,
+                                func.num_locals,
+                                func.num_param_slots,
+                                &func.name,
+                            );
                             println!("function {}:", func.name);
                             println!("{}", mir);
                         }
