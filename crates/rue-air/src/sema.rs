@@ -3,11 +3,11 @@
 //! Sema performs type checking and converts untyped RIR to typed AIR.
 //! This is analogous to Zig's Sema phase.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::inst::{Air, AirInst, AirInstData, AirRef};
 use crate::types::{StructDef, StructField, StructId, Type};
-use rue_error::{CompileError, CompileResult, ErrorKind};
+use rue_error::{CompileError, CompileResult, CompileWarning, ErrorKind, WarningKind};
 use rue_intern::{Interner, Symbol};
 use rue_rir::{InstData, InstRef, Rir};
 use rue_span::Span;
@@ -34,6 +34,8 @@ struct LocalVar {
     ty: Type,
     /// Whether the variable is mutable
     is_mut: bool,
+    /// Span of the variable declaration (for unused variable warnings)
+    span: Span,
 }
 
 /// Information about a function parameter.
@@ -60,6 +62,8 @@ struct AnalysisContext<'a> {
     next_slot: u32,
     /// How many loops we're nested inside (for break/continue validation)
     loop_depth: u32,
+    /// Local variables that have been read (for unused variable detection)
+    used_locals: HashSet<Symbol>,
 }
 
 /// Information about a function.
@@ -81,6 +85,8 @@ pub struct Sema<'a> {
     structs: HashMap<Symbol, StructId>,
     /// Struct definitions indexed by StructId
     struct_defs: Vec<StructDef>,
+    /// Warnings collected during analysis
+    warnings: Vec<CompileWarning>,
 }
 
 impl<'a> Sema<'a> {
@@ -92,6 +98,47 @@ impl<'a> Sema<'a> {
             functions: HashMap::new(),
             structs: HashMap::new(),
             struct_defs: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    /// Take the collected warnings, leaving an empty vector.
+    pub fn take_warnings(&mut self) -> Vec<CompileWarning> {
+        std::mem::take(&mut self.warnings)
+    }
+
+    /// Check for unused local variables in the current scope.
+    /// `saved_locals` contains the locals from the outer scope before this scope started.
+    /// We check variables that are in `ctx.locals` but not in `saved_locals` (i.e., new in this scope).
+    fn check_unused_locals_in_scope(
+        &mut self,
+        saved_locals: &HashMap<Symbol, LocalVar>,
+        ctx: &AnalysisContext,
+    ) {
+        for (symbol, local) in &ctx.locals {
+            // Skip if this variable existed in the outer scope
+            if saved_locals.contains_key(symbol) {
+                continue;
+            }
+
+            // Skip if variable was used
+            if ctx.used_locals.contains(symbol) {
+                continue;
+            }
+
+            // Get variable name
+            let name = self.interner.get(*symbol);
+
+            // Skip variables starting with underscore (convention for intentionally unused)
+            if name.starts_with('_') {
+                continue;
+            }
+
+            // Emit warning
+            self.warnings.push(CompileWarning::new(
+                WarningKind::UnusedVariable(name.to_string()),
+                local.span,
+            ));
         }
     }
 
@@ -203,7 +250,7 @@ impl<'a> Sema<'a> {
     /// Analyze a single function, producing AIR.
     /// Returns (air, num_locals, num_param_slots).
     fn analyze_function(
-        &self,
+        &mut self,
         return_type: Type,
         params: &[(Symbol, Type)],
         body: InstRef,
@@ -233,6 +280,7 @@ impl<'a> Sema<'a> {
             params: &param_map,
             next_slot: 0,
             loop_depth: 0,
+            used_locals: HashSet::new(),
         };
 
         // Analyze the body expression
@@ -250,7 +298,7 @@ impl<'a> Sema<'a> {
 
     /// Analyze an RIR instruction, producing AIR instructions.
     fn analyze_inst(
-        &self,
+        &mut self,
         air: &mut Air,
         inst_ref: InstRef,
         expected_type: Type,
@@ -641,6 +689,7 @@ impl<'a> Sema<'a> {
                         slot,
                         ty: var_type,
                         is_mut: *is_mut,
+                        span: inst.span,
                     },
                 );
 
@@ -690,6 +739,9 @@ impl<'a> Sema<'a> {
 
                 let ty = local.ty;
                 let slot = local.slot;
+
+                // Mark variable as used
+                ctx.used_locals.insert(*name);
 
                 // Type check - allow Unit context (value is discarded)
                 if ty != expected_type && expected_type != Type::Unit && !expected_type.is_error() {
@@ -831,6 +883,9 @@ impl<'a> Sema<'a> {
                     }
                 }
 
+                // Check for unused variables before restoring scope
+                self.check_unused_locals_in_scope(&saved_locals, ctx);
+
                 // Restore locals to remove block-scoped variables.
                 // Note: We don't restore next_slot, so slots are not reused.
                 // This is a future optimization opportunity.
@@ -877,14 +932,16 @@ impl<'a> Sema<'a> {
                     ));
                 }
 
+                // Clone the data we need before mutable borrow
+                let param_types = fn_info.param_types.clone();
+                let return_type = fn_info.return_type;
+
                 // Analyze arguments with expected parameter types
                 let mut arg_refs = Vec::new();
-                for (arg, expected_param_type) in args.iter().zip(&fn_info.param_types) {
+                for (arg, expected_param_type) in args.iter().zip(&param_types) {
                     let arg_ref = self.analyze_inst(air, *arg, *expected_param_type, ctx)?;
                     arg_refs.push(arg_ref);
                 }
-
-                let return_type = fn_info.return_type;
 
                 // Check that return type matches expected type (if we have an expectation)
                 if expected_type != Type::Unit && return_type != expected_type && !return_type.is_error() {
@@ -942,7 +999,8 @@ impl<'a> Sema<'a> {
                     )
                 })?;
 
-                let struct_def = &self.struct_defs[struct_id.0 as usize];
+                // Clone struct def data before mutable borrow
+                let struct_def = self.struct_defs[struct_id.0 as usize].clone();
                 let struct_type = Type::Struct(struct_id);
 
                 // Type check: verify expected type matches

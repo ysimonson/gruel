@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use annotate_snippets::{Level, Renderer, Snippet};
-use rue_compiler::{compile, compile_to_air, generate_mir, CompileError};
+use rue_compiler::{compile, compile_to_air, generate_mir, CompileError, CompileWarning};
 use rue_rir::RirPrinter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,9 +129,14 @@ fn main() {
 
     // Normal compilation
     match compile(&source) {
-        Ok(elf) => {
+        Ok(output) => {
+            // Print warnings first
+            for warning in &output.warnings {
+                print_warning(warning, &source, &options.source_path);
+            }
+
             // Write output
-            if let Err(e) = fs::write(&options.output_path, &elf) {
+            if let Err(e) = fs::write(&options.output_path, &output.elf) {
                 eprintln!("Error writing {}: {}", options.output_path, e);
                 std::process::exit(1);
             }
@@ -153,7 +158,7 @@ fn main() {
                     eprintln!(
                         "Warning: could not read file metadata for {}: {}",
                         options.output_path, e
-                    );
+                        );
                 }
             }
 
@@ -182,6 +187,27 @@ fn print_error(error: &CompileError, source: &str, source_path: &str) {
             .origin(source_path)
             .fold(true)
             .annotation(Level::Error.span(span.start as usize..span.end as usize)),
+    );
+
+    eprintln!("{}", renderer.render(report));
+}
+
+fn print_warning(warning: &CompileWarning, source: &str, source_path: &str) {
+    let message = warning.to_string();
+    let renderer = Renderer::plain();
+
+    // For warnings without a span, just print the message
+    let Some(span) = warning.span() else {
+        let report = Level::Warning.title(&message);
+        eprintln!("{}", renderer.render(report));
+        return;
+    };
+
+    let report = Level::Warning.title(&message).snippet(
+        Snippet::source(source)
+            .origin(source_path)
+            .fold(true)
+            .annotation(Level::Warning.span(span.start as usize..span.end as usize)),
     );
 
     eprintln!("{}", renderer.render(report));

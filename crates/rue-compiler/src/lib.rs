@@ -24,7 +24,7 @@ pub use rue_air::{Air, AnalyzedFunction, Sema, StructDef, Type};
 pub use rue_codegen::{CodeGen, X86Mir};
 pub use rue_linker::{Archive, CodeRelocation, Linker, ObjectBuilder, ObjectFile};
 use rue_linker::RelocationType;
-pub use rue_error::{CompileError, CompileResult, ErrorKind};
+pub use rue_error::{CompileError, CompileResult, CompileWarning, ErrorKind, WarningKind};
 pub use rue_intern::{Interner, Symbol};
 pub use rue_lexer::{Lexer, Token, TokenKind};
 pub use rue_parser::{Ast, Expr, Function, Parser};
@@ -37,6 +37,8 @@ pub struct CompileState {
     pub rir: Rir,
     pub functions: Vec<AnalyzedFunction>,
     pub struct_defs: Vec<StructDef>,
+    /// Warnings generated during compilation.
+    pub warnings: Vec<CompileWarning>,
 }
 
 /// Compile source code through all phases up to (but not including) codegen.
@@ -60,19 +62,30 @@ pub fn compile_to_air(source: &str) -> CompileResult<CompileState> {
     let mut sema = Sema::new(&rir, &interner);
     let functions = sema.analyze_all()?;
     let struct_defs = sema.struct_defs().to_vec();
+    let warnings = sema.take_warnings();
 
     Ok(CompileState {
         interner,
         rir,
         functions,
         struct_defs,
+        warnings,
     })
+}
+
+/// Output from successful compilation.
+pub struct CompileOutput {
+    /// The compiled ELF binary.
+    pub elf: Vec<u8>,
+    /// Warnings generated during compilation.
+    pub warnings: Vec<CompileWarning>,
 }
 
 /// Compile source code to an ELF binary.
 ///
 /// This is the main entry point for compilation.
-pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
+/// Returns the ELF binary along with any warnings generated during compilation.
+pub fn compile(source: &str) -> CompileResult<CompileOutput> {
     let state = compile_to_air(source)?;
 
     // Check for main function
@@ -136,7 +149,10 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
         .link("_start")
         .map_err(|e| CompileError::without_span(ErrorKind::LinkError(e.to_string())))?;
 
-    Ok(elf)
+    Ok(CompileOutput {
+        elf,
+        warnings: state.warnings,
+    })
 }
 
 /// Generate X86Mir from AIR (for debugging/inspection).
@@ -163,14 +179,34 @@ mod tests {
 
     #[test]
     fn test_compile_simple() {
-        let elf = compile("fn main() -> i32 { 42 }").unwrap();
+        let output = compile("fn main() -> i32 { 42 }").unwrap();
         // Should produce a valid ELF
-        assert_eq!(&elf[0..4], &[0x7F, b'E', b'L', b'F']);
+        assert_eq!(&output.elf[0..4], &[0x7F, b'E', b'L', b'F']);
     }
 
     #[test]
     fn test_compile_no_main() {
         let result = compile("fn foo() -> i32 { 42 }");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_unused_variable_warning() {
+        let output = compile("fn main() -> i32 { let x = 42; 0 }").unwrap();
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].to_string().contains("unused variable"));
+        assert!(output.warnings[0].to_string().contains("'x'"));
+    }
+
+    #[test]
+    fn test_underscore_prefix_no_warning() {
+        let output = compile("fn main() -> i32 { let _x = 42; 0 }").unwrap();
+        assert_eq!(output.warnings.len(), 0);
+    }
+
+    #[test]
+    fn test_used_variable_no_warning() {
+        let output = compile("fn main() -> i32 { let x = 42; x }").unwrap();
+        assert_eq!(output.warnings.len(), 0);
     }
 }

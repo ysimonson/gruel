@@ -49,6 +49,15 @@ struct Case {
     runtime_exit_code: Option<i32>,
     #[serde(default)]
     skip: bool,
+    /// Substrings that should appear in warning messages
+    #[serde(default)]
+    warning_contains: Option<Vec<String>>,
+    /// Expected number of warnings
+    #[serde(default)]
+    expected_warning_count: Option<usize>,
+    /// If true, verify no warnings were emitted
+    #[serde(default)]
+    no_warnings: bool,
 }
 
 /// A spec file containing a section and its cases.
@@ -270,6 +279,45 @@ fn run_test_case(case: &Case, rue_binary: &Path) -> Result<(), Failed> {
             stderr
         )
         .into());
+    }
+
+    // Check warning-related assertions
+    let compile_stderr = stderr.to_string();
+
+    // Check if no warnings expected
+    if case.no_warnings {
+        if compile_stderr.contains("warning:") {
+            return Err(format!(
+                "Expected no warnings but got:\n{}\n  source: {}",
+                compile_stderr, case.source
+            )
+            .into());
+        }
+    }
+
+    // Check expected warning count
+    if let Some(expected_count) = case.expected_warning_count {
+        let actual_count = compile_stderr.matches("warning:").count();
+        if actual_count != expected_count {
+            return Err(format!(
+                "Warning count mismatch:\n  expected: {}\n  actual: {}\n  stderr: {}\n  source: {}",
+                expected_count, actual_count, compile_stderr, case.source
+            )
+            .into());
+        }
+    }
+
+    // Check that warnings contain expected substrings
+    if let Some(ref expected_warnings) = case.warning_contains {
+        for expected in expected_warnings {
+            if !compile_stderr.contains(expected) {
+                return Err(format!(
+                    "Warning message mismatch:\n  expected to contain: {}\n  actual stderr: {}\n  source: {}",
+                    expected, compile_stderr, case.source
+                )
+                .into());
+            }
+        }
     }
 
     // Run the compiled binary

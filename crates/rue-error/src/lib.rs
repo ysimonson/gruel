@@ -216,6 +216,68 @@ impl fmt::Display for ErrorKind {
 /// Result type for compilation operations.
 pub type CompileResult<T> = Result<T, CompileError>;
 
+/// The kind of compilation warning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WarningKind {
+    /// A variable was declared but never used.
+    UnusedVariable(String),
+    /// A function was declared but never called.
+    UnusedFunction(String),
+}
+
+/// A compilation warning with optional source location information.
+///
+/// Warnings don't stop compilation but indicate potential issues in the code.
+#[derive(Debug, Clone)]
+pub struct CompileWarning {
+    pub kind: WarningKind,
+    span: Option<Span>,
+}
+
+impl CompileWarning {
+    /// Create a new warning with the given kind and span.
+    #[inline]
+    pub fn new(kind: WarningKind, span: Span) -> Self {
+        Self {
+            kind,
+            span: Some(span),
+        }
+    }
+
+    /// Create a warning without a source location.
+    #[inline]
+    pub fn without_span(kind: WarningKind) -> Self {
+        Self { kind, span: None }
+    }
+
+    /// Returns true if this warning has source location information.
+    #[inline]
+    pub fn has_span(&self) -> bool {
+        self.span.is_some()
+    }
+
+    /// Get the span, if present.
+    #[inline]
+    pub fn span(&self) -> Option<Span> {
+        self.span
+    }
+}
+
+impl fmt::Display for CompileWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)
+    }
+}
+
+impl fmt::Display for WarningKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WarningKind::UnusedVariable(name) => write!(f, "unused variable '{}'", name),
+            WarningKind::UnusedFunction(name) => write!(f, "unused function '{}'", name),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
