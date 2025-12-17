@@ -134,9 +134,9 @@ function main:
     mov v2, 2
     mov v0, v1
     add v0, v2
-    jno .Ladd_ok_0
+    jno .Lmain_add_ok_0
     call __rue_overflow
-    .Ladd_ok_0:
+    .Lmain_add_ok_0:
     mov rdi, v0
     call __rue_exit
 """
@@ -175,9 +175,9 @@ function main:
     mov v2, 3
     mov v0, v1
     sub v0, v2
-    jno .Lsub_ok_0
+    jno .Lmain_sub_ok_0
     call __rue_overflow
-    .Lsub_ok_0:
+    .Lmain_sub_ok_0:
     mov rdi, v0
     call __rue_exit
 """
@@ -216,9 +216,9 @@ function main:
     mov v2, 4
     mov v0, v1
     imul v0, v2
-    jno .Lmul_ok_0
+    jno .Lmain_mul_ok_0
     call __rue_overflow
-    .Lmul_ok_0:
+    .Lmain_mul_ok_0:
     mov rdi, v0
     call __rue_exit
 """
@@ -256,9 +256,9 @@ function main:
     mov v1, 10
     mov v2, 3
     test v2, v2
-    jnz .Ldiv_ok_0
+    jnz .Lmain_div_ok_0
     call __rue_div_by_zero
-    .Ldiv_ok_0:
+    .Lmain_div_ok_0:
     mov rax, v1
     cdq
     idiv v2
@@ -300,9 +300,9 @@ function main:
     mov v1, 10
     mov v2, 3
     test v2, v2
-    jnz .Lmod_ok_0
+    jnz .Lmain_mod_ok_0
     call __rue_div_by_zero
-    .Lmod_ok_0:
+    .Lmain_mod_ok_0:
     mov rax, v1
     cdq
     idiv v2
@@ -404,9 +404,9 @@ function main:
     mov v1, 42
     mov v0, v1
     neg v0
-    jno .Lneg_ok_0
+    jno .Lmain_neg_ok_0
     call __rue_overflow
-    .Lneg_ok_0:
+    .Lmain_neg_ok_0:
     mov rdi, v0
     call __rue_exit
 """

@@ -73,11 +73,12 @@ impl<'a> Lower<'a> {
 
     /// Generate a unique label name.
     ///
-    /// TODO: Labels are currently unique within a single function but could collide
-    /// across multiple functions in the same object file. When we add multi-function
-    /// support, we'll need function-scoped or globally unique label generation.
+    /// Labels are globally unique by including the function name and a counter.
+    /// Format: .L{fn_name}_{prefix}_{counter}
+    /// This ensures labels don't collide across multiple functions in the same
+    /// object file.
     fn new_label(&mut self, prefix: &str) -> String {
-        let label = format!(".L{}_{}", prefix, self.label_counter);
+        let label = format!(".L{}_{}_{}", self.fn_name, prefix, self.label_counter);
         self.label_counter += 1;
         label
     }
