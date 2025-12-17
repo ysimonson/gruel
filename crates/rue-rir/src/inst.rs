@@ -236,6 +236,41 @@ pub enum InstData {
         /// Value to store
         value: InstRef,
     },
+
+    // Struct operations
+    /// Struct type declaration
+    StructDecl {
+        /// Struct name
+        name: Symbol,
+        /// Fields: [(field_name, field_type), ...]
+        fields: Vec<(Symbol, Symbol)>,
+    },
+
+    /// Struct literal: creates a new struct instance
+    StructInit {
+        /// Struct type name
+        type_name: Symbol,
+        /// Field initializers: [(field_name, value_inst), ...]
+        fields: Vec<(Symbol, InstRef)>,
+    },
+
+    /// Field access: reads a field from a struct
+    FieldGet {
+        /// Base struct value
+        base: InstRef,
+        /// Field name
+        field: Symbol,
+    },
+
+    /// Field assignment: writes a value to a struct field
+    FieldSet {
+        /// Base struct value
+        base: InstRef,
+        /// Field name
+        field: Symbol,
+        /// Value to store
+        value: InstRef,
+    },
 }
 
 impl fmt::Display for InstRef {
@@ -379,6 +414,46 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::Assign { name, value } => {
                     let name_str = self.interner.get(*name);
                     out.push_str(&format!("assign {} = {}\n", name_str, value));
+                }
+                InstData::StructDecl { name, fields } => {
+                    let name_str = self.interner.get(*name);
+                    let fields_str: Vec<String> = fields
+                        .iter()
+                        .map(|(fname, ftype)| {
+                            format!(
+                                "{}: {}",
+                                self.interner.get(*fname),
+                                self.interner.get(*ftype)
+                            )
+                        })
+                        .collect();
+                    out.push_str(&format!(
+                        "struct {} {{ {} }}\n",
+                        name_str,
+                        fields_str.join(", ")
+                    ));
+                }
+                InstData::StructInit { type_name, fields } => {
+                    let type_str = self.interner.get(*type_name);
+                    let fields_str: Vec<String> = fields
+                        .iter()
+                        .map(|(fname, value)| {
+                            format!("{}: {}", self.interner.get(*fname), value)
+                        })
+                        .collect();
+                    out.push_str(&format!(
+                        "struct_init {} {{ {} }}\n",
+                        type_str,
+                        fields_str.join(", ")
+                    ));
+                }
+                InstData::FieldGet { base, field } => {
+                    let field_str = self.interner.get(*field);
+                    out.push_str(&format!("field_get {}.{}\n", base, field_str));
+                }
+                InstData::FieldSet { base, field, value } => {
+                    let field_str = self.interner.get(*field);
+                    out.push_str(&format!("field_set {}.{} = {}\n", base, field_str, value));
                 }
             }
         }

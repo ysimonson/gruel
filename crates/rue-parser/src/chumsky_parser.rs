@@ -4,9 +4,10 @@
 //! with Pratt parsing for expression precedence.
 
 use crate::ast::{
-    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallExpr,
-    ContinueExpr, Expr, Function, Ident, IfExpr, IntLit, Item, LetStatement, Param, ParenExpr,
-    Statement, UnaryExpr, UnaryOp, WhileExpr,
+    AssignStatement, AssignTarget, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr,
+    CallExpr, ContinueExpr, Expr, FieldDecl, FieldExpr, FieldInit, Function, Ident, IfExpr, IntLit,
+    Item, LetStatement, Param, ParenExpr, Statement, StructDecl, StructLitExpr, UnaryExpr, UnaryOp,
+    WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -48,6 +49,34 @@ where
         })
 }
 
+/// Parser for struct field declarations: name: type
+fn field_decl_parser<'src, I>(
+) -> impl Parser<'src, I, FieldDecl, extra::Err<Rich<'src, TokenKind>>> + Clone
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    ident_parser()
+        .then_ignore(just(TokenKind::Colon))
+        .then(ident_parser())
+        .map_with(|(name, ty), e| FieldDecl {
+            name,
+            ty,
+            span: to_rue_span(e.span()),
+        })
+}
+
+/// Parser for comma-separated struct field declarations
+fn field_decls_parser<'src, I>(
+) -> impl Parser<'src, I, Vec<FieldDecl>, extra::Err<Rich<'src, TokenKind>>> + Clone
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    field_decl_parser()
+        .separated_by(just(TokenKind::Comma))
+        .allow_trailing()
+        .collect()
+}
+
 /// Parser for comma-separated parameters
 fn params_parser<'src, I>(
 ) -> impl Parser<'src, I, Vec<Param>, extra::Err<Rich<'src, TokenKind>>> + Clone
@@ -67,6 +96,36 @@ where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
     expr.separated_by(just(TokenKind::Comma))
+        .collect()
+}
+
+/// Parser for struct field initializers: name: expr
+fn field_init_parser<'src, I>(
+    expr: impl Parser<'src, I, Expr, extra::Err<Rich<'src, TokenKind>>> + Clone,
+) -> impl Parser<'src, I, FieldInit, extra::Err<Rich<'src, TokenKind>>> + Clone
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    ident_parser()
+        .then_ignore(just(TokenKind::Colon))
+        .then(expr)
+        .map_with(|(name, value), e| FieldInit {
+            name,
+            value: Box::new(value),
+            span: to_rue_span(e.span()),
+        })
+}
+
+/// Parser for comma-separated field initializers
+fn field_inits_parser<'src, I>(
+    expr: impl Parser<'src, I, Expr, extra::Err<Rich<'src, TokenKind>>> + Clone,
+) -> impl Parser<'src, I, Vec<FieldInit>, extra::Err<Rich<'src, TokenKind>>> + Clone
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    field_init_parser(expr)
+        .separated_by(just(TokenKind::Comma))
+        .allow_trailing()
         .collect()
 }
 
@@ -240,20 +299,42 @@ where
         })
         .boxed();
 
-    // Identifier or function call
-    let ident_or_call = ident_parser()
+    // What can follow an identifier: call args, struct fields, or nothing
+    #[derive(Clone)]
+    enum IdentSuffix {
+        Call(Vec<Expr>),
+        StructLit(Vec<FieldInit>),
+        None,
+    }
+
+    // Identifier followed by optional call args, struct literal, or nothing
+    let ident_or_call_or_struct = ident_parser()
         .then(
-            args_parser(expr.clone())
-                .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
-                .or_not(),
+            choice((
+                // Function call: (args)
+                args_parser(expr.clone())
+                    .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
+                    .map(IdentSuffix::Call),
+                // Struct literal: { field: value, ... }
+                field_inits_parser(expr.clone())
+                    .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace))
+                    .map(IdentSuffix::StructLit),
+            ))
+            .or_not()
+            .map(|opt| opt.unwrap_or(IdentSuffix::None)),
         )
-        .map_with(|(name, args), e| match args {
-            Some(args) => Expr::Call(CallExpr {
+        .map_with(|(name, suffix), e| match suffix {
+            IdentSuffix::Call(args) => Expr::Call(CallExpr {
                 name,
                 args,
                 span: to_rue_span(e.span()),
             }),
-            None => Expr::Ident(name),
+            IdentSuffix::StructLit(fields) => Expr::StructLit(StructLitExpr {
+                name,
+                fields,
+                span: to_rue_span(e.span()),
+            }),
+            IdentSuffix::None => Expr::Ident(name),
         });
 
     // Parenthesized expression
@@ -270,7 +351,8 @@ where
     // Block expression
     let block_expr = block_parser(expr);
 
-    choice((
+    // Primary expression (before field access)
+    let primary = choice((
         int_lit,
         bool_true,
         bool_false,
@@ -278,10 +360,26 @@ where
         continue_expr,
         if_expr,
         while_expr,
-        ident_or_call,
+        ident_or_call_or_struct,
         paren_expr,
         block_expr,
-    ))
+    ));
+
+    // Field access suffix: .field
+    // Handles chains like a.b.c
+    primary.foldl(
+        just(TokenKind::Dot)
+            .ignore_then(ident_parser())
+            .repeated(),
+        |base, field| {
+            let span = Span::new(base.span().start, field.span.end);
+            Expr::Field(FieldExpr {
+                base: Box::new(base),
+                field,
+                span,
+            })
+        },
+    )
 }
 
 /// A block item is either a statement or an expression (potentially the final one)
@@ -316,20 +414,61 @@ where
         })
 }
 
-/// Parser for assignment statements: name = expr;
+/// Parser for assignment target: either a simple variable or field access chain
+/// Parses: name or name.field or name.field.field...
+fn assign_target_parser<'src, I>(
+) -> impl Parser<'src, I, AssignTarget, extra::Err<Rich<'src, TokenKind>>> + Clone
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    ident_parser()
+        .then(
+            just(TokenKind::Dot)
+                .ignore_then(ident_parser())
+                .repeated()
+                .collect::<Vec<_>>(),
+        )
+        .map(|(base_ident, field_chain)| {
+            if field_chain.is_empty() {
+                // Simple variable: x
+                AssignTarget::Var(base_ident)
+            } else {
+                // Field access chain: x.a.b.c
+                // Build up the FieldExpr from left to right
+                let mut base_expr = Expr::Ident(base_ident);
+                for field in field_chain {
+                    let span = Span::new(base_expr.span().start, field.span.end);
+                    base_expr = Expr::Field(FieldExpr {
+                        base: Box::new(base_expr),
+                        field,
+                        span,
+                    });
+                }
+                // Extract the FieldExpr from the final expression
+                if let Expr::Field(field_expr) = base_expr {
+                    AssignTarget::Field(field_expr)
+                } else {
+                    unreachable!("We just built a Field expression")
+                }
+            }
+        })
+}
+
+/// Parser for assignment statements: target = expr;
+/// Supports both variable assignment (x = 5) and field assignment (point.x = 5)
 fn assign_statement_parser<'src, I>(
     expr: impl Parser<'src, I, Expr, extra::Err<Rich<'src, TokenKind>>> + Clone,
 ) -> impl Parser<'src, I, Statement, extra::Err<Rich<'src, TokenKind>>> + Clone
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    ident_parser()
+    assign_target_parser()
         .then_ignore(just(TokenKind::Eq))
         .then(expr)
         .then_ignore(just(TokenKind::Semi))
-        .map_with(|(name, value), e| {
+        .map_with(|(target, value), e| {
             Statement::Assign(AssignStatement {
-                name,
+                target,
                 value: Box::new(value),
                 span: to_rue_span(e.span()),
             })
@@ -492,12 +631,31 @@ where
         })
 }
 
-/// Parser for top-level items (currently only functions)
+/// Parser for struct definitions: struct Name { field: Type, ... }
+fn struct_parser<'src, I>(
+) -> impl Parser<'src, I, StructDecl, extra::Err<Rich<'src, TokenKind>>> + Clone
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    just(TokenKind::Struct)
+        .ignore_then(ident_parser())
+        .then(field_decls_parser().delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)))
+        .map_with(|(name, fields), e| StructDecl {
+            name,
+            fields,
+            span: to_rue_span(e.span()),
+        })
+}
+
+/// Parser for top-level items (functions and structs)
 fn item_parser<'src, I>() -> impl Parser<'src, I, Item, extra::Err<Rich<'src, TokenKind>>> + Clone
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    function_parser().map(Item::Function)
+    choice((
+        function_parser().map(Item::Function),
+        struct_parser().map(Item::Struct),
+    ))
 }
 
 /// Main parser that produces an AST
@@ -619,6 +777,7 @@ mod tests {
                 Expr::Block(block) => Ok(*block.expr),
                 other => Ok(other),
             },
+            Item::Struct(_) => panic!("parse_expr helper should only be used with functions"),
         }
     }
 
@@ -639,6 +798,7 @@ mod tests {
                     _ => panic!("expected Block"),
                 }
             }
+            Item::Struct(_) => panic!("expected Function"),
         }
     }
 
@@ -699,6 +859,7 @@ mod tests {
                 }
                 _ => panic!("expected Block"),
             },
+            Item::Struct(_) => panic!("expected Function"),
         }
     }
 

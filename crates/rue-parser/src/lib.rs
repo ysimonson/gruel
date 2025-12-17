@@ -6,7 +6,8 @@ pub mod ast;
 mod chumsky_parser;
 
 pub use ast::{
-    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, CallExpr, Expr, Function, Ident,
-    IntLit, Item, LetStatement, Param, ParenExpr, Statement, UnaryExpr, UnaryOp, WhileExpr,
+    AssignStatement, AssignTarget, Ast, BinaryExpr, BinaryOp, BlockExpr, CallExpr, Expr,
+    FieldDecl, FieldExpr, FieldInit, Function, Ident, IntLit, Item, LetStatement, Param,
+    ParenExpr, Statement, StructDecl, StructLitExpr, UnaryExpr, UnaryOp, WhileExpr,
 };
 pub use chumsky_parser::ChumskyParser as Parser;

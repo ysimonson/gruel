@@ -4,7 +4,7 @@
 //! This is analogous to Zig's AstGen phase.
 
 use rue_intern::Interner;
-use rue_parser::{Ast, BinaryOp, Expr, Function, Item, Statement, UnaryOp};
+use rue_parser::{AssignTarget, Ast, BinaryOp, Expr, Function, Item, Statement, StructDecl, UnaryOp};
 
 use crate::inst::{Inst, InstData, InstRef, Rir};
 
@@ -41,7 +41,28 @@ impl<'a> AstGen<'a> {
             Item::Function(func) => {
                 self.gen_function(func);
             }
+            Item::Struct(struct_decl) => {
+                self.gen_struct(struct_decl);
+            }
         }
+    }
+
+    fn gen_struct(&mut self, struct_decl: &StructDecl) -> InstRef {
+        let name = self.interner.intern(&struct_decl.name.name);
+        let fields: Vec<_> = struct_decl
+            .fields
+            .iter()
+            .map(|f| {
+                let field_name = self.interner.intern(&f.name.name);
+                let field_type = self.interner.intern(&f.ty.name);
+                (field_name, field_type)
+            })
+            .collect();
+
+        self.rir.add_inst(Inst {
+            data: InstData::StructDecl { name, fields },
+            span: struct_decl.span,
+        })
     }
 
     fn gen_function(&mut self, func: &Function) -> InstRef {
@@ -172,6 +193,32 @@ impl<'a> AstGen<'a> {
                 data: InstData::Continue,
                 span: continue_expr.span,
             }),
+            Expr::StructLit(struct_lit) => {
+                let type_name = self.interner.intern(&struct_lit.name.name);
+                let fields: Vec<_> = struct_lit
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        let field_name = self.interner.intern(&f.name.name);
+                        let field_value = self.gen_expr(&f.value);
+                        (field_name, field_value)
+                    })
+                    .collect();
+
+                self.rir.add_inst(Inst {
+                    data: InstData::StructInit { type_name, fields },
+                    span: struct_lit.span,
+                })
+            }
+            Expr::Field(field_expr) => {
+                let base = self.gen_expr(&field_expr.base);
+                let field = self.interner.intern(&field_expr.field.name);
+
+                self.rir.add_inst(Inst {
+                    data: InstData::FieldGet { base, field },
+                    span: field_expr.span,
+                })
+            }
         }
     }
 
@@ -221,12 +268,24 @@ impl<'a> AstGen<'a> {
                 })
             }
             Statement::Assign(assign) => {
-                let name = self.interner.intern(&assign.name.name);
                 let value = self.gen_expr(&assign.value);
-                self.rir.add_inst(Inst {
-                    data: InstData::Assign { name, value },
-                    span: assign.span,
-                })
+                match &assign.target {
+                    AssignTarget::Var(ident) => {
+                        let name = self.interner.intern(&ident.name);
+                        self.rir.add_inst(Inst {
+                            data: InstData::Assign { name, value },
+                            span: assign.span,
+                        })
+                    }
+                    AssignTarget::Field(field_expr) => {
+                        let base = self.gen_expr(&field_expr.base);
+                        let field = self.interner.intern(&field_expr.field.name);
+                        self.rir.add_inst(Inst {
+                            data: InstData::FieldSet { base, field, value },
+                            span: assign.span,
+                        })
+                    }
+                }
             }
             Statement::Expr(expr) => {
                 // Expression statements are evaluated for side effects

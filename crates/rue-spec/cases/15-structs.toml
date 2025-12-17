@@ -1,0 +1,482 @@
+[section]
+id = "7.1"
+name = "Structs"
+description = "User-defined struct types with value semantics."
+
+# =============================================================================
+# Basic Struct Declaration and Instantiation
+# =============================================================================
+
+[[case]]
+name = "struct_single_field"
+description = "Struct with a single i32 field"
+source = """
+struct Point {
+    x: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { x: 42 };
+    p.x
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_two_fields"
+description = "Struct with two i32 fields"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    p.x + p.y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_multiple_fields"
+description = "Struct with multiple fields"
+source = """
+struct Data {
+    a: i32,
+    b: i32,
+    c: i32,
+    d: i32,
+}
+
+fn main() -> i32 {
+    let d = Data { a: 10, b: 20, c: 7, d: 5 };
+    d.a + d.b + d.c + d.d
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_bool_field"
+description = "Struct with bool field"
+source = """
+struct Flags {
+    active: bool,
+    count: i32,
+}
+
+fn main() -> i32 {
+    let f = Flags { active: true, count: 42 };
+    if f.active { f.count } else { 0 }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Field Access
+# =============================================================================
+
+[[case]]
+name = "field_access_first"
+description = "Access first field of struct"
+source = """
+struct Pair {
+    first: i32,
+    second: i32,
+}
+
+fn main() -> i32 {
+    let p = Pair { first: 42, second: 100 };
+    p.first
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "field_access_second"
+description = "Access second field of struct"
+source = """
+struct Pair {
+    first: i32,
+    second: i32,
+}
+
+fn main() -> i32 {
+    let p = Pair { first: 100, second: 42 };
+    p.second
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "field_access_in_expression"
+description = "Use field access in arithmetic expressions"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 5 };
+    (p.x * 4) + (p.y - 3)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "field_access_multiple_reads"
+description = "Read the same field multiple times"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn main() -> i32 {
+    let v = Value { n: 14 };
+    v.n + v.n + v.n
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Field Mutation
+# =============================================================================
+
+[[case]]
+name = "field_mutation_single"
+description = "Mutate a single field"
+source = """
+struct Counter {
+    value: i32,
+}
+
+fn main() -> i32 {
+    let mut c = Counter { value: 0 };
+    c.value = 42;
+    c.value
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "field_mutation_multiple"
+description = "Mutate multiple fields"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let mut p = Point { x: 0, y: 0 };
+    p.x = 20;
+    p.y = 22;
+    p.x + p.y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "field_mutation_preserve_other"
+description = "Mutating one field preserves others"
+source = """
+struct Triple {
+    a: i32,
+    b: i32,
+    c: i32,
+}
+
+fn main() -> i32 {
+    let mut t = Triple { a: 10, b: 20, c: 12 };
+    t.b = 30;
+    t.a + t.c
+}
+"""
+exit_code = 22
+
+[[case]]
+name = "field_mutation_read_after_write"
+description = "Read field after writing to it"
+source = """
+struct Box {
+    value: i32,
+}
+
+fn main() -> i32 {
+    let mut b = Box { value: 10 };
+    b.value = b.value + 32;
+    b.value
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Multiple Structs
+# =============================================================================
+
+[[case]]
+name = "multiple_struct_types"
+description = "Program with multiple struct definitions"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+struct Size {
+    width: i32,
+    height: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 20 };
+    let s = Size { width: 6, height: 6 };
+    p.x + s.width
+}
+"""
+exit_code = 16
+
+[[case]]
+name = "multiple_struct_instances"
+description = "Multiple instances of the same struct"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 5, y: 7 };
+    p1.x + p2.x + p2.y
+}
+"""
+exit_code = 22
+
+# =============================================================================
+# Struct Fields with Expressions
+# =============================================================================
+
+[[case]]
+name = "struct_field_expression"
+description = "Struct field initialized with expression"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn main() -> i32 {
+    let v = Value { n: 20 + 22 };
+    v.n
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_field_variable"
+description = "Struct field initialized from variable"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn main() -> i32 {
+    let x = 42;
+    let v = Value { n: x };
+    v.n
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_field_function_call"
+description = "Struct field initialized from function call"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn double(x: i32) -> i32 {
+    x * 2
+}
+
+fn main() -> i32 {
+    let v = Value { n: double(21) };
+    v.n
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Copy Semantics
+# =============================================================================
+
+[[case]]
+name = "struct_copy_independence"
+description = "Copied structs are independent"
+source = """
+struct Counter {
+    value: i32,
+}
+
+fn main() -> i32 {
+    let c1 = Counter { value: 10 };
+    let mut c2 = c1;
+    c2.value = 42;
+    c1.value
+}
+"""
+exit_code = 10
+
+# =============================================================================
+# Edge Cases
+# =============================================================================
+
+[[case]]
+name = "struct_field_order_independence"
+description = "Field order in literal doesn't matter (matches definition order)"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { y: 32, x: 10 };
+    p.x + p.y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_same_field_names_different_structs"
+description = "Different structs can have same field names"
+source = """
+struct A {
+    value: i32,
+}
+
+struct B {
+    value: i32,
+}
+
+fn main() -> i32 {
+    let a = A { value: 20 };
+    let b = B { value: 22 };
+    a.value + b.value
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Error Cases
+# =============================================================================
+
+[[case]]
+name = "struct_unknown_type"
+description = "Using undefined struct type"
+source = """
+fn main() -> i32 {
+    let p = Unknown { x: 42 };
+    p.x
+}
+"""
+compile_fail = true
+error_contains = "unknown type"
+
+[[case]]
+name = "struct_missing_field"
+description = "Missing field in struct literal"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { x: 42 };
+    p.x
+}
+"""
+compile_fail = true
+error_contains = "has 2 fields, but 1"
+
+[[case]]
+name = "struct_extra_field"
+description = "Extra field in struct literal"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { x: 42, y: 10, z: 5 };
+    p.x
+}
+"""
+compile_fail = true
+error_contains = "has 2 fields, but 3"
+
+[[case]]
+name = "struct_field_wrong_type"
+description = "Field initialized with wrong type"
+source = """
+struct Value {
+    n: i32,
+}
+
+fn main() -> i32 {
+    let v = Value { n: true };
+    v.n
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "struct_field_access_on_non_struct"
+description = "Field access on non-struct type"
+source = """
+fn main() -> i32 {
+    let x = 42;
+    x.value
+}
+"""
+compile_fail = true
+error_contains = "non-struct"
+
+[[case]]
+name = "struct_unknown_field_access"
+description = "Access unknown field"
+source = """
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 20 };
+    p.z
+}
+"""
+compile_fail = true
+error_contains = "unknown field"
+
+[[case]]
+name = "struct_mutate_immutable"
+description = "Mutate field of immutable binding"
+source = """
+struct Counter {
+    value: i32,
+}
+
+fn main() -> i32 {
+    let c = Counter { value: 10 };
+    c.value = 42;
+    c.value
+}
+"""
+compile_fail = true
+error_contains = "cannot assign"

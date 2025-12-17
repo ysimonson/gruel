@@ -16,4 +16,4 @@ mod types;
 
 pub use inst::{Air, AirInst, AirInstData, AirRef};
 pub use sema::{AnalyzedFunction, Sema};
-pub use types::Type;
+pub use types::{StructDef, StructField, StructId, Type};

@@ -47,6 +47,25 @@ pub enum ErrorKind {
         found: usize,
     },
 
+    // Struct errors
+    WrongFieldCount {
+        struct_name: String,
+        expected: usize,
+        found: usize,
+    },
+    MissingField {
+        struct_name: String,
+        field_name: String,
+    },
+    UnknownField {
+        struct_name: String,
+        field_name: String,
+    },
+    FieldAccessOnNonStruct {
+        found: String,
+    },
+    InvalidAssignmentTarget,
+
     // Control flow errors
     BreakOutsideLoop,
     ContinueOutsideLoop,
@@ -131,6 +150,25 @@ impl fmt::Display for ErrorKind {
                 } else {
                     write!(f, "expected {} arguments, found {}", expected, found)
                 }
+            }
+            ErrorKind::WrongFieldCount { struct_name, expected, found } => {
+                if *expected == 1 {
+                    write!(f, "struct '{}' has {} field, but {} were supplied", struct_name, expected, found)
+                } else {
+                    write!(f, "struct '{}' has {} fields, but {} were supplied", struct_name, expected, found)
+                }
+            }
+            ErrorKind::MissingField { struct_name, field_name } => {
+                write!(f, "missing field '{}' in struct '{}'", field_name, struct_name)
+            }
+            ErrorKind::UnknownField { struct_name, field_name } => {
+                write!(f, "unknown field '{}' in struct '{}'", field_name, struct_name)
+            }
+            ErrorKind::FieldAccessOnNonStruct { found } => {
+                write!(f, "field access on non-struct type '{}'", found)
+            }
+            ErrorKind::InvalidAssignmentTarget => {
+                write!(f, "invalid assignment target")
             }
             ErrorKind::BreakOutsideLoop => write!(f, "'break' outside of loop"),
             ErrorKind::ContinueOutsideLoop => write!(f, "'continue' outside of loop"),

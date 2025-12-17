@@ -5,6 +5,8 @@
 //! lowered when their values are needed, enabling short-circuit evaluation of
 //! logical operators (&&, ||).
 
+use std::collections::HashMap;
+
 use rue_air::{Air, AirInstData, AirRef, Type};
 
 use super::mir::{Operand, Reg, VReg, X86Inst, X86Mir};
@@ -38,6 +40,9 @@ pub struct Lower<'a> {
     /// Stack of loop contexts for nested loops.
     /// Used to resolve break and continue targets.
     loop_stack: Vec<LoopContext>,
+    /// Maps StructInit AIR refs to their field vregs.
+    /// Used by Alloc to store all struct fields to consecutive stack slots.
+    struct_field_vregs: HashMap<AirRef, Vec<VReg>>,
 }
 
 /// Argument passing registers per System V AMD64 ABI.
@@ -56,6 +61,7 @@ impl<'a> Lower<'a> {
             num_params,
             fn_name: fn_name.to_string(),
             loop_stack: Vec::new(),
+            struct_field_vregs: HashMap::new(),
         }
     }
 
@@ -305,16 +311,48 @@ impl<'a> Lower<'a> {
             }
 
             AirInstData::Alloc { slot, init } => {
-                // Get the initialized value
-                let init_vreg = self.get_vreg(*init);
+                // Check if the init is a StructInit - if so, store all fields
+                // to consecutive slots instead of just the first field.
+                let init_data = self.air.get(*init).data.clone();
+                if let AirInstData::StructInit { .. } = &init_data {
+                    // Lower the StructInit first to get all field vregs
+                    self.demand_lower(*init);
 
-                // Store to stack slot
-                let offset = self.local_offset(*slot);
-                self.mir.push(X86Inst::MovMR {
-                    base: Reg::Rbp,
-                    offset,
-                    src: Operand::Virtual(init_vreg),
-                });
+                    // Get the field vregs that were saved by StructInit
+                    if let Some(field_vregs) = self.struct_field_vregs.get(init).cloned() {
+                        // Store each field to consecutive slots
+                        for (i, field_vreg) in field_vregs.iter().enumerate() {
+                            let field_slot = slot + i as u32;
+                            let offset = self.local_offset(field_slot);
+                            self.mir.push(X86Inst::MovMR {
+                                base: Reg::Rbp,
+                                offset,
+                                src: Operand::Virtual(*field_vreg),
+                            });
+                        }
+                    } else {
+                        // Fallback: just use the single vreg (shouldn't happen)
+                        let init_vreg = self.value_map[init.as_u32() as usize]
+                            .expect("StructInit should be lowered");
+                        let offset = self.local_offset(*slot);
+                        self.mir.push(X86Inst::MovMR {
+                            base: Reg::Rbp,
+                            offset,
+                            src: Operand::Virtual(init_vreg),
+                        });
+                    }
+                } else {
+                    // Regular (non-struct) value
+                    let init_vreg = self.get_vreg(*init);
+
+                    // Store to stack slot
+                    let offset = self.local_offset(*slot);
+                    self.mir.push(X86Inst::MovMR {
+                        base: Reg::Rbp,
+                        offset,
+                        src: Operand::Virtual(init_vreg),
+                    });
+                }
 
                 // Alloc doesn't produce a value that can be used directly
                 // (it's a statement, not an expression)
@@ -916,6 +954,85 @@ impl<'a> Lower<'a> {
                     src: Operand::Physical(Reg::Rax),
                 });
             }
+
+            AirInstData::StructInit { struct_id: _, fields } => {
+                // Struct initialization: evaluate all fields and save their vregs.
+                // The actual storage to stack slots is handled by Alloc.
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                // Evaluate all fields to get their vregs
+                let mut field_vregs = Vec::new();
+                for field in fields {
+                    let field_vreg = self.get_vreg(*field);
+                    field_vregs.push(field_vreg);
+                }
+
+                // Use the first field as the representative value (for simple cases)
+                if let Some(&first_vreg) = field_vregs.first() {
+                    self.mir.push(X86Inst::MovRR {
+                        dst: Operand::Virtual(vreg),
+                        src: Operand::Virtual(first_vreg),
+                    });
+                } else {
+                    // Empty struct - just set to 0
+                    self.mir.push(X86Inst::MovRI32 {
+                        dst: Operand::Virtual(vreg),
+                        imm: 0,
+                    });
+                }
+
+                // Save field vregs for Alloc to pick up
+                self.struct_field_vregs.insert(air_ref, field_vregs);
+            }
+
+            AirInstData::FieldGet { base, struct_id: _, field_index } => {
+                // Field access: load from base_slot + field_index.
+                // The base should be a Load from the struct variable's slot.
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                // Look at the base instruction to find the slot
+                let base_data = self.air.get(*base).data.clone();
+                match &base_data {
+                    AirInstData::Load { slot } => {
+                        // Load from slot + field_index
+                        let actual_slot = slot + field_index;
+                        let offset = self.local_offset(actual_slot);
+                        self.mir.push(X86Inst::MovRM {
+                            dst: Operand::Virtual(vreg),
+                            base: Reg::Rbp,
+                            offset,
+                        });
+                    }
+                    _ => {
+                        // Base is some other expression - this shouldn't happen
+                        // for well-formed struct field access on a local variable.
+                        // Just evaluate it and use directly (won't work correctly
+                        // for multi-field structs, but provides a fallback).
+                        let base_vreg = self.get_vreg(*base);
+                        self.mir.push(X86Inst::MovRR {
+                            dst: Operand::Virtual(vreg),
+                            src: Operand::Virtual(base_vreg),
+                        });
+                    }
+                }
+            }
+
+            AirInstData::FieldSet { slot, struct_id: _, field_index, value } => {
+                // Field assignment: store value to slot + field_index
+                let value_vreg = self.get_vreg(*value);
+
+                let actual_slot = slot + field_index;
+                let offset = self.local_offset(actual_slot);
+                self.mir.push(X86Inst::MovMR {
+                    base: Reg::Rbp,
+                    offset,
+                    src: Operand::Virtual(value_vreg),
+                });
+
+                // FieldSet doesn't produce a value
+            }
         }
     }
 
@@ -1028,6 +1145,18 @@ impl<'a> Lower<'a> {
             AirInstData::Loop { cond, body } => {
                 self.clear_transitive_deps(cond);
                 self.clear_transitive_deps(body);
+            }
+            // Struct operations
+            AirInstData::StructInit { fields, .. } => {
+                for field in fields {
+                    self.clear_transitive_deps(field);
+                }
+            }
+            AirInstData::FieldGet { base, .. } => {
+                self.clear_transitive_deps(base);
+            }
+            AirInstData::FieldSet { value, .. } => {
+                self.clear_transitive_deps(value);
             }
             // These were already handled by the early return above
             AirInstData::Const(_)

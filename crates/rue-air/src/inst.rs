@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use crate::types::Type;
+use crate::types::{StructId, Type};
 use rue_span::Span;
 
 /// A reference to an instruction in the AIR.
@@ -205,6 +205,37 @@ pub enum AirInstData {
         /// The block's resulting value
         value: AirRef,
     },
+
+    // Struct operations
+    /// Create a new struct instance with initialized fields
+    StructInit {
+        /// The struct type being created
+        struct_id: StructId,
+        /// Field values in declaration order
+        fields: Vec<AirRef>,
+    },
+
+    /// Load a field from a struct value
+    FieldGet {
+        /// The struct value
+        base: AirRef,
+        /// The struct type
+        struct_id: StructId,
+        /// Field index (0-based, in declaration order)
+        field_index: u32,
+    },
+
+    /// Store a value to a struct field
+    FieldSet {
+        /// The struct variable slot
+        slot: u32,
+        /// The struct type
+        struct_id: StructId,
+        /// Field index (0-based, in declaration order)
+        field_index: u32,
+        /// Value to store
+        value: AirRef,
+    },
 }
 
 impl fmt::Display for AirRef {
@@ -272,6 +303,22 @@ impl fmt::Display for Air {
                         write!(f, "{}", s)?;
                     }
                     writeln!(f, "], {}", value)?;
+                }
+                AirInstData::StructInit { struct_id, fields } => {
+                    write!(f, "struct_init #{} {{", struct_id.0)?;
+                    for (i, field) in fields.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", field)?;
+                    }
+                    writeln!(f, "}}")?;
+                }
+                AirInstData::FieldGet { base, struct_id, field_index } => {
+                    writeln!(f, "field_get {}.#{}.{}", base, struct_id.0, field_index)?;
+                }
+                AirInstData::FieldSet { slot, struct_id, field_index, value } => {
+                    writeln!(f, "field_set ${}.#{}.{} = {}", slot, struct_id.0, field_index, value)?;
                 }
             }
         }

@@ -42,6 +42,8 @@ pub enum LogosTokenKind {
     True,
     #[token("false")]
     False,
+    #[token("struct")]
+    Struct,
 
     // Integer literals
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
@@ -102,6 +104,8 @@ pub enum LogosTokenKind {
     Semi,
     #[token(",")]
     Comma,
+    #[token(".")]
+    Dot,
 }
 
 use crate::{Token, TokenKind};
@@ -119,6 +123,7 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::Continue => TokenKind::Continue,
             LogosTokenKind::True => TokenKind::True,
             LogosTokenKind::False => TokenKind::False,
+            LogosTokenKind::Struct => TokenKind::Struct,
             LogosTokenKind::Int(n) => TokenKind::Int(n),
             LogosTokenKind::Ident(s) => TokenKind::Ident(s),
             LogosTokenKind::EqEq => TokenKind::EqEq,
@@ -144,6 +149,7 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::Colon => TokenKind::Colon,
             LogosTokenKind::Semi => TokenKind::Semi,
             LogosTokenKind::Comma => TokenKind::Comma,
+            LogosTokenKind::Dot => TokenKind::Dot,
         }
     }
 }

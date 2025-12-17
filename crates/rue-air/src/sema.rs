@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::inst::{Air, AirInst, AirInstData, AirRef};
-use crate::types::Type;
+use crate::types::{StructDef, StructField, StructId, Type};
 use rue_error::{CompileError, CompileResult, ErrorKind};
 use rue_intern::{Interner, Symbol};
 use rue_rir::{InstData, InstRef, Rir};
@@ -73,6 +73,10 @@ pub struct Sema<'a> {
     interner: &'a Interner,
     /// Function table: maps function name symbols to their info
     functions: HashMap<Symbol, FunctionInfo>,
+    /// Struct table: maps struct name symbols to their StructId
+    structs: HashMap<Symbol, StructId>,
+    /// Struct definitions indexed by StructId
+    struct_defs: Vec<StructDef>,
 }
 
 impl<'a> Sema<'a> {
@@ -82,15 +86,25 @@ impl<'a> Sema<'a> {
             rir,
             interner,
             functions: HashMap::new(),
+            structs: HashMap::new(),
+            struct_defs: Vec::new(),
         }
+    }
+
+    /// Get struct definitions for codegen.
+    pub fn struct_defs(&self) -> &[StructDef] {
+        &self.struct_defs
     }
 
     /// Analyze all functions in the RIR.
     pub fn analyze_all(&mut self) -> CompileResult<Vec<AnalyzedFunction>> {
-        // First pass: collect function signatures
+        // First pass: collect struct definitions (needed for type resolution)
+        self.collect_struct_definitions()?;
+
+        // Second pass: collect function signatures
         self.collect_function_signatures()?;
 
-        // Second pass: analyze function bodies
+        // Third pass: analyze function bodies
         let mut result = Vec::new();
 
         for (_, inst) in self.rir.iter() {
@@ -127,7 +141,34 @@ impl<'a> Sema<'a> {
         Ok(result)
     }
 
-    /// First pass: collect all function signatures for forward reference
+    /// Collect all struct definitions from the RIR.
+    fn collect_struct_definitions(&mut self) -> CompileResult<()> {
+        for (_, inst) in self.rir.iter() {
+            if let InstData::StructDecl { name, fields } = &inst.data {
+                let struct_id = StructId(self.struct_defs.len() as u32);
+                let struct_name = self.interner.get(*name).to_string();
+
+                // Resolve field types (can only be primitive types for now, or other structs)
+                let mut resolved_fields = Vec::new();
+                for (field_name, field_type) in fields {
+                    let field_ty = self.resolve_type(*field_type, inst.span)?;
+                    resolved_fields.push(StructField {
+                        name: self.interner.get(*field_name).to_string(),
+                        ty: field_ty,
+                    });
+                }
+
+                self.struct_defs.push(StructDef {
+                    name: struct_name,
+                    fields: resolved_fields,
+                });
+                self.structs.insert(*name, struct_id);
+            }
+        }
+        Ok(())
+    }
+
+    /// Collect all function signatures for forward reference
     fn collect_function_signatures(&mut self) -> CompileResult<()> {
         for (_, inst) in self.rir.iter() {
             if let InstData::FnDecl {
@@ -538,19 +579,8 @@ impl<'a> Sema<'a> {
             InstData::Alloc { name, is_mut, ty, init } => {
                 // Determine the type from annotation or infer from initializer
                 let var_type = if let Some(type_sym) = ty {
-                    // Resolve the type annotation
-                    let well_known = self.interner.well_known();
-                    if *type_sym == well_known.i32 {
-                        Type::I32
-                    } else if *type_sym == well_known.bool {
-                        Type::Bool
-                    } else {
-                        let type_name = self.interner.get(*type_sym);
-                        return Err(CompileError::new(
-                            ErrorKind::UnknownType(type_name.to_string()),
-                            inst.span,
-                        ));
-                    }
+                    // Resolve the type annotation (supports structs too)
+                    self.resolve_type(*type_sym, inst.span)?
                 } else {
                     // Infer type from initializer
                     self.infer_type(*init, &ctx.locals, ctx.params)?
@@ -559,9 +589,13 @@ impl<'a> Sema<'a> {
                 // Analyze the initializer with the expected type
                 let init_ref = self.analyze_inst(air, *init, var_type, ctx)?;
 
-                // Allocate a new slot
+                // Allocate slots - structs need multiple slots (one per field)
                 let slot = ctx.next_slot;
-                ctx.next_slot += 1;
+                let num_slots = match var_type {
+                    Type::Struct(struct_id) => self.struct_defs[struct_id.0 as usize].field_count() as u32,
+                    _ => 1,
+                };
+                ctx.next_slot += num_slots;
 
                 // Register the variable (shadowing is allowed by just overwriting)
                 ctx.locals.insert(
@@ -850,6 +884,226 @@ impl<'a> Sema<'a> {
                     span: inst.span,
                 }))
             }
+
+            InstData::StructDecl { .. } => {
+                // Struct declarations are handled at the top level during collect_struct_definitions
+                unreachable!("StructDecl should not appear in expression context")
+            }
+
+            InstData::StructInit { type_name, fields: field_inits } => {
+                // Look up the struct type
+                let type_name_str = self.interner.get(*type_name);
+                let struct_id = *self.structs.get(type_name).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::UnknownType(type_name_str.to_string()),
+                        inst.span,
+                    )
+                })?;
+
+                let struct_def = &self.struct_defs[struct_id.0 as usize];
+                let struct_type = Type::Struct(struct_id);
+
+                // Type check: verify expected type matches
+                if struct_type != expected_type && expected_type != Type::Unit && !expected_type.is_error() {
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: expected_type.name().to_string(),
+                            found: struct_def.name.clone(),
+                        },
+                        inst.span,
+                    ));
+                }
+
+                // Check that all fields are provided and no extra fields
+                if field_inits.len() != struct_def.fields.len() {
+                    return Err(CompileError::new(
+                        ErrorKind::WrongFieldCount {
+                            struct_name: struct_def.name.clone(),
+                            expected: struct_def.fields.len(),
+                            found: field_inits.len(),
+                        },
+                        inst.span,
+                    ));
+                }
+
+                // Analyze field values in declaration order
+                // First, build a map from field name to its value
+                let mut field_map: HashMap<String, InstRef> = HashMap::new();
+                for (field_name, field_value) in field_inits {
+                    let name_str = self.interner.get(*field_name).to_string();
+                    field_map.insert(name_str, *field_value);
+                }
+
+                // Now analyze fields in struct definition order
+                let mut field_refs = Vec::new();
+                for struct_field in &struct_def.fields {
+                    let field_value = field_map.get(&struct_field.name).ok_or_else(|| {
+                        CompileError::new(
+                            ErrorKind::MissingField {
+                                struct_name: struct_def.name.clone(),
+                                field_name: struct_field.name.clone(),
+                            },
+                            inst.span,
+                        )
+                    })?;
+
+                    let field_ref = self.analyze_inst(air, *field_value, struct_field.ty, ctx)?;
+                    field_refs.push(field_ref);
+                }
+
+                // Check for extra fields
+                for (field_name, _) in field_inits {
+                    let name_str = self.interner.get(*field_name).to_string();
+                    if struct_def.find_field(&name_str).is_none() {
+                        return Err(CompileError::new(
+                            ErrorKind::UnknownField {
+                                struct_name: struct_def.name.clone(),
+                                field_name: name_str,
+                            },
+                            inst.span,
+                        ));
+                    }
+                }
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::StructInit {
+                        struct_id,
+                        fields: field_refs,
+                    },
+                    ty: struct_type,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::FieldGet { base, field } => {
+                // Analyze the base expression (we don't know the type yet, so use Error as placeholder)
+                // We'll first infer the base type
+                let base_type = self.infer_type(*base, &ctx.locals, ctx.params)?;
+
+                let struct_id = match base_type {
+                    Type::Struct(id) => id,
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::FieldAccessOnNonStruct {
+                                found: base_type.name().to_string(),
+                            },
+                            inst.span,
+                        ));
+                    }
+                };
+
+                let struct_def = &self.struct_defs[struct_id.0 as usize];
+                let field_name_str = self.interner.get(*field).to_string();
+
+                let (field_index, struct_field) = struct_def.find_field(&field_name_str).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::UnknownField {
+                            struct_name: struct_def.name.clone(),
+                            field_name: field_name_str.clone(),
+                        },
+                        inst.span,
+                    )
+                })?;
+
+                let field_type = struct_field.ty;
+
+                // Type check
+                if field_type != expected_type && expected_type != Type::Unit && !expected_type.is_error() {
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: expected_type.name().to_string(),
+                            found: field_type.name().to_string(),
+                        },
+                        inst.span,
+                    ));
+                }
+
+                // Now analyze the base with its known type
+                let base_ref = self.analyze_inst(air, *base, base_type, ctx)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::FieldGet {
+                        base: base_ref,
+                        struct_id,
+                        field_index: field_index as u32,
+                    },
+                    ty: field_type,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::FieldSet { base, field, value } => {
+                // For field assignment, we need the base to be a local variable
+                // Get the variable info from the base VarRef
+                let base_inst = self.rir.get(*base);
+                let (var_name, slot, base_type, is_mut) = match &base_inst.data {
+                    InstData::VarRef { name } => {
+                        let name_str = self.interner.get(*name);
+                        let local = ctx.locals.get(name).ok_or_else(|| {
+                            CompileError::new(
+                                ErrorKind::UndefinedVariable(name_str.to_string()),
+                                inst.span,
+                            )
+                        })?;
+                        (name_str.to_string(), local.slot, local.ty, local.is_mut)
+                    }
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::InvalidAssignmentTarget,
+                            inst.span,
+                        ));
+                    }
+                };
+
+                // Check mutability
+                if !is_mut {
+                    return Err(CompileError::new(
+                        ErrorKind::AssignToImmutable(var_name),
+                        inst.span,
+                    ));
+                }
+
+                let struct_id = match base_type {
+                    Type::Struct(id) => id,
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::FieldAccessOnNonStruct {
+                                found: base_type.name().to_string(),
+                            },
+                            inst.span,
+                        ));
+                    }
+                };
+
+                let struct_def = &self.struct_defs[struct_id.0 as usize];
+                let field_name_str = self.interner.get(*field).to_string();
+
+                let (field_index, struct_field) = struct_def.find_field(&field_name_str).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::UnknownField {
+                            struct_name: struct_def.name.clone(),
+                            field_name: field_name_str.clone(),
+                        },
+                        inst.span,
+                    )
+                })?;
+
+                let field_type = struct_field.ty;
+
+                // Analyze the value with the expected field type
+                let value_ref = self.analyze_inst(air, *value, field_type, ctx)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::FieldSet {
+                        slot,
+                        struct_id,
+                        field_index: field_index as u32,
+                        value: value_ref,
+                    },
+                    ty: Type::Unit,
+                    span: inst.span,
+                }))
+            }
         }
     }
 
@@ -863,12 +1117,12 @@ impl<'a> Sema<'a> {
             Ok(Type::I32)
         } else if type_sym == well_known.bool {
             Ok(Type::Bool)
+        } else if let Some(&struct_id) = self.structs.get(&type_sym) {
+            Ok(Type::Struct(struct_id))
         } else {
+            let type_name = self.interner.get(type_sym);
             Err(CompileError::new(
-                ErrorKind::UnexpectedToken {
-                    expected: "type",
-                    found: self.interner.get(type_sym).to_string(),
-                },
+                ErrorKind::UnknownType(type_name.to_string()),
                 span,
             ))
         }
@@ -959,9 +1213,51 @@ impl<'a> Sema<'a> {
                 Ok(param_info.ty)
             }
             InstData::Alloc { .. } | InstData::Assign { .. } | InstData::Ret(_) | InstData::Loop { .. } | InstData::Break | InstData::Continue => Ok(Type::Unit),
-            InstData::FnDecl { .. } => {
-                unreachable!("FnDecl should not appear in expression context")
+            InstData::FnDecl { .. } | InstData::StructDecl { .. } => {
+                unreachable!("FnDecl/StructDecl should not appear in expression context")
             }
+            InstData::StructInit { type_name, .. } => {
+                // Look up the struct type
+                let struct_id = self.structs.get(type_name).ok_or_else(|| {
+                    let type_name_str = self.interner.get(*type_name);
+                    CompileError::new(
+                        ErrorKind::UnknownType(type_name_str.to_string()),
+                        inst.span,
+                    )
+                })?;
+                Ok(Type::Struct(*struct_id))
+            }
+            InstData::FieldGet { base, field } => {
+                // Infer the base type and get the field's type
+                let base_type = self.infer_type(*base, locals, params)?;
+                let struct_id = match base_type {
+                    Type::Struct(id) => id,
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::FieldAccessOnNonStruct {
+                                found: base_type.name().to_string(),
+                            },
+                            inst.span,
+                        ));
+                    }
+                };
+
+                let struct_def = &self.struct_defs[struct_id.0 as usize];
+                let field_name_str = self.interner.get(*field).to_string();
+
+                let (_, struct_field) = struct_def.find_field(&field_name_str).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::UnknownField {
+                            struct_name: struct_def.name.clone(),
+                            field_name: field_name_str.clone(),
+                        },
+                        inst.span,
+                    )
+                })?;
+
+                Ok(struct_field.ty)
+            }
+            InstData::FieldSet { .. } => Ok(Type::Unit),
         }
     }
 }

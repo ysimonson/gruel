@@ -22,6 +22,7 @@ pub enum TokenKind {
     Continue,
     True,
     False,
+    Struct,
 
     // Literals
     Int(i64),
@@ -55,6 +56,7 @@ pub enum TokenKind {
     Colon,
     Semi,
     Comma,
+    Dot,  // .
 
     // Special
     Eof,
@@ -74,6 +76,7 @@ impl TokenKind {
             TokenKind::Continue => "'continue'",
             TokenKind::True => "'true'",
             TokenKind::False => "'false'",
+            TokenKind::Struct => "'struct'",
             TokenKind::Int(_) => "integer",
             TokenKind::Ident(_) => "identifier",
             TokenKind::Plus => "'+'",
@@ -99,6 +102,7 @@ impl TokenKind {
             TokenKind::Colon => "':'",
             TokenKind::Semi => "';'",
             TokenKind::Comma => "','",
+            TokenKind::Dot => "'.'",
             TokenKind::Eof => "end of file",
         }
     }

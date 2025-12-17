@@ -16,6 +16,29 @@ pub struct Ast {
 #[derive(Debug, Clone)]
 pub enum Item {
     Function(Function),
+    Struct(StructDecl),
+}
+
+/// A struct declaration.
+#[derive(Debug, Clone)]
+pub struct StructDecl {
+    /// Struct name
+    pub name: Ident,
+    /// Struct fields
+    pub fields: Vec<FieldDecl>,
+    /// Span covering the entire struct declaration
+    pub span: Span,
+}
+
+/// A field declaration in a struct.
+#[derive(Debug, Clone)]
+pub struct FieldDecl {
+    /// Field name
+    pub name: Ident,
+    /// Field type
+    pub ty: Ident,
+    /// Span covering the entire field declaration
+    pub span: Span,
 }
 
 /// A function definition.
@@ -78,6 +101,10 @@ pub enum Expr {
     Break(BreakExpr),
     /// Continue statement (skips to the next iteration of the innermost loop)
     Continue(ContinueExpr),
+    /// Struct literal (e.g., `Point { x: 1, y: 2 }`)
+    StructLit(StructLitExpr),
+    /// Field access (e.g., `point.x`)
+    Field(FieldExpr),
 }
 
 /// An integer literal.
@@ -178,6 +205,36 @@ pub struct CallExpr {
     pub span: Span,
 }
 
+/// A struct literal expression (e.g., `Point { x: 1, y: 2 }`).
+#[derive(Debug, Clone)]
+pub struct StructLitExpr {
+    /// Struct type name
+    pub name: Ident,
+    /// Field initializers
+    pub fields: Vec<FieldInit>,
+    pub span: Span,
+}
+
+/// A field initializer in a struct literal.
+#[derive(Debug, Clone)]
+pub struct FieldInit {
+    /// Field name
+    pub name: Ident,
+    /// Field value
+    pub value: Box<Expr>,
+    pub span: Span,
+}
+
+/// A field access expression (e.g., `point.x`).
+#[derive(Debug, Clone)]
+pub struct FieldExpr {
+    /// Base expression (the struct value)
+    pub base: Box<Expr>,
+    /// Field name
+    pub field: Ident,
+    pub span: Span,
+}
+
 /// A statement (does not produce a value).
 #[derive(Debug, Clone)]
 pub enum Statement {
@@ -206,11 +263,20 @@ pub struct LetStatement {
 /// An assignment statement.
 #[derive(Debug, Clone)]
 pub struct AssignStatement {
-    /// Target variable
-    pub name: Ident,
+    /// Assignment target (variable or field)
+    pub target: AssignTarget,
     /// Value expression
     pub value: Box<Expr>,
     pub span: Span,
+}
+
+/// An assignment target.
+#[derive(Debug, Clone)]
+pub enum AssignTarget {
+    /// Variable assignment (e.g., `x = 5`)
+    Var(Ident),
+    /// Field assignment (e.g., `point.x = 5`)
+    Field(FieldExpr),
 }
 
 /// A while loop expression.
@@ -251,6 +317,8 @@ impl Expr {
             Expr::Call(call) => call.span,
             Expr::Break(break_expr) => break_expr.span,
             Expr::Continue(continue_expr) => continue_expr.span,
+            Expr::StructLit(struct_lit) => struct_lit.span,
+            Expr::Field(field_expr) => field_expr.span,
         }
     }
 }
