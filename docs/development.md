@@ -5,7 +5,7 @@ This document covers how to build, test, and contribute to the Rue compiler.
 ## Prerequisites
 
 - Rust toolchain (rustc, cargo)
-- Buck2 build system (included as `./buck2` wrapper script)
+- dotslash, for bootstrapping buck2
 - Linux x86-64 (for running compiled binaries)
 
 ## Repository Structure
@@ -14,16 +14,17 @@ This document covers how to build, test, and contribute to the Rue compiler.
 rue/
 ├── crates/
 │   ├── rue/           # CLI binary
-│   ├── rue-compiler/  # Pipeline orchestration
-│   ├── rue-lexer/     # Tokenizer
-│   ├── rue-parser/    # AST construction
-│   ├── rue-rir/       # Untyped IR
 │   ├── rue-air/       # Typed IR + semantic analysis
 │   ├── rue-codegen/   # Machine code generation
-│   ├── rue-linker/    # Object file creation and linking
+│   ├── rue-compiler/  # Pipeline orchestration
 │   ├── rue-error/     # Error types
-│   ├── rue-span/      # Source locations
 │   ├── rue-intern/    # String interning
+│   ├── rue-lexer/     # Tokenizer
+│   ├── rue-linker/    # Object file creation and linking
+│   ├── rue-parser/    # AST construction
+│   ├── rue-rir/       # Untyped IR
+│   ├── rue-runtime/    # The runtime
+│   ├── rue-span/      # Source locations
 │   └── rue-spec/      # Specification test runner
 ├── docs/              # Documentation
 ├── examples/          # Example .rue programs
