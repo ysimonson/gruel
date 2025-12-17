@@ -124,6 +124,27 @@ impl<'a> Sema<'a> {
                 }))
             }
 
+            InstData::BoolConst(value) => {
+                let ty = Type::Bool;
+
+                // Type check
+                if ty != expected_type && !expected_type.is_error() {
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: expected_type.name().to_string(),
+                            found: ty.name().to_string(),
+                        },
+                        inst.span,
+                    ));
+                }
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::BoolConst(*value),
+                    ty,
+                    span: inst.span,
+                }))
+            }
+
             InstData::Add { lhs, rhs } => {
                 // Both operands must be i32 for now
                 let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
@@ -180,6 +201,73 @@ impl<'a> Sema<'a> {
                 }))
             }
 
+            // Comparison operators: operands must be i32, result is bool
+            InstData::Eq { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Eq(lhs_ref, rhs_ref),
+                    ty: Type::Bool,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Ne { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Ne(lhs_ref, rhs_ref),
+                    ty: Type::Bool,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Lt { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Lt(lhs_ref, rhs_ref),
+                    ty: Type::Bool,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Gt { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Gt(lhs_ref, rhs_ref),
+                    ty: Type::Bool,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Le { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Le(lhs_ref, rhs_ref),
+                    ty: Type::Bool,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Ge { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, locals, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, locals, next_slot)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Ge(lhs_ref, rhs_ref),
+                    ty: Type::Bool,
+                    span: inst.span,
+                }))
+            }
+
             InstData::Neg { operand } => {
                 let operand_ref = self.analyze_inst(air, *operand, Type::I32, locals, next_slot)?;
 
@@ -190,22 +278,95 @@ impl<'a> Sema<'a> {
                 }))
             }
 
+            InstData::Branch { cond, then_block, else_block } => {
+                // Condition must be bool
+                let cond_ref = self.analyze_inst(air, *cond, Type::Bool, locals, next_slot)?;
+
+                // Determine the result type:
+                // - If else is present, both branches must have the same type
+                // - If else is absent, the result is Unit
+                if let Some(else_b) = else_block {
+                    // Save locals before then branch
+                    let saved_locals = locals.clone();
+
+                    // Analyze then branch
+                    let then_ref = self.analyze_inst(air, *then_block, expected_type, locals, next_slot)?;
+                    let then_type = air.get(then_ref).ty;
+
+                    // Restore locals and analyze else branch
+                    *locals = saved_locals.clone();
+                    let else_ref = self.analyze_inst(air, *else_b, then_type, locals, next_slot)?;
+                    let else_type = air.get(else_ref).ty;
+
+                    // Check types match
+                    if then_type != else_type && !then_type.is_error() && !else_type.is_error() {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: then_type.name().to_string(),
+                                found: else_type.name().to_string(),
+                            },
+                            self.rir.get(*else_b).span,
+                        ));
+                    }
+
+                    // Restore locals to original (branches are isolated scopes)
+                    *locals = saved_locals;
+
+                    Ok(air.add_inst(AirInst {
+                        data: AirInstData::Branch {
+                            cond: cond_ref,
+                            then_value: then_ref,
+                            else_value: Some(else_ref),
+                        },
+                        ty: then_type,
+                        span: inst.span,
+                    }))
+                } else {
+                    // No else branch - result is Unit
+                    // Save locals
+                    let saved_locals = locals.clone();
+
+                    // Analyze then branch (can be any type, we'll ignore it)
+                    let then_ref = self.analyze_inst(air, *then_block, Type::Unit, locals, next_slot)?;
+
+                    // Restore locals
+                    *locals = saved_locals;
+
+                    Ok(air.add_inst(AirInst {
+                        data: AirInstData::Branch {
+                            cond: cond_ref,
+                            then_value: then_ref,
+                            else_value: None,
+                        },
+                        ty: Type::Unit,
+                        span: inst.span,
+                    }))
+                }
+            }
+
             InstData::Alloc { name, is_mut, ty, init } => {
-                // Check type annotation if provided
-                if let Some(type_sym) = ty {
-                    // Verify it's a valid type
+                // Determine the type from annotation or infer from initializer
+                let var_type = if let Some(type_sym) = ty {
+                    // Resolve the type annotation
                     let well_known = self.interner.well_known();
-                    if *type_sym != well_known.i32 {
+                    if *type_sym == well_known.i32 {
+                        Type::I32
+                    } else if *type_sym == well_known.bool {
+                        Type::Bool
+                    } else {
                         let type_name = self.interner.get(*type_sym);
                         return Err(CompileError::new(
                             ErrorKind::UnknownType(type_name.to_string()),
                             inst.span,
                         ));
                     }
-                }
+                } else {
+                    // Infer type from initializer
+                    self.infer_type(*init, locals)?
+                };
 
-                // Analyze the initializer
-                let init_ref = self.analyze_inst(air, *init, Type::I32, locals, next_slot)?;
+                // Analyze the initializer with the expected type
+                let init_ref = self.analyze_inst(air, *init, var_type, locals, next_slot)?;
 
                 // Allocate a new slot
                 let slot = *next_slot;
@@ -216,7 +377,7 @@ impl<'a> Sema<'a> {
                     *name,
                     LocalVar {
                         slot,
-                        ty: Type::I32,
+                        ty: var_type,
                         is_mut: *is_mut,
                     },
                 );
@@ -335,6 +496,8 @@ impl<'a> Sema<'a> {
 
         if type_sym == well_known.i32 {
             Ok(Type::I32)
+        } else if type_sym == well_known.bool {
+            Ok(Type::Bool)
         } else {
             Err(CompileError::new(
                 ErrorKind::UnexpectedToken {
@@ -343,6 +506,66 @@ impl<'a> Sema<'a> {
                 },
                 span,
             ))
+        }
+    }
+
+    /// Infer the type of an RIR instruction without analyzing it fully.
+    ///
+    /// This is used for type inference in `let` bindings without type annotations.
+    ///
+    /// Note: Arithmetic operations (Add, Sub, etc.) return i32 because that's currently
+    /// the only numeric type. When more numeric types are added, this will need to
+    /// perform actual type unification.
+    fn infer_type(
+        &self,
+        inst_ref: InstRef,
+        locals: &HashMap<Symbol, LocalVar>,
+    ) -> CompileResult<Type> {
+        let inst = self.rir.get(inst_ref);
+
+        match &inst.data {
+            InstData::IntConst(_) => Ok(Type::I32),
+            InstData::BoolConst(_) => Ok(Type::Bool),
+            InstData::Add { .. }
+            | InstData::Sub { .. }
+            | InstData::Mul { .. }
+            | InstData::Div { .. }
+            | InstData::Mod { .. }
+            | InstData::Neg { .. } => Ok(Type::I32),
+            InstData::Eq { .. }
+            | InstData::Ne { .. }
+            | InstData::Lt { .. }
+            | InstData::Gt { .. }
+            | InstData::Le { .. }
+            | InstData::Ge { .. } => Ok(Type::Bool),
+            InstData::VarRef { name } => {
+                let name_str = self.interner.get(*name);
+                let local = locals.get(name).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::UndefinedVariable(name_str.to_string()),
+                        inst.span,
+                    )
+                })?;
+                Ok(local.ty)
+            }
+            InstData::Block { extra_start, len } => {
+                // The type of a block is the type of its last expression
+                if *len == 0 {
+                    Ok(Type::Unit)
+                } else {
+                    let inst_refs = self.rir.get_extra(*extra_start, *len);
+                    let last_ref = InstRef::from_raw(inst_refs[inst_refs.len() - 1]);
+                    self.infer_type(last_ref, locals)
+                }
+            }
+            InstData::Branch { then_block, .. } => {
+                // The type of an if/else is the type of either branch (they should match)
+                self.infer_type(*then_block, locals)
+            }
+            InstData::Alloc { .. } | InstData::Assign { .. } | InstData::Ret(_) => Ok(Type::Unit),
+            InstData::FnDecl { .. } => {
+                unreachable!("FnDecl should not appear in expression context")
+            }
         }
     }
 }

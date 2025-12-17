@@ -43,6 +43,8 @@ pub struct Ident {
 pub enum Expr {
     /// Integer literal
     Int(IntLit),
+    /// Boolean literal
+    Bool(BoolLit),
     /// Identifier reference (variable)
     Ident(Ident),
     /// Binary operation (e.g., `a + b`)
@@ -53,12 +55,21 @@ pub enum Expr {
     Paren(ParenExpr),
     /// Block with statements and final expression
     Block(BlockExpr),
+    /// If expression (e.g., `if cond { a } else { b }`)
+    If(IfExpr),
 }
 
 /// An integer literal.
 #[derive(Debug)]
 pub struct IntLit {
     pub value: i64,
+    pub span: Span,
+}
+
+/// A boolean literal.
+#[derive(Debug)]
+pub struct BoolLit {
+    pub value: bool,
     pub span: Span,
 }
 
@@ -74,11 +85,19 @@ pub struct BinaryExpr {
 /// Binary operators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
+    // Arithmetic
     Add, // +
     Sub, // -
     Mul, // *
     Div, // /
     Mod, // %
+    // Comparison
+    Eq,  // ==
+    Ne,  // !=
+    Lt,  // <
+    Gt,  // >
+    Le,  // <=
+    Ge,  // >=
 }
 
 /// A unary expression.
@@ -109,6 +128,18 @@ pub struct BlockExpr {
     pub statements: Vec<Statement>,
     /// Final expression (the value of the block)
     pub expr: Box<Expr>,
+    pub span: Span,
+}
+
+/// An if expression.
+#[derive(Debug)]
+pub struct IfExpr {
+    /// Condition (must be bool)
+    pub cond: Box<Expr>,
+    /// Then branch
+    pub then_block: BlockExpr,
+    /// Optional else branch
+    pub else_block: Option<BlockExpr>,
     pub span: Span,
 }
 
@@ -152,11 +183,13 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Int(lit) => lit.span,
+            Expr::Bool(lit) => lit.span,
             Expr::Ident(ident) => ident.span,
             Expr::Binary(bin) => bin.span,
             Expr::Unary(un) => un.span,
             Expr::Paren(paren) => paren.span,
             Expr::Block(block) => block.span,
+            Expr::If(if_expr) => if_expr.span,
         }
     }
 }

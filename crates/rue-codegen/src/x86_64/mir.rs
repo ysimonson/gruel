@@ -211,7 +211,34 @@ pub enum X86Inst {
     /// Quotient in EAX, remainder in EDX.
     IdivR { src: Operand },
 
-    // Control flow for runtime checks
+    // Comparison and control flow
+    /// `cmp src1, src2` - Compare (subtract and set flags, discard result).
+    CmpRR { src1: Operand, src2: Operand },
+
+    /// `cmp src, imm` - Compare register with immediate.
+    CmpRI { src: Operand, imm: i32 },
+
+    /// `sete dst` - Set byte if equal (ZF=1).
+    Sete { dst: Operand },
+
+    /// `setne dst` - Set byte if not equal (ZF=0).
+    Setne { dst: Operand },
+
+    /// `setl dst` - Set byte if less (signed: SF!=OF).
+    Setl { dst: Operand },
+
+    /// `setg dst` - Set byte if greater (signed: ZF=0 and SF=OF).
+    Setg { dst: Operand },
+
+    /// `setle dst` - Set byte if less or equal (signed: ZF=1 or SF!=OF).
+    Setle { dst: Operand },
+
+    /// `setge dst` - Set byte if greater or equal (signed: SF=OF).
+    Setge { dst: Operand },
+
+    /// `movzx dst, src` - Move with zero-extend (byte to dword).
+    Movzx { dst: Operand, src: Operand },
+
     /// `test src1, src2` - Bitwise AND, set flags, discard result.
     TestRR { src1: Operand, src2: Operand },
 
@@ -226,6 +253,9 @@ pub enum X86Inst {
 
     /// `jno label` - Jump if overflow flag is not set.
     Jno { label: String },
+
+    /// `jmp label` - Unconditional jump.
+    Jmp { label: String },
 
     /// Label marker (not a real instruction).
     Label { name: String },
@@ -272,11 +302,21 @@ impl fmt::Display for X86Inst {
             X86Inst::Neg { dst } => write!(f, "neg {}", dst),
             X86Inst::Cdq => write!(f, "cdq"),
             X86Inst::IdivR { src } => write!(f, "idiv {}", src),
+            X86Inst::CmpRR { src1, src2 } => write!(f, "cmp {}, {}", src1, src2),
+            X86Inst::CmpRI { src, imm } => write!(f, "cmp {}, {}", src, imm),
+            X86Inst::Sete { dst } => write!(f, "sete {}", dst),
+            X86Inst::Setne { dst } => write!(f, "setne {}", dst),
+            X86Inst::Setl { dst } => write!(f, "setl {}", dst),
+            X86Inst::Setg { dst } => write!(f, "setg {}", dst),
+            X86Inst::Setle { dst } => write!(f, "setle {}", dst),
+            X86Inst::Setge { dst } => write!(f, "setge {}", dst),
+            X86Inst::Movzx { dst, src } => write!(f, "movzx {}, {}", dst, src),
             X86Inst::TestRR { src1, src2 } => write!(f, "test {}, {}", src1, src2),
             X86Inst::Jz { label } => write!(f, "jz {}", label),
             X86Inst::Jnz { label } => write!(f, "jnz {}", label),
             X86Inst::Jo { label } => write!(f, "jo {}", label),
             X86Inst::Jno { label } => write!(f, "jno {}", label),
+            X86Inst::Jmp { label } => write!(f, "jmp {}", label),
             X86Inst::Label { name } => write!(f, "{}:", name),
             X86Inst::CallRel { symbol } => write!(f, "call {}", symbol),
             X86Inst::Syscall => write!(f, "syscall"),

@@ -148,6 +148,33 @@ impl<'a> Emitter<'a> {
             X86Inst::IdivR { src } => {
                 self.emit_idiv(src.as_physical());
             }
+            X86Inst::CmpRR { src1, src2 } => {
+                self.emit_cmp_rr(src1.as_physical(), src2.as_physical());
+            }
+            X86Inst::CmpRI { src, imm } => {
+                self.emit_cmp_ri(src.as_physical(), *imm);
+            }
+            X86Inst::Sete { dst } => {
+                self.emit_setcc(0x94, dst.as_physical()); // SETE opcode
+            }
+            X86Inst::Setne { dst } => {
+                self.emit_setcc(0x95, dst.as_physical()); // SETNE opcode
+            }
+            X86Inst::Setl { dst } => {
+                self.emit_setcc(0x9C, dst.as_physical()); // SETL opcode
+            }
+            X86Inst::Setg { dst } => {
+                self.emit_setcc(0x9F, dst.as_physical()); // SETG opcode
+            }
+            X86Inst::Setle { dst } => {
+                self.emit_setcc(0x9E, dst.as_physical()); // SETLE opcode
+            }
+            X86Inst::Setge { dst } => {
+                self.emit_setcc(0x9D, dst.as_physical()); // SETGE opcode
+            }
+            X86Inst::Movzx { dst, src } => {
+                self.emit_movzx(dst.as_physical(), src.as_physical());
+            }
             X86Inst::TestRR { src1, src2 } => {
                 self.emit_test_rr(src1.as_physical(), src2.as_physical());
             }
@@ -162,6 +189,9 @@ impl<'a> Emitter<'a> {
             }
             X86Inst::Jno { label } => {
                 self.emit_jcc(0x71, label); // JNO rel8 opcode
+            }
+            X86Inst::Jmp { label } => {
+                self.emit_jmp(label);
             }
             X86Inst::Label { name } => {
                 // Record the current code offset for this label
@@ -530,6 +560,114 @@ impl<'a> Emitter<'a> {
         // ModR/M: mod=11, reg=src2, r/m=src1
         let modrm = 0xC0 | ((src2_enc & 7) << 3) | (src1_enc & 7);
         self.code.push(modrm);
+    }
+
+    /// Emit `cmp r32, r32`.
+    ///
+    /// Encoding: [REX] 39 /r (cmp r/m32, r32)
+    fn emit_cmp_rr(&mut self, src1: Reg, src2: Reg) {
+        let src1_enc = src1.encoding();
+        let src2_enc = src2.encoding();
+
+        // REX prefix if needed
+        if src2.needs_rex() || src1.needs_rex() {
+            let rex = 0x40
+                | if src2.needs_rex() { 0x04 } else { 0x00 }  // REX.R
+                | if src1.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+            self.code.push(rex);
+        }
+
+        // Opcode: 39 (cmp r/m32, r32)
+        self.code.push(0x39);
+
+        // ModR/M: mod=11, reg=src2, r/m=src1
+        let modrm = 0xC0 | ((src2_enc & 7) << 3) | (src1_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `cmp r32, imm32`.
+    ///
+    /// Encoding: [REX] 81 /7 imm32 (cmp r/m32, imm32)
+    fn emit_cmp_ri(&mut self, src: Reg, imm: i32) {
+        let src_enc = src.encoding();
+
+        // REX prefix if needed
+        if src.needs_rex() {
+            self.code.push(0x41); // REX.B
+        }
+
+        // Opcode: 81 (group 1, /7 for CMP)
+        self.code.push(0x81);
+
+        // ModR/M: mod=11, reg=7 (CMP), r/m=src
+        let modrm = 0xC0 | (7 << 3) | (src_enc & 7);
+        self.code.push(modrm);
+
+        // Immediate (32-bit little-endian)
+        self.code.extend_from_slice(&imm.to_le_bytes());
+    }
+
+    /// Emit `setcc r8` - Set byte based on condition code.
+    ///
+    /// Encoding: [REX] 0F 9x /0 (setcc r/m8)
+    /// The opcode byte (9x) varies by condition.
+    fn emit_setcc(&mut self, opcode: u8, dst: Reg) {
+        let dst_enc = dst.encoding();
+
+        // REX prefix if needed for extended registers
+        // Note: SETcc operates on 8-bit registers, but we use 64-bit names
+        if dst.needs_rex() {
+            self.code.push(0x41); // REX.B
+        }
+
+        // Two-byte opcode: 0F 9x
+        self.code.push(0x0F);
+        self.code.push(opcode);
+
+        // ModR/M: mod=11, reg=0, r/m=dst
+        let modrm = 0xC0 | (dst_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `movzx r32, r8` - Move with zero-extend (byte to dword).
+    ///
+    /// Encoding: [REX] 0F B6 /r (movzx r32, r/m8)
+    fn emit_movzx(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX prefix if needed
+        if dst.needs_rex() || src.needs_rex() {
+            let rex = 0x40
+                | if dst.needs_rex() { 0x04 } else { 0x00 }  // REX.R
+                | if src.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+            self.code.push(rex);
+        }
+
+        // Two-byte opcode: 0F B6 (movzx r32, r/m8)
+        self.code.push(0x0F);
+        self.code.push(0xB6);
+
+        // ModR/M: mod=11, reg=dst, r/m=src
+        let modrm = 0xC0 | ((dst_enc & 7) << 3) | (src_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `jmp rel8` - Unconditional jump.
+    ///
+    /// Encoding: EB rel8
+    fn emit_jmp(&mut self, label: &str) {
+        // Opcode: EB (jmp rel8)
+        self.code.push(0xEB);
+
+        // Record fixup location and emit placeholder for rel8
+        let fixup_offset = self.code.len();
+        self.code.push(0x00); // Placeholder, will be patched
+
+        self.fixups.push(Fixup {
+            offset: fixup_offset,
+            label: label.to_string(),
+        });
     }
 
     /// Emit a conditional jump with rel8 encoding.

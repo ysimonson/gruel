@@ -69,6 +69,10 @@ impl<'a> AstGen<'a> {
                 data: InstData::IntConst(lit.value),
                 span: lit.span,
             }),
+            Expr::Bool(lit) => self.rir.add_inst(Inst {
+                data: InstData::BoolConst(lit.value),
+                span: lit.span,
+            }),
             Expr::Ident(ident) => {
                 let name = self.interner.intern(&ident.name);
                 self.rir.add_inst(Inst {
@@ -85,6 +89,12 @@ impl<'a> AstGen<'a> {
                     BinaryOp::Mul => InstData::Mul { lhs, rhs },
                     BinaryOp::Div => InstData::Div { lhs, rhs },
                     BinaryOp::Mod => InstData::Mod { lhs, rhs },
+                    BinaryOp::Eq => InstData::Eq { lhs, rhs },
+                    BinaryOp::Ne => InstData::Ne { lhs, rhs },
+                    BinaryOp::Lt => InstData::Lt { lhs, rhs },
+                    BinaryOp::Gt => InstData::Gt { lhs, rhs },
+                    BinaryOp::Le => InstData::Le { lhs, rhs },
+                    BinaryOp::Ge => InstData::Ge { lhs, rhs },
                 };
                 self.rir.add_inst(Inst {
                     data,
@@ -103,33 +113,51 @@ impl<'a> AstGen<'a> {
                 self.gen_expr(&paren.inner)
             }
             Expr::Block(block) => {
-                if block.statements.is_empty() {
-                    // No statements, just the final expression
-                    self.gen_expr(&block.expr)
-                } else {
-                    // Collect all instruction refs for the block
-                    let mut inst_refs = Vec::new();
-
-                    // Generate all statements first
-                    for stmt in &block.statements {
-                        let inst_ref = self.gen_statement(stmt);
-                        inst_refs.push(inst_ref.as_u32());
-                    }
-
-                    // Generate the final expression
-                    let final_expr = self.gen_expr(&block.expr);
-                    inst_refs.push(final_expr.as_u32());
-
-                    // Store the refs in extra data
-                    let extra_start = self.rir.add_extra(&inst_refs);
-                    let len = inst_refs.len() as u32;
-
-                    self.rir.add_inst(Inst {
-                        data: InstData::Block { extra_start, len },
-                        span: block.span,
-                    })
-                }
+                self.gen_block(block)
             }
+            Expr::If(if_expr) => {
+                let cond = self.gen_expr(&if_expr.cond);
+                let then_block = self.gen_block(&if_expr.then_block);
+                let else_block = if_expr.else_block.as_ref().map(|b| self.gen_block(b));
+
+                self.rir.add_inst(Inst {
+                    data: InstData::Branch {
+                        cond,
+                        then_block,
+                        else_block,
+                    },
+                    span: if_expr.span,
+                })
+            }
+        }
+    }
+
+    fn gen_block(&mut self, block: &rue_parser::BlockExpr) -> InstRef {
+        if block.statements.is_empty() {
+            // No statements, just the final expression
+            self.gen_expr(&block.expr)
+        } else {
+            // Collect all instruction refs for the block
+            let mut inst_refs = Vec::new();
+
+            // Generate all statements first
+            for stmt in &block.statements {
+                let inst_ref = self.gen_statement(stmt);
+                inst_refs.push(inst_ref.as_u32());
+            }
+
+            // Generate the final expression
+            let final_expr = self.gen_expr(&block.expr);
+            inst_refs.push(final_expr.as_u32());
+
+            // Store the refs in extra data
+            let extra_start = self.rir.add_extra(&inst_refs);
+            let len = inst_refs.len() as u32;
+
+            self.rir.add_inst(Inst {
+                data: InstData::Block { extra_start, len },
+                span: block.span,
+            })
         }
     }
 

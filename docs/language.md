@@ -16,11 +16,14 @@ Rue is in early development. The implemented feature set is minimal:
 | Feature | Status |
 |---------|--------|
 | Integer literals | ✓ Implemented |
+| Boolean literals | ✓ Implemented |
 | Functions | ✓ Basic (no parameters) |
 | Line comments | ✓ Implemented |
 | Arithmetic operators | ✓ Implemented |
+| Comparison operators | ✓ Implemented |
 | Variables | ✓ Implemented |
-| Control flow | Planned |
+| If/else expressions | ✓ Implemented |
+| Loops | Planned |
 
 ## Specification Tests
 
@@ -37,6 +40,7 @@ The executable specification lives in `crates/rue-spec/cases/`:
 | `07-error-golden.toml` | 5.1 | Error message golden tests |
 | `08-arithmetic.toml` | 1.2 | Arithmetic operators |
 | `09-variables.toml` | 2.2 | Local variables |
+| `10-conditionals.toml` | 10.1 | If/else expressions and comparisons |
 
 Each `.toml` file contains test cases that define expected behavior:
 
@@ -127,12 +131,85 @@ fn main() -> i32 {
 }
 ```
 
+### Types
+
+Rue currently supports two primitive types:
+
+| Type | Description | Literals |
+|------|-------------|----------|
+| `i32` | 32-bit signed integer | `0`, `42`, `-17` |
+| `bool` | Boolean | `true`, `false` |
+
+Type annotations are optional when the type can be inferred:
+
+```rue
+fn main() -> i32 {
+    let x = 42;        // inferred as i32
+    let flag = true;   // inferred as bool
+    let y: i32 = 10;   // explicit annotation
+    x + y
+}
+```
+
+### Operators
+
 Operators by precedence (highest to lowest):
 1. `-` (unary negation)
 2. `*`, `/`, `%` (multiplicative)
 3. `+`, `-` (additive)
+4. `==`, `!=`, `<`, `>`, `<=`, `>=` (comparison)
 
 All binary operators are left-associative: `10 - 3 - 2` equals `5` (not `9`).
+
+Comparison operators return `bool`:
+
+```rue
+fn main() -> i32 {
+    let a = 1 == 1;    // true
+    let b = 2 < 3;     // true
+    let c = 5 >= 5;    // true
+    if a { 1 } else { 0 }
+}
+```
+
+### Conditionals
+
+If/else is an expression that returns a value:
+
+```rue
+fn main() -> i32 {
+    let x = if true { 42 } else { 0 };
+    x
+}
+```
+
+Both branches must have the same type:
+
+```rue
+fn main() -> i32 {
+    let n = 5;
+    if n > 0 { 100 } else { 0 }
+}
+```
+
+If/else can be nested:
+
+```rue
+fn main() -> i32 {
+    let x = 5;
+    if x < 3 { 1 }
+    else { if x < 7 { 2 }
+    else { 3 } }
+}
+```
+
+The condition must be of type `bool`. Integer values are not implicitly converted to booleans:
+
+```rue
+fn main() -> i32 {
+    if 1 { 42 } else { 0 }  // ERROR: expected bool, found i32
+}
+```
 
 ### Runtime Errors
 
@@ -152,19 +229,24 @@ block          = { statement } expression ;
 statement      = let_stmt | assign_stmt ;
 let_stmt       = "let" [ "mut" ] IDENT [ ":" type ] "=" expression ";" ;
 assign_stmt    = IDENT "=" expression ";" ;
-type           = "i32" ;
-expression     = additive ;
+type           = "i32" | "bool" ;
+expression     = comparison ;
+comparison     = additive { ("==" | "!=" | "<" | ">" | "<=" | ">=") additive } ;
 additive       = multiplicative { ("+" | "-") multiplicative } ;
 multiplicative = unary { ("*" | "/" | "%") unary } ;
 unary          = "-" unary | primary ;
-primary        = INTEGER | IDENT | "(" expression ")" ;
+primary        = INTEGER | BOOL | IDENT | "(" expression ")" | block_expr | if_expr ;
+block_expr     = "{" block "}" ;
+if_expr        = "if" expression "{" block "}" [ "else" "{" block "}" ] ;
+
+BOOL           = "true" | "false" ;
 ```
 
 ## Planned Features
 
 See `docs/design-decisions.md` (ADR-009) for language philosophy. Planned additions include:
 
-- Control flow: `if`/`else`, `while`, `loop`
+- Loops: `while`, `loop`
 - Functions with parameters
 - Structs and user-defined types
 - Memory safety model (influenced by Hylo/Swift/Rust)

@@ -7,6 +7,8 @@
 pub enum Type {
     /// 32-bit signed integer
     I32,
+    /// Boolean
+    Bool,
     /// The unit type (for functions that don't return a value)
     #[default]
     Unit,
@@ -19,6 +21,7 @@ impl Type {
     pub fn name(&self) -> &'static str {
         match self {
             Type::I32 => "i32",
+            Type::Bool => "bool",
             Type::Unit => "()",
             Type::Error => "<error>",
         }

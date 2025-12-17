@@ -312,6 +312,204 @@ impl<'a> Lower<'a> {
                 // Store doesn't produce a value
             }
 
+            AirInstData::BoolConst(value) => {
+                // Booleans are represented as 0 or 1
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                self.mir.push(X86Inst::MovRI32 {
+                    dst: Operand::Virtual(vreg),
+                    imm: if *value { 1 } else { 0 },
+                });
+            }
+
+            // Comparison operators
+            AirInstData::Eq(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                // Compare and set result
+                self.mir.push(X86Inst::CmpRR {
+                    src1: Operand::Virtual(lhs_vreg),
+                    src2: Operand::Virtual(rhs_vreg),
+                });
+                self.mir.push(X86Inst::Sete {
+                    dst: Operand::Virtual(vreg),
+                });
+                // Zero-extend byte to dword
+                self.mir.push(X86Inst::Movzx {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(vreg),
+                });
+            }
+
+            AirInstData::Ne(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                self.mir.push(X86Inst::CmpRR {
+                    src1: Operand::Virtual(lhs_vreg),
+                    src2: Operand::Virtual(rhs_vreg),
+                });
+                self.mir.push(X86Inst::Setne {
+                    dst: Operand::Virtual(vreg),
+                });
+                self.mir.push(X86Inst::Movzx {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(vreg),
+                });
+            }
+
+            AirInstData::Lt(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                self.mir.push(X86Inst::CmpRR {
+                    src1: Operand::Virtual(lhs_vreg),
+                    src2: Operand::Virtual(rhs_vreg),
+                });
+                self.mir.push(X86Inst::Setl {
+                    dst: Operand::Virtual(vreg),
+                });
+                self.mir.push(X86Inst::Movzx {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(vreg),
+                });
+            }
+
+            AirInstData::Gt(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                self.mir.push(X86Inst::CmpRR {
+                    src1: Operand::Virtual(lhs_vreg),
+                    src2: Operand::Virtual(rhs_vreg),
+                });
+                self.mir.push(X86Inst::Setg {
+                    dst: Operand::Virtual(vreg),
+                });
+                self.mir.push(X86Inst::Movzx {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(vreg),
+                });
+            }
+
+            AirInstData::Le(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                self.mir.push(X86Inst::CmpRR {
+                    src1: Operand::Virtual(lhs_vreg),
+                    src2: Operand::Virtual(rhs_vreg),
+                });
+                self.mir.push(X86Inst::Setle {
+                    dst: Operand::Virtual(vreg),
+                });
+                self.mir.push(X86Inst::Movzx {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(vreg),
+                });
+            }
+
+            AirInstData::Ge(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                self.mir.push(X86Inst::CmpRR {
+                    src1: Operand::Virtual(lhs_vreg),
+                    src2: Operand::Virtual(rhs_vreg),
+                });
+                self.mir.push(X86Inst::Setge {
+                    dst: Operand::Virtual(vreg),
+                });
+                self.mir.push(X86Inst::Movzx {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(vreg),
+                });
+            }
+
+            AirInstData::Branch { cond, then_value, else_value } => {
+                // Note: Both branches have already been lowered to MIR before we get here,
+                // since AIR instructions are processed in order. The vregs we fetch below
+                // already contain the computed values. This is fine for simple cases but
+                // means we don't get short-circuit evaluation or lazy branch computation.
+                // Future optimization work could defer branch lowering.
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let cond_vreg = self.get_vreg(*cond);
+                let then_vreg = self.get_vreg(*then_value);
+
+                if let Some(else_v) = else_value {
+                    // if-else: result is either then_value or else_value
+                    let else_vreg = self.get_vreg(*else_v);
+
+                    let else_label = self.new_label("else");
+                    let end_label = self.new_label("end_if");
+
+                    // Test condition: if zero (false), jump to else
+                    self.mir.push(X86Inst::CmpRI {
+                        src: Operand::Virtual(cond_vreg),
+                        imm: 0,
+                    });
+                    self.mir.push(X86Inst::Jz { label: else_label.clone() });
+
+                    // Then branch: copy then_value to result
+                    self.mir.push(X86Inst::MovRR {
+                        dst: Operand::Virtual(vreg),
+                        src: Operand::Virtual(then_vreg),
+                    });
+                    self.mir.push(X86Inst::Jmp { label: end_label.clone() });
+
+                    // Else branch
+                    self.mir.push(X86Inst::Label { name: else_label });
+                    self.mir.push(X86Inst::MovRR {
+                        dst: Operand::Virtual(vreg),
+                        src: Operand::Virtual(else_vreg),
+                    });
+
+                    // End
+                    self.mir.push(X86Inst::Label { name: end_label });
+                } else {
+                    // if without else: result is Unit (we can just use then_value)
+                    let end_label = self.new_label("end_if");
+
+                    // Test condition: if zero (false), skip then branch
+                    self.mir.push(X86Inst::CmpRI {
+                        src: Operand::Virtual(cond_vreg),
+                        imm: 0,
+                    });
+                    self.mir.push(X86Inst::Jz { label: end_label.clone() });
+
+                    // Then branch: copy then_value to result (for consistency)
+                    self.mir.push(X86Inst::MovRR {
+                        dst: Operand::Virtual(vreg),
+                        src: Operand::Virtual(then_vreg),
+                    });
+
+                    // End
+                    self.mir.push(X86Inst::Label { name: end_label });
+                }
+            }
+
             AirInstData::Ret(value_ref) => {
                 // Get the vreg holding the return value
                 let value_vreg = self.get_vreg(*value_ref);

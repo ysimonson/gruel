@@ -3,8 +3,8 @@
 //! Converts a sequence of tokens into an AST.
 
 use crate::ast::{
-    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, Expr, Function, Ident, IntLit, Item,
-    LetStatement, ParenExpr, Statement, UnaryExpr, UnaryOp,
+    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, Expr, Function, Ident, IfExpr,
+    IntLit, Item, LetStatement, ParenExpr, Statement, UnaryExpr, UnaryOp,
 };
 use rue_error::{CompileError, CompileResult, ErrorKind};
 use rue_lexer::{Token, TokenKind};
@@ -206,7 +206,50 @@ impl Parser {
 
     /// Parse an expression (entry point).
     fn parse_expr(&mut self) -> CompileResult<Expr> {
-        self.parse_additive()
+        self.parse_comparison()
+    }
+
+    /// Parse comparison expressions (==, !=, <, >, <=, >=).
+    /// Lower precedence than additive.
+    ///
+    /// Note: This allows chaining like `1 < 2 < 3`, which parses as `(1 < 2) < 3`.
+    /// This will type-error (bool vs int), but a dedicated "comparison chaining"
+    /// error message would provide better UX. Future work.
+    fn parse_comparison(&mut self) -> CompileResult<Expr> {
+        let mut left = self.parse_additive()?;
+
+        while matches!(
+            self.current().kind,
+            TokenKind::EqEq
+                | TokenKind::BangEq
+                | TokenKind::Lt
+                | TokenKind::Gt
+                | TokenKind::LtEq
+                | TokenKind::GtEq
+        ) {
+            let op_token = self.advance();
+            let op = match op_token.kind {
+                TokenKind::EqEq => BinaryOp::Eq,
+                TokenKind::BangEq => BinaryOp::Ne,
+                TokenKind::Lt => BinaryOp::Lt,
+                TokenKind::Gt => BinaryOp::Gt,
+                TokenKind::LtEq => BinaryOp::Le,
+                TokenKind::GtEq => BinaryOp::Ge,
+                _ => unreachable!(),
+            };
+
+            let right = self.parse_additive()?;
+            let span = Span::new(left.span().start, right.span().end);
+
+            left = Expr::Binary(BinaryExpr {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+                span,
+            });
+        }
+
+        Ok(left)
     }
 
     /// Parse additive expressions (+, -).
@@ -298,6 +341,20 @@ impl Parser {
                     span: token.span,
                 }))
             }
+            TokenKind::True => {
+                self.advance();
+                Ok(Expr::Bool(BoolLit {
+                    value: true,
+                    span: token.span,
+                }))
+            }
+            TokenKind::False => {
+                self.advance();
+                Ok(Expr::Bool(BoolLit {
+                    value: false,
+                    span: token.span,
+                }))
+            }
             TokenKind::Ident(name) => {
                 let name = name.clone();
                 self.advance();
@@ -322,6 +379,9 @@ impl Parser {
                 // Nested block expression
                 self.parse_block()
             }
+            TokenKind::If => {
+                self.parse_if_expr()
+            }
             _ => Err(CompileError::new(
                 ErrorKind::UnexpectedToken {
                     expected: "expression",
@@ -329,6 +389,115 @@ impl Parser {
                 },
                 token.span,
             )),
+        }
+    }
+
+    /// Parse an if expression: `if cond { then } [else { else }]`
+    fn parse_if_expr(&mut self) -> CompileResult<Expr> {
+        let start = self.current().span.start;
+
+        // Consume 'if'
+        self.expect(TokenKind::If)?;
+
+        // Parse condition
+        let cond = self.parse_expr()?;
+
+        // Parse then block
+        let then_block = self.parse_block_expr()?;
+
+        // Optionally parse else block
+        let else_block = if self.check(&TokenKind::Else) {
+            self.advance(); // consume 'else'
+            Some(self.parse_block_expr()?)
+        } else {
+            None
+        };
+
+        let end = if let Some(ref else_b) = else_block {
+            else_b.span.end
+        } else {
+            then_block.span.end
+        };
+
+        Ok(Expr::If(IfExpr {
+            cond: Box::new(cond),
+            then_block,
+            else_block,
+            span: Span::new(start, end),
+        }))
+    }
+
+    /// Parse a block expression and return the BlockExpr directly (not wrapped in Expr).
+    fn parse_block_expr(&mut self) -> CompileResult<BlockExpr> {
+        let start = self.current().span.start;
+        self.expect(TokenKind::LBrace)?;
+
+        let mut statements = Vec::new();
+
+        // Parse statements and final expression
+        loop {
+            // Check for end of block
+            if self.check(&TokenKind::RBrace) {
+                // Empty block or block ending after statements - error
+                return Err(CompileError::new(
+                    ErrorKind::UnexpectedToken {
+                        expected: "expression",
+                        found: self.current().kind.name().to_string(),
+                    },
+                    self.current().span,
+                ));
+            }
+
+            // Try to parse a let statement
+            if self.check(&TokenKind::Let) {
+                statements.push(self.parse_let_statement()?);
+                continue;
+            }
+
+            // Parse an expression
+            let expr = self.parse_expr()?;
+
+            // Check what follows the expression
+            if self.check(&TokenKind::Semi) {
+                // Expression statement - consume semicolon and continue
+                self.advance();
+                statements.push(Statement::Expr(expr));
+            } else if self.check(&TokenKind::RBrace) {
+                // Final expression - end of block
+                self.expect(TokenKind::RBrace)?;
+                let end = self.tokens[self.pos.saturating_sub(1)].span.end;
+
+                return Ok(BlockExpr {
+                    statements,
+                    expr: Box::new(expr),
+                    span: Span::new(start, end),
+                });
+            } else if self.check(&TokenKind::Eq) {
+                // Assignment: we parsed the LHS as an expression, check it's an identifier
+                match expr {
+                    Expr::Ident(target) => {
+                        let assign = self.parse_assignment_rest(target)?;
+                        statements.push(Statement::Assign(assign));
+                    }
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::UnexpectedToken {
+                                expected: "';'",
+                                found: self.current().kind.name().to_string(),
+                            },
+                            self.current().span,
+                        ));
+                    }
+                }
+            } else {
+                return Err(CompileError::new(
+                    ErrorKind::UnexpectedToken {
+                        expected: "';'",
+                        found: self.current().kind.name().to_string(),
+                    },
+                    self.current().span,
+                ));
+            }
         }
     }
 

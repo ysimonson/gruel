@@ -36,6 +36,8 @@ impl Symbol {
 pub struct WellKnown {
     /// The `i32` type
     pub i32: Symbol,
+    /// The `bool` type
+    pub bool: Symbol,
     /// The `()` unit type (currently not used in syntax)
     pub unit: Symbol,
 }
@@ -45,6 +47,7 @@ impl WellKnown {
     fn new(interner: &mut Interner) -> Self {
         Self {
             i32: interner.intern_inner("i32"),
+            bool: interner.intern_inner("bool"),
             unit: interner.intern_inner("()"),
         }
     }
@@ -210,9 +213,9 @@ mod tests {
     #[test]
     fn test_len() {
         let mut interner = Interner::new();
-        // Well-known symbols (i32, ()) are pre-interned
+        // Well-known symbols (i32, bool, ()) are pre-interned
         let initial_len = interner.len();
-        assert_eq!(initial_len, 2);
+        assert_eq!(initial_len, 3);
 
         interner.intern("a");
         assert_eq!(interner.len(), initial_len + 1);

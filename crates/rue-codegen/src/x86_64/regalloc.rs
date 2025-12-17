@@ -19,7 +19,11 @@ use super::mir::{Operand, Reg, X86Inst, X86Mir};
 /// - rax, rdx (used implicitly by idiv for division/modulo)
 /// - rdi is used for exit call argument, but available for temporaries
 ///
-/// For now, we use a simple set of scratch registers.
+/// Note: The current allocation is simple round-robin without liveness analysis.
+/// We include more registers than typically needed to reduce the chance of
+/// register conflicts when values have overlapping lifetimes (e.g., across
+/// conditional branches). Proper liveness-based allocation should be implemented
+/// as the language grows.
 const ALLOCATABLE_REGS: &[Reg] = &[
     Reg::R10, // First choice - caller-saved, not used for args
     Reg::R11, // Second choice - caller-saved, not used for args
@@ -28,6 +32,11 @@ const ALLOCATABLE_REGS: &[Reg] = &[
     Reg::R8,  // Can use when not needed for args
     Reg::R9,  // Can use when not needed for args
     Reg::Rdi, // Can use when not needed for exit call
+    Reg::R12, // Callee-saved, but we can use them for now
+    Reg::R13, // Callee-saved
+    Reg::R14, // Callee-saved
+    Reg::R15, // Callee-saved
+    Reg::Rbx, // Callee-saved
 ];
 
 /// Register allocator.
@@ -118,6 +127,35 @@ impl RegAlloc {
                 *src1 = Self::rewrite_operand(allocation, *src1);
                 *src2 = Self::rewrite_operand(allocation, *src2);
             }
+            X86Inst::CmpRR { src1, src2 } => {
+                *src1 = Self::rewrite_operand(allocation, *src1);
+                *src2 = Self::rewrite_operand(allocation, *src2);
+            }
+            X86Inst::CmpRI { src, .. } => {
+                *src = Self::rewrite_operand(allocation, *src);
+            }
+            X86Inst::Sete { dst } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+            }
+            X86Inst::Setne { dst } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+            }
+            X86Inst::Setl { dst } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+            }
+            X86Inst::Setg { dst } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+            }
+            X86Inst::Setle { dst } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+            }
+            X86Inst::Setge { dst } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+            }
+            X86Inst::Movzx { dst, src } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+                *src = Self::rewrite_operand(allocation, *src);
+            }
             X86Inst::Pop { dst } => {
                 *dst = Self::rewrite_operand(allocation, *dst);
             }
@@ -126,6 +164,7 @@ impl RegAlloc {
             | X86Inst::Jnz { .. }
             | X86Inst::Jo { .. }
             | X86Inst::Jno { .. }
+            | X86Inst::Jmp { .. }
             | X86Inst::Label { .. }
             | X86Inst::CallRel { .. }
             | X86Inst::Syscall

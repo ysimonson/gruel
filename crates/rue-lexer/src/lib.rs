@@ -12,6 +12,10 @@ pub enum TokenKind {
     Fn,
     Let,
     Mut,
+    If,
+    Else,
+    True,
+    False,
 
     // Literals
     Int(i64),
@@ -26,6 +30,12 @@ pub enum TokenKind {
     Slash,   // /
     Percent, // %
     Eq,      // =
+    EqEq,    // ==
+    BangEq,  // !=
+    Lt,      // <
+    Gt,      // >
+    LtEq,    // <=
+    GtEq,    // >=
 
     // Punctuation
     LParen,
@@ -47,6 +57,10 @@ impl TokenKind {
             TokenKind::Fn => "'fn'",
             TokenKind::Let => "'let'",
             TokenKind::Mut => "'mut'",
+            TokenKind::If => "'if'",
+            TokenKind::Else => "'else'",
+            TokenKind::True => "'true'",
+            TokenKind::False => "'false'",
             TokenKind::Int(_) => "integer",
             TokenKind::Ident(_) => "identifier",
             TokenKind::Plus => "'+'",
@@ -55,6 +69,12 @@ impl TokenKind {
             TokenKind::Slash => "'/'",
             TokenKind::Percent => "'%'",
             TokenKind::Eq => "'='",
+            TokenKind::EqEq => "'=='",
+            TokenKind::BangEq => "'!='",
+            TokenKind::Lt => "'<'",
+            TokenKind::Gt => "'>'",
+            TokenKind::LtEq => "'<='",
+            TokenKind::GtEq => "'>='",
             TokenKind::LParen => "'('",
             TokenKind::RParen => "')'",
             TokenKind::LBrace => "'{'",
@@ -164,7 +184,42 @@ impl<'a> Lexer<'a> {
             }
             '=' => {
                 self.advance();
-                TokenKind::Eq
+                if self.peek() == Some('=') {
+                    self.advance();
+                    TokenKind::EqEq
+                } else {
+                    TokenKind::Eq
+                }
+            }
+            '!' => {
+                self.advance();
+                if self.peek() == Some('=') {
+                    self.advance();
+                    TokenKind::BangEq
+                } else {
+                    return Err(CompileError::new(
+                        ErrorKind::UnexpectedCharacter('!'),
+                        Span::new(start, self.pos as u32),
+                    ));
+                }
+            }
+            '<' => {
+                self.advance();
+                if self.peek() == Some('=') {
+                    self.advance();
+                    TokenKind::LtEq
+                } else {
+                    TokenKind::Lt
+                }
+            }
+            '>' => {
+                self.advance();
+                if self.peek() == Some('=') {
+                    self.advance();
+                    TokenKind::GtEq
+                } else {
+                    TokenKind::Gt
+                }
             }
             '0'..='9' => self.lex_number()?,
             'a'..='z' | 'A'..='Z' | '_' => self.lex_ident_or_keyword(),
@@ -208,6 +263,10 @@ impl<'a> Lexer<'a> {
             "fn" => TokenKind::Fn,
             "let" => TokenKind::Let,
             "mut" => TokenKind::Mut,
+            "if" => TokenKind::If,
+            "else" => TokenKind::Else,
+            "true" => TokenKind::True,
+            "false" => TokenKind::False,
             _ => TokenKind::Ident(text.to_string()),
         }
     }

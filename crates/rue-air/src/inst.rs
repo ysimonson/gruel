@@ -94,6 +94,9 @@ pub enum AirInstData {
     /// Integer constant (typed)
     Const(i64),
 
+    /// Boolean constant
+    BoolConst(bool),
+
     // Binary arithmetic operations
     /// Addition
     Add(AirRef, AirRef),
@@ -106,9 +109,31 @@ pub enum AirInstData {
     /// Modulo
     Mod(AirRef, AirRef),
 
+    // Comparison operations (return bool)
+    /// Equality
+    Eq(AirRef, AirRef),
+    /// Inequality
+    Ne(AirRef, AirRef),
+    /// Less than
+    Lt(AirRef, AirRef),
+    /// Greater than
+    Gt(AirRef, AirRef),
+    /// Less than or equal
+    Le(AirRef, AirRef),
+    /// Greater than or equal
+    Ge(AirRef, AirRef),
+
     // Unary operations
     /// Negation
     Neg(AirRef),
+
+    // Control flow
+    /// Conditional branch
+    Branch {
+        cond: AirRef,
+        then_value: AirRef,
+        else_value: Option<AirRef>,
+    },
 
     // Variable operations
     /// Allocate local variable with initial value
@@ -151,12 +176,26 @@ impl fmt::Display for Air {
             write!(f, "    {} : {} = ", inst_ref, inst.ty.name())?;
             match &inst.data {
                 AirInstData::Const(v) => writeln!(f, "const {}", v)?,
+                AirInstData::BoolConst(v) => writeln!(f, "const {}", v)?,
                 AirInstData::Add(lhs, rhs) => writeln!(f, "add {}, {}", lhs, rhs)?,
                 AirInstData::Sub(lhs, rhs) => writeln!(f, "sub {}, {}", lhs, rhs)?,
                 AirInstData::Mul(lhs, rhs) => writeln!(f, "mul {}, {}", lhs, rhs)?,
                 AirInstData::Div(lhs, rhs) => writeln!(f, "div {}, {}", lhs, rhs)?,
                 AirInstData::Mod(lhs, rhs) => writeln!(f, "mod {}, {}", lhs, rhs)?,
+                AirInstData::Eq(lhs, rhs) => writeln!(f, "eq {}, {}", lhs, rhs)?,
+                AirInstData::Ne(lhs, rhs) => writeln!(f, "ne {}, {}", lhs, rhs)?,
+                AirInstData::Lt(lhs, rhs) => writeln!(f, "lt {}, {}", lhs, rhs)?,
+                AirInstData::Gt(lhs, rhs) => writeln!(f, "gt {}, {}", lhs, rhs)?,
+                AirInstData::Le(lhs, rhs) => writeln!(f, "le {}, {}", lhs, rhs)?,
+                AirInstData::Ge(lhs, rhs) => writeln!(f, "ge {}, {}", lhs, rhs)?,
                 AirInstData::Neg(operand) => writeln!(f, "neg {}", operand)?,
+                AirInstData::Branch { cond, then_value, else_value } => {
+                    if let Some(else_v) = else_value {
+                        writeln!(f, "branch {}, {}, {}", cond, then_value, else_v)?
+                    } else {
+                        writeln!(f, "branch {}, {}", cond, then_value)?
+                    }
+                }
                 AirInstData::Alloc { slot, init } => writeln!(f, "alloc ${} = {}", slot, init)?,
                 AirInstData::Load { slot } => writeln!(f, "load ${}", slot)?,
                 AirInstData::Store { slot, value } => writeln!(f, "store ${} = {}", slot, value)?,

@@ -111,6 +111,9 @@ pub enum InstData {
     /// Integer constant
     IntConst(i64),
 
+    /// Boolean constant
+    BoolConst(bool),
+
     // Binary arithmetic operations
     /// Addition: lhs + rhs
     Add { lhs: InstRef, rhs: InstRef },
@@ -123,9 +126,31 @@ pub enum InstData {
     /// Modulo: lhs % rhs
     Mod { lhs: InstRef, rhs: InstRef },
 
+    // Comparison operations
+    /// Equality: lhs == rhs
+    Eq { lhs: InstRef, rhs: InstRef },
+    /// Inequality: lhs != rhs
+    Ne { lhs: InstRef, rhs: InstRef },
+    /// Less than: lhs < rhs
+    Lt { lhs: InstRef, rhs: InstRef },
+    /// Greater than: lhs > rhs
+    Gt { lhs: InstRef, rhs: InstRef },
+    /// Less than or equal: lhs <= rhs
+    Le { lhs: InstRef, rhs: InstRef },
+    /// Greater than or equal: lhs >= rhs
+    Ge { lhs: InstRef, rhs: InstRef },
+
     // Unary operations
     /// Negation: -operand
     Neg { operand: InstRef },
+
+    // Control flow
+    /// Branch: if cond then then_block else else_block
+    Branch {
+        cond: InstRef,
+        then_block: InstRef,
+        else_block: Option<InstRef>,
+    },
 
     /// Function definition
     /// Contains: name symbol, return type symbol, body instruction ref
@@ -202,6 +227,9 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::IntConst(v) => {
                     out.push_str(&format!("const {}\n", v));
                 }
+                InstData::BoolConst(v) => {
+                    out.push_str(&format!("const {}\n", v));
+                }
                 InstData::Add { lhs, rhs } => {
                     out.push_str(&format!("add {}, {}\n", lhs, rhs));
                 }
@@ -217,8 +245,33 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::Mod { lhs, rhs } => {
                     out.push_str(&format!("mod {}, {}\n", lhs, rhs));
                 }
+                InstData::Eq { lhs, rhs } => {
+                    out.push_str(&format!("eq {}, {}\n", lhs, rhs));
+                }
+                InstData::Ne { lhs, rhs } => {
+                    out.push_str(&format!("ne {}, {}\n", lhs, rhs));
+                }
+                InstData::Lt { lhs, rhs } => {
+                    out.push_str(&format!("lt {}, {}\n", lhs, rhs));
+                }
+                InstData::Gt { lhs, rhs } => {
+                    out.push_str(&format!("gt {}, {}\n", lhs, rhs));
+                }
+                InstData::Le { lhs, rhs } => {
+                    out.push_str(&format!("le {}, {}\n", lhs, rhs));
+                }
+                InstData::Ge { lhs, rhs } => {
+                    out.push_str(&format!("ge {}, {}\n", lhs, rhs));
+                }
                 InstData::Neg { operand } => {
                     out.push_str(&format!("neg {}\n", operand));
+                }
+                InstData::Branch { cond, then_block, else_block } => {
+                    if let Some(else_b) = else_block {
+                        out.push_str(&format!("branch {}, {}, {}\n", cond, then_block, else_b));
+                    } else {
+                        out.push_str(&format!("branch {}, {}\n", cond, then_block));
+                    }
                 }
                 InstData::FnDecl { name, return_type, body } => {
                     let name_str = self.interner.get(*name);
