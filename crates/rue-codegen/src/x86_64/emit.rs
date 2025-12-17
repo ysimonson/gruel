@@ -142,6 +142,15 @@ impl<'a> Emitter<'a> {
             X86Inst::Neg { dst } => {
                 self.emit_neg(dst.as_physical());
             }
+            X86Inst::XorRI { dst, imm } => {
+                self.emit_xor_ri(dst.as_physical(), *imm);
+            }
+            X86Inst::AndRR { dst, src } => {
+                self.emit_and_rr(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::OrRR { dst, src } => {
+                self.emit_or_rr(dst.as_physical(), src.as_physical());
+            }
             X86Inst::Cdq => {
                 self.emit_cdq();
             }
@@ -510,6 +519,88 @@ impl<'a> Emitter<'a> {
 
         // ModR/M: mod=11, reg=3 (NEG), r/m=dst
         let modrm = 0xC0 | (3 << 3) | (dst_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `xor r32, imm32`.
+    ///
+    /// Encoding: [REX] 81 /6 imm32 (xor r/m32, imm32)
+    /// For small immediates we could use 83 /6 imm8 but let's keep it simple.
+    fn emit_xor_ri(&mut self, dst: Reg, imm: i32) {
+        let dst_enc = dst.encoding();
+
+        // REX prefix if needed
+        if dst.needs_rex() {
+            self.code.push(0x41); // REX.B
+        }
+
+        // For small immediates (-128..127), use 83 /6 imm8
+        if imm >= -128 && imm <= 127 {
+            // Opcode: 83 (group 1, /6 for XOR with imm8)
+            self.code.push(0x83);
+
+            // ModR/M: mod=11, reg=6 (XOR), r/m=dst
+            let modrm = 0xC0 | (6 << 3) | (dst_enc & 7);
+            self.code.push(modrm);
+
+            // 8-bit immediate
+            self.code.push(imm as u8);
+        } else {
+            // Opcode: 81 (group 1, /6 for XOR with imm32)
+            self.code.push(0x81);
+
+            // ModR/M: mod=11, reg=6 (XOR), r/m=dst
+            let modrm = 0xC0 | (6 << 3) | (dst_enc & 7);
+            self.code.push(modrm);
+
+            // 32-bit immediate
+            self.code.extend_from_slice(&imm.to_le_bytes());
+        }
+    }
+
+    /// Emit `and r32, r32`.
+    ///
+    /// Encoding: [REX] 21 /r (and r/m32, r32)
+    fn emit_and_rr(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX prefix if needed
+        if src.needs_rex() || dst.needs_rex() {
+            let rex = 0x40
+                | if src.needs_rex() { 0x04 } else { 0x00 }  // REX.R
+                | if dst.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+            self.code.push(rex);
+        }
+
+        // Opcode: 21 (and r/m32, r32)
+        self.code.push(0x21);
+
+        // ModR/M: mod=11 (register-to-register), reg=src, r/m=dst
+        let modrm = 0xC0 | ((src_enc & 7) << 3) | (dst_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `or r32, r32`.
+    ///
+    /// Encoding: [REX] 09 /r (or r/m32, r32)
+    fn emit_or_rr(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX prefix if needed
+        if src.needs_rex() || dst.needs_rex() {
+            let rex = 0x40
+                | if src.needs_rex() { 0x04 } else { 0x00 }  // REX.R
+                | if dst.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+            self.code.push(rex);
+        }
+
+        // Opcode: 09 (or r/m32, r32)
+        self.code.push(0x09);
+
+        // ModR/M: mod=11 (register-to-register), reg=src, r/m=dst
+        let modrm = 0xC0 | ((src_enc & 7) << 3) | (dst_enc & 7);
         self.code.push(modrm);
     }
 

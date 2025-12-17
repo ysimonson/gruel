@@ -204,6 +204,15 @@ pub enum X86Inst {
     /// `neg dst` - Two's complement negation (dst = -dst).
     Neg { dst: Operand },
 
+    /// `xor dst, imm` - XOR with immediate (dst = dst ^ imm).
+    XorRI { dst: Operand, imm: i32 },
+
+    /// `and dst, src` - Bitwise AND (dst = dst & src).
+    AndRR { dst: Operand, src: Operand },
+
+    /// `or dst, src` - Bitwise OR (dst = dst | src).
+    OrRR { dst: Operand, src: Operand },
+
     /// `cdq` - Sign-extend EAX into EDX:EAX (for division).
     Cdq,
 
@@ -300,6 +309,9 @@ impl fmt::Display for X86Inst {
             X86Inst::SubRR { dst, src } => write!(f, "sub {}, {}", dst, src),
             X86Inst::ImulRR { dst, src } => write!(f, "imul {}, {}", dst, src),
             X86Inst::Neg { dst } => write!(f, "neg {}", dst),
+            X86Inst::XorRI { dst, imm } => write!(f, "xor {}, {}", dst, imm),
+            X86Inst::AndRR { dst, src } => write!(f, "and {}, {}", dst, src),
+            X86Inst::OrRR { dst, src } => write!(f, "or {}, {}", dst, src),
             X86Inst::Cdq => write!(f, "cdq"),
             X86Inst::IdivR { src } => write!(f, "idiv {}", src),
             X86Inst::CmpRR { src1, src2 } => write!(f, "cmp {}, {}", src1, src2),

@@ -123,9 +123,17 @@ pub enum AirInstData {
     /// Greater than or equal
     Ge(AirRef, AirRef),
 
+    // Logical operations (return bool)
+    /// Logical AND
+    And(AirRef, AirRef),
+    /// Logical OR
+    Or(AirRef, AirRef),
+
     // Unary operations
     /// Negation
     Neg(AirRef),
+    /// Logical NOT
+    Not(AirRef),
 
     // Control flow
     /// Conditional branch
@@ -188,7 +196,10 @@ impl fmt::Display for Air {
                 AirInstData::Gt(lhs, rhs) => writeln!(f, "gt {}, {}", lhs, rhs)?,
                 AirInstData::Le(lhs, rhs) => writeln!(f, "le {}, {}", lhs, rhs)?,
                 AirInstData::Ge(lhs, rhs) => writeln!(f, "ge {}, {}", lhs, rhs)?,
+                AirInstData::And(lhs, rhs) => writeln!(f, "and {}, {}", lhs, rhs)?,
+                AirInstData::Or(lhs, rhs) => writeln!(f, "or {}, {}", lhs, rhs)?,
                 AirInstData::Neg(operand) => writeln!(f, "neg {}", operand)?,
+                AirInstData::Not(operand) => writeln!(f, "not {}", operand)?,
                 AirInstData::Branch { cond, then_value, else_value } => {
                     if let Some(else_v) = else_value {
                         writeln!(f, "branch {}, {}, {}", cond, then_value, else_v)?

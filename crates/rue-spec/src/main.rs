@@ -325,8 +325,19 @@ fn main() {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
             // Try to find it in common buck output locations
+            // First try the buck2 output (has UUID in path)
+            let buck_root = Path::new("buck-out/v2/gen/root");
+            if buck_root.exists() {
+                if let Ok(entries) = std::fs::read_dir(buck_root) {
+                    for entry in entries.flatten() {
+                        let rue_path = entry.path().join("crates/rue/__rue__/rue");
+                        if rue_path.exists() {
+                            return rue_path;
+                        }
+                    }
+                }
+            }
             let possible_paths = [
-                "buck-out/v2/gen/root/crates/rue/__rue__/rue",
                 "../rue/rue",
                 "./rue",
             ];

@@ -24,18 +24,21 @@ pub enum TokenKind {
     Ident(String),
 
     // Operators
-    Plus,    // +
-    Minus,   // -
-    Star,    // *
-    Slash,   // /
-    Percent, // %
-    Eq,      // =
-    EqEq,    // ==
-    BangEq,  // !=
-    Lt,      // <
-    Gt,      // >
-    LtEq,    // <=
-    GtEq,    // >=
+    Plus,     // +
+    Minus,    // -
+    Star,     // *
+    Slash,    // /
+    Percent,  // %
+    Eq,       // =
+    EqEq,     // ==
+    Bang,     // !
+    BangEq,   // !=
+    Lt,       // <
+    Gt,       // >
+    LtEq,     // <=
+    GtEq,     // >=
+    AmpAmp,   // &&
+    PipePipe, // ||
 
     // Punctuation
     LParen,
@@ -70,11 +73,14 @@ impl TokenKind {
             TokenKind::Percent => "'%'",
             TokenKind::Eq => "'='",
             TokenKind::EqEq => "'=='",
+            TokenKind::Bang => "'!'",
             TokenKind::BangEq => "'!='",
             TokenKind::Lt => "'<'",
             TokenKind::Gt => "'>'",
             TokenKind::LtEq => "'<='",
             TokenKind::GtEq => "'>='",
+            TokenKind::AmpAmp => "'&&'",
+            TokenKind::PipePipe => "'||'",
             TokenKind::LParen => "'('",
             TokenKind::RParen => "')'",
             TokenKind::LBrace => "'{'",
@@ -197,8 +203,29 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     TokenKind::BangEq
                 } else {
+                    TokenKind::Bang
+                }
+            }
+            '&' => {
+                self.advance();
+                if self.peek() == Some('&') {
+                    self.advance();
+                    TokenKind::AmpAmp
+                } else {
                     return Err(CompileError::new(
-                        ErrorKind::UnexpectedCharacter('!'),
+                        ErrorKind::UnexpectedCharacter('&'),
+                        Span::new(start, self.pos as u32),
+                    ));
+                }
+            }
+            '|' => {
+                self.advance();
+                if self.peek() == Some('|') {
+                    self.advance();
+                    TokenKind::PipePipe
+                } else {
+                    return Err(CompileError::new(
+                        ErrorKind::UnexpectedCharacter('|'),
                         Span::new(start, self.pos as u32),
                     ));
                 }
@@ -419,5 +446,31 @@ mod tests {
         assert!(matches!(tokens[4].kind, TokenKind::Eq));
         assert!(matches!(tokens[5].kind, TokenKind::Int(42)));
         assert!(matches!(tokens[6].kind, TokenKind::Semi));
+    }
+
+    #[test]
+    fn test_logical_operators() {
+        let mut lexer = Lexer::new("!true && false || true");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Bang));
+        assert!(matches!(tokens[1].kind, TokenKind::True));
+        assert!(matches!(tokens[2].kind, TokenKind::AmpAmp));
+        assert!(matches!(tokens[3].kind, TokenKind::False));
+        assert!(matches!(tokens[4].kind, TokenKind::PipePipe));
+        assert!(matches!(tokens[5].kind, TokenKind::True));
+    }
+
+    #[test]
+    fn test_bang_eq_vs_bang() {
+        // Bang alone
+        let mut lexer = Lexer::new("!a");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Bang));
+
+        // BangEq
+        let mut lexer = Lexer::new("a != b");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[1].kind, TokenKind::BangEq));
     }
 }

@@ -4,7 +4,7 @@
 //! This is analogous to Zig's AstGen phase.
 
 use rue_intern::Interner;
-use rue_parser::{Ast, BinaryOp, Expr, Function, Item, Statement};
+use rue_parser::{Ast, BinaryOp, Expr, Function, Item, Statement, UnaryOp};
 
 use crate::inst::{Inst, InstData, InstRef, Rir};
 
@@ -95,6 +95,8 @@ impl<'a> AstGen<'a> {
                     BinaryOp::Gt => InstData::Gt { lhs, rhs },
                     BinaryOp::Le => InstData::Le { lhs, rhs },
                     BinaryOp::Ge => InstData::Ge { lhs, rhs },
+                    BinaryOp::And => InstData::And { lhs, rhs },
+                    BinaryOp::Or => InstData::Or { lhs, rhs },
                 };
                 self.rir.add_inst(Inst {
                     data,
@@ -103,8 +105,12 @@ impl<'a> AstGen<'a> {
             }
             Expr::Unary(un) => {
                 let operand = self.gen_expr(&un.operand);
+                let data = match un.op {
+                    UnaryOp::Neg => InstData::Neg { operand },
+                    UnaryOp::Not => InstData::Not { operand },
+                };
                 self.rir.add_inst(Inst {
-                    data: InstData::Neg { operand },
+                    data,
                     span: un.span,
                 })
             }

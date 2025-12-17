@@ -140,9 +140,17 @@ pub enum InstData {
     /// Greater than or equal: lhs >= rhs
     Ge { lhs: InstRef, rhs: InstRef },
 
+    // Logical operations
+    /// Logical AND: lhs && rhs
+    And { lhs: InstRef, rhs: InstRef },
+    /// Logical OR: lhs || rhs
+    Or { lhs: InstRef, rhs: InstRef },
+
     // Unary operations
     /// Negation: -operand
     Neg { operand: InstRef },
+    /// Logical NOT: !operand
+    Not { operand: InstRef },
 
     // Control flow
     /// Branch: if cond then then_block else else_block
@@ -263,8 +271,17 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::Ge { lhs, rhs } => {
                     out.push_str(&format!("ge {}, {}\n", lhs, rhs));
                 }
+                InstData::And { lhs, rhs } => {
+                    out.push_str(&format!("and {}, {}\n", lhs, rhs));
+                }
+                InstData::Or { lhs, rhs } => {
+                    out.push_str(&format!("or {}, {}\n", lhs, rhs));
+                }
                 InstData::Neg { operand } => {
                     out.push_str(&format!("neg {}\n", operand));
+                }
+                InstData::Not { operand } => {
+                    out.push_str(&format!("not {}\n", operand));
                 }
                 InstData::Branch { cond, then_block, else_block } => {
                     if let Some(else_b) = else_block {

@@ -120,6 +120,17 @@ impl RegAlloc {
             X86Inst::Neg { dst } => {
                 *dst = Self::rewrite_operand(allocation, *dst);
             }
+            X86Inst::XorRI { dst, .. } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+            }
+            X86Inst::AndRR { dst, src } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+                *src = Self::rewrite_operand(allocation, *src);
+            }
+            X86Inst::OrRR { dst, src } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+                *src = Self::rewrite_operand(allocation, *src);
+            }
             X86Inst::IdivR { src } => {
                 *src = Self::rewrite_operand(allocation, *src);
             }

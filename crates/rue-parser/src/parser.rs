@@ -206,11 +206,53 @@ impl Parser {
 
     /// Parse an expression (entry point).
     fn parse_expr(&mut self) -> CompileResult<Expr> {
-        self.parse_comparison()
+        self.parse_or()
+    }
+
+    /// Parse logical OR expressions (||).
+    /// Lowest precedence among binary operators.
+    fn parse_or(&mut self) -> CompileResult<Expr> {
+        let mut left = self.parse_and()?;
+
+        while matches!(self.current().kind, TokenKind::PipePipe) {
+            self.advance();
+            let right = self.parse_and()?;
+            let span = Span::new(left.span().start, right.span().end);
+
+            left = Expr::Binary(BinaryExpr {
+                left: Box::new(left),
+                op: BinaryOp::Or,
+                right: Box::new(right),
+                span,
+            });
+        }
+
+        Ok(left)
+    }
+
+    /// Parse logical AND expressions (&&).
+    /// Higher precedence than OR, lower than comparison.
+    fn parse_and(&mut self) -> CompileResult<Expr> {
+        let mut left = self.parse_comparison()?;
+
+        while matches!(self.current().kind, TokenKind::AmpAmp) {
+            self.advance();
+            let right = self.parse_comparison()?;
+            let span = Span::new(left.span().start, right.span().end);
+
+            left = Expr::Binary(BinaryExpr {
+                left: Box::new(left),
+                op: BinaryOp::And,
+                right: Box::new(right),
+                span,
+            });
+        }
+
+        Ok(left)
     }
 
     /// Parse comparison expressions (==, !=, <, >, <=, >=).
-    /// Lower precedence than additive.
+    /// Higher precedence than logical operators, lower than additive.
     ///
     /// Note: This allows chaining like `1 < 2 < 3`, which parses as `(1 < 2) < 3`.
     /// This will type-error (bool vs int), but a dedicated "comparison chaining"
@@ -310,16 +352,21 @@ impl Parser {
         Ok(left)
     }
 
-    /// Parse unary expressions (-x).
+    /// Parse unary expressions (-x, !x).
     /// Highest precedence (binds tightest).
     fn parse_unary(&mut self) -> CompileResult<Expr> {
-        if matches!(self.current().kind, TokenKind::Minus) {
+        if matches!(self.current().kind, TokenKind::Minus | TokenKind::Bang) {
             let op_token = self.advance();
-            let operand = self.parse_unary()?; // Recursive for --x
+            let op = match op_token.kind {
+                TokenKind::Minus => UnaryOp::Neg,
+                TokenKind::Bang => UnaryOp::Not,
+                _ => unreachable!(),
+            };
+            let operand = self.parse_unary()?; // Recursive for --x, !!x
             let span = Span::new(op_token.span.start, operand.span().end);
 
             Ok(Expr::Unary(UnaryExpr {
-                op: UnaryOp::Neg,
+                op,
                 operand: Box::new(operand),
                 span,
             }))
@@ -876,6 +923,120 @@ mod tests {
                 }
                 _ => panic!("expected Block"),
             },
+        }
+    }
+
+    #[test]
+    fn test_parse_logical_not() {
+        let expr = parse_expr("!true").unwrap();
+        match expr {
+            Expr::Unary(un) => {
+                assert!(matches!(un.op, UnaryOp::Not));
+                match *un.operand {
+                    Expr::Bool(lit) => assert!(lit.value),
+                    _ => panic!("expected Bool"),
+                }
+            }
+            _ => panic!("expected Unary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_double_not() {
+        let expr = parse_expr("!!false").unwrap();
+        match expr {
+            Expr::Unary(outer) => {
+                assert!(matches!(outer.op, UnaryOp::Not));
+                match *outer.operand {
+                    Expr::Unary(inner) => {
+                        assert!(matches!(inner.op, UnaryOp::Not));
+                    }
+                    _ => panic!("expected Unary"),
+                }
+            }
+            _ => panic!("expected Unary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_logical_and() {
+        let expr = parse_expr("true && false").unwrap();
+        match expr {
+            Expr::Binary(bin) => {
+                assert!(matches!(bin.op, BinaryOp::And));
+            }
+            _ => panic!("expected Binary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_logical_or() {
+        let expr = parse_expr("true || false").unwrap();
+        match expr {
+            Expr::Binary(bin) => {
+                assert!(matches!(bin.op, BinaryOp::Or));
+            }
+            _ => panic!("expected Binary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_and_or_precedence() {
+        // true || false && false should parse as true || (false && false)
+        let expr = parse_expr("true || false && false").unwrap();
+        match expr {
+            Expr::Binary(bin) => {
+                assert!(matches!(bin.op, BinaryOp::Or));
+                match *bin.right {
+                    Expr::Binary(inner) => {
+                        assert!(matches!(inner.op, BinaryOp::And));
+                    }
+                    _ => panic!("expected Binary"),
+                }
+            }
+            _ => panic!("expected Binary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_not_binds_tighter_than_and() {
+        // !true && false should parse as (!true) && false
+        let expr = parse_expr("!true && false").unwrap();
+        match expr {
+            Expr::Binary(bin) => {
+                assert!(matches!(bin.op, BinaryOp::And));
+                match *bin.left {
+                    Expr::Unary(un) => {
+                        assert!(matches!(un.op, UnaryOp::Not));
+                    }
+                    _ => panic!("expected Unary"),
+                }
+            }
+            _ => panic!("expected Binary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_comparison_binds_tighter_than_and() {
+        // 1 < 2 && 3 < 4 should parse as (1 < 2) && (3 < 4)
+        let expr = parse_expr("1 < 2 && 3 < 4").unwrap();
+        match expr {
+            Expr::Binary(bin) => {
+                assert!(matches!(bin.op, BinaryOp::And));
+                match *bin.left {
+                    Expr::Binary(inner) => {
+                        assert!(matches!(inner.op, BinaryOp::Lt));
+                    }
+                    _ => panic!("expected Binary"),
+                }
+                match *bin.right {
+                    Expr::Binary(inner) => {
+                        assert!(matches!(inner.op, BinaryOp::Lt));
+                    }
+                    _ => panic!("expected Binary"),
+                }
+            }
+            _ => panic!("expected Binary"),
         }
     }
 }

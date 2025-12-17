@@ -71,9 +71,11 @@ impl<'a> Lower<'a> {
 
     /// Lower AIR to X86Mir.
     pub fn lower(mut self) -> X86Mir {
-        // Walk AIR instructions and lower each one
-        for (air_ref, inst) in self.air.iter() {
-            self.lower_inst(air_ref, &inst.data);
+        // Lower all instructions in order
+        for i in 0..self.air.len() {
+            let air_ref = AirRef::from_raw(i as u32);
+            let inst = self.air.get(air_ref);
+            self.lower_inst(air_ref, &inst.data.clone());
         }
 
         self.mir
@@ -81,6 +83,10 @@ impl<'a> Lower<'a> {
 
     /// Lower a single AIR instruction.
     fn lower_inst(&mut self, air_ref: AirRef, data: &AirInstData) {
+        // Skip if already lowered
+        if self.value_map[air_ref.as_u32() as usize].is_some() {
+            return;
+        }
         match data {
             AirInstData::Const(value) => {
                 // Allocate a vreg and move the constant into it
@@ -446,22 +452,74 @@ impl<'a> Lower<'a> {
                 });
             }
 
+            // Logical operators
+            AirInstData::Not(operand) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let operand_vreg = self.get_vreg(*operand);
+
+                // Booleans are 0 or 1, so !x is x ^ 1
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(operand_vreg),
+                });
+                self.mir.push(X86Inst::XorRI {
+                    dst: Operand::Virtual(vreg),
+                    imm: 1,
+                });
+            }
+
+            AirInstData::And(lhs, rhs) => {
+                // Note: && is desugared to Branch at the RIR level for short-circuit
+                // evaluation, but proper short-circuit requires more IR changes.
+                // For now, we compute both and use logical AND.
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                // x86 AND works: 0 && 0 = 0, 0 && 1 = 0, 1 && 0 = 0, 1 && 1 = 1
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(lhs_vreg),
+                });
+                self.mir.push(X86Inst::AndRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(rhs_vreg),
+                });
+            }
+
+            AirInstData::Or(lhs, rhs) => {
+                // Note: || is desugared to Branch at the RIR level for short-circuit
+                // evaluation, but proper short-circuit requires more IR changes.
+                // For now, we compute both and use logical OR.
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                // x86 OR works: 0 || 0 = 0, 0 || 1 = 1, 1 || 0 = 1, 1 || 1 = 1
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(lhs_vreg),
+                });
+                self.mir.push(X86Inst::OrRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(rhs_vreg),
+                });
+            }
+
             AirInstData::Branch { cond, then_value, else_value } => {
-                // Note: Both branches have already been lowered to MIR before we get here,
-                // since AIR instructions are processed in order. The vregs we fetch below
-                // already contain the computed values. This is fine for simple cases but
-                // means we don't get short-circuit evaluation or lazy branch computation.
-                // Future optimization work could defer branch lowering.
                 let vreg = self.mir.alloc_vreg();
                 self.value_map[air_ref.as_u32() as usize] = Some(vreg);
 
                 let cond_vreg = self.get_vreg(*cond);
-                let then_vreg = self.get_vreg(*then_value);
 
                 if let Some(else_v) = else_value {
                     // if-else: result is either then_value or else_value
-                    let else_vreg = self.get_vreg(*else_v);
-
                     let else_label = self.new_label("else");
                     let end_label = self.new_label("end_if");
 
@@ -472,7 +530,8 @@ impl<'a> Lower<'a> {
                     });
                     self.mir.push(X86Inst::Jz { label: else_label.clone() });
 
-                    // Then branch: copy then_value to result
+                    // Then branch
+                    let then_vreg = self.get_vreg(*then_value);
                     self.mir.push(X86Inst::MovRR {
                         dst: Operand::Virtual(vreg),
                         src: Operand::Virtual(then_vreg),
@@ -481,6 +540,7 @@ impl<'a> Lower<'a> {
 
                     // Else branch
                     self.mir.push(X86Inst::Label { name: else_label });
+                    let else_vreg = self.get_vreg(*else_v);
                     self.mir.push(X86Inst::MovRR {
                         dst: Operand::Virtual(vreg),
                         src: Operand::Virtual(else_vreg),
@@ -499,7 +559,8 @@ impl<'a> Lower<'a> {
                     });
                     self.mir.push(X86Inst::Jz { label: end_label.clone() });
 
-                    // Then branch: copy then_value to result (for consistency)
+                    // Then branch
+                    let then_vreg = self.get_vreg(*then_value);
                     self.mir.push(X86Inst::MovRR {
                         dst: Operand::Virtual(vreg),
                         src: Operand::Virtual(then_vreg),

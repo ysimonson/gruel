@@ -92,12 +92,15 @@ pub enum BinaryOp {
     Div, // /
     Mod, // %
     // Comparison
-    Eq,  // ==
-    Ne,  // !=
-    Lt,  // <
-    Gt,  // >
-    Le,  // <=
-    Ge,  // >=
+    Eq, // ==
+    Ne, // !=
+    Lt, // <
+    Gt, // >
+    Le, // <=
+    Ge, // >=
+    // Logical
+    And, // &&
+    Or,  // ||
 }
 
 /// A unary expression.
@@ -112,6 +115,7 @@ pub struct UnaryExpr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg, // -
+    Not, // !
 }
 
 /// A parenthesized expression.

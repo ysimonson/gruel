@@ -23,6 +23,7 @@ Rue is in early development. The implemented feature set is minimal:
 | Comparison operators | ✓ Implemented |
 | Variables | ✓ Implemented |
 | If/else expressions | ✓ Implemented |
+| Logical operators | ✓ Implemented |
 | Loops | Planned |
 
 ## Specification Tests
@@ -41,6 +42,7 @@ The executable specification lives in `crates/rue-spec/cases/`:
 | `08-arithmetic.toml` | 1.2 | Arithmetic operators |
 | `09-variables.toml` | 2.2 | Local variables |
 | `10-conditionals.toml` | 10.1 | If/else expressions and comparisons |
+| `11-logical-operators.toml` | 11.1 | Logical operators (!, &&, \|\|) |
 
 Each `.toml` file contains test cases that define expected behavior:
 
@@ -154,10 +156,12 @@ fn main() -> i32 {
 ### Operators
 
 Operators by precedence (highest to lowest):
-1. `-` (unary negation)
+1. `-` (unary negation), `!` (logical not)
 2. `*`, `/`, `%` (multiplicative)
 3. `+`, `-` (additive)
 4. `==`, `!=`, `<`, `>`, `<=`, `>=` (comparison)
+5. `&&` (logical and)
+6. `||` (logical or)
 
 All binary operators are left-associative: `10 - 3 - 2` equals `5` (not `9`).
 
@@ -171,6 +175,30 @@ fn main() -> i32 {
     if a { 1 } else { 0 }
 }
 ```
+
+### Logical Operators
+
+Logical operators work on `bool` values:
+
+```rue
+fn main() -> i32 {
+    let a = !false;           // true (negation)
+    let b = true && true;     // true (and)
+    let c = false || true;    // true (or)
+    if a && b && c { 1 } else { 0 }
+}
+```
+
+`&&` binds tighter than `||`, so `a || b && c` means `a || (b && c)`:
+
+```rue
+fn main() -> i32 {
+    // true || false && false  =>  true || (false && false)  =>  true
+    if true || false && false { 1 } else { 0 }
+}
+```
+
+`&&` and `||` use short-circuit evaluation: the right operand is only evaluated if needed.
 
 ### Conditionals
 
@@ -230,11 +258,13 @@ statement      = let_stmt | assign_stmt ;
 let_stmt       = "let" [ "mut" ] IDENT [ ":" type ] "=" expression ";" ;
 assign_stmt    = IDENT "=" expression ";" ;
 type           = "i32" | "bool" ;
-expression     = comparison ;
+expression     = or_expr ;
+or_expr        = and_expr { "||" and_expr } ;
+and_expr       = comparison { "&&" comparison } ;
 comparison     = additive { ("==" | "!=" | "<" | ">" | "<=" | ">=") additive } ;
 additive       = multiplicative { ("+" | "-") multiplicative } ;
 multiplicative = unary { ("*" | "/" | "%") unary } ;
-unary          = "-" unary | primary ;
+unary          = "-" unary | "!" unary | primary ;
 primary        = INTEGER | BOOL | IDENT | "(" expression ")" | block_expr | if_expr ;
 block_expr     = "{" block "}" ;
 if_expr        = "if" expression "{" block "}" [ "else" "{" block "}" ] ;

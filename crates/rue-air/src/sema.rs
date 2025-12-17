@@ -268,12 +268,45 @@ impl<'a> Sema<'a> {
                 }))
             }
 
+            // Logical operators: operands and result are all bool
+            InstData::And { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::Bool, locals, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::Bool, locals, next_slot)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::And(lhs_ref, rhs_ref),
+                    ty: Type::Bool,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Or { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::Bool, locals, next_slot)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::Bool, locals, next_slot)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Or(lhs_ref, rhs_ref),
+                    ty: Type::Bool,
+                    span: inst.span,
+                }))
+            }
+
             InstData::Neg { operand } => {
                 let operand_ref = self.analyze_inst(air, *operand, Type::I32, locals, next_slot)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Neg(operand_ref),
                     ty: Type::I32,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Not { operand } => {
+                let operand_ref = self.analyze_inst(air, *operand, Type::Bool, locals, next_slot)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Not(operand_ref),
+                    ty: Type::Bool,
                     span: inst.span,
                 }))
             }
@@ -537,7 +570,10 @@ impl<'a> Sema<'a> {
             | InstData::Lt { .. }
             | InstData::Gt { .. }
             | InstData::Le { .. }
-            | InstData::Ge { .. } => Ok(Type::Bool),
+            | InstData::Ge { .. }
+            | InstData::And { .. }
+            | InstData::Or { .. }
+            | InstData::Not { .. } => Ok(Type::Bool),
             InstData::VarRef { name } => {
                 let name_str = self.interner.get(*name);
                 let local = locals.get(name).ok_or_else(|| {
