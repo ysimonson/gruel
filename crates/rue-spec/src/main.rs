@@ -44,6 +44,9 @@ struct Case {
     /// Expected runtime error message (program compiles but fails at runtime)
     #[serde(default)]
     runtime_error: Option<String>,
+    /// Expected exit code for runtime errors (defaults to 101)
+    #[serde(default)]
+    runtime_exit_code: Option<i32>,
     #[serde(default)]
     skip: bool,
 }
@@ -279,11 +282,14 @@ fn run_test_case(case: &Case, rue_binary: &Path) -> Result<(), Failed> {
 
     // Handle runtime error tests
     if let Some(ref expected_error) = case.runtime_error {
-        // Expect the program to fail at runtime (non-zero exit code)
-        if run_output.status.success() {
+        // Default exit code for runtime errors is 101
+        let expected_exit = case.runtime_exit_code.unwrap_or(101);
+
+        // Check exit code
+        if actual_exit_code != expected_exit {
             return Err(format!(
-                "Expected runtime error but program succeeded\n  expected error: {}\n  source: {}",
-                expected_error, case.source
+                "Runtime error exit code mismatch:\n  expected: {}\n  actual: {}\n  source: {}",
+                expected_exit, actual_exit_code, case.source
             )
             .into());
         }
