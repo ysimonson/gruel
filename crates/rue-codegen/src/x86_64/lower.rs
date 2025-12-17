@@ -643,6 +643,10 @@ impl<'a> Lower<'a> {
 
                 let cond_vreg = self.get_vreg(*cond);
 
+                // Get the types of the branches to check for divergence (Never type)
+                let then_type = self.air.get(*then_value).ty;
+                let else_type = else_value.map(|e| self.air.get(e).ty);
+
                 if let Some(else_v) = else_value {
                     // if-else: result is either then_value or else_value
                     let else_label = self.new_label("else");
@@ -656,20 +660,33 @@ impl<'a> Lower<'a> {
                     self.mir.push(X86Inst::Jz { label: else_label.clone() });
 
                     // Then branch
-                    let then_vreg = self.get_vreg(*then_value);
-                    self.mir.push(X86Inst::MovRR {
-                        dst: Operand::Virtual(vreg),
-                        src: Operand::Virtual(then_vreg),
-                    });
-                    self.mir.push(X86Inst::Jmp { label: end_label.clone() });
+                    // If then is Never (divergent), just lower it for side effects (the jump)
+                    // Don't try to copy its "value" to the result register
+                    if then_type.is_never() {
+                        self.lower_for_effect(*then_value);
+                        // Note: no jump to end_label - the then branch diverges
+                    } else {
+                        let then_vreg = self.get_vreg(*then_value);
+                        self.mir.push(X86Inst::MovRR {
+                            dst: Operand::Virtual(vreg),
+                            src: Operand::Virtual(then_vreg),
+                        });
+                        self.mir.push(X86Inst::Jmp { label: end_label.clone() });
+                    }
 
                     // Else branch
                     self.mir.push(X86Inst::Label { name: else_label });
-                    let else_vreg = self.get_vreg(*else_v);
-                    self.mir.push(X86Inst::MovRR {
-                        dst: Operand::Virtual(vreg),
-                        src: Operand::Virtual(else_vreg),
-                    });
+                    // If else is Never (divergent), just lower it for side effects
+                    if else_type.is_some_and(|t| t.is_never()) {
+                        self.lower_for_effect(*else_v);
+                        // Note: no need to copy value - the else branch diverges
+                    } else {
+                        let else_vreg = self.get_vreg(*else_v);
+                        self.mir.push(X86Inst::MovRR {
+                            dst: Operand::Virtual(vreg),
+                            src: Operand::Virtual(else_vreg),
+                        });
+                    }
 
                     // End
                     self.mir.push(X86Inst::Label { name: end_label });
@@ -684,12 +701,16 @@ impl<'a> Lower<'a> {
                     });
                     self.mir.push(X86Inst::Jz { label: end_label.clone() });
 
-                    // Then branch
-                    let then_vreg = self.get_vreg(*then_value);
-                    self.mir.push(X86Inst::MovRR {
-                        dst: Operand::Virtual(vreg),
-                        src: Operand::Virtual(then_vreg),
-                    });
+                    // Then branch - even if it's Never, we still lower it
+                    if then_type.is_never() {
+                        self.lower_for_effect(*then_value);
+                    } else {
+                        let then_vreg = self.get_vreg(*then_value);
+                        self.mir.push(X86Inst::MovRR {
+                            dst: Operand::Virtual(vreg),
+                            src: Operand::Virtual(then_vreg),
+                        });
+                    }
 
                     // End
                     self.mir.push(X86Inst::Label { name: end_label });
@@ -1433,6 +1454,23 @@ impl<'a> Lower<'a> {
         // Should be lowered now
         self.value_map[air_ref.as_u32() as usize]
             .expect("instruction should have been lowered")
+    }
+
+    /// Lower an instruction for its side effects only, not expecting a value.
+    ///
+    /// This is used for divergent instructions (Never type) like break/continue
+    /// which are lowered for their control flow effects but don't produce a value.
+    fn lower_for_effect(&mut self, air_ref: AirRef) {
+        // Check if already lowered - if so, nothing more to do
+        if self.value_map[air_ref.as_u32() as usize].is_some() {
+            return;
+        }
+
+        // Lower the instruction for its side effects
+        let data = self.air.get(air_ref).data.clone();
+        self.lower_inst(air_ref, &data);
+        // Note: we don't check value_map afterwards - divergent instructions
+        // don't set it, and that's expected
     }
 
     /// Clear value_map entries for instructions in a loop so they can be re-lowered.

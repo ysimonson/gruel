@@ -499,31 +499,47 @@ impl<'a> Sema<'a> {
                 let cond_ref = self.analyze_inst(air, *cond, Type::Bool, ctx)?;
 
                 // Determine the result type:
-                // - If else is present, both branches must have the same type
+                // - If else is present, both branches must have compatible types
+                //   (Never type can coerce to any type)
                 // - If else is absent, the result is Unit
                 if let Some(else_b) = else_block {
                     // Save locals before then branch
                     let saved_locals = ctx.locals.clone();
 
-                    // Analyze then branch
+                    // Analyze then branch with the expected type
                     let then_ref = self.analyze_inst(air, *then_block, expected_type, ctx)?;
                     let then_type = air.get(then_ref).ty;
 
                     // Restore locals and analyze else branch
+                    // If then branch is Never, use expected_type for else (so it determines the result)
+                    // Otherwise use then_type as the expectation
                     ctx.locals = saved_locals.clone();
-                    let else_ref = self.analyze_inst(air, *else_b, then_type, ctx)?;
+                    let else_expected = if then_type.is_never() { expected_type } else { then_type };
+                    let else_ref = self.analyze_inst(air, *else_b, else_expected, ctx)?;
                     let else_type = air.get(else_ref).ty;
 
-                    // Check types match
-                    if then_type != else_type && !then_type.is_error() && !else_type.is_error() {
-                        return Err(CompileError::new(
-                            ErrorKind::TypeMismatch {
-                                expected: then_type.name().to_string(),
-                                found: else_type.name().to_string(),
-                            },
-                            self.rir.get(*else_b).span,
-                        ));
-                    }
+                    // Compute the unified result type using never type coercion:
+                    // - If both branches are Never, result is Never
+                    // - If one branch is Never, result is the other branch's type
+                    // - Otherwise, types must match exactly
+                    let result_type = match (then_type.is_never(), else_type.is_never()) {
+                        (true, true) => Type::Never,
+                        (true, false) => else_type,
+                        (false, true) => then_type,
+                        (false, false) => {
+                            // Neither diverges - types must match exactly
+                            if then_type != else_type && !then_type.is_error() && !else_type.is_error() {
+                                return Err(CompileError::new(
+                                    ErrorKind::TypeMismatch {
+                                        expected: then_type.name().to_string(),
+                                        found: else_type.name().to_string(),
+                                    },
+                                    self.rir.get(*else_b).span,
+                                ));
+                            }
+                            then_type
+                        }
+                    };
 
                     // Restore locals to original (branches are isolated scopes)
                     ctx.locals = saved_locals;
@@ -534,7 +550,7 @@ impl<'a> Sema<'a> {
                             then_value: then_ref,
                             else_value: Some(else_ref),
                         },
-                        ty: then_type,
+                        ty: result_type,
                         span: inst.span,
                     }))
                 } else {
@@ -735,9 +751,10 @@ impl<'a> Sema<'a> {
                     ));
                 }
 
+                // Break has the never type - it diverges (doesn't produce a value)
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Break,
-                    ty: Type::Unit,
+                    ty: Type::Never,
                     span: inst.span,
                 }))
             }
@@ -751,9 +768,10 @@ impl<'a> Sema<'a> {
                     ));
                 }
 
+                // Continue has the never type - it diverges (doesn't produce a value)
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Continue,
-                    ty: Type::Unit,
+                    ty: Type::Never,
                     span: inst.span,
                 }))
             }
@@ -1232,7 +1250,8 @@ impl<'a> Sema<'a> {
             | Type::U64
             | Type::Bool
             | Type::Unit
-            | Type::Error => 1,
+            | Type::Error
+            | Type::Never => 1,
             Type::Struct(struct_id) => self.struct_defs[struct_id.0 as usize].field_count() as u32,
         }
     }
@@ -1295,9 +1314,21 @@ impl<'a> Sema<'a> {
                     self.infer_type(last_ref, locals, params)
                 }
             }
-            InstData::Branch { then_block, .. } => {
-                // The type of an if/else is the type of either branch (they should match)
-                self.infer_type(*then_block, locals, params)
+            InstData::Branch { then_block, else_block, .. } => {
+                // The type of an if/else comes from the non-divergent branch.
+                // If both branches diverge (both Never), the result is Never.
+                // If one branch is Never, the result is the other branch's type.
+                let then_type = self.infer_type(*then_block, locals, params)?;
+                if then_type.is_never() {
+                    if let Some(else_b) = else_block {
+                        self.infer_type(*else_b, locals, params)
+                    } else {
+                        // No else branch and then is Never - result is Unit (if without else)
+                        Ok(Type::Unit)
+                    }
+                } else {
+                    Ok(then_type)
+                }
             }
             InstData::Call { name, .. } => {
                 // Infer the return type from the function signature
@@ -1321,7 +1352,8 @@ impl<'a> Sema<'a> {
                 })?;
                 Ok(param_info.ty)
             }
-            InstData::Alloc { .. } | InstData::Assign { .. } | InstData::Ret(_) | InstData::Loop { .. } | InstData::Break | InstData::Continue => Ok(Type::Unit),
+            InstData::Alloc { .. } | InstData::Assign { .. } | InstData::Ret(_) | InstData::Loop { .. } => Ok(Type::Unit),
+            InstData::Break | InstData::Continue => Ok(Type::Never),
             InstData::FnDecl { .. } | InstData::StructDecl { .. } => {
                 unreachable!("FnDecl/StructDecl should not appear in expression context")
             }

@@ -34,6 +34,9 @@ pub enum Type {
     Struct(StructId),
     /// An error type (used during type checking to continue after errors)
     Error,
+    /// The never type - represents computations that don't return (e.g., break, continue).
+    /// Can coerce to any other type.
+    Never,
 }
 
 /// Definition of a struct type.
@@ -87,6 +90,7 @@ impl Type {
             Type::Unit => "()",
             Type::Struct(_) => "<struct>",
             Type::Error => "<error>",
+            Type::Never => "!",
         }
     }
 
@@ -110,6 +114,11 @@ impl Type {
         matches!(self, Type::Error)
     }
 
+    /// Check if this is the never type.
+    pub fn is_never(&self) -> bool {
+        matches!(self, Type::Never)
+    }
+
     /// Check if this is a struct type.
     pub fn is_struct(&self) -> bool {
         matches!(self, Type::Struct(_))
@@ -121,6 +130,16 @@ impl Type {
             Type::Struct(id) => Some(*id),
             _ => None,
         }
+    }
+
+    /// Check if this type can coerce to the target type.
+    ///
+    /// Coercion rules:
+    /// - Never can coerce to any type (it represents divergent control flow)
+    /// - Error can coerce to any type (for error recovery during type checking)
+    /// - Otherwise, types must be equal
+    pub fn can_coerce_to(&self, target: &Type) -> bool {
+        self.is_never() || self.is_error() || self == target
     }
 }
 
