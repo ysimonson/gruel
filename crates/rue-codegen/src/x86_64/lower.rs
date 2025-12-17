@@ -1,8 +1,9 @@
 //! AIR to X86Mir lowering.
 //!
 //! This phase converts AIR (typed, high-level IR) to X86Mir (x86-64 instructions
-//! with virtual registers). The lowering is straightforward since AIR operations
-//! map fairly directly to x86-64 instructions.
+//! with virtual registers). The lowering is demand-driven: instructions are only
+//! lowered when their values are needed, enabling short-circuit evaluation of
+//! logical operators (&&, ||).
 
 use rue_air::{Air, AirInstData, AirRef};
 
@@ -69,14 +70,18 @@ impl<'a> Lower<'a> {
         label
     }
 
-    /// Lower AIR to X86Mir.
+    /// Lower AIR to X86Mir using demand-driven lowering.
+    ///
+    /// Instead of lowering all instructions in order, we start from the root
+    /// (the Ret instruction at the end) and recursively demand-lower dependencies.
+    /// This enables short-circuit evaluation: And/Or can conditionally skip
+    /// lowering their RHS if the LHS determines the result.
     pub fn lower(mut self) -> X86Mir {
-        // Lower all instructions in order
-        for i in 0..self.air.len() {
-            let air_ref = AirRef::from_raw(i as u32);
-            let inst = self.air.get(air_ref);
-            self.lower_inst(air_ref, &inst.data.clone());
-        }
+        // Start from the root (last instruction, which should be Ret)
+        // and demand-lower recursively
+        let root = AirRef::from_raw((self.air.len() - 1) as u32);
+        let inst = self.air.get(root);
+        self.lower_inst(root, &inst.data.clone());
 
         self.mir
     }
@@ -471,45 +476,79 @@ impl<'a> Lower<'a> {
             }
 
             AirInstData::And(lhs, rhs) => {
-                // Note: && is desugared to Branch at the RIR level for short-circuit
-                // evaluation, but proper short-circuit requires more IR changes.
-                // For now, we compute both and use logical AND.
+                // Short-circuit evaluation: a && b
+                // If LHS is false, result is false (skip RHS)
+                // If LHS is true, result is RHS
                 let vreg = self.mir.alloc_vreg();
                 self.value_map[air_ref.as_u32() as usize] = Some(vreg);
 
+                // Always evaluate LHS
                 let lhs_vreg = self.get_vreg(*lhs);
-                let rhs_vreg = self.get_vreg(*rhs);
 
-                // x86 AND works: 0 && 0 = 0, 0 && 1 = 0, 1 && 0 = 0, 1 && 1 = 1
-                self.mir.push(X86Inst::MovRR {
-                    dst: Operand::Virtual(vreg),
+                let false_label = self.new_label("and_false");
+                let end_label = self.new_label("and_end");
+
+                // If LHS is false (zero), short-circuit to false
+                self.mir.push(X86Inst::CmpRI {
                     src: Operand::Virtual(lhs_vreg),
+                    imm: 0,
                 });
-                self.mir.push(X86Inst::AndRR {
+                self.mir.push(X86Inst::Jz { label: false_label.clone() });
+
+                // LHS was true - evaluate RHS (demand-driven, only lowered here)
+                let rhs_vreg = self.get_vreg(*rhs);
+                self.mir.push(X86Inst::MovRR {
                     dst: Operand::Virtual(vreg),
                     src: Operand::Virtual(rhs_vreg),
                 });
+                self.mir.push(X86Inst::Jmp { label: end_label.clone() });
+
+                // Short-circuit path: result is false
+                self.mir.push(X86Inst::Label { name: false_label });
+                self.mir.push(X86Inst::MovRI32 {
+                    dst: Operand::Virtual(vreg),
+                    imm: 0,
+                });
+
+                self.mir.push(X86Inst::Label { name: end_label });
             }
 
             AirInstData::Or(lhs, rhs) => {
-                // Note: || is desugared to Branch at the RIR level for short-circuit
-                // evaluation, but proper short-circuit requires more IR changes.
-                // For now, we compute both and use logical OR.
+                // Short-circuit evaluation: a || b
+                // If LHS is true, result is true (skip RHS)
+                // If LHS is false, result is RHS
                 let vreg = self.mir.alloc_vreg();
                 self.value_map[air_ref.as_u32() as usize] = Some(vreg);
 
+                // Always evaluate LHS
                 let lhs_vreg = self.get_vreg(*lhs);
-                let rhs_vreg = self.get_vreg(*rhs);
 
-                // x86 OR works: 0 || 0 = 0, 0 || 1 = 1, 1 || 0 = 1, 1 || 1 = 1
-                self.mir.push(X86Inst::MovRR {
-                    dst: Operand::Virtual(vreg),
+                let true_label = self.new_label("or_true");
+                let end_label = self.new_label("or_end");
+
+                // If LHS is true (non-zero), short-circuit to true
+                self.mir.push(X86Inst::CmpRI {
                     src: Operand::Virtual(lhs_vreg),
+                    imm: 0,
                 });
-                self.mir.push(X86Inst::OrRR {
+                self.mir.push(X86Inst::Jnz { label: true_label.clone() });
+
+                // LHS was false - evaluate RHS (demand-driven, only lowered here)
+                let rhs_vreg = self.get_vreg(*rhs);
+                self.mir.push(X86Inst::MovRR {
                     dst: Operand::Virtual(vreg),
                     src: Operand::Virtual(rhs_vreg),
                 });
+                self.mir.push(X86Inst::Jmp { label: end_label.clone() });
+
+                // Short-circuit path: result is true
+                self.mir.push(X86Inst::Label { name: true_label });
+                self.mir.push(X86Inst::MovRI32 {
+                    dst: Operand::Virtual(vreg),
+                    imm: 1,
+                });
+
+                self.mir.push(X86Inst::Label { name: end_label });
             }
 
             AirInstData::Branch { cond, then_value, else_value } => {
@@ -597,13 +636,61 @@ impl<'a> Lower<'a> {
                     symbol: "__rue_exit".to_string(),
                 });
             }
+
+            AirInstData::Block { statements, value } => {
+                // Execute all statements in order (for side effects).
+                // This is demand-driven: statements are lowered now, inside whatever
+                // control flow context we're in (e.g., inside the RHS of &&).
+                //
+                // We call lower_inst directly instead of get_vreg because statements
+                // like Alloc and Store don't produce values (they have no entry in
+                // value_map). The lower_inst function handles this correctly by not
+                // setting value_map for these instructions.
+                for stmt_ref in statements {
+                    self.demand_lower(*stmt_ref);
+                }
+
+                // The block's value is the result - use the value's vreg directly
+                let value_vreg = self.get_vreg(*value);
+                self.value_map[air_ref.as_u32() as usize] = Some(value_vreg);
+            }
         }
     }
 
+    /// Demand-lower an AIR instruction if not already lowered.
+    ///
+    /// This is used for instructions that don't produce values (like Alloc, Store)
+    /// where we need to ensure they're lowered but don't need a vreg back.
+    fn demand_lower(&mut self, air_ref: AirRef) {
+        // Skip if already lowered
+        if self.value_map[air_ref.as_u32() as usize].is_some() {
+            return;
+        }
+
+        // Lower now - we need to clone the data because lower_inst borrows self mutably
+        let data = self.air.get(air_ref).data.clone();
+        self.lower_inst(air_ref, &data);
+    }
+
     /// Get the vreg holding the result of an AIR instruction.
-    fn get_vreg(&self, air_ref: AirRef) -> VReg {
+    ///
+    /// This is demand-driven: if the instruction hasn't been lowered yet,
+    /// it will be lowered now. This enables short-circuit evaluation where
+    /// we only lower instructions when their values are actually needed.
+    fn get_vreg(&mut self, air_ref: AirRef) -> VReg {
+        // Check if already lowered
+        if let Some(vreg) = self.value_map[air_ref.as_u32() as usize] {
+            return vreg;
+        }
+
+        // Not yet lowered - lower it now (demand-driven)
+        // We need to clone the data because lower_inst borrows self mutably
+        let data = self.air.get(air_ref).data.clone();
+        self.lower_inst(air_ref, &data);
+
+        // Should be lowered now
         self.value_map[air_ref.as_u32() as usize]
-            .expect("AIR instruction should have been lowered before use")
+            .expect("instruction should have been lowered")
     }
 }
 

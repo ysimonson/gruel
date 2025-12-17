@@ -298,9 +298,10 @@ fn main() -> i32 {
 exit_code = 1
 
 # =============================================================================
-# Note: Short-circuit evaluation is not yet implemented.
-# These tests verify that && and || correctly compute results,
-# but both sides are always evaluated.
+# Basic evaluation tests
+# Short-circuit evaluation is implemented via demand-driven lowering.
+# See the "Short-circuit evaluation tests" section at the end for tests
+# that verify side effects are correctly skipped.
 # =============================================================================
 
 # Both true and true - should return true
@@ -405,3 +406,106 @@ name = "or_requires_bool_rhs"
 source = "fn main() -> i32 { if true || 1 { 1 } else { 0 } }"
 compile_fail = true
 error_contains = "expected bool"
+
+# =============================================================================
+# Short-circuit evaluation tests
+# These tests verify that && and || correctly short-circuit by using side effects.
+# =============================================================================
+
+# false && { side_effect } should NOT evaluate the RHS
+[[case]]
+name = "and_short_circuit_skips_side_effects"
+source = """
+fn main() -> i32 {
+    let mut x = 0;
+    false && { x = 1; true };
+    x
+}
+"""
+exit_code = 0
+
+# true || { side_effect } should NOT evaluate the RHS
+[[case]]
+name = "or_short_circuit_skips_side_effects"
+source = """
+fn main() -> i32 {
+    let mut x = 0;
+    true || { x = 1; false };
+    x
+}
+"""
+exit_code = 0
+
+# true && { side_effect } SHOULD evaluate the RHS
+[[case]]
+name = "and_evaluates_rhs_when_lhs_true"
+source = """
+fn main() -> i32 {
+    let mut x = 0;
+    true && { x = 1; true };
+    x
+}
+"""
+exit_code = 1
+
+# false || { side_effect } SHOULD evaluate the RHS
+[[case]]
+name = "or_evaluates_rhs_when_lhs_false"
+source = """
+fn main() -> i32 {
+    let mut x = 0;
+    false || { x = 1; true };
+    x
+}
+"""
+exit_code = 1
+
+# Nested short-circuit: outer && short-circuits before inner is evaluated
+[[case]]
+name = "nested_and_short_circuit"
+source = """
+fn main() -> i32 {
+    let mut x = 0;
+    false && (true && { x = 1; true });
+    x
+}
+"""
+exit_code = 0
+
+# Nested short-circuit: outer || short-circuits before inner is evaluated
+[[case]]
+name = "nested_or_short_circuit"
+source = """
+fn main() -> i32 {
+    let mut x = 0;
+    true || (false || { x = 1; false });
+    x
+}
+"""
+exit_code = 0
+
+# Variable-based short-circuit with &&
+[[case]]
+name = "and_short_circuit_with_variables"
+source = """
+fn main() -> i32 {
+    let cond = false;
+    let mut x = 0;
+    cond && { x = 1; true };
+    x
+}
+"""
+exit_code = 0
+
+# Variable-based short-circuit with ||
+[[case]]
+name = "or_short_circuit_with_variables"
+source = """
+fn main() -> i32 {
+    let cond = true;
+    let mut x = 0;
+    cond || { x = 1; false };
+    x
+}
+"""
+exit_code = 0

@@ -130,14 +130,14 @@ name = "addition_mir"
 source = "fn main() -> i32 { 1 + 2 }"
 expected_mir = """
 function main:
-    mov v0, 1
-    mov v1, 2
-    mov v2, v0
-    add v2, v1
+    mov v1, 1
+    mov v2, 2
+    mov v0, v1
+    add v0, v2
     jno .Ladd_ok_0
     call __rue_overflow
     .Ladd_ok_0:
-    mov rdi, v2
+    mov rdi, v0
     call __rue_exit
 """
 
@@ -171,14 +171,14 @@ name = "subtraction_mir"
 source = "fn main() -> i32 { 5 - 3 }"
 expected_mir = """
 function main:
-    mov v0, 5
-    mov v1, 3
-    mov v2, v0
-    sub v2, v1
+    mov v1, 5
+    mov v2, 3
+    mov v0, v1
+    sub v0, v2
     jno .Lsub_ok_0
     call __rue_overflow
     .Lsub_ok_0:
-    mov rdi, v2
+    mov rdi, v0
     call __rue_exit
 """
 
@@ -212,14 +212,14 @@ name = "multiplication_mir"
 source = "fn main() -> i32 { 3 * 4 }"
 expected_mir = """
 function main:
-    mov v0, 3
-    mov v1, 4
-    mov v2, v0
-    imul v2, v1
+    mov v1, 3
+    mov v2, 4
+    mov v0, v1
+    imul v0, v2
     jno .Lmul_ok_0
     call __rue_overflow
     .Lmul_ok_0:
-    mov rdi, v2
+    mov rdi, v0
     call __rue_exit
 """
 
@@ -253,17 +253,17 @@ name = "division_mir"
 source = "fn main() -> i32 { 10 / 3 }"
 expected_mir = """
 function main:
-    mov v0, 10
-    mov v1, 3
-    test v1, v1
+    mov v1, 10
+    mov v2, 3
+    test v2, v2
     jnz .Ldiv_ok_0
     call __rue_div_by_zero
     .Ldiv_ok_0:
-    mov rax, v0
+    mov rax, v1
     cdq
-    idiv v1
-    mov v2, rax
-    mov rdi, v2
+    idiv v2
+    mov v0, rax
+    mov rdi, v0
     call __rue_exit
 """
 
@@ -297,17 +297,17 @@ name = "modulo_mir"
 source = "fn main() -> i32 { 10 % 3 }"
 expected_mir = """
 function main:
-    mov v0, 10
-    mov v1, 3
-    test v1, v1
+    mov v1, 10
+    mov v2, 3
+    test v2, v2
     jnz .Lmod_ok_0
     call __rue_div_by_zero
     .Lmod_ok_0:
-    mov rax, v0
+    mov rax, v1
     cdq
-    idiv v1
-    mov v2, rdx
-    mov rdi, v2
+    idiv v2
+    mov v0, rdx
+    mov rdi, v0
     call __rue_exit
 """
 
@@ -401,13 +401,13 @@ name = "negation_mir"
 source = "fn main() -> i32 { -42 }"
 expected_mir = """
 function main:
-    mov v0, 42
-    mov v1, v0
-    neg v1
+    mov v1, 42
+    mov v0, v1
+    neg v0
     jno .Lneg_ok_0
     call __rue_overflow
     .Lneg_ok_0:
-    mov rdi, v1
+    mov rdi, v0
     call __rue_exit
 """
 

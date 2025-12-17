@@ -498,6 +498,7 @@ impl<'a> Sema<'a> {
                 // Process all instructions in the block
                 // The last one is the final expression (the block's value)
                 // All other instructions are statements and should be typed as Unit
+                let mut statements = Vec::new();
                 let mut last_ref = None;
                 let num_insts = inst_refs.len();
                 for (i, &raw_ref) in inst_refs.iter().enumerate() {
@@ -507,7 +508,13 @@ impl<'a> Sema<'a> {
                     // statements (let, assign, expr;) don't need type checking
                     // against the block's expected type
                     let inst_expected_type = if is_last { expected_type } else { Type::Unit };
-                    last_ref = Some(self.analyze_inst(air, inst_ref, inst_expected_type, locals, next_slot)?);
+                    let air_ref = self.analyze_inst(air, inst_ref, inst_expected_type, locals, next_slot)?;
+
+                    if is_last {
+                        last_ref = Some(air_ref);
+                    } else {
+                        statements.push(air_ref);
+                    }
                 }
 
                 // Restore locals to remove block-scoped variables.
@@ -515,8 +522,20 @@ impl<'a> Sema<'a> {
                 // This is a future optimization opportunity.
                 *locals = saved_locals;
 
-                // Return the last instruction's result (the block's value)
-                Ok(last_ref.expect("block should have at least one instruction"))
+                let value = last_ref.expect("block should have at least one instruction");
+
+                // Only create a Block instruction if there are statements;
+                // otherwise just return the value directly (optimization)
+                if statements.is_empty() {
+                    Ok(value)
+                } else {
+                    let ty = air.get(value).ty;
+                    Ok(air.add_inst(AirInst {
+                        data: AirInstData::Block { statements, value },
+                        ty,
+                        span: inst.span,
+                    }))
+                }
             }
         }
     }
@@ -698,8 +717,8 @@ mod tests {
         assert_eq!(functions[0].num_locals, 1);
 
         let air = &functions[0].air;
-        // Const(42) + Alloc + Load + Ret = 4 instructions
-        assert_eq!(air.len(), 4);
+        // Const(42) + Alloc + Load + Block([Alloc], Load) + Ret = 5 instructions
+        assert_eq!(air.len(), 5);
 
         // Check alloc instruction
         let alloc_inst = air.get(AirRef::from_raw(1));
@@ -708,6 +727,10 @@ mod tests {
         // Check load instruction
         let load_inst = air.get(AirRef::from_raw(2));
         assert!(matches!(load_inst.data, AirInstData::Load { slot: 0 }));
+
+        // Check block instruction groups the alloc with the load
+        let block_inst = air.get(AirRef::from_raw(3));
+        assert!(matches!(block_inst.data, AirInstData::Block { .. }));
     }
 
     #[test]
@@ -715,12 +738,16 @@ mod tests {
         let functions = compile_to_air("fn main() -> i32 { let mut x = 10; x = 20; x }").unwrap();
 
         let air = &functions[0].air;
-        // Const(10) + Alloc + Const(20) + Store + Load + Ret = 6 instructions
-        assert_eq!(air.len(), 6);
+        // Const(10) + Alloc + Const(20) + Store + Load + Block([Alloc, Store], Load) + Ret = 7 instructions
+        assert_eq!(air.len(), 7);
 
         // Check store instruction
         let store_inst = air.get(AirRef::from_raw(3));
         assert!(matches!(store_inst.data, AirInstData::Store { slot: 0, .. }));
+
+        // Check block instruction groups statements
+        let block_inst = air.get(AirRef::from_raw(5));
+        assert!(matches!(block_inst.data, AirInstData::Block { .. }));
     }
 
     #[test]

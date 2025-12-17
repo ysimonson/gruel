@@ -169,6 +169,16 @@ pub enum AirInstData {
 
     /// Return from function
     Ret(AirRef),
+
+    /// Block expression with statements and final value.
+    /// Used to group side-effect statements with their result value,
+    /// enabling demand-driven lowering for short-circuit evaluation.
+    Block {
+        /// Side-effect statements to execute in order
+        statements: Vec<AirRef>,
+        /// The block's resulting value
+        value: AirRef,
+    },
 }
 
 impl fmt::Display for AirRef {
@@ -211,6 +221,16 @@ impl fmt::Display for Air {
                 AirInstData::Load { slot } => writeln!(f, "load ${}", slot)?,
                 AirInstData::Store { slot, value } => writeln!(f, "store ${} = {}", slot, value)?,
                 AirInstData::Ret(inner) => writeln!(f, "ret {}", inner)?,
+                AirInstData::Block { statements, value } => {
+                    write!(f, "block [")?;
+                    for (i, s) in statements.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", s)?;
+                    }
+                    writeln!(f, "], {}", value)?;
+                }
             }
         }
         writeln!(f, "}}")
