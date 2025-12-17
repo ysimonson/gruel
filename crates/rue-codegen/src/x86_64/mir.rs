@@ -390,6 +390,11 @@ impl X86Mir {
     pub fn iter(&self) -> impl Iterator<Item = &X86Inst> {
         self.instructions.iter()
     }
+
+    /// Consume the MIR and return its instructions.
+    pub fn into_instructions(self) -> Vec<X86Inst> {
+        self.instructions
+    }
 }
 
 impl fmt::Display for X86Mir {

@@ -12,6 +12,7 @@
 //! - `emit`: Encodes X86Mir instructions to machine code bytes
 
 mod emit;
+mod liveness;
 mod lower;
 mod mir;
 mod regalloc;
@@ -55,11 +56,13 @@ pub fn generate(air: &Air, num_locals: u32) -> MachineCode {
     // Phase 1: Lower AIR to X86Mir with virtual registers
     let mir = Lower::new(air, num_locals).lower();
 
-    // Phase 2: Allocate physical registers
-    let mir = RegAlloc::new(mir).allocate();
+    // Phase 2: Allocate physical registers (may add spill slots)
+    let (mir, num_spills) = RegAlloc::new(mir, num_locals).allocate_with_spills();
 
     // Phase 3: Emit machine code bytes (with prologue for stack frame setup)
-    let (code, relocations) = Emitter::new(&mir, num_locals).emit();
+    // Total stack slots = local variables + spill slots
+    let total_slots = num_locals + num_spills;
+    let (code, relocations) = Emitter::new(&mir, total_slots).emit();
 
     MachineCode { code, relocations }
 }
