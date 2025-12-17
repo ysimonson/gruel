@@ -260,6 +260,50 @@ fn main() -> i32 {
 
 ---
 
+## ADR-011: Uniform 8-Byte Stack Slots for All Values
+
+**Status:** Accepted (temporary simplification)
+
+**Context:**
+When storing values on the stack (local variables, struct fields, function parameters), we need to decide on memory layout. Options include:
+
+1. **Type-aware layout**: Each type uses its natural size (i8 = 1 byte, i16 = 2 bytes, i32 = 4 bytes, i64 = 8 bytes) with appropriate alignment padding
+2. **Uniform slots**: Every value uses a fixed-size slot (e.g., 8 bytes)
+3. **C-compatible layout**: Follow the System V AMD64 ABI for struct layout (required for FFI)
+
+**Decision:**
+Use uniform 8-byte slots for all scalar values and struct fields.
+
+**Rationale:**
+- Dramatically simplifies implementation: no alignment calculations, no padding logic
+- Correct for x86-64: smaller values are sign/zero-extended to 64-bit registers naturally
+- Stack slot arithmetic is trivial: `offset = -(slot + 1) * 8`
+- Struct field access uses simple indexing: `field_offset = base_slot + field_index`
+- Allows us to focus on language semantics before optimizing memory layout
+
+**Example:**
+```rue
+struct Point { x: i8, y: i8 }
+```
+- Current layout: 16 bytes (2 slots × 8 bytes)
+- Optimal layout: 2 bytes (no padding) or 2 bytes with 6 bytes padding for alignment
+- C-compatible layout: 2 bytes
+
+**Consequences:**
+- Wastes memory for small types (i8 uses 8 bytes instead of 1)
+- Struct sizes are larger than necessary
+- **Not ABI-compatible with C** (cannot do FFI with C structs)
+- Will need to revisit for FFI support or memory-constrained use cases
+
+**Future Work:**
+When implementing FFI or optimizing memory usage, we should:
+1. Add `size_of()` and `align_of()` methods to `Type`
+2. Calculate actual byte offsets in struct layout (with padding)
+3. Add type-appropriate load/store instructions (movb, movw, movl, movq)
+4. Consider `#[repr(C)]` attribute for C-compatible layout
+
+---
+
 ## Future Considerations
 
 Decisions we've deferred or are still considering:
@@ -269,3 +313,4 @@ Decisions we've deferred or are still considering:
 - **Optimization Passes**: When to add, what granularity (per-IR vs peephole)
 - **Debug Info**: DWARF generation for debugger support
 - **Multiple Targets**: ARM64, RISC-V, WebAssembly
+- **Proper Struct Layout**: C-compatible struct layout for FFI (see ADR-011)

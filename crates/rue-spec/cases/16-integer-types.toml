@@ -1,0 +1,212 @@
+[section]
+id = "16.1"
+name = "Integer Types"
+description = "Support for i8, i16, i32, and i64 signed integer types."
+
+# =============================================================================
+# i8 Type
+# =============================================================================
+
+[[case]]
+name = "i8_return"
+source = "fn main() -> i8 { 42 }"
+exit_code = 42
+
+[[case]]
+name = "i8_zero"
+source = "fn main() -> i8 { 0 }"
+exit_code = 0
+
+[[case]]
+name = "i8_max_positive"
+source = "fn main() -> i8 { 127 }"
+exit_code = 127
+
+[[case]]
+name = "i8_variable"
+source = """
+fn main() -> i8 {
+    let x: i8 = 50;
+    x
+}
+"""
+exit_code = 50
+
+[[case]]
+name = "i8_arithmetic"
+source = """
+fn main() -> i8 {
+    let a: i8 = 10;
+    let b: i8 = 5;
+    a + b
+}
+"""
+exit_code = 15
+
+[[case]]
+name = "i8_param"
+source = """
+fn double(x: i8) -> i8 { x + x }
+fn main() -> i8 { double(21) }
+"""
+exit_code = 42
+
+# =============================================================================
+# i16 Type
+# =============================================================================
+
+[[case]]
+name = "i16_return"
+source = "fn main() -> i16 { 100 }"
+exit_code = 100
+
+[[case]]
+name = "i16_zero"
+source = "fn main() -> i16 { 0 }"
+exit_code = 0
+
+[[case]]
+name = "i16_variable"
+source = """
+fn main() -> i16 {
+    let x: i16 = 200;
+    x
+}
+"""
+exit_code = 200
+
+[[case]]
+name = "i16_arithmetic"
+source = """
+fn main() -> i16 {
+    let a: i16 = 100;
+    let b: i16 = 50;
+    a - b
+}
+"""
+exit_code = 50
+
+[[case]]
+name = "i16_param"
+source = """
+fn add(x: i16, y: i16) -> i16 { x + y }
+fn main() -> i16 { add(30, 12) }
+"""
+exit_code = 42
+
+# =============================================================================
+# i64 Type
+# =============================================================================
+
+[[case]]
+name = "i64_return"
+source = "fn main() -> i64 { 42 }"
+exit_code = 42
+
+[[case]]
+name = "i64_zero"
+source = "fn main() -> i64 { 0 }"
+exit_code = 0
+
+[[case]]
+name = "i64_variable"
+source = """
+fn main() -> i64 {
+    let x: i64 = 123;
+    x
+}
+"""
+exit_code = 123
+
+[[case]]
+name = "i64_arithmetic"
+source = """
+fn main() -> i64 {
+    let a: i64 = 20;
+    let b: i64 = 22;
+    a + b
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "i64_param"
+source = """
+fn triple(x: i64) -> i64 { x + x + x }
+fn main() -> i64 { triple(14) }
+"""
+exit_code = 42
+
+# =============================================================================
+# Type Mismatch Errors
+# =============================================================================
+
+[[case]]
+name = "type_mismatch_i8_i32"
+source = """
+fn main() -> i32 {
+    let x: i8 = 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_i32_i64"
+source = """
+fn main() -> i64 {
+    let x: i32 = 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_arithmetic_i8_i32"
+source = """
+fn main() -> i32 {
+    let a: i8 = 10;
+    let b: i32 = 20;
+    a + b
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_arithmetic_i16_i64"
+source = """
+fn main() -> i64 {
+    let a: i16 = 10;
+    let b: i64 = 20;
+    a + b
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_function_arg_i8_i32"
+source = """
+fn foo(x: i32) -> i32 { x }
+fn main() -> i32 {
+    let y: i8 = 10;
+    foo(y)
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "type_mismatch_function_arg_i64_i16"
+source = """
+fn foo(x: i16) -> i16 { x }
+fn main() -> i16 {
+    let y: i64 = 10;
+    foo(y)
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"

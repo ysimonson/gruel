@@ -260,8 +260,12 @@ impl<'a> Sema<'a> {
 
         match &inst.data {
             InstData::IntConst(value) => {
-                // Integer constants are always i32 for now
-                let ty = Type::I32;
+                // Integer constants default to i32, but take on the expected type if it's an integer
+                let ty = if expected_type.is_integer() {
+                    expected_type
+                } else {
+                    Type::I32
+                };
 
                 // Type check - allow Unit context (value is discarded)
                 if ty != expected_type && expected_type != Type::Unit && !expected_type.is_error() {
@@ -303,57 +307,62 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Add { lhs, rhs } => {
-                // Both operands must be i32 for now
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, ctx)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, ctx)?;
+                // Use expected type if it's an integer, otherwise default to i32
+                let op_type = if expected_type.is_integer() { expected_type } else { Type::I32 };
+                let lhs_ref = self.analyze_inst(air, *lhs, op_type, ctx)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, op_type, ctx)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Add(lhs_ref, rhs_ref),
-                    ty: Type::I32,
+                    ty: op_type,
                     span: inst.span,
                 }))
             }
 
             InstData::Sub { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, ctx)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, ctx)?;
+                let op_type = if expected_type.is_integer() { expected_type } else { Type::I32 };
+                let lhs_ref = self.analyze_inst(air, *lhs, op_type, ctx)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, op_type, ctx)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Sub(lhs_ref, rhs_ref),
-                    ty: Type::I32,
+                    ty: op_type,
                     span: inst.span,
                 }))
             }
 
             InstData::Mul { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, ctx)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, ctx)?;
+                let op_type = if expected_type.is_integer() { expected_type } else { Type::I32 };
+                let lhs_ref = self.analyze_inst(air, *lhs, op_type, ctx)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, op_type, ctx)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Mul(lhs_ref, rhs_ref),
-                    ty: Type::I32,
+                    ty: op_type,
                     span: inst.span,
                 }))
             }
 
             InstData::Div { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, ctx)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, ctx)?;
+                let op_type = if expected_type.is_integer() { expected_type } else { Type::I32 };
+                let lhs_ref = self.analyze_inst(air, *lhs, op_type, ctx)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, op_type, ctx)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Div(lhs_ref, rhs_ref),
-                    ty: Type::I32,
+                    ty: op_type,
                     span: inst.span,
                 }))
             }
 
             InstData::Mod { lhs, rhs } => {
-                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32, ctx)?;
-                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32, ctx)?;
+                let op_type = if expected_type.is_integer() { expected_type } else { Type::I32 };
+                let lhs_ref = self.analyze_inst(air, *lhs, op_type, ctx)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, op_type, ctx)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Mod(lhs_ref, rhs_ref),
-                    ty: Type::I32,
+                    ty: op_type,
                     span: inst.span,
                 }))
             }
@@ -449,26 +458,28 @@ impl<'a> Sema<'a> {
             }
 
             InstData::Neg { operand } => {
+                let op_type = if expected_type.is_integer() { expected_type } else { Type::I32 };
+
                 // Special case: -2147483648 (MIN_I32)
                 // The literal 2147483648 exceeds i32::MAX, but -2147483648 is valid.
                 // We detect this pattern and fold it to a constant to avoid overflow.
                 let operand_inst = self.rir.get(*operand);
                 if let InstData::IntConst(value) = &operand_inst.data {
-                    if *value == 2147483648 {
+                    if *value == 2147483648 && op_type == Type::I32 {
                         // Fold to MIN_I32 constant directly
                         return Ok(air.add_inst(AirInst {
                             data: AirInstData::Const(-2147483648_i64),
-                            ty: Type::I32,
+                            ty: op_type,
                             span: inst.span,
                         }));
                     }
                 }
 
-                let operand_ref = self.analyze_inst(air, *operand, Type::I32, ctx)?;
+                let operand_ref = self.analyze_inst(air, *operand, op_type, ctx)?;
 
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Neg(operand_ref),
-                    ty: Type::I32,
+                    ty: op_type,
                     span: inst.span,
                 }))
             }
@@ -1126,8 +1137,14 @@ impl<'a> Sema<'a> {
     fn resolve_type(&self, type_sym: Symbol, span: Span) -> CompileResult<Type> {
         let well_known = self.interner.well_known();
 
-        if type_sym == well_known.i32 {
+        if type_sym == well_known.i8 {
+            Ok(Type::I8)
+        } else if type_sym == well_known.i16 {
+            Ok(Type::I16)
+        } else if type_sym == well_known.i32 {
             Ok(Type::I32)
+        } else if type_sym == well_known.i64 {
+            Ok(Type::I64)
         } else if type_sym == well_known.bool {
             Ok(Type::Bool)
         } else if let Some(&struct_id) = self.structs.get(&type_sym) {
@@ -1142,10 +1159,10 @@ impl<'a> Sema<'a> {
     }
 
     /// Get the number of ABI slots required for a type.
-    /// Scalar types (i32, bool) use 1 slot, structs use 1 slot per field.
+    /// Scalar types (i8, i16, i32, i64, bool) use 1 slot, structs use 1 slot per field.
     fn abi_slot_count(&self, ty: Type) -> u32 {
         match ty {
-            Type::I32 | Type::Bool | Type::Unit | Type::Error => 1,
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Bool | Type::Unit | Type::Error => 1,
             Type::Struct(struct_id) => self.struct_defs[struct_id.0 as usize].field_count() as u32,
         }
     }

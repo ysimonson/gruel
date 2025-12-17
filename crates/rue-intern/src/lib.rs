@@ -34,8 +34,14 @@ impl Symbol {
 /// fast symbol comparison instead of string comparison for type resolution.
 #[derive(Debug, Clone, Copy)]
 pub struct WellKnown {
+    /// The `i8` type
+    pub i8: Symbol,
+    /// The `i16` type
+    pub i16: Symbol,
     /// The `i32` type
     pub i32: Symbol,
+    /// The `i64` type
+    pub i64: Symbol,
     /// The `bool` type
     pub bool: Symbol,
     /// The `()` unit type (currently not used in syntax)
@@ -46,7 +52,10 @@ impl WellKnown {
     /// Create well-known symbols by interning them.
     fn new(interner: &mut Interner) -> Self {
         Self {
+            i8: interner.intern_inner("i8"),
+            i16: interner.intern_inner("i16"),
             i32: interner.intern_inner("i32"),
+            i64: interner.intern_inner("i64"),
             bool: interner.intern_inner("bool"),
             unit: interner.intern_inner("()"),
         }
@@ -213,9 +222,9 @@ mod tests {
     #[test]
     fn test_len() {
         let mut interner = Interner::new();
-        // Well-known symbols (i32, bool, ()) are pre-interned
+        // Well-known symbols (i8, i16, i32, i64, bool, ()) are pre-interned
         let initial_len = interner.len();
-        assert_eq!(initial_len, 3);
+        assert_eq!(initial_len, 6);
 
         interner.intern("a");
         assert_eq!(interner.len(), initial_len + 1);

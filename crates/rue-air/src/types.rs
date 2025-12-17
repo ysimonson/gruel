@@ -9,8 +9,14 @@ pub struct StructId(pub u32);
 /// A type in the Rue type system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Type {
+    /// 8-bit signed integer
+    I8,
+    /// 16-bit signed integer
+    I16,
     /// 32-bit signed integer
     I32,
+    /// 64-bit signed integer
+    I64,
     /// Boolean
     Bool,
     /// The unit type (for functions that don't return a value)
@@ -61,12 +67,20 @@ impl Type {
     /// Use `type_name_with_structs` for proper struct names.
     pub fn name(&self) -> &'static str {
         match self {
+            Type::I8 => "i8",
+            Type::I16 => "i16",
             Type::I32 => "i32",
+            Type::I64 => "i64",
             Type::Bool => "bool",
             Type::Unit => "()",
             Type::Struct(_) => "<struct>",
             Type::Error => "<error>",
         }
+    }
+
+    /// Check if this type is an integer type.
+    pub fn is_integer(&self) -> bool {
+        matches!(self, Type::I8 | Type::I16 | Type::I32 | Type::I64)
     }
 
     /// Check if this is an error type.
