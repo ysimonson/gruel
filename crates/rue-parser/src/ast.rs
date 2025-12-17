@@ -70,6 +70,8 @@ pub enum Expr {
     Block(BlockExpr),
     /// If expression (e.g., `if cond { a } else { b }`)
     If(IfExpr),
+    /// While expression (e.g., `while cond { body }`)
+    While(WhileExpr),
     /// Function call (e.g., `foo(1, 2)`)
     Call(CallExpr),
 }
@@ -207,6 +209,16 @@ pub struct AssignStatement {
     pub span: Span,
 }
 
+/// A while loop expression.
+#[derive(Debug)]
+pub struct WhileExpr {
+    /// Condition (must be bool)
+    pub cond: Box<Expr>,
+    /// Loop body
+    pub body: BlockExpr,
+    pub span: Span,
+}
+
 impl Expr {
     /// Get the span of this expression.
     pub fn span(&self) -> Span {
@@ -219,6 +231,7 @@ impl Expr {
             Expr::Paren(paren) => paren.span,
             Expr::Block(block) => block.span,
             Expr::If(if_expr) => if_expr.span,
+            Expr::While(while_expr) => while_expr.span,
             Expr::Call(call) => call.span,
         }
     }

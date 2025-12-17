@@ -143,6 +143,12 @@ pub enum AirInstData {
         else_value: Option<AirRef>,
     },
 
+    /// While loop
+    Loop {
+        cond: AirRef,
+        body: AirRef,
+    },
+
     // Variable operations
     /// Allocate local variable with initial value
     /// Returns the slot index
@@ -230,6 +236,9 @@ impl fmt::Display for Air {
                     } else {
                         writeln!(f, "branch {}, {}", cond, then_value)?
                     }
+                }
+                AirInstData::Loop { cond, body } => {
+                    writeln!(f, "loop {}, {}", cond, body)?
                 }
                 AirInstData::Alloc { slot, init } => writeln!(f, "alloc ${} = {}", slot, init)?,
                 AirInstData::Load { slot } => writeln!(f, "load ${}", slot)?,

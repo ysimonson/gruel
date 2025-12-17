@@ -14,6 +14,7 @@ pub enum TokenKind {
     Mut,
     If,
     Else,
+    While,
     True,
     False,
 
@@ -63,6 +64,7 @@ impl TokenKind {
             TokenKind::Mut => "'mut'",
             TokenKind::If => "'if'",
             TokenKind::Else => "'else'",
+            TokenKind::While => "'while'",
             TokenKind::True => "'true'",
             TokenKind::False => "'false'",
             TokenKind::Int(_) => "integer",
@@ -298,6 +300,7 @@ impl<'a> Lexer<'a> {
             "mut" => TokenKind::Mut,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
+            "while" => TokenKind::While,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             _ => TokenKind::Ident(text.to_string()),

@@ -147,6 +147,14 @@ impl<'a> AstGen<'a> {
                     span: if_expr.span,
                 })
             }
+            Expr::While(while_expr) => {
+                let cond = self.gen_expr(&while_expr.cond);
+                let body = self.gen_block(&while_expr.body);
+                self.rir.add_inst(Inst {
+                    data: InstData::Loop { cond, body },
+                    span: while_expr.span,
+                })
+            }
             Expr::Call(call) => {
                 let name = self.interner.intern(&call.name.name);
                 let args: Vec<_> = call.args.iter().map(|a| self.gen_expr(a)).collect();
@@ -219,6 +227,7 @@ impl<'a> AstGen<'a> {
             }
         }
     }
+
 }
 
 #[cfg(test)]

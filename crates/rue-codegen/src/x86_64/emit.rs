@@ -8,12 +8,23 @@ use std::collections::HashMap;
 use super::mir::{Reg, X86Inst, X86Mir};
 use super::EmittedRelocation;
 
+/// Kind of jump fixup (rel8 or rel32).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FixupKind {
+    /// 1-byte relative offset (-128 to +127)
+    Rel8,
+    /// 4-byte relative offset
+    Rel32,
+}
+
 /// A pending fixup for a forward jump.
 struct Fixup {
     /// Offset of the rel8/rel32 displacement in the code.
     offset: usize,
     /// Target label name.
     label: String,
+    /// Kind of fixup (rel8 or rel32).
+    kind: FixupKind,
 }
 
 /// X86-64 instruction emitter.
@@ -149,21 +160,42 @@ impl<'a> Emitter<'a> {
             let target_offset = self.labels.get(&fixup.label)
                 .unwrap_or_else(|| panic!("undefined label: {}", fixup.label));
 
-            // Calculate relative offset from the end of the jump instruction
-            // The fixup offset points to the rel8, which is the last byte of the instruction
-            let jump_end = fixup.offset + 1; // rel8 is 1 byte
-            let relative = *target_offset as i64 - jump_end as i64;
+            match fixup.kind {
+                FixupKind::Rel8 => {
+                    // Calculate relative offset from the end of the jump instruction
+                    // The fixup offset points to the rel8, which is the last byte of the instruction
+                    let jump_end = fixup.offset + 1; // rel8 is 1 byte
+                    let relative = *target_offset as i64 - jump_end as i64;
 
-            // rel8 encoding only supports -128 to +127 byte offsets
-            assert!(
-                relative >= -128 && relative <= 127,
-                "jump offset {} exceeds rel8 range (-128..127) for label '{}'; \
-                 consider implementing rel32 fallback",
-                relative,
-                fixup.label
-            );
+                    // rel8 encoding only supports -128 to +127 byte offsets
+                    assert!(
+                        relative >= -128 && relative <= 127,
+                        "jump offset {} exceeds rel8 range (-128..127) for label '{}'; \
+                         consider implementing rel32 fallback",
+                        relative,
+                        fixup.label
+                    );
 
-            self.code[fixup.offset] = relative as u8;
+                    self.code[fixup.offset] = relative as u8;
+                }
+                FixupKind::Rel32 => {
+                    // Calculate relative offset from the end of the jump instruction
+                    // The fixup offset points to the first byte of the 4-byte rel32
+                    let jump_end = fixup.offset + 4; // rel32 is 4 bytes
+                    let relative = *target_offset as i64 - jump_end as i64;
+
+                    // rel32 encoding supports i32 range
+                    assert!(
+                        relative >= i32::MIN as i64 && relative <= i32::MAX as i64,
+                        "jump offset {} exceeds rel32 range for label '{}'",
+                        relative,
+                        fixup.label
+                    );
+
+                    let bytes = (relative as i32).to_le_bytes();
+                    self.code[fixup.offset..fixup.offset + 4].copy_from_slice(&bytes);
+                }
+            }
         }
     }
 
@@ -847,38 +879,48 @@ impl<'a> Emitter<'a> {
         self.code.push(modrm);
     }
 
-    /// Emit `jmp rel8` - Unconditional jump.
+    /// Emit `jmp rel32` - Unconditional jump.
     ///
-    /// Encoding: EB rel8
+    /// Encoding: E9 rel32
+    /// We always use rel32 to support jumps of any size.
     fn emit_jmp(&mut self, label: &str) {
-        // Opcode: EB (jmp rel8)
-        self.code.push(0xEB);
+        // Opcode: E9 (jmp rel32)
+        self.code.push(0xE9);
 
-        // Record fixup location and emit placeholder for rel8
+        // Record fixup location and emit placeholder for rel32
         let fixup_offset = self.code.len();
-        self.code.push(0x00); // Placeholder, will be patched
+        self.code.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // 4-byte placeholder
 
         self.fixups.push(Fixup {
             offset: fixup_offset,
             label: label.to_string(),
+            kind: FixupKind::Rel32,
         });
     }
 
-    /// Emit a conditional jump with rel8 encoding.
+    /// Emit a conditional jump with rel32 encoding.
     ///
     /// The opcode is the condition-specific byte (e.g., 0x74 for JZ, 0x75 for JNZ).
-    /// We use rel8 encoding since our jumps are short (within +-127 bytes).
+    /// We convert rel8 opcodes to rel32 opcodes (0F 8x form) to support jumps of any size.
     fn emit_jcc(&mut self, opcode: u8, label: &str) {
-        // Emit opcode
-        self.code.push(opcode);
+        // Convert rel8 opcode to rel32 opcode
+        // rel8 opcodes are 7x (e.g., 74=JZ, 75=JNZ, 70=JO, 71=JNO)
+        // rel32 opcodes are 0F 8x (e.g., 0F 84=JZ, 0F 85=JNZ, 0F 80=JO, 0F 81=JNO)
+        // The pattern is: rel32_second_byte = rel8_opcode + 0x10
+        let rel32_opcode = opcode + 0x10;
 
-        // Record fixup location and emit placeholder for rel8
+        // Emit two-byte opcode
+        self.code.push(0x0F);
+        self.code.push(rel32_opcode);
+
+        // Record fixup location and emit placeholder for rel32
         let fixup_offset = self.code.len();
-        self.code.push(0x00); // Placeholder, will be patched
+        self.code.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // 4-byte placeholder
 
         self.fixups.push(Fixup {
             offset: fixup_offset,
             label: label.to_string(),
+            kind: FixupKind::Rel32,
         });
     }
 }

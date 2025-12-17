@@ -5,6 +5,7 @@
 use crate::ast::{
     AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, CallExpr, Expr, Function,
     Ident, IfExpr, IntLit, Item, LetStatement, Param, ParenExpr, Statement, UnaryExpr, UnaryOp,
+    WhileExpr,
 };
 use rue_error::{CompileError, CompileResult, ErrorKind};
 use rue_lexer::{Token, TokenKind};
@@ -170,6 +171,9 @@ impl Parser {
                         ));
                     }
                 }
+            } else if matches!(&expr, Expr::If(_) | Expr::While(_)) {
+                // If and while expressions don't require semicolon when used as statements
+                statements.push(Statement::Expr(expr));
             } else {
                 return Err(CompileError::new(
                     ErrorKind::UnexpectedToken {
@@ -220,6 +224,26 @@ impl Parser {
             name,
             ty,
             init: Box::new(init),
+            span: Span::new(start, end),
+        }))
+    }
+
+    /// Parse a while expression: `while cond { body }`
+    fn parse_while_expr(&mut self) -> CompileResult<Expr> {
+        let start = self.current().span.start;
+        self.expect(TokenKind::While)?;
+
+        // Parse condition
+        let cond = self.parse_expr()?;
+
+        // Parse body block using the same method as if-then blocks
+        let body = self.parse_maybe_unit_block()?;
+
+        let end = body.span.end;
+
+        Ok(Expr::While(WhileExpr {
+            cond: Box::new(cond),
+            body,
             span: Span::new(start, end),
         }))
     }
@@ -480,6 +504,9 @@ impl Parser {
             TokenKind::If => {
                 self.parse_if_expr()
             }
+            TokenKind::While => {
+                self.parse_while_expr()
+            }
             _ => Err(CompileError::new(
                 ErrorKind::UnexpectedToken {
                     expected: "expression",
@@ -500,13 +527,13 @@ impl Parser {
         // Parse condition
         let cond = self.parse_expr()?;
 
-        // Parse then block
-        let then_block = self.parse_block_expr()?;
+        // Parse then block - use maybe_unit_block to allow statements without final expression
+        let then_block = self.parse_maybe_unit_block()?;
 
         // Optionally parse else block
         let else_block = if self.check(&TokenKind::Else) {
             self.advance(); // consume 'else'
-            Some(self.parse_block_expr()?)
+            Some(self.parse_maybe_unit_block()?)
         } else {
             None
         };
@@ -523,6 +550,88 @@ impl Parser {
             else_block,
             span: Span::new(start, end),
         }))
+    }
+
+    /// Parse a block that may end with statements (producing Unit) or with an expression.
+    /// This is used for if-then blocks and while bodies where the final value may be discarded.
+    fn parse_maybe_unit_block(&mut self) -> CompileResult<BlockExpr> {
+        let start = self.current().span.start;
+        self.expect(TokenKind::LBrace)?;
+
+        let mut statements = Vec::new();
+
+        // Parse statements and maybe a final expression
+        loop {
+            // Check for end of block
+            if self.check(&TokenKind::RBrace) {
+                self.expect(TokenKind::RBrace)?;
+                let end = self.tokens[self.pos.saturating_sub(1)].span.end;
+
+                // Block ends after statements - use a dummy placeholder expression
+                return Ok(BlockExpr {
+                    statements,
+                    expr: Box::new(Expr::Bool(BoolLit {
+                        value: false,
+                        span: Span::new(end, end),
+                    })),
+                    span: Span::new(start, end),
+                });
+            }
+
+            // Try to parse a let statement
+            if self.check(&TokenKind::Let) {
+                statements.push(self.parse_let_statement()?);
+                continue;
+            }
+
+            // Parse an expression
+            let expr = self.parse_expr()?;
+
+            // Check what follows the expression
+            if self.check(&TokenKind::Semi) {
+                // Expression statement - consume semicolon and continue
+                self.advance();
+                statements.push(Statement::Expr(expr));
+            } else if self.check(&TokenKind::RBrace) {
+                // Final expression - end of block
+                self.expect(TokenKind::RBrace)?;
+                let end = self.tokens[self.pos.saturating_sub(1)].span.end;
+
+                return Ok(BlockExpr {
+                    statements,
+                    expr: Box::new(expr),
+                    span: Span::new(start, end),
+                });
+            } else if self.check(&TokenKind::Eq) {
+                // Assignment: we parsed the LHS as an expression, check it's an identifier
+                match expr {
+                    Expr::Ident(target) => {
+                        let assign = self.parse_assignment_rest(target)?;
+                        statements.push(Statement::Assign(assign));
+                    }
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::UnexpectedToken {
+                                expected: "';'",
+                                found: self.current().kind.name().to_string(),
+                            },
+                            self.current().span,
+                        ));
+                    }
+                }
+            } else if matches!(expr, Expr::If(_) | Expr::While(_) | Expr::Block(_)) {
+                // If, while, and block expressions that end with } don't need semicolon
+                statements.push(Statement::Expr(expr));
+            } else {
+                return Err(CompileError::new(
+                    ErrorKind::UnexpectedToken {
+                        expected: "';'",
+                        found: self.current().kind.name().to_string(),
+                    },
+                    self.current().span,
+                ));
+            }
+        }
     }
 
     /// Parse a function call: `name(args...)`

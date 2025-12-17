@@ -160,6 +160,12 @@ pub enum InstData {
         else_block: Option<InstRef>,
     },
 
+    /// While loop: while cond { body }
+    Loop {
+        cond: InstRef,
+        body: InstRef,
+    },
+
     /// Function definition
     /// Contains: name symbol, parameters, return type symbol, body instruction ref
     FnDecl {
@@ -307,6 +313,9 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     } else {
                         out.push_str(&format!("branch {}, {}\n", cond, then_block));
                     }
+                }
+                InstData::Loop { cond, body } => {
+                    out.push_str(&format!("loop {}, {}\n", cond, body));
                 }
                 InstData::FnDecl { name, params, return_type, body } => {
                     let name_str = self.interner.get(*name);

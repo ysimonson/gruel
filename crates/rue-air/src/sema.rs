@@ -194,8 +194,8 @@ impl<'a> Sema<'a> {
                 // Integer constants are always i32 for now
                 let ty = Type::I32;
 
-                // Type check
-                if ty != expected_type && !expected_type.is_error() {
+                // Type check - allow Unit context (value is discarded)
+                if ty != expected_type && expected_type != Type::Unit && !expected_type.is_error() {
                     return Err(CompileError::new(
                         ErrorKind::TypeMismatch {
                             expected: expected_type.name().to_string(),
@@ -215,8 +215,8 @@ impl<'a> Sema<'a> {
             InstData::BoolConst(value) => {
                 let ty = Type::Bool;
 
-                // Type check
-                if ty != expected_type && !expected_type.is_error() {
+                // Type check - allow Unit context (value is discarded)
+                if ty != expected_type && expected_type != Type::Unit && !expected_type.is_error() {
                     return Err(CompileError::new(
                         ErrorKind::TypeMismatch {
                             expected: expected_type.name().to_string(),
@@ -465,6 +465,40 @@ impl<'a> Sema<'a> {
                 }
             }
 
+            InstData::Loop { cond, body } => {
+                // While loop: condition must be bool, result is Unit
+                // Type check - while expressions produce Unit
+                if expected_type != Type::Unit && !expected_type.is_error() {
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: expected_type.name().to_string(),
+                            found: "()".to_string(),
+                        },
+                        inst.span,
+                    ));
+                }
+
+                let cond_ref = self.analyze_inst(air, *cond, Type::Bool, locals, params, next_slot)?;
+
+                // Save locals before loop body
+                let saved_locals = locals.clone();
+
+                // Analyze body - while body is Unit type
+                let body_ref = self.analyze_inst(air, *body, Type::Unit, locals, params, next_slot)?;
+
+                // Restore locals (loop body is its own scope)
+                *locals = saved_locals;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Loop {
+                        cond: cond_ref,
+                        body: body_ref,
+                    },
+                    ty: Type::Unit,
+                    span: inst.span,
+                }))
+            }
+
             InstData::Alloc { name, is_mut, ty, init } => {
                 // Determine the type from annotation or infer from initializer
                 let var_type = if let Some(type_sym) = ty {
@@ -514,11 +548,24 @@ impl<'a> Sema<'a> {
             InstData::VarRef { name } => {
                 // First check if it's a parameter
                 if let Some(param_info) = params.get(name) {
+                    let ty = param_info.ty;
+
+                    // Type check - allow Unit context (value is discarded)
+                    if ty != expected_type && expected_type != Type::Unit && !expected_type.is_error() {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: expected_type.name().to_string(),
+                                found: ty.name().to_string(),
+                            },
+                            inst.span,
+                        ));
+                    }
+
                     return Ok(air.add_inst(AirInst {
                         data: AirInstData::Param {
                             index: param_info.index,
                         },
-                        ty: param_info.ty,
+                        ty,
                         span: inst.span,
                     }));
                 }
@@ -532,10 +579,23 @@ impl<'a> Sema<'a> {
                     )
                 })?;
 
+                let ty = local.ty;
+
+                // Type check - allow Unit context (value is discarded)
+                if ty != expected_type && expected_type != Type::Unit && !expected_type.is_error() {
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: expected_type.name().to_string(),
+                            found: ty.name().to_string(),
+                        },
+                        inst.span,
+                    ));
+                }
+
                 // Load the variable
                 Ok(air.add_inst(AirInst {
                     data: AirInstData::Load { slot: local.slot },
-                    ty: local.ty,
+                    ty,
                     span: inst.span,
                 }))
             }
@@ -605,8 +665,19 @@ impl<'a> Sema<'a> {
                     let is_last = i == num_insts - 1;
                     // Only the final expression should match expected_type;
                     // statements (let, assign, expr;) don't need type checking
-                    // against the block's expected type
-                    let inst_expected_type = if is_last { expected_type } else { Type::Unit };
+                    // against the block's expected type.
+                    // When expected_type is Unit (e.g., while loop body), we allow
+                    // any type for the final expression since we discard its value.
+                    let inst_expected_type = if is_last {
+                        if expected_type == Type::Unit {
+                            // In Unit context, infer the type rather than enforce Unit
+                            self.infer_type(inst_ref, locals, params)?
+                        } else {
+                            expected_type
+                        }
+                    } else {
+                        Type::Unit
+                    };
                     let air_ref = self.analyze_inst(air, inst_ref, inst_expected_type, locals, params, next_slot)?;
 
                     if is_last {
@@ -628,7 +699,12 @@ impl<'a> Sema<'a> {
                 if statements.is_empty() {
                     Ok(value)
                 } else {
-                    let ty = air.get(value).ty;
+                    // When expected_type is Unit, the block produces Unit
+                    let ty = if expected_type == Type::Unit {
+                        Type::Unit
+                    } else {
+                        air.get(value).ty
+                    };
                     Ok(air.add_inst(AirInst {
                         data: AirInstData::Block { statements, value },
                         ty,
@@ -813,7 +889,7 @@ impl<'a> Sema<'a> {
                 })?;
                 Ok(param_info.ty)
             }
-            InstData::Alloc { .. } | InstData::Assign { .. } | InstData::Ret(_) => Ok(Type::Unit),
+            InstData::Alloc { .. } | InstData::Assign { .. } | InstData::Ret(_) | InstData::Loop { .. } => Ok(Type::Unit),
             InstData::FnDecl { .. } => {
                 unreachable!("FnDecl should not appear in expression context")
             }

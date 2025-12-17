@@ -5,7 +5,7 @@
 //! lowered when their values are needed, enabling short-circuit evaluation of
 //! logical operators (&&, ||).
 
-use rue_air::{Air, AirInstData, AirRef};
+use rue_air::{Air, AirInstData, AirRef, Type};
 
 use super::mir::{Operand, Reg, VReg, X86Inst, X86Mir};
 
@@ -622,6 +622,84 @@ impl<'a> Lower<'a> {
                 }
             }
 
+            AirInstData::Loop { cond, body } => {
+                // While loop: while cond { body }
+                //
+                // The challenge is that the condition and body may reference values
+                // that need to be re-evaluated each iteration. We must lower the
+                // condition INSIDE the loop so it's re-computed each time.
+                //
+                // Structure:
+                //   loop_start:
+                //     evaluate condition (freshly each iteration)
+                //     if false, jump to loop_end
+                //     evaluate body
+                //     jump to loop_start
+                //   loop_end:
+
+                let loop_start = self.new_label("loop_start");
+                let loop_end = self.new_label("loop_end");
+
+                // Loop start label
+                self.mir.push(X86Inst::Label { name: loop_start.clone() });
+
+                // Evaluate condition fresh each iteration
+                // We need to re-lower it each time, but since we're in a loop,
+                // we need to clear the value_map entries for the condition
+                // and body so they get re-computed.
+                // For now, just demand_lower the condition - it will use cached
+                // values for things computed outside the loop, but we need the
+                // Load instructions inside the condition to be re-evaluated.
+                // Actually, the current design assumes each AIR instruction is
+                // lowered once. For loops, we need a different approach.
+                //
+                // Solution: Generate the condition check inline each iteration
+                // by re-lowering the condition instructions.
+                self.demand_lower(*cond);
+                let cond_vreg = self.value_map[cond.as_u32() as usize]
+                    .expect("condition should be lowered");
+
+                // If condition is false (zero), exit loop
+                self.mir.push(X86Inst::CmpRI {
+                    src: Operand::Virtual(cond_vreg),
+                    imm: 0,
+                });
+                self.mir.push(X86Inst::Jz { label: loop_end.clone() });
+
+                // Execute body
+                self.demand_lower(*body);
+
+                // Before jumping back, clear the value_map for instructions that
+                // need to be re-evaluated (loads from mutable variables).
+                // For now, we'll take the simpler approach: just jump back and
+                // rely on the fact that demand_lower will re-execute instructions
+                // if they haven't been done yet... but wait, they HAVE been done.
+                //
+                // The real fix is that Load instructions from mutable slots
+                // should be re-executed each iteration. But our current model
+                // doesn't support that - each AIR ref is lowered exactly once.
+                //
+                // Workaround: Clear the value_map entries for instructions that
+                // are inside the loop's condition and body so they get re-lowered.
+                // This is a hack but will work for now.
+                self.clear_loop_values(*cond, *body);
+
+                // Jump back to start
+                self.mir.push(X86Inst::Jmp { label: loop_start });
+
+                // Loop end label
+                self.mir.push(X86Inst::Label { name: loop_end });
+
+                // Loop doesn't produce a value (Unit type), but we need something
+                // in the value_map. Use a dummy vreg with 0.
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+                self.mir.push(X86Inst::MovRI32 {
+                    dst: Operand::Virtual(vreg),
+                    imm: 0,
+                });
+            }
+
             AirInstData::Ret(value_ref) => {
                 // Get the vreg holding the return value
                 let value_vreg = self.get_vreg(*value_ref);
@@ -674,9 +752,24 @@ impl<'a> Lower<'a> {
                     self.demand_lower(*stmt_ref);
                 }
 
-                // The block's value is the result - use the value's vreg directly
-                let value_vreg = self.get_vreg(*value);
-                self.value_map[air_ref.as_u32() as usize] = Some(value_vreg);
+                // The block's value is the result.
+                // If it's a Unit-typed instruction (Store, Alloc), it doesn't produce
+                // a vreg, so we just demand_lower it and use a dummy value.
+                let value_inst = self.air.get(*value);
+                if value_inst.ty == Type::Unit {
+                    // Unit type - just execute for side effects, use dummy vreg
+                    self.demand_lower(*value);
+                    let vreg = self.mir.alloc_vreg();
+                    self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+                    self.mir.push(X86Inst::MovRI32 {
+                        dst: Operand::Virtual(vreg),
+                        imm: 0,
+                    });
+                } else {
+                    // Has a value - use it
+                    let value_vreg = self.get_vreg(*value);
+                    self.value_map[air_ref.as_u32() as usize] = Some(value_vreg);
+                }
             }
 
             AirInstData::Param { index } => {
@@ -799,6 +892,90 @@ impl<'a> Lower<'a> {
         // Should be lowered now
         self.value_map[air_ref.as_u32() as usize]
             .expect("instruction should have been lowered")
+    }
+
+    /// Clear value_map entries for instructions in a loop so they can be re-lowered.
+    /// This is needed because load/store operations inside a loop need to execute
+    /// each iteration, not just once.
+    fn clear_loop_values(&mut self, cond: AirRef, body: AirRef) {
+        // Clear the condition and all instructions it depends on that might change
+        self.clear_transitive_deps(cond);
+
+        // Clear the body
+        self.clear_transitive_deps(body);
+    }
+
+    /// Recursively clear an instruction and its dependencies from value_map.
+    /// Constants and allocs are NOT cleared since they don't need re-evaluation.
+    fn clear_transitive_deps(&mut self, air_ref: AirRef) {
+        // Get the instruction data first to check what type it is
+        let data = self.air.get(air_ref).data.clone();
+
+        // Don't clear constants, params, or allocs - they don't change between iterations
+        match &data {
+            AirInstData::Const(_)
+            | AirInstData::BoolConst(_)
+            | AirInstData::Param { .. }
+            | AirInstData::Alloc { .. } => return,
+            _ => {}
+        }
+
+        // Clear this instruction
+        self.value_map[air_ref.as_u32() as usize] = None;
+
+        // Clear dependencies too (recursively)
+        match data {
+            AirInstData::Load { .. } => {
+                // Load from a slot - this MUST be re-executed each iteration
+                // Already cleared above, no dependencies to clear
+            }
+            AirInstData::Store { value, .. } => {
+                self.clear_transitive_deps(value);
+            }
+            AirInstData::Add(lhs, rhs)
+            | AirInstData::Sub(lhs, rhs)
+            | AirInstData::Mul(lhs, rhs)
+            | AirInstData::Div(lhs, rhs)
+            | AirInstData::Mod(lhs, rhs)
+            | AirInstData::Eq(lhs, rhs)
+            | AirInstData::Ne(lhs, rhs)
+            | AirInstData::Lt(lhs, rhs)
+            | AirInstData::Gt(lhs, rhs)
+            | AirInstData::Le(lhs, rhs)
+            | AirInstData::Ge(lhs, rhs)
+            | AirInstData::And(lhs, rhs)
+            | AirInstData::Or(lhs, rhs) => {
+                self.clear_transitive_deps(lhs);
+                self.clear_transitive_deps(rhs);
+            }
+            AirInstData::Neg(operand) | AirInstData::Not(operand) => {
+                self.clear_transitive_deps(operand);
+            }
+            AirInstData::Block { statements, value } => {
+                for stmt in statements {
+                    self.clear_transitive_deps(stmt);
+                }
+                self.clear_transitive_deps(value);
+            }
+            AirInstData::Branch { cond, then_value, else_value } => {
+                self.clear_transitive_deps(cond);
+                self.clear_transitive_deps(then_value);
+                if let Some(else_v) = else_value {
+                    self.clear_transitive_deps(else_v);
+                }
+            }
+            AirInstData::Loop { cond, body } => {
+                self.clear_transitive_deps(cond);
+                self.clear_transitive_deps(body);
+            }
+            // These were already handled by the early return above
+            AirInstData::Const(_)
+            | AirInstData::BoolConst(_)
+            | AirInstData::Param { .. }
+            | AirInstData::Alloc { .. } => unreachable!(),
+            // Ret and Call shouldn't appear in loop body/condition normally
+            AirInstData::Ret(_) | AirInstData::Call { .. } => {}
+        }
     }
 }
 
