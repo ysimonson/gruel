@@ -132,9 +132,24 @@ fn main() {
 
             // Make executable
             let path = Path::new(&options.output_path);
-            let mut perms = fs::metadata(path).unwrap().permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(path, perms).unwrap();
+            match fs::metadata(path) {
+                Ok(metadata) => {
+                    let mut perms = metadata.permissions();
+                    perms.set_mode(0o755);
+                    if let Err(e) = fs::set_permissions(path, perms) {
+                        eprintln!(
+                            "Warning: could not set executable permissions on {}: {}",
+                            options.output_path, e
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Warning: could not read file metadata for {}: {}",
+                        options.output_path, e
+                    );
+                }
+            }
 
             println!("Compiled {} -> {}", options.source_path, options.output_path);
         }
