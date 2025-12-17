@@ -10,6 +10,8 @@ use rue_span::Span;
 pub enum TokenKind {
     // Keywords
     Fn,
+    Let,
+    Mut,
 
     // Literals
     Int(i64),
@@ -23,6 +25,7 @@ pub enum TokenKind {
     Star,    // *
     Slash,   // /
     Percent, // %
+    Eq,      // =
 
     // Punctuation
     LParen,
@@ -42,6 +45,8 @@ impl TokenKind {
     pub fn name(&self) -> &'static str {
         match self {
             TokenKind::Fn => "'fn'",
+            TokenKind::Let => "'let'",
+            TokenKind::Mut => "'mut'",
             TokenKind::Int(_) => "integer",
             TokenKind::Ident(_) => "identifier",
             TokenKind::Plus => "'+'",
@@ -49,6 +54,7 @@ impl TokenKind {
             TokenKind::Star => "'*'",
             TokenKind::Slash => "'/'",
             TokenKind::Percent => "'%'",
+            TokenKind::Eq => "'='",
             TokenKind::LParen => "'('",
             TokenKind::RParen => "')'",
             TokenKind::LBrace => "'{'",
@@ -156,6 +162,10 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 TokenKind::Percent
             }
+            '=' => {
+                self.advance();
+                TokenKind::Eq
+            }
             '0'..='9' => self.lex_number()?,
             'a'..='z' | 'A'..='Z' | '_' => self.lex_ident_or_keyword(),
             _ => {
@@ -196,6 +206,8 @@ impl<'a> Lexer<'a> {
         let text = &self.source[start..self.pos];
         match text {
             "fn" => TokenKind::Fn,
+            "let" => TokenKind::Let,
+            "mut" => TokenKind::Mut,
             _ => TokenKind::Ident(text.to_string()),
         }
     }
@@ -309,5 +321,44 @@ mod tests {
         let tokens = lexer.tokenize().unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::Minus));
         assert!(matches!(tokens[1].kind, TokenKind::Int(1)));
+    }
+
+    #[test]
+    fn test_let_binding() {
+        let mut lexer = Lexer::new("let x = 42;");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Let));
+        assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "x"));
+        assert!(matches!(tokens[2].kind, TokenKind::Eq));
+        assert!(matches!(tokens[3].kind, TokenKind::Int(42)));
+        assert!(matches!(tokens[4].kind, TokenKind::Semi));
+    }
+
+    #[test]
+    fn test_let_mut_binding() {
+        let mut lexer = Lexer::new("let mut x = 10;");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Let));
+        assert!(matches!(tokens[1].kind, TokenKind::Mut));
+        assert!(matches!(tokens[2].kind, TokenKind::Ident(ref s) if s == "x"));
+        assert!(matches!(tokens[3].kind, TokenKind::Eq));
+        assert!(matches!(tokens[4].kind, TokenKind::Int(10)));
+        assert!(matches!(tokens[5].kind, TokenKind::Semi));
+    }
+
+    #[test]
+    fn test_let_with_type() {
+        let mut lexer = Lexer::new("let x: i32 = 42;");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Let));
+        assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "x"));
+        assert!(matches!(tokens[2].kind, TokenKind::Colon));
+        assert!(matches!(tokens[3].kind, TokenKind::Ident(ref s) if s == "i32"));
+        assert!(matches!(tokens[4].kind, TokenKind::Eq));
+        assert!(matches!(tokens[5].kind, TokenKind::Int(42)));
+        assert!(matches!(tokens[6].kind, TokenKind::Semi));
     }
 }

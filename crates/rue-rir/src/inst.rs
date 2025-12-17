@@ -146,6 +146,33 @@ pub enum InstData {
         /// Number of instructions in the block
         len: u32,
     },
+
+    // Variable operations
+    /// Local variable declaration: allocates storage and initializes
+    Alloc {
+        /// Variable name
+        name: Symbol,
+        /// Whether the variable is mutable
+        is_mut: bool,
+        /// Optional type annotation
+        ty: Option<Symbol>,
+        /// Initial value instruction
+        init: InstRef,
+    },
+
+    /// Variable reference: reads the value of a variable
+    VarRef {
+        /// Variable name
+        name: Symbol,
+    },
+
+    /// Assignment: stores a value into a mutable variable
+    Assign {
+        /// Variable name
+        name: Symbol,
+        /// Value to store
+        value: InstRef,
+    },
 }
 
 impl fmt::Display for InstRef {
@@ -205,6 +232,20 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 }
                 InstData::Block { extra_start, len } => {
                     out.push_str(&format!("block({}, {})\n", extra_start, len));
+                }
+                InstData::Alloc { name, is_mut, ty, init } => {
+                    let name_str = self.interner.get(*name);
+                    let mut_str = if *is_mut { "mut " } else { "" };
+                    let ty_str = ty.map(|t| format!(": {}", self.interner.get(t))).unwrap_or_default();
+                    out.push_str(&format!("alloc {}{}{}= {}\n", mut_str, name_str, ty_str, init));
+                }
+                InstData::VarRef { name } => {
+                    let name_str = self.interner.get(*name);
+                    out.push_str(&format!("var_ref {}\n", name_str));
+                }
+                InstData::Assign { name, value } => {
+                    let name_str = self.interner.get(*name);
+                    out.push_str(&format!("assign {} = {}\n", name_str, value));
                 }
             }
         }

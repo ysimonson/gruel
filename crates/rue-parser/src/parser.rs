@@ -3,7 +3,8 @@
 //! Converts a sequence of tokens into an AST.
 
 use crate::ast::{
-    Ast, BinaryExpr, BinaryOp, Expr, Function, Ident, IntLit, Item, ParenExpr, UnaryExpr, UnaryOp,
+    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, Expr, Function, Ident, IntLit, Item,
+    LetStatement, ParenExpr, Statement, UnaryExpr, UnaryOp,
 };
 use rue_error::{CompileError, CompileResult, ErrorKind};
 use rue_lexer::{Token, TokenKind};
@@ -55,9 +56,7 @@ impl Parser {
         let return_type = self.expect_ident()?;
 
         // { body }
-        self.expect(TokenKind::LBrace)?;
-        let body = self.parse_expr()?;
-        self.expect(TokenKind::RBrace)?;
+        let body = self.parse_block()?;
 
         let end = self.tokens[self.pos.saturating_sub(1)].span.end;
 
@@ -65,6 +64,142 @@ impl Parser {
             name,
             return_type,
             body,
+            span: Span::new(start, end),
+        })
+    }
+
+    /// Parse a block: `{ statements... expr }`
+    fn parse_block(&mut self) -> CompileResult<Expr> {
+        let start = self.current().span.start;
+        self.expect(TokenKind::LBrace)?;
+
+        let mut statements = Vec::new();
+
+        // Parse statements and final expression
+        loop {
+            // Check for end of block
+            if self.check(&TokenKind::RBrace) {
+                // Empty block or block ending after statements - error
+                return Err(CompileError::new(
+                    ErrorKind::UnexpectedToken {
+                        expected: "expression",
+                        found: self.current().kind.name().to_string(),
+                    },
+                    self.current().span,
+                ));
+            }
+
+            // Try to parse a let statement
+            if self.check(&TokenKind::Let) {
+                statements.push(self.parse_let_statement()?);
+                continue;
+            }
+
+            // Parse an expression
+            let expr = self.parse_expr()?;
+
+            // Check what follows the expression
+            if self.check(&TokenKind::Semi) {
+                // Expression statement - consume semicolon and continue
+                self.advance();
+                statements.push(Statement::Expr(expr));
+            } else if self.check(&TokenKind::RBrace) {
+                // Final expression - end of block
+                self.expect(TokenKind::RBrace)?;
+                let end = self.tokens[self.pos.saturating_sub(1)].span.end;
+
+                return Ok(Expr::Block(BlockExpr {
+                    statements,
+                    expr: Box::new(expr),
+                    span: Span::new(start, end),
+                }));
+            } else if self.check(&TokenKind::Eq) {
+                // Assignment: we parsed the LHS as an expression, check it's an identifier
+                match expr {
+                    Expr::Ident(target) => {
+                        let assign = self.parse_assignment_rest(target)?;
+                        statements.push(Statement::Assign(assign));
+                    }
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::UnexpectedToken {
+                                expected: "';'",
+                                found: self.current().kind.name().to_string(),
+                            },
+                            self.current().span,
+                        ));
+                    }
+                }
+            } else {
+                return Err(CompileError::new(
+                    ErrorKind::UnexpectedToken {
+                        expected: "';'",
+                        found: self.current().kind.name().to_string(),
+                    },
+                    self.current().span,
+                ));
+            }
+        }
+    }
+
+    /// Parse a let statement: `let [mut] name [: type] = expr;`
+    fn parse_let_statement(&mut self) -> CompileResult<Statement> {
+        let start = self.current().span.start;
+        self.expect(TokenKind::Let)?;
+
+        // Check for 'mut'
+        let is_mut = if self.check(&TokenKind::Mut) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
+        // Variable name
+        let name = self.expect_ident()?;
+
+        // Optional type annotation
+        let ty = if self.check(&TokenKind::Colon) {
+            self.advance();
+            Some(self.expect_ident()?)
+        } else {
+            None
+        };
+
+        // = expr
+        self.expect(TokenKind::Eq)?;
+        let init = self.parse_expr()?;
+
+        // ;
+        self.expect(TokenKind::Semi)?;
+
+        let end = self.tokens[self.pos.saturating_sub(1)].span.end;
+
+        Ok(Statement::Let(LetStatement {
+            is_mut,
+            name,
+            ty,
+            init: Box::new(init),
+            span: Span::new(start, end),
+        }))
+    }
+
+    /// Parse the rest of an assignment after we've already parsed the target identifier.
+    fn parse_assignment_rest(&mut self, target: Ident) -> CompileResult<AssignStatement> {
+        let start = target.span.start;
+
+        // = expr
+        self.expect(TokenKind::Eq)?;
+        let value = self.parse_expr()?;
+
+        // ;
+        self.expect(TokenKind::Semi)?;
+
+        let end = self.tokens[self.pos.saturating_sub(1)].span.end;
+
+        Ok(AssignStatement {
+            name: target,
+            value: Box::new(value),
             span: Span::new(start, end),
         })
     }
@@ -150,7 +285,7 @@ impl Parser {
         }
     }
 
-    /// Parse primary expressions (literals, parenthesized expressions).
+    /// Parse primary expressions (literals, identifiers, parenthesized expressions).
     fn parse_primary(&mut self) -> CompileResult<Expr> {
         let token = self.current().clone();
 
@@ -160,6 +295,14 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Int(IntLit {
                     value,
+                    span: token.span,
+                }))
+            }
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(Expr::Ident(Ident {
+                    name,
                     span: token.span,
                 }))
             }
@@ -174,6 +317,10 @@ impl Parser {
                     inner: Box::new(inner),
                     span,
                 }))
+            }
+            TokenKind::LBrace => {
+                // Nested block expression
+                self.parse_block()
             }
             _ => Err(CompileError::new(
                 ErrorKind::UnexpectedToken {
@@ -266,7 +413,13 @@ mod tests {
     fn parse_expr(source: &str) -> CompileResult<Expr> {
         let ast = parse(&format!("fn main() -> i32 {{ {} }}", source))?;
         match ast.items.into_iter().next().unwrap() {
-            Item::Function(f) => Ok(f.body),
+            Item::Function(f) => {
+                // Unwrap the block to get the final expression
+                match f.body {
+                    Expr::Block(block) => Ok(*block.expr),
+                    other => Ok(other),
+                }
+            }
         }
     }
 
@@ -279,9 +432,13 @@ mod tests {
             Item::Function(f) => {
                 assert_eq!(f.name.name, "main");
                 assert_eq!(f.return_type.name, "i32");
+                // Body is now wrapped in a Block
                 match &f.body {
-                    Expr::Int(lit) => assert_eq!(lit.value, 42),
-                    _ => panic!("expected Int"),
+                    Expr::Block(block) => match block.expr.as_ref() {
+                        Expr::Int(lit) => assert_eq!(lit.value, 42),
+                        _ => panic!("expected Int"),
+                    },
+                    _ => panic!("expected Block"),
                 }
             }
         }
@@ -437,6 +594,119 @@ mod tests {
                 }
             }
             _ => panic!("expected Binary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_identifier() {
+        let expr = parse_expr("x").unwrap();
+        match expr {
+            Expr::Ident(ident) => assert_eq!(ident.name, "x"),
+            _ => panic!("expected Ident"),
+        }
+    }
+
+    #[test]
+    fn test_parse_let_binding() {
+        let ast = parse("fn main() -> i32 { let x = 42; x }").unwrap();
+        match &ast.items[0] {
+            Item::Function(f) => match &f.body {
+                Expr::Block(block) => {
+                    assert_eq!(block.statements.len(), 1);
+                    match &block.statements[0] {
+                        Statement::Let(let_stmt) => {
+                            assert!(!let_stmt.is_mut);
+                            assert_eq!(let_stmt.name.name, "x");
+                            assert!(let_stmt.ty.is_none());
+                            match let_stmt.init.as_ref() {
+                                Expr::Int(lit) => assert_eq!(lit.value, 42),
+                                _ => panic!("expected Int"),
+                            }
+                        }
+                        _ => panic!("expected Let"),
+                    }
+                    match block.expr.as_ref() {
+                        Expr::Ident(ident) => assert_eq!(ident.name, "x"),
+                        _ => panic!("expected Ident"),
+                    }
+                }
+                _ => panic!("expected Block"),
+            },
+        }
+    }
+
+    #[test]
+    fn test_parse_let_mut() {
+        let ast = parse("fn main() -> i32 { let mut x = 10; x }").unwrap();
+        match &ast.items[0] {
+            Item::Function(f) => match &f.body {
+                Expr::Block(block) => match &block.statements[0] {
+                    Statement::Let(let_stmt) => {
+                        assert!(let_stmt.is_mut);
+                        assert_eq!(let_stmt.name.name, "x");
+                    }
+                    _ => panic!("expected Let"),
+                },
+                _ => panic!("expected Block"),
+            },
+        }
+    }
+
+    #[test]
+    fn test_parse_let_with_type() {
+        let ast = parse("fn main() -> i32 { let x: i32 = 42; x }").unwrap();
+        match &ast.items[0] {
+            Item::Function(f) => match &f.body {
+                Expr::Block(block) => match &block.statements[0] {
+                    Statement::Let(let_stmt) => {
+                        assert_eq!(let_stmt.name.name, "x");
+                        assert!(let_stmt.ty.is_some());
+                        assert_eq!(let_stmt.ty.as_ref().unwrap().name, "i32");
+                    }
+                    _ => panic!("expected Let"),
+                },
+                _ => panic!("expected Block"),
+            },
+        }
+    }
+
+    #[test]
+    fn test_parse_assignment() {
+        let ast = parse("fn main() -> i32 { let mut x = 10; x = 20; x }").unwrap();
+        match &ast.items[0] {
+            Item::Function(f) => match &f.body {
+                Expr::Block(block) => {
+                    assert_eq!(block.statements.len(), 2);
+                    match &block.statements[1] {
+                        Statement::Assign(assign) => {
+                            assert_eq!(assign.name.name, "x");
+                            match assign.value.as_ref() {
+                                Expr::Int(lit) => assert_eq!(lit.value, 20),
+                                _ => panic!("expected Int"),
+                            }
+                        }
+                        _ => panic!("expected Assign"),
+                    }
+                }
+                _ => panic!("expected Block"),
+            },
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_statements() {
+        let ast = parse("fn main() -> i32 { let x = 1; let y = 2; x + y }").unwrap();
+        match &ast.items[0] {
+            Item::Function(f) => match &f.body {
+                Expr::Block(block) => {
+                    assert_eq!(block.statements.len(), 2);
+                    match block.expr.as_ref() {
+                        Expr::Binary(bin) => assert!(matches!(bin.op, BinaryOp::Add)),
+                        _ => panic!("expected Binary"),
+                    }
+                }
+                _ => panic!("expected Block"),
+            },
         }
     }
 }

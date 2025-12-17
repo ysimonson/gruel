@@ -95,3 +95,79 @@ error: expected expression, found ')'
   |                     ^
   |
 """
+
+# =============================================================================
+# Variable Error Messages
+# =============================================================================
+
+[[case]]
+name = "undefined_variable_error"
+source = """
+fn main() -> i32 {
+    x
+}
+"""
+compile_fail = true
+expected_error = """
+error: undefined variable 'x'
+ --> <source>:2:5
+  |
+2 |     x
+  |     ^
+  |
+"""
+
+[[case]]
+name = "assign_to_immutable_error"
+source = """
+fn main() -> i32 {
+    let x = 10;
+    x = 20;
+    x
+}
+"""
+compile_fail = true
+expected_error = """
+error: cannot assign to immutable variable 'x'
+ --> <source>:3:5
+  |
+3 |     x = 20;
+  |     ^^^^^^^
+  |
+"""
+
+[[case]]
+name = "let_missing_equals_error"
+source = """
+fn main() -> i32 {
+    let x 42;
+    x
+}
+"""
+compile_fail = true
+expected_error = """
+error: expected '=', found integer
+ --> <source>:2:11
+  |
+2 |     let x 42;
+  |           ^^
+  |
+"""
+
+[[case]]
+name = "let_missing_semicolon_error"
+source = """
+fn main() -> i32 {
+    let x = 42
+    x
+}
+"""
+compile_fail = true
+expected_error = """
+error: expected ';', found identifier
+ --> <source>:3:5
+  |
+3 |     x
+  |     ^
+  |
+"""

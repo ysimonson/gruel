@@ -27,17 +27,18 @@ use rue_air::Air;
 /// This provides a similar API to the old CodeGen for compatibility.
 pub struct CodeGen<'a> {
     air: &'a Air,
+    num_locals: u32,
 }
 
 impl<'a> CodeGen<'a> {
     /// Create a new code generator for the given AIR.
-    pub fn new(air: &'a Air) -> Self {
-        Self { air }
+    pub fn new(air: &'a Air, num_locals: u32) -> Self {
+        Self { air, num_locals }
     }
 
     /// Generate machine code from the AIR.
     pub fn generate(self) -> MachineCode {
-        x86_64::generate(self.air)
+        x86_64::generate(self.air, self.num_locals)
     }
 }
 
@@ -64,7 +65,7 @@ mod tests {
         });
 
         // Test the old-style API
-        let codegen = CodeGen::new(&air);
+        let codegen = CodeGen::new(&air, 0);
         let machine_code = codegen.generate();
 
         // Should generate working code
@@ -98,7 +99,7 @@ mod tests {
         });
 
         // Test the new direct API
-        let machine_code = generate(&air);
+        let machine_code = generate(&air, 0);
         assert!(!machine_code.code.is_empty());
     }
 }

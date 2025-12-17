@@ -51,15 +51,15 @@ pub struct MachineCode {
 /// Generate machine code from AIR.
 ///
 /// This is the main entry point for x86-64 code generation.
-pub fn generate(air: &Air) -> MachineCode {
+pub fn generate(air: &Air, num_locals: u32) -> MachineCode {
     // Phase 1: Lower AIR to X86Mir with virtual registers
-    let mir = Lower::new(air).lower();
+    let mir = Lower::new(air, num_locals).lower();
 
     // Phase 2: Allocate physical registers
     let mir = RegAlloc::new(mir).allocate();
 
-    // Phase 3: Emit machine code bytes
-    let (code, relocations) = Emitter::new(&mir).emit();
+    // Phase 3: Emit machine code bytes (with prologue for stack frame setup)
+    let (code, relocations) = Emitter::new(&mir, num_locals).emit();
 
     MachineCode { code, relocations }
 }

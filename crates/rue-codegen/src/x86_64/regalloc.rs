@@ -88,6 +88,14 @@ impl RegAlloc {
                 *dst = Self::rewrite_operand(allocation, *dst);
                 *src = Self::rewrite_operand(allocation, *src);
             }
+            X86Inst::MovRM { dst, .. } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+                // base is already physical (Reg::Rbp)
+            }
+            X86Inst::MovMR { src, .. } => {
+                *src = Self::rewrite_operand(allocation, *src);
+                // base is already physical (Reg::Rbp)
+            }
             X86Inst::AddRR { dst, src } => {
                 *dst = Self::rewrite_operand(allocation, *dst);
                 *src = Self::rewrite_operand(allocation, *src);
@@ -109,6 +117,9 @@ impl RegAlloc {
             X86Inst::TestRR { src1, src2 } => {
                 *src1 = Self::rewrite_operand(allocation, *src1);
                 *src2 = Self::rewrite_operand(allocation, *src2);
+            }
+            X86Inst::Pop { dst } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
             }
             X86Inst::Cdq
             | X86Inst::Jz { .. }

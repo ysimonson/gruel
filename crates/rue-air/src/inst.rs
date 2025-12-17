@@ -110,6 +110,30 @@ pub enum AirInstData {
     /// Negation
     Neg(AirRef),
 
+    // Variable operations
+    /// Allocate local variable with initial value
+    /// Returns the slot index
+    Alloc {
+        /// Local variable slot index (0, 1, 2, ...)
+        slot: u32,
+        /// Initial value
+        init: AirRef,
+    },
+
+    /// Load value from local variable
+    Load {
+        /// Local variable slot index
+        slot: u32,
+    },
+
+    /// Store value to local variable
+    Store {
+        /// Local variable slot index
+        slot: u32,
+        /// Value to store
+        value: AirRef,
+    },
+
     /// Return from function
     Ret(AirRef),
 }
@@ -133,6 +157,9 @@ impl fmt::Display for Air {
                 AirInstData::Div(lhs, rhs) => writeln!(f, "div {}, {}", lhs, rhs)?,
                 AirInstData::Mod(lhs, rhs) => writeln!(f, "mod {}, {}", lhs, rhs)?,
                 AirInstData::Neg(operand) => writeln!(f, "neg {}", operand)?,
+                AirInstData::Alloc { slot, init } => writeln!(f, "alloc ${} = {}", slot, init)?,
+                AirInstData::Load { slot } => writeln!(f, "load ${}", slot)?,
+                AirInstData::Store { slot, value } => writeln!(f, "store ${} = {}", slot, value)?,
                 AirInstData::Ret(inner) => writeln!(f, "ret {}", inner)?,
             }
         }

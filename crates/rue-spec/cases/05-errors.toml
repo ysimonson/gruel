@@ -115,3 +115,199 @@ compile_fail = true
 name = "missing_operator"
 source = "fn main() -> i32 { 1 2 }"
 compile_fail = true
+
+# =============================================================================
+# Variable Errors
+# =============================================================================
+
+[[case]]
+name = "undefined_variable"
+source = """
+fn main() -> i32 {
+    x
+}
+"""
+compile_fail = true
+error_contains = "undefined variable"
+
+[[case]]
+name = "undefined_variable_in_expr"
+source = """
+fn main() -> i32 {
+    1 + y
+}
+"""
+compile_fail = true
+error_contains = "undefined variable"
+
+[[case]]
+name = "use_before_definition"
+source = """
+fn main() -> i32 {
+    let y = x;
+    let x = 42;
+    y
+}
+"""
+compile_fail = true
+error_contains = "undefined variable"
+
+[[case]]
+name = "let_missing_equals"
+source = """
+fn main() -> i32 {
+    let x 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "expected '='"
+
+[[case]]
+name = "let_missing_value"
+source = """
+fn main() -> i32 {
+    let x = ;
+    x
+}
+"""
+compile_fail = true
+
+[[case]]
+name = "let_missing_semicolon"
+source = """
+fn main() -> i32 {
+    let x = 42
+    x
+}
+"""
+compile_fail = true
+error_contains = "expected ';'"
+
+[[case]]
+name = "let_missing_name"
+source = """
+fn main() -> i32 {
+    let = 42;
+    0
+}
+"""
+compile_fail = true
+
+[[case]]
+name = "assign_to_immutable"
+source = """
+fn main() -> i32 {
+    let x = 10;
+    x = 20;
+    x
+}
+"""
+compile_fail = true
+error_contains = "cannot assign"
+
+[[case]]
+name = "assign_to_undefined"
+source = """
+fn main() -> i32 {
+    x = 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "undefined variable"
+
+[[case]]
+name = "let_keyword_as_name"
+source = """
+fn main() -> i32 {
+    let let = 42;
+    0
+}
+"""
+compile_fail = true
+
+[[case]]
+name = "fn_keyword_as_name"
+source = """
+fn main() -> i32 {
+    let fn = 42;
+    0
+}
+"""
+compile_fail = true
+
+[[case]]
+name = "mut_keyword_as_name"
+source = """
+fn main() -> i32 {
+    let mut = 42;
+    0
+}
+"""
+compile_fail = true
+
+[[case]]
+name = "let_wrong_type_annotation"
+source = """
+fn main() -> i32 {
+    let x: foo = 42;
+    x
+}
+"""
+compile_fail = true
+error_contains = "unknown type"
+
+[[case]]
+name = "let_missing_type_after_colon"
+source = """
+fn main() -> i32 {
+    let x: = 42;
+    x
+}
+"""
+compile_fail = true
+
+[[case]]
+name = "assignment_missing_semicolon"
+source = """
+fn main() -> i32 {
+    let mut x = 10;
+    x = 20
+    x
+}
+"""
+compile_fail = true
+error_contains = "expected ';'"
+
+# =============================================================================
+# Block Scoping Errors
+# =============================================================================
+
+[[case]]
+name = "variable_out_of_scope"
+source = """
+fn main() -> i32 {
+    let _unused = {
+        let x = 42;
+        x
+    };
+    x
+}
+"""
+compile_fail = true
+error_contains = "undefined variable"
+
+[[case]]
+name = "nested_variable_out_of_scope"
+source = """
+fn main() -> i32 {
+    let y = {
+        let inner = 10;
+        inner
+    };
+    inner + y
+}
+"""
+compile_fail = true
+error_contains = "undefined variable"

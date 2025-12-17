@@ -19,7 +19,7 @@ Rue is in early development. The implemented feature set is minimal:
 | Functions | ✓ Basic (no parameters) |
 | Line comments | ✓ Implemented |
 | Arithmetic operators | ✓ Implemented |
-| Variables | Planned |
+| Variables | ✓ Implemented |
 | Control flow | Planned |
 
 ## Specification Tests
@@ -36,6 +36,7 @@ The executable specification lives in `crates/rue-spec/cases/`:
 | `06-ir-dumps.toml` | 4.1 | IR output golden tests |
 | `07-error-golden.toml` | 5.1 | Error message golden tests |
 | `08-arithmetic.toml` | 1.2 | Arithmetic operators |
+| `09-variables.toml` | 2.2 | Local variables |
 
 Each `.toml` file contains test cases that define expected behavior:
 
@@ -87,6 +88,45 @@ fn main() -> i32 {
 }
 ```
 
+### Variables
+
+```rue
+fn main() -> i32 {
+    let x = 40;
+    let y = 2;
+    x + y
+}
+```
+
+Variables are immutable by default. Use `let mut` for mutable bindings:
+
+```rue
+fn main() -> i32 {
+    let mut counter = 0;
+    counter = counter + 1;
+    counter
+}
+```
+
+Type annotations are optional:
+
+```rue
+fn main() -> i32 {
+    let x: i32 = 42;
+    x
+}
+```
+
+Shadowing is allowed:
+
+```rue
+fn main() -> i32 {
+    let x = 10;
+    let x = x + 5;  // shadows previous x
+    x  // returns 15
+}
+```
+
 Operators by precedence (highest to lowest):
 1. `-` (unary negation)
 2. `*`, `/`, `%` (multiplicative)
@@ -107,20 +147,23 @@ fn main() -> i32 { 2147483647 + 1 }   // runtime error: integer overflow
 
 ```ebnf
 program        = { function } ;
-function       = "fn" IDENT "(" ")" "->" type "{" expression "}" ;
+function       = "fn" IDENT "(" ")" "->" type "{" block "}" ;
+block          = { statement } expression ;
+statement      = let_stmt | assign_stmt ;
+let_stmt       = "let" [ "mut" ] IDENT [ ":" type ] "=" expression ";" ;
+assign_stmt    = IDENT "=" expression ";" ;
 type           = "i32" ;
 expression     = additive ;
 additive       = multiplicative { ("+" | "-") multiplicative } ;
 multiplicative = unary { ("*" | "/" | "%") unary } ;
 unary          = "-" unary | primary ;
-primary        = INTEGER | "(" expression ")" ;
+primary        = INTEGER | IDENT | "(" expression ")" ;
 ```
 
 ## Planned Features
 
 See `docs/design-decisions.md` (ADR-009) for language philosophy. Planned additions include:
 
-- Variables: `let x = 42;`
 - Control flow: `if`/`else`, `while`, `loop`
 - Functions with parameters
 - Structs and user-defined types

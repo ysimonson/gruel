@@ -31,6 +31,8 @@ pub enum ErrorKind {
     // Semantic errors
     NoMainFunction,
     UndefinedVariable(String),
+    AssignToImmutable(String),
+    UnknownType(String),
     TypeMismatch {
         expected: String,
         found: String,
@@ -68,7 +70,11 @@ impl CompileError {
                 format!("unexpected end of file, expected {}", expected)
             }
             ErrorKind::NoMainFunction => "no main function found".to_string(),
-            ErrorKind::UndefinedVariable(name) => format!("undefined variable: {}", name),
+            ErrorKind::UndefinedVariable(name) => format!("undefined variable '{}'", name),
+            ErrorKind::AssignToImmutable(name) => {
+                format!("cannot assign to immutable variable '{}'", name)
+            }
+            ErrorKind::UnknownType(name) => format!("unknown type '{}'", name),
             ErrorKind::TypeMismatch { expected, found } => {
                 format!("type mismatch: expected {}, found {}", expected, found)
             }

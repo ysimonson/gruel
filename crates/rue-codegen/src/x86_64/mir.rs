@@ -185,6 +185,12 @@ pub enum X86Inst {
     /// `mov dst, src` - Move register to register.
     MovRR { dst: Operand, src: Operand },
 
+    /// `mov dst, [base + offset]` - Load from memory (stack local).
+    MovRM { dst: Operand, base: Reg, offset: i32 },
+
+    /// `mov [base + offset], src` - Store to memory (stack local).
+    MovMR { base: Reg, offset: i32, src: Operand },
+
     // Arithmetic instructions
     /// `add dst, src` - Add src to dst (dst = dst + src).
     AddRR { dst: Operand, src: Operand },
@@ -235,6 +241,9 @@ pub enum X86Inst {
 
     /// `ret` - Return from function.
     Ret,
+
+    /// `pop dst` - Pop value from stack into register.
+    Pop { dst: Operand },
 }
 
 impl fmt::Display for X86Inst {
@@ -243,6 +252,20 @@ impl fmt::Display for X86Inst {
             X86Inst::MovRI32 { dst, imm } => write!(f, "mov {}, {}", dst, imm),
             X86Inst::MovRI64 { dst, imm } => write!(f, "mov {}, {}", dst, imm),
             X86Inst::MovRR { dst, src } => write!(f, "mov {}, {}", dst, src),
+            X86Inst::MovRM { dst, base, offset } => {
+                if *offset >= 0 {
+                    write!(f, "mov {}, [{}+{}]", dst, base, offset)
+                } else {
+                    write!(f, "mov {}, [{}-{}]", dst, base, -offset)
+                }
+            }
+            X86Inst::MovMR { base, offset, src } => {
+                if *offset >= 0 {
+                    write!(f, "mov [{}+{}], {}", base, offset, src)
+                } else {
+                    write!(f, "mov [{}-{}], {}", base, -offset, src)
+                }
+            }
             X86Inst::AddRR { dst, src } => write!(f, "add {}, {}", dst, src),
             X86Inst::SubRR { dst, src } => write!(f, "sub {}, {}", dst, src),
             X86Inst::ImulRR { dst, src } => write!(f, "imul {}, {}", dst, src),
@@ -258,6 +281,7 @@ impl fmt::Display for X86Inst {
             X86Inst::CallRel { symbol } => write!(f, "call {}", symbol),
             X86Inst::Syscall => write!(f, "syscall"),
             X86Inst::Ret => write!(f, "ret"),
+            X86Inst::Pop { dst } => write!(f, "pop {}", dst),
         }
     }
 }

@@ -4,8 +4,7 @@
 //! This is analogous to Zig's AstGen phase.
 
 use rue_intern::Interner;
-use rue_parser::{Ast, BinaryOp, Expr, Function, Item};
-use rue_span::Span;
+use rue_parser::{Ast, BinaryOp, Expr, Function, Item, Statement};
 
 use crate::inst::{Inst, InstData, InstRef, Rir};
 
@@ -70,6 +69,13 @@ impl<'a> AstGen<'a> {
                 data: InstData::IntConst(lit.value),
                 span: lit.span,
             }),
+            Expr::Ident(ident) => {
+                let name = self.interner.intern(&ident.name);
+                self.rir.add_inst(Inst {
+                    data: InstData::VarRef { name },
+                    span: ident.span,
+                })
+            }
             Expr::Binary(bin) => {
                 let lhs = self.gen_expr(&bin.left);
                 let rhs = self.gen_expr(&bin.right);
@@ -95,6 +101,66 @@ impl<'a> AstGen<'a> {
             Expr::Paren(paren) => {
                 // Parentheses are transparent in the IR - just generate the inner expression
                 self.gen_expr(&paren.inner)
+            }
+            Expr::Block(block) => {
+                if block.statements.is_empty() {
+                    // No statements, just the final expression
+                    self.gen_expr(&block.expr)
+                } else {
+                    // Collect all instruction refs for the block
+                    let mut inst_refs = Vec::new();
+
+                    // Generate all statements first
+                    for stmt in &block.statements {
+                        let inst_ref = self.gen_statement(stmt);
+                        inst_refs.push(inst_ref.as_u32());
+                    }
+
+                    // Generate the final expression
+                    let final_expr = self.gen_expr(&block.expr);
+                    inst_refs.push(final_expr.as_u32());
+
+                    // Store the refs in extra data
+                    let extra_start = self.rir.add_extra(&inst_refs);
+                    let len = inst_refs.len() as u32;
+
+                    self.rir.add_inst(Inst {
+                        data: InstData::Block { extra_start, len },
+                        span: block.span,
+                    })
+                }
+            }
+        }
+    }
+
+    fn gen_statement(&mut self, stmt: &Statement) -> InstRef {
+        match stmt {
+            Statement::Let(let_stmt) => {
+                let name = self.interner.intern(&let_stmt.name.name);
+                let ty = let_stmt.ty.as_ref().map(|t| self.interner.intern(&t.name));
+                let init = self.gen_expr(&let_stmt.init);
+                self.rir.add_inst(Inst {
+                    data: InstData::Alloc {
+                        name,
+                        is_mut: let_stmt.is_mut,
+                        ty,
+                        init,
+                    },
+                    span: let_stmt.span,
+                })
+            }
+            Statement::Assign(assign) => {
+                let name = self.interner.intern(&assign.name.name);
+                let value = self.gen_expr(&assign.value);
+                self.rir.add_inst(Inst {
+                    data: InstData::Assign { name, value },
+                    span: assign.span,
+                })
+            }
+            Statement::Expr(expr) => {
+                // Expression statements are evaluated for side effects
+                // The result is discarded, but we still return the InstRef
+                self.gen_expr(expr)
             }
         }
     }
@@ -248,5 +314,127 @@ mod tests {
 
         let (rir, _) = gen_rir("fn main() -> i32 { 1 % 2 }");
         assert!(matches!(rir.get(InstRef::from_raw(2)).data, InstData::Mod { .. }));
+    }
+
+    #[test]
+    fn test_gen_let_binding() {
+        let (rir, interner) = gen_rir("fn main() -> i32 { let x = 42; x }");
+
+        // Find the Alloc instruction
+        let alloc_inst = rir.iter().find(|(_, inst)| {
+            matches!(inst.data, InstData::Alloc { .. })
+        });
+        assert!(alloc_inst.is_some());
+
+        let (_, inst) = alloc_inst.unwrap();
+        match &inst.data {
+            InstData::Alloc { name, is_mut, ty, init } => {
+                assert_eq!(interner.get(*name), "x");
+                assert!(!is_mut);
+                assert!(ty.is_none());
+                assert!(matches!(rir.get(*init).data, InstData::IntConst(42)));
+            }
+            _ => panic!("expected Alloc"),
+        }
+    }
+
+    #[test]
+    fn test_gen_let_mut() {
+        let (rir, interner) = gen_rir("fn main() -> i32 { let mut x = 10; x }");
+
+        let alloc_inst = rir.iter().find(|(_, inst)| {
+            matches!(inst.data, InstData::Alloc { .. })
+        });
+        assert!(alloc_inst.is_some());
+
+        let (_, inst) = alloc_inst.unwrap();
+        match &inst.data {
+            InstData::Alloc { name, is_mut, .. } => {
+                assert_eq!(interner.get(*name), "x");
+                assert!(*is_mut);
+            }
+            _ => panic!("expected Alloc"),
+        }
+    }
+
+    #[test]
+    fn test_gen_var_ref() {
+        let (rir, interner) = gen_rir("fn main() -> i32 { let x = 42; x }");
+
+        // The body should be a Block (since there are statements)
+        let fn_inst = rir.iter().last().unwrap().1;
+        match &fn_inst.data {
+            InstData::FnDecl { body, .. } => {
+                let body_inst = rir.get(*body);
+                match &body_inst.data {
+                    InstData::Block { extra_start, len } => {
+                        // Block contains: Alloc, VarRef
+                        assert_eq!(*len, 2);
+                        let inst_refs = rir.get_extra(*extra_start, *len);
+                        // Last instruction in block is the VarRef
+                        let var_ref_inst = rir.get(InstRef::from_raw(inst_refs[1]));
+                        match &var_ref_inst.data {
+                            InstData::VarRef { name } => {
+                                assert_eq!(interner.get(*name), "x");
+                            }
+                            _ => panic!("expected VarRef"),
+                        }
+                    }
+                    _ => panic!("expected Block, got {:?}", body_inst.data),
+                }
+            }
+            _ => panic!("expected FnDecl"),
+        }
+    }
+
+    #[test]
+    fn test_gen_assignment() {
+        let (rir, interner) = gen_rir("fn main() -> i32 { let mut x = 10; x = 20; x }");
+
+        // Find the Assign instruction
+        let assign_inst = rir.iter().find(|(_, inst)| {
+            matches!(inst.data, InstData::Assign { .. })
+        });
+        assert!(assign_inst.is_some());
+
+        let (_, inst) = assign_inst.unwrap();
+        match &inst.data {
+            InstData::Assign { name, value } => {
+                assert_eq!(interner.get(*name), "x");
+                assert!(matches!(rir.get(*value).data, InstData::IntConst(20)));
+            }
+            _ => panic!("expected Assign"),
+        }
+    }
+
+    #[test]
+    fn test_gen_multiple_statements() {
+        let (rir, _interner) = gen_rir("fn main() -> i32 { let x = 1; let y = 2; x + y }");
+
+        // Count Alloc instructions
+        let alloc_count = rir.iter().filter(|(_, inst)| {
+            matches!(inst.data, InstData::Alloc { .. })
+        }).count();
+        assert_eq!(alloc_count, 2);
+
+        // Check the body is a Block containing the allocs and the Add
+        let fn_inst = rir.iter().last().unwrap().1;
+        match &fn_inst.data {
+            InstData::FnDecl { body, .. } => {
+                let body_inst = rir.get(*body);
+                match &body_inst.data {
+                    InstData::Block { extra_start, len } => {
+                        // Block contains: Alloc(x), Alloc(y), Add
+                        assert_eq!(*len, 3);
+                        let inst_refs = rir.get_extra(*extra_start, *len);
+                        // Last instruction in block is the Add
+                        let add_inst = rir.get(InstRef::from_raw(inst_refs[2]));
+                        assert!(matches!(add_inst.data, InstData::Add { .. }));
+                    }
+                    _ => panic!("expected Block"),
+                }
+            }
+            _ => panic!("expected FnDecl"),
+        }
     }
 }

@@ -16,17 +16,46 @@ pub struct Lower<'a> {
     value_map: Vec<Option<VReg>>,
     /// Label counter for generating unique labels.
     label_counter: u32,
+    /// Whether this function has a stack frame (num_locals > 0).
+    /// Used to emit proper epilogue before returns.
+    has_frame: bool,
 }
 
 impl<'a> Lower<'a> {
     /// Create a new lowering pass.
-    pub fn new(air: &'a Air) -> Self {
+    pub fn new(air: &'a Air, num_locals: u32) -> Self {
         Self {
             air,
             mir: X86Mir::new(),
             value_map: vec![None; air.len()],
             label_counter: 0,
+            has_frame: num_locals > 0,
         }
+    }
+
+    /// Calculate the stack offset for a local variable slot.
+    /// Slot 0 is at [rbp - 8], slot 1 is at [rbp - 16], etc.
+    fn local_offset(&self, slot: u32) -> i32 {
+        -((slot as i32 + 1) * 8)
+    }
+
+    /// Emit function epilogue to restore the stack frame.
+    ///
+    /// This tears down the RBP-based stack frame:
+    /// ```asm
+    /// mov rsp, rbp
+    /// pop rbp
+    /// ```
+    fn emit_epilogue(&mut self) {
+        // mov rsp, rbp
+        self.mir.push(X86Inst::MovRR {
+            dst: Operand::Physical(Reg::Rsp),
+            src: Operand::Physical(Reg::Rbp),
+        });
+        // pop rbp
+        self.mir.push(X86Inst::Pop {
+            dst: Operand::Physical(Reg::Rbp),
+        });
     }
 
     /// Generate a unique label name.
@@ -238,6 +267,51 @@ impl<'a> Lower<'a> {
                 self.mir.push(X86Inst::Label { name: ok_label });
             }
 
+            AirInstData::Alloc { slot, init } => {
+                // Get the initialized value
+                let init_vreg = self.get_vreg(*init);
+
+                // Store to stack slot
+                let offset = self.local_offset(*slot);
+                self.mir.push(X86Inst::MovMR {
+                    base: Reg::Rbp,
+                    offset,
+                    src: Operand::Virtual(init_vreg),
+                });
+
+                // Alloc doesn't produce a value that can be used directly
+                // (it's a statement, not an expression)
+            }
+
+            AirInstData::Load { slot } => {
+                // Allocate vreg for the loaded value
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                // Load from stack slot
+                let offset = self.local_offset(*slot);
+                self.mir.push(X86Inst::MovRM {
+                    dst: Operand::Virtual(vreg),
+                    base: Reg::Rbp,
+                    offset,
+                });
+            }
+
+            AirInstData::Store { slot, value } => {
+                // Get the value to store
+                let value_vreg = self.get_vreg(*value);
+
+                // Store to stack slot
+                let offset = self.local_offset(*slot);
+                self.mir.push(X86Inst::MovMR {
+                    base: Reg::Rbp,
+                    offset,
+                    src: Operand::Virtual(value_vreg),
+                });
+
+                // Store doesn't produce a value
+            }
+
             AirInstData::Ret(value_ref) => {
                 // Get the vreg holding the return value
                 let value_vreg = self.get_vreg(*value_ref);
@@ -250,6 +324,13 @@ impl<'a> Lower<'a> {
                     dst: Operand::Physical(Reg::Rdi),
                     src: Operand::Virtual(value_vreg),
                 });
+
+                // Emit epilogue to restore stack frame before the call.
+                // This is technically not needed since __rue_exit never returns,
+                // but it's good practice for when we add real function returns.
+                if self.has_frame {
+                    self.emit_epilogue();
+                }
 
                 // Call the runtime's __rue_exit function.
                 // This function never returns (it calls the exit syscall).
@@ -291,7 +372,7 @@ mod tests {
             span: Span::new(0, 2),
         });
 
-        let mir = Lower::new(&air).lower();
+        let mir = Lower::new(&air, 0).lower();
 
         // Should have 3 instructions:
         // 1. mov v0, 42
@@ -334,7 +415,7 @@ mod tests {
             span: Span::new(0, 2),
         });
 
-        let mir = Lower::new(&air).lower();
+        let mir = Lower::new(&air, 0).lower();
 
         // First instruction should be 64-bit move
         match &mir.instructions()[0] {

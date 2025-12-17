@@ -25,17 +25,20 @@ pub struct Emitter<'a> {
     labels: HashMap<String, usize>,
     /// Forward jumps that need to be patched.
     fixups: Vec<Fixup>,
+    /// Number of local variable slots (for stack frame setup).
+    num_locals: u32,
 }
 
 impl<'a> Emitter<'a> {
     /// Create a new emitter.
-    pub fn new(mir: &'a X86Mir) -> Self {
+    pub fn new(mir: &'a X86Mir, num_locals: u32) -> Self {
         Self {
             mir,
             code: Vec::new(),
             relocations: Vec::new(),
             labels: HashMap::new(),
             fixups: Vec::new(),
+            num_locals,
         }
     }
 
@@ -43,11 +46,46 @@ impl<'a> Emitter<'a> {
     ///
     /// Returns (code bytes, relocations).
     pub fn emit(mut self) -> (Vec<u8>, Vec<EmittedRelocation>) {
+        // Emit function prologue if we have local variables
+        if self.num_locals > 0 {
+            self.emit_prologue();
+        }
+
         for inst in self.mir.iter() {
             self.emit_inst(inst);
         }
         self.apply_fixups();
         (self.code, self.relocations)
+    }
+
+    /// Emit function prologue to set up the stack frame.
+    ///
+    /// This sets up RBP-based stack frame and allocates space for locals:
+    /// ```asm
+    /// push rbp
+    /// mov rbp, rsp
+    /// sub rsp, N  ; N = num_locals * 8, aligned to 16
+    /// ```
+    fn emit_prologue(&mut self) {
+        // push rbp: 55
+        self.code.push(0x55);
+
+        // mov rbp, rsp: 48 89 E5
+        self.code.push(0x48);
+        self.code.push(0x89);
+        self.code.push(0xE5);
+
+        // Calculate stack space needed (8 bytes per local, aligned to 16)
+        let stack_size = ((self.num_locals as i32 * 8 + 15) / 16) * 16;
+
+        if stack_size > 0 {
+            // sub rsp, imm32: 48 81 EC imm32
+            // (For small values we could use sub rsp, imm8 but let's keep it simple)
+            self.code.push(0x48);
+            self.code.push(0x81);
+            self.code.push(0xEC);
+            self.code.extend_from_slice(&stack_size.to_le_bytes());
+        }
     }
 
     /// Apply all fixups for forward jumps.
@@ -85,6 +123,12 @@ impl<'a> Emitter<'a> {
             }
             X86Inst::MovRR { dst, src } => {
                 self.emit_mov_rr(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::MovRM { dst, base, offset } => {
+                self.emit_mov_rm(dst.as_physical(), *base, *offset);
+            }
+            X86Inst::MovMR { base, offset, src } => {
+                self.emit_mov_mr(*base, *offset, src.as_physical());
             }
             X86Inst::AddRR { dst, src } => {
                 self.emit_add_rr(dst.as_physical(), src.as_physical());
@@ -131,6 +175,9 @@ impl<'a> Emitter<'a> {
             }
             X86Inst::Ret => {
                 self.emit_ret();
+            }
+            X86Inst::Pop { dst } => {
+                self.emit_pop(dst.as_physical());
             }
         }
     }
@@ -200,6 +247,97 @@ impl<'a> Emitter<'a> {
         self.code.push(modrm);
     }
 
+    /// Emit `mov r64, [base + offset]` - Load from memory.
+    ///
+    /// Encoding: REX.W 8B /r (mov r64, r/m64)
+    fn emit_mov_rm(&mut self, dst: Reg, base: Reg, offset: i32) {
+        let dst_enc = dst.encoding();
+        let base_enc = base.encoding();
+
+        // REX prefix: W=1 for 64-bit, R for dst, B for base
+        let rex = 0x48
+            | if dst.needs_rex() { 0x04 } else { 0x00 }  // REX.R
+            | if base.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+        self.code.push(rex);
+
+        // Opcode: 8B (mov r64, r/m64)
+        self.code.push(0x8B);
+
+        // ModR/M and optional SIB/displacement
+        self.emit_modrm_memory(dst_enc, base_enc, offset);
+    }
+
+    /// Emit `mov [base + offset], r64` - Store to memory.
+    ///
+    /// Encoding: REX.W 89 /r (mov r/m64, r64)
+    fn emit_mov_mr(&mut self, base: Reg, offset: i32, src: Reg) {
+        let src_enc = src.encoding();
+        let base_enc = base.encoding();
+
+        // REX prefix: W=1 for 64-bit, R for src, B for base
+        let rex = 0x48
+            | if src.needs_rex() { 0x04 } else { 0x00 }  // REX.R
+            | if base.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+        self.code.push(rex);
+
+        // Opcode: 89 (mov r/m64, r64)
+        self.code.push(0x89);
+
+        // ModR/M and optional SIB/displacement
+        self.emit_modrm_memory(src_enc, base_enc, offset);
+    }
+
+    /// Emit ModR/M byte (and SIB/displacement if needed) for memory operand [base + offset].
+    ///
+    /// This handles the complex x86 addressing mode encoding.
+    fn emit_modrm_memory(&mut self, reg: u8, base: u8, offset: i32) {
+        // For RBP-based addressing (common for stack locals), we need:
+        // - mod=01 for 8-bit displacement or mod=10 for 32-bit displacement
+        // - r/m=101 (RBP) requires a displacement (no [rbp] form exists, only [rbp+disp])
+        // - RSP (r/m=100) requires a SIB byte
+
+        let base_bits = base & 7;
+
+        if base_bits == 4 {
+            // RSP/R12 - needs SIB byte
+            if offset >= -128 && offset <= 127 {
+                // mod=01 (8-bit displacement), r/m=100 (SIB follows)
+                let modrm = 0x44 | ((reg & 7) << 3);
+                self.code.push(modrm);
+                // SIB: scale=00, index=100 (none), base=RSP
+                self.code.push(0x24);
+                // 8-bit displacement
+                self.code.push(offset as u8);
+            } else {
+                // mod=10 (32-bit displacement), r/m=100 (SIB follows)
+                let modrm = 0x84 | ((reg & 7) << 3);
+                self.code.push(modrm);
+                // SIB: scale=00, index=100 (none), base=RSP
+                self.code.push(0x24);
+                // 32-bit displacement
+                self.code.extend_from_slice(&offset.to_le_bytes());
+            }
+        } else if base_bits == 5 && offset == 0 {
+            // RBP/R13 with no displacement - must use [rbp+0] encoding
+            // mod=01 (8-bit displacement), r/m=101 (RBP)
+            let modrm = 0x45 | ((reg & 7) << 3);
+            self.code.push(modrm);
+            self.code.push(0x00); // 8-bit displacement of 0
+        } else if offset >= -128 && offset <= 127 {
+            // 8-bit displacement
+            // mod=01, r/m=base
+            let modrm = 0x40 | ((reg & 7) << 3) | base_bits;
+            self.code.push(modrm);
+            self.code.push(offset as u8);
+        } else {
+            // 32-bit displacement
+            // mod=10, r/m=base
+            let modrm = 0x80 | ((reg & 7) << 3) | base_bits;
+            self.code.push(modrm);
+            self.code.extend_from_slice(&offset.to_le_bytes());
+        }
+    }
+
     /// Emit `syscall`.
     ///
     /// Encoding: 0F 05
@@ -213,6 +351,23 @@ impl<'a> Emitter<'a> {
     /// Encoding: C3
     fn emit_ret(&mut self) {
         self.code.push(0xC3);
+    }
+
+    /// Emit `pop r64`.
+    ///
+    /// Encoding: [REX.B] 58+rd
+    /// - REX.B is needed for r8-r15
+    fn emit_pop(&mut self, dst: Reg) {
+        let enc = dst.encoding();
+
+        // REX prefix if needed (for R8-R15)
+        if dst.needs_rex() {
+            // REX.B = 1 (0x41)
+            self.code.push(0x41);
+        }
+
+        // Opcode: 58 + (reg & 7)
+        self.code.push(0x58 + (enc & 7));
     }
 
     /// Emit `call rel32` with a relocation.
@@ -404,7 +559,7 @@ mod tests {
     fn emit_single(inst: X86Inst) -> Vec<u8> {
         let mut mir = X86Mir::new();
         mir.push(inst);
-        Emitter::new(&mir).emit().0
+        Emitter::new(&mir, 0).emit().0
     }
 
     #[test]
@@ -526,7 +681,7 @@ mod tests {
         });
         mir.push(X86Inst::Syscall);
 
-        let (code, _) = Emitter::new(&mir).emit();
+        let (code, _) = Emitter::new(&mir, 0).emit();
 
         // 41 BA 2A 00 00 00  mov r10d, 42
         // 4C 89 D7           mov rdi, r10
@@ -550,7 +705,7 @@ mod tests {
             symbol: "__rue_exit".into(),
         });
 
-        let (code, relocs) = Emitter::new(&mir).emit();
+        let (code, relocs) = Emitter::new(&mir, 0).emit();
 
         // call rel32 -> E8 00 00 00 00
         assert_eq!(code, vec![0xE8, 0x00, 0x00, 0x00, 0x00]);
@@ -657,5 +812,136 @@ mod tests {
         });
         // test eax, eax -> 85 C0
         assert_eq!(code, vec![0x85, 0xC0]);
+    }
+
+    // =========================================================================
+    // Memory instruction tests (MovRM, MovMR)
+    // =========================================================================
+
+    #[test]
+    fn test_mov_rax_rbp_minus_8() {
+        // mov rax, [rbp-8] - Load from first local variable slot
+        let code = emit_single(X86Inst::MovRM {
+            dst: Operand::Physical(Reg::Rax),
+            base: Reg::Rbp,
+            offset: -8,
+        });
+        // mov rax, [rbp-8] -> 48 8B 45 F8
+        // REX.W=1 (0x48), opcode 8B, ModRM: mod=01 r/m=101(rbp) reg=000(rax), disp8=-8
+        assert_eq!(code, vec![0x48, 0x8B, 0x45, 0xF8]);
+    }
+
+    #[test]
+    fn test_mov_rbp_minus_8_rax() {
+        // mov [rbp-8], rax - Store to first local variable slot
+        let code = emit_single(X86Inst::MovMR {
+            base: Reg::Rbp,
+            offset: -8,
+            src: Operand::Physical(Reg::Rax),
+        });
+        // mov [rbp-8], rax -> 48 89 45 F8
+        // REX.W=1 (0x48), opcode 89, ModRM: mod=01 r/m=101(rbp) reg=000(rax), disp8=-8
+        assert_eq!(code, vec![0x48, 0x89, 0x45, 0xF8]);
+    }
+
+    #[test]
+    fn test_mov_r10_rbp_minus_16() {
+        // mov r10, [rbp-16] - Load from second local with extended register
+        let code = emit_single(X86Inst::MovRM {
+            dst: Operand::Physical(Reg::R10),
+            base: Reg::Rbp,
+            offset: -16,
+        });
+        // mov r10, [rbp-16] -> 4C 8B 55 F0
+        // REX.W=1 REX.R=1 (0x4C), opcode 8B, ModRM: mod=01 r/m=101(rbp) reg=010(r10), disp8=-16
+        assert_eq!(code, vec![0x4C, 0x8B, 0x55, 0xF0]);
+    }
+
+    #[test]
+    fn test_mov_rbp_minus_16_r10() {
+        // mov [rbp-16], r10 - Store to second local with extended register
+        let code = emit_single(X86Inst::MovMR {
+            base: Reg::Rbp,
+            offset: -16,
+            src: Operand::Physical(Reg::R10),
+        });
+        // mov [rbp-16], r10 -> 4C 89 55 F0
+        // REX.W=1 REX.R=1 (0x4C), opcode 89, ModRM: mod=01 r/m=101(rbp) reg=010(r10), disp8=-16
+        assert_eq!(code, vec![0x4C, 0x89, 0x55, 0xF0]);
+    }
+
+    #[test]
+    fn test_mov_rm_large_offset() {
+        // mov rax, [rbp-256] - Load with 32-bit displacement (offset too large for 8-bit)
+        let code = emit_single(X86Inst::MovRM {
+            dst: Operand::Physical(Reg::Rax),
+            base: Reg::Rbp,
+            offset: -256,
+        });
+        // mov rax, [rbp-256] -> 48 8B 85 00 FF FF FF
+        // REX.W=1, opcode 8B, ModRM: mod=10 r/m=101(rbp) reg=000(rax), disp32=-256
+        assert_eq!(code, vec![0x48, 0x8B, 0x85, 0x00, 0xFF, 0xFF, 0xFF]);
+    }
+
+    // =========================================================================
+    // Pop instruction tests
+    // =========================================================================
+
+    #[test]
+    fn test_pop_rbp() {
+        let code = emit_single(X86Inst::Pop {
+            dst: Operand::Physical(Reg::Rbp),
+        });
+        // pop rbp -> 5D
+        assert_eq!(code, vec![0x5D]);
+    }
+
+    #[test]
+    fn test_pop_rax() {
+        let code = emit_single(X86Inst::Pop {
+            dst: Operand::Physical(Reg::Rax),
+        });
+        // pop rax -> 58
+        assert_eq!(code, vec![0x58]);
+    }
+
+    #[test]
+    fn test_pop_r10() {
+        let code = emit_single(X86Inst::Pop {
+            dst: Operand::Physical(Reg::R10),
+        });
+        // pop r10 -> 41 5A
+        assert_eq!(code, vec![0x41, 0x5A]);
+    }
+
+    // =========================================================================
+    // Prologue tests
+    // =========================================================================
+
+    #[test]
+    fn test_prologue_one_local() {
+        // With 1 local, we need 8 bytes, aligned to 16 = 16 bytes
+        let mir = X86Mir::new();
+        let (code, _) = Emitter::new(&mir, 1).emit();
+
+        // push rbp: 55
+        // mov rbp, rsp: 48 89 E5
+        // sub rsp, 16: 48 81 EC 10 00 00 00
+        assert_eq!(
+            code,
+            vec![
+                0x55,                               // push rbp
+                0x48, 0x89, 0xE5,                   // mov rbp, rsp
+                0x48, 0x81, 0xEC, 0x10, 0x00, 0x00, 0x00, // sub rsp, 16
+            ]
+        );
+    }
+
+    #[test]
+    fn test_no_prologue_no_locals() {
+        // With 0 locals, no prologue should be emitted
+        let mir = X86Mir::new();
+        let (code, _) = Emitter::new(&mir, 0).emit();
+        assert!(code.is_empty());
     }
 }

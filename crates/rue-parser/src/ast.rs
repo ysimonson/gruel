@@ -43,12 +43,16 @@ pub struct Ident {
 pub enum Expr {
     /// Integer literal
     Int(IntLit),
+    /// Identifier reference (variable)
+    Ident(Ident),
     /// Binary operation (e.g., `a + b`)
     Binary(BinaryExpr),
     /// Unary operation (e.g., `-x`)
     Unary(UnaryExpr),
     /// Parenthesized expression (e.g., `(a + b)`)
     Paren(ParenExpr),
+    /// Block with statements and final expression
+    Block(BlockExpr),
 }
 
 /// An integer literal.
@@ -98,14 +102,61 @@ pub struct ParenExpr {
     pub span: Span,
 }
 
+/// A block expression containing statements and a final expression.
+#[derive(Debug)]
+pub struct BlockExpr {
+    /// Statements in the block
+    pub statements: Vec<Statement>,
+    /// Final expression (the value of the block)
+    pub expr: Box<Expr>,
+    pub span: Span,
+}
+
+/// A statement (does not produce a value).
+#[derive(Debug)]
+pub enum Statement {
+    /// Let binding: `let x = expr;` or `let mut x = expr;`
+    Let(LetStatement),
+    /// Assignment: `x = expr;`
+    Assign(AssignStatement),
+    /// Expression statement: `expr;`
+    Expr(Expr),
+}
+
+/// A let binding statement.
+#[derive(Debug)]
+pub struct LetStatement {
+    /// Whether the binding is mutable
+    pub is_mut: bool,
+    /// Variable name
+    pub name: Ident,
+    /// Optional type annotation
+    pub ty: Option<Ident>,
+    /// Initializer expression
+    pub init: Box<Expr>,
+    pub span: Span,
+}
+
+/// An assignment statement.
+#[derive(Debug)]
+pub struct AssignStatement {
+    /// Target variable
+    pub name: Ident,
+    /// Value expression
+    pub value: Box<Expr>,
+    pub span: Span,
+}
+
 impl Expr {
     /// Get the span of this expression.
     pub fn span(&self) -> Span {
         match self {
             Expr::Int(lit) => lit.span,
+            Expr::Ident(ident) => ident.span,
             Expr::Binary(bin) => bin.span,
             Expr::Unary(un) => un.span,
             Expr::Paren(paren) => paren.span,
+            Expr::Block(block) => block.span,
         }
     }
 }

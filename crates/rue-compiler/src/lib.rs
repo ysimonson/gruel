@@ -80,7 +80,7 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
         .ok_or_else(|| CompileError::new(ErrorKind::NoMainFunction, Span::default()))?;
 
     // Phase 5: Code generation (AIR to machine code)
-    let codegen = CodeGen::new(&main_fn.air);
+    let codegen = CodeGen::new(&main_fn.air, main_fn.num_locals);
     let machine_code = codegen.generate();
 
     // Phase 6: Build object file
@@ -128,8 +128,8 @@ pub fn compile(source: &str) -> CompileResult<Vec<u8>> {
 }
 
 /// Generate X86Mir from AIR (for debugging/inspection).
-pub fn generate_mir(air: &Air) -> X86Mir {
-    rue_codegen::x86_64::Lower::new(air).lower()
+pub fn generate_mir(air: &Air, num_locals: u32) -> X86Mir {
+    rue_codegen::x86_64::Lower::new(air, num_locals).lower()
 }
 
 #[cfg(test)]

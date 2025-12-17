@@ -4,6 +4,7 @@ pub mod ast;
 mod parser;
 
 pub use ast::{
-    Ast, BinaryExpr, BinaryOp, Expr, Function, Ident, IntLit, Item, ParenExpr, UnaryExpr, UnaryOp,
+    AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, Expr, Function, Ident, IntLit, Item,
+    LetStatement, ParenExpr, Statement, UnaryExpr, UnaryOp,
 };
 pub use parser::Parser;
