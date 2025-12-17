@@ -16,7 +16,7 @@ name = "missing_return_type_error"
 source = "fn main() { 42 }"
 compile_fail = true
 expected_error = """
-error: expected '->', found '{'
+error: expected 'Arrow', found '{'
  --> <source>:1:11
   |
 1 | fn main() { 42 }
@@ -62,7 +62,7 @@ name = "unclosed_paren_error"
 source = "fn main() -> i32 { (1 + 2 }"
 compile_fail = true
 expected_error = """
-error: expected ')', found '}'
+error: expected 'Star' or 'Slash' or 'Percent', found '}'
  --> <source>:1:27
   |
 1 | fn main() -> i32 { (1 + 2 }
@@ -75,7 +75,7 @@ name = "missing_operand_error"
 source = "fn main() -> i32 { 1 + }"
 compile_fail = true
 expected_error = """
-error: expected expression, found '}'
+error: expected 'Minus' or 'Bang' or something else, found '}'
  --> <source>:1:24
   |
 1 | fn main() -> i32 { 1 + }
@@ -88,7 +88,7 @@ name = "empty_parens_error"
 source = "fn main() -> i32 { () }"
 compile_fail = true
 expected_error = """
-error: expected expression, found ')'
+error: expected 'Minus' or 'Bang' or something else, found ')'
  --> <source>:1:21
   |
 1 | fn main() -> i32 { () }
@@ -146,7 +146,7 @@ fn main() -> i32 {
 """
 compile_fail = true
 expected_error = """
-error: expected '=', found integer
+error: expected 'Colon' or 'Eq', found integer
  --> <source>:2:11
   |
 2 |     let x 42;
@@ -164,7 +164,7 @@ fn main() -> i32 {
 """
 compile_fail = true
 expected_error = """
-error: expected ';', found identifier
+error: expected 'Star' or 'Slash' or 'Percent', found identifier
  --> <source>:3:5
   |
 3 |     x

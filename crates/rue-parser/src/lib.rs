@@ -1,10 +1,12 @@
 //! Parser and AST for the Rue programming language.
+//!
+//! Uses chumsky for parser combinators with Pratt parsing for expressions.
 
 pub mod ast;
-mod parser;
+mod chumsky_parser;
 
 pub use ast::{
     AssignStatement, Ast, BinaryExpr, BinaryOp, BlockExpr, CallExpr, Expr, Function, Ident,
     IntLit, Item, LetStatement, Param, ParenExpr, Statement, UnaryExpr, UnaryOp, WhileExpr,
 };
-pub use parser::Parser;
+pub use chumsky_parser::ChumskyParser as Parser;

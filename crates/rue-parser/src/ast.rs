@@ -7,19 +7,19 @@
 use rue_span::Span;
 
 /// A complete source file (list of items).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Ast {
     pub items: Vec<Item>,
 }
 
 /// A top-level item in a source file.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Item {
     Function(Function),
 }
 
 /// A function definition.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     /// Function name
     pub name: Ident,
@@ -34,7 +34,7 @@ pub struct Function {
 }
 
 /// A function parameter.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Param {
     /// Parameter name
     pub name: Ident,
@@ -52,7 +52,7 @@ pub struct Ident {
 }
 
 /// An expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     /// Integer literal
     Int(IntLit),
@@ -81,21 +81,21 @@ pub enum Expr {
 }
 
 /// An integer literal.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IntLit {
     pub value: i64,
     pub span: Span,
 }
 
 /// A boolean literal.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoolLit {
     pub value: bool,
     pub span: Span,
 }
 
 /// A binary expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinaryExpr {
     pub left: Box<Expr>,
     pub op: BinaryOp,
@@ -125,7 +125,7 @@ pub enum BinaryOp {
 }
 
 /// A unary expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnaryExpr {
     pub op: UnaryOp,
     pub operand: Box<Expr>,
@@ -140,14 +140,14 @@ pub enum UnaryOp {
 }
 
 /// A parenthesized expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParenExpr {
     pub inner: Box<Expr>,
     pub span: Span,
 }
 
 /// A block expression containing statements and a final expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockExpr {
     /// Statements in the block
     pub statements: Vec<Statement>,
@@ -157,7 +157,7 @@ pub struct BlockExpr {
 }
 
 /// An if expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IfExpr {
     /// Condition (must be bool)
     pub cond: Box<Expr>,
@@ -169,7 +169,7 @@ pub struct IfExpr {
 }
 
 /// A function call expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CallExpr {
     /// Function name
     pub name: Ident,
@@ -179,7 +179,7 @@ pub struct CallExpr {
 }
 
 /// A statement (does not produce a value).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statement {
     /// Let binding: `let x = expr;` or `let mut x = expr;`
     Let(LetStatement),
@@ -190,7 +190,7 @@ pub enum Statement {
 }
 
 /// A let binding statement.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LetStatement {
     /// Whether the binding is mutable
     pub is_mut: bool,
@@ -204,7 +204,7 @@ pub struct LetStatement {
 }
 
 /// An assignment statement.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AssignStatement {
     /// Target variable
     pub name: Ident,
@@ -214,7 +214,7 @@ pub struct AssignStatement {
 }
 
 /// A while loop expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WhileExpr {
     /// Condition (must be bool)
     pub cond: Box<Expr>,
@@ -224,13 +224,13 @@ pub struct WhileExpr {
 }
 
 /// A break expression (exits the innermost loop).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BreakExpr {
     pub span: Span,
 }
 
 /// A continue expression (skips to the next iteration of the innermost loop).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ContinueExpr {
     pub span: Span,
 }

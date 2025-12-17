@@ -1,0 +1,349 @@
+//! Logos-based lexer for the Rue programming language.
+//!
+//! This module provides a lexer implementation using the logos derive macro
+//! for efficient tokenization.
+
+use logos::Logos;
+use rue_error::{CompileError, CompileResult, ErrorKind};
+use rue_span::Span;
+
+/// Error type for lexing failures.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LexError {
+    #[default]
+    UnexpectedCharacter,
+    InvalidInteger,
+}
+
+/// Token kinds in the Rue language, using logos derive macro.
+#[derive(Logos, Debug, Clone, PartialEq, Eq)]
+#[logos(error = LexError)]
+#[logos(skip r"[ \t\n\r\f]+")]
+#[logos(skip r"//[^\n]*")]
+pub enum LogosTokenKind {
+    // Keywords - logos prefers longer/specific matches over shorter/generic ones
+    #[token("fn")]
+    Fn,
+    #[token("let")]
+    Let,
+    #[token("mut")]
+    Mut,
+    #[token("if")]
+    If,
+    #[token("else")]
+    Else,
+    #[token("while")]
+    While,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
+    #[token("true")]
+    True,
+    #[token("false")]
+    False,
+
+    // Integer literals
+    #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
+    Int(i64),
+
+    // Identifiers (lower priority than keywords)
+    #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string(), priority = 1)]
+    Ident(String),
+
+    // Multi-character operators (logos automatically prefers longer matches)
+    #[token("==")]
+    EqEq,
+    #[token("!=")]
+    BangEq,
+    #[token("<=")]
+    LtEq,
+    #[token(">=")]
+    GtEq,
+    #[token("&&")]
+    AmpAmp,
+    #[token("||")]
+    PipePipe,
+    #[token("->")]
+    Arrow,
+
+    // Single-character operators
+    #[token("+")]
+    Plus,
+    #[token("-")]
+    Minus,
+    #[token("*")]
+    Star,
+    #[token("/")]
+    Slash,
+    #[token("%")]
+    Percent,
+    #[token("=")]
+    Eq,
+    #[token("!")]
+    Bang,
+    #[token("<")]
+    Lt,
+    #[token(">")]
+    Gt,
+
+    // Punctuation
+    #[token("(")]
+    LParen,
+    #[token(")")]
+    RParen,
+    #[token("{")]
+    LBrace,
+    #[token("}")]
+    RBrace,
+    #[token(":")]
+    Colon,
+    #[token(";")]
+    Semi,
+    #[token(",")]
+    Comma,
+}
+
+use crate::{Token, TokenKind};
+
+impl From<LogosTokenKind> for TokenKind {
+    fn from(logos_kind: LogosTokenKind) -> Self {
+        match logos_kind {
+            LogosTokenKind::Fn => TokenKind::Fn,
+            LogosTokenKind::Let => TokenKind::Let,
+            LogosTokenKind::Mut => TokenKind::Mut,
+            LogosTokenKind::If => TokenKind::If,
+            LogosTokenKind::Else => TokenKind::Else,
+            LogosTokenKind::While => TokenKind::While,
+            LogosTokenKind::Break => TokenKind::Break,
+            LogosTokenKind::Continue => TokenKind::Continue,
+            LogosTokenKind::True => TokenKind::True,
+            LogosTokenKind::False => TokenKind::False,
+            LogosTokenKind::Int(n) => TokenKind::Int(n),
+            LogosTokenKind::Ident(s) => TokenKind::Ident(s),
+            LogosTokenKind::EqEq => TokenKind::EqEq,
+            LogosTokenKind::BangEq => TokenKind::BangEq,
+            LogosTokenKind::LtEq => TokenKind::LtEq,
+            LogosTokenKind::GtEq => TokenKind::GtEq,
+            LogosTokenKind::AmpAmp => TokenKind::AmpAmp,
+            LogosTokenKind::PipePipe => TokenKind::PipePipe,
+            LogosTokenKind::Arrow => TokenKind::Arrow,
+            LogosTokenKind::Plus => TokenKind::Plus,
+            LogosTokenKind::Minus => TokenKind::Minus,
+            LogosTokenKind::Star => TokenKind::Star,
+            LogosTokenKind::Slash => TokenKind::Slash,
+            LogosTokenKind::Percent => TokenKind::Percent,
+            LogosTokenKind::Eq => TokenKind::Eq,
+            LogosTokenKind::Bang => TokenKind::Bang,
+            LogosTokenKind::Lt => TokenKind::Lt,
+            LogosTokenKind::Gt => TokenKind::Gt,
+            LogosTokenKind::LParen => TokenKind::LParen,
+            LogosTokenKind::RParen => TokenKind::RParen,
+            LogosTokenKind::LBrace => TokenKind::LBrace,
+            LogosTokenKind::RBrace => TokenKind::RBrace,
+            LogosTokenKind::Colon => TokenKind::Colon,
+            LogosTokenKind::Semi => TokenKind::Semi,
+            LogosTokenKind::Comma => TokenKind::Comma,
+        }
+    }
+}
+
+/// Logos-based lexer that converts source text into tokens.
+pub struct LogosLexer<'a> {
+    source: &'a str,
+}
+
+impl<'a> LogosLexer<'a> {
+    /// Create a new lexer for the given source text.
+    pub fn new(source: &'a str) -> Self {
+        Self { source }
+    }
+
+    /// Tokenize the entire source, returning all tokens.
+    pub fn tokenize(&mut self) -> CompileResult<Vec<Token>> {
+        let mut tokens = Vec::new();
+
+        for (result, span) in LogosTokenKind::lexer(self.source).spanned() {
+            match result {
+                Ok(logos_kind) => {
+                    tokens.push(Token {
+                        kind: logos_kind.into(),
+                        span: Span::new(span.start as u32, span.end as u32),
+                    });
+                }
+                Err(lex_error) => {
+                    let rue_span = Span::new(span.start as u32, span.end as u32);
+                    let error_char = self.source[span.clone()].chars().next().unwrap_or('?');
+                    let kind = match lex_error {
+                        LexError::InvalidInteger => ErrorKind::InvalidInteger,
+                        LexError::UnexpectedCharacter => ErrorKind::UnexpectedCharacter(error_char),
+                    };
+                    return Err(CompileError::new(kind, rue_span));
+                }
+            }
+        }
+
+        // Add EOF token (logos doesn't emit EOF)
+        let eof_pos = self.source.len() as u32;
+        tokens.push(Token {
+            kind: TokenKind::Eof,
+            span: Span::point(eof_pos),
+        });
+
+        Ok(tokens)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_logos_basic_tokens() {
+        let mut lexer = LogosLexer::new("fn main() -> i32 { 42 }");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Fn));
+        assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "main"));
+        assert!(matches!(tokens[2].kind, TokenKind::LParen));
+        assert!(matches!(tokens[3].kind, TokenKind::RParen));
+        assert!(matches!(tokens[4].kind, TokenKind::Arrow));
+        assert!(matches!(tokens[5].kind, TokenKind::Ident(ref s) if s == "i32"));
+        assert!(matches!(tokens[6].kind, TokenKind::LBrace));
+        assert!(matches!(tokens[7].kind, TokenKind::Int(42)));
+        assert!(matches!(tokens[8].kind, TokenKind::RBrace));
+        assert!(matches!(tokens[9].kind, TokenKind::Eof));
+    }
+
+    #[test]
+    fn test_logos_unexpected_character() {
+        let mut lexer = LogosLexer::new("fn main() { @ }");
+        let result = lexer.tokenize();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::UnexpectedCharacter('@')));
+    }
+
+    #[test]
+    fn test_logos_spans() {
+        let mut lexer = LogosLexer::new("fn main");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert_eq!(tokens[0].span, Span::new(0, 2)); // "fn"
+        assert_eq!(tokens[1].span, Span::new(3, 7)); // "main"
+    }
+
+    #[test]
+    fn test_logos_arithmetic_operators() {
+        let mut lexer = LogosLexer::new("1 + 2 - 3 * 4 / 5 % 6");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Int(1)));
+        assert!(matches!(tokens[1].kind, TokenKind::Plus));
+        assert!(matches!(tokens[2].kind, TokenKind::Int(2)));
+        assert!(matches!(tokens[3].kind, TokenKind::Minus));
+        assert!(matches!(tokens[4].kind, TokenKind::Int(3)));
+        assert!(matches!(tokens[5].kind, TokenKind::Star));
+        assert!(matches!(tokens[6].kind, TokenKind::Int(4)));
+        assert!(matches!(tokens[7].kind, TokenKind::Slash));
+        assert!(matches!(tokens[8].kind, TokenKind::Int(5)));
+        assert!(matches!(tokens[9].kind, TokenKind::Percent));
+        assert!(matches!(tokens[10].kind, TokenKind::Int(6)));
+    }
+
+    #[test]
+    fn test_logos_minus_vs_arrow() {
+        // Minus alone
+        let mut lexer = LogosLexer::new("a - b");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[1].kind, TokenKind::Minus));
+
+        // Arrow
+        let mut lexer = LogosLexer::new("-> i32");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Arrow));
+
+        // Minus followed by non-arrow
+        let mut lexer = LogosLexer::new("-1");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Minus));
+        assert!(matches!(tokens[1].kind, TokenKind::Int(1)));
+    }
+
+    #[test]
+    fn test_logos_let_binding() {
+        let mut lexer = LogosLexer::new("let x = 42;");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Let));
+        assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "x"));
+        assert!(matches!(tokens[2].kind, TokenKind::Eq));
+        assert!(matches!(tokens[3].kind, TokenKind::Int(42)));
+        assert!(matches!(tokens[4].kind, TokenKind::Semi));
+    }
+
+    #[test]
+    fn test_logos_logical_operators() {
+        let mut lexer = LogosLexer::new("!true && false || true");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Bang));
+        assert!(matches!(tokens[1].kind, TokenKind::True));
+        assert!(matches!(tokens[2].kind, TokenKind::AmpAmp));
+        assert!(matches!(tokens[3].kind, TokenKind::False));
+        assert!(matches!(tokens[4].kind, TokenKind::PipePipe));
+        assert!(matches!(tokens[5].kind, TokenKind::True));
+    }
+
+    #[test]
+    fn test_logos_comparison_operators() {
+        let mut lexer = LogosLexer::new("a == b != c < d > e <= f >= g");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[1].kind, TokenKind::EqEq));
+        assert!(matches!(tokens[3].kind, TokenKind::BangEq));
+        assert!(matches!(tokens[5].kind, TokenKind::Lt));
+        assert!(matches!(tokens[7].kind, TokenKind::Gt));
+        assert!(matches!(tokens[9].kind, TokenKind::LtEq));
+        assert!(matches!(tokens[11].kind, TokenKind::GtEq));
+    }
+
+    #[test]
+    fn test_logos_line_comments() {
+        let mut lexer = LogosLexer::new("fn // comment\nmain");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Fn));
+        assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "main"));
+        assert!(matches!(tokens[2].kind, TokenKind::Eof));
+    }
+
+    #[test]
+    fn test_logos_keywords_vs_identifiers() {
+        // Keywords should be recognized
+        let mut lexer = LogosLexer::new("fn let mut if else while break continue true false");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Fn));
+        assert!(matches!(tokens[1].kind, TokenKind::Let));
+        assert!(matches!(tokens[2].kind, TokenKind::Mut));
+        assert!(matches!(tokens[3].kind, TokenKind::If));
+        assert!(matches!(tokens[4].kind, TokenKind::Else));
+        assert!(matches!(tokens[5].kind, TokenKind::While));
+        assert!(matches!(tokens[6].kind, TokenKind::Break));
+        assert!(matches!(tokens[7].kind, TokenKind::Continue));
+        assert!(matches!(tokens[8].kind, TokenKind::True));
+        assert!(matches!(tokens[9].kind, TokenKind::False));
+
+        // Identifiers that start with keywords should be identifiers
+        let mut lexer = LogosLexer::new("fns lets mutable iff elseif whileloop");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "fns"));
+        assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "lets"));
+        assert!(matches!(tokens[2].kind, TokenKind::Ident(ref s) if s == "mutable"));
+        assert!(matches!(tokens[3].kind, TokenKind::Ident(ref s) if s == "iff"));
+        assert!(matches!(tokens[4].kind, TokenKind::Ident(ref s) if s == "elseif"));
+        assert!(matches!(tokens[5].kind, TokenKind::Ident(ref s) if s == "whileloop"));
+    }
+}
