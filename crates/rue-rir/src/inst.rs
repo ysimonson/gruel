@@ -111,6 +111,22 @@ pub enum InstData {
     /// Integer constant
     IntConst(i64),
 
+    // Binary arithmetic operations
+    /// Addition: lhs + rhs
+    Add { lhs: InstRef, rhs: InstRef },
+    /// Subtraction: lhs - rhs
+    Sub { lhs: InstRef, rhs: InstRef },
+    /// Multiplication: lhs * rhs
+    Mul { lhs: InstRef, rhs: InstRef },
+    /// Division: lhs / rhs
+    Div { lhs: InstRef, rhs: InstRef },
+    /// Modulo: lhs % rhs
+    Mod { lhs: InstRef, rhs: InstRef },
+
+    // Unary operations
+    /// Negation: -operand
+    Neg { operand: InstRef },
+
     /// Function definition
     /// Contains: name symbol, return type symbol, body instruction ref
     FnDecl {
@@ -158,6 +174,24 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
             match &inst.data {
                 InstData::IntConst(v) => {
                     out.push_str(&format!("const {}\n", v));
+                }
+                InstData::Add { lhs, rhs } => {
+                    out.push_str(&format!("add {}, {}\n", lhs, rhs));
+                }
+                InstData::Sub { lhs, rhs } => {
+                    out.push_str(&format!("sub {}, {}\n", lhs, rhs));
+                }
+                InstData::Mul { lhs, rhs } => {
+                    out.push_str(&format!("mul {}, {}\n", lhs, rhs));
+                }
+                InstData::Div { lhs, rhs } => {
+                    out.push_str(&format!("div {}, {}\n", lhs, rhs));
+                }
+                InstData::Mod { lhs, rhs } => {
+                    out.push_str(&format!("mod {}, {}\n", lhs, rhs));
+                }
+                InstData::Neg { operand } => {
+                    out.push_str(&format!("neg {}\n", operand));
                 }
                 InstData::FnDecl { name, return_type, body } => {
                     let name_str = self.interner.get(*name);

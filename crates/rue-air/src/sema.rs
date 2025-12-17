@@ -100,6 +100,72 @@ impl<'a> Sema<'a> {
                 }))
             }
 
+            InstData::Add { lhs, rhs } => {
+                // Both operands must be i32 for now
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Add(lhs_ref, rhs_ref),
+                    ty: Type::I32,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Sub { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Sub(lhs_ref, rhs_ref),
+                    ty: Type::I32,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Mul { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Mul(lhs_ref, rhs_ref),
+                    ty: Type::I32,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Div { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Div(lhs_ref, rhs_ref),
+                    ty: Type::I32,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Mod { lhs, rhs } => {
+                let lhs_ref = self.analyze_inst(air, *lhs, Type::I32)?;
+                let rhs_ref = self.analyze_inst(air, *rhs, Type::I32)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Mod(lhs_ref, rhs_ref),
+                    ty: Type::I32,
+                    span: inst.span,
+                }))
+            }
+
+            InstData::Neg { operand } => {
+                let operand_ref = self.analyze_inst(air, *operand, Type::I32)?;
+
+                Ok(air.add_inst(AirInst {
+                    data: AirInstData::Neg(operand_ref),
+                    ty: Type::I32,
+                    span: inst.span,
+                }))
+            }
+
             InstData::FnDecl { .. } => {
                 // Function declarations are handled at the top level
                 unreachable!("FnDecl should not appear in expression context")
@@ -172,5 +238,56 @@ mod tests {
         let air = &functions[0].air;
         assert_eq!(air.return_type(), Type::I32);
         assert_eq!(air.len(), 2); // Const + Ret
+    }
+
+    #[test]
+    fn test_analyze_addition() {
+        let functions = compile_to_air("fn main() -> i32 { 1 + 2 }").unwrap();
+
+        let air = &functions[0].air;
+        assert_eq!(air.return_type(), Type::I32);
+        // Const(1) + Const(2) + Add + Ret = 4 instructions
+        assert_eq!(air.len(), 4);
+
+        // Check that add instruction exists with correct type
+        let add_inst = air.get(AirRef::from_raw(2));
+        assert!(matches!(add_inst.data, AirInstData::Add(_, _)));
+        assert_eq!(add_inst.ty, Type::I32);
+    }
+
+    #[test]
+    fn test_analyze_all_binary_ops() {
+        // Test that all binary operators compile correctly
+        assert!(compile_to_air("fn main() -> i32 { 1 + 2 }").is_ok());
+        assert!(compile_to_air("fn main() -> i32 { 1 - 2 }").is_ok());
+        assert!(compile_to_air("fn main() -> i32 { 1 * 2 }").is_ok());
+        assert!(compile_to_air("fn main() -> i32 { 1 / 2 }").is_ok());
+        assert!(compile_to_air("fn main() -> i32 { 1 % 2 }").is_ok());
+    }
+
+    #[test]
+    fn test_analyze_negation() {
+        let functions = compile_to_air("fn main() -> i32 { -42 }").unwrap();
+
+        let air = &functions[0].air;
+        // Const(42) + Neg + Ret = 3 instructions
+        assert_eq!(air.len(), 3);
+
+        let neg_inst = air.get(AirRef::from_raw(1));
+        assert!(matches!(neg_inst.data, AirInstData::Neg(_)));
+        assert_eq!(neg_inst.ty, Type::I32);
+    }
+
+    #[test]
+    fn test_analyze_complex_expr() {
+        let functions = compile_to_air("fn main() -> i32 { (1 + 2) * 3 }").unwrap();
+
+        let air = &functions[0].air;
+        // Const(1) + Const(2) + Add + Const(3) + Mul + Ret = 6 instructions
+        assert_eq!(air.len(), 6);
+
+        // Check that result is multiplication
+        let mul_inst = air.get(AirRef::from_raw(4));
+        assert!(matches!(mul_inst.data, AirInstData::Mul(_, _)));
     }
 }

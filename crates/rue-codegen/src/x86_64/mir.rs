@@ -185,6 +185,45 @@ pub enum X86Inst {
     /// `mov dst, src` - Move register to register.
     MovRR { dst: Operand, src: Operand },
 
+    // Arithmetic instructions
+    /// `add dst, src` - Add src to dst (dst = dst + src).
+    AddRR { dst: Operand, src: Operand },
+
+    /// `sub dst, src` - Subtract src from dst (dst = dst - src).
+    SubRR { dst: Operand, src: Operand },
+
+    /// `imul dst, src` - Signed multiply (dst = dst * src).
+    ImulRR { dst: Operand, src: Operand },
+
+    /// `neg dst` - Two's complement negation (dst = -dst).
+    Neg { dst: Operand },
+
+    /// `cdq` - Sign-extend EAX into EDX:EAX (for division).
+    Cdq,
+
+    /// `idiv src` - Signed divide EDX:EAX by src.
+    /// Quotient in EAX, remainder in EDX.
+    IdivR { src: Operand },
+
+    // Control flow for runtime checks
+    /// `test src1, src2` - Bitwise AND, set flags, discard result.
+    TestRR { src1: Operand, src2: Operand },
+
+    /// `jz label` - Jump if zero flag is set.
+    Jz { label: String },
+
+    /// `jnz label` - Jump if zero flag is not set.
+    Jnz { label: String },
+
+    /// `jo label` - Jump if overflow flag is set.
+    Jo { label: String },
+
+    /// `jno label` - Jump if overflow flag is not set.
+    Jno { label: String },
+
+    /// Label marker (not a real instruction).
+    Label { name: String },
+
     /// `call symbol` - Call a function by symbol name (PC-relative).
     ///
     /// The symbol will be resolved by the linker. This emits a `call rel32`
@@ -204,6 +243,18 @@ impl fmt::Display for X86Inst {
             X86Inst::MovRI32 { dst, imm } => write!(f, "mov {}, {}", dst, imm),
             X86Inst::MovRI64 { dst, imm } => write!(f, "mov {}, {}", dst, imm),
             X86Inst::MovRR { dst, src } => write!(f, "mov {}, {}", dst, src),
+            X86Inst::AddRR { dst, src } => write!(f, "add {}, {}", dst, src),
+            X86Inst::SubRR { dst, src } => write!(f, "sub {}, {}", dst, src),
+            X86Inst::ImulRR { dst, src } => write!(f, "imul {}, {}", dst, src),
+            X86Inst::Neg { dst } => write!(f, "neg {}", dst),
+            X86Inst::Cdq => write!(f, "cdq"),
+            X86Inst::IdivR { src } => write!(f, "idiv {}", src),
+            X86Inst::TestRR { src1, src2 } => write!(f, "test {}, {}", src1, src2),
+            X86Inst::Jz { label } => write!(f, "jz {}", label),
+            X86Inst::Jnz { label } => write!(f, "jnz {}", label),
+            X86Inst::Jo { label } => write!(f, "jo {}", label),
+            X86Inst::Jno { label } => write!(f, "jno {}", label),
+            X86Inst::Label { name } => write!(f, "{}:", name),
             X86Inst::CallRel { symbol } => write!(f, "call {}", symbol),
             X86Inst::Syscall => write!(f, "syscall"),
             X86Inst::Ret => write!(f, "ret"),

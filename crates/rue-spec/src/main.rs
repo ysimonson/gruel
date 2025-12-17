@@ -41,6 +41,9 @@ struct Case {
     /// Expected MIR dump (golden test)
     #[serde(default)]
     expected_mir: Option<String>,
+    /// Expected runtime error message (program compiles but fails at runtime)
+    #[serde(default)]
+    runtime_error: Option<String>,
     #[serde(default)]
     skip: bool,
 }
@@ -272,8 +275,34 @@ fn run_test_case(case: &Case, rue_binary: &Path) -> Result<(), Failed> {
         .map_err(|e| format!("Failed to run compiled binary: {}", e))?;
 
     let actual_exit_code = run_output.status.code().unwrap_or(-1);
+    let stderr = String::from_utf8_lossy(&run_output.stderr);
+
+    // Handle runtime error tests
+    if let Some(ref expected_error) = case.runtime_error {
+        // Expect the program to fail at runtime (non-zero exit code)
+        if run_output.status.success() {
+            return Err(format!(
+                "Expected runtime error but program succeeded\n  expected error: {}\n  source: {}",
+                expected_error, case.source
+            )
+            .into());
+        }
+
+        // Check that stderr contains the expected error message
+        if !stderr.contains(expected_error.as_str()) {
+            return Err(format!(
+                "Runtime error message mismatch:\n  expected to contain: {}\n  actual stderr: {}\n  source: {}",
+                expected_error, stderr, case.source
+            )
+            .into());
+        }
+
+        return Ok(());
+    }
+
+    // Normal exit code test
     let expected_exit_code = case.exit_code.ok_or_else(|| {
-        "Test case should have exit_code when compile_fail is false".to_string()
+        "Test case should have exit_code when compile_fail is false and runtime_error is not set".to_string()
     })?;
 
     if actual_exit_code != expected_exit_code {

@@ -4,19 +4,6 @@ name = "Error Message Golden Tests"
 description = "Golden tests for exact error message formatting."
 
 [[case]]
-name = "negative_integer_error"
-source = "fn main() -> i32 { -1 }"
-compile_fail = true
-expected_error = """
-error: unexpected character: -
- --> <source>:1:20
-  |
-1 | fn main() -> i32 { -1 }
-  |                    ^
-  |
-"""
-
-[[case]]
 name = "missing_main_error"
 source = "fn foo() -> i32 { 42 }"
 compile_fail = true
@@ -64,4 +51,47 @@ source = "// just a comment"
 compile_fail = true
 expected_error = """
 error: no main function found
+"""
+
+# =============================================================================
+# Arithmetic Error Messages
+# =============================================================================
+
+[[case]]
+name = "unclosed_paren_error"
+source = "fn main() -> i32 { (1 + 2 }"
+compile_fail = true
+expected_error = """
+error: expected ')', found '}'
+ --> <source>:1:27
+  |
+1 | fn main() -> i32 { (1 + 2 }
+  |                           ^
+  |
+"""
+
+[[case]]
+name = "missing_operand_error"
+source = "fn main() -> i32 { 1 + }"
+compile_fail = true
+expected_error = """
+error: expected expression, found '}'
+ --> <source>:1:24
+  |
+1 | fn main() -> i32 { 1 + }
+  |                        ^
+  |
+"""
+
+[[case]]
+name = "empty_parens_error"
+source = "fn main() -> i32 { () }"
+compile_fail = true
+expected_error = """
+error: expected expression, found ')'
+ --> <source>:1:21
+  |
+1 | fn main() -> i32 { () }
+  |                     ^
+  |
 """

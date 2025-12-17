@@ -2,7 +2,9 @@
 //!
 //! Converts a sequence of tokens into an AST.
 
-use crate::ast::{Ast, Expr, Function, Ident, IntLit, Item};
+use crate::ast::{
+    Ast, BinaryExpr, BinaryOp, Expr, Function, Ident, IntLit, Item, ParenExpr, UnaryExpr, UnaryOp,
+};
 use rue_error::{CompileError, CompileResult, ErrorKind};
 use rue_lexer::{Token, TokenKind};
 use rue_span::Span;
@@ -67,13 +69,112 @@ impl Parser {
         })
     }
 
+    /// Parse an expression (entry point).
     fn parse_expr(&mut self) -> CompileResult<Expr> {
-        let token = self.advance();
+        self.parse_additive()
+    }
+
+    /// Parse additive expressions (+, -).
+    /// Lower precedence than multiplicative.
+    fn parse_additive(&mut self) -> CompileResult<Expr> {
+        let mut left = self.parse_multiplicative()?;
+
+        while matches!(self.current().kind, TokenKind::Plus | TokenKind::Minus) {
+            let op_token = self.advance();
+            let op = match op_token.kind {
+                TokenKind::Plus => BinaryOp::Add,
+                TokenKind::Minus => BinaryOp::Sub,
+                _ => unreachable!(),
+            };
+
+            let right = self.parse_multiplicative()?;
+            let span = Span::new(left.span().start, right.span().end);
+
+            left = Expr::Binary(BinaryExpr {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+                span,
+            });
+        }
+
+        Ok(left)
+    }
+
+    /// Parse multiplicative expressions (*, /, %).
+    /// Higher precedence than additive.
+    fn parse_multiplicative(&mut self) -> CompileResult<Expr> {
+        let mut left = self.parse_unary()?;
+
+        while matches!(
+            self.current().kind,
+            TokenKind::Star | TokenKind::Slash | TokenKind::Percent
+        ) {
+            let op_token = self.advance();
+            let op = match op_token.kind {
+                TokenKind::Star => BinaryOp::Mul,
+                TokenKind::Slash => BinaryOp::Div,
+                TokenKind::Percent => BinaryOp::Mod,
+                _ => unreachable!(),
+            };
+
+            let right = self.parse_unary()?;
+            let span = Span::new(left.span().start, right.span().end);
+
+            left = Expr::Binary(BinaryExpr {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+                span,
+            });
+        }
+
+        Ok(left)
+    }
+
+    /// Parse unary expressions (-x).
+    /// Highest precedence (binds tightest).
+    fn parse_unary(&mut self) -> CompileResult<Expr> {
+        if matches!(self.current().kind, TokenKind::Minus) {
+            let op_token = self.advance();
+            let operand = self.parse_unary()?; // Recursive for --x
+            let span = Span::new(op_token.span.start, operand.span().end);
+
+            Ok(Expr::Unary(UnaryExpr {
+                op: UnaryOp::Neg,
+                operand: Box::new(operand),
+                span,
+            }))
+        } else {
+            self.parse_primary()
+        }
+    }
+
+    /// Parse primary expressions (literals, parenthesized expressions).
+    fn parse_primary(&mut self) -> CompileResult<Expr> {
+        let token = self.current().clone();
+
         match &token.kind {
-            TokenKind::Int(n) => Ok(Expr::Int(IntLit {
-                value: *n,
-                span: token.span,
-            })),
+            TokenKind::Int(n) => {
+                let value = *n;
+                self.advance();
+                Ok(Expr::Int(IntLit {
+                    value,
+                    span: token.span,
+                }))
+            }
+            TokenKind::LParen => {
+                let start = token.span.start;
+                self.advance(); // consume '('
+                let inner = self.parse_expr()?;
+                let close = self.expect(TokenKind::RParen)?;
+                let span = Span::new(start, close.span.end);
+
+                Ok(Expr::Paren(ParenExpr {
+                    inner: Box::new(inner),
+                    span,
+                }))
+            }
             _ => Err(CompileError::new(
                 ErrorKind::UnexpectedToken {
                     expected: "expression",
@@ -155,12 +256,23 @@ mod tests {
     use super::*;
     use rue_lexer::Lexer;
 
+    fn parse(source: &str) -> CompileResult<Ast> {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize()?;
+        let mut parser = Parser::new(tokens);
+        parser.parse()
+    }
+
+    fn parse_expr(source: &str) -> CompileResult<Expr> {
+        let ast = parse(&format!("fn main() -> i32 {{ {} }}", source))?;
+        match ast.items.into_iter().next().unwrap() {
+            Item::Function(f) => Ok(f.body),
+        }
+    }
+
     #[test]
     fn test_parse_main() {
-        let mut lexer = Lexer::new("fn main() -> i32 { 42 }");
-        let tokens = lexer.tokenize().unwrap();
-        let mut parser = Parser::new(tokens);
-        let ast = parser.parse().unwrap();
+        let ast = parse("fn main() -> i32 { 42 }").unwrap();
 
         assert_eq!(ast.items.len(), 1);
         match &ast.items[0] {
@@ -169,6 +281,7 @@ mod tests {
                 assert_eq!(f.return_type.name, "i32");
                 match &f.body {
                     Expr::Int(lit) => assert_eq!(lit.value, 42),
+                    _ => panic!("expected Int"),
                 }
             }
         }
@@ -176,10 +289,154 @@ mod tests {
 
     #[test]
     fn test_missing_return_type() {
-        let mut lexer = Lexer::new("fn main() { 42 }");
-        let tokens = lexer.tokenize().unwrap();
-        let mut parser = Parser::new(tokens);
-        let result = parser.parse();
+        let result = parse("fn main() { 42 }");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_addition() {
+        let expr = parse_expr("1 + 2").unwrap();
+        match expr {
+            Expr::Binary(bin) => {
+                assert!(matches!(bin.op, BinaryOp::Add));
+                match (*bin.left, *bin.right) {
+                    (Expr::Int(l), Expr::Int(r)) => {
+                        assert_eq!(l.value, 1);
+                        assert_eq!(r.value, 2);
+                    }
+                    _ => panic!("expected Int operands"),
+                }
+            }
+            _ => panic!("expected Binary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_precedence() {
+        // 1 + 2 * 3 should parse as 1 + (2 * 3)
+        let expr = parse_expr("1 + 2 * 3").unwrap();
+        match expr {
+            Expr::Binary(bin) => {
+                assert!(matches!(bin.op, BinaryOp::Add));
+                match *bin.left {
+                    Expr::Int(l) => assert_eq!(l.value, 1),
+                    _ => panic!("expected Int"),
+                }
+                match *bin.right {
+                    Expr::Binary(inner) => {
+                        assert!(matches!(inner.op, BinaryOp::Mul));
+                    }
+                    _ => panic!("expected Binary"),
+                }
+            }
+            _ => panic!("expected Binary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_parens() {
+        // (1 + 2) * 3 should parse as (1 + 2) * 3
+        let expr = parse_expr("(1 + 2) * 3").unwrap();
+        match expr {
+            Expr::Binary(bin) => {
+                assert!(matches!(bin.op, BinaryOp::Mul));
+                match *bin.left {
+                    Expr::Paren(p) => match *p.inner {
+                        Expr::Binary(inner) => {
+                            assert!(matches!(inner.op, BinaryOp::Add));
+                        }
+                        _ => panic!("expected Binary inside paren"),
+                    },
+                    _ => panic!("expected Paren"),
+                }
+            }
+            _ => panic!("expected Binary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unary_negation() {
+        let expr = parse_expr("-42").unwrap();
+        match expr {
+            Expr::Unary(un) => {
+                assert!(matches!(un.op, UnaryOp::Neg));
+                match *un.operand {
+                    Expr::Int(lit) => assert_eq!(lit.value, 42),
+                    _ => panic!("expected Int"),
+                }
+            }
+            _ => panic!("expected Unary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_double_negation() {
+        let expr = parse_expr("--5").unwrap();
+        match expr {
+            Expr::Unary(outer) => {
+                assert!(matches!(outer.op, UnaryOp::Neg));
+                match *outer.operand {
+                    Expr::Unary(inner) => {
+                        assert!(matches!(inner.op, UnaryOp::Neg));
+                        match *inner.operand {
+                            Expr::Int(lit) => assert_eq!(lit.value, 5),
+                            _ => panic!("expected Int"),
+                        }
+                    }
+                    _ => panic!("expected Unary"),
+                }
+            }
+            _ => panic!("expected Unary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_negation_precedence() {
+        // -2 * 3 should parse as (-2) * 3
+        let expr = parse_expr("-2 * 3").unwrap();
+        match expr {
+            Expr::Binary(bin) => {
+                assert!(matches!(bin.op, BinaryOp::Mul));
+                match *bin.left {
+                    Expr::Unary(un) => {
+                        assert!(matches!(un.op, UnaryOp::Neg));
+                    }
+                    _ => panic!("expected Unary"),
+                }
+            }
+            _ => panic!("expected Binary"),
+        }
+    }
+
+    #[test]
+    fn test_parse_all_operators() {
+        // Test all binary operators
+        assert!(parse_expr("1 + 2").is_ok());
+        assert!(parse_expr("1 - 2").is_ok());
+        assert!(parse_expr("1 * 2").is_ok());
+        assert!(parse_expr("1 / 2").is_ok());
+        assert!(parse_expr("1 % 2").is_ok());
+    }
+
+    #[test]
+    fn test_left_associativity() {
+        // 10 - 3 - 2 should parse as (10 - 3) - 2
+        let expr = parse_expr("10 - 3 - 2").unwrap();
+        match expr {
+            Expr::Binary(outer) => {
+                assert!(matches!(outer.op, BinaryOp::Sub));
+                match *outer.right {
+                    Expr::Int(lit) => assert_eq!(lit.value, 2),
+                    _ => panic!("expected Int"),
+                }
+                match *outer.left {
+                    Expr::Binary(inner) => {
+                        assert!(matches!(inner.op, BinaryOp::Sub));
+                    }
+                    _ => panic!("expected Binary"),
+                }
+            }
+            _ => panic!("expected Binary"),
+        }
     }
 }

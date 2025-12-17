@@ -4,12 +4,6 @@ name = "Compilation Errors"
 description = "Programs that should fail to compile."
 
 [[case]]
-name = "negative_integer"
-source = "fn main() -> i32 { -1 }"
-compile_fail = true
-error_contains = "unexpected character: -"
-
-[[case]]
 name = "missing_main"
 source = "fn foo() -> i32 { 42 }"
 compile_fail = true
@@ -61,3 +55,63 @@ name = "missing_return_type"
 source = "fn main() { 42 }"
 compile_fail = true
 error_contains = "expected '->'"
+
+# =============================================================================
+# Arithmetic Errors
+# =============================================================================
+
+[[case]]
+name = "unclosed_paren"
+source = "fn main() -> i32 { (1 + 2 }"
+compile_fail = true
+error_contains = "expected ')'"
+
+[[case]]
+name = "missing_operand_after_plus"
+source = "fn main() -> i32 { 1 + }"
+compile_fail = true
+
+[[case]]
+name = "missing_operand_after_minus"
+source = "fn main() -> i32 { 1 - }"
+compile_fail = true
+
+[[case]]
+name = "missing_operand_after_mul"
+source = "fn main() -> i32 { 1 * }"
+compile_fail = true
+
+[[case]]
+name = "missing_operand_after_div"
+source = "fn main() -> i32 { 1 / }"
+compile_fail = true
+
+[[case]]
+name = "missing_operand_after_mod"
+source = "fn main() -> i32 { 1 % }"
+compile_fail = true
+
+[[case]]
+name = "unary_plus_not_supported"
+source = "fn main() -> i32 { +1 }"
+compile_fail = true
+
+[[case]]
+name = "unary_plus_in_expression"
+source = "fn main() -> i32 { 1 + +2 }"
+compile_fail = true
+
+[[case]]
+name = "empty_parens"
+source = "fn main() -> i32 { () }"
+compile_fail = true
+
+[[case]]
+name = "mismatched_parens"
+source = "fn main() -> i32 { (1 + 2)) }"
+compile_fail = true
+
+[[case]]
+name = "missing_operator"
+source = "fn main() -> i32 { 1 2 }"
+compile_fail = true

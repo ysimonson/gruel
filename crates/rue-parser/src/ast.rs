@@ -43,6 +43,12 @@ pub struct Ident {
 pub enum Expr {
     /// Integer literal
     Int(IntLit),
+    /// Binary operation (e.g., `a + b`)
+    Binary(BinaryExpr),
+    /// Unary operation (e.g., `-x`)
+    Unary(UnaryExpr),
+    /// Parenthesized expression (e.g., `(a + b)`)
+    Paren(ParenExpr),
 }
 
 /// An integer literal.
@@ -52,11 +58,54 @@ pub struct IntLit {
     pub span: Span,
 }
 
+/// A binary expression.
+#[derive(Debug)]
+pub struct BinaryExpr {
+    pub left: Box<Expr>,
+    pub op: BinaryOp,
+    pub right: Box<Expr>,
+    pub span: Span,
+}
+
+/// Binary operators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    Add, // +
+    Sub, // -
+    Mul, // *
+    Div, // /
+    Mod, // %
+}
+
+/// A unary expression.
+#[derive(Debug)]
+pub struct UnaryExpr {
+    pub op: UnaryOp,
+    pub operand: Box<Expr>,
+    pub span: Span,
+}
+
+/// Unary operators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg, // -
+}
+
+/// A parenthesized expression.
+#[derive(Debug)]
+pub struct ParenExpr {
+    pub inner: Box<Expr>,
+    pub span: Span,
+}
+
 impl Expr {
     /// Get the span of this expression.
     pub fn span(&self) -> Span {
         match self {
             Expr::Int(lit) => lit.span,
+            Expr::Binary(bin) => bin.span,
+            Expr::Unary(un) => un.span,
+            Expr::Paren(paren) => paren.span,
         }
     }
 }

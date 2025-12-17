@@ -16,19 +16,18 @@ use super::mir::{Operand, Reg, X86Inst, X86Mir};
 /// We avoid:
 /// - rsp (stack pointer)
 /// - rbp (frame pointer, if we use it)
-/// - rdi, rsi, rdx, rcx, r8, r9 are used for syscall/function args, but can be
-///   used as temporaries when not needed for that purpose
+/// - rax, rdx (used implicitly by idiv for division/modulo)
+/// - rdi is used for exit call argument, but available for temporaries
 ///
 /// For now, we use a simple set of scratch registers.
 const ALLOCATABLE_REGS: &[Reg] = &[
     Reg::R10, // First choice - caller-saved, not used for args
     Reg::R11, // Second choice - caller-saved, not used for args
-    Reg::Rax, // Can use when not needed for syscall number
     Reg::Rcx, // Can use when not needed for args
-    Reg::Rdx, // Can use when not needed for args
     Reg::Rsi, // Can use when not needed for args
     Reg::R8,  // Can use when not needed for args
     Reg::R9,  // Can use when not needed for args
+    Reg::Rdi, // Can use when not needed for exit call
 ];
 
 /// Register allocator.
@@ -89,7 +88,37 @@ impl RegAlloc {
                 *dst = Self::rewrite_operand(allocation, *dst);
                 *src = Self::rewrite_operand(allocation, *src);
             }
-            X86Inst::CallRel { .. } | X86Inst::Syscall | X86Inst::Ret => {
+            X86Inst::AddRR { dst, src } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+                *src = Self::rewrite_operand(allocation, *src);
+            }
+            X86Inst::SubRR { dst, src } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+                *src = Self::rewrite_operand(allocation, *src);
+            }
+            X86Inst::ImulRR { dst, src } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+                *src = Self::rewrite_operand(allocation, *src);
+            }
+            X86Inst::Neg { dst } => {
+                *dst = Self::rewrite_operand(allocation, *dst);
+            }
+            X86Inst::IdivR { src } => {
+                *src = Self::rewrite_operand(allocation, *src);
+            }
+            X86Inst::TestRR { src1, src2 } => {
+                *src1 = Self::rewrite_operand(allocation, *src1);
+                *src2 = Self::rewrite_operand(allocation, *src2);
+            }
+            X86Inst::Cdq
+            | X86Inst::Jz { .. }
+            | X86Inst::Jnz { .. }
+            | X86Inst::Jo { .. }
+            | X86Inst::Jno { .. }
+            | X86Inst::Label { .. }
+            | X86Inst::CallRel { .. }
+            | X86Inst::Syscall
+            | X86Inst::Ret => {
                 // No register operands to rewrite
             }
         }

@@ -17,6 +17,13 @@ pub enum TokenKind {
     // Identifiers
     Ident(String),
 
+    // Operators
+    Plus,    // +
+    Minus,   // -
+    Star,    // *
+    Slash,   // /
+    Percent, // %
+
     // Punctuation
     LParen,
     RParen,
@@ -37,6 +44,11 @@ impl TokenKind {
             TokenKind::Fn => "'fn'",
             TokenKind::Int(_) => "integer",
             TokenKind::Ident(_) => "identifier",
+            TokenKind::Plus => "'+'",
+            TokenKind::Minus => "'-'",
+            TokenKind::Star => "'*'",
+            TokenKind::Slash => "'/'",
+            TokenKind::Percent => "'%'",
             TokenKind::LParen => "'('",
             TokenKind::RParen => "')'",
             TokenKind::LBrace => "'{'",
@@ -119,17 +131,30 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 TokenKind::Semi
             }
+            '+' => {
+                self.advance();
+                TokenKind::Plus
+            }
             '-' => {
                 self.advance();
                 if self.peek() == Some('>') {
                     self.advance();
                     TokenKind::Arrow
                 } else {
-                    return Err(CompileError::new(
-                        ErrorKind::UnexpectedCharacter('-'),
-                        Span::new(start, self.pos as u32),
-                    ));
+                    TokenKind::Minus
                 }
+            }
+            '*' => {
+                self.advance();
+                TokenKind::Star
+            }
+            '/' => {
+                self.advance();
+                TokenKind::Slash
+            }
+            '%' => {
+                self.advance();
+                TokenKind::Percent
             }
             '0'..='9' => self.lex_number()?,
             'a'..='z' | 'A'..='Z' | '_' => self.lex_ident_or_keyword(),
@@ -247,5 +272,42 @@ mod tests {
 
         assert_eq!(tokens[0].span, Span::new(0, 2)); // "fn"
         assert_eq!(tokens[1].span, Span::new(3, 7)); // "main"
+    }
+
+    #[test]
+    fn test_arithmetic_operators() {
+        let mut lexer = Lexer::new("1 + 2 - 3 * 4 / 5 % 6");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Int(1)));
+        assert!(matches!(tokens[1].kind, TokenKind::Plus));
+        assert!(matches!(tokens[2].kind, TokenKind::Int(2)));
+        assert!(matches!(tokens[3].kind, TokenKind::Minus));
+        assert!(matches!(tokens[4].kind, TokenKind::Int(3)));
+        assert!(matches!(tokens[5].kind, TokenKind::Star));
+        assert!(matches!(tokens[6].kind, TokenKind::Int(4)));
+        assert!(matches!(tokens[7].kind, TokenKind::Slash));
+        assert!(matches!(tokens[8].kind, TokenKind::Int(5)));
+        assert!(matches!(tokens[9].kind, TokenKind::Percent));
+        assert!(matches!(tokens[10].kind, TokenKind::Int(6)));
+    }
+
+    #[test]
+    fn test_minus_vs_arrow() {
+        // Minus alone
+        let mut lexer = Lexer::new("a - b");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[1].kind, TokenKind::Minus));
+
+        // Arrow
+        let mut lexer = Lexer::new("-> i32");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Arrow));
+
+        // Minus followed by non-arrow
+        let mut lexer = Lexer::new("-1");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Minus));
+        assert!(matches!(tokens[1].kind, TokenKind::Int(1)));
     }
 }

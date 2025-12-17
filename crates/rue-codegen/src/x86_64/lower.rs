@@ -14,6 +14,8 @@ pub struct Lower<'a> {
     mir: X86Mir,
     /// Maps AIR instruction refs to the vreg holding their result.
     value_map: Vec<Option<VReg>>,
+    /// Label counter for generating unique labels.
+    label_counter: u32,
 }
 
 impl<'a> Lower<'a> {
@@ -23,7 +25,19 @@ impl<'a> Lower<'a> {
             air,
             mir: X86Mir::new(),
             value_map: vec![None; air.len()],
+            label_counter: 0,
         }
+    }
+
+    /// Generate a unique label name.
+    ///
+    /// TODO: Labels are currently unique within a single function but could collide
+    /// across multiple functions in the same object file. When we add multi-function
+    /// support, we'll need function-scoped or globally unique label generation.
+    fn new_label(&mut self, prefix: &str) -> String {
+        let label = format!(".L{}_{}", prefix, self.label_counter);
+        self.label_counter += 1;
+        label
     }
 
     /// Lower AIR to X86Mir.
@@ -56,6 +70,172 @@ impl<'a> Lower<'a> {
                         imm: *value,
                     });
                 }
+            }
+
+            AirInstData::Add(lhs, rhs) => {
+                // Allocate result vreg
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                // x86 add is dst = dst + src, so we need to copy lhs to dst first
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(lhs_vreg),
+                });
+                self.mir.push(X86Inst::AddRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(rhs_vreg),
+                });
+                // Check for overflow and call error handler if set
+                let ok_label = self.new_label("add_ok");
+                self.mir.push(X86Inst::Jno { label: ok_label.clone() });
+                self.mir.push(X86Inst::CallRel { symbol: "__rue_overflow".to_string() });
+                self.mir.push(X86Inst::Label { name: ok_label });
+            }
+
+            AirInstData::Sub(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(lhs_vreg),
+                });
+                self.mir.push(X86Inst::SubRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(rhs_vreg),
+                });
+                // Check for overflow and call error handler if set
+                let ok_label = self.new_label("sub_ok");
+                self.mir.push(X86Inst::Jno { label: ok_label.clone() });
+                self.mir.push(X86Inst::CallRel { symbol: "__rue_overflow".to_string() });
+                self.mir.push(X86Inst::Label { name: ok_label });
+            }
+
+            AirInstData::Mul(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                // imul r32, r32 is dst = dst * src
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(lhs_vreg),
+                });
+                self.mir.push(X86Inst::ImulRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(rhs_vreg),
+                });
+                // Check for overflow and call error handler if set
+                let ok_label = self.new_label("mul_ok");
+                self.mir.push(X86Inst::Jno { label: ok_label.clone() });
+                self.mir.push(X86Inst::CallRel { symbol: "__rue_overflow".to_string() });
+                self.mir.push(X86Inst::Label { name: ok_label });
+            }
+
+            AirInstData::Div(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                // Check for division by zero before performing division
+                let ok_label = self.new_label("div_ok");
+                self.mir.push(X86Inst::TestRR {
+                    src1: Operand::Virtual(rhs_vreg),
+                    src2: Operand::Virtual(rhs_vreg),
+                });
+                self.mir.push(X86Inst::Jnz { label: ok_label.clone() });
+                self.mir.push(X86Inst::CallRel { symbol: "__rue_div_by_zero".to_string() });
+                self.mir.push(X86Inst::Label { name: ok_label });
+
+                // Division on x86 uses EDX:EAX / divisor -> quotient in EAX, remainder in EDX
+                // TODO: The register allocator doesn't know RAX/RDX are clobbered here.
+                // Once we have real liveness analysis, we'll need register constraints or
+                // explicit clobber sets to prevent the allocator from placing live values
+                // in RAX/RDX across division operations.
+                // 1. Move dividend to EAX
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Physical(Reg::Rax),
+                    src: Operand::Virtual(lhs_vreg),
+                });
+                // 2. Sign-extend EAX to EDX:EAX
+                self.mir.push(X86Inst::Cdq);
+                // 3. Perform division
+                self.mir.push(X86Inst::IdivR {
+                    src: Operand::Virtual(rhs_vreg),
+                });
+                // 4. Move quotient (EAX) to result vreg
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Physical(Reg::Rax),
+                });
+            }
+
+            AirInstData::Mod(lhs, rhs) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let lhs_vreg = self.get_vreg(*lhs);
+                let rhs_vreg = self.get_vreg(*rhs);
+
+                // Check for division by zero before performing modulo
+                let ok_label = self.new_label("mod_ok");
+                self.mir.push(X86Inst::TestRR {
+                    src1: Operand::Virtual(rhs_vreg),
+                    src2: Operand::Virtual(rhs_vreg),
+                });
+                self.mir.push(X86Inst::Jnz { label: ok_label.clone() });
+                self.mir.push(X86Inst::CallRel { symbol: "__rue_div_by_zero".to_string() });
+                self.mir.push(X86Inst::Label { name: ok_label });
+
+                // Modulo uses the same idiv instruction, but takes remainder from EDX
+                // 1. Move dividend to EAX
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Physical(Reg::Rax),
+                    src: Operand::Virtual(lhs_vreg),
+                });
+                // 2. Sign-extend EAX to EDX:EAX
+                self.mir.push(X86Inst::Cdq);
+                // 3. Perform division
+                self.mir.push(X86Inst::IdivR {
+                    src: Operand::Virtual(rhs_vreg),
+                });
+                // 4. Move remainder (EDX) to result vreg
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Physical(Reg::Rdx),
+                });
+            }
+
+            AirInstData::Neg(operand) => {
+                let vreg = self.mir.alloc_vreg();
+                self.value_map[air_ref.as_u32() as usize] = Some(vreg);
+
+                let operand_vreg = self.get_vreg(*operand);
+
+                // neg r32 modifies in place, so copy first
+                self.mir.push(X86Inst::MovRR {
+                    dst: Operand::Virtual(vreg),
+                    src: Operand::Virtual(operand_vreg),
+                });
+                self.mir.push(X86Inst::Neg {
+                    dst: Operand::Virtual(vreg),
+                });
+                // Check for overflow (only happens when negating i32::MIN)
+                let ok_label = self.new_label("neg_ok");
+                self.mir.push(X86Inst::Jno { label: ok_label.clone() });
+                self.mir.push(X86Inst::CallRel { symbol: "__rue_overflow".to_string() });
+                self.mir.push(X86Inst::Label { name: ok_label });
             }
 
             AirInstData::Ret(value_ref) => {

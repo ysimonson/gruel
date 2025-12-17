@@ -35,3 +35,23 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 pub extern "C" fn __rue_exit(status: i32) -> ! {
     x86_64_linux::exit(status)
 }
+
+/// Runtime error: division by zero.
+///
+/// Called when a division or modulo operation has a zero divisor.
+/// Prints an error message to stderr and exits with code 1.
+#[unsafe(no_mangle)]
+pub extern "C" fn __rue_div_by_zero() -> ! {
+    x86_64_linux::write_stderr(b"error: division by zero\n");
+    x86_64_linux::exit(1)
+}
+
+/// Runtime error: integer overflow.
+///
+/// Called when an arithmetic operation overflows.
+/// Prints an error message to stderr and exits with code 1.
+#[unsafe(no_mangle)]
+pub extern "C" fn __rue_overflow() -> ! {
+    x86_64_linux::write_stderr(b"error: integer overflow\n");
+    x86_64_linux::exit(1)
+}

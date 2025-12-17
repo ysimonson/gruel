@@ -94,6 +94,22 @@ pub enum AirInstData {
     /// Integer constant (typed)
     Const(i64),
 
+    // Binary arithmetic operations
+    /// Addition
+    Add(AirRef, AirRef),
+    /// Subtraction
+    Sub(AirRef, AirRef),
+    /// Multiplication
+    Mul(AirRef, AirRef),
+    /// Division
+    Div(AirRef, AirRef),
+    /// Modulo
+    Mod(AirRef, AirRef),
+
+    // Unary operations
+    /// Negation
+    Neg(AirRef),
+
     /// Return from function
     Ret(AirRef),
 }
@@ -111,6 +127,12 @@ impl fmt::Display for Air {
             write!(f, "    {} : {} = ", inst_ref, inst.ty.name())?;
             match &inst.data {
                 AirInstData::Const(v) => writeln!(f, "const {}", v)?,
+                AirInstData::Add(lhs, rhs) => writeln!(f, "add {}, {}", lhs, rhs)?,
+                AirInstData::Sub(lhs, rhs) => writeln!(f, "sub {}, {}", lhs, rhs)?,
+                AirInstData::Mul(lhs, rhs) => writeln!(f, "mul {}, {}", lhs, rhs)?,
+                AirInstData::Div(lhs, rhs) => writeln!(f, "div {}, {}", lhs, rhs)?,
+                AirInstData::Mod(lhs, rhs) => writeln!(f, "mod {}, {}", lhs, rhs)?,
+                AirInstData::Neg(operand) => writeln!(f, "neg {}", operand)?,
                 AirInstData::Ret(inner) => writeln!(f, "ret {}", inner)?,
             }
         }

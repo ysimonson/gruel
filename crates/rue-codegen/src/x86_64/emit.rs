@@ -3,14 +3,28 @@
 //! This phase converts X86Mir instructions (with physical registers) to
 //! machine code bytes.
 
+use std::collections::HashMap;
+
 use super::mir::{Reg, X86Inst, X86Mir};
 use super::EmittedRelocation;
+
+/// A pending fixup for a forward jump.
+struct Fixup {
+    /// Offset of the rel8/rel32 displacement in the code.
+    offset: usize,
+    /// Target label name.
+    label: String,
+}
 
 /// X86-64 instruction emitter.
 pub struct Emitter<'a> {
     mir: &'a X86Mir,
     code: Vec<u8>,
     relocations: Vec<EmittedRelocation>,
+    /// Maps label names to their code offsets.
+    labels: HashMap<String, usize>,
+    /// Forward jumps that need to be patched.
+    fixups: Vec<Fixup>,
 }
 
 impl<'a> Emitter<'a> {
@@ -20,6 +34,8 @@ impl<'a> Emitter<'a> {
             mir,
             code: Vec::new(),
             relocations: Vec::new(),
+            labels: HashMap::new(),
+            fixups: Vec::new(),
         }
     }
 
@@ -30,7 +46,32 @@ impl<'a> Emitter<'a> {
         for inst in self.mir.iter() {
             self.emit_inst(inst);
         }
+        self.apply_fixups();
         (self.code, self.relocations)
+    }
+
+    /// Apply all fixups for forward jumps.
+    fn apply_fixups(&mut self) {
+        for fixup in &self.fixups {
+            let target_offset = self.labels.get(&fixup.label)
+                .unwrap_or_else(|| panic!("undefined label: {}", fixup.label));
+
+            // Calculate relative offset from the end of the jump instruction
+            // The fixup offset points to the rel8, which is the last byte of the instruction
+            let jump_end = fixup.offset + 1; // rel8 is 1 byte
+            let relative = *target_offset as i64 - jump_end as i64;
+
+            // rel8 encoding only supports -128 to +127 byte offsets
+            assert!(
+                relative >= -128 && relative <= 127,
+                "jump offset {} exceeds rel8 range (-128..127) for label '{}'; \
+                 consider implementing rel32 fallback",
+                relative,
+                fixup.label
+            );
+
+            self.code[fixup.offset] = relative as u8;
+        }
     }
 
     /// Emit a single instruction.
@@ -44,6 +85,43 @@ impl<'a> Emitter<'a> {
             }
             X86Inst::MovRR { dst, src } => {
                 self.emit_mov_rr(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::AddRR { dst, src } => {
+                self.emit_add_rr(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::SubRR { dst, src } => {
+                self.emit_sub_rr(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::ImulRR { dst, src } => {
+                self.emit_imul_rr(dst.as_physical(), src.as_physical());
+            }
+            X86Inst::Neg { dst } => {
+                self.emit_neg(dst.as_physical());
+            }
+            X86Inst::Cdq => {
+                self.emit_cdq();
+            }
+            X86Inst::IdivR { src } => {
+                self.emit_idiv(src.as_physical());
+            }
+            X86Inst::TestRR { src1, src2 } => {
+                self.emit_test_rr(src1.as_physical(), src2.as_physical());
+            }
+            X86Inst::Jz { label } => {
+                self.emit_jcc(0x74, label); // JZ rel8 opcode
+            }
+            X86Inst::Jnz { label } => {
+                self.emit_jcc(0x75, label); // JNZ rel8 opcode
+            }
+            X86Inst::Jo { label } => {
+                self.emit_jcc(0x70, label); // JO rel8 opcode
+            }
+            X86Inst::Jno { label } => {
+                self.emit_jcc(0x71, label); // JNO rel8 opcode
+            }
+            X86Inst::Label { name } => {
+                // Record the current code offset for this label
+                self.labels.insert(name.clone(), self.code.len());
             }
             X86Inst::CallRel { symbol } => {
                 self.emit_call_rel(symbol);
@@ -157,6 +235,163 @@ impl<'a> Emitter<'a> {
             offset: reloc_offset,
             symbol: symbol.to_string(),
             addend: -4,
+        });
+    }
+
+    /// Emit `add r32, r32`.
+    ///
+    /// Encoding: [REX] 01 /r (add r/m32, r32)
+    /// We use 32-bit operand size for i32 values.
+    fn emit_add_rr(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX prefix if needed
+        if src.needs_rex() || dst.needs_rex() {
+            let rex = 0x40
+                | if src.needs_rex() { 0x04 } else { 0x00 }  // REX.R
+                | if dst.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+            self.code.push(rex);
+        }
+
+        // Opcode: 01 (add r/m32, r32)
+        self.code.push(0x01);
+
+        // ModR/M: mod=11 (register-to-register), reg=src, r/m=dst
+        let modrm = 0xC0 | ((src_enc & 7) << 3) | (dst_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `sub r32, r32`.
+    ///
+    /// Encoding: [REX] 29 /r (sub r/m32, r32)
+    fn emit_sub_rr(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX prefix if needed
+        if src.needs_rex() || dst.needs_rex() {
+            let rex = 0x40
+                | if src.needs_rex() { 0x04 } else { 0x00 }  // REX.R
+                | if dst.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+            self.code.push(rex);
+        }
+
+        // Opcode: 29 (sub r/m32, r32)
+        self.code.push(0x29);
+
+        // ModR/M: mod=11 (register-to-register), reg=src, r/m=dst
+        let modrm = 0xC0 | ((src_enc & 7) << 3) | (dst_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `imul r32, r32`.
+    ///
+    /// Encoding: [REX] 0F AF /r (imul r32, r/m32)
+    fn emit_imul_rr(&mut self, dst: Reg, src: Reg) {
+        let dst_enc = dst.encoding();
+        let src_enc = src.encoding();
+
+        // REX prefix if needed
+        if dst.needs_rex() || src.needs_rex() {
+            let rex = 0x40
+                | if dst.needs_rex() { 0x04 } else { 0x00 }  // REX.R (dst is reg field)
+                | if src.needs_rex() { 0x01 } else { 0x00 }; // REX.B (src is r/m field)
+            self.code.push(rex);
+        }
+
+        // Opcode: 0F AF (imul r32, r/m32)
+        self.code.push(0x0F);
+        self.code.push(0xAF);
+
+        // ModR/M: mod=11, reg=dst, r/m=src
+        let modrm = 0xC0 | ((dst_enc & 7) << 3) | (src_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `neg r32`.
+    ///
+    /// Encoding: [REX] F7 /3 (neg r/m32)
+    fn emit_neg(&mut self, dst: Reg) {
+        let dst_enc = dst.encoding();
+
+        // REX prefix if needed
+        if dst.needs_rex() {
+            self.code.push(0x41); // REX.B
+        }
+
+        // Opcode: F7 (group 3 operations)
+        self.code.push(0xF7);
+
+        // ModR/M: mod=11, reg=3 (NEG), r/m=dst
+        let modrm = 0xC0 | (3 << 3) | (dst_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `cdq` - Sign-extend EAX to EDX:EAX.
+    ///
+    /// Encoding: 99
+    fn emit_cdq(&mut self) {
+        self.code.push(0x99);
+    }
+
+    /// Emit `idiv r32` - Signed divide EDX:EAX by r32.
+    ///
+    /// Encoding: [REX] F7 /7 (idiv r/m32)
+    fn emit_idiv(&mut self, src: Reg) {
+        let src_enc = src.encoding();
+
+        // REX prefix if needed
+        if src.needs_rex() {
+            self.code.push(0x41); // REX.B
+        }
+
+        // Opcode: F7 (group 3 operations)
+        self.code.push(0xF7);
+
+        // ModR/M: mod=11, reg=7 (IDIV), r/m=src
+        let modrm = 0xC0 | (7 << 3) | (src_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit `test r32, r32`.
+    ///
+    /// Encoding: [REX] 85 /r (test r/m32, r32)
+    fn emit_test_rr(&mut self, src1: Reg, src2: Reg) {
+        let src1_enc = src1.encoding();
+        let src2_enc = src2.encoding();
+
+        // REX prefix if needed
+        if src2.needs_rex() || src1.needs_rex() {
+            let rex = 0x40
+                | if src2.needs_rex() { 0x04 } else { 0x00 }  // REX.R
+                | if src1.needs_rex() { 0x01 } else { 0x00 }; // REX.B
+            self.code.push(rex);
+        }
+
+        // Opcode: 85 (test r/m32, r32)
+        self.code.push(0x85);
+
+        // ModR/M: mod=11, reg=src2, r/m=src1
+        let modrm = 0xC0 | ((src2_enc & 7) << 3) | (src1_enc & 7);
+        self.code.push(modrm);
+    }
+
+    /// Emit a conditional jump with rel8 encoding.
+    ///
+    /// The opcode is the condition-specific byte (e.g., 0x74 for JZ, 0x75 for JNZ).
+    /// We use rel8 encoding since our jumps are short (within +-127 bytes).
+    fn emit_jcc(&mut self, opcode: u8, label: &str) {
+        // Emit opcode
+        self.code.push(opcode);
+
+        // Record fixup location and emit placeholder for rel8
+        let fixup_offset = self.code.len();
+        self.code.push(0x00); // Placeholder, will be patched
+
+        self.fixups.push(Fixup {
+            offset: fixup_offset,
+            label: label.to_string(),
         });
     }
 }
@@ -325,5 +560,102 @@ mod tests {
         assert_eq!(relocs[0].offset, 1); // After the opcode
         assert_eq!(relocs[0].symbol, "__rue_exit");
         assert_eq!(relocs[0].addend, -4);
+    }
+
+    // =========================================================================
+    // Arithmetic instruction tests
+    // =========================================================================
+
+    #[test]
+    fn test_add_eax_ecx() {
+        let code = emit_single(X86Inst::AddRR {
+            dst: Operand::Physical(Reg::Rax),
+            src: Operand::Physical(Reg::Rcx),
+        });
+        // add eax, ecx -> 01 C8
+        assert_eq!(code, vec![0x01, 0xC8]);
+    }
+
+    #[test]
+    fn test_add_r10d_r11d() {
+        let code = emit_single(X86Inst::AddRR {
+            dst: Operand::Physical(Reg::R10),
+            src: Operand::Physical(Reg::R11),
+        });
+        // add r10d, r11d -> 45 01 DA
+        assert_eq!(code, vec![0x45, 0x01, 0xDA]);
+    }
+
+    #[test]
+    fn test_sub_eax_ecx() {
+        let code = emit_single(X86Inst::SubRR {
+            dst: Operand::Physical(Reg::Rax),
+            src: Operand::Physical(Reg::Rcx),
+        });
+        // sub eax, ecx -> 29 C8
+        assert_eq!(code, vec![0x29, 0xC8]);
+    }
+
+    #[test]
+    fn test_imul_eax_ecx() {
+        let code = emit_single(X86Inst::ImulRR {
+            dst: Operand::Physical(Reg::Rax),
+            src: Operand::Physical(Reg::Rcx),
+        });
+        // imul eax, ecx -> 0F AF C1
+        assert_eq!(code, vec![0x0F, 0xAF, 0xC1]);
+    }
+
+    #[test]
+    fn test_neg_eax() {
+        let code = emit_single(X86Inst::Neg {
+            dst: Operand::Physical(Reg::Rax),
+        });
+        // neg eax -> F7 D8
+        assert_eq!(code, vec![0xF7, 0xD8]);
+    }
+
+    #[test]
+    fn test_neg_r10d() {
+        let code = emit_single(X86Inst::Neg {
+            dst: Operand::Physical(Reg::R10),
+        });
+        // neg r10d -> 41 F7 DA
+        assert_eq!(code, vec![0x41, 0xF7, 0xDA]);
+    }
+
+    #[test]
+    fn test_cdq() {
+        let code = emit_single(X86Inst::Cdq);
+        // cdq -> 99
+        assert_eq!(code, vec![0x99]);
+    }
+
+    #[test]
+    fn test_idiv_ecx() {
+        let code = emit_single(X86Inst::IdivR {
+            src: Operand::Physical(Reg::Rcx),
+        });
+        // idiv ecx -> F7 F9
+        assert_eq!(code, vec![0xF7, 0xF9]);
+    }
+
+    #[test]
+    fn test_idiv_r10d() {
+        let code = emit_single(X86Inst::IdivR {
+            src: Operand::Physical(Reg::R10),
+        });
+        // idiv r10d -> 41 F7 FA
+        assert_eq!(code, vec![0x41, 0xF7, 0xFA]);
+    }
+
+    #[test]
+    fn test_test_eax_eax() {
+        let code = emit_single(X86Inst::TestRR {
+            src1: Operand::Physical(Reg::Rax),
+            src2: Operand::Physical(Reg::Rax),
+        });
+        // test eax, eax -> 85 C0
+        assert_eq!(code, vec![0x85, 0xC0]);
     }
 }
