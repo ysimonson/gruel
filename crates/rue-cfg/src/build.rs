@@ -1,0 +1,731 @@
+//! AIR to CFG lowering.
+//!
+//! This module converts the structured control flow in AIR (Branch, Loop)
+//! into explicit basic blocks with terminators.
+
+use rue_air::{Air, AirInstData, AirRef, Type};
+
+use crate::inst::{BlockId, Cfg, CfgInst, CfgInstData, CfgValue, Terminator};
+
+/// Result of lowering an expression.
+struct ExprResult {
+    /// The value produced (if any - statements like Store don't produce values)
+    value: Option<CfgValue>,
+    /// Whether control flow continues after this expression
+    continuation: Continuation,
+}
+
+/// How control flow continues after an expression.
+enum Continuation {
+    /// Control continues normally (can add more instructions)
+    Continues,
+    /// Control flow diverged (return, break, continue) - no more instructions
+    Diverged,
+}
+
+/// Loop context for break/continue handling.
+struct LoopContext {
+    /// Block to jump to for continue (loop header)
+    header: BlockId,
+    /// Block to jump to for break (loop exit)
+    exit: BlockId,
+}
+
+/// Builder that converts AIR to CFG.
+pub struct CfgBuilder<'a> {
+    air: &'a Air,
+    cfg: Cfg,
+    /// Current block we're building
+    current_block: BlockId,
+    /// Stack of loop contexts for nested loops
+    loop_stack: Vec<LoopContext>,
+    /// Cache: maps AIR refs to CFG values (for already-lowered instructions)
+    value_cache: Vec<Option<CfgValue>>,
+}
+
+impl<'a> CfgBuilder<'a> {
+    /// Build a CFG from AIR.
+    pub fn build(
+        air: &'a Air,
+        num_locals: u32,
+        num_params: u32,
+        fn_name: &str,
+    ) -> Cfg {
+        let mut builder = CfgBuilder {
+            air,
+            cfg: Cfg::new(air.return_type(), num_locals, num_params, fn_name.to_string()),
+            current_block: BlockId(0),
+            loop_stack: Vec::new(),
+            value_cache: vec![None; air.len()],
+        };
+
+        // Create entry block
+        builder.current_block = builder.cfg.new_block();
+        builder.cfg.entry = builder.current_block;
+
+        // Find the root (should be Ret as last instruction)
+        if air.len() > 0 {
+            let root = AirRef::from_raw((air.len() - 1) as u32);
+            builder.lower_inst(root);
+        }
+
+        // Compute predecessor lists
+        builder.cfg.compute_predecessors();
+
+        builder.cfg
+    }
+
+    /// Lower an AIR instruction, returning its result.
+    fn lower_inst(&mut self, air_ref: AirRef) -> ExprResult {
+        // Check cache first
+        if let Some(cached) = self.value_cache[air_ref.as_u32() as usize] {
+            return ExprResult {
+                value: Some(cached),
+                continuation: Continuation::Continues,
+            };
+        }
+
+        let inst = self.air.get(air_ref);
+        let span = inst.span;
+        let ty = inst.ty;
+
+        match &inst.data.clone() {
+            AirInstData::Const(v) => {
+                let value = self.emit(CfgInstData::Const(*v), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::BoolConst(v) => {
+                let value = self.emit(CfgInstData::BoolConst(*v), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Param { index } => {
+                let value = self.emit(CfgInstData::Param { index: *index }, ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Add(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Add(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Sub(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Sub(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Mul(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Mul(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Div(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Div(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Mod(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Mod(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Eq(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Eq(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Ne(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Ne(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Lt(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Lt(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Gt(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Gt(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Le(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Le(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Ge(lhs, rhs) => {
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                let value = self.emit(CfgInstData::Ge(lhs_val, rhs_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::And(lhs, rhs) => {
+                // Short-circuit: if lhs is false, result is false
+                // We need to create blocks for this
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+
+                let rhs_block = self.cfg.new_block();
+                let join_block = self.cfg.new_block();
+
+                // Add block parameter for the result
+                let result_param = self.cfg.add_block_param(join_block, Type::Bool);
+
+                // Branch: if lhs is false, go to join with false; else evaluate rhs
+                let false_val = self.emit(CfgInstData::BoolConst(false), Type::Bool, span);
+                self.cfg.set_terminator(self.current_block, Terminator::Branch {
+                    cond: lhs_val,
+                    then_block: rhs_block,
+                    then_args: vec![],
+                    else_block: join_block,
+                    else_args: vec![false_val],
+                });
+
+                // In rhs_block, evaluate rhs and go to join
+                self.current_block = rhs_block;
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                self.cfg.set_terminator(self.current_block, Terminator::Goto {
+                    target: join_block,
+                    args: vec![rhs_val],
+                });
+
+                // Continue in join block
+                self.current_block = join_block;
+                self.cache(air_ref, result_param);
+                ExprResult {
+                    value: Some(result_param),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Or(lhs, rhs) => {
+                // Short-circuit: if lhs is true, result is true
+                let lhs_val = self.lower_inst(*lhs).value.unwrap();
+
+                let rhs_block = self.cfg.new_block();
+                let join_block = self.cfg.new_block();
+
+                // Add block parameter for the result
+                let result_param = self.cfg.add_block_param(join_block, Type::Bool);
+
+                // Branch: if lhs is true, go to join with true; else evaluate rhs
+                let true_val = self.emit(CfgInstData::BoolConst(true), Type::Bool, span);
+                self.cfg.set_terminator(self.current_block, Terminator::Branch {
+                    cond: lhs_val,
+                    then_block: join_block,
+                    then_args: vec![true_val],
+                    else_block: rhs_block,
+                    else_args: vec![],
+                });
+
+                // In rhs_block, evaluate rhs and go to join
+                self.current_block = rhs_block;
+                let rhs_val = self.lower_inst(*rhs).value.unwrap();
+                self.cfg.set_terminator(self.current_block, Terminator::Goto {
+                    target: join_block,
+                    args: vec![rhs_val],
+                });
+
+                // Continue in join block
+                self.current_block = join_block;
+                self.cache(air_ref, result_param);
+                ExprResult {
+                    value: Some(result_param),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Neg(operand) => {
+                let op_val = self.lower_inst(*operand).value.unwrap();
+                let value = self.emit(CfgInstData::Neg(op_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Not(operand) => {
+                let op_val = self.lower_inst(*operand).value.unwrap();
+                let value = self.emit(CfgInstData::Not(op_val), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Alloc { slot, init } => {
+                let init_result = self.lower_inst(*init);
+                // If init produces a value, use it; otherwise use a dummy Unit value
+                let init_val = init_result.value.unwrap_or_else(|| {
+                    self.emit(CfgInstData::Const(0), Type::Unit, span)
+                });
+                self.emit(CfgInstData::Alloc { slot: *slot, init: init_val }, Type::Unit, span);
+                ExprResult {
+                    value: None,
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Load { slot } => {
+                let value = self.emit(CfgInstData::Load { slot: *slot }, ty, span);
+                // Don't cache loads - they need to be re-evaluated
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Store { slot, value } => {
+                let val = self.lower_inst(*value).value.unwrap();
+                self.emit(CfgInstData::Store { slot: *slot, value: val }, Type::Unit, span);
+                ExprResult {
+                    value: None,
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Call { name, args } => {
+                let mut arg_vals = Vec::new();
+                for arg in args {
+                    arg_vals.push(self.lower_inst(*arg).value.unwrap());
+                }
+                let value = self.emit(
+                    CfgInstData::Call { name: name.clone(), args: arg_vals },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Intrinsic { name, args } => {
+                let mut arg_vals = Vec::new();
+                for arg in args {
+                    arg_vals.push(self.lower_inst(*arg).value.unwrap());
+                }
+                let value = self.emit(
+                    CfgInstData::Intrinsic { name: name.clone(), args: arg_vals },
+                    ty,
+                    span,
+                );
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::StructInit { struct_id, fields } => {
+                let mut field_vals = Vec::new();
+                for field in fields {
+                    field_vals.push(self.lower_inst(*field).value.unwrap());
+                }
+                let value = self.emit(
+                    CfgInstData::StructInit { struct_id: *struct_id, fields: field_vals },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::FieldGet { base, struct_id, field_index } => {
+                let base_val = self.lower_inst(*base).value.unwrap();
+                let value = self.emit(
+                    CfgInstData::FieldGet {
+                        base: base_val,
+                        struct_id: *struct_id,
+                        field_index: *field_index,
+                    },
+                    ty,
+                    span,
+                );
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::FieldSet { slot, struct_id, field_index, value } => {
+                let val = self.lower_inst(*value).value.unwrap();
+                self.emit(
+                    CfgInstData::FieldSet {
+                        slot: *slot,
+                        struct_id: *struct_id,
+                        field_index: *field_index,
+                        value: val,
+                    },
+                    Type::Unit,
+                    span,
+                );
+                ExprResult {
+                    value: None,
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Block { statements, value } => {
+                // Lower each statement
+                for stmt in statements {
+                    let result = self.lower_inst(*stmt);
+                    if matches!(result.continuation, Continuation::Diverged) {
+                        return ExprResult {
+                            value: None,
+                            continuation: Continuation::Diverged,
+                        };
+                    }
+                }
+
+                // Lower the final value
+                self.lower_inst(*value)
+            }
+
+            AirInstData::Branch { cond, then_value, else_value } => {
+                let cond_val = self.lower_inst(*cond).value.unwrap();
+
+                let then_block = self.cfg.new_block();
+                let else_block = self.cfg.new_block();
+                let join_block = self.cfg.new_block();
+
+                // Get types for then/else
+                let then_type = self.air.get(*then_value).ty;
+                let else_type = else_value.map(|e| self.air.get(e).ty);
+
+                // Branch to then/else
+                self.cfg.set_terminator(self.current_block, Terminator::Branch {
+                    cond: cond_val,
+                    then_block,
+                    then_args: vec![],
+                    else_block,
+                    else_args: vec![],
+                });
+
+                // Lower then branch
+                self.current_block = then_block;
+                let then_result = self.lower_inst(*then_value);
+                let then_exit_block = self.current_block;
+                let then_diverged = matches!(then_result.continuation, Continuation::Diverged);
+
+                // Lower else branch
+                self.current_block = else_block;
+                let else_result = if let Some(else_val) = else_value {
+                    self.lower_inst(*else_val)
+                } else {
+                    // No else - emit unit
+                    let unit_val = self.emit(CfgInstData::Const(0), Type::Unit, span);
+                    ExprResult {
+                        value: Some(unit_val),
+                        continuation: Continuation::Continues,
+                    }
+                };
+                let else_exit_block = self.current_block;
+                let else_diverged = matches!(else_result.continuation, Continuation::Diverged);
+
+                // If both branches diverge, mark join block as unreachable and diverge
+                if then_diverged && else_diverged {
+                    self.cfg.set_terminator(join_block, Terminator::Unreachable);
+                    return ExprResult {
+                        value: None,
+                        continuation: Continuation::Diverged,
+                    };
+                }
+
+                // Determine result type
+                let result_type = if then_type.is_never() {
+                    else_type.unwrap_or(Type::Unit)
+                } else {
+                    then_type
+                };
+
+                // Add block parameter for result (if we have a value type)
+                let result_param = if result_type != Type::Unit && result_type != Type::Never {
+                    Some(self.cfg.add_block_param(join_block, result_type))
+                } else {
+                    None
+                };
+
+                // Wire up non-divergent branches to join
+                if !then_diverged {
+                    let args = if let Some(val) = then_result.value {
+                        if result_param.is_some() { vec![val] } else { vec![] }
+                    } else {
+                        vec![]
+                    };
+                    self.cfg.set_terminator(then_exit_block, Terminator::Goto {
+                        target: join_block,
+                        args,
+                    });
+                }
+
+                if !else_diverged {
+                    let args = if let Some(val) = else_result.value {
+                        if result_param.is_some() { vec![val] } else { vec![] }
+                    } else {
+                        vec![]
+                    };
+                    self.cfg.set_terminator(else_exit_block, Terminator::Goto {
+                        target: join_block,
+                        args,
+                    });
+                }
+
+                self.current_block = join_block;
+
+                if let Some(param) = result_param {
+                    self.cache(air_ref, param);
+                }
+
+                ExprResult {
+                    value: result_param,
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Loop { cond, body } => {
+                let header_block = self.cfg.new_block();
+                let body_block = self.cfg.new_block();
+                let exit_block = self.cfg.new_block();
+
+                // Jump to header
+                self.cfg.set_terminator(self.current_block, Terminator::Goto {
+                    target: header_block,
+                    args: vec![],
+                });
+
+                // Push loop context
+                self.loop_stack.push(LoopContext {
+                    header: header_block,
+                    exit: exit_block,
+                });
+
+                // Lower condition in header
+                self.current_block = header_block;
+                let cond_val = self.lower_inst(*cond).value.unwrap();
+
+                // Branch: if true go to body, if false exit
+                self.cfg.set_terminator(self.current_block, Terminator::Branch {
+                    cond: cond_val,
+                    then_block: body_block,
+                    then_args: vec![],
+                    else_block: exit_block,
+                    else_args: vec![],
+                });
+
+                // Lower body
+                self.current_block = body_block;
+                let body_result = self.lower_inst(*body);
+
+                // After body, go back to header (unless diverged)
+                if !matches!(body_result.continuation, Continuation::Diverged) {
+                    self.cfg.set_terminator(self.current_block, Terminator::Goto {
+                        target: header_block,
+                        args: vec![],
+                    });
+                }
+
+                self.loop_stack.pop();
+
+                // Continue after loop
+                self.current_block = exit_block;
+
+                ExprResult {
+                    value: None,
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::Break => {
+                let ctx = self.loop_stack.last().expect("break outside loop");
+                self.cfg.set_terminator(self.current_block, Terminator::Goto {
+                    target: ctx.exit,
+                    args: vec![],
+                });
+
+                ExprResult {
+                    value: None,
+                    continuation: Continuation::Diverged,
+                }
+            }
+
+            AirInstData::Continue => {
+                let ctx = self.loop_stack.last().expect("continue outside loop");
+                self.cfg.set_terminator(self.current_block, Terminator::Goto {
+                    target: ctx.header,
+                    args: vec![],
+                });
+
+                ExprResult {
+                    value: None,
+                    continuation: Continuation::Diverged,
+                }
+            }
+
+            AirInstData::Ret(value) => {
+                let val = self.lower_inst(*value).value.unwrap();
+                self.cfg.set_terminator(self.current_block, Terminator::Return { value: val });
+
+                ExprResult {
+                    value: None,
+                    continuation: Continuation::Diverged,
+                }
+            }
+        }
+    }
+
+    /// Emit an instruction in the current block.
+    fn emit(&mut self, data: CfgInstData, ty: Type, span: rue_span::Span) -> CfgValue {
+        self.cfg.add_inst_to_block(self.current_block, CfgInst { data, ty, span })
+    }
+
+    /// Cache a value for an AIR ref.
+    fn cache(&mut self, air_ref: AirRef, value: CfgValue) {
+        self.value_cache[air_ref.as_u32() as usize] = Some(value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rue_air::Sema;
+    use rue_intern::Interner;
+    use rue_lexer::Lexer;
+    use rue_parser::Parser;
+    use rue_rir::AstGen;
+
+    fn build_cfg(source: &str) -> Cfg {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let ast = parser.parse().unwrap();
+
+        let mut interner = Interner::new();
+        let astgen = AstGen::new(&ast, &mut interner);
+        let rir = astgen.generate();
+
+        let mut sema = Sema::new(&rir, &interner);
+        let functions = sema.analyze_all().unwrap();
+
+        let func = &functions[0];
+        CfgBuilder::build(&func.air, func.num_locals, func.num_param_slots, &func.name)
+    }
+
+    #[test]
+    fn test_simple_return() {
+        let cfg = build_cfg("fn main() -> i32 { 42 }");
+
+        assert_eq!(cfg.block_count(), 1);
+        assert_eq!(cfg.fn_name(), "main");
+
+        let entry = cfg.get_block(cfg.entry);
+        assert!(matches!(entry.terminator, Terminator::Return { .. }));
+    }
+
+    #[test]
+    fn test_if_else() {
+        let cfg = build_cfg("fn main() -> i32 { if true { 1 } else { 2 } }");
+
+        // Should have: entry, then, else, join
+        assert!(cfg.block_count() >= 3);
+    }
+
+    #[test]
+    fn test_while_loop() {
+        let cfg = build_cfg("fn main() -> i32 { let mut x = 0; while x < 10 { x = x + 1; } x }");
+
+        // Should have: entry, header, body, exit, and possibly join blocks
+        assert!(cfg.block_count() >= 3);
+    }
+
+    #[test]
+    fn test_short_circuit_and() {
+        let cfg = build_cfg("fn main() -> i32 { if true && false { 1 } else { 0 } }");
+
+        // && creates extra blocks for short-circuit evaluation
+        assert!(cfg.block_count() >= 3);
+    }
+}
