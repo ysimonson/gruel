@@ -314,7 +314,7 @@ fn compile_x86_64(state: &CompileState, options: &CompileOptions) -> CompileResu
             &state.struct_defs,
             &state.array_types,
             &state.strings,
-        );
+        )?;
 
         // Build object file for this function
         let mut obj_builder = ObjectBuilder::new(options.target, &func.analyzed.name)
@@ -459,7 +459,7 @@ fn compile_aarch64(state: &CompileState, options: &CompileOptions) -> CompileRes
             &state.struct_defs,
             &state.array_types,
             &state.strings,
-        );
+        )?;
 
         let mut obj_builder = ObjectBuilder::new(options.target, &func.analyzed.name)
             .code(machine_code.code)
@@ -610,7 +610,7 @@ pub fn generate_allocated_mir(
     array_types: &[ArrayTypeDef],
     strings: &[String],
     target: Target,
-) -> Mir {
+) -> CompileResult<Mir> {
     let num_locals = cfg.num_locals();
     let num_params = cfg.num_params();
     let existing_slots = num_locals + num_params;
@@ -623,9 +623,9 @@ pub fn generate_allocated_mir(
 
             // Allocate physical registers
             let (mir, _num_spills, _used_callee_saved) =
-                rue_codegen::x86_64::RegAlloc::new(mir, existing_slots).allocate_with_spills();
+                rue_codegen::x86_64::RegAlloc::new(mir, existing_slots).allocate_with_spills()?;
 
-            Mir::X86_64(mir)
+            Ok(Mir::X86_64(mir))
         }
         Arch::Aarch64 => {
             // Lower CFG to Aarch64Mir with virtual registers
@@ -634,9 +634,9 @@ pub fn generate_allocated_mir(
 
             // Allocate physical registers
             let (mir, _num_spills, _used_callee_saved) =
-                rue_codegen::aarch64::RegAlloc::new(mir, existing_slots).allocate_with_spills();
+                rue_codegen::aarch64::RegAlloc::new(mir, existing_slots).allocate_with_spills()?;
 
-            Mir::Aarch64(mir)
+            Ok(Mir::Aarch64(mir))
         }
     }
 }
