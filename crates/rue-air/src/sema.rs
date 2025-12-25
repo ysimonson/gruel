@@ -1092,9 +1092,7 @@ impl<'a> Sema<'a> {
                 if let Some(move_info) = ctx.moved_vars.get(name) {
                     let name_str = self.interner.get(*name);
                     return Err(CompileError::new(
-                        ErrorKind::UseAfterMove {
-                            var_name: name_str.to_string(),
-                        },
+                        ErrorKind::UseAfterMove(name_str.to_string()),
                         inst.span,
                     )
                     .with_label("value moved here", move_info.moved_at));
@@ -1127,9 +1125,7 @@ impl<'a> Sema<'a> {
             // Check if this variable has been moved
             if let Some(move_info) = ctx.moved_vars.get(name) {
                 return Err(CompileError::new(
-                    ErrorKind::UseAfterMove {
-                        var_name: name_str.to_string(),
-                    },
+                    ErrorKind::UseAfterMove(name_str.to_string()),
                     inst.span,
                 )
                 .with_label("value moved here", move_info.moved_at));
@@ -1889,7 +1885,7 @@ impl<'a> Sema<'a> {
                 ty: _,
                 init,
             } => {
-                // Analyze the initializer
+                // Analyze the initializer (move checking happens in analyze_inst for VarRef)
                 let init_result = self.analyze_inst(air, *init, ctx)?;
 
                 // The variable type is determined by HM inference (considering any annotation)
@@ -1964,9 +1960,7 @@ impl<'a> Sema<'a> {
                     if let Some(move_info) = ctx.moved_vars.get(name) {
                         let name_str = self.interner.get(*name);
                         return Err(CompileError::new(
-                            ErrorKind::UseAfterMove {
-                                var_name: name_str.to_string(),
-                            },
+                            ErrorKind::UseAfterMove(name_str.to_string()),
                             inst.span,
                         )
                         .with_label("value moved here", move_info.moved_at));
@@ -2009,9 +2003,7 @@ impl<'a> Sema<'a> {
                 // Check if this variable has been moved
                 if let Some(move_info) = ctx.moved_vars.get(name) {
                     return Err(CompileError::new(
-                        ErrorKind::UseAfterMove {
-                            var_name: name_str.to_string(),
-                        },
+                        ErrorKind::UseAfterMove(name_str.to_string()),
                         inst.span,
                     )
                     .with_label("value moved here", move_info.moved_at));
@@ -2258,7 +2250,7 @@ impl<'a> Sema<'a> {
                 let param_types = fn_info.param_types.clone();
                 let return_type = fn_info.return_type;
 
-                // Analyze arguments (types already determined by HM inference)
+                // Analyze arguments (move checking happens in analyze_inst for VarRef)
                 let mut arg_refs = Vec::new();
                 for arg in args.iter() {
                     let arg_result = self.analyze_inst(air, *arg, ctx)?;
@@ -2490,9 +2482,7 @@ impl<'a> Sema<'a> {
                             // Check if this variable has been moved
                             if let Some(move_info) = ctx.moved_vars.get(name) {
                                 return Err(CompileError::new(
-                                    ErrorKind::UseAfterMove {
-                                        var_name: name_str.to_string(),
-                                    },
+                                    ErrorKind::UseAfterMove(name_str.to_string()),
                                     inst.span,
                                 )
                                 .with_label("value moved here", move_info.moved_at));
@@ -2813,9 +2803,7 @@ impl<'a> Sema<'a> {
                         // Check if this variable has been moved
                         if let Some(move_info) = ctx.moved_vars.get(name) {
                             return Err(CompileError::new(
-                                ErrorKind::UseAfterMove {
-                                    var_name: name_str.to_string(),
-                                },
+                                ErrorKind::UseAfterMove(name_str.to_string()),
                                 inst.span,
                             )
                             .with_label("value moved here", move_info.moved_at));

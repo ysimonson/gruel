@@ -254,6 +254,8 @@ pub enum ErrorKind {
     UndefinedFunction(String),
     AssignToImmutable(String),
     UnknownType(String),
+    /// Use of a value after it has been moved.
+    UseAfterMove(String),
     TypeMismatch {
         expected: String,
         found: String,
@@ -391,13 +393,11 @@ pub enum ErrorKind {
         what: String,
     },
 
-    // Move semantics errors
-    UseAfterMove {
-        var_name: String,
-    },
-
     // Internal compiler errors (bugs in the compiler itself)
     InternalError(String),
+
+    // Codegen internal errors (compiler bugs)
+    InternalCodegenError(String),
 }
 
 impl CompileError {
@@ -508,6 +508,9 @@ impl fmt::Display for ErrorKind {
                 write!(f, "cannot assign to immutable variable '{}'", name)
             }
             ErrorKind::UnknownType(name) => write!(f, "unknown type '{}'", name),
+            ErrorKind::UseAfterMove(name) => {
+                write!(f, "use of moved value '{}'", name)
+            }
             ErrorKind::TypeMismatch { expected, found } => {
                 write!(f, "type mismatch: expected {}, found {}", expected, found)
             }
@@ -749,11 +752,11 @@ impl fmt::Display for ErrorKind {
             ErrorKind::PreviewFeatureRequired { feature, what } => {
                 write!(f, "{} requires preview feature `{}`", what, feature.name())
             }
-            ErrorKind::UseAfterMove { var_name } => {
-                write!(f, "use of moved value '{}'", var_name)
-            }
             ErrorKind::InternalError(msg) => {
                 write!(f, "internal compiler error: {}", msg)
+            }
+            ErrorKind::InternalCodegenError(msg) => {
+                write!(f, "internal codegen error: {}", msg)
             }
         }
     }
