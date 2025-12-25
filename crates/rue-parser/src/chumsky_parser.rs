@@ -5,10 +5,10 @@
 
 use crate::ast::{
     ArrayLitExpr, AssignStatement, AssignTarget, AssocFnCallExpr, Ast, BinaryExpr, BinaryOp,
-    BlockExpr, BoolLit, BreakExpr, CallExpr, ContinueExpr, Directive, DirectiveArg, EnumDecl,
-    EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, Function, Ident, IfExpr, ImplBlock,
-    IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr,
-    MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param, ParenExpr, PathExpr,
+    BlockExpr, BoolLit, BreakExpr, CallExpr, ContinueExpr, Directive, DirectiveArg, DropFn,
+    EnumDecl, EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, Function, Ident, IfExpr,
+    ImplBlock, IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern, LetStatement,
+    LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param, ParenExpr, PathExpr,
     PathPattern, Pattern, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit, StructDecl,
     StructLitExpr, TypeExpr, UnaryExpr, UnaryOp, UnitLit, WhileExpr,
 };
@@ -1396,7 +1396,33 @@ where
         })
 }
 
-/// Parser for top-level items (functions, structs, enums, and impl blocks)
+/// Parser for drop fn declarations: drop fn TypeName(self) { body }
+fn drop_fn_parser<'src, I>()
+-> impl Parser<'src, I, DropFn, extra::Err<Rich<'src, TokenKind>>> + Clone
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    let expr = expr_parser();
+
+    // Parse self parameter
+    let self_param = just(TokenKind::SelfValue).map_with(|_, e| SelfParam {
+        span: to_rue_span(e.span()),
+    });
+
+    just(TokenKind::Drop)
+        .ignore_then(just(TokenKind::Fn))
+        .ignore_then(ident_parser())
+        .then(self_param.delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)))
+        .then(block_parser(expr))
+        .map_with(|((type_name, self_param), body), e| DropFn {
+            type_name,
+            self_param,
+            body,
+            span: to_rue_span(e.span()),
+        })
+}
+
+/// Parser for top-level items (functions, structs, enums, impl blocks, and drop fns)
 fn item_parser<'src, I>() -> impl Parser<'src, I, Item, extra::Err<Rich<'src, TokenKind>>> + Clone
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -1406,6 +1432,7 @@ where
         struct_parser().map(Item::Struct),
         enum_parser().map(Item::Enum),
         impl_parser().map(Item::Impl),
+        drop_fn_parser().map(Item::DropFn),
     ))
 }
 
@@ -1529,6 +1556,7 @@ mod tests {
             Item::Struct(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Enum(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Impl(_) => panic!("parse_expr helper should only be used with functions"),
+            Item::DropFn(_) => panic!("parse_expr helper should only be used with functions"),
         }
     }
 
@@ -1555,6 +1583,7 @@ mod tests {
             Item::Struct(_) => panic!("expected Function"),
             Item::Enum(_) => panic!("expected Function"),
             Item::Impl(_) => panic!("expected Function"),
+            Item::DropFn(_) => panic!("expected Function"),
         }
     }
 
@@ -1621,6 +1650,7 @@ mod tests {
             Item::Struct(_) => panic!("expected Function"),
             Item::Enum(_) => panic!("expected Function"),
             Item::Impl(_) => panic!("expected Function"),
+            Item::DropFn(_) => panic!("expected Function"),
         }
     }
 
