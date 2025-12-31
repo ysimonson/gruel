@@ -161,6 +161,7 @@ pub fn validate_runtime() -> Result<(), String> {
 }
 
 // Re-export commonly used types
+pub use lasso::{Spur, ThreadedRodeo};
 pub use rue_air::{Air, AnalyzedFunction, ArrayTypeDef, Sema, SemaOutput, StructDef, Type};
 pub use rue_cfg::{Cfg, CfgBuilder, CfgOutput, OptLevel};
 pub use rue_codegen::{
@@ -171,7 +172,6 @@ pub use rue_error::{
     CompileError, CompileErrors, CompileResult, CompileWarning, Diagnostic, ErrorKind,
     MultiErrorResult, PreviewFeature, PreviewFeatures, WarningKind,
 };
-pub use rue_intern::{Interner, Symbol};
 pub use rue_lexer::{Lexer, Token, TokenKind};
 pub use rue_linker::{Archive, CodeRelocation, Linker, ObjectBuilder, ObjectFile, RelocationType};
 pub use rue_parser::{Ast, Expr, Function, Parser};
@@ -257,7 +257,7 @@ pub struct CompileState {
     /// The abstract syntax tree.
     pub ast: Ast,
     /// String interner used during compilation.
-    pub interner: Interner,
+    pub interner: ThreadedRodeo,
     /// The untyped IR (RIR).
     pub rir: Rir,
     /// Analyzed functions with typed IR and control flow graphs.
@@ -341,7 +341,10 @@ pub fn compile_frontend_with_options(
 ///
 /// Uses default optimization level (O0) and no preview features. For custom options,
 /// use [`compile_frontend_from_ast_with_options`].
-pub fn compile_frontend_from_ast(ast: Ast, interner: Interner) -> MultiErrorResult<CompileState> {
+pub fn compile_frontend_from_ast(
+    ast: Ast,
+    interner: ThreadedRodeo,
+) -> MultiErrorResult<CompileState> {
     compile_frontend_from_ast_with_options(
         ast,
         interner,
@@ -360,7 +363,7 @@ pub fn compile_frontend_from_ast(ast: Ast, interner: Interner) -> MultiErrorResu
 /// first error, allowing users to see all issues at once.
 pub fn compile_frontend_from_ast_with_options(
     ast: Ast,
-    interner: Interner,
+    interner: ThreadedRodeo,
     opt_level: OptLevel,
     preview_features: &PreviewFeatures,
 ) -> MultiErrorResult<CompileState> {
@@ -904,7 +907,7 @@ pub fn generate_mir(
     struct_defs: &[StructDef],
     array_types: &[ArrayTypeDef],
     strings: &[String],
-    interner: &Interner,
+    interner: &ThreadedRodeo,
     target: Target,
 ) -> Mir {
     match target.arch() {
@@ -942,7 +945,7 @@ pub fn generate_allocated_mir(
     struct_defs: &[StructDef],
     array_types: &[ArrayTypeDef],
     strings: &[String],
-    interner: &Interner,
+    interner: &ThreadedRodeo,
     target: Target,
 ) -> CompileResult<Mir> {
     let num_locals = cfg.num_locals();
@@ -998,7 +1001,7 @@ pub fn generate_liveness_info(
     struct_defs: &[StructDef],
     array_types: &[ArrayTypeDef],
     strings: &[String],
-    interner: &Interner,
+    interner: &ThreadedRodeo,
     target: Target,
 ) -> rue_codegen::LivenessDebugInfo {
     match target.arch() {
@@ -1038,7 +1041,7 @@ pub fn generate_lowering_info(
     struct_defs: &[StructDef],
     array_types: &[ArrayTypeDef],
     strings: &[String],
-    interner: &Interner,
+    interner: &ThreadedRodeo,
     target: Target,
 ) -> rue_codegen::LoweringDebugInfo {
     match target.arch() {
@@ -1080,7 +1083,7 @@ pub fn generate_emitted_asm(
     struct_defs: &[StructDef],
     array_types: &[ArrayTypeDef],
     strings: &[String],
-    interner: &Interner,
+    interner: &ThreadedRodeo,
     target: Target,
 ) -> CompileResult<String> {
     match target.arch() {
@@ -1117,7 +1120,7 @@ pub fn generate_regalloc_info(
     struct_defs: &[StructDef],
     array_types: &[ArrayTypeDef],
     strings: &[String],
-    interner: &Interner,
+    interner: &ThreadedRodeo,
     target: Target,
 ) -> CompileResult<String> {
     match target.arch() {
@@ -1157,7 +1160,7 @@ pub struct AirOutput {
     /// The abstract syntax tree.
     pub ast: Ast,
     /// String interner used during compilation.
-    pub interner: Interner,
+    pub interner: ThreadedRodeo,
     /// The untyped IR (RIR).
     pub rir: Rir,
     /// Analyzed functions with typed IR.
