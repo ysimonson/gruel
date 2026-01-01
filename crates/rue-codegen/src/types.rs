@@ -223,6 +223,8 @@ fn type_name(ty: Type, type_pool: &TypeInternPool, array_types: &[ArrayTypeDef])
         Type::Unit => "unit".to_string(),
         Type::Never => "never".to_string(),
         Type::Error => "error".to_string(),
+        // ComptimeType only exists at compile time, no runtime representation
+        Type::ComptimeType => "comptime_type".to_string(),
         Type::Enum(enum_id) => format!("enum{}", enum_id.0),
         // Struct types include builtin types like String
         Type::Struct(struct_id) => type_pool.struct_def(struct_id).name.clone(),
