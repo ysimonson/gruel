@@ -3076,7 +3076,7 @@ fn analyze_inst_for_projection_ctx(
             let air_ref = air.add_inst(AirInst {
                 data: AirInstData::IndexGet {
                     base: base_result.air_ref,
-                    array_type_id,
+                    array_type: base_type,
                     index: index_result.air_ref,
                 },
                 ty: elem_type,
@@ -3503,7 +3503,6 @@ fn analyze_array_init_ctx(
 
     let air_ref = air.add_inst(AirInst {
         data: AirInstData::ArrayInit {
-            array_type_id,
             elems_start,
             elems_len,
         },
@@ -3588,7 +3587,7 @@ fn analyze_index_get_ctx(
     let air_ref = air.add_inst(AirInst {
         data: AirInstData::IndexGet {
             base: base_result.air_ref,
-            array_type_id,
+            array_type: base_type,
             index: index_result.air_ref,
         },
         ty: elem_type,
@@ -3766,7 +3765,7 @@ fn analyze_index_set_ctx(
         air.add_inst(AirInst {
             data: AirInstData::ParamIndexSet {
                 param_slot: slot,
-                array_type_id,
+                array_type: base_type,
                 index: index_result.air_ref,
                 value: value_result.air_ref,
             },
@@ -3777,7 +3776,7 @@ fn analyze_index_set_ctx(
         air.add_inst(AirInst {
             data: AirInstData::IndexSet {
                 slot,
-                array_type_id,
+                array_type: base_type,
                 index: index_result.air_ref,
                 value: value_result.air_ref,
             },
@@ -5208,7 +5207,7 @@ impl<'a> Sema<'a> {
             let air_ref = air.add_inst(AirInst {
                 data: AirInstData::IndexGet {
                     base: base_result.air_ref,
-                    array_type_id,
+                    array_type: base_type,
                     index: index_result.air_ref,
                 },
                 ty: element_type,
@@ -5871,7 +5870,7 @@ impl<'a> Sema<'a> {
             air.add_inst(AirInst {
                 data: AirInstData::ParamIndexSet {
                     param_slot: slot,
-                    array_type_id,
+                    array_type: base_type,
                     index: index_result.air_ref,
                     value: value_result.air_ref,
                 },
@@ -5882,7 +5881,7 @@ impl<'a> Sema<'a> {
             air.add_inst(AirInst {
                 data: AirInstData::IndexSet {
                     slot,
-                    array_type_id,
+                    array_type: base_type,
                     index: index_result.air_ref,
                     value: value_result.air_ref,
                 },
