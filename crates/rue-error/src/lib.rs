@@ -250,6 +250,9 @@ pub enum PreviewFeature {
     /// Compile-time execution (comptime).
     /// See ADR-0025 for the full design.
     Comptime,
+    /// Module system with @import and pub visibility.
+    /// See ADR-0026 for the full design.
+    Modules,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -272,6 +275,7 @@ impl PreviewFeature {
             PreviewFeature::TestInfra => "test_infra",
             PreviewFeature::AffineMvs => "affine_mvs",
             PreviewFeature::Comptime => "comptime",
+            PreviewFeature::Modules => "modules",
         }
     }
 
@@ -282,6 +286,7 @@ impl PreviewFeature {
             PreviewFeature::TestInfra => "ADR-0005",
             PreviewFeature::AffineMvs => "ADR-0008",
             PreviewFeature::Comptime => "ADR-0025",
+            PreviewFeature::Modules => "ADR-0026",
         }
     }
 
@@ -291,6 +296,7 @@ impl PreviewFeature {
             PreviewFeature::TestInfra,
             PreviewFeature::AffineMvs,
             PreviewFeature::Comptime,
+            PreviewFeature::Modules,
         ]
     }
 
@@ -316,6 +322,7 @@ impl std::str::FromStr for PreviewFeature {
             "test_infra" => Ok(PreviewFeature::TestInfra),
             "affine_mvs" => Ok(PreviewFeature::AffineMvs),
             "comptime" => Ok(PreviewFeature::Comptime),
+            "modules" => Ok(PreviewFeature::Modules),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1791,7 +1798,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra, affine_mvs, comptime");
+        assert_eq!(names, "test_infra, affine_mvs, comptime, modules");
     }
 
     // ========================================================================

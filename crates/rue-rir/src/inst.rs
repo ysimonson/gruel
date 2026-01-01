@@ -941,6 +941,7 @@ impl Rir {
             InstData::FnDecl {
                 directives_start,
                 directives_len,
+                is_pub,
                 name,
                 params_start,
                 params_len,
@@ -950,6 +951,7 @@ impl Rir {
             } => InstData::FnDecl {
                 directives_start: *directives_start + extra_offset,
                 directives_len: *directives_len,
+                is_pub: *is_pub,
                 name: *name,
                 params_start: *params_start + extra_offset,
                 params_len: *params_len,
@@ -984,6 +986,7 @@ impl Rir {
             InstData::StructDecl {
                 directives_start,
                 directives_len,
+                is_pub,
                 is_linear,
                 name,
                 fields_start,
@@ -991,6 +994,7 @@ impl Rir {
             } => InstData::StructDecl {
                 directives_start: *directives_start + extra_offset,
                 directives_len: *directives_len,
+                is_pub: *is_pub,
                 is_linear: *is_linear,
                 name: *name,
                 fields_start: *fields_start + extra_offset,
@@ -1017,10 +1021,12 @@ impl Rir {
 
             // Enum operations
             InstData::EnumDecl {
+                is_pub,
                 name,
                 variants_start,
                 variants_len,
             } => InstData::EnumDecl {
+                is_pub: *is_pub,
                 name: *name,
                 variants_start: *variants_start + extra_offset,
                 variants_len: *variants_len,
@@ -1377,6 +1383,8 @@ pub enum InstData {
         directives_start: u32,
         /// Number of directives
         directives_len: u32,
+        /// Whether this function is public (requires --preview modules)
+        is_pub: bool,
         name: Spur,
         /// Index into extra data where params start
         params_start: u32,
@@ -1481,6 +1489,8 @@ pub enum InstData {
         directives_start: u32,
         /// Number of directives
         directives_len: u32,
+        /// Whether this struct is public (requires --preview modules)
+        is_pub: bool,
         /// Whether this struct is a linear type (must be consumed)
         is_linear: bool,
         /// Struct name
@@ -1524,6 +1534,8 @@ pub enum InstData {
     /// Enum type declaration
     /// Variants are stored in the extra array using add_symbols/get_symbols.
     EnumDecl {
+        /// Whether this enum is public (requires --preview modules)
+        is_pub: bool,
         /// Enum name
         name: Spur,
         /// Index into extra data where variants start
@@ -1749,6 +1761,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::FnDecl {
                     directives_start: _,
                     directives_len: _,
+                    is_pub,
                     name,
                     params_start,
                     params_len,
@@ -1756,6 +1769,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     body,
                     has_self,
                 } => {
+                    let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(&*name);
                     let ret_str = self.interner.resolve(&*return_type);
                     let self_str = if *has_self { "self, " } else { "" };
@@ -1778,7 +1792,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         .collect();
                     writeln!(
                         out,
-                        "fn {}({}{}) -> {} {{",
+                        "{}fn {}({}{}) -> {} {{",
+                        pub_str,
                         name_str,
                         self_str,
                         params_str.join(", "),
@@ -1855,11 +1870,13 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::StructDecl {
                     directives_start,
                     directives_len,
+                    is_pub,
                     is_linear,
                     name,
                     fields_start,
                     fields_len,
                 } => {
+                    let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(&*name);
                     let fields = self.rir.get_field_decls(*fields_start, *fields_len);
                     let fields_str: Vec<String> = fields
@@ -1885,8 +1902,9 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     };
                     writeln!(
                         out,
-                        "{}{}struct {} {{ {} }}",
+                        "{}{}{}struct {} {{ {} }}",
                         directives_str,
+                        pub_str,
                         linear_str,
                         name_str,
                         fields_str.join(", ")
@@ -1930,17 +1948,26 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
 
                 // Enums
                 InstData::EnumDecl {
+                    is_pub,
                     name,
                     variants_start,
                     variants_len,
                 } => {
+                    let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(&*name);
                     let variants = self.rir.get_symbols(*variants_start, *variants_len);
                     let variants_str: Vec<String> = variants
                         .iter()
                         .map(|v| self.interner.resolve(&*v).to_string())
                         .collect();
-                    writeln!(out, "enum {} {{ {} }}", name_str, variants_str.join(", ")).unwrap();
+                    writeln!(
+                        out,
+                        "{}enum {} {{ {} }}",
+                        pub_str,
+                        name_str,
+                        variants_str.join(", ")
+                    )
+                    .unwrap();
                 }
                 InstData::EnumVariant { type_name, variant } => {
                     writeln!(
@@ -2523,6 +2550,7 @@ mod tests {
             data: InstData::FnDecl {
                 directives_start,
                 directives_len,
+                is_pub: false,
                 name,
                 params_start,
                 params_len,
@@ -2556,6 +2584,7 @@ mod tests {
             data: InstData::FnDecl {
                 directives_start,
                 directives_len,
+                is_pub: false,
                 name,
                 params_start,
                 params_len,
@@ -2614,6 +2643,7 @@ mod tests {
             data: InstData::FnDecl {
                 directives_start,
                 directives_len,
+                is_pub: false,
                 name,
                 params_start,
                 params_len,
@@ -2921,6 +2951,7 @@ mod tests {
             data: InstData::StructDecl {
                 directives_start,
                 directives_len,
+                is_pub: false,
                 is_linear: false,
                 name,
                 fields_start,
@@ -2953,6 +2984,7 @@ mod tests {
             data: InstData::StructDecl {
                 directives_start,
                 directives_len,
+                is_pub: false,
                 is_linear: false,
                 name,
                 fields_start,
@@ -3054,6 +3086,7 @@ mod tests {
 
         rir.add_inst(Inst {
             data: InstData::EnumDecl {
+                is_pub: false,
                 name,
                 variants_start,
                 variants_len,
@@ -3181,6 +3214,7 @@ mod tests {
             data: InstData::FnDecl {
                 directives_start,
                 directives_len,
+                is_pub: false,
                 name: method_name,
                 params_start,
                 params_len,
@@ -3760,6 +3794,7 @@ mod tests {
             data: InstData::FnDecl {
                 directives_start: dirs_start,
                 directives_len: dirs_len,
+                is_pub: false,
                 name: main_name,
                 params_start,
                 params_len,
@@ -3784,6 +3819,7 @@ mod tests {
             data: InstData::FnDecl {
                 directives_start: dirs_start2,
                 directives_len: dirs_len2,
+                is_pub: false,
                 name: helper_name,
                 params_start: params_start2,
                 params_len: params_len2,
