@@ -223,7 +223,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:45", cat="normative") }}
 
-Calling `.handle()` on a handle type consumes the receiver and returns a new owned value. Both the original and the returned value are valid after the call.
+Calling `.handle()` on a handle type does not consume the receiver and returns a new owned value. Both the original and the returned value are valid after the call.
 
 {{ rule(id="3.8:46", cat="informative") }}
 
