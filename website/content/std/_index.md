@@ -71,4 +71,4 @@ The Rue standard library follows several design principles:
 3. **File = module** - Each `.rue` file is a module; the filesystem is the source of truth
 4. **Simple visibility** - Just `pub` (public) or nothing (private)
 
-For more details on the module system, see [ADR-0026: Module System](https://github.com/rue-language/rue/blob/main/docs/designs/0026-module-system.md).
+For more details on the module system, see [ADR-0026: Module System](https://github.com/rue-language/rue/blob/trunk/docs/designs/0026-module-system.md).
