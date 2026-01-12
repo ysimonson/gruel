@@ -1464,6 +1464,7 @@ fn run_type_inference_with_context(
         &ctx.inference_ctx.struct_types,
         &ctx.inference_ctx.enum_types,
         &ctx.inference_ctx.method_sigs,
+        &ctx.type_pool,
     );
 
     // Build parameter map for constraint context.
@@ -6725,6 +6726,7 @@ impl<'a> Sema<'a> {
             &infer_ctx.struct_types,
             &infer_ctx.enum_types,
             &infer_ctx.method_sigs,
+            &self.type_pool,
             type_subst,
         );
 
