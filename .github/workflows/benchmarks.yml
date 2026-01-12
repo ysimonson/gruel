@@ -90,7 +90,7 @@ jobs:
           cat /tmp/results.json
           echo ""
           echo "=== Validation ==="
-          python3 -c "
+          python3 << 'EOF'
           import json
           import sys
 
@@ -99,7 +99,7 @@ jobs:
 
           benchmarks = data.get('benchmarks', [])
           print(f'Platform: ${{ matrix.platform }}')
-          print(f'Commit: {data.get(\"commit\", \"unknown\")}')
+          print(f'Commit: {data.get("commit", "unknown")}')
           print(f'Benchmarks collected: {len(benchmarks)}')
 
           if not benchmarks:
@@ -112,7 +112,7 @@ jobs:
               print(f'  - {name}: {mean:.2f}ms')
 
           print('Validation passed!')
-          "
+          EOF
 
       - name: Upload benchmark results as artifact
         uses: actions/upload-artifact@v4
