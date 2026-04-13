@@ -8,40 +8,165 @@ argument-hint: <bd-id>
 
 Implement the feature tracked by: $ARGUMENTS
 
-## Instructions
+## Prerequisites
 
-Read and follow `docs/process/implementation.md` for the full implementation workflow.
+Before implementing:
+1. A plan exists (bd issue, and ADR for large features)
+2. You understand what needs to be done
+3. The work fits in a single session (split if not)
 
-Key references:
-- `docs/process/implementation.md` - Implementation workflow
-- `docs/process/code-review.md` - Review standards
-- `docs/designs/` - ADRs for large features
+## Step 1: Load Context
 
-## Summary
+1. **Get the issue details**:
+   ```bash
+   bd show <bd-id> --json
+   ```
 
-1. **Load context** - `bd show <id>`, read ADR if applicable, mark in_progress
-2. **Scope check** - Ensure work fits in one session (split if not)
-3. **Implement** in order:
-   - Update specification (`docs/spec/src/`) if changing language semantics
-   - Add tests first (spec tests, UI tests, or unit tests as appropriate)
-   - Make code changes (check ALL backends if touching codegen)
-4. **Verify** - Run `./test.sh`
-5. **Update progress** - Check off phase in ADR if applicable
-6. **Review and commit** - `/code-review` then `/commit`
+2. **For large features**, read the ADR in `docs/designs/`:
+   - Identify which phase you're implementing
+   - Understand how this phase fits into the whole
 
-## For Preview Features
+3. **Mark work in progress**:
+   ```bash
+   bd update <bd-id> --status in_progress --json
+   ```
 
-- Add tests with `preview = "<feature>"` flag
-- Add `require_preview()` gates in semantic analysis
-- Stable tests must always pass; preview tests should pass when phase is complete
+## Step 2: Scope Check
 
-## Stabilization (when all phases complete)
+**Good scope (proceed):**
+- Clear, bounded changes
+- 1-5 files to modify
+- Single logical unit of work
 
-1. Remove `preview = "..."` from tests
-2. Remove `require_preview()` calls
-3. Remove feature from `PreviewFeature` enum
+**Too large (split it):**
+- More than 5-7 files
+- Multiple unrelated changes
+- Would require extensive exploration
+
+If too large, create subtasks:
+```bash
+bd create "Subtask: <description>" --parent <bd-id> -t task --json
+```
+
+Then implement subtasks one at a time.
+
+## Step 3: Implementation Order
+
+Follow this order for consistent, reviewable changes:
+
+### 1. Update Specification (if changing language semantics)
+
+Edit files in `docs/spec/src/`:
+- Add or modify paragraphs with proper IDs: `{{ rule(id="X.Y:Z", cat="category") }}`
+- Categories: `normative`, `legality-rule`, `dynamic-semantics`, `syntax`, `example`, `informative`
+
+### 2. Add Tests First
+
+**Spec tests** (`crates/gruel-spec/cases/`):
+- For language semantics
+- Must include `spec = ["X.Y:Z"]` references to spec paragraphs
+- Traceability check enforces 100% coverage
+
+**UI tests** (`crates/gruel-ui-tests/cases/`):
+- For warnings, diagnostics, compiler flags
+- Not tied to spec paragraphs
+
+**Unit tests** (in crate source with `#[cfg(test)]`):
+- For internal implementation details
+
+### 3. Make Code Changes
+
+Follow existing patterns. Key considerations:
+
+**Multi-backend consistency**: If touching `gruel-codegen`, implement in ALL backends:
+- `x86_64/` - Linux x86-64
+- `aarch64/` - macOS ARM64
+
+Check: `mir.rs`, `emit.rs`, `regalloc.rs`, `liveness.rs`, `cfg_lower.rs`
+
+**Index-based references**: Use u32 indices, not pointers. Check for dangling indices.
+
+**Span tracking**: Maintain source locations for error reporting.
+
+### 4. For Preview Features
+
+If this is a large feature behind a preview gate, add tests with `preview` field:
+```toml
+[[case]]
+name = "my_feature_test"
+preview = "my_feature"
+source = """..."""
+exit_code = 42
+```
+
+Add semantic gates in sema:
+```rust
+if using_preview_syntax {
+    self.require_preview(PreviewFeature::MyFeature, "feature description", span)?;
+}
+```
+
+Preview tests run but are allowed to fail until the feature is complete.
+
+## Step 4: Verify
+
+```bash
+./test.sh
+```
+
+**For stable work**: All tests must pass.
+**For preview features**: Stable tests must pass. Preview tests for your feature should pass when your phase is complete.
+
+## Step 5: Update Progress
+
+For large features, check off the completed phase in the ADR:
+```markdown
+- [x] **Phase 1: Core parsing** - bd-42
+- [ ] **Phase 2: Type checking** - bd-43
+```
+
+## Step 6: Review and Commit
+
+1. Run `/code-review`
+2. Fix any blocking issues
+3. Run `/commit`
+
+## Stabilizing a Large Feature
+
+When all phases are complete:
+
+1. Remove `preview = "..."` from spec tests
+2. Remove `require_preview()` calls from semantic analysis
+3. Remove the feature from `PreviewFeature` enum
 4. Update ADR status to "Implemented"
 5. Fill in `implemented:` date in ADR frontmatter
+6. Create stabilization commit
+
+## Common Patterns
+
+### Adding a New Operator
+
+1. Lexer: Add token in `gruel-lexer`
+2. Parser: Add parsing in `gruel-parser`
+3. RIR: Add IR node in `gruel-rir`
+4. AIR: Add typed node in `gruel-air`
+5. Sema: Add type checking in `gruel-air/src/sema.rs`
+6. Codegen: Add code generation in both backends
+
+### Adding a New Type
+
+1. Add to `Type` enum in `gruel-air/src/types.rs`
+2. Update type checking in sema
+3. Update code generation for the type's operations
+4. Add spec chapter and tests
+
+### Adding a New Statement/Expression
+
+1. Parser: Add syntax handling
+2. RIR/AIR: Add IR representation
+3. Sema: Add semantic analysis
+4. Codegen: Add code generation
+5. Spec: Document the syntax and semantics
 
 ## Important
 

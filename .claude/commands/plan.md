@@ -8,26 +8,110 @@ argument-hint: <feature description>
 
 Plan this feature: $ARGUMENTS
 
-## Instructions
+## When to Plan
 
-Read and follow `docs/process/planning.md` for the full planning workflow.
+Plan before implementing when:
+- Adding new language features
+- Making significant compiler changes
+- The scope isn't immediately clear
 
-Key references:
-- `docs/process/planning.md` - Planning workflow
-- `docs/designs/README.md` - ADR guide
-- `docs/designs/0000-template.md` - ADR template
+Skip formal planning for:
+- Bug fixes with obvious solutions
+- Documentation updates
+- Simple refactoring
 
-## Summary
+## Step 1: Understand the Feature
 
-1. **Understand** - Clarify requirements, research codebase, check `bd ready`
-2. **Assess size** - Small (1-3 files, one session) vs Large (many files, phases)
-3. **Create plan**:
-   - Small: Draft a brief implementation plan
-   - Large: Create ADR from template (`docs/designs/NNNN-<feature>.md`)
-4. **Get approval** - Present plan, iterate until approved
-5. **Finalize** - Create bd issues only after approval:
-   - Small: Single bd issue
-   - Large: bd epic + subtasks, add to PreviewFeature enum
+Before planning, ensure you understand:
+
+1. **What problem does this solve?** - Be specific about the use case
+2. **What's the desired behavior?** - How should it work from a user's perspective
+3. **What exists already?** - Check for related code, existing issues (`bd ready`)
+
+Ask clarifying questions if requirements are ambiguous.
+
+## Step 2: Assess Feature Size
+
+### Small Features
+
+Characteristics:
+- Touches 1-3 files
+- Single concept (new operator, syntax sugar, simple addition)
+- No new runtime functions
+- No new IR instruction kinds
+- Completable in one focused session
+
+Examples: Add `%` operator, add `else if` syntax, add unary `+`, new warning type
+
+**Output**: A bd issue
+
+### Large Features
+
+Characteristics:
+- Touches many files across multiple crates
+- Multiple implementation phases
+- New runtime support functions
+- New IR instruction kinds
+- New type system concepts
+- May span multiple sessions
+
+Examples: Mutable strings, inout parameters, enums and pattern matching, trait system
+
+**Output**: An ADR + bd epic with subtasks
+
+## Step 3: Create the Plan
+
+### For Small Features
+
+Draft a brief implementation plan: which files change and what tests are needed. Present it for approval before creating issues.
+
+### For Large Features
+
+1. **Create an ADR**
+
+   Copy the template and fill it in:
+   ```bash
+   cp docs/designs/0000-template.md docs/designs/NNNN-<feature>.md
+   ```
+
+   Use the next available number. See `docs/designs/README.md` for the full ADR guide.
+
+   Key sections to complete:
+   - **Summary**: One paragraph explaining the decision
+   - **Context**: Why this is needed
+   - **Decision**: Technical details of the approach
+   - **Implementation Phases**: Break into independently-committable chunks
+   - **Consequences**: Trade-offs and implications
+
+2. **Add the preview feature** (in `crates/gruel-error/src/lib.rs`):
+   ```rust
+   pub enum PreviewFeature {
+       // ...existing...
+       YourFeature,
+   }
+   ```
+   Also update `name()`, `adr()`, `all()`, and `FromStr` impl.
+
+3. **Create the bd epic and subtasks** (after approval):
+   ```bash
+   bd create "<feature title>" -t epic -p 2 --json
+   bd create "Phase 1: <description>" -t task --parent <epic-id> --json
+   bd create "Phase 2: <description>" -t task --parent <epic-id> --json
+   ```
+
+4. **Update the ADR with issue IDs**:
+   ```markdown
+   ## Implementation Phases
+   - [ ] **Phase 1: Core parsing** - bd-42
+   - [ ] **Phase 2: Type checking** - bd-43
+   ```
+
+## Step 4: Get Approval
+
+Before creating issues or writing implementation code, present the plan and confirm:
+- Does the scope look correct?
+- Are the phases reasonable?
+- Any concerns about the approach?
 
 ## Output
 

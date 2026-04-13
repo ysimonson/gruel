@@ -142,7 +142,7 @@ Steve's solution was to formalize the process. We now have a set of slash comman
 
 This sounds like bureaucracy, but it's actually the opposite. By making the structure explicit, we can move faster on big features. The module system, for example, is an epic with five phases. We shipped Phase 1 (visibility modifiers, basic resolution) and can ship the rest incrementally. Without this process, that feature might still be half-implemented in a stalled branch.
 
-The process documentation lives in `docs/process/`. If you're curious how human-AI collaboration works at this scale, that's where to look.
+The process is documented directly in the slash commands themselves—each command file contains the full workflow it automates. If you're curious how human-AI collaboration works at this scale, that's where to look.
 
 ## Things That Didn't Work
 
