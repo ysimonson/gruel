@@ -8,7 +8,7 @@ allowed-tools: Bash, Read, Glob, Grep
 Current changes to review:
 
 ```
-!jj show
+!git diff HEAD
 ```
 
 ## Task

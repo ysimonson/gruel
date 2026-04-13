@@ -150,4 +150,4 @@ When all phases are complete:
 - Each commit should leave tests passing
 - Split work that's too large into phases
 - Use Buck2 (`./buck2`), not Cargo
-- Use `jj` for version control, not git
+- Use `git` for version control

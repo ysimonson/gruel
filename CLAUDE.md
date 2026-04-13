@@ -622,31 +622,14 @@ Example: If adding a new comparison instruction variant (e.g., 64-bit compare):
 
 ## Version Control
 
-**IMPORTANT**: This project uses **Jujutsu (jj)**, NOT git. Never use git commands in this repository.
-
-### Common jj Commands
-
-| Instead of git... | Use jj... |
-|-------------------|-----------|
-| `git status` | `jj status` |
-| `git diff` | `jj diff` |
-| `git add . && git commit -m "msg"` | `jj commit -m "msg"` (auto-adds all changes) |
-| `git log` | `jj log` |
-| `git checkout -b branch` | `jj new -m "description"` |
-| `git stash` | Not needed - jj auto-saves working changes |
-
-### Key Differences from git
-
-- **No staging area**: `jj commit` automatically includes all changes
-- **Working copy is a commit**: Your uncommitted changes are already tracked
-- **Use `jj describe`** to update the current commit message
-- **Use `jj new`** to start a new change on top of current one
+This project uses git.
 
 ### Commit Messages
 
-When committing, use `jj commit -m "message"` or for multi-line messages:
+When committing, use `git commit -m "message"` or for multi-line messages:
 ```bash
-jj commit -m "Short summary
+git add -p  # Stage relevant changes
+git commit -m "Short summary
 
 Longer description here.
 

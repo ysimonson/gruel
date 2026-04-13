@@ -187,21 +187,22 @@ air (return_type: i32) {
 
 ## Version Control
 
-This project uses [Jujutsu (jj)](https://github.com/martinvonz/jj) for version control.
+This project uses git.
 
 ### Common Commands
 
 ```bash
-jj status          # Show working copy changes
-jj diff            # Show diff
-jj commit -m "msg" # Create a commit
-jj log             # Show history
+git status         # Show working copy changes
+git diff           # Show diff
+git add -p && git commit -m "msg" # Create a commit
+git log            # Show history
 ```
 
 ### Creating a Commit
 
 ```bash
-jj commit -m "Add feature X"
+git add -p
+git commit -m "Add feature X"
 ```
 
 ## Code Style

@@ -90,9 +90,8 @@ During website deployment:
 
 ## Manual Maintenance
 
-> **Note:** The commands below use git rather than jj because the `perf` branch
-> is managed by GitHub Actions CI, which uses git. The perf branch exists only
-> on the remote and is not part of the normal jj workflow.
+> **Note:** The commands below use git to manage the `perf` branch,
+> which is managed by GitHub Actions CI and exists only on the remote.
 
 To reset benchmark history:
 ```bash
