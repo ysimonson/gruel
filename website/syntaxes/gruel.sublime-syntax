@@ -1,12 +1,12 @@
 %YAML 1.2
 ---
-# Rue syntax highlighting (based on Rust syntax)
-name: rue
-scope: source.rue
+# Gruel syntax highlighting (based on Rust syntax)
+name: gruel
+scope: source.gruel
 version: 2
 
 file_extensions:
-  - rue
+  - gruel
 
 variables:
   identifier: '\b[a-zA-Z_][a-zA-Z0-9_]*\b'
@@ -28,102 +28,102 @@ contexts:
   comments:
     # Line comments
     - match: //.*$
-      scope: comment.line.double-slash.rue
+      scope: comment.line.double-slash.gruel
 
   keywords:
     # Control flow
     - match: \b(if|else|while|loop|match|return|break|continue)\b
-      scope: keyword.control.rue
+      scope: keyword.control.gruel
     # Declaration keywords
     - match: \b(fn|let|mut|struct|enum)\b
-      scope: keyword.declaration.rue
+      scope: keyword.declaration.gruel
     # Boolean literals
     - match: \b(true|false)\b
-      scope: constant.language.boolean.rue
+      scope: constant.language.boolean.gruel
 
   types:
     # Primitive types
     - match: \b(i8|i16|i32|i64|u8|u16|u32|u64|bool)\b
-      scope: storage.type.primitive.rue
+      scope: storage.type.primitive.gruel
     # Unit type
     - match: \(\)
-      scope: storage.type.unit.rue
+      scope: storage.type.unit.gruel
 
   strings:
     # Double-quoted strings
     - match: '"'
-      scope: punctuation.definition.string.begin.rue
+      scope: punctuation.definition.string.begin.gruel
       push:
-        - meta_scope: string.quoted.double.rue
+        - meta_scope: string.quoted.double.gruel
         - match: '"'
-          scope: punctuation.definition.string.end.rue
+          scope: punctuation.definition.string.end.gruel
           pop: true
         - match: '\\[\\"]'
-          scope: constant.character.escape.rue
+          scope: constant.character.escape.gruel
         - match: '\\.'
-          scope: invalid.illegal.escape.rue
+          scope: invalid.illegal.escape.gruel
 
   numbers:
     # Integer literals
     - match: '{{int_literal}}'
-      scope: constant.numeric.integer.rue
+      scope: constant.numeric.integer.gruel
 
   operators:
     # Arrow operators (must be before arithmetic/comparison)
     - match: '->'
-      scope: keyword.operator.arrow.rue
+      scope: keyword.operator.arrow.gruel
     - match: '=>'
-      scope: keyword.operator.fat-arrow.rue
+      scope: keyword.operator.fat-arrow.gruel
     # Comparison operators (multi-char before single-char)
     - match: '==|!=|<=|>=|<<|>>'
-      scope: keyword.operator.comparison.rue
+      scope: keyword.operator.comparison.gruel
     - match: '<|>'
-      scope: keyword.operator.comparison.rue
+      scope: keyword.operator.comparison.gruel
     # Logical operators
     - match: '\|\||&&'
-      scope: keyword.operator.logical.rue
+      scope: keyword.operator.logical.gruel
     # Bitwise operators
     - match: '&|\||\^|~'
-      scope: keyword.operator.bitwise.rue
+      scope: keyword.operator.bitwise.gruel
     # Arithmetic operators
     - match: '[+\-*/%]'
-      scope: keyword.operator.arithmetic.rue
+      scope: keyword.operator.arithmetic.gruel
     # Negation (must be after && to not conflict)
     - match: '!'
-      scope: keyword.operator.logical.rue
+      scope: keyword.operator.logical.gruel
     # Assignment
     - match: '='
-      scope: keyword.operator.assignment.rue
+      scope: keyword.operator.assignment.gruel
 
   punctuation:
     - match: '[{}()\[\]]'
-      scope: punctuation.section.rue
+      scope: punctuation.section.gruel
     - match: '[,;:]'
-      scope: punctuation.separator.rue
+      scope: punctuation.separator.gruel
 
   intrinsics:
     # Intrinsic function calls like @print, @exit
     - match: '@{{identifier}}'
-      scope: support.function.intrinsic.rue
+      scope: support.function.intrinsic.gruel
 
   functions:
     # Function definitions
     - match: '\b(fn)\s+({{identifier}})'
       captures:
-        1: keyword.declaration.function.rue
-        2: entity.name.function.rue
+        1: keyword.declaration.function.gruel
+        2: entity.name.function.gruel
     # Function calls (identifier followed by parenthesis)
     - match: '({{identifier}})\s*(?=\()'
       captures:
-        1: variable.function.rue
+        1: variable.function.gruel
 
   identifiers:
     # Wildcard identifier
     - match: '\b_\b'
-      scope: variable.language.wildcard.rue
+      scope: variable.language.wildcard.gruel
     # Underscore-prefixed identifiers
     - match: '\b_[a-zA-Z0-9_]+\b'
-      scope: variable.other.underscore.rue
+      scope: variable.other.underscore.gruel
     # Regular identifiers
     - match: '{{identifier}}'
-      scope: variable.other.rue
+      scope: variable.other.gruel
