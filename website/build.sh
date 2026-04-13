@@ -2,7 +2,10 @@
 set -euo pipefail
 
 # Build the Gruel website
-# Usage: ./build.sh [serve]
+# Usage: ./build.sh [serve|deploy]
+#   (no args) - local build with root-relative URLs
+#   serve     - dev server at http://127.0.0.1:1111
+#   deploy    - production build with absolute URLs (https://gruel-lang.dev)
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -149,6 +152,10 @@ if [[ "${1:-}" == "serve" ]]; then
     echo "Starting dev server at http://127.0.0.1:1111"
     echo "Note: CSS changes require rebuilding Tailwind manually"
     "$ROOT/zola" serve
+elif [[ "${1:-}" == "deploy" ]]; then
+    echo "Building website for production..."
+    "$ROOT/zola" build --base-url https://gruel-lang.dev
+    echo "Done! Output in website/public/"
 else
     echo "Building website..."
     "$ROOT/zola" build
