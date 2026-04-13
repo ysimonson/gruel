@@ -1,6 +1,7 @@
-# gruel
+# Gruel
 
-gruel is a programming language, forked from [rue](https://github.com/rue-language/rue).
+Gruel is a programming language. It's like
+[rue](https://github.com/rue-language/rue) but worse.
 
 ## Why Fork
 
@@ -8,7 +9,7 @@ I think the bones of a really compelling language are there with Rue. But the
 project is not contributor-friendly. This is by design: Steve wants to
 experiment largely in isolation with some ideas, and it's apparent with e.g.
 PRs that are not getting accepted. To make it contributor friendly, and
-hopefully iterate on a language faster, this fork gets rid of as many
+hopefully iterate on a language faster, this fork gets rid of as much
 off-the-beaten path infrastructure as possible in favor of more pedestrian
 variants: git instead of jj, just ADRs without beads workflows, cargo instead
 of buck, etc.
@@ -27,5 +28,5 @@ at your option.
 ## Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
-dual licensed as above, without any additional terms or conditions.
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.
