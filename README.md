@@ -1,21 +1,17 @@
-# rue
+# gruel
 
-> [!CAUTION]
-> Listen, this repo is just for fun. I had it private, but I care more about
-> being able to run GitHub Actions to make sure that things are good, so I'm
-> open sourcing this repo. Not everything in here is good, or accurate, or
-> anything: I'm just messing around. Feel free to take a look but don't look too
-> much into this just yet. Someday I'll actually talk about this.
+gruel is a programming language, forked from [rue](https://github.com/rue-language/rue).
 
-rue is a programming language. Right now, it's a very basic one.
+## Why Fork
 
-I am building this project for two main reasons:
-
-* I want to play around with a compiler
-* I want to see how good Claude is at building compilers
-
-I have some ideas for where I want rue to go, but everything is subject to
-change at the moment.
+I think the bones of a really compelling language are there with Rue. But the
+project is not contributor-friendly. This is by design: Steve wants to
+experiment largely in isolation with some ideas, and it's apparent with e.g.
+PRs that are not getting accepted. To make it contributor friendly, and
+hopefully iterate on a language faster, this fork gets rid of as many
+off-the-beaten path infrastructure as possible in favor of more pedestrian
+variants: git instead of jj, just ADRs without beads workflows, cargo instead
+of buck, etc.
 
 ## License
 

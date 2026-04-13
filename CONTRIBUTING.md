@@ -1,6 +1,6 @@
-# Contributing to Rue
+# Contributing to Gruel
 
-Thanks for your interest in contributing to Rue!
+Thanks for your interest in contributing to Gruel!
 
 ## Getting Started
 
