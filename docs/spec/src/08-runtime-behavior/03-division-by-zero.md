@@ -20,7 +20,7 @@ Both the division operator (`/`) and remainder operator (`%`) **MAY** cause divi
 
 {{ rule(id="8.3:4") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     10 / 0  // Runtime error: division by zero
 }
@@ -28,7 +28,7 @@ fn main() -> i32 {
 
 {{ rule(id="8.3:5") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     10 % 0  // Runtime error: division by zero
 }
@@ -36,7 +36,7 @@ fn main() -> i32 {
 
 {{ rule(id="8.3:6") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let divisor = 5 - 5;
     10 / divisor  // Runtime error: division by zero

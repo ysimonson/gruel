@@ -19,17 +19,17 @@ Implemented
 
 ## Summary
 
-Add destructor support to Rue, enabling types to define cleanup logic that runs automatically when values go out of scope. Destructors are required for heap-allocated types like mutable strings where `free()` must be called. We begin with compiler-synthesized destructors for built-in types, with a path to user-defined destructors via the `drop` keyword.
+Add destructor support to Gruel, enabling types to define cleanup logic that runs automatically when values go out of scope. Destructors are required for heap-allocated types like mutable strings where `free()` must be called. We begin with compiler-synthesized destructors for built-in types, with a path to user-defined destructors via the `drop` keyword.
 
 ## Context
 
 ### Why Destructors Now?
 
-Rue's affine type system (ADR-0008) establishes that types are affine by default: they can be dropped. But currently "dropped" just means "memory is deallocated"—there's no mechanism to run cleanup code.
+Gruel's affine type system (ADR-0008) establishes that types are affine by default: they can be dropped. But currently "dropped" just means "memory is deallocated"—there's no mechanism to run cleanup code.
 
 Mutable strings are the immediate motivator. A mutable string owns a heap-allocated buffer:
 
-```rue
+```gruel
 struct String {
     ptr: RawPtr,    // Points to heap allocation
     len: u64,
@@ -45,7 +45,7 @@ The compiler already has most infrastructure for destructors:
 
 1. **Affine type tracking**: We know which values are live and when they're consumed
 2. **Scope management**: `push_scope()`/`pop_scope()` track variable lifetimes
-3. **CFG representation**: Designed for "drop elaboration" (noted in rue-cfg comments)
+3. **CFG representation**: Designed for "drop elaboration" (noted in gruel-cfg comments)
 4. **Move tracking**: We know when values transfer ownership
 
 What's missing:
@@ -68,7 +68,7 @@ We want a path from "built-in types have compiler-synthesized destructors" to "u
 
 When a value's owning binding goes out of scope for the last time (not moved elsewhere), its destructor runs exactly once:
 
-```rue
+```gruel
 fn example() {
     let s = String::new("hello");  // String is allocated
     // ... use s ...
@@ -77,7 +77,7 @@ fn example() {
 
 Drop order: **reverse declaration order** (last declared, first dropped):
 
-```rue
+```gruel
 fn example() {
     let a = String::new("first");
     let b = String::new("second");
@@ -108,7 +108,7 @@ Note: None of these types exist yet. This ADR provides the infrastructure they'l
 
 For structs containing non-trivially-droppable fields, the compiler synthesizes a destructor:
 
-```rue
+```gruel
 struct Person {
     name: String,  // needs drop
     age: i32,      // trivial
@@ -127,7 +127,7 @@ Fields are dropped in **declaration order** (matches C++, Rust).
 
 In Phase 3, users can define custom destructors:
 
-```rue
+```gruel
 struct FileHandle {
     fd: i32,
 }
@@ -176,7 +176,7 @@ The CFG builder inserts `Drop` instructions:
 
 Example CFG transformation:
 
-```rue
+```gruel
 fn example() -> i32 {
     let s = String::new("hello");
     if condition {
@@ -212,21 +212,21 @@ Drop instructions lower to function calls:
 ```asm
 ; drop(s) where s: String
 mov rdi, [rbp-8]      ; load s.ptr
-call __rue_drop_String
+call __gruel_drop_String
 ```
 
 For trivially droppable types, the drop is a no-op (elided).
 
 ### Runtime Support
 
-Drop functions for built-in types will be added to `rue-runtime` as those types are implemented. The naming convention is `__rue_drop_<TypeName>`. For example, when mutable strings land:
+Drop functions for built-in types will be added to `gruel-runtime` as those types are implemented. The naming convention is `__gruel_drop_<TypeName>`. For example, when mutable strings land:
 
 ```rust
 // Example: what a String drop might look like (when String is added)
 #[no_mangle]
-pub extern "C" fn __rue_drop_String(s: RawString) {
+pub extern "C" fn __gruel_drop_String(s: RawString) {
     if !s.ptr.is_null() && s.capacity > 0 {
-        __rue_free(s.ptr, s.capacity);
+        __gruel_free(s.ptr, s.capacity);
     }
 }
 ```
@@ -239,7 +239,7 @@ Until heap-allocated types exist, the runtime won't need any drop functions.
 
 If a type is Copy, it can be duplicated via bitwise copy. If it also had a destructor, the destructor would run multiple times (double-free). Therefore:
 
-```rue
+```gruel
 @copy
 struct Bad {
     ptr: RawPtr,  // ERROR: @copy type with pointer? dangerous
@@ -252,7 +252,7 @@ We enforce: `@copy` structs can only contain `@copy` fields (already in ADR-0008
 
 Linear types (from ADR-0008) **must be explicitly consumed**—they cannot be implicitly dropped:
 
-```rue
+```gruel
 linear struct MustConsume { ... }
 
 fn bad() {
@@ -266,7 +266,7 @@ The destructor mechanism skips linear types; they error at implicit drop points 
 
 ### Panic Safety
 
-Rue currently aborts on panic rather than unwinding. This means:
+Gruel currently aborts on panic rather than unwinding. This means:
 - Destructors do not run on panic (no stack unwinding)
 - A panic in a destructor simply aborts
 
@@ -274,11 +274,11 @@ If unwinding is added in the future, destructor behavior during unwinding will n
 
 ## Implementation Phases
 
-Epic: rue-wjha
+Epic: gruel-wjha
 
 Following spec-first, test-driven development: each phase writes spec paragraphs, then tests that reference them, then implementation to make tests pass.
 
-### Phase 1: Spec and Infrastructure (rue-wjha.7)
+### Phase 1: Spec and Infrastructure (gruel-wjha.7)
 
 **Spec**: Add destructor chapter to specification (section 3.9 or similar):
 - When destructors run (scope exit, not moved)
@@ -295,7 +295,7 @@ Following spec-first, test-driven development: each phase writes spec paragraphs
 - Add `type_needs_drop()` method to `CfgBuilder` (requires access to struct/array type definitions)
 - Add drop elaboration pass stub in CFG builder
 
-### Phase 2: Drop Elaboration (rue-wjha.8)
+### Phase 2: Drop Elaboration (gruel-wjha.8)
 
 **Spec**: Add paragraphs for:
 - Drop at end of block scope
@@ -313,23 +313,23 @@ Following spec-first, test-driven development: each phase writes spec paragraphs
 - CFG builder inserts `Drop` at scope exits
 - Handle early returns, conditionals, loops
 
-### Phase 3: Codegen (rue-wjha.9)
+### Phase 3: Codegen (gruel-wjha.9)
 
 **Spec**: Add paragraphs for:
 - Drop calls generated for non-trivial types
 - Trivially droppable types elide drop calls
 
 **Tests**:
-- Golden tests showing generated assembly calls `__rue_drop_*`
+- Golden tests showing generated assembly calls `__gruel_drop_*`
 - Tests confirming no drop calls for trivially droppable types
 
 **Implementation**:
-- x86_64 backend: emit calls to `__rue_drop_*`
-- aarch64 backend: emit calls to `__rue_drop_*`
+- x86_64 backend: emit calls to `__gruel_drop_*`
+- aarch64 backend: emit calls to `__gruel_drop_*`
 - Elide drops for trivially droppable types
 - Register allocation around drop calls
 
-### Phase 4: User-Defined Destructors (rue-wjha.10)
+### Phase 4: User-Defined Destructors (gruel-wjha.10)
 
 **Spec**: Add paragraphs for:
 - `drop fn TypeName(self)` syntax
@@ -347,10 +347,10 @@ Following spec-first, test-driven development: each phase writes spec paragraphs
 - Semantic analysis: validate signature
 - Generate drop function, wire into type's destructor
 
-### Phase 5: Integration with Built-in Types (rue-wjha.11)
+### Phase 5: Integration with Built-in Types (gruel-wjha.11)
 
 This phase is deferred until mutable strings or other heap-allocated types land. It will:
-- Add `__rue_drop_String` to runtime
+- Add `__gruel_drop_String` to runtime
 - Wire String type to use it
 - Verify no memory leaks (valgrind clean)
 

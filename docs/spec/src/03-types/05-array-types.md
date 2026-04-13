@@ -24,7 +24,7 @@ Arrays are stored contiguously in memory. The size of `[T; N]` is `N * size_of(T
 
 {{ rule(id="3.5:5") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 12];
     arr[0] + arr[1] + arr[2]  // 42
@@ -49,7 +49,7 @@ Accessing an array with an out-of-bounds index causes a runtime panic.
 
 {{ rule(id="3.5:10") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     let idx = 5;

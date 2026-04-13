@@ -45,7 +45,7 @@ Key references:
 
 ## Important
 
-- If touching `rue-codegen`, implement in ALL backends (x86_64 and aarch64)
+- If touching `gruel-codegen`, implement in ALL backends (x86_64 and aarch64)
 - Each commit should leave tests passing
 - Split work that's too large into subtasks
 - Use Buck2 (`./buck2`), not Cargo

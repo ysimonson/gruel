@@ -1,6 +1,6 @@
 # Benchmark Data
 
-This directory contains benchmark history data for the Rue compiler performance dashboard.
+This directory contains benchmark history data for the Gruel compiler performance dashboard.
 
 ## Files
 

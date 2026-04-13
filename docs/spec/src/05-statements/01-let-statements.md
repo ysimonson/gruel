@@ -24,7 +24,7 @@ By default, variables are immutable. An immutable variable **MUST NOT** be reass
 
 {{ rule(id="5.1:4", cat="normative") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 42;
     x
@@ -39,7 +39,7 @@ The `mut` keyword creates a mutable binding that **MAY** be reassigned.
 
 {{ rule(id="5.1:6") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut x = 10;
     x = 20;
@@ -59,7 +59,7 @@ When a type annotation is present, the initializer **MUST** be compatible with t
 
 {{ rule(id="5.1:9") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i32 = 42;      // explicit type
     let y = 10;           // type inferred as i32
@@ -84,7 +84,7 @@ The scope of a binding introduced by a let statement begins after the complete l
 
 {{ rule(id="5.1:13") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 10;
     let x = x + 5;  // shadows previous x, initializer uses old x

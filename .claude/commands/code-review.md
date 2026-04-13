@@ -22,19 +22,19 @@ Review the current changes following `docs/process/code-review.md`.
 3. **Style** - Rust idioms, project conventions
 4. **Error handling** - Appropriate types and clear messages
 5. **Tests** - Adequate coverage:
-   - Spec tests (`crates/rue-spec/cases/`) with `spec = [...]` for language semantics
-   - UI tests (`crates/rue-ui-tests/cases/`) for warnings/diagnostics
+   - Spec tests (`crates/gruel-spec/cases/`) with `spec = [...]` for language semantics
+   - UI tests (`crates/gruel-ui-tests/cases/`) for warnings/diagnostics
    - Unit tests for internal implementation details
 6. **Specification** - If changing language semantics:
    - Is `docs/spec/src/` updated with proper paragraph IDs?
    - Will traceability check pass (100% coverage)?
 
-## Rue-Specific Checks
+## Gruel-Specific Checks
 
 - **Index-based references** - No dangling indices
 - **IR transformations** - Semantics preserved
 - **Span tracking** - Source locations maintained for errors
-- **Multi-backend** - If touching `rue-codegen`, check BOTH x86_64 and aarch64:
+- **Multi-backend** - If touching `gruel-codegen`, check BOTH x86_64 and aarch64:
   - `mir.rs`, `emit.rs`, `regalloc.rs`, `liveness.rs`, `cfg_lower.rs`
 
 ## Output

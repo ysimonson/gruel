@@ -22,7 +22,7 @@ Integer literals default to type `i32` unless the context requires a different t
 
 {{ rule(id="4.1:4") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     0       // zero
     42      // positive integer
@@ -38,7 +38,7 @@ The boolean literals are `true` and `false`, both of type `bool`.
 
 {{ rule(id="4.1:6") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = true;
     let b = false;
@@ -58,7 +58,7 @@ The unit literal evaluates to the single value of the unit type.
 
 {{ rule(id="4.1:9") }}
 
-```rue
+```gruel
 fn returns_unit() -> () {
     ()
 }
@@ -82,7 +82,7 @@ String literals support escape sequences: `\\` for a backslash and `\"` for a do
 
 {{ rule(id="4.1:12") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = "hello";
     let b = "world";

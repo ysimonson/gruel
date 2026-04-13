@@ -31,7 +31,7 @@ If no `else` branch is present, the `then` branch **MUST** have type `()`.
 
 {{ rule(id="4.6:6") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = if true { 42 } else { 0 };
     x
@@ -44,7 +44,7 @@ If the condition evaluates to `true`, the then-branch is executed. Otherwise, th
 
 {{ rule(id="4.6:8") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let n = 5;
     if n > 3 { 100 } else { 0 }
@@ -55,7 +55,7 @@ fn main() -> i32 {
 
 If expressions can be chained using `else if`:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 5;
     if x < 3 { 1 }

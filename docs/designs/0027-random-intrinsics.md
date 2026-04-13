@@ -34,13 +34,13 @@ fn main() {
 }
 ```
 
-Rue currently has no randomness capability. Adding it requires choosing between several approaches:
+Gruel currently has no randomness capability. Adding it requires choosing between several approaches:
 
 1. **Intrinsic functions** - Simple, stateless, syscall-based
 2. **Built-in PRNG type** - Stateful, requires passing state or global variables
 3. **External library** - Requires module system and package management (not yet available)
 
-For Rue's current stage of development, intrinsics are the best fit:
+For Gruel's current stage of development, intrinsics are the best fit:
 - No generics yet (needed for `Random<T>`)
 - No module system (needed for external libraries)
 - Educational use cases don't require determinism or PRNG state
@@ -53,7 +53,7 @@ Add two new intrinsics:
 ### `@random_u32()`
 
 **Signature:**
-```rue
+```gruel
 @random_u32() -> u32
 ```
 
@@ -64,7 +64,7 @@ Add two new intrinsics:
 - Uses platform entropy source (cryptographically secure)
 
 **Example:**
-```rue
+```gruel
 fn main() -> i32 {
     let secret: u32 = (@random_u32() % 100) + 1;  // 1-100
     @dbg("Guess the number between 1 and 100!");
@@ -92,7 +92,7 @@ fn main() -> i32 {
 ### `@random_u64()`
 
 **Signature:**
-```rue
+```gruel
 @random_u64() -> u64
 ```
 
@@ -116,9 +116,9 @@ fn main() -> i32 {
 
 **Implementation:**
 ```rust
-// In rue-runtime
+// In gruel-runtime
 #[unsafe(no_mangle)]
-pub extern "C" fn __rue_random_u32(out: *mut u32) {
+pub extern "C" fn __gruel_random_u32(out: *mut u32) {
     unsafe {
         let mut bytes = [0u8; 4];
         platform::get_random_bytes(&mut bytes);
@@ -127,7 +127,7 @@ pub extern "C" fn __rue_random_u32(out: *mut u32) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn __rue_random_u64(out: *mut u64) {
+pub extern "C" fn __gruel_random_u64(out: *mut u64) {
     unsafe {
         let mut bytes = [0u8; 8];
         platform::get_random_bytes(&mut bytes);
@@ -145,7 +145,7 @@ pub extern "C" fn __rue_random_u64(out: *mut u64) {
    - Type as `u32` or `u64` return type
    - Gate behind `PreviewFeature::Random`
 4. **CFG**: Lower to `Intrinsic::RandomU32` or `Intrinsic::RandomU64`
-5. **Codegen**: Generate `call __rue_random_u32` or `call __rue_random_u64`
+5. **Codegen**: Generate `call __gruel_random_u32` or `call __gruel_random_u64`
 6. **Linker**: Link runtime functions (already automatic)
 
 ### Specification
@@ -190,25 +190,25 @@ The return type of `@random_u64` is `u64`.
 
 ## Implementation Phases
 
-- [x] **Phase 1: Spec and tests** - rue-ddko
+- [x] **Phase 1: Spec and tests** - gruel-ddko
   - Add spec documentation for `@random_u32` and `@random_u64`
   - Add preview-gated spec tests (non-deterministic, so test compilation only)
   - Add `Random` to `PreviewFeature` enum
 
-- [x] **Phase 2: Parser and Sema** - rue-ub3z
+- [x] **Phase 2: Parser and Sema** - gruel-ub3z
   - Add `RandomU32` and `RandomU64` to intrinsic parsing
   - Add type checking (returns u32/u64, takes no args)
   - Add preview feature gate check
   - Add CFG lowering for random intrinsics
 
-- [x] **Phase 3: Runtime implementation** - rue-5852
-  - Implement `__rue_random_u32` for x86-64 Linux
-  - Implement `__rue_random_u64` for x86-64 Linux
+- [x] **Phase 3: Runtime implementation** - gruel-5852
+  - Implement `__gruel_random_u32` for x86-64 Linux
+  - Implement `__gruel_random_u64` for x86-64 Linux
   - Implement for aarch64 macOS (using getentropy from libSystem)
   - Implement for aarch64 Linux
   - Handle error cases (no entropy source)
 
-- [x] **Phase 4: Codegen** - rue-2h42
+- [x] **Phase 4: Codegen** - gruel-2h42
   - Add call generation for x86-64 backend
   - Add call generation for aarch64 backend
   - Integration testing with example programs (spec tests)
@@ -222,7 +222,7 @@ The return type of `@random_u64` is `u64`.
 - Platform-native cryptographic quality randomness (suitable for non-crypto uses)
 - No runtime state or initialization required
 - Fits existing intrinsic pattern
-- Works with Rue's `no_std` philosophy
+- Works with Gruel's `no_std` philosophy
 
 ### Negative
 

@@ -38,7 +38,7 @@ Check for:
 - Error handling
 - Test coverage (spec tests, UI tests, unit tests)
 - Specification updates if changing language semantics
-- Multi-backend consistency (if touching `rue-codegen`)
+- Multi-backend consistency (if touching `gruel-codegen`)
 
 **Auto-fix any issues found.** Do not report and wait - just fix them.
 

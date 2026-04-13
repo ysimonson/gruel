@@ -8,11 +8,11 @@ page_template = "spec/page.html"
 
 # Types
 
-This chapter describes the type system of Rue.
+This chapter describes the type system of Gruel.
 
 {{ rule(id="3.0:1") }}
 
-Every value in Rue has a type that determines its representation in memory and the operations that can be performed on it.
+Every value in Gruel has a type that determines its representation in memory and the operations that can be performed on it.
 
 ## Zero-Sized Types
 

@@ -6,13 +6,13 @@ template = "tutorial/page.html"
 
 # Control Flow
 
-Rue has three main control flow constructs: `if`, `while`, and `match`.
+Gruel has three main control flow constructs: `if`, `while`, and `match`.
 
 ## If Expressions
 
 `if` is an expression, not a statement—it returns a value:
 
-```rue
+```gruel
 fn max(a: i32, b: i32) -> i32 {
     if a > b { a } else { b }
 }
@@ -26,7 +26,7 @@ fn main() -> i32 {
 
 Because `if` is an expression, you can use it anywhere a value is expected:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 5;
     let description = if x > 0 { 1 } else { 0 };
@@ -39,7 +39,7 @@ Both branches must have the same type.
 
 ## While Loops
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut sum = 0;
     let mut i = 1;
@@ -58,7 +58,7 @@ fn main() -> i32 {
 
 For multi-way branching, use `match`:
 
-```rue
+```gruel
 fn day_type(day: i32) -> i32 {
     // 0 = weekend, 1 = weekday
     match day {
@@ -81,7 +81,7 @@ The `_` is a wildcard that matches anything. Match expressions must be exhaustiv
 
 Here's a classic example combining everything:
 
-```rue
+```gruel
 fn fizzbuzz(n: i32) -> i32 {
     let div_by_3 = n % 3 == 0;
     let div_by_5 = n % 5 == 0;

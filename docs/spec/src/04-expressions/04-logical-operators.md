@@ -18,7 +18,7 @@ The logical NOT operator `!` negates its operand.
 
 {{ rule(id="4.4:3") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = !false;   // true
     let b = !true;    // false
@@ -39,7 +39,7 @@ The `&&` operator uses short-circuit evaluation: if the left operand is `false`,
 
 {{ rule(id="4.4:6") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     if true && true { 1 } else { 0 }   // 1
     if true && false { 1 } else { 0 }  // 0
@@ -58,7 +58,7 @@ The `||` operator uses short-circuit evaluation: if the left operand is `true`, 
 
 {{ rule(id="4.4:9") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     if false || true { 1 } else { 0 }  // 1
     if false || false { 1 } else { 0 } // 0
@@ -76,7 +76,7 @@ Operator precedence (highest to lowest):
 
 {{ rule(id="4.4:11") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     // true || false && false => true || (false && false) => true
     if true || false && false { 1 } else { 0 }

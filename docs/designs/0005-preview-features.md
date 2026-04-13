@@ -26,7 +26,7 @@ Introduce a preview feature gating mechanism that allows in-progress language fe
 
 ## Context
 
-Large features in Rue often require multiple implementation phases spanning several commits or development sessions. Examples include:
+Large features in Gruel often require multiple implementation phases spanning several commits or development sessions. Examples include:
 
 - **Inout parameters** (future): Parser changes, exclusivity analysis, codegen calling convention
 - **Traits** (future): Trait definitions, impl blocks, method resolution
@@ -40,7 +40,7 @@ When implementing these features in a single commit, several problems arise:
 
 We need a way to:
 - Write tests for a feature before it's complete
-- **Merge partial implementations to main** without breaking stable Rue
+- **Merge partial implementations to main** without breaking stable Gruel
 - Track which features are in-progress vs stable
 - Clearly communicate to users what's experimental
 
@@ -57,14 +57,14 @@ Introduce **preview features** - a gating mechanism for in-progress language fea
 ### Compiler Flag
 
 ```bash
-rue --preview inout_params source.rue output
+gruel --preview inout_params source.gruel output
 ```
 
 Code using preview features without the flag produces a clear error:
 
 ```
 error: inout parameters require preview feature `inout_params`
-  --> source.rue:1:12
+  --> source.gruel:1:12
    |
  1 | fn foo(inout x: i32) { }
    |        ^^^^^
@@ -76,7 +76,7 @@ error: inout parameters require preview feature `inout_params`
 ### Feature Registry
 
 ```rust
-// rue-compiler/src/features.rs
+// gruel-compiler/src/features.rs
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PreviewFeature {
@@ -165,7 +165,7 @@ When all tests for a preview feature pass:
 3. Remove the feature from the `PreviewFeature` enum
 4. Update the ADR status to "Implemented"
 
-The feature is now part of stable Rue.
+The feature is now part of stable Gruel.
 
 ## Implementation Phases
 

@@ -23,7 +23,7 @@ See [docs/development.md](docs/development.md) for:
 ./test.sh
 
 # Build and run the compiler
-./buck2 run //crates/rue:rue -- source.rue output
+./buck2 run //crates/gruel:gruel -- source.gruel output
 ```
 
 ## Questions?

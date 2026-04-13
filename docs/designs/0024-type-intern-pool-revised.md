@@ -207,24 +207,24 @@ Phase 4: Type→TypeId rename (only if needed, ~8-16 hours)
 ### Phase 2A (Remove Vecs)
 
 **Delete fields**:
-- `crates/rue-air/src/sema/mod.rs`: `struct_defs`, `enum_defs` fields
-- `crates/rue-air/src/sema_context.rs`: `struct_defs`, `enum_defs` fields
-- `crates/rue-air/src/type_context.rs`: `struct_defs`, `enum_defs` fields
+- `crates/gruel-air/src/sema/mod.rs`: `struct_defs`, `enum_defs` fields
+- `crates/gruel-air/src/sema_context.rs`: `struct_defs`, `enum_defs` fields
+- `crates/gruel-air/src/type_context.rs`: `struct_defs`, `enum_defs` fields
 
 **Update**:
-- `crates/rue-air/src/sema/declarations.rs`: Remove `.push()` calls
-- `crates/rue-air/src/sema/builtins.rs`: Remove `.push()` call
-- `crates/rue-air/src/sema/analysis.rs`: Remove `std::mem::take(&mut sema.struct_defs)`
-- `crates/rue-air/src/sema/mod.rs`: Remove Vec cloning in `build_type_context()`
-- `crates/rue-air/src/sema/tests.rs`: Use `type_pool.struct_count()` instead
-- `crates/rue-compiler/src/lib.rs`: Use `type_pool.struct_count()` for logging
+- `crates/gruel-air/src/sema/declarations.rs`: Remove `.push()` calls
+- `crates/gruel-air/src/sema/builtins.rs`: Remove `.push()` call
+- `crates/gruel-air/src/sema/analysis.rs`: Remove `std::mem::take(&mut sema.struct_defs)`
+- `crates/gruel-air/src/sema/mod.rs`: Remove Vec cloning in `build_type_context()`
+- `crates/gruel-air/src/sema/tests.rs`: Use `type_pool.struct_count()` instead
+- `crates/gruel-compiler/src/lib.rs`: Use `type_pool.struct_count()` for logging
 
 ### Phase 2B (Arrays to Pool)
 
-- `crates/rue-air/src/intern_pool.rs`: Already has `intern_array()`
-- `crates/rue-air/src/sema_context.rs`: Replace `ArrayTypeRegistry` with pool
-- `crates/rue-air/src/sema/analysis.rs`: Use `type_pool.intern_array()`
-- `crates/rue-codegen/src/types.rs`: Update array lookups
+- `crates/gruel-air/src/intern_pool.rs`: Already has `intern_array()`
+- `crates/gruel-air/src/sema_context.rs`: Replace `ArrayTypeRegistry` with pool
+- `crates/gruel-air/src/sema/analysis.rs`: Use `type_pool.intern_array()`
+- `crates/gruel-codegen/src/types.rs`: Update array lookups
 
 ## Success Criteria
 
@@ -259,7 +259,7 @@ The key challenge is migrating ~61 pattern match sites without creating 600+ sim
 Create a new `TypeKind` enum that mirrors the current `Type` enum structure:
 
 ```rust
-// crates/rue-air/src/types.rs
+// crates/gruel-air/src/types.rs
 pub enum TypeKind {
     I8, I16, I32, I64, U8, U16, U32, U64,
     Bool, Unit,
@@ -386,7 +386,7 @@ impl Type {
 ### Success Criteria
 
 #### Phase 3 Complete ✅ (2026-01-02)
-- [x] TypeKind enum exists in crates/rue-air/src/types.rs
+- [x] TypeKind enum exists in crates/gruel-air/src/types.rs
 - [x] Type::kind() method implemented
 - [x] All ~61 pattern match sites migrated to use .kind()
 - [x] All tests pass
@@ -403,20 +403,20 @@ impl Type {
 ### Files Affected (Estimated)
 
 **Phase 3.1-3.2** (~1-2 files):
-- `crates/rue-air/src/types.rs` - Add TypeKind, Type::kind()
+- `crates/gruel-air/src/types.rs` - Add TypeKind, Type::kind()
 
 **Phase 3.3** (~20 files, 61 match sites):
-- `crates/rue-air/src/sema/analysis.rs` (~19 matches)
-- `crates/rue-air/src/sema/typeck.rs` (~9 matches)
-- `crates/rue-codegen/src/x86_64/cfg_lower.rs` (~7 matches)
-- `crates/rue-compiler/src/drop_glue.rs` (~8 matches)
-- `crates/rue-air/src/intern_pool.rs` (~15 matches)
+- `crates/gruel-air/src/sema/analysis.rs` (~19 matches)
+- `crates/gruel-air/src/sema/typeck.rs` (~9 matches)
+- `crates/gruel-codegen/src/x86_64/cfg_lower.rs` (~7 matches)
+- `crates/gruel-compiler/src/drop_glue.rs` (~8 matches)
+- `crates/gruel-air/src/intern_pool.rs` (~15 matches)
 - ... (15 more files with 1-3 matches each)
 
 **Phase 4.1-4.2** (~3-5 files):
-- `crates/rue-air/src/types.rs` - Replace enum with newtype
-- `crates/rue-air/src/intern_pool.rs` - Add get_kind() method
-- `crates/rue-air/src/lib.rs` - Update exports
+- `crates/gruel-air/src/types.rs` - Replace enum with newtype
+- `crates/gruel-air/src/intern_pool.rs` - Add get_kind() method
+- `crates/gruel-air/src/lib.rs` - Update exports
 
 ### Comparison to Big-Bang Approach
 

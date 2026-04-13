@@ -8,13 +8,13 @@ template = "spec/page.html"
 
 {{ rule(id="1.1:1") }}
 
-This document is the Rue Language Specification. It defines the syntax and semantics of the Rue programming language.
+This document is the Gruel Language Specification. It defines the syntax and semantics of the Gruel programming language.
 
 ## Scope
 
 {{ rule(id="1.2:1") }}
 
-This specification describes the Rue programming language as implemented by the reference compiler. It covers:
+This specification describes the Gruel programming language as implemented by the reference compiler. It covers:
 
 - Lexical structure (tokens, comments, whitespace)
 - Types (integers, booleans, arrays, structs)
@@ -115,7 +115,7 @@ The following terms are used throughout this specification:
 
 {{ rule(id="1.4:16") }}
 
-**Coercion**: An implicit type conversion that occurs automatically during type checking. See section 3.4 for the complete set of coercions in Rue.
+**Coercion**: An implicit type conversion that occurs automatically during type checking. See section 3.4 for the complete set of coercions in Gruel.
 
 {{ rule(id="1.4:17") }}
 
@@ -169,4 +169,4 @@ This specification is organized as follows:
 
 {{ rule(id="1.7:1") }}
 
-This specification corresponds to version 0.1.0 of the Rue language.
+This specification corresponds to version 0.1.0 of the Gruel language.

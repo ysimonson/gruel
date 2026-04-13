@@ -22,7 +22,7 @@ Binary bitwise operators take two operands of the same integer type and produce 
 
 {{ rule(id="4.3a:2") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a: i32 = 0b1100;
     let b: i32 = 0b1010;
@@ -45,7 +45,7 @@ Bitwise NOT takes a single integer operand and produces a result of the same typ
 
 {{ rule(id="4.3a:5") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a: i32 = 0b0101;
     let not_a = ~a;   // All bits inverted
@@ -84,7 +84,7 @@ If the shift amount is greater than or equal to the bit width of the type, the b
 
 {{ rule(id="4.3a:11") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i32 = 1;
     let left = x << 4;    // 16 (binary: 10000)
@@ -114,7 +114,7 @@ Parentheses can be used to override the default precedence.
 
 {{ rule(id="4.3a:15") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a: i32 = 1 | 2 & 3;   // = 1 | (2 & 3) = 1 | 2 = 3
     let b: i32 = (1 | 2) & 3; // = 3 & 3 = 3
@@ -130,7 +130,7 @@ All binary bitwise operators are left-associative.
 
 {{ rule(id="4.3a:17") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i32 = 1 << 2 << 1;  // = (1 << 2) << 1 = 4 << 1 = 8
     x

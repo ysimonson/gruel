@@ -1,6 +1,6 @@
 # Planning Features
 
-This document describes how to plan new features for Rue. The `/plan` command automates this workflow.
+This document describes how to plan new features for Gruel. The `/plan` command automates this workflow.
 
 ## When to Plan
 
@@ -88,7 +88,7 @@ Include in the description:
 
 2. **Add the preview feature**
 
-   In `crates/rue-error/src/lib.rs`, add to the `PreviewFeature` enum:
+   In `crates/gruel-error/src/lib.rs`, add to the `PreviewFeature` enum:
    ```rust
    pub enum PreviewFeature {
        // ...existing...

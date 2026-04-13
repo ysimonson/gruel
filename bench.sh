@@ -1,5 +1,5 @@
 #!/bin/bash
-# Rue Compiler Benchmark Runner
+# Gruel Compiler Benchmark Runner
 #
 # This script builds the compiler in release mode and runs benchmarks on all
 # programs defined in benchmarks/manifest.toml. Results are saved as JSON
@@ -92,7 +92,7 @@ done
 # Verify we're in the right directory
 if [[ ! -f "$MANIFEST" ]]; then
     log_error "Cannot find benchmarks/manifest.toml"
-    log_error "Run this script from the rue repository root"
+    log_error "Run this script from the gruel repository root"
     exit 1
 fi
 
@@ -101,17 +101,17 @@ os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m)
 
 # Build the compiler
-log_info "Building rue compiler ($BUILD_MODE mode)..."
-./buck2 build //crates/rue:rue --modifier //constraints:$BUILD_MODE 2>&1 | tail -3
+log_info "Building gruel compiler ($BUILD_MODE mode)..."
+./buck2 build //crates/gruel:gruel --modifier //constraints:$BUILD_MODE 2>&1 | tail -3
 
 # Get the path to the built compiler
-RUE_BIN="$(./buck2 build //crates/rue:rue --modifier //constraints:$BUILD_MODE --show-output 2>/dev/null | awk '{print $2}')"
-if [[ ! -x "$RUE_BIN" ]]; then
-    log_error "Failed to find rue binary at: $RUE_BIN"
+GRUEL_BIN="$(./buck2 build //crates/gruel:gruel --modifier //constraints:$BUILD_MODE --show-output 2>/dev/null | awk '{print $2}')"
+if [[ ! -x "$GRUEL_BIN" ]]; then
+    log_error "Failed to find gruel binary at: $GRUEL_BIN"
     exit 1
 fi
 
-log_info "Using compiler: $RUE_BIN"
+log_info "Using compiler: $GRUEL_BIN"
 
 # Create temp directory for outputs
 TEMP_DIR=$(mktemp -d)
@@ -182,7 +182,7 @@ for i in "${!benchmark_names[@]}"; do
         time_output="$TEMP_DIR/time_output_$$"
         if [[ "$os" == "darwin" ]]; then
             # macOS: -l gives max resident set size in bytes
-            if ! timing_json=$(/usr/bin/time -l "$RUE_BIN" --benchmark-json "$full_path" "$output_binary" 2>"$time_output"); then
+            if ! timing_json=$(/usr/bin/time -l "$GRUEL_BIN" --benchmark-json "$full_path" "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
                 rm -f "$time_output"
                 continue
@@ -191,7 +191,7 @@ for i in "${!benchmark_names[@]}"; do
             peak_mem_bytes=$(grep "maximum resident set size" "$time_output" 2>/dev/null | awk '{print $1}')
         else
             # Linux: -v gives max resident set size in KB
-            if ! timing_json=$(/usr/bin/time -v "$RUE_BIN" --benchmark-json "$full_path" "$output_binary" 2>"$time_output"); then
+            if ! timing_json=$(/usr/bin/time -v "$GRUEL_BIN" --benchmark-json "$full_path" "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
                 rm -f "$time_output"
                 continue

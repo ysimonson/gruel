@@ -8,7 +8,7 @@ page_template = "spec/page.html"
 
 # Runtime Behavior
 
-This chapter describes runtime behavior in Rue, including error conditions and panics.
+This chapter describes runtime behavior in Gruel, including error conditions and panics.
 
 {{ rule(id="8.0:1") }}
 

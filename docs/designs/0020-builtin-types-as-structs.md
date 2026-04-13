@@ -28,7 +28,7 @@ Refactor built-in types like `String` from hardcoded `Type` enum variants into s
 Today, `String` is a primitive variant in the `Type` enum:
 
 ```rust
-// rue-air/src/types.rs
+// gruel-air/src/types.rs
 pub enum Type {
     I8, I16, I32, I64,
     U8, U16, U32, U64,
@@ -50,7 +50,7 @@ Because `String` is "magic" (a built-in with heap semantics, 3-slot ABI, runtime
 | Sema | `sema.rs:4748` | Returns slot count (3) |
 | Type inference | `generate.rs:264` | Infers `StringConst → String` |
 | CFG builder | `build.rs:1682` | Marks String as needing drop |
-| Codegen (x86) | `cfg_lower.rs:1229` | Emits `__rue_str_eq` call |
+| Codegen (x86) | `cfg_lower.rs:1229` | Emits `__gruel_str_eq` call |
 | Codegen (x86) | `cfg_lower.rs:1371` | Handles 3-slot alloc |
 | Codegen (arm) | `cfg_lower.rs:946` | Same, duplicated |
 | Drop glue | `drop_glue.rs:47` | String needs drop |
@@ -72,11 +72,11 @@ If we wanted to add `Vec<T>`, `HashMap<K,V>`, or even `&str`, we'd need to:
 
 **Rust**: Uses "lang items" — markers like `#[lang = "owned_box"]` that tell the compiler "this library type implements this language concept." The compiler knows about traits (`Drop`, `Eq`, `Deref`) but `String` and `Vec<T>` are plain library structs that *use* those traits. The compiler doesn't special-case them directly.
 
-**Rue Today**: Hard-codes `String` as a compiler primitive, requiring scattered special-case code everywhere.
+**Gruel Today**: Hard-codes `String` as a compiler primitive, requiring scattered special-case code everywhere.
 
 ### The Insight
 
-`String` isn't fundamentally different from a user-defined struct — it's just a struct whose methods are implemented in the runtime rather than generated from Rue source. If the compiler sees it as "just a struct," we can unify the handling.
+`String` isn't fundamentally different from a user-defined struct — it's just a struct whose methods are implemented in the runtime rather than generated from Gruel source. If the compiler sees it as "just a struct," we can unify the handling.
 
 ## Decision
 
@@ -115,7 +115,7 @@ pub enum Type {
 Create a central registry that describes built-in types:
 
 ```rust
-// New module: rue-builtins or within rue-air
+// New module: gruel-builtins or within gruel-air
 
 /// Descriptor for a built-in type's properties
 pub struct BuiltinTypeDef {
@@ -177,10 +177,10 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
         BuiltinField { name: "cap", ty: BuiltinFieldType::U64 },
     ],
     is_copy: false,
-    drop_fn: Some("__rue_drop_String"),
+    drop_fn: Some("__gruel_drop_String"),
     operators: &[
-        BuiltinOperator { op: BinOp::Eq, runtime_fn: "__rue_str_eq" },
-        BuiltinOperator { op: BinOp::Ne, runtime_fn: "__rue_str_eq" }, // Inverted
+        BuiltinOperator { op: BinOp::Eq, runtime_fn: "__gruel_str_eq" },
+        BuiltinOperator { op: BinOp::Ne, runtime_fn: "__gruel_str_eq" }, // Inverted
     ],
     associated_fns: &[
         BuiltinAssociatedFn {
@@ -372,7 +372,7 @@ if let Some(runtime_fn) = self.get_builtin_operator(lhs_ty, BinOp::Eq) {
 
 ### Drop Glue Changes
 
-The existing drop glue system already handles structs with destructors. With `is_builtin: true` and `destructor: Some("__rue_drop_String")`, the drop glue synthesizer will correctly generate calls to the runtime drop function.
+The existing drop glue system already handles structs with destructors. With `is_builtin: true` and `destructor: Some("__gruel_drop_String")`, the drop glue synthesizer will correctly generate calls to the runtime drop function.
 
 ```rust
 // drop_glue.rs - no changes needed for String specifically!
@@ -398,16 +398,16 @@ let air_ref = self.air.add_inst(AirInst {
 
 ## Implementation Phases
 
-**Epic**: rue-c8lp
+**Epic**: gruel-c8lp
 
 ### Phase 1: Builtin Registry Infrastructure
 
-**Issues**: rue-fgx3 (crate), rue-cbsc (injection)
+**Issues**: gruel-fgx3 (crate), gruel-cbsc (injection)
 
 **Goal**: Create the builtin type registry without changing existing behavior.
 
 **Tasks**:
-- Create `rue-builtins` crate
+- Create `gruel-builtins` crate
 - Define `BuiltinTypeDef` and related types
 - Define `STRING_TYPE` with all current String operations
 - Add `is_builtin` field to `StructDef`
@@ -419,7 +419,7 @@ let air_ref = self.air.add_inst(AirInst {
 
 ### Phase 2: Migrate Sema
 
-**Issue**: rue-hp13
+**Issue**: gruel-hp13
 
 **Goal**: Replace `Type::String` checks in semantic analysis with struct-based queries.
 
@@ -435,7 +435,7 @@ let air_ref = self.air.add_inst(AirInst {
 
 ### Phase 3: Migrate Codegen
 
-**Issues**: rue-s6mk (x86_64), rue-tco7 (aarch64), rue-5cfw (other)
+**Issues**: gruel-s6mk (x86_64), gruel-tco7 (aarch64), gruel-5cfw (other)
 
 **Goal**: Replace `Type::String` checks in both backends and remaining crates.
 
@@ -448,13 +448,13 @@ let air_ref = self.air.add_inst(AirInst {
   - `Call` with string args/returns → struct ABI
   - `Drop` → existing struct drop path
 - Mirror all changes in aarch64 `cfg_lower.rs`
-- Migrate rue-cfg, rue-compiler/drop_glue, rue-codegen/types
+- Migrate gruel-cfg, gruel-compiler/drop_glue, gruel-codegen/types
 
 **Verification**: All tests pass on both architectures.
 
 ### Phase 4: Remove Type::String
 
-**Issue**: rue-bmje
+**Issue**: gruel-bmje
 
 **Goal**: Delete the `Type::String` variant entirely.
 
@@ -468,12 +468,12 @@ let air_ref = self.air.add_inst(AirInst {
 
 ### Phase 5: Documentation and Cleanup
 
-**Issue**: rue-n20l
+**Issue**: gruel-n20l
 
 **Goal**: Document the new architecture for future contributors.
 
 **Tasks**:
-- Add documentation to `rue-builtins` explaining how to add new built-in types
+- Add documentation to `gruel-builtins` explaining how to add new built-in types
 - Update CLAUDE.md with builtin type information
 - Remove any dead code from the migration
 
@@ -502,7 +502,7 @@ let air_ref = self.air.add_inst(AirInst {
 
 ## Design Decisions
 
-1. **Where does the registry live?** New `rue-builtins` crate. This provides the cleanest separation of concerns and makes the builtin type definitions easy to find and modify.
+1. **Where does the registry live?** New `gruel-builtins` crate. This provides the cleanest separation of concerns and makes the builtin type definitions easy to find and modify.
 
 2. **How do we handle String literals in inference?** The `StringConst` instruction needs to know the String struct's ID. The registry will return the `StructId` after injection, and we'll store it in a well-known field (e.g., `Sema::builtin_string_id`) for fast access.
 

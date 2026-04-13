@@ -74,7 +74,7 @@ jobs:
 
       - name: Add CNAME
         if: github.ref == 'refs/heads/trunk'
-        run: echo "rue-lang.dev" > website/public/CNAME
+        run: echo "gruel-lang.dev" > website/public/CNAME
 
       - name: Upload artifact
         if: github.ref == 'refs/heads/trunk'
@@ -83,7 +83,7 @@ jobs:
           path: website/public
 
   deploy:
-    if: github.ref == 'refs/heads/trunk' && github.repository == 'rue-language/rue'
+    if: github.ref == 'refs/heads/trunk' && github.repository == 'gruel-language/gruel'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

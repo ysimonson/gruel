@@ -1,6 +1,6 @@
 # Design Decisions
 
-This document records significant architectural decisions made in the Rue compiler, along with context and rationale.
+This document records significant architectural decisions made in the Gruel compiler, along with context and rationale.
 
 ## ADR-001: Architecture-Specific Machine IR (X86Mir)
 
@@ -63,7 +63,7 @@ Some compilers have a single IR that gets progressively annotated with type info
 
 **Decision:**
 We have two distinct IRs:
-- **RIR** (Rue IR): Untyped, produced by AstGen
+- **RIR** (Gruel IR): Untyped, produced by AstGen
 - **AIR** (Analyzed IR): Typed, produced by Sema
 
 **Rationale:**
@@ -109,7 +109,7 @@ Focus on fast from-scratch compilation first. No incremental compilation initial
 Many compilers use LLVM for code generation, benefiting from its optimizations and target support. Others emit machine code directly.
 
 **Decision:**
-Rue emits machine code directly, without LLVM.
+Gruel emits machine code directly, without LLVM.
 
 **Rationale:**
 - Full control over compilation speed
@@ -183,7 +183,7 @@ Compiler tests need to verify behavior across many inputs. Approaches include:
 - Structured test specifications
 
 **Decision:**
-Use TOML files with structured test cases in `rue-spec/cases/`.
+Use TOML files with structured test cases in `gruel-spec/cases/`.
 
 **Rationale:**
 - Tests are data, not code
@@ -193,7 +193,7 @@ Use TOML files with structured test cases in `rue-spec/cases/`.
 - Human-readable and version-control friendly
 
 **Consequences:**
-- Need a test runner (rue-spec) to execute them
+- Need a test runner (gruel-spec) to execute them
 - Tests are outside the normal `cargo test` flow
 - Must keep test format and runner in sync
 
@@ -210,7 +210,7 @@ Programming languages occupy different points in the abstraction/control tradeof
 - **Managed** (Go, Java): Garbage collection, simpler mental model
 
 **Decision:**
-Rue aims to be higher-level than Rust/Zig but lower-level than Go. Memory safety by default, but no garbage collector.
+Gruel aims to be higher-level than Rust/Zig but lower-level than Go. Memory safety by default, but no garbage collector.
 
 **Influences:**
 - **Hylo** (formerly Val): Mutable value semantics, memory safety without GC
@@ -244,10 +244,10 @@ Start with a subset of Rust syntax. May evolve independently later.
 - Familiar to target audience (systems programmers)
 - Existing Rust tooling (syntax highlighting, etc.) works initially
 - Allows focusing on semantics before syntax bikeshedding
-- Clear migration path for Rust users exploring Rue
+- Clear migration path for Rust users exploring Gruel
 
 **Current syntax:**
-```rue
+```gruel
 fn main() -> i32 {
     42
 }
@@ -256,7 +256,7 @@ fn main() -> i32 {
 **Consequences:**
 - Parser follows Rust conventions
 - May diverge from Rust syntax as language evolves
-- Users may expect Rust semantics where Rue differs
+- Users may expect Rust semantics where Gruel differs
 
 ---
 
@@ -282,7 +282,7 @@ Use uniform 8-byte slots for all scalar values and struct fields.
 - Allows us to focus on language semantics before optimizing memory layout
 
 **Example:**
-```rue
+```gruel
 struct Point { x: i8, y: i8 }
 ```
 - Current layout: 16 bytes (2 slots × 8 bytes)

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the Struct-of-Arrays (SOA) layout for Rue's AST, inspired by Zig's approach (PR #7920).
+This document describes the Struct-of-Arrays (SOA) layout for Gruel's AST, inspired by Zig's approach (PR #7920).
 
 ## Motivation
 
@@ -367,7 +367,7 @@ Based on Zig's results (PR #7920):
 
 1. **Span tracking**: Should we store full Span (start+end) or just main_token and re-tokenize?
    - Zig stores only start offset
-   - Rue currently stores full spans
+   - Gruel currently stores full spans
    - **Decision**: Start with main_token only, add Span if needed
 
 2. **String interning**: Should strings be in a separate table or inline?

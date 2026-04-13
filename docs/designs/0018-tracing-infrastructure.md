@@ -19,11 +19,11 @@ Implemented
 
 ## Summary
 
-Add the `tracing` crate to Rue for structured debug logging, following the "wide events" philosophy from loggingsucks.com. This provides rich, context-aware logging per compilation pass rather than scattered debug statements, and also implements the `--time-passes` feature (rue-uxgx).
+Add the `tracing` crate to Gruel for structured debug logging, following the "wide events" philosophy from loggingsucks.com. This provides rich, context-aware logging per compilation pass rather than scattered debug statements, and also implements the `--time-passes` feature (gruel-uxgx).
 
 ## Context
 
-Currently Rue has no formal logging infrastructure. Debug output uses ad-hoc `println!`/`eprintln!` calls scattered throughout the codebase. This makes debugging compiler issues difficult and provides no structured way to analyze compilation performance.
+Currently Gruel has no formal logging infrastructure. Debug output uses ad-hoc `println!`/`eprintln!` calls scattered throughout the codebase. This makes debugging compiler issues difficult and provides no structured way to analyze compilation performance.
 
 The "wide events" philosophy (from loggingsucks.com) advocates for:
 1. **Canonical log lines** - One rich, structured log per operation containing all debugging context
@@ -32,7 +32,7 @@ The "wide events" philosophy (from loggingsucks.com) advocates for:
 
 For a compiler, this translates to emitting one structured span per compilation pass with rich context (timing, counts, outcomes).
 
-Additionally, there's an open feature request (rue-uxgx) for `--time-passes` to show compilation timing. The `tracing` crate provides timing spans naturally, so both needs are addressed by the same infrastructure.
+Additionally, there's an open feature request (gruel-uxgx) for `--time-passes` to show compilation timing. The `tracing` crate provides timing spans naturally, so both needs are addressed by the same infrastructure.
 
 ## Decision
 
@@ -42,20 +42,20 @@ Add `tracing` and `tracing-subscriber` as dependencies and instrument the compil
 
 ```bash
 # Normal compilation (no logging by default)
-rue source.rue output
+gruel source.gruel output
 
 # Show timing per pass
-rue --time-passes source.rue output
+gruel --time-passes source.gruel output
 
 # Enable debug logging
-rue --log-level=debug source.rue output
-RUST_LOG=debug rue source.rue output
+gruel --log-level=debug source.gruel output
+RUST_LOG=debug gruel source.gruel output
 
 # JSON format for tooling integration
-rue --log-format=json --log-level=debug source.rue output
+gruel --log-format=json --log-level=debug source.gruel output
 
 # Filter to specific module
-RUST_LOG=rue_compiler::sema=trace rue source.rue output
+RUST_LOG=gruel_compiler::sema=trace gruel source.gruel output
 ```
 
 ### --time-passes Output
@@ -114,28 +114,28 @@ pub fn compile_frontend_with_options(...) -> CompileResult<...> {
 
 ## Implementation Phases
 
-- [x] **Phase 1: Add dependencies** - rue-irz1.1
+- [x] **Phase 1: Add dependencies** - gruel-irz1.1
   - Update `third-party/Cargo.toml` with tracing, tracing-subscriber
   - Run `reindeer buckify`
   - Update crate BUCK files
 
-- [x] **Phase 2: CLI and subscriber** - rue-irz1.2
+- [x] **Phase 2: CLI and subscriber** - gruel-irz1.2
   - Initialize tracing-subscriber in main.rs
   - Add `--log-level` flag (off/error/warn/info/debug/trace)
   - Add `--log-format` flag (text/json)
   - Support `RUST_LOG` environment variable
 
-- [x] **Phase 3: --time-passes** - rue-irz1.3
+- [x] **Phase 3: --time-passes** - gruel-irz1.3
   - Implement `--time-passes` using tracing spans
   - Collect timing from spans and format output
-  - Closes rue-uxgx
+  - Closes gruel-uxgx
 
-- [x] **Phase 4: Instrument compiler** - rue-irz1.4
+- [x] **Phase 4: Instrument compiler** - gruel-irz1.4
   - Add spans to `compile_frontend_with_options()`
   - Add spans to backend functions
   - Include context: file size, token/instruction counts
 
-- [x] **Phase 5: Documentation** - rue-irz1.5
+- [x] **Phase 5: Documentation** - gruel-irz1.5
   - Add logging guidelines to CLAUDE.md
   - Document the "wide events" philosophy
   - Provide good/bad examples
@@ -173,4 +173,4 @@ None - resolved during planning:
 
 - https://loggingsucks.com/ - Wide events philosophy
 - https://docs.rs/tracing - Tracing crate documentation
-- rue-uxgx - Original --time-passes feature request
+- gruel-uxgx - Original --time-passes feature request

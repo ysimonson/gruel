@@ -22,7 +22,7 @@ Expressions of type `!` include:
 
 {{ rule(id="3.4:3", cat="normative") }}
 
-A type coercion is an implicit type conversion that occurs automatically during type checking. Rue has exactly one coercion: the never type coerces to any type.
+A type coercion is an implicit type conversion that occurs automatically during type checking. Gruel has exactly one coercion: the never type coerces to any type.
 
 {{ rule(id="3.4:4", cat="normative") }}
 
@@ -30,7 +30,7 @@ When type checking requires a value of type `T`, a value of type `!` is accepted
 
 {{ rule(id="3.4:5") }}
 
-```rue
+```gruel
 fn test(x: i32) -> i32 {
     // `return 100` has type !, which coerces to i32
     let y = if x > 5 { return 100 } else { x };
@@ -48,7 +48,7 @@ When both branches of an `if` expression or all arms of a `match` expression hav
 
 {{ rule(id="3.4:7") }}
 
-```rue
+```gruel
 fn diverges(x: i32) -> i32 {
     // Both branches return, so the if has type !
     // This coerces to i32 (the function's return type)

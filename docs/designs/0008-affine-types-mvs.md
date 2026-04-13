@@ -22,7 +22,7 @@ Introduce an affine type system with mutable value semantics (MVS) to provide me
 
 ## Context
 
-Rue aims to be a systems programming language with memory safety and higher-level ergonomics than Rust or Zig. The key insight is that we can achieve safety through a different path than Rust's borrow checker:
+Gruel aims to be a systems programming language with memory safety and higher-level ergonomics than Rust or Zig. The key insight is that we can achieve safety through a different path than Rust's borrow checker:
 
 ### The Problem with Borrow Checking
 
@@ -77,7 +77,7 @@ All types are affine by default:
 - Can be implicitly dropped (destructor runs)
 - Cannot be implicitly copied
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 fn consume(p: Point) { ... }
@@ -93,7 +93,7 @@ fn main() {
 
 Mark types with `linear` to require explicit consumption:
 
-```rue
+```gruel
 linear struct Transaction {
     connection: DbConnection,
 }
@@ -121,7 +121,7 @@ Linear types are useful for:
 
 The `@copy` directive enables implicit bitwise copying:
 
-```rue
+```gruel
 @copy
 struct Point { x: i32, y: i32 }
 
@@ -148,7 +148,7 @@ Note: `@copy` uses the directive system (like `@dbg`). When a full trait system 
 
 The `@handle` directive marks types that can be explicitly duplicated:
 
-```rue
+```gruel
 @handle
 struct Rc<T> {
     ptr: RawPtr,
@@ -182,7 +182,7 @@ Note: `@handle` uses the directive system. The type must provide a `.handle()` m
 
 The `inout` keyword marks parameters that are mutated and returned to the caller:
 
-```rue
+```gruel
 fn increment(x: inout i32) {
     x = x + 1;
 }
@@ -203,16 +203,16 @@ Semantics:
 
 Unlike Rust's `&mut`, `inout` does not create a reference type. It's a calling convention:
 
-```rue
+```gruel
 // Rust: takes a reference type &mut i32
 fn increment(x: &mut i32) { *x += 1; }
 
-// Rue: inout is a calling convention, not a type
+// Gruel: inout is a calling convention, not a type
 fn increment(x: inout i32) { x = x + 1; }
 ```
 
 The difference:
-- No reference types in Rue's type system
+- No reference types in Gruel's type system
 - No lifetimes needed
 - Cannot store an inout "reference" - it's not a value
 
@@ -222,7 +222,7 @@ The difference:
 
 Array indexing uses projection semantics (following Hylo):
 
-```rue
+```gruel
 fn main() {
     var arr = [1, 2, 3];
 
@@ -251,7 +251,7 @@ Following Hylo, enforce the law of exclusivity statically:
 - You can have **either** one inout access **or** multiple read accesses
 - Never both simultaneously
 
-```rue
+```gruel
 var arr = [1, 2, 3];
 
 // OK: multiple reads
@@ -266,7 +266,7 @@ swap(&arr[0], &arr[1]);  // Both are inout to same array
 
 The solution for swap:
 
-```rue
+```gruel
 fn swap_indices(arr: inout Array<i32>, i: usize, j: usize) {
     let tmp = arr[i];
     arr[i] = arr[j];
@@ -278,7 +278,7 @@ fn swap_indices(arr: inout Array<i32>, i: usize, j: usize) {
 
 For non-Copy types, you cannot move out of an indexed position:
 
-```rue
+```gruel
 struct BigThing { ... }  // not Copy
 
 var arr: Array<BigThing> = [...];
@@ -292,7 +292,7 @@ This keeps the mental model simple: arrays always contain valid elements.
 
 ### Syntax Summary
 
-```rue
+```gruel
 // Affine by default
 struct Point { x: i32, y: i32 }
 
@@ -339,7 +339,7 @@ Linear types:
 - Can be `@handle` if explicit duplication makes sense
 - Must have all linear fields consumed for the type to be consumed
 
-```rue
+```gruel
 linear struct Transaction { ... }
 
 // ERROR: linear types cannot be @copy
@@ -354,7 +354,7 @@ linear struct Transaction { ... }
 #### Inference Rules
 
 For function:
-```rue
+```gruel
 fn example<T>(x: T) -> T { x }
 ```
 
@@ -367,11 +367,11 @@ The type and linearity are checked separately.
 
 ## Implementation Phases
 
-Epic: rue-dfr8
+Epic: gruel-dfr8
 
 This is a large feature requiring multiple phases. Each phase is a **vertical slice** - a complete, testable feature end-to-end. This allows kicking the tires at each step.
 
-### Phase 1: Affine structs (rue-dfr8.1) ✅ COMPLETE
+### Phase 1: Affine structs (gruel-dfr8.1) ✅ COMPLETE
 
 Make user-defined structs affine by default. Primitives remain implicitly Copy.
 
@@ -385,7 +385,7 @@ Make user-defined structs affine by default. Primitives remain implicitly Copy.
 
 **Testable**: Define a struct, use it twice, get a compile error.
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };
@@ -395,7 +395,7 @@ fn main() -> i32 {
 }
 ```
 
-### Phase 2: @copy directive (rue-dfr8.2)
+### Phase 2: @copy directive (gruel-dfr8.2)
 
 Allow opting structs into Copy semantics.
 
@@ -405,7 +405,7 @@ Allow opting structs into Copy semantics.
 
 **Testable**: Mark a struct `@copy`, use it multiple times without error.
 
-```rue
+```gruel
 @copy
 struct Point { x: i32, y: i32 }
 fn main() -> i32 {
@@ -416,7 +416,7 @@ fn main() -> i32 {
 }
 ```
 
-### Phase 3: Inout parameters (rue-dfr8.3)
+### Phase 3: Inout parameters (gruel-dfr8.3)
 
 Add mutation-without-ownership-transfer.
 
@@ -427,7 +427,7 @@ Add mutation-without-ownership-transfer.
 
 **Testable**: Mutate a value through inout parameter.
 
-```rue
+```gruel
 fn increment(x: inout i32) {
     x = x + 1;
 }
@@ -438,7 +438,7 @@ fn main() -> i32 {
 }
 ```
 
-### Phase 4: Linear types (rue-dfr8.4)
+### Phase 4: Linear types (gruel-dfr8.4)
 
 Add must-consume semantics.
 
@@ -449,7 +449,7 @@ Add must-consume semantics.
 
 **Testable**: Dropping a linear value without consuming it is an error.
 
-```rue
+```gruel
 linear struct MustUse { value: i32 }
 fn consume(m: MustUse) -> i32 { m.value }
 fn main() -> i32 {
@@ -460,7 +460,7 @@ fn main() -> i32 {
 // fn bad() { let m = MustUse { value: 1 }; }  // ERROR: linear value dropped
 ```
 
-### Phase 5: Projection semantics (rue-dfr8.5) ✅ COMPLETE
+### Phase 5: Projection semantics (gruel-dfr8.5) ✅ COMPLETE
 
 Add proper array access rules under affine semantics.
 
@@ -469,11 +469,11 @@ Add proper array access rules under affine semantics.
 - [x] Array write: inout projection to array
 - [x] Law of exclusivity for overlapping projections (via existing inout checks)
 
-**Note**: Compound assignment on array elements (`arr[0] += 5`) is not yet implemented (separate parser enhancement needed). Also, accessing fields of struct elements in arrays (`arr[i].field`) has an ICE in codegen (see rue-oqm6).
+**Note**: Compound assignment on array elements (`arr[0] += 5`) is not yet implemented (separate parser enhancement needed). Also, accessing fields of struct elements in arrays (`arr[i].field`) has an ICE in codegen (see gruel-oqm6).
 
 **Testable**: Can mutate array elements; can't move out non-Copy elements.
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut arr = [1, 2, 3];
     arr[0] = 10;        // OK: inout projection
@@ -482,7 +482,7 @@ fn main() -> i32 {
 }
 ```
 
-### Phase 6: @handle directive (rue-dfr8.6)
+### Phase 6: @handle directive (gruel-dfr8.6)
 
 Add explicit duplication for reference-counted types.
 
@@ -493,7 +493,7 @@ Add explicit duplication for reference-counted types.
 
 **Testable**: Call `.handle()` to explicitly duplicate.
 
-```rue
+```gruel
 @handle
 struct Counter { count: i32 }
 fn Counter_handle(self: Counter) -> Counter {

@@ -19,13 +19,13 @@ Implemented
 
 ## Summary
 
-Extend Rue's parameter passing model with immutable borrowing (`borrow`), completing the ownership capability matrix alongside existing `inout` (mutable borrow) and move semantics. This enables temporary read-only access without consuming values, paralleling Swift's `borrowing`/`consuming`/`inout` and Hylo's `let`/`sink`/`inout`/`set` conventions.
+Extend Gruel's parameter passing model with immutable borrowing (`borrow`), completing the ownership capability matrix alongside existing `inout` (mutable borrow) and move semantics. This enables temporary read-only access without consuming values, paralleling Swift's `borrowing`/`consuming`/`inout` and Hylo's `let`/`sink`/`inout`/`set` conventions.
 
 ## Context
 
 ### Current State
 
-Rue (ADR-0008) currently has:
+Gruel (ADR-0008) currently has:
 - **Move** (default): Values are consumed when passed to functions
 - **Copy** (`@copy`): Values are implicitly duplicated (bitwise)
 - **Inout** (in progress): Mutable access without ownership transfer
@@ -36,7 +36,7 @@ What's missing: **immutable borrowing** - temporary read-only access without con
 
 Consider this scenario:
 
-```rue
+```gruel
 struct BigData { /* lots of fields */ }
 
 fn print_summary(data: BigData) {
@@ -63,7 +63,7 @@ We need a way to say "borrow this temporarily for reading."
 #### Swift (SE-0377)
 
 Swift has three parameter ownership modifiers:
-- `consuming` - takes ownership (like Rue's default)
+- `consuming` - takes ownership (like Gruel's default)
 - `borrowing` - temporary read-only access (what we want)
 - `inout` - temporary exclusive mutable access (what we have)
 
@@ -134,7 +134,7 @@ For now, we're deferring pinning. But the `borrow`/`inout` distinction lays grou
 
 Add `borrow` as a parameter passing mode keyword:
 
-```rue
+```gruel
 fn analyze(borrow data: BigData) -> i32 {
     data.field1 + data.field2
 }
@@ -158,7 +158,7 @@ Like `inout`, the `borrow` keyword appears at both declaration and call site for
 4. **Multiple borrows OK**: Can have multiple simultaneous borrows of the same value
 5. **No borrow during inout**: Cannot borrow a value while an `inout` reference to it exists
 
-```rue
+```gruel
 fn read1(borrow x: BigData) -> i32 { x.field }
 fn read2(borrow x: BigData) -> i32 { x.field * 2 }
 
@@ -178,9 +178,9 @@ fn main() -> i32 {
 
 #### Law of Exclusivity
 
-Rue enforces exclusivity statically (following Hylo):
+Gruel enforces exclusivity statically (following Hylo):
 
-```rue
+```gruel
 fn mutate(inout x: i32) { x = x + 1; }
 fn read(borrow x: i32) -> i32 { x }
 
@@ -204,7 +204,7 @@ The key rule: **either** one `inout` **or** any number of `borrow` accesses, nev
 
 Borrowing a struct allows borrowing its fields:
 
-```rue
+```gruel
 struct Pair { a: i32, b: i32 }
 
 fn read_a(borrow p: Pair) -> i32 { p.a }
@@ -221,7 +221,7 @@ This is projection: borrowing the whole gives access to the parts.
 
 A critical property: borrows cannot escape their scope.
 
-```rue
+```gruel
 // ERROR: cannot return a borrow
 fn bad(borrow x: BigData) -> BigData {
     x  // ERROR: cannot move out of borrowed value
@@ -240,7 +240,7 @@ This is why we don't need lifetime annotations like Rust: borrows are always sco
 
 For `@copy` types, `borrow` is still meaningful but may be optimized:
 
-```rue
+```gruel
 @copy
 struct Point { x: i32, y: i32 }
 
@@ -253,7 +253,7 @@ The compiler may pass small `@copy` types by value even when `borrow` is used, a
 
 Functions cannot return borrowed values (no lifetime tracking):
 
-```rue
+```gruel
 // OK: returns owned value
 fn make() -> BigData { BigData { ... } }
 
@@ -299,7 +299,7 @@ call_arg = [ param_mode ] expr ;
 
 Borrowing is a calling convention, not a type constructor:
 
-```rue
+```gruel
 // This is NOT valid - borrow is not a type
 let x: borrow BigData = ...;  // ERROR
 
@@ -311,12 +311,12 @@ This keeps the type system simple and avoids lifetime complexity.
 
 ## Implementation Phases
 
-Epic: rue-7lii
+Epic: gruel-7lii
 
-- [x] **Phase 1: Parser support** - rue-7lii.1 - Add `borrow` keyword, parse in parameter declarations and call sites
-- [x] **Phase 2: Semantic analysis** - rue-7lii.2 - Enforce immutability, prevent move-out, non-escaping check, exclusivity
-- [x] **Phase 3: Codegen** - rue-7lii.3 - Pass borrowed values by pointer, generate read-only accesses
-- [x] **Phase 4: Specification and tests** - rue-7lii.4 - Add spec sections, comprehensive tests
+- [x] **Phase 1: Parser support** - gruel-7lii.1 - Add `borrow` keyword, parse in parameter declarations and call sites
+- [x] **Phase 2: Semantic analysis** - gruel-7lii.2 - Enforce immutability, prevent move-out, non-escaping check, exclusivity
+- [x] **Phase 3: Codegen** - gruel-7lii.3 - Pass borrowed values by pointer, generate read-only accesses
+- [x] **Phase 4: Specification and tests** - gruel-7lii.4 - Add spec sections, comprehensive tests
 
 ## Consequences
 
@@ -353,7 +353,7 @@ Epic: rue-7lii
    This seems natural but needs detailed design.
 
 3. **Field borrowing granularity?** Can you borrow different fields simultaneously?
-   ```rue
+   ```gruel
    fn f(borrow a: i32, inout b: i32) { ... }
    let mut s = Struct { a: 1, b: 2 };
    f(borrow s.a, inout s.b);  // Is this OK?
@@ -361,7 +361,7 @@ Epic: rue-7lii
    Hylo allows this. We should too, but it needs careful analysis.
 
 4. **Interaction with arrays?** Borrowing an array element:
-   ```rue
+   ```gruel
    let arr = [big1, big2, big3];
    analyze(borrow arr[0]);  // Borrow one element?
    ```

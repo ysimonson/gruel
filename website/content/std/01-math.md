@@ -9,7 +9,7 @@ The `math` module provides basic mathematical utilities for working with integer
 
 ## Import
 
-```rue
+```gruel
 const math = @import("std").math;
 ```
 
@@ -17,7 +17,7 @@ const math = @import("std").math;
 
 ### abs
 
-```rue
+```gruel
 pub fn abs(x: i32) -> i32
 ```
 
@@ -30,7 +30,7 @@ Returns the absolute value of an integer.
 
 **Example:**
 
-```rue
+```gruel
 const math = @import("std").math;
 
 fn main() -> i32 {
@@ -45,7 +45,7 @@ fn main() -> i32 {
 
 ### min
 
-```rue
+```gruel
 pub fn min(a: i32, b: i32) -> i32
 ```
 
@@ -59,7 +59,7 @@ Returns the smaller of two values.
 
 **Example:**
 
-```rue
+```gruel
 const math = @import("std").math;
 
 fn main() -> i32 {
@@ -73,7 +73,7 @@ fn main() -> i32 {
 
 ### max
 
-```rue
+```gruel
 pub fn max(a: i32, b: i32) -> i32
 ```
 
@@ -87,7 +87,7 @@ Returns the larger of two values.
 
 **Example:**
 
-```rue
+```gruel
 const math = @import("std").math;
 
 fn main() -> i32 {
@@ -101,7 +101,7 @@ fn main() -> i32 {
 
 ### clamp
 
-```rue
+```gruel
 pub fn clamp(x: i32, lo: i32, hi: i32) -> i32
 ```
 
@@ -118,7 +118,7 @@ If `x` is less than `lo`, returns `lo`. If `x` is greater than `hi`, returns `hi
 
 **Example:**
 
-```rue
+```gruel
 const math = @import("std").math;
 
 fn main() -> i32 {
@@ -133,7 +133,7 @@ fn main() -> i32 {
 
 Here's a more complete example using multiple math functions:
 
-```rue
+```gruel
 const math = @import("std").math;
 
 fn distance(a: i32, b: i32) -> i32 {
@@ -159,4 +159,4 @@ fn main() -> i32 {
 
 ## Implementation
 
-The math module is implemented in `std/math.rue`. All functions currently operate on `i32` values. Future versions may include overloads for other integer types.
+The math module is implemented in `std/math.gruel`. All functions currently operate on `i32` values. Future versions may include overloads for other integer types.

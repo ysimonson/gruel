@@ -1,5 +1,5 @@
 +++
-title = "The Story of Rue So Far"
+title = "The Story of Gruel So Far"
 date = 2025-12-22
 template = "blog-page.html"
 
@@ -7,7 +7,7 @@ template = "blog-page.html"
 authors = ["steve"]
 +++
 
-Hi, Steve here, no Claude. I wanted to talk about what I've done so far with Rue. I plan on letting Claude also write something soon as well, but I wanted to get my own words down first.
+Hi, Steve here, no Claude. I wanted to talk about what I've done so far with Gruel. I plan on letting Claude also write something soon as well, but I wanted to get my own words down first.
 
 <!-- more -->
 
@@ -49,7 +49,7 @@ However, last week, I had some spare time... and I decided to start over. I have
 
 So I started over.
 
-And it's going *way* better this time! Technically, Rue doesn't have all of the features that it had, but in many ways, it has more already too. And I feel much better about the state of the codebase, the velocity of the project, and my ability to keep working on it in my limited spare time.
+And it's going *way* better this time! Technically, Gruel doesn't have all of the features that it had, but in many ways, it has more already too. And I feel much better about the state of the codebase, the velocity of the project, and my ability to keep working on it in my limited spare time.
 
 So that's why I decided to more formally announce things. I'm more ready to share this project with the world than I was back then. And I wanted to make this blog to write some of this out. I'm sure some of you are asking "Well what *are* those practices? Why is it going better this time?" And I do want to write that stuff up. But not for tonight.
 
@@ -57,4 +57,4 @@ Tonight, I'd just like to bask in the fact that I got a baby language from zero 
 
 And maybe I'll run out of steam again, or maybe I'll hit a wall with Claude. Who knows. But I've already had a tremendous amount of fun with all of this. And hopefully you all can learn from my success or failure here. We'll see which way it goes.
 
-[first-attempt]: https://github.com/rue-language/rue/tree/first-attempt
+[first-attempt]: https://github.com/gruel-language/gruel/tree/first-attempt

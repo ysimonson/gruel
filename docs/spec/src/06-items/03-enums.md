@@ -39,7 +39,7 @@ An error is raised if the variant does not exist within the enum.
 
 {{ rule(id="6.3:6") }}
 
-```rue
+```gruel
 enum Color {
     Red,
     Green,
@@ -66,7 +66,7 @@ either explicitly or via a wildcard pattern `_`.
 
 {{ rule(id="6.3:9") }}
 
-```rue
+```gruel
 enum Color { Red, Green, Blue }
 
 fn main() -> i32 {
@@ -87,7 +87,7 @@ Enums can be used as function parameter types, return types, and struct field ty
 
 {{ rule(id="6.3:11") }}
 
-```rue
+```gruel
 enum Color { Red, Green, Blue }
 
 fn get_value(c: Color) -> i32 {

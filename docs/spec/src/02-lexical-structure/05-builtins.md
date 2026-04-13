@@ -96,7 +96,7 @@ When `@allow(unused_variable)` precedes a let statement, no unused variable warn
 
 {{ rule(id="2.5:16") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     @allow(unused_variable)
     let x = 42;  // no warning, even though x is unused
@@ -110,7 +110,7 @@ When `@allow(unused_variable)` precedes a function definition, no unused variabl
 
 {{ rule(id="2.5:18") }}
 
-```rue
+```gruel
 @allow(unused_variable)
 fn example() -> i32 {
     let a = 1;  // no warning
@@ -127,7 +127,7 @@ When `@allow(unused_function)` precedes a function definition, no unused functio
 
 {{ rule(id="2.5:20") }}
 
-```rue
+```gruel
 @allow(unused_function)
 fn helper() {
     // This function is never called, but no warning is emitted
@@ -146,7 +146,7 @@ When `@allow(unreachable_code)` precedes a function definition, no unreachable c
 
 {{ rule(id="2.5:22") }}
 
-```rue
+```gruel
 @allow(unreachable_code)
 fn example() -> i32 {
     return 0;
@@ -163,7 +163,7 @@ Multiple warning names **MAY** be specified in a single `@allow` directive, sepa
 
 {{ rule(id="2.5:24") }}
 
-```rue
+```gruel
 @allow(unused_variable, unreachable_code)
 fn example() -> i32 {
     let x = 1;
@@ -181,7 +181,7 @@ The underscore prefix convention (e.g., `_unused`) and `@allow(unused_variable)`
 
 {{ rule(id="2.5:26") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let _x = 42;                    // underscore prefix suppresses warning
 
@@ -208,7 +208,7 @@ The `@copy` directive marks a struct type as a Copy type.
 
 {{ rule(id="2.5:30") }}
 
-```rue
+```gruel
 @copy
 struct Point { x: i32, y: i32 }
 

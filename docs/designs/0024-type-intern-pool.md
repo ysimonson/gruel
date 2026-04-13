@@ -19,13 +19,13 @@ Implemented
 
 ## Summary
 
-Replace Rue's current type representation (a `Type` enum with separate ID registries for structs, enums, and arrays) with a unified **Type Intern Pool** inspired by Zig's `InternPool`. All types become 32-bit indices into a canonical, thread-safe pool, enabling O(1) type equality, efficient memory usage, and clean parallel compilation.
+Replace Gruel's current type representation (a `Type` enum with separate ID registries for structs, enums, and arrays) with a unified **Type Intern Pool** inspired by Zig's `InternPool`. All types become 32-bit indices into a canonical, thread-safe pool, enabling O(1) type equality, efficient memory usage, and clean parallel compilation.
 
 ## Context
 
 ### Current Architecture
 
-Rue currently has three separate ID systems for composite types:
+Gruel currently has three separate ID systems for composite types:
 
 | Type | ID Type | Storage | Creation Point |
 |------|---------|---------|----------------|
@@ -46,7 +46,7 @@ pub enum Type {
 
 ### Problems
 
-1. **Dynamic array type creation**: Arrays are created during type inference, requiring mutable state during what should be parallel function analysis. This led to `FunctionAnalysisState` with per-function array registries that must be merged afterward (see rue-wcg7).
+1. **Dynamic array type creation**: Arrays are created during type inference, requiring mutable state during what should be parallel function analysis. This led to `FunctionAnalysisState` with per-function array registries that must be merged afterward (see gruel-wcg7).
 
 2. **Inconsistent creation patterns**: Structs/enums use one path, arrays use another. This asymmetry complicates the codebase.
 
@@ -66,7 +66,7 @@ Zig uses an `InternPool` - a canonical, thread-safe, sharded hash table that ded
 
 ## Decision
 
-Implement a unified `TypeInternPool` for all types in Rue.
+Implement a unified `TypeInternPool` for all types in Gruel.
 
 ### Core Design
 
@@ -193,20 +193,20 @@ The key insight is that `Type` remains a small, Copy value - we're just changing
 
 ## Implementation Phases
 
-**Epic**: rue-igt6
+**Epic**: gruel-igt6
 
-### Phase 1: Introduce TypeInternPool alongside existing system (rue-3mjg)
+### Phase 1: Introduce TypeInternPool alongside existing system (gruel-3mjg)
 
 Create the new `TypeInternPool` infrastructure without removing the old system. Both coexist temporarily.
 
-- [x] Create `rue-air/src/intern_pool.rs` with `TypeInternPool`, `TypeData`
+- [x] Create `gruel-air/src/intern_pool.rs` with `TypeInternPool`, `TypeData`
 - [x] Add `TypeInternPool` to `Sema` and `SemaContext`
 - [x] Populate pool during declaration collection (structs, enums)
 - [x] Verify pool contents match existing registries (test coverage)
 
 **Ship criterion**: All existing tests pass, pool is populated but not yet used.
 
-### Phase 2: Migrate array types to the pool (rue-9e5t)
+### Phase 2: Migrate array types to the pool (gruel-9e5t)
 
 Replace `ArrayTypeId` and the per-function array type handling with pool interning.
 
@@ -217,7 +217,7 @@ Replace `ArrayTypeId` and the per-function array type handling with pool interni
 
 **Ship criterion**: Arrays work, parallel function analysis uses shared pool, no per-function array registries.
 
-### Phase 3: Migrate struct/enum IDs to pool indices (rue-ej3x)
+### Phase 3: Migrate struct/enum IDs to pool indices (gruel-ej3x)
 
 Replace `StructId` and `EnumId` with `Type` indices directly.
 
@@ -228,7 +228,7 @@ Replace `StructId` and `EnumId` with `Type` indices directly.
 
 **Ship criterion**: `Type` is now a u32 index. All lookups go through the pool.
 
-### Phase 4: Unify Type representation (rue-wsny)
+### Phase 4: Unify Type representation (gruel-wsny)
 
 Replace the `Type` enum entirely with the `Type(u32)` newtype.
 
@@ -239,7 +239,7 @@ Replace the `Type` enum entirely with the `Type(u32)` newtype.
 
 **Ship criterion**: Single unified type representation. Clean API.
 
-### Phase 5: Performance optimization (rue-ynk5, optional)
+### Phase 5: Performance optimization (gruel-ynk5, optional)
 
 If profiling shows lock contention:
 
@@ -305,5 +305,5 @@ If profiling shows lock contention:
 
 - [Zig InternPool PR #15569](https://github.com/ziglang/zig/pull/15569)
 - [Zig InternPool.zig source](https://github.com/ziglang/zig/blob/master/src/InternPool.zig)
-- [rue-50gf: Original issue on array type design](rue-50gf)
-- [rue-wcg7: Parallel function analysis](rue-wcg7)
+- [gruel-50gf: Original issue on array type design](gruel-50gf)
+- [gruel-wcg7: Parallel function analysis](gruel-wcg7)

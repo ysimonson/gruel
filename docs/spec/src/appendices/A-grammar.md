@@ -6,7 +6,7 @@ template = "spec/page.html"
 
 # Appendix A: Grammar
 
-This appendix contains the complete EBNF grammar for Rue.
+This appendix contains the complete EBNF grammar for Gruel.
 
 ```ebnf
 (* Program structure *)

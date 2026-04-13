@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADRs)
 
-This directory contains Architecture Decision Records for the Rue project. ADRs document significant design decisions, providing historical context for why things are the way they are.
+This directory contains Architecture Decision Records for the Gruel project. ADRs document significant design decisions, providing historical context for why things are the way they are.
 
 ## What is an ADR?
 
@@ -105,7 +105,7 @@ Update the ADR with the bd issue IDs.
 
 ### 5. Add Preview Feature
 
-In `crates/rue-error/src/lib.rs`:
+In `crates/gruel-error/src/lib.rs`:
 ```rust
 pub enum PreviewFeature {
     // ...

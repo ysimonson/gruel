@@ -8,7 +8,7 @@ page_template = "spec/page.html"
 
 # Statements
 
-This chapter describes statements in Rue.
+This chapter describes statements in Gruel.
 
 {{ rule(id="5.0:1") }}
 

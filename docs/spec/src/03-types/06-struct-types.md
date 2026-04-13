@@ -22,7 +22,7 @@ struct_field = IDENT ":" type ;
 
 {{ rule(id="3.6:3") }}
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -50,11 +50,11 @@ Field names **MUST** be unique within a struct.
 
 {{ rule(id="3.6:7", cat="informative") }}
 
-The memory layout rules described in this section are provisional and may change in future versions of Rue. The current design prioritizes simplicity over space efficiency.
+The memory layout rules described in this section are provisional and may change in future versions of Gruel. The current design prioritizes simplicity over space efficiency.
 
 {{ rule(id="3.6:8", cat="normative") }}
 
-Non-zero-sized types in Rue occupy one or more 8-byte slots. Scalar types (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`) each occupy one slot.
+Non-zero-sized types in Gruel occupy one or more 8-byte slots. Scalar types (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`) each occupy one slot.
 
 {{ rule(id="3.6:9", cat="normative") }}
 
@@ -66,7 +66,7 @@ The size of a struct is the sum of the sizes of all its fields. There is no padd
 
 {{ rule(id="3.6:11") }}
 
-```rue
+```gruel
 // A struct with two i32 fields occupies 2 slots (16 bytes)
 struct Point { x: i32, y: i32 }
 
@@ -84,7 +84,7 @@ A struct with no fields is a zero-sized type. See [Zero-Sized Types](../#zero-si
 
 {{ rule(id="3.6:14") }}
 
-```rue
+```gruel
 // An empty struct is a zero-sized type
 struct Empty {}
 

@@ -8,7 +8,7 @@ page_template = "spec/page.html"
 
 # Lexical Structure
 
-This chapter describes the lexical structure of Rue programs, including tokens, comments, and whitespace.
+This chapter describes the lexical structure of Gruel programs, including tokens, comments, and whitespace.
 
 {{ rule(id="2.0:1") }}
 
@@ -26,7 +26,7 @@ This principle resolves ambiguity when multiple token patterns could match at a 
 
 {{ rule(id="2.0:4", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 1 << 2;   // << is a single left-shift token
     let y = x <= 10;  // <= is a single less-than-or-equal token

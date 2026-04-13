@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(./buck2 kill:*)",
+      "Bash(./buck2 build:*)",
+      "Bash(./test.sh 2>&1)",
+      "Bash(./buck2 test:*)"
     ]
   },
   "hooks": {
@@ -15,5 +19,9 @@
         ]
       }
     ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
   }
 }

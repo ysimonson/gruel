@@ -6,4 +6,4 @@ generate_feeds = true
 template = "blog.html"
 +++
 
-News and updates from the Rue programming language project.
+News and updates from the Gruel programming language project.

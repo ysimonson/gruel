@@ -1,0 +1,22 @@
+rust_library(
+    name = "gruel-rir",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//third-party:lasso",
+        "//crates/gruel-lexer:gruel-lexer",
+        "//crates/gruel-parser:gruel-parser",
+        "//crates/gruel-span:gruel-span",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "gruel-rir-test",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//third-party:lasso",
+        "//crates/gruel-lexer:gruel-lexer",
+        "//crates/gruel-parser:gruel-parser",
+        "//crates/gruel-span:gruel-span",
+    ],
+)

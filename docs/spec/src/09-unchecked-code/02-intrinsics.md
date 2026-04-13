@@ -36,7 +36,7 @@ Syscall numbers and conventions differ between operating systems. Linux x86-64 s
 
 {{ rule(id="9.2:6", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     checked {
         // Linux x86-64: write(fd=1, buf, len)

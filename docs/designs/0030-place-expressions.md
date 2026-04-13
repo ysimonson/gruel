@@ -15,13 +15,13 @@ Implemented
 
 ## Summary
 
-Introduce a `Place` abstraction in Rue's IR to represent memory locations (lvalues) as first-class values. This eliminates redundant Load instructions for array indexing and field access, fixing an asymmetry where read operations take loaded values while write operations take slots directly.
+Introduce a `Place` abstraction in Gruel's IR to represent memory locations (lvalues) as first-class values. This eliminates redundant Load instructions for array indexing and field access, fixing an asymmetry where read operations take loaded values while write operations take slots directly.
 
 ## Context
 
 ### The Problem
 
-Currently, Rue's IR conflates memory locations ("places") with values, leading to:
+Currently, Gruel's IR conflates memory locations ("places") with values, leading to:
 
 1. **Asymmetric instruction signatures**:
    - `IndexGet { base: AirRef, ... }` - takes a *loaded* array value
@@ -77,7 +77,7 @@ Operations on places are explicit:
 
 ### Phase 1: Introduce Place Type in CFG
 
-Add a `Place` type to `rue-cfg` that represents memory locations:
+Add a `Place` type to `gruel-cfg` that represents memory locations:
 
 ```rust
 /// A memory location that can be read from or written to.
@@ -233,7 +233,7 @@ pub enum AirProjection {
 
 ## Implementation Phases
 
-- [x] **Phase 1: Add Place type to CFG** - Define `Place`, `PlaceBase`, `Projection` in `rue-cfg`
+- [x] **Phase 1: Add Place type to CFG** - Define `Place`, `PlaceBase`, `Projection` in `gruel-cfg`
 - [x] **Phase 2: Add PlaceRead/PlaceWrite instructions** - Add new CFG instruction variants alongside existing ones
 - [x] **Phase 3: Update CFG builder** - Generate Place-based instructions for simple cases
 - [x] **Phase 4: Update x86_64 codegen** - Emit efficient code for Place-based instructions
@@ -241,7 +241,7 @@ pub enum AirProjection {
 - [x] **Phase 6: Migrate remaining cases** - Handle all array/field operations via places
 - [x] **Phase 7: Remove old instructions** - Delete IndexGet/FieldGet with base values
 - [x] **Phase 8: Apply same changes to AIR** - Propagate place abstraction to AIR level
-  - Added `AirPlace`, `AirPlaceBase`, `AirProjection`, `AirPlaceRef` types to `rue-air`
+  - Added `AirPlace`, `AirPlaceBase`, `AirProjection`, `AirPlaceRef` types to `gruel-air`
   - Added `AirInstData::PlaceRead` and `AirInstData::PlaceWrite` instruction variants
   - Added `Air::make_place`, `Air::get_place`, `Air::get_place_projections` helper methods
   - Updated CFG builder to lower `AirInstData::PlaceRead` → `CfgInstData::PlaceRead`
@@ -293,9 +293,9 @@ Projections are **interned** in rustc, meaning:
 
 See [rustc memory management](https://rustc-dev-guide.rust-lang.org/memory.html) for details.
 
-### Rue's Approach
+### Gruel's Approach
 
-Rue already uses an `extra: Vec<CfgValue>` pattern for variable-length data (struct fields, array elements). We'll extend this for projections:
+Gruel already uses an `extra: Vec<CfgValue>` pattern for variable-length data (struct fields, array elements). We'll extend this for projections:
 
 ```rust
 /// A place is 12 bytes (fits in 2 cache lines with instruction data)
@@ -314,7 +314,7 @@ pub enum Projection {
 
 ### Why Not Intern?
 
-For Rue's current scale, interning adds complexity without clear benefit:
+For Gruel's current scale, interning adds complexity without clear benefit:
 - **Most projection chains are short** (1-3 elements for `arr[i].field`)
 - **Duplication is limited** - each function has its own CFG
 - **Equality checks are rare** - we mostly iterate projections, not compare them

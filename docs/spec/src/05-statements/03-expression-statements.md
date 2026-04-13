@@ -22,7 +22,7 @@ The value of the expression is discarded. The type of an expression statement is
 
 {{ rule(id="5.3:4") }}
 
-```rue
+```gruel
 fn side_effect() { }
 
 fn main() -> i32 {

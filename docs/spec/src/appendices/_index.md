@@ -8,4 +8,4 @@ page_template = "spec/page.html"
 
 # Appendices
 
-This section contains reference material for the Rue language.
+This section contains reference material for the Gruel language.

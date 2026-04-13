@@ -5,13 +5,13 @@ weight = 8
 
 # Move Semantics
 
-This section describes how values are moved and copied in Rue.
+This section describes how values are moved and copied in Gruel.
 
 ## Value Categories
 
 {{ rule(id="3.8:1", cat="normative") }}
 
-Types in Rue are categorized by how they behave when used:
+Types in Gruel are categorized by how they behave when used:
 - **Copy types** can be implicitly duplicated when used. Using a Copy type does not consume the original value.
 - **Move types** (also called affine types) are consumed when used. After using a move type value, the original binding becomes invalid.
 
@@ -30,7 +30,7 @@ User-defined struct types are move types by default. Using a struct value consum
 
 {{ rule(id="3.8:4", cat="example") }}
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
@@ -59,7 +59,7 @@ A struct marked with `@copy` is a Copy type. Using a `@copy` struct value does n
 
 {{ rule(id="3.8:17", cat="example") }}
 
-```rue
+```gruel
 @copy
 struct Point { x: i32, y: i32 }
 
@@ -77,7 +77,7 @@ A `@copy` struct **MUST** contain only fields that are themselves Copy types. It
 
 {{ rule(id="3.8:19", cat="example") }}
 
-```rue
+```gruel
 struct Inner { value: i32 }  // move type (no @copy)
 
 @copy
@@ -90,7 +90,7 @@ A `@copy` struct **MAY** contain fields of primitive Copy types (integers, boole
 
 {{ rule(id="3.8:21", cat="example") }}
 
-```rue
+```gruel
 @copy
 struct Point { x: i32, y: i32 }
 
@@ -132,7 +132,7 @@ A linear value is consumed when it is:
 
 {{ rule(id="3.8:34", cat="example") }}
 
-```rue
+```gruel
 linear struct MustUse { value: i32 }
 
 fn consume(m: MustUse) -> i32 { m.value }
@@ -149,7 +149,7 @@ It is a compile-time error to allow a linear value to be implicitly dropped.
 
 {{ rule(id="3.8:36", cat="example") }}
 
-```rue
+```gruel
 linear struct MustUse { value: i32 }
 
 fn main() -> i32 {
@@ -164,7 +164,7 @@ A linear struct **MUST NOT** be marked with `@copy`. Linear types cannot be impl
 
 {{ rule(id="3.8:38", cat="example") }}
 
-```rue
+```gruel
 @copy
 linear struct Invalid { value: i32 }  // ERROR: linear types cannot be @copy
 ```
@@ -192,7 +192,7 @@ handle_struct = "@handle" struct_def ;
 
 A struct marked with `@handle` **MUST** provide a method named `handle` with the following signature:
 
-```rue
+```gruel
 fn handle(self) -> T
 ```
 
@@ -204,7 +204,7 @@ The `handle` method **MUST** take exactly one parameter (`self` of the struct ty
 
 {{ rule(id="3.8:44", cat="example") }}
 
-```rue
+```gruel
 @handle
 struct Counter { count: i32 }
 
@@ -256,7 +256,7 @@ It is a compile-time error to use a value that has been moved.
 
 {{ rule(id="3.8:6", cat="example") }}
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
@@ -276,7 +276,7 @@ A value is considered moved when it is:
 
 {{ rule(id="3.8:8", cat="example") }}
 
-```rue
+```gruel
 struct Data { value: i32 }
 
 fn consume(d: Data) -> i32 { d.value }
@@ -297,7 +297,7 @@ Copy types can be used multiple times without being consumed.
 
 {{ rule(id="3.8:10", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 42;
     let a = x;  // x is copied
@@ -318,7 +318,7 @@ When a non-Copy field of a struct is accessed (moved out of), only that specific
 
 {{ rule(id="3.8:23", cat="example") }}
 
-```rue
+```gruel
 struct Inner { x: i32 }
 struct S { a: Inner, b: Inner }
 
@@ -336,7 +336,7 @@ It is a compile-time error to access a field that has already been moved.
 
 {{ rule(id="3.8:25", cat="example") }}
 
-```rue
+```gruel
 struct Inner { x: i32 }
 struct S { a: Inner, b: Inner }
 
@@ -354,7 +354,7 @@ A struct with any moved fields cannot be used as a whole value. It is a compile-
 
 {{ rule(id="3.8:27", cat="example") }}
 
-```rue
+```gruel
 struct Inner { x: i32 }
 struct S { a: Inner, b: Inner }
 
@@ -373,7 +373,7 @@ Accessing Copy-type fields does not move them. Copy-type fields can be accessed 
 
 {{ rule(id="3.8:29", cat="example") }}
 
-```rue
+```gruel
 struct S { a: i32, b: i32 }
 
 fn main() -> i32 {
@@ -393,7 +393,7 @@ Shadowing a variable does not prevent it from being moved. A moved variable rema
 
 {{ rule(id="3.8:13", cat="example") }}
 
-```rue
+```gruel
 struct Data { value: i32 }
 
 fn main() -> i32 {

@@ -53,7 +53,7 @@ If the change affects language semantics:
 - Do spec tests reference the new paragraphs?
 - Will traceability check pass (100% coverage required)?
 
-## Rue-Specific Checks
+## Gruel-Specific Checks
 
 ### Index-Based References
 
@@ -76,7 +76,7 @@ Source locations must be maintained for error reporting:
 
 ### Multi-Backend Consistency
 
-If changes touch `rue-codegen`, verify equivalent changes in ALL backends:
+If changes touch `gruel-codegen`, verify equivalent changes in ALL backends:
 
 | File | x86_64 | aarch64 |
 |------|--------|---------|

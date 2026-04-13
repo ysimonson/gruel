@@ -59,12 +59,12 @@ Edit files in `docs/spec/src/`:
 
 ### 2. Add Tests First
 
-**Spec tests** (`crates/rue-spec/cases/`):
+**Spec tests** (`crates/gruel-spec/cases/`):
 - For language semantics
 - Must include `spec = ["X.Y:Z"]` references to spec paragraphs
 - Traceability check enforces 100% coverage
 
-**UI tests** (`crates/rue-ui-tests/cases/`):
+**UI tests** (`crates/gruel-ui-tests/cases/`):
 - For warnings, diagnostics, compiler flags
 - Not tied to spec paragraphs
 
@@ -76,7 +76,7 @@ Edit files in `docs/spec/src/`:
 
 Follow existing patterns. Key considerations:
 
-**Multi-backend consistency**: If touching `rue-codegen`, implement in ALL backends:
+**Multi-backend consistency**: If touching `gruel-codegen`, implement in ALL backends:
 - `x86_64/` - Linux x86-64
 - `aarch64/` - macOS ARM64
 
@@ -117,7 +117,7 @@ Run the full test suite:
 
 This runs:
 - Unit tests (`./buck2 test //...`)
-- Spec tests (`./buck2 run //crates/rue-spec:rue-spec`)
+- Spec tests (`./buck2 run //crates/gruel-spec:gruel-spec`)
 - Traceability check
 
 **For stable work**: All tests must pass.
@@ -156,16 +156,16 @@ When all phases are complete:
 
 ### Adding a New Operator
 
-1. Lexer: Add token in `rue-lexer`
-2. Parser: Add parsing in `rue-parser`
-3. RIR: Add IR node in `rue-rir`
-4. AIR: Add typed node in `rue-air`
-5. Sema: Add type checking in `rue-air/src/sema.rs`
+1. Lexer: Add token in `gruel-lexer`
+2. Parser: Add parsing in `gruel-parser`
+3. RIR: Add IR node in `gruel-rir`
+4. AIR: Add typed node in `gruel-air`
+5. Sema: Add type checking in `gruel-air/src/sema.rs`
 6. Codegen: Add code generation in both backends
 
 ### Adding a New Type
 
-1. Add to `Type` enum in `rue-air/src/types.rs`
+1. Add to `Type` enum in `gruel-air/src/types.rs`
 2. Update type checking in sema
 3. Update code generation for the type's operations
 4. Add spec chapter and tests

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Rue is a systems programming language aiming for memory safety without garbage collection, with higher-level ergonomics than Rust/Zig. Currently in early development with Rust-like syntax.
+Gruel is a systems programming language aiming for memory safety without garbage collection, with higher-level ergonomics than Rust/Zig. Currently in early development with Rust-like syntax.
 
 ## Build System
 
@@ -16,7 +16,7 @@ This project uses Buck2 (via `./buck2` wrapper script), not Cargo.
 
 ```bash
 # Build the compiler
-./buck2 build //crates/rue:rue
+./buck2 build //crates/gruel:gruel
 
 # Build everything
 ./buck2 build //...
@@ -28,41 +28,41 @@ This project uses Buck2 (via `./buck2` wrapper script), not Cargo.
 ./buck2 test //...
 
 # Run spec tests only
-./buck2 run //crates/rue-spec:rue-spec
+./buck2 run //crates/gruel-spec:gruel-spec
 
 # Run a specific crate's tests
-./buck2 test //crates/rue-lexer:rue-lexer-test
+./buck2 test //crates/gruel-lexer:gruel-lexer-test
 
 # Filter spec tests by pattern
-./buck2 run //crates/rue-spec:rue-spec -- "1.1"  # Section 1.1
-./buck2 run //crates/rue-spec:rue-spec -- "zero" # Tests matching "zero"
+./buck2 run //crates/gruel-spec:gruel-spec -- "1.1"  # Section 1.1
+./buck2 run //crates/gruel-spec:gruel-spec -- "zero" # Tests matching "zero"
 
 # Compile and run a program (single file)
-./buck2 run //crates/rue:rue -- source.rue output
+./buck2 run //crates/gruel:gruel -- source.gruel output
 ./output
 
 # Compile multiple files into one program
-./buck2 run //crates/rue:rue -- main.rue utils.rue math.rue -o program
+./buck2 run //crates/gruel:gruel -- main.gruel utils.gruel math.gruel -o program
 ./program
 
 # With shell glob expansion
-./buck2 run //crates/rue:rue -- src/*.rue -o program
+./buck2 run //crates/gruel:gruel -- src/*.gruel -o program
 
 # Note: -o is required when compiling multiple files
-./buck2 run //crates/rue:rue -- a.rue b.rue          # Error!
-./buck2 run //crates/rue:rue -- a.rue b.rue -o out   # OK
+./buck2 run //crates/gruel:gruel -- a.gruel b.gruel          # Error!
+./buck2 run //crates/gruel:gruel -- a.gruel b.gruel -o out   # OK
 
 # Emit intermediate representations (can specify multiple stages)
-./buck2 run //crates/rue:rue -- --emit tokens source.rue  # Lexer tokens
-./buck2 run //crates/rue:rue -- --emit ast source.rue     # Abstract syntax tree
-./buck2 run //crates/rue:rue -- --emit rir source.rue     # Untyped IR
-./buck2 run //crates/rue:rue -- --emit air source.rue     # Typed IR
-./buck2 run //crates/rue:rue -- --emit cfg source.rue     # Control flow graph
-./buck2 run //crates/rue:rue -- --emit mir source.rue     # Machine IR (virtual registers)
-./buck2 run //crates/rue:rue -- --emit asm source.rue     # Assembly (physical registers)
+./buck2 run //crates/gruel:gruel -- --emit tokens source.gruel  # Lexer tokens
+./buck2 run //crates/gruel:gruel -- --emit ast source.gruel     # Abstract syntax tree
+./buck2 run //crates/gruel:gruel -- --emit rir source.gruel     # Untyped IR
+./buck2 run //crates/gruel:gruel -- --emit air source.gruel     # Typed IR
+./buck2 run //crates/gruel:gruel -- --emit cfg source.gruel     # Control flow graph
+./buck2 run //crates/gruel:gruel -- --emit mir source.gruel     # Machine IR (virtual registers)
+./buck2 run //crates/gruel:gruel -- --emit asm source.gruel     # Assembly (physical registers)
 
 # Chain multiple stages to see the full pipeline
-./buck2 run //crates/rue:rue -- --emit tokens --emit ast --emit rir source.rue
+./buck2 run //crates/gruel:gruel -- --emit tokens --emit ast --emit rir source.gruel
 ```
 
 ## Architecture
@@ -90,31 +90,31 @@ graph LR
 
 | Crate | Purpose |
 |-------|---------|
-| `rue` | CLI binary |
-| `rue-compiler` | Pipeline orchestration |
-| `rue-lexer` | Tokenization |
-| `rue-parser` | AST construction |
-| `rue-rir` | Untyped IR (post-parse, pre-typing) |
-| `rue-cfg` | Control flow graph construction and optimization |
-| `rue-air` | Typed IR (after semantic analysis) |
-| `rue-codegen` | x86-64 machine code generation |
-| `rue-linker` | ELF object file creation and linking |
-| `rue-error` | Error types and diagnostics |
-| `rue-span` | Source location tracking |
-| `rue-target` | Target platform configuration |
-| `rue-spec` | Specification test runner |
-| `rue-ui-tests` | UI/diagnostics tests (warnings, error messages) |
-| `rue-fuzz` | Fuzz testing infrastructure |
-| `rue-runtime` | Runtime support |
-| `rue-builtins` | Built-in type definitions (String, future Vec, etc.) |
+| `gruel` | CLI binary |
+| `gruel-compiler` | Pipeline orchestration |
+| `gruel-lexer` | Tokenization |
+| `gruel-parser` | AST construction |
+| `gruel-rir` | Untyped IR (post-parse, pre-typing) |
+| `gruel-cfg` | Control flow graph construction and optimization |
+| `gruel-air` | Typed IR (after semantic analysis) |
+| `gruel-codegen` | x86-64 machine code generation |
+| `gruel-linker` | ELF object file creation and linking |
+| `gruel-error` | Error types and diagnostics |
+| `gruel-span` | Source location tracking |
+| `gruel-target` | Target platform configuration |
+| `gruel-spec` | Specification test runner |
+| `gruel-ui-tests` | UI/diagnostics tests (warnings, error messages) |
+| `gruel-fuzz` | Fuzz testing infrastructure |
+| `gruel-runtime` | Runtime support |
+| `gruel-builtins` | Built-in type definitions (String, future Vec, etc.) |
 
 ### Multi-File Compilation
 
-Rue supports compiling multiple source files into a single executable:
+Gruel supports compiling multiple source files into a single executable:
 
 ```bash
 # All files share a flat global namespace (no modules yet)
-rue main.rue utils.rue lib.rue -o program
+gruel main.gruel utils.gruel lib.gruel -o program
 ```
 
 **Key semantics:**
@@ -135,31 +135,31 @@ rue main.rue utils.rue lib.rue -o program
 - **Index-based references**: Instructions stored in vectors, referenced by u32 indices (cache-friendly, no lifetimes)
 - **Direct code emission**: No LLVM dependency; machine code emitted directly
 - **Minimal ELF**: Static executables with direct syscalls (Linux x86-64 only)
-- **Built-in types as synthetic structs**: Types like `String` are defined in `rue-builtins` and injected as synthetic structs, not as hardcoded `Type` enum variants (see [ADR-0020](docs/designs/0020-builtin-types-as-structs.md))
+- **Built-in types as synthetic structs**: Types like `String` are defined in `gruel-builtins` and injected as synthetic structs, not as hardcoded `Type` enum variants (see [ADR-0020](docs/designs/0020-builtin-types-as-structs.md))
 
 ### Built-in Types Architecture
 
 Built-in types (currently just `String`, future `Vec<T>`, etc.) are implemented as "synthetic structs" — the compiler injects them before processing user code. This architecture:
 
 - **Eliminates special-casing**: Built-in types flow through the same code paths as user-defined structs
-- **Centralizes metadata**: All type information (fields, methods, operators) lives in `rue-builtins`
+- **Centralizes metadata**: All type information (fields, methods, operators) lives in `gruel-builtins`
 - **Scales to new types**: Adding `Vec<T>` or `HashMap<K,V>` becomes "add an entry to `BUILTIN_TYPES`"
 
 **Key components:**
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Type definitions | `rue-builtins/src/lib.rs` | `BuiltinTypeDef` constants describing fields, methods, operators |
-| Injection point | `rue-air/src/sema.rs` | `inject_builtin_types()` creates synthetic `StructDef` entries |
-| Runtime functions | `rue-runtime/src/lib.rs` | Actual implementations (e.g., `String__len`, `__rue_drop_String`) |
+| Type definitions | `gruel-builtins/src/lib.rs` | `BuiltinTypeDef` constants describing fields, methods, operators |
+| Injection point | `gruel-air/src/sema.rs` | `inject_builtin_types()` creates synthetic `StructDef` entries |
+| Runtime functions | `gruel-runtime/src/lib.rs` | Actual implementations (e.g., `String__len`, `__gruel_drop_String`) |
 
 **Adding a new built-in type:**
 
-1. Define a `BuiltinTypeDef` in `rue-builtins/src/lib.rs`
+1. Define a `BuiltinTypeDef` in `gruel-builtins/src/lib.rs`
 2. Add it to the `BUILTIN_TYPES` slice
-3. Implement runtime functions in `rue-runtime`
+3. Implement runtime functions in `gruel-runtime`
 
-See the module documentation in `rue-builtins` for a detailed example with hypothetical `Vec` type.
+See the module documentation in `gruel-builtins` for a detailed example with hypothetical `Vec` type.
 
 ## Testing
 
@@ -171,7 +171,7 @@ The test suite has three layers optimized for different stages of development:
 |-----------|---------|-------|-------------|
 | Unit tests | `./quick-test.sh` | ~2-5s | During active development |
 | Full suite | `./test.sh` | ~30-60s | Before committing |
-| Targeted spec | `./buck2 run //crates/rue-spec:rue-spec -- "pattern"` | Varies | Testing specific features |
+| Targeted spec | `./buck2 run //crates/gruel-spec:gruel-spec -- "pattern"` | Varies | Testing specific features |
 
 **Recommended workflow:**
 
@@ -183,8 +183,8 @@ The test suite has three layers optimized for different stages of development:
 ./test.sh                      # Unit + spec + UI + traceability
 
 # Debugging specific areas
-./buck2 run //crates/rue-spec:rue-spec -- "arithmetic"  # Specific spec tests
-./buck2 test //crates/rue-codegen:rue-codegen-test      # Specific crate
+./buck2 run //crates/gruel-spec:gruel-spec -- "arithmetic"  # Specific spec tests
+./buck2 test //crates/gruel-codegen:gruel-codegen-test      # Specific crate
 ```
 
 ### Choosing the Right Test Type
@@ -204,7 +204,7 @@ The test suite has three layers optimized for different stages of development:
 ### Unit Tests
 Add to relevant crate's source file with `#[cfg(test)]` modules. Ensure crate has `rust_test` target in its `BUCK` file.
 
-The `rue-compiler` crate includes integration unit tests that test the full pipeline without execution. Use `compile_to_air()` and `compile_to_cfg()` helpers to test compilation without spawning processes.
+The `gruel-compiler` crate includes integration unit tests that test the full pipeline without execution. Use `compile_to_air()` and `compile_to_cfg()` helpers to test compilation without spawning processes.
 
 ### UI Tests
 
@@ -216,7 +216,7 @@ UI tests verify compiler behavior that is **not** part of the language specifica
 
 #### UI Test Directory Structure
 
-UI tests are in `crates/rue-ui-tests/cases/`:
+UI tests are in `crates/gruel-ui-tests/cases/`:
 
 ```
 cases/
@@ -262,16 +262,16 @@ no_warnings = true
 
 ```bash
 # Run all UI tests
-./buck2 run //crates/rue-ui-tests:rue-ui-tests
+./buck2 run //crates/gruel-ui-tests:gruel-ui-tests
 
 # Filter by pattern
-./buck2 run //crates/rue-ui-tests:rue-ui-tests -- "unused"
+./buck2 run //crates/gruel-ui-tests:gruel-ui-tests -- "unused"
 ```
 
 #### When to Add UI Tests vs Spec Tests
 
-- **Spec tests** (`crates/rue-spec/cases/`): Language semantics defined in the specification. These tests have `spec = [...]` references linking to spec paragraphs.
-- **UI tests** (`crates/rue-ui-tests/cases/`): Compiler quality-of-life features not in the spec (warnings, diagnostics, CLI behavior).
+- **Spec tests** (`crates/gruel-spec/cases/`): Language semantics defined in the specification. These tests have `spec = [...]` references linking to spec paragraphs.
+- **UI tests** (`crates/gruel-ui-tests/cases/`): Compiler quality-of-life features not in the spec (warnings, diagnostics, CLI behavior).
 
 ### Specification Tests
 
@@ -279,7 +279,7 @@ The specification test system provides traceability between the language specifi
 
 #### Test Directory Structure
 
-Tests are organized in `crates/rue-spec/cases/` by language feature:
+Tests are organized in `crates/gruel-spec/cases/` by language feature:
 
 ```
 cases/
@@ -408,7 +408,7 @@ A signed integer type is one of: `i8`, `i16`, `i32`, or `i64`.
 Signed integer arithmetic that overflows causes a runtime panic.
 
 {{ rule(id="3.1:3", cat="example") }}
-```rue
+```gruel
 let x: i32 = 42;
 ```
 ```
@@ -434,10 +434,10 @@ Generate a report showing test coverage of spec paragraphs:
 
 ```bash
 # Summary report
-./buck2 run //crates/rue-spec:rue-spec -- --traceability
+./buck2 run //crates/gruel-spec:gruel-spec -- --traceability
 
 # Detailed matrix (shows all paragraphs and their covering tests)
-./buck2 run //crates/rue-spec:rue-spec -- --traceability --detailed
+./buck2 run //crates/gruel-spec:gruel-spec -- --traceability --detailed
 ```
 
 The traceability check is run as part of `./test.sh` and fails if:
@@ -446,13 +446,13 @@ The traceability check is run as part of `./test.sh` and fails if:
 
 ### Fuzz Testing
 
-The project has comprehensive fuzz testing infrastructure in `crates/rue-fuzz` that tests the compiler for crashes, panics, and security issues using both mutation-based and property-based fuzzing.
+The project has comprehensive fuzz testing infrastructure in `crates/gruel-fuzz` that tests the compiler for crashes, panics, and security issues using both mutation-based and property-based fuzzing.
 
 #### Available Fuzz Targets
 
 ```bash
 # List all fuzz targets
-./buck2 run //crates/rue-fuzz:rue-fuzz -- --list
+./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --list
 
 # Available targets:
 # - lexer: Tokenization only (~27,000 exec/s)
@@ -467,30 +467,30 @@ The project has comprehensive fuzz testing infrastructure in `crates/rue-fuzz` t
 
 ```bash
 # Initialize corpus from spec tests
-./buck2 run //crates/rue-fuzz:rue-fuzz -- --init-corpus crates/rue-fuzz/corpus
+./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
 
 # Run a fuzz target with mutations
-./buck2 run //crates/rue-fuzz:rue-fuzz -- --mutate lexer crates/rue-fuzz/corpus
+./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate lexer crates/gruel-fuzz/corpus
 
 # Run for a specific duration (300 seconds = 5 minutes)
-./buck2 run //crates/rue-fuzz:rue-fuzz -- --mutate --max-time=300 parser crates/rue-fuzz/corpus
+./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 parser crates/gruel-fuzz/corpus
 
 # Run for a specific number of iterations
-./buck2 run //crates/rue-fuzz:rue-fuzz -- --max-runs=10000 sema crates/rue-fuzz/corpus
+./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --max-runs=10000 sema crates/gruel-fuzz/corpus
 
 # Run all fuzz targets for 5 minutes each
 for target in lexer parser sema compiler emitter emitter_sequence; do
-    ./buck2 run //crates/rue-fuzz:rue-fuzz -- --mutate --max-time=300 $target crates/rue-fuzz/corpus
+    ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 $target crates/gruel-fuzz/corpus
 done
 ```
 
 #### Property-Based Testing
 
-The fuzzer includes proptest-based generators that create syntactically valid Rue programs:
+The fuzzer includes proptest-based generators that create syntactically valid Gruel programs:
 
 ```bash
 # Run proptest-based fuzz tests
-./buck2 test //crates/rue-fuzz:rue-fuzz-test
+./buck2 test //crates/gruel-fuzz:gruel-fuzz-test
 ```
 
 These generators create valid identifiers, types, expressions, statements, functions, and complete programs. This enables deeper testing than random byte mutation since the inputs exercise semantic analysis and type checking.
@@ -501,17 +501,17 @@ Fuzzing runs automatically in CI via `.github/workflows/fuzz.yml`. Each target r
 
 #### When a Crash is Found
 
-If fuzzing finds a crash, the input is saved to `crates/rue-fuzz/crashes/`:
+If fuzzing finds a crash, the input is saved to `crates/gruel-fuzz/crashes/`:
 
 ```bash
 # Reproduce the crash
-./buck2 run //crates/rue:rue -- crates/rue-fuzz/crashes/crash-*.txt output
+./buck2 run //crates/gruel:gruel -- crates/gruel-fuzz/crashes/crash-*.txt output
 
 # Or just tokenize to see the issue
-./buck2 run //crates/rue:rue -- --emit tokens crates/rue-fuzz/crashes/crash-*.txt
+./buck2 run //crates/gruel:gruel -- --emit tokens crates/gruel-fuzz/crashes/crash-*.txt
 ```
 
-See `crates/rue-fuzz/README.md` for complete documentation.
+See `crates/gruel-fuzz/README.md` for complete documentation.
 
 ## Modifying the Language
 
@@ -530,7 +530,7 @@ Use preview gating when:
 
 #### How to Gate a Feature
 
-1. **Add to PreviewFeature enum** in `rue-error/src/lib.rs`:
+1. **Add to PreviewFeature enum** in `gruel-error/src/lib.rs`:
    ```rust
    pub enum PreviewFeature {
        YourNewFeature,  // Add your feature here
@@ -538,7 +538,7 @@ Use preview gating when:
    ```
    Also update `name()`, `adr()`, `all()`, and `FromStr` impl.
 
-2. **Add the gate check in Sema** (`rue-air/src/sema.rs`):
+2. **Add the gate check in Sema** (`gruel-air/src/sema.rs`):
    ```rust
    // At the point where the feature is used:
    self.require_preview(PreviewFeature::YourNewFeature, "your feature description", span)?;
@@ -576,23 +576,23 @@ When all tests pass and the feature is complete:
    - Include normative rules, dynamic semantics, and examples
    - Update the grammar appendix if syntax changes
 
-2. **Update `rue-lexer`** if new tokens needed
+2. **Update `gruel-lexer`** if new tokens needed
 
-3. **Update `rue-parser`** for new syntax
+3. **Update `gruel-parser`** for new syntax
 
-4. **Update `rue-rir`** for new IR instructions
+4. **Update `gruel-rir`** for new IR instructions
 
-5. **Update `rue-air`** for typed versions
+5. **Update `gruel-air`** for typed versions
    - **If this is a new feature**: Add the `require_preview()` gate (see above)
 
-6. **Update `rue-codegen`** for code generation
+6. **Update `gruel-codegen`** for code generation
 
-7. **Add spec tests** in `crates/rue-spec/cases/`
+7. **Add spec tests** in `crates/gruel-spec/cases/`
    - Include `spec = ["X.Y:Z"]` references to link to spec paragraphs
    - Cover all normative paragraphs (traceability check enforces 100% coverage)
    - **If this is a preview feature**: Include `preview = "feature_name"` field
 
-8. **Add UI tests** in `crates/rue-ui-tests/cases/` if the feature includes:
+8. **Add UI tests** in `crates/gruel-ui-tests/cases/` if the feature includes:
    - New warnings or lints
    - Changes to error message formatting
    - New compiler flags or options
@@ -601,7 +601,7 @@ When all tests pass and the feature is complete:
 
 ## Codegen: Multi-Backend Considerations
 
-**IMPORTANT**: The `rue-codegen` crate contains multiple architecture backends:
+**IMPORTANT**: The `gruel-codegen` crate contains multiple architecture backends:
 - `x86_64/` - Linux x86-64
 - `aarch64/` - macOS ARM64
 
@@ -664,7 +664,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ## Logging Guidelines
 
-Rue uses the `tracing` crate for structured logging, following the **"wide events"** philosophy from [loggingsucks.com](https://loggingsucks.com/). This means:
+Gruel uses the `tracing` crate for structured logging, following the **"wide events"** philosophy from [loggingsucks.com](https://loggingsucks.com/). This means:
 
 1. **Canonical log lines** - One rich, structured log per operation containing all debugging context
 2. **Structured format** - Key-value pairs instead of plain strings for queryability
@@ -674,20 +674,20 @@ Rue uses the `tracing` crate for structured logging, following the **"wide event
 
 ```bash
 # Normal compilation (no logging by default)
-rue source.rue output
+gruel source.gruel output
 
 # Show timing per pass
-rue --time-passes source.rue output
+gruel --time-passes source.gruel output
 
 # Enable debug logging
-rue --log-level=debug source.rue output
-RUST_LOG=debug rue source.rue output
+gruel --log-level=debug source.gruel output
+RUST_LOG=debug gruel source.gruel output
 
 # JSON format for tooling integration
-rue --log-format=json --log-level=debug source.rue output
+gruel --log-format=json --log-level=debug source.gruel output
 
 # Filter to specific module
-RUST_LOG=rue_compiler::sema=trace rue source.rue output
+RUST_LOG=gruel_compiler::sema=trace gruel source.gruel output
 ```
 
 ### Adding Instrumentation

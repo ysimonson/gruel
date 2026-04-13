@@ -5,7 +5,7 @@ weight = 9
 
 # Destructors
 
-This section describes when and how values are cleaned up in Rue.
+This section describes when and how values are cleaned up in Gruel.
 
 ## Drop Semantics
 
@@ -19,7 +19,7 @@ A value is dropped exactly once. Values that are moved are not dropped at their 
 
 {{ rule(id="3.9:3", cat="example") }}
 
-```rue
+```gruel
 struct Data { value: i32 }
 
 fn consume(d: Data) -> i32 { d.value }
@@ -38,7 +38,7 @@ When multiple values go out of scope at the same point, they are dropped in reve
 
 {{ rule(id="3.9:5", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = Data { value: 1 };  // declared first
     let b = Data { value: 2 };  // declared second
@@ -72,7 +72,7 @@ A struct type is trivially droppable if all of its fields are trivially droppabl
 
 {{ rule(id="3.9:10", cat="example") }}
 
-```rue
+```gruel
 // Trivially droppable: all fields are trivially droppable
 struct Point { x: i32, y: i32 }
 
@@ -106,7 +106,7 @@ When an array with a destructor is dropped, each element is dropped in index ord
 
 {{ rule(id="3.9:16", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [String; 3] = ["a", "b", "c"];
     0
@@ -132,7 +132,7 @@ Each branch of a conditional independently drops bindings declared within that b
 
 {{ rule(id="3.9:20", cat="example") }}
 
-```rue
+```gruel
 fn example(condition: bool) -> i32 {
     let a = Data { value: 1 };
     if condition {
@@ -164,7 +164,7 @@ The distinction between trivially droppable and non-trivially droppable types al
 
 A user-defined destructor is declared using the `drop fn` syntax:
 
-```rue
+```gruel
 drop fn TypeName(self) {
     // cleanup code
 }
@@ -188,7 +188,7 @@ When a value with a user-defined destructor is dropped, the user-defined destruc
 
 {{ rule(id="3.9:29", cat="example") }}
 
-```rue
+```gruel
 struct FileHandle {
     fd: i32,
 }

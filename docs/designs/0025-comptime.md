@@ -23,7 +23,7 @@ Introduce a unified compile-time execution model inspired by Zig, where `comptim
 
 ## Context
 
-Rue currently has basic constant expression evaluation (ADR-0003) that handles arithmetic on literals for compile-time bounds checking. However, this is limited:
+Gruel currently has basic constant expression evaluation (ADR-0003) that handles arithmetic on literals for compile-time bounds checking. However, this is limited:
 
 1. **No user-visible constant declarations**: Users can't define named compile-time constants
 2. **No compile-time functions**: Can't run arbitrary code at compile time
@@ -53,7 +53,7 @@ Zig's approach is elegant because it uses the **same syntax and semantics** for 
 
 `comptime` is a guarantee that an expression will be evaluated at compile time. If evaluation fails (e.g., due to runtime dependencies), it's a compile error.
 
-```rue
+```gruel
 // Comptime block - must evaluate at compile time
 const SIZE: i32 = comptime { 1024 * 1024 };
 
@@ -74,7 +74,7 @@ fn repeat(comptime n: i32, value: i32) -> i32 {
 
 `type` is a comptime-only type whose values are types themselves:
 
-```rue
+```gruel
 fn max(comptime T: type, a: T, b: T) -> T {
     if a > b { a } else { b }
 }
@@ -98,7 +98,7 @@ Some values can only exist at compile time:
 
 Attempting to store these in a runtime variable is a compile error:
 
-```rue
+```gruel
 fn main() -> i32 {
     let t: type = i32;  // ERROR: type 'type' cannot exist at runtime
     0
@@ -109,7 +109,7 @@ fn main() -> i32 {
 
 When a function has comptime type parameters, each unique combination of comptime arguments creates a specialized version:
 
-```rue
+```gruel
 fn max(comptime T: type, a: T, b: T) -> T {
     if a > b { a } else { b }
 }
@@ -127,7 +127,7 @@ After monomorphization, AIR contains no generic functions - only concrete specia
 
 #### Comptime Blocks
 
-```rue
+```gruel
 comptime { <expr> }
 ```
 
@@ -135,7 +135,7 @@ The expression inside must be evaluable at compile time. The result replaces the
 
 #### Comptime Parameters
 
-```rue
+```gruel
 fn name(comptime param: Type, ...) -> ReturnType { ... }
 ```
 
@@ -143,19 +143,19 @@ Parameters marked `comptime` must be provided with comptime-known values at ever
 
 #### Const Items
 
-```rue
+```gruel
 const NAME: Type = <expr>;
 ```
 
 The expression must be comptime-evaluable. If it's not obviously constant, use `comptime { }`:
 
-```rue
+```gruel
 const TABLE_SIZE: i32 = comptime { compute_size() };
 ```
 
 #### Type Parameters
 
-```rue
+```gruel
 fn generic(comptime T: type, value: T) -> T { ... }
 ```
 
@@ -180,7 +180,7 @@ When Sema encounters a comptime context:
 
 Inside a comptime context, everything is comptime:
 
-```rue
+```gruel
 comptime {
     let x = 1 + 2;      // Comptime evaluation
     let y = x * 3;      // Also comptime
@@ -215,7 +215,7 @@ Future extensions:
 
 Comptime errors are compile errors:
 
-```rue
+```gruel
 const X: i32 = comptime { 1 / 0 };  // Compile error: division by zero
 ```
 
@@ -277,7 +277,7 @@ When Sema encounters a call to a generic function:
 
 Comptime functions can return types, enabling patterns like:
 
-```rue
+```gruel
 fn Pair(comptime T: type, comptime U: type) -> type {
     struct {
         first: T,
@@ -300,9 +300,9 @@ This is deferred to Phase 4.
 
 ## Implementation Phases
 
-Epic: rue-33lf (closed)
+Epic: gruel-33lf (closed)
 
-### Phase 1: Comptime Expressions (rue-3xoq) - Complete
+### Phase 1: Comptime Expressions (gruel-3xoq) - Complete
 
 **Goal**: `comptime { expr }` syntax with basic expression evaluation.
 
@@ -315,7 +315,7 @@ Epic: rue-33lf (closed)
 
 **Deliverable**: Users can write `const X: i32 = comptime { 1 + 2 * 3 };`
 
-### Phase 2: Comptime Parameters (Value) (rue-ya9i) - Complete
+### Phase 2: Comptime Parameters (Value) (gruel-ya9i) - Complete
 
 **Goal**: Functions can take comptime value parameters.
 
@@ -327,7 +327,7 @@ Epic: rue-33lf (closed)
 
 **Deliverable**: Users can write `fn repeat(comptime n: i32, x: i32) -> i32`
 
-### Phase 3: Type Parameters (rue-fbwv) - Complete
+### Phase 3: Type Parameters (gruel-fbwv) - Complete
 
 **Goal**: The `type` type and comptime type parameters.
 
@@ -339,7 +339,7 @@ Epic: rue-33lf (closed)
 
 **Deliverable**: Users can write `fn max(comptime T: type, a: T, b: T) -> T`
 
-### Phase 4: Comptime Type Construction (rue-ak9z) - Complete
+### Phase 4: Comptime Type Construction (gruel-ak9z) - Complete
 
 **Goal**: Comptime functions can construct and return types.
 
@@ -355,7 +355,7 @@ Epic: rue-33lf (closed)
 ### Positive
 
 - **Unified model**: One concept for const evaluation, metaprogramming, and generics
-- **Same syntax**: Comptime code uses normal Rue syntax, no special template language
+- **Same syntax**: Comptime code uses normal Gruel syntax, no special template language
 - **Incremental adoption**: Each phase adds value; Phase 1 is useful standalone
 - **Type safety**: Types are first-class values but still statically checked
 - **Zero runtime cost**: All comptime computation happens at compile time
@@ -415,7 +415,7 @@ These are explicitly out of scope for this ADR:
 
 ### Phase 1: Comptime Expressions
 
-```rue
+```gruel
 // Compile-time arithmetic
 const BUFFER_SIZE: i32 = comptime { 4 * 1024 };
 const FLAGS: i32 = comptime { 1 | 2 | 4 };
@@ -429,7 +429,7 @@ fn main() -> i32 {
 
 ### Phase 2: Comptime Value Parameters
 
-```rue
+```gruel
 // Compile-time loop unrolling
 fn sum_n(comptime n: i32) -> i32 {
     let mut total = 0;
@@ -448,7 +448,7 @@ fn main() -> i32 {
 
 ### Phase 3: Generic Functions
 
-```rue
+```gruel
 fn swap(comptime T: type, a: T, b: T) -> (T, T) {
     (b, a)
 }
@@ -465,7 +465,7 @@ fn main() -> i32 {
 
 ### Phase 4: Type Construction (Future)
 
-```rue
+```gruel
 fn Array(comptime T: type, comptime N: i32) -> type {
     struct {
         data: [T; N],

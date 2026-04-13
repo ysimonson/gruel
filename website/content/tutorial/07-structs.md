@@ -10,7 +10,7 @@ Structs let you create custom types by grouping related data together.
 
 ## Defining Structs
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -31,7 +31,7 @@ fn main() -> i32 {
 
 Pass structs to functions and return them:
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -58,7 +58,7 @@ fn main() -> i32 {
 
 Structs can contain other structs:
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -92,7 +92,7 @@ fn main() -> i32 {
 
 If a struct variable is mutable, you can modify its fields:
 
-```rue
+```gruel
 struct Counter {
     value: i32,
 }
@@ -111,7 +111,7 @@ fn main() -> i32 {
 
 By default, structs *move* when assigned or passed to functions. After a move, the original variable can't be used:
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -132,7 +132,7 @@ fn main() -> i32 {
 
 If you want a type to be copyable instead, mark it with `@copy`:
 
-```rue
+```gruel
 @copy
 struct Point {
     x: i32,

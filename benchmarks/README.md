@@ -1,6 +1,6 @@
-# Rue Compiler Benchmarks
+# Gruel Compiler Benchmarks
 
-This directory contains benchmark programs for measuring Rue compiler performance.
+This directory contains benchmark programs for measuring Gruel compiler performance.
 
 ## Structure
 
@@ -9,11 +9,11 @@ benchmarks/
 ├── manifest.toml       # Benchmark metadata
 ├── README.md           # This file
 └── stress/             # Stress test programs
-    ├── many_functions.rue    # 100+ functions
-    ├── deep_nesting.rue      # Deeply nested blocks
-    ├── large_structs.rue     # Many struct types
-    ├── arithmetic_heavy.rue  # Expression-heavy code
-    └── control_flow.rue      # Complex if/while/match
+    ├── many_functions.gruel    # 100+ functions
+    ├── deep_nesting.gruel      # Deeply nested blocks
+    ├── large_structs.gruel     # Many struct types
+    ├── arithmetic_heavy.gruel  # Expression-heavy code
+    └── control_flow.gruel      # Complex if/while/match
 ```
 
 ## Benchmark Descriptions
@@ -60,15 +60,15 @@ For manual testing or debugging:
 
 ```bash
 # Run a single benchmark with timing output
-./buck2 run //crates/rue:rue -- --time-passes benchmarks/stress/many_functions.rue /tmp/out
+./buck2 run //crates/gruel:gruel -- --time-passes benchmarks/stress/many_functions.gruel /tmp/out
 
 # Get JSON timing output
-./buck2 run //crates/rue:rue -- --benchmark-json benchmarks/stress/many_functions.rue /tmp/out
+./buck2 run //crates/gruel:gruel -- --benchmark-json benchmarks/stress/many_functions.gruel /tmp/out
 ```
 
 ## Adding Benchmarks
 
-1. Add a `.rue` file to `stress/` (or create a new category directory)
+1. Add a `.gruel` file to `stress/` (or create a new category directory)
 2. Add an entry to `manifest.toml`
 3. Ensure the program compiles and runs correctly
 

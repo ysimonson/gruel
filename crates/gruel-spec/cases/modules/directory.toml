@@ -1,0 +1,135 @@
+[section]
+id = "modules.directory"
+name = "Directory Module Resolution"
+description = "Directory module resolution using the _foo.gruel + foo/ pattern. Per ADR-0026, @import('foo') resolves to _foo.gruel when foo.gruel doesn't exist."
+
+# =============================================================================
+# Simple File Module Resolution
+# =============================================================================
+# Note: Module resolution is implemented, but module member access is not yet.
+# These tests verify the path resolution logic by checking that the correct
+# file is found (no "module not found" error).
+
+[[case]]
+name = "import_simple_file_resolves"
+description = "@import('foo') resolves to foo.gruel when it exists (verifies file is found)"
+source = """
+fn main() -> i32 {
+    let math = @import("math");
+    0
+}
+"""
+aux_files = { "math.gruel" = """
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+""" }
+exit_code = 0
+
+[[case]]
+name = "import_simple_file_with_extension_resolves"
+description = "@import('foo.gruel') resolves to foo.gruel directly"
+source = """
+fn main() -> i32 {
+    let math = @import("math.gruel");
+    0
+}
+"""
+aux_files = { "math.gruel" = """
+fn multiply(a: i32, b: i32) -> i32 {
+    a * b
+}
+""" }
+exit_code = 0
+
+# =============================================================================
+# Directory Module Resolution (_foo.gruel pattern)
+# =============================================================================
+
+[[case]]
+name = "import_directory_module_resolves"
+description = "@import('utils') resolves to _utils.gruel when utils.gruel doesn't exist"
+source = """
+fn main() -> i32 {
+    let utils = @import("utils");
+    0
+}
+"""
+aux_files = { "_utils.gruel" = """
+fn helper() -> i32 {
+    42
+}
+""" }
+exit_code = 0
+
+[[case]]
+name = "import_directory_module_with_subdir_resolves"
+description = "@import('utils') finds _utils.gruel even when utils/ directory exists"
+source = """
+fn main() -> i32 {
+    let utils = @import("utils");
+    0
+}
+"""
+aux_files = { "_utils.gruel" = """
+fn helper() -> i32 {
+    99
+}
+""", "utils/inner.gruel" = """
+fn inner_fn() -> i32 { 1 }
+""" }
+exit_code = 0
+
+# =============================================================================
+# Resolution Priority (foo.gruel before _foo.gruel)
+# =============================================================================
+
+[[case]]
+name = "import_prefers_simple_file_resolves"
+description = "foo.gruel is preferred over _foo.gruel if both exist (verifies resolution order)"
+source = """
+fn main() -> i32 {
+    let math = @import("math");
+    0
+}
+"""
+aux_files = { "math.gruel" = """
+fn value() -> i32 { 10 }
+""", "_math.gruel" = """
+fn value() -> i32 { 20 }
+""" }
+exit_code = 0
+
+# =============================================================================
+# Module Not Found Errors
+# =============================================================================
+
+[[case]]
+name = "import_module_not_found"
+description = "@import for non-existent module produces clear error"
+source = """
+fn main() -> i32 {
+    let missing = @import("nonexistent");
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot find module"
+
+# =============================================================================
+# Nested Directory Resolution
+# =============================================================================
+
+[[case]]
+name = "import_nested_path_resolves"
+description = "@import('foo/bar') resolves to foo/bar.gruel"
+source = """
+fn main() -> i32 {
+    let nested = @import("sub/helper");
+    0
+}
+"""
+aux_files = { "sub/helper.gruel" = """
+fn value() -> i32 { 123 }
+""" }
+exit_code = 0

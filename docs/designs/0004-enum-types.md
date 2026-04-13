@@ -22,13 +22,13 @@ Implemented
 
 ## Summary
 
-Add simple enum types (discriminated unions without associated data) to Rue, enabling type-safe variant types and exhaustive match expressions.
+Add simple enum types (discriminated unions without associated data) to Gruel, enabling type-safe variant types and exhaustive match expressions.
 
 ## Context
 
-Rue currently supports structs as the only user-defined type. Users cannot define a type with a fixed set of variants. For example, there's no way to express:
+Gruel currently supports structs as the only user-defined type. Users cannot define a type with a fixed set of variants. For example, there's no way to express:
 
-```rue
+```gruel
 // Not currently possible
 enum Direction {
     North,
@@ -42,11 +42,11 @@ This forces users to represent states as integers with magic values, losing type
 
 ## Decision
 
-Add simple enum types to Rue. This first iteration focuses on **discriminated unions without associated data** (C-style enums), which are a stepping stone toward full algebraic data types.
+Add simple enum types to Gruel. This first iteration focuses on **discriminated unions without associated data** (C-style enums), which are a stepping stone toward full algebraic data types.
 
 ### Syntax
 
-```rue
+```gruel
 enum Color {
     Red,
     Green,
@@ -93,7 +93,7 @@ An enum defines:
 
 An enum with no variants is valid and represents an uninhabited type (like the never type `!`):
 
-```rue
+```gruel
 enum Void {}
 ```
 
@@ -107,7 +107,7 @@ A zero-variant enum:
 
 Discriminants are automatically assigned starting from 0:
 
-```rue
+```gruel
 enum Status {
     Pending,   // discriminant 0
     Active,    // discriminant 1
@@ -127,7 +127,7 @@ The discriminant type is chosen to be the smallest unsigned integer that can rep
 
 Variants are constructed using path syntax `EnumName::VariantName`:
 
-```rue
+```gruel
 let color = Color::Red;
 ```
 
@@ -135,7 +135,7 @@ let color = Color::Red;
 
 Enum variants are matched using the same path syntax:
 
-```rue
+```gruel
 match color {
     Color::Red => 0,
     Color::Green => 1,
@@ -147,7 +147,7 @@ match color {
 
 Match expressions on enum types must cover all variants:
 
-```rue
+```gruel
 match direction {
     Direction::North => 0,
     Direction::South => 1,
@@ -157,7 +157,7 @@ match direction {
 
 A wildcard pattern can be used to match remaining variants:
 
-```rue
+```gruel
 match direction {
     Direction::North => 0,
     _ => 1,  // matches East, South, West

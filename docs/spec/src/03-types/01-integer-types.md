@@ -34,7 +34,7 @@ Signed integer arithmetic that overflows **MUST** cause a runtime panic.
 
 {{ rule(id="3.1:7") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a: i8 = 127;
     let b: i16 = 32767;
@@ -82,7 +82,7 @@ When an integer literal appears in a context where the expected type is known (e
 
 {{ rule(id="3.1:16") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 42;           // x has type i32 (default)
     let y: i64 = 100;     // 100 is inferred as i64
@@ -102,7 +102,7 @@ When an integer literal is the operand of a unary negation operator, and the neg
 
 {{ rule(id="3.1:19") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a: i8 = -128;                       // valid: -128 is in i8 range
     let b: i8 = 128;                        // error: 128 exceeds i8 range
@@ -114,7 +114,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.1:20") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i8 = 128;           // error: literal out of range for i8
     let y: u8 = 256;           // error: literal out of range for u8

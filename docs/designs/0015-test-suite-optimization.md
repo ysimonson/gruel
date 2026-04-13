@@ -19,7 +19,7 @@ Implemented
 
 ## Summary
 
-Optimize the Rue test suite for faster development iteration by: (1) adding parameterized test support to consolidate redundant spec tests, (2) enhancing unit test coverage for development-time feedback, and (3) adding an integration unit test layer that tests the compilation pipeline without execution.
+Optimize the Gruel test suite for faster development iteration by: (1) adding parameterized test support to consolidate redundant spec tests, (2) enhancing unit test coverage for development-time feedback, and (3) adding an integration unit test layer that tests the compilation pipeline without execution.
 
 ## Context
 
@@ -124,10 +124,10 @@ Target consolidation in high-duplication files while maintaining 100% spec parag
 
 ### 3. Add Integration Unit Tests
 
-Create a new test layer in `rue-compiler` that tests the pipeline without execution:
+Create a new test layer in `gruel-compiler` that tests the pipeline without execution:
 
 ```rust
-// In rue-compiler/src/lib.rs
+// In gruel-compiler/src/lib.rs
 #[cfg(test)]
 mod integration_tests {
     use super::*;
@@ -165,37 +165,37 @@ Update CLAUDE.md with recommended workflow:
 ./test.sh                             # Full suite including spec tests
 
 # Targeted spec tests
-./buck2 run //crates/rue-spec:rue-spec -- "arithmetic"  # Run specific tests
+./buck2 run //crates/gruel-spec:gruel-spec -- "arithmetic"  # Run specific tests
 ```
 
 Add a new script `./quick-test.sh` that runs only unit tests for faster iteration.
 
 ## Implementation Phases
 
-- [x] **Phase 1: Parameterized Test Support** - rue-9jdv.1
-  - Added `ParamSet` struct and `params` field to `Case` in `rue-test-runner`
+- [x] **Phase 1: Parameterized Test Support** - gruel-9jdv.1
+  - Added `ParamSet` struct and `params` field to `Case` in `gruel-test-runner`
   - Implemented template expansion with `{param}` syntax
   - Implemented `expand_case()` and `expand_test_file()` functions
   - Added unit tests for expansion logic
   - Added example parameterized test to `integers.toml`
 
-- [x] **Phase 2: Consolidate Integer Tests** - rue-9jdv.2
+- [x] **Phase 2: Consolidate Integer Tests** - gruel-9jdv.2
   - Rewrote `integers.toml` using parameterized format (95 → 41 case definitions)
   - Fixed traceability report to handle parameterized tests with `spec_extra`
   - Verified 100% spec coverage maintained via traceability check
 
-- [x] **Phase 3: Consolidate Other Spec Tests** - rue-9jdv.3
+- [x] **Phase 3: Consolidate Other Spec Tests** - gruel-9jdv.3
   - Consolidated `arithmetic.toml` (530→274 lines), `let.toml` (688→400 lines)
   - Consolidated `functions.toml` (1405→800 lines, heavily reduced inout section)
   - Consolidated `bitwise.toml` (550→325 lines), `comparison.toml` (439→274 lines)
   - All 1021 tests pass with 100% normative spec coverage maintained
 
-- [x] **Phase 4: Integration Unit Tests** - rue-9jdv.4
-  - Added `compile_to_air()` and `compile_to_cfg()` test helpers to `rue-compiler`
+- [x] **Phase 4: Integration Unit Tests** - gruel-9jdv.4
+  - Added `compile_to_air()` and `compile_to_cfg()` test helpers to `gruel-compiler`
   - Added 115+ integration unit tests covering major language features
   - Tests organized by category: types, arithmetic, comparison, logical, bitwise, control flow, functions, structs, enums, arrays, strings, intrinsics, CFG construction, error messages, warnings, and edge cases
 
-- [x] **Phase 5: Workflow Documentation** - rue-9jdv.5
+- [x] **Phase 5: Workflow Documentation** - gruel-9jdv.5
   - Added Development Workflow section to CLAUDE.md
   - Added `./quick-test.sh` script for fast unit test iteration
   - Added "Choosing the Right Test Type" table documenting when to use each test level
@@ -241,5 +241,5 @@ Add a new script `./quick-test.sh` that runs only unit tests for faster iteratio
 
 - [ADR-0005: Preview Features](0005-preview-features.md) - Feature gating mechanism
 - [CLAUDE.md](../../CLAUDE.md) - Development workflow documentation
-- `crates/rue-test-runner/src/lib.rs` - Test infrastructure with parameterized support
+- `crates/gruel-test-runner/src/lib.rs` - Test infrastructure with parameterized support
 - Similar concepts: pytest parametrize, JUnit @ParameterizedTest, Go table-driven tests

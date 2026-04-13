@@ -8,7 +8,7 @@ template = "spec/page.html"
 
 {{ rule(id="C.1:1") }}
 
-This appendix documents implementation-defined limits of the Rue compiler. These limits are normative: a conforming implementation **MUST** support at least the minimum values specified here. Implementations **MAY** support larger values.
+This appendix documents implementation-defined limits of the Gruel compiler. These limits are normative: a conforming implementation **MUST** support at least the minimum values specified here. Implementations **MAY** support larger values.
 
 {{ rule(id="C.1:2") }}
 

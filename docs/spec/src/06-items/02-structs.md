@@ -26,7 +26,7 @@ Field names **MUST** be unique within a struct.
 
 {{ rule(id="6.2:4") }}
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -45,7 +45,7 @@ Field initializers **MAY** be provided in any order.
 
 {{ rule(id="6.2:7") }}
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
@@ -67,7 +67,7 @@ Mutable struct values allow field reassignment.
 
 {{ rule(id="6.2:10") }}
 
-```rue
+```gruel
 struct Counter { value: i32 }
 
 fn main() -> i32 {

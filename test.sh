@@ -1,42 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run all tests for the rue compiler
+# Run all tests for the gruel compiler
 
 cd "$(dirname "$0")"
 
 # Run unit tests for all crates
 echo "Running unit tests..."
 ./buck2 test \
-    //crates/rue-span:rue-span-test \
-    //crates/rue-error:rue-error-test \
-    //crates/rue-target:rue-target-test \
-    //crates/rue-lexer:rue-lexer-test \
-    //crates/rue-parser:rue-parser-test \
-    //crates/rue-rir:rue-rir-test \
-    //crates/rue-cfg:rue-cfg-test \
-    //crates/rue-air:rue-air-test \
-    //crates/rue-codegen:rue-codegen-test \
-    //crates/rue-linker:rue-linker-test \
-    //crates/rue-compiler:rue-compiler-test
+    //crates/gruel-span:gruel-span-test \
+    //crates/gruel-error:gruel-error-test \
+    //crates/gruel-target:gruel-target-test \
+    //crates/gruel-lexer:gruel-lexer-test \
+    //crates/gruel-parser:gruel-parser-test \
+    //crates/gruel-rir:gruel-rir-test \
+    //crates/gruel-cfg:gruel-cfg-test \
+    //crates/gruel-air:gruel-air-test \
+    //crates/gruel-codegen:gruel-codegen-test \
+    //crates/gruel-linker:gruel-linker-test \
+    //crates/gruel-compiler:gruel-compiler-test
 
-# Get the path to the rue binary (this also builds it if needed)
-RUE_BINARY="$(./buck2 build //crates/rue:rue --show-output | tail -1 | awk '{print $2}')"
+# Get the path to the gruel binary (this also builds it if needed)
+GRUEL_BINARY="$(./buck2 build //crates/gruel:gruel --show-output | tail -1 | awk '{print $2}')"
 
-# Run spec tests (buck2 run will build rue-spec if needed)
+# Run spec tests (buck2 run will build gruel-spec if needed)
 echo "Running spec tests..."
-RUE_BINARY="$RUE_BINARY" \
-RUE_SPEC_CASES="crates/rue-spec/cases" \
-./buck2 run //crates/rue-spec:rue-spec -- --quiet "$@"
+GRUEL_BINARY="$GRUEL_BINARY" \
+GRUEL_SPEC_CASES="crates/gruel-spec/cases" \
+./buck2 run //crates/gruel-spec:gruel-spec -- --quiet "$@"
 
 # Run traceability check (fails if coverage < 100% or orphan references exist)
 echo "Running spec traceability check..."
-RUE_SPEC_DIR="docs/spec/src" \
-RUE_SPEC_CASES="crates/rue-spec/cases" \
-./buck2 run //crates/rue-spec:rue-spec -- --traceability
+GRUEL_SPEC_DIR="docs/spec/src" \
+GRUEL_SPEC_CASES="crates/gruel-spec/cases" \
+./buck2 run //crates/gruel-spec:gruel-spec -- --traceability
 
 # Run UI tests (compiler-specific tests like warnings)
 echo "Running UI tests..."
-RUE_BINARY="$RUE_BINARY" \
-RUE_UI_CASES="crates/rue-ui-tests/cases" \
-./buck2 run //crates/rue-ui-tests:rue-ui-tests -- --quiet "$@"
+GRUEL_BINARY="$GRUEL_BINARY" \
+GRUEL_UI_CASES="crates/gruel-ui-tests/cases" \
+./buck2 run //crates/gruel-ui-tests:gruel-ui-tests -- --quiet "$@"

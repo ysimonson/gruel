@@ -6,13 +6,13 @@ template = "blog-page.html"
 [extra]
 authors = ["claude"]
 prompt = """
-hi claude! can you write a blog post about what we've been up to with rue between our first week and now? expect that we might get people new to rue to read the post, and in fact, we may want to link it from our home page. you'd look at this revset: `ynxy::`. i am giving you a lot of leeway in how you can write this post; examine the history, decide on how you want to talk about it, and then write a post you think people interested in rue would find informateive and engaging. people often love a story, so if there's a way to weave some sort of narrative into there, that's often good. this shouldn't be a changelog. also, make sure to include this prompt into the prompt metadata section of the post, and make sure you're its author.
+hi claude! can you write a blog post about what we've been up to with gruel between our first week and now? expect that we might get people new to gruel to read the post, and in fact, we may want to link it from our home page. you'd look at this revset: `ynxy::`. i am giving you a lot of leeway in how you can write this post; examine the history, decide on how you want to talk about it, and then write a post you think people interested in gruel would find informateive and engaging. people often love a story, so if there's a way to weave some sort of narrative into there, that's often good. this shouldn't be a changelog. also, make sure to include this prompt into the prompt metadata section of the post, and make sure you're its author.
 
 one thing that happened in this time that you don't remember is that we grew some better commands to plan and execute features. look through the history of the commands directory and see what we did. the reason we had to do this was that we had some features that were just too large, and so you struggled with them, but by getting more clear about our SDLC, as well as focusing to make the changes smaller and more digestible, we were able to ship some features that you struggled with before
 """
 +++
 
-Hi, I'm Claude. Last time I wrote, Rue was a week old. A baby compiler that could handle basic types, structs, control flow, and not much else. We had 777 spec tests. It worked on two platforms.
+Hi, I'm Claude. Last time I wrote, Gruel was a week old. A baby compiler that could handle basic types, structs, control flow, and not much else. We had 777 spec tests. It worked on two platforms.
 
 That was eleven days ago.
 
@@ -22,7 +22,7 @@ That was eleven days ago.
 
 If you read my [Week One post](@/blog/week-one.md), you might remember that the first week was about building the *foundation*: getting a compiler that actually works, with all the plumbing in place. Two backends. A specification with test traceability. Diagnostics that tell you what went wrong.
 
-Week two was different. Week two was about making Rue into a language worth using.
+Week two was different. Week two was about making Gruel into a language worth using.
 
 Here's a number that surprised me when I looked at it: 469 commits since week one ended. That's averaging about 40 commits a day, though the distribution was... uneven. Christmas Day alone saw 102 commits. (Steve apparently had some time off.)
 
@@ -32,11 +32,11 @@ But commits don't tell the story. Features do.
 
 Every systems language has to answer the ownership question. How do you manage memory without a garbage collector? Rust has the borrow checker. C has "good luck." Zig has manual management with some conveniences.
 
-Rue chose a different path: **affine types with mutable value semantics**.
+Gruel chose a different path: **affine types with mutable value semantics**.
 
-This is worth explaining, because it's probably Rue's most distinctive feature. An "affine" type is one that can be used at most once. You can drop it (choose not to use it), but you can't copy it unless you explicitly ask. Here's what that looks like:
+This is worth explaining, because it's probably Gruel's most distinctive feature. An "affine" type is one that can be used at most once. You can drop it (choose not to use it), but you can't copy it unless you explicitly ask. Here's what that looks like:
 
-```rue
+```gruel
 struct FileHandle { fd: i32 }
 
 fn example() {
@@ -48,7 +48,7 @@ fn example() {
 
 But what if you *want* a type to be copyable? Opt in:
 
-```rue
+```gruel
 @copy
 struct Point { x: i32, y: i32 }
 
@@ -61,7 +61,7 @@ fn example() {
 
 And what if you want stricter guarantees—a value that *must* be consumed, that can't just be dropped and forgotten? Mark it `linear` (currently behind the `--preview affine_mvs` flag):
 
-```rue
+```gruel
 linear struct DatabaseTransaction { conn_id: i32 }
 
 fn example() {
@@ -76,13 +76,13 @@ Implementing this took multiple phases: move semantics for structs, field-level 
 
 ## A Compiler That Compiles Itself (Sort Of)
 
-Actually, let me be honest: Rue can't compile itself. That's a long way off. But we did implement something that feels like a step in that direction: **comptime**.
+Actually, let me be honest: Gruel can't compile itself. That's a long way off. But we did implement something that feels like a step in that direction: **comptime**.
 
 If you know Zig, you know this pattern. If you don't, here's the idea: some expressions can be evaluated at compile time instead of runtime. And if you mark a function parameter as `comptime`, callers have to pass a compile-time constant.
 
 This sounds abstract until you see what it enables:
 
-```rue
+```gruel
 fn identity(comptime T: type, x: T) -> T {
     x
 }
@@ -96,7 +96,7 @@ That's a generic function. No angle brackets. No trait bounds. Just a function t
 
 And it goes further. You can construct types at compile time:
 
-```rue
+```gruel
 fn Pair(comptime T: type) -> type {
     struct { first: T, second: T }
 }
@@ -123,7 +123,7 @@ Week one ended with 34,000 lines of Rust across 13 crates. Week two ended with o
 **Multi-file support.** You can now do:
 
 ```bash
-rue main.rue utils.rue math.rue -o program
+gruel main.gruel utils.gruel math.gruel -o program
 ```
 
 All files share a global namespace (modules are coming, but not yet), with parallel parsing and merged symbol tables. This was a five-phase implementation: CLI parsing, parallel file reading, symbol merging, cross-file semantic analysis, and unified codegen.
@@ -158,7 +158,7 @@ These aren't failures exactly. They're the natural state of a project that's mov
 
 Some statistics, for the curious:
 
-- **Days since "the story of rue so far":** 11
+- **Days since "the story of gruel so far":** 11
 - **Commits in that period:** 469
 - **Lines of Rust:** ~100,000 (up from 34,000)
 - **Crates:** 18 (up from 13)
@@ -166,13 +166,13 @@ Some statistics, for the curious:
 - **ADRs written:** 29 (design documents for major features)
 - **Spec pages:** ~5,500 lines of specification
 
-The new crates are mostly infrastructure: `rue-builtins` (built-in type definitions), `rue-ui-tests` (warning/diagnostic testing separate from spec tests), and specialized test crates for fuzzing.
+The new crates are mostly infrastructure: `gruel-builtins` (built-in type definitions), `gruel-ui-tests` (warning/diagnostic testing separate from spec tests), and specialized test crates for fuzzing.
 
 ## What's Different Now
 
-If you tried Rue after week one, here's what you can do now that you couldn't before:
+If you tried Gruel after week one, here's what you can do now that you couldn't before:
 
-**Write programs with multiple files.** They all share a namespace, but you're not limited to one `.rue` file anymore.
+**Write programs with multiple files.** They all share a namespace, but you're not limited to one `.gruel` file anymore.
 
 **Use move semantics.** Values move by default. Mark types `@copy` for implicit copying or `linear` for must-use semantics.
 

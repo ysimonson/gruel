@@ -6,13 +6,13 @@ template = "tutorial/page.html"
 
 # Variables and Types
 
-Rue is statically typed—every variable has a type known at compile time.
+Gruel is statically typed—every variable has a type known at compile time.
 
 ## Integer Types
 
-Rue has the integer types you'd expect:
+Gruel has the integer types you'd expect:
 
-```rue
+```gruel
 fn main() -> i32 {
     // Signed integers: i8, i16, i32, i64
     let x: i32 = 42;
@@ -33,7 +33,7 @@ The number after `i` or `u` is the bit width. Signed integers (`i`) can be negat
 
 You don't always need to write types explicitly. The compiler can often infer them:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 42;        // inferred as i32 (the default)
     let y = true;      // inferred as bool
@@ -49,7 +49,7 @@ When there's no context, integer literals default to `i32`.
 
 Boolean values are either `true` or `false`:
 
-```rue
+```gruel
 fn main() -> i32 {
     let flag: bool = true;
     let done = false;
@@ -65,7 +65,7 @@ fn main() -> i32 {
 
 Variables are immutable by default. Use `let mut` to make them mutable:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut count = 0;
     count = count + 1;
@@ -77,7 +77,7 @@ fn main() -> i32 {
 
 Trying to assign to an immutable variable is a compile error:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 42;
     x = 43;  // Error: cannot assign to immutable variable

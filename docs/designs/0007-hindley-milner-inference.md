@@ -35,7 +35,7 @@ The current type system (ADR-0002) uses bidirectional type checking with several
    This appears in 5+ places in sema.rs (lines 195, 811, 2583, 2907, 2949).
 
 2. **Inconsistent inference**: The `peek_type` function (lines 2895-2987) tries to guess types without full analysis, but can't handle complex cases:
-   ```rue
+   ```gruel
    let x = 1 + 2;  // Both literals -> defaults to i32, can't infer from later use
    ```
 
@@ -52,7 +52,7 @@ HM inference:
 - Scales to **generics/polymorphism** if we add them later
 - Is **well-understood**: decades of research and implementations
 
-Note: We're implementing HM for **inference consistency**, not for polymorphism. Rue currently has no generics, and this ADR doesn't add them.
+Note: We're implementing HM for **inference consistency**, not for polymorphism. Gruel currently has no generics, and this ADR doesn't add them.
 
 ## Decision
 
@@ -144,7 +144,7 @@ Walk the RIR and for each expression:
 4. Generate `Equal` constraints based on how expressions combine
 
 Example:
-```rue
+```gruel
 fn foo(x: i64) -> i64 {
     let y = 1 + x;  // y's type unknown, 1 is IntLiteral
     y
@@ -222,13 +222,13 @@ With full constraint context, we can provide better error messages:
 **Before:**
 ```
 error: type mismatch: expected i32, found i64
-  --> file.rue:3:5
+  --> file.gruel:3:5
 ```
 
 **After:**
 ```
 error: type mismatch
-  --> file.rue:3:5
+  --> file.gruel:3:5
    |
  3 |     let y = 1 + x;
    |             ^ this has type i64 (from parameter x: i64)
@@ -248,32 +248,32 @@ Code that compiled before will compile after with the same types.
 
 ## Implementation Phases
 
-- [x] **Phase 1: Type variable infrastructure** - rue-xvc
+- [x] **Phase 1: Type variable infrastructure** - gruel-xvc
   - Add `InferType`, `TypeVarId` types
   - Add type variable allocation and substitution
   - Add constraint types
   - Unit tests for unification algorithm
 
-- [x] **Phase 2: Constraint generation** - rue-5os
+- [x] **Phase 2: Constraint generation** - gruel-5os
   - Add `generate_constraints` that walks RIR
   - Generate constraints for all expression types
   - Preserve span information for error reporting
   - Tests for constraint generation
 
-- [x] **Phase 3: Unification** - rue-8sl
+- [x] **Phase 3: Unification** - gruel-8sl
   - Implement Algorithm W unification
   - Handle `IntLiteral` special unification rules
   - Apply integer defaulting at the end
   - Error collection and reporting with `Type::Error` recovery
   - Tests for unification edge cases
 
-- [x] **Phase 4: AIR emission** - rue-048
+- [x] **Phase 4: AIR emission** - gruel-048
   - Split current `analyze_inst` into constraint gen + emission
   - Emit AIR with resolved types
   - Verify all existing spec tests pass
   - Legacy peek_type and integer_type kept as defensive fallbacks (may remove in Phase 5)
 
-- [x] **Phase 5: Cleanup and stabilization** - rue-rvm
+- [x] **Phase 5: Cleanup and stabilization** - gruel-rvm
   - Remove TypeExpectation enum and peek_type function
   - Add InferType::Array for structural array type handling during inference
   - Update FunctionSig and ParamVarInfo to use InferType (not Type)

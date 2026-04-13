@@ -19,15 +19,15 @@ Implemented
 
 ## Summary
 
-Add a `@read_line()` intrinsic that reads a line of text from standard input and returns it as a `String`. On EOF or I/O error, the intrinsic panics. This provides the simplest possible input mechanism for Rue programs.
+Add a `@read_line()` intrinsic that reads a line of text from standard input and returns it as a `String`. On EOF or I/O error, the intrinsic panics. This provides the simplest possible input mechanism for Gruel programs.
 
 ## Context
 
 ### Current I/O Situation
 
-Rue currently has output via `@dbg`, but no input mechanism:
+Gruel currently has output via `@dbg`, but no input mechanism:
 
-```rue
+```gruel
 fn main() -> i32 {
     @dbg("Hello, world!");  // Output works
     // But how do we read user input?
@@ -35,14 +35,14 @@ fn main() -> i32 {
 }
 ```
 
-Without input, Rue programs cannot:
+Without input, Gruel programs cannot:
 - Interact with users
 - Process data from pipes
 - Read configuration at runtime
 
 ### Design Philosophy: Start Simple
 
-Rue is building up capabilities incrementally. For input, the simplest useful primitive is reading a line of text. More sophisticated I/O (files, binary data, non-blocking I/O) can come later.
+Gruel is building up capabilities incrementally. For input, the simplest useful primitive is reading a line of text. More sophisticated I/O (files, binary data, non-blocking I/O) can come later.
 
 Key constraints:
 - **No generics yet**: Can't have `Result<String, Error>`
@@ -72,7 +72,7 @@ This feature requires:
 
 ### The `@read_line` Intrinsic
 
-```rue
+```gruel
 @read_line() -> String
 ```
 
@@ -89,7 +89,7 @@ Reads characters from standard input until a newline (`\n`) is encountered. Retu
 
 #### Examples
 
-```rue
+```gruel
 fn main() -> i32 {
     @dbg("What is your name?");
     let name = @read_line();
@@ -135,7 +135,7 @@ Add to the shared runtime (`lib.rs`):
 /// Read a line from stdin, return as String.
 /// Panics on EOF with no data or on I/O error.
 #[unsafe(no_mangle)]
-pub extern "C" fn __rue_read_line() -> (*mut u8, u64, u64) {
+pub extern "C" fn __gruel_read_line() -> (*mut u8, u64, u64) {
     // 1. Allocate initial buffer (e.g., 128 bytes)
     // 2. Read in a loop until \n or EOF
     // 3. Grow buffer as needed (using string allocation functions)
@@ -159,7 +159,7 @@ A future optimization could add an internal buffer to reduce syscalls.
 
 The `@read_line` intrinsic is lowered to:
 
-1. Call `__rue_read_line` (returns ptr, len, cap in registers/memory)
+1. Call `__gruel_read_line` (returns ptr, len, cap in registers/memory)
 2. Construct String value from the three components
 
 This follows the same pattern as `String::new()` and other String-returning functions.
@@ -175,7 +175,7 @@ This follows the same pattern as `String::new()` and other String-returning func
 
 ### Phase 2: Line Reading Runtime Function
 
-- [x] Add `__rue_read_line() -> (ptr, len, cap)` to runtime
+- [x] Add `__gruel_read_line() -> (ptr, len, cap)` to runtime
 - [x] Implement byte-by-byte reading until newline
 - [x] Handle EOF (panic if no data, otherwise return partial)
 - [x] Handle errors (panic with message)
@@ -185,7 +185,7 @@ This follows the same pattern as `String::new()` and other String-returning func
 
 - [x] Add `@read_line` to known intrinsics in sema
 - [x] Type check: no arguments, returns `String`
-- [x] Lower to `__rue_read_line` call in codegen
+- [x] Lower to `__gruel_read_line` call in codegen
 - [x] Handle String return value assembly
 
 ### Phase 4: Spec and Tests
@@ -212,7 +212,7 @@ This follows the same pattern as `String::new()` and other String-returning func
 ### Neutral
 
 - **Newline handling**: Newline is consumed but not returned (common convention)
-- **UTF-8**: Input is treated as bytes, conventionally UTF-8 (like all Rue strings)
+- **UTF-8**: Input is treated as bytes, conventionally UTF-8 (like all Gruel strings)
 
 ## Open Questions
 

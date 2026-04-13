@@ -33,7 +33,7 @@ The `self` parameter represents the receiver value and has the type of the enclo
 
 {{ rule(id="6.4:5", cat="example") }}
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -65,7 +65,7 @@ Methods **MAY** have additional parameters after `self`.
 
 {{ rule(id="6.4:9", cat="example") }}
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -90,7 +90,7 @@ When a method returns the same struct type, method calls **MAY** be chained.
 
 {{ rule(id="6.4:11", cat="example") }}
 
-```rue
+```gruel
 struct Counter {
     value: i32,
 
@@ -117,7 +117,7 @@ Associated functions are called using path notation: `Type::function(args)`.
 
 {{ rule(id="6.4:14", cat="example") }}
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -145,7 +145,7 @@ Method names **MUST** be unique within a struct definition.
 
 {{ rule(id="6.4:17", cat="example") }}
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,

@@ -20,7 +20,7 @@ String literals are stored in read-only memory and have static lifetime.
 
 {{ rule(id="3.7:4") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let s = "hello";
     0
@@ -52,7 +52,7 @@ An invalid escape sequence in a string literal is a compile-time error.
 
 {{ rule(id="3.7:8") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = "hello world";
     let b = "with \"quotes\"";
@@ -75,7 +75,7 @@ Two strings are equal if they have the same length and identical byte content.
 
 {{ rule(id="3.7:11") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = "hello";
     let b = "hello";
@@ -96,7 +96,7 @@ The `@dbg` intrinsic accepts a `String` argument and prints its content followed
 
 {{ rule(id="3.7:13") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let msg = "Hello, world!";
     @dbg(msg);

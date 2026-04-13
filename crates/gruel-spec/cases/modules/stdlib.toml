@@ -1,0 +1,65 @@
+[section]
+id = "modules.stdlib"
+spec_chapter = "4.13"
+name = "Standard Library Imports"
+description = "Resolution and usage of @import(\"std\") for the standard library."
+
+# =============================================================================
+# @import("std") Resolution
+# =============================================================================
+
+[[case]]
+name = "import_std_resolves"
+spec = ["4.13:82"]
+description = "@import(\"std\") resolves to the standard library root when std/ exists"
+source = """
+fn main() -> i32 {
+    let std = @import("std");
+    0
+}
+"""
+aux_files = { "std/_std.gruel" = """
+// Minimal std library for testing
+pub fn test_fn() -> i32 { 42 }
+""" }
+exit_code = 0
+
+[[case]]
+name = "import_std_not_found_error"
+spec = ["4.13:83"]
+description = "@import(\"std\") produces a clear error when stdlib is not found"
+source = """
+fn main() -> i32 {
+    let std = @import("std");
+    0
+}
+"""
+compile_fail = true
+error_contains = "standard library not found"
+# This test runs without GRUEL_STD_PATH and without std/ in the test directory
+# so it should fail to find the standard library
+
+# =============================================================================
+# Standard Library Submodule Access
+# =============================================================================
+# Note: These tests require module member access to be fully implemented.
+# For now, they verify that the std library can be found and parsed.
+
+[[case]]
+name = "import_std_with_submodule"
+spec = ["4.13:81", "4.13:82"]
+description = "std library with submodules can be imported"
+source = """
+fn main() -> i32 {
+    let std = @import("std");
+    0
+}
+"""
+aux_files = { "std/_std.gruel" = """
+pub const math = @import("math.gruel");
+""", "std/math.gruel" = """
+pub fn abs(x: i32) -> i32 {
+    if x < 0 { -x } else { x }
+}
+""" }
+exit_code = 0

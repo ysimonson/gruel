@@ -17,7 +17,7 @@ Quicksort is a classic divide-and-conquer sorting algorithm:
 
 ## The Implementation
 
-```rue
+```gruel
 fn partition(inout arr: [i32; 5], lo: u64, hi: u64) -> u64 {
     let pivot = arr[hi];
     let mut i = lo;
@@ -89,7 +89,7 @@ This example uses almost everything from the tutorial:
 ## Running It
 
 ```bash
-./buck2 run //crates/rue:rue -- quicksort.rue quicksort
+./buck2 run //crates/gruel:gruel -- quicksort.gruel quicksort
 ./quicksort
 ```
 
@@ -112,16 +112,16 @@ The array is sorted!
 
 ## More Examples
 
-The [GitHub repository](https://github.com/rue-language/rue) has more examples in the `examples/` directory:
+The [GitHub repository](https://github.com/gruel-language/gruel) has more examples in the `examples/` directory:
 
-- `fibonacci.rue` - Iterative and recursive Fibonacci
-- `primes.rue` - Prime number sieve with trial division
-- `binary_search.rue` - Binary search on a sorted array
-- `quicksort.rue` - Full quicksort with 10-element arrays
-- `structs.rue` - Working with Points and Rectangles
+- `fibonacci.gruel` - Iterative and recursive Fibonacci
+- `primes.gruel` - Prime number sieve with trial division
+- `binary_search.gruel` - Binary search on a sorted array
+- `quicksort.gruel` - Full quicksort with 10-element arrays
+- `structs.gruel` - Working with Points and Rectangles
 
 ## Next Steps
 
-You've learned the core of Rue! For the complete language reference, read the [Language Specification](/spec/).
+You've learned the core of Gruel! For the complete language reference, read the [Language Specification](/spec/).
 
-Rue is still in early development. If you find bugs or have ideas, please [file an issue](https://github.com/rue-language/rue/issues)!
+Gruel is still in early development. If you find bugs or have ideas, please [file an issue](https://github.com/gruel-language/gruel/issues)!

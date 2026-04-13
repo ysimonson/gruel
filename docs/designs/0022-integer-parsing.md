@@ -27,7 +27,7 @@ Add intrinsics to parse strings into integer values: `@parse_i32`, `@parse_i64`,
 
 With `@read_line()` (ADR-0021) providing input and `@dbg` providing output, we need a way to process numeric input:
 
-```rue
+```gruel
 fn main() -> i32 {
     @dbg("Enter a number:");
     let input = @read_line();
@@ -60,7 +60,7 @@ Like `@intCast`, parsing panics on failure:
 - Overflow (e.g., "999999999999" for i32)
 - Empty string
 
-This matches Rue's current pattern: runtime errors are panics. Once we have `Result<T, E>` (requires generics), we can add `@try_parse_i32` that returns a Result.
+This matches Gruel's current pattern: runtime errors are panics. Once we have `Result<T, E>` (requires generics), we can add `@try_parse_i32` that returns a Result.
 
 ### What About Other Bases?
 
@@ -70,7 +70,7 @@ For simplicity, we only support base-10 (decimal) parsing. Hexadecimal (`0x`), b
 
 ### Parsing Intrinsics
 
-```rue
+```gruel
 @parse_i32(s: String) -> i32
 @parse_i64(s: String) -> i64
 @parse_u32(s: String) -> u32
@@ -140,7 +140,7 @@ Clear, actionable error messages:
 
 The intrinsics **borrow** the string rather than consuming it:
 
-```rue
+```gruel
 fn main() -> i32 {
     let s = "42";
     let n = @parse_i32(s);  // Borrows s
@@ -159,7 +159,7 @@ Add to the shared runtime (`lib.rs`):
 ```rust
 /// Parse string as i32. Panics on invalid input or overflow.
 #[unsafe(no_mangle)]
-pub extern "C" fn __rue_parse_i32(ptr: *const u8, len: u64) -> i32 {
+pub extern "C" fn __gruel_parse_i32(ptr: *const u8, len: u64) -> i32 {
     // 1. Check for empty string
     // 2. Check for leading '-'
     // 3. Parse digits, checking for overflow
@@ -168,15 +168,15 @@ pub extern "C" fn __rue_parse_i32(ptr: *const u8, len: u64) -> i32 {
 
 /// Parse string as i64. Panics on invalid input or overflow.
 #[unsafe(no_mangle)]
-pub extern "C" fn __rue_parse_i64(ptr: *const u8, len: u64) -> i64 { ... }
+pub extern "C" fn __gruel_parse_i64(ptr: *const u8, len: u64) -> i64 { ... }
 
 /// Parse string as u32. Panics on invalid input, overflow, or negative.
 #[unsafe(no_mangle)]
-pub extern "C" fn __rue_parse_u32(ptr: *const u8, len: u64) -> u32 { ... }
+pub extern "C" fn __gruel_parse_u32(ptr: *const u8, len: u64) -> u32 { ... }
 
 /// Parse string as u64. Panics on invalid input, overflow, or negative.
 #[unsafe(no_mangle)]
-pub extern "C" fn __rue_parse_u64(ptr: *const u8, len: u64) -> u64 { ... }
+pub extern "C" fn __gruel_parse_u64(ptr: *const u8, len: u64) -> u64 { ... }
 ```
 
 Each function receives the string's pointer and length (extracted from the String fat pointer by codegen).
@@ -186,7 +186,7 @@ Each function receives the string's pointer and length (extracted from the Strin
 For `@parse_i32(s)`:
 
 1. Extract `ptr` and `len` from String `s`
-2. Call `__rue_parse_i32(ptr, len)`
+2. Call `__gruel_parse_i32(ptr, len)`
 3. Return result in register
 
 The String is borrowed, so no drop is inserted for it (the caller retains ownership).
@@ -195,10 +195,10 @@ The String is borrowed, so no drop is inserted for it (the caller retains owners
 
 ### Phase 1: Runtime Parsing Functions
 
-- [x] Add `__rue_parse_i64` to runtime (signed, 64-bit as base case)
-- [x] Add `__rue_parse_u64` to runtime (unsigned, 64-bit)
-- [x] Add `__rue_parse_i32` to runtime (delegates to i64, checks range)
-- [x] Add `__rue_parse_u32` to runtime (delegates to u64, checks range)
+- [x] Add `__gruel_parse_i64` to runtime (signed, 64-bit as base case)
+- [x] Add `__gruel_parse_u64` to runtime (unsigned, 64-bit)
+- [x] Add `__gruel_parse_i32` to runtime (delegates to i64, checks range)
+- [x] Add `__gruel_parse_u32` to runtime (delegates to u64, checks range)
 - [x] Unit tests in Rust for all parsing functions
 - [x] Test edge cases: empty, whitespace, overflow, negative
 
@@ -207,7 +207,7 @@ The String is borrowed, so no drop is inserted for it (the caller retains owners
 - [x] Add `@parse_i32`, `@parse_i64`, `@parse_u32`, `@parse_u64` to known intrinsics
 - [x] Type check: one String argument, returns appropriate integer type
 - [x] Mark String argument as borrowed (not consumed)
-- [x] Lower to appropriate `__rue_parse_*` call in codegen
+- [x] Lower to appropriate `__gruel_parse_*` call in codegen
 - [x] Extract ptr/len from String for call
 
 ### Phase 3: Spec and Tests

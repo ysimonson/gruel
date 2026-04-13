@@ -35,7 +35,7 @@ Two struct values are equal if and only if they have the same struct type and al
 
 {{ rule(id="4.3:4") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = 1 == 1;    // true
     let b = 1 != 2;    // true
@@ -48,7 +48,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.3:4a", cat="example") }}
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
@@ -78,7 +78,7 @@ Ordering operators on boolean, string, unit, or struct values are a compile-time
 
 {{ rule(id="4.3:7") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = 1 < 2;     // true
     let b = 5 >= 5;    // true
@@ -94,7 +94,7 @@ Comparison operators have lower precedence than arithmetic operators.
 
 {{ rule(id="4.3:9") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     if 1 + 2 == 3 { 1 } else { 0 }  // 1 (comparison after arithmetic)
 }
@@ -120,7 +120,7 @@ Comparison operators cannot be chained. Expressions like `a < b < c` or `a == b 
 
 To compare multiple values, use logical operators:
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = 1;
     let b = 2;

@@ -34,7 +34,7 @@ If no return type is specified, the function returns `()`.
 
 {{ rule(id="6.1:6", cat="normative") }}
 
-```rue
+```gruel
 fn add(x: i32, y: i32) -> i32 {
     x + y
 }
@@ -74,7 +74,7 @@ When a function is called with an `inout` argument:
 
 {{ rule(id="6.1:19", cat="example") }}
 
-```rue
+```gruel
 fn increment(inout x: i32) {
     x = x + 1;
 }
@@ -92,7 +92,7 @@ A single function call **MUST NOT** pass the same variable to multiple `inout` p
 
 {{ rule(id="6.1:21", cat="example") }}
 
-```rue
+```gruel
 fn swap(inout a: i32, inout b: i32) {
     let tmp = a;
     a = b;
@@ -136,7 +136,7 @@ When a function is called with a `borrow` argument:
 
 {{ rule(id="6.1:27", cat="example") }}
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 fn sum_coords(borrow p: Point) -> i32 {
@@ -156,7 +156,7 @@ Multiple `borrow` parameters **MAY** refer to the same variable. Unlike `inout`,
 
 {{ rule(id="6.1:29", cat="example") }}
 
-```rue
+```gruel
 fn sum_both(borrow a: i32, borrow b: i32) -> i32 {
     a + b
 }
@@ -173,7 +173,7 @@ A single function call **MUST NOT** pass the same variable to both a `borrow` pa
 
 {{ rule(id="6.1:31", cat="example") }}
 
-```rue
+```gruel
 fn mixed(borrow a: i32, inout b: i32) {
     b = a + 1;
 }
@@ -193,7 +193,7 @@ A parameter that is not marked `inout` is immutable within the function body. As
 
 {{ rule(id="6.1:33", cat="example") }}
 
-```rue
+```gruel
 fn bad(x: i32) {
     x = 5;  // error: cannot assign to immutable parameter 'x'
 }
@@ -218,7 +218,7 @@ The `main` function **MUST** return either `i32` or `()`. When it returns `i32`,
 
 {{ rule(id="6.1:9") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     42  // exit code is 42
 }
@@ -232,7 +232,7 @@ Functions **MAY** call themselves recursively.
 
 {{ rule(id="6.1:11") }}
 
-```rue
+```gruel
 fn factorial(n: i32) -> i32 {
     if n <= 1 { 1 }
     else { n * factorial(n - 1) }
@@ -251,7 +251,7 @@ Functions **MAY** call any function defined in the same module, regardless of de
 
 {{ rule(id="6.1:13") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     helper()  // can call function defined below
 }

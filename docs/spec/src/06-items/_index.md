@@ -8,7 +8,7 @@ page_template = "spec/page.html"
 
 # Items
 
-This chapter describes items in Rue.
+This chapter describes items in Gruel.
 
 {{ rule(id="6.0:1") }}
 
@@ -26,7 +26,7 @@ User-defined types **MUST NOT** use names reserved for built-in types. Currently
 
 {{ rule(id="6.0:4", cat="example") }}
 
-```rue
+```gruel
 // Error: cannot define type with reserved name
 struct String { data: i32 }  // compile error
 ```

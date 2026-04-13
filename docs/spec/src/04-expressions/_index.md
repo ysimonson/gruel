@@ -8,7 +8,7 @@ page_template = "spec/page.html"
 
 # Expressions
 
-This chapter describes expressions in Rue.
+This chapter describes expressions in Gruel.
 
 {{ rule(id="4.0:1") }}
 

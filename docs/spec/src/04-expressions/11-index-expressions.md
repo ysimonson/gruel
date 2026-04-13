@@ -30,7 +30,7 @@ The type of an index expression is the element type `T`.
 
 {{ rule(id="4.11:6") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 42, 100];
     arr[1]  // 42
@@ -53,7 +53,7 @@ An out-of-bounds access **MUST** cause a runtime panic.
 
 {{ rule(id="4.11:10") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     arr[5]  // Compile-time error: index out of bounds
@@ -62,7 +62,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.11:11") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     let idx = 5;
@@ -78,7 +78,7 @@ For mutable arrays, elements can be assigned using index expressions.
 
 {{ rule(id="4.11:13") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut arr: [i32; 2] = [0, 0];
     arr[0] = 20;

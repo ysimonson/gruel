@@ -8,7 +8,7 @@ page_template = "spec/page.html"
 
 # Arrays
 
-This chapter describes fixed-size arrays in Rue.
+This chapter describes fixed-size arrays in Gruel.
 
 {{ rule(id="7.0:1") }}
 

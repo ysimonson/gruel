@@ -25,32 +25,32 @@ jobs:
             buck2-fuzz-
 
       - name: Create seed corpus
-        run: ./buck2 run //crates/rue-fuzz:rue-fuzz -- --init-corpus crates/rue-fuzz/corpus
+        run: ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
 
       - name: Fuzz lexer (5 minutes)
-        run: ./buck2 run //crates/rue-fuzz:rue-fuzz -- --mutate --max-time=300 lexer crates/rue-fuzz/corpus
+        run: ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 lexer crates/gruel-fuzz/corpus
 
       - name: Fuzz parser (5 minutes)
-        run: ./buck2 run //crates/rue-fuzz:rue-fuzz -- --mutate --max-time=300 parser crates/rue-fuzz/corpus
+        run: ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 parser crates/gruel-fuzz/corpus
 
       - name: Fuzz sema (5 minutes)
-        run: ./buck2 run //crates/rue-fuzz:rue-fuzz -- --mutate --max-time=300 sema crates/rue-fuzz/corpus
+        run: ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 sema crates/gruel-fuzz/corpus
 
       - name: Fuzz compiler (5 minutes)
-        run: ./buck2 run //crates/rue-fuzz:rue-fuzz -- --mutate --max-time=300 compiler crates/rue-fuzz/corpus
+        run: ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 compiler crates/gruel-fuzz/corpus
 
       - name: Fuzz x86-64 emitter (5 minutes)
-        run: ./buck2 run //crates/rue-fuzz:rue-fuzz -- --mutate --max-time=300 emitter crates/rue-fuzz/corpus
+        run: ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 emitter crates/gruel-fuzz/corpus
 
       - name: Fuzz x86-64 emitter sequences (5 minutes)
-        run: ./buck2 run //crates/rue-fuzz:rue-fuzz -- --mutate --max-time=300 emitter_sequence crates/rue-fuzz/corpus
+        run: ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 emitter_sequence crates/gruel-fuzz/corpus
 
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-crashes
-          path: crates/rue-fuzz/crashes/
+          path: crates/gruel-fuzz/crashes/
           if-no-files-found: ignore
 
       - name: Create issue on failure
@@ -69,7 +69,7 @@ jobs:
 
             ### Next Steps
             1. Download the crash artifacts from the workflow run
-            2. Reproduce locally with \`./buck2 run //crates/rue:rue -- crashes/crash-*.txt output\`
+            2. Reproduce locally with \`./buck2 run //crates/gruel:gruel -- crashes/crash-*.txt output\`
             3. Fix the issue and add a regression test
             `;
 

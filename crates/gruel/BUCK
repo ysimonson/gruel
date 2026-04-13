@@ -1,0 +1,38 @@
+rust_binary(
+    name = "gruel",
+    srcs = [
+        "src/main.rs",
+        "src/timing.rs",
+    ],
+    rustc_flags = ["-Dwarnings"],
+    deps = [
+        "//crates/gruel-compiler:gruel-compiler",
+        "//crates/gruel-rir:gruel-rir",
+        "//crates/gruel-target:gruel-target",
+        "//third-party:libc",
+        "//third-party:serde",
+        "//third-party:serde_json",
+        "//third-party:tracing",
+        "//third-party:tracing-subscriber",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "gruel-test",
+    srcs = [
+        "src/main.rs",
+        "src/timing.rs",
+    ],
+    rustc_flags = ["-Dwarnings"],
+    deps = [
+        "//crates/gruel-compiler:gruel-compiler",
+        "//crates/gruel-rir:gruel-rir",
+        "//crates/gruel-target:gruel-target",
+        "//third-party:libc",
+        "//third-party:serde",
+        "//third-party:serde_json",
+        "//third-party:tracing",
+        "//third-party:tracing-subscriber",
+    ],
+)

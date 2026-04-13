@@ -23,7 +23,7 @@ Use `Vec` with linear search instead of `HashMap` for collections that typically
 
 ## Context
 
-The Rue compiler uses many small lookup tables throughout semantic analysis and code generation:
+The Gruel compiler uses many small lookup tables throughout semantic analysis and code generation:
 - Function parameters (typically 0-10 items)
 - Local variables (typically 1-50 items)
 - Struct fields (typically 1-10 items)
@@ -176,7 +176,7 @@ None - all questions resolved through benchmarking and implementation.
 
 ## References
 
-- Issue: rue-vfmy
+- Issue: gruel-vfmy
 - Commit: "Optimize: Convert AnalysisContext.params from HashMap to Vec"
 - Benchmark data: See "Benchmarks" section above
 - Rust std docs: [`HashMap`](https://doc.rust-lang.org/std/collections/struct.HashMap.html), [`Vec`](https://doc.rust-lang.org/std/vec/struct.Vec.html)

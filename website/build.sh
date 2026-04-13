@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the Rue website
+# Build the Gruel website
 # Usage: ./build.sh [serve]
 
 cd "$(dirname "$0")/.."

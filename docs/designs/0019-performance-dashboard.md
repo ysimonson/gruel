@@ -19,11 +19,11 @@ Implemented
 
 ## Summary
 
-Create a system for tracking Rue compiler performance over time and displaying it on the website. This includes a benchmark corpus of representative Rue programs, infrastructure to collect and store timing data, and interactive visualizations for the website.
+Create a system for tracking Gruel compiler performance over time and displaying it on the website. This includes a benchmark corpus of representative Gruel programs, infrastructure to collect and store timing data, and interactive visualizations for the website.
 
 ## Context
 
-As Rue develops, we want to track compiler performance to:
+As Gruel develops, we want to track compiler performance to:
 1. **Detect regressions** - Notice when changes slow down compilation
 2. **Track improvements** - See the impact of optimization work
 3. **Provide transparency** - Show the community our performance characteristics
@@ -50,11 +50,11 @@ Spec tests are too small to meaningfully benchmark. We'll create purpose-built p
 benchmarks/
 ├── README.md           # Describes the benchmark suite
 ├── stress/             # Hand-crafted stress tests
-│   ├── many_functions.rue    # 100+ functions
-│   ├── deep_nesting.rue      # Deeply nested blocks/expressions
-│   ├── large_structs.rue     # Many struct types with fields
-│   ├── arithmetic_heavy.rue  # Lots of arithmetic expressions
-│   └── control_flow.rue      # Complex if/while/match patterns
+│   ├── many_functions.gruel    # 100+ functions
+│   ├── deep_nesting.gruel      # Deeply nested blocks/expressions
+│   ├── large_structs.gruel     # Many struct types with fields
+│   ├── arithmetic_heavy.gruel  # Lots of arithmetic expressions
+│   └── control_flow.gruel      # Complex if/while/match patterns
 └── manifest.toml       # Benchmark metadata
 ```
 
@@ -67,12 +67,12 @@ description = "Aggregate timing across all spec tests"
 
 [[benchmark]]
 name = "many_functions"
-path = "stress/many_functions.rue"
+path = "stress/many_functions.gruel"
 description = "100 trivial functions to stress function handling"
 
 [[benchmark]]
 name = "deep_nesting"
-path = "stress/deep_nesting.rue"
+path = "stress/deep_nesting.gruel"
 description = "20 levels of nested blocks"
 ```
 
@@ -127,15 +127,15 @@ Since benchmarks run on every commit to trunk, storing results directly in the m
 ```bash
 #!/bin/bash
 # Build release compiler, run benchmarks, append to history
-./buck2 build //crates/rue:rue --release
-./buck2 run //crates/rue:rue -- --benchmark-json /tmp/bench.json benchmarks/
+./buck2 build //crates/gruel:gruel --release
+./buck2 run //crates/gruel:gruel -- --benchmark-json /tmp/bench.json benchmarks/
 # Append to history (via a small Rust tool or script)
 ./scripts/append-benchmark.py /tmp/bench.json website/static/benchmarks/history.json
 ```
 
 ### Part 3: Website Visualization
 
-**Page:** `/performance/` on the Rue website
+**Page:** `/performance/` on the Gruel website
 
 **Decision: Static charts generated at build time**
 
@@ -168,31 +168,31 @@ website/
 
 ## Implementation Phases
 
-**Epic:** rue-a5ah
+**Epic:** gruel-a5ah
 
-- [x] **Phase 1: Benchmark corpus** - rue-a5ah.1
+- [x] **Phase 1: Benchmark corpus** - gruel-a5ah.1
   - Create `benchmarks/` directory structure
   - Write initial stress test programs (many_functions, deep_nesting, etc.)
   - Create `manifest.toml` format
 
-- [x] **Phase 2: Data collection** - rue-a5ah.2
+- [x] **Phase 2: Data collection** - gruel-a5ah.2
   - Implement `--benchmark-json` flag in the CLI
   - Extend `TimingData` to output JSON format
   - Support multiple iterations with mean/std calculation
 
-- [x] **Phase 3: Runner & storage** - rue-a5ah.3
+- [x] **Phase 3: Runner & storage** - gruel-a5ah.3
   - Create `./bench.sh` script
   - Create `scripts/append-benchmark.py` to manage history
   - Set up `perf` branch structure
   - Document benchmark workflow
   - Add release/debug build modes via Buck2 modifiers
 
-- [x] **Phase 4: CI integration** - rue-a5ah.4
+- [x] **Phase 4: CI integration** - gruel-a5ah.4
   - GitHub Actions workflow to run benchmarks on trunk commits
   - Push results to `perf` branch
   - Configure consistent benchmark environment
 
-- [x] **Phase 5: Website visualization** - rue-a5ah.5
+- [x] **Phase 5: Website visualization** - gruel-a5ah.5
   - Create SVG chart generator (Rust or Python)
   - Create `/performance/` page template
   - Integrate chart generation into website build

@@ -23,9 +23,9 @@ Add the ability to define methods on structs using `impl` blocks, allowing metho
 
 ## Context
 
-Rue currently supports structs with fields, but all operations on structs must be implemented as free functions that take the struct as a parameter:
+Gruel currently supports structs with fields, but all operations on structs must be implemented as free functions that take the struct as a parameter:
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 fn distance_from_origin(p: Point) -> i32 {
@@ -51,7 +51,7 @@ This pattern is verbose and doesn't scale well as the number of struct-specific 
 
 We will add `impl` blocks that contain method definitions:
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 impl Point {
@@ -77,7 +77,7 @@ Methods take `self` as their first parameter, representing the receiver:
 
 - `self` - takes ownership of the receiver (move semantics)
 
-For the initial implementation, only by-value `self` is supported, matching Rue's current copy-by-default semantics for structs.
+For the initial implementation, only by-value `self` is supported, matching Gruel's current copy-by-default semantics for structs.
 
 Additional receiver types will be added as part of [ADR-0008: Affine Types and Mutable Value Semantics](0008-affine-types-mvs.md):
 - `inout self` - mutable projection (Phase 3 of ADR-0008)
@@ -86,7 +86,7 @@ Additional receiver types will be added as part of [ADR-0008: Affine Types and M
 
 Functions in `impl` blocks without a `self` parameter are associated functions (like Rust's associated functions):
 
-```rue
+```gruel
 impl Point {
     fn origin() -> Point {
         Point { x: 0, y: 0 }
@@ -114,7 +114,7 @@ When encountering `expr.method(args)`:
 
 Multiple `impl` blocks for the same struct are allowed and their methods are merged:
 
-```rue
+```gruel
 impl Point {
     fn x(self) -> i32 { self.x }
 }
@@ -132,19 +132,19 @@ Methods can only be defined for structs in the same compilation unit. (This is a
 
 ## Implementation Phases
 
-- [x] **Phase 1: Parsing** - rue-qs3z.1
+- [x] **Phase 1: Parsing** - gruel-qs3z.1
   - Add `impl` keyword to lexer
   - Parse `impl Type { fn... }` blocks
   - Add `Item::ImplBlock` to AST
   - Parse method calls as a variant of field access
 
-- [x] **Phase 2: RIR Generation** - rue-qs3z.2
+- [x] **Phase 2: RIR Generation** - gruel-qs3z.2
   - Add method info to RIR (ImplDecl, MethodCall, AssocFnCall instructions)
   - Generate RIR for impl blocks
   - Handle method calls in expression generation
   - Parse associated function calls (Type::fn() syntax)
 
-- [x] **Phase 3: Type Checking** - rue-qs3z.3
+- [x] **Phase 3: Type Checking** - gruel-qs3z.3
   - Add method registry to struct definitions
   - Type check impl blocks
   - Resolve method calls to their definitions
@@ -155,12 +155,12 @@ Methods can only be defined for structs in the same compilation unit. (This is a
     3. Resolving the method name
     4. Type checking the arguments against method signature
 
-- [x] **Phase 4: Code Generation** - rue-qs3z.4
+- [x] **Phase 4: Code Generation** - gruel-qs3z.4
   - Lower method calls to regular calls with receiver as first argument
   - Update both x86_64 and aarch64 backends
   - Handle associated function calls (`Type::method()`)
 
-- [x] **Phase 5: Specification & Tests** - rue-qs3z.5
+- [x] **Phase 5: Specification & Tests** - gruel-qs3z.5
   - Add spec chapter 6.4 for impl blocks and methods
   - Add comprehensive spec tests
   - Ensure traceability coverage

@@ -8,13 +8,13 @@ template = "spec/page.html"
 
 {{ rule(id="2.1:1", cat="normative") }}
 
-Tokens are the atomic units of syntax in a Rue program. The lexer processes source text and produces a sequence of tokens.
+Tokens are the atomic units of syntax in a Gruel program. The lexer processes source text and produces a sequence of tokens.
 
 ## Token Categories
 
 {{ rule(id="2.1:2") }}
 
-Rue tokens fall into the following categories:
+Gruel tokens fall into the following categories:
 
 | Category | Examples |
 |----------|----------|
@@ -42,7 +42,7 @@ Integer literals **MUST** be representable in their target type. An unadorned in
 
 {{ rule(id="2.1:5") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     0        // zero
     42       // decimal integer
@@ -85,7 +85,7 @@ An unterminated string literal (reaching end-of-file or end-of-line without a cl
 
 {{ rule(id="2.1:10") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = "hello world";
     let b = "with \"quotes\"";
@@ -127,7 +127,7 @@ Multiple occurrences of `_` are permitted in the same scope. Each occurrence ind
 
 {{ rule(id="2.1:16") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let _ = 42;       // discards 42, no binding created
     let _ = 100;      // discards 100, no conflict with previous _
@@ -143,7 +143,7 @@ An identifier that begins with an underscore followed by one or more characters 
 
 {{ rule(id="2.1:18") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 1;
     let my_variable = 2;

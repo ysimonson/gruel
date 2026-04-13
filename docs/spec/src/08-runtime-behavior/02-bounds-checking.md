@@ -28,7 +28,7 @@ For variable indices, bounds checking **MUST** be performed at runtime before th
 
 {{ rule(id="8.2:6") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     let idx: u64 = 10;
@@ -38,7 +38,7 @@ fn main() -> i32 {
 
 {{ rule(id="8.2:7") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     arr[5]  // Compile-time error: index out of bounds
@@ -47,7 +47,7 @@ fn main() -> i32 {
 
 {{ rule(id="8.2:8") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     arr[1 + 5]  // Compile-time error: index out of bounds

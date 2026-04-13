@@ -26,7 +26,7 @@ Variables declared in a block are local to that block and shadow any outer varia
 
 {{ rule(id="4.5:5") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 1;
     let y = {

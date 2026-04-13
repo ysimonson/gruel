@@ -24,7 +24,7 @@ The unit type is a zero-sized type. See [Zero-Sized Types](../#zero-sized-types)
 
 {{ rule(id="3.3:5") }}
 
-```rue
+```gruel
 fn do_nothing() {
     // Implicitly returns ()
 }

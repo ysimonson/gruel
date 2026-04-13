@@ -26,7 +26,7 @@ Implement a constant expression evaluator at the RIR level during semantic analy
 
 ## Context
 
-The current `try_get_const_index` function in `rue-air/src/sema.rs` only recognizes direct integer literals and negated literals as compile-time constants:
+The current `try_get_const_index` function in `gruel-air/src/sema.rs` only recognizes direct integer literals and negated literals as compile-time constants:
 
 ```rust
 fn try_get_const_index(&self, inst_ref: InstRef) -> Option<i64> {
@@ -49,7 +49,7 @@ fn try_get_const_index(&self, inst_ref: InstRef) -> Option<i64> {
 
 This means expressions like `arr[1 + 1]` or `arr[2 * 3]` don't get compile-time bounds checking, even though their values are statically known. Users expect the compiler to catch obvious out-of-bounds errors like `arr[1 + 100]` at compile time rather than waiting for a runtime panic.
 
-Additionally, Rue may want to add a `comptime` feature in the future (similar to Zig), which would require a more robust constant evaluation infrastructure. The design of this feature should not foreclose on that possibility.
+Additionally, Gruel may want to add a `comptime` feature in the future (similar to Zig), which would require a more robust constant evaluation infrastructure. The design of this feature should not foreclose on that possibility.
 
 ## Decision
 

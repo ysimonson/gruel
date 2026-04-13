@@ -26,7 +26,7 @@ Refactor semantic analysis to use a synthesize/check pattern, eliminating redund
 
 ## Context
 
-The current semantic analysis in `rue-air/src/sema.rs` traverses the RIR multiple times:
+The current semantic analysis in `gruel-air/src/sema.rs` traverses the RIR multiple times:
 
 1. **`infer_type()`** walks the tree to determine a type bottom-up
 2. **`analyze_inst()`** walks the same tree again to emit AIR instructions

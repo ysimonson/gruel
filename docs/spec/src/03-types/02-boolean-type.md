@@ -24,7 +24,7 @@ Boolean values support equality comparison (`==`, `!=`) but not ordering compari
 
 {{ rule(id="3.2:5") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = true;
     let b = false;

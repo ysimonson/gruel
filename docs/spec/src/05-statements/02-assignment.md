@@ -30,7 +30,7 @@ The expression type **MUST** be compatible with the variable's type.
 
 {{ rule(id="5.2:5") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut x = 0;
     x = 42;
@@ -46,7 +46,7 @@ Array element assignment requires a mutable array.
 
 {{ rule(id="5.2:7") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut arr: [i32; 2] = [0, 0];
     arr[0] = 20;
@@ -63,7 +63,7 @@ Struct field assignment requires a mutable struct value.
 
 {{ rule(id="5.2:9") }}
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
@@ -85,7 +85,7 @@ All struct values in the chain **MUST** be part of a mutable binding.
 
 {{ rule(id="5.2:13") }}
 
-```rue
+```gruel
 struct Inner { value: i32 }
 struct Outer { inner: Inner }
 

@@ -65,7 +65,7 @@ The following rules determine whether a pattern set is exhaustive:
 
 {{ rule(id="4.7:11") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     match 2 {
         1 => 10,
@@ -94,7 +94,7 @@ Match arm bodies **MAY** be simple expressions or block expressions.
 
 {{ rule(id="4.7:15") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     match 2 {
         1 => 10,
@@ -139,7 +139,7 @@ well-formed and the unreachable arm is not executed at runtime.
 
 {{ rule(id="4.7:21") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     match 5 {
         _ => 10,
@@ -150,7 +150,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.7:22") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     match 1 {
         1 => 10,

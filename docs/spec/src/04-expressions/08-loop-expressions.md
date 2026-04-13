@@ -32,7 +32,7 @@ The condition is evaluated before each iteration. If it is `true`, the body is e
 
 {{ rule(id="4.8:6") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut sum = 0;
     let mut i = 1;
@@ -66,7 +66,7 @@ The only way to exit a `loop` is via `break` or `return`.
 
 {{ rule(id="4.8:19") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut x = 0;
     loop {
@@ -83,7 +83,7 @@ fn main() -> i32 {
 
 The `loop` expression is preferred over `while true` for infinite loops:
 
-```rue
+```gruel
 // Preferred
 loop {
     // ...
@@ -119,7 +119,7 @@ Currently, `break` does not carry a value. A `loop` expression has type `!` rega
 
 {{ rule(id="4.8:11") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut x = 0;
     while true {
@@ -134,7 +134,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.8:12") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut sum = 0;
     let mut i = 0;
@@ -157,7 +157,7 @@ In nested loops, `break` and `continue` affect only the innermost enclosing loop
 
 {{ rule(id="4.8:14") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut total = 0;
     let mut outer = 0;

@@ -24,7 +24,7 @@ Multiple whitespace characters between tokens are equivalent to a single space.
 
 {{ rule(id="2.3:4") }}
 
-```rue
+```gruel
 // Minimal whitespace
 fn main()->i32{42}
 

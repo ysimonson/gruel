@@ -64,7 +64,7 @@ This architecture is intentional and matches how Zig and Rust handle feature gat
 Add `preview_features` to the compilation pipeline:
 
 ```rust
-// rue-compiler/src/lib.rs
+// gruel-compiler/src/lib.rs
 pub fn compile_frontend_with_options(
     source: &str,
     opt_level: OptLevel,
@@ -83,7 +83,7 @@ Update the call in `compile_with_options()` to pass the features through.
 ### 2. Add `preview_features` to Sema
 
 ```rust
-// rue-air/src/sema.rs
+// gruel-air/src/sema.rs
 pub struct Sema<'a> {
     // ... existing fields ...
     preview_features: PreviewFeatures,
@@ -130,7 +130,7 @@ impl<'a> Sema<'a> {
 Add a new preview feature that is never stabilized:
 
 ```rust
-// rue-error/src/lib.rs
+// gruel-error/src/lib.rs
 pub enum PreviewFeature {
     /// **Permanently unstable** - used only for testing the preview feature
     /// infrastructure. This feature should never be stabilized.
@@ -155,7 +155,7 @@ A minimal gated intrinsic that:
 - Does nothing at runtime
 - Exercises the full pipeline from lexer through codegen
 
-```rue
+```gruel
 // Only compiles with --preview test_infra
 fn main() -> i32 {
     @test_preview_gate();
@@ -168,7 +168,7 @@ fn main() -> i32 {
 Add preview feature support to the in-process test helpers:
 
 ```rust
-// rue-compiler/src/lib.rs (test module)
+// gruel-compiler/src/lib.rs (test module)
 pub fn compile_to_air(source: &str) -> CompileResult<SemaOutput> { ... }
 pub fn compile_to_air_with_preview(
     source: &str,
@@ -178,10 +178,10 @@ pub fn compile_to_air_with_preview(
 
 ## Implementation Phases
 
-- [x] **Phase 1: Pipeline threading** - rue-0slf.1
-- [x] **Phase 2: Gating method** - rue-0slf.2
-- [x] **Phase 3: test_infra feature** - rue-0slf.3
-- [x] **Phase 4: Cleanup** - rue-0slf.4
+- [x] **Phase 1: Pipeline threading** - gruel-0slf.1
+- [x] **Phase 2: Gating method** - gruel-0slf.2
+- [x] **Phase 3: test_infra feature** - gruel-0slf.3
+- [x] **Phase 4: Cleanup** - gruel-0slf.4
 
 ## Consequences
 

@@ -30,7 +30,7 @@ The type of a field access expression is the type of the accessed field.
 
 {{ rule(id="4.12:6") }}
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
@@ -50,7 +50,7 @@ For mutable struct values, fields can be assigned.
 
 {{ rule(id="4.12:8") }}
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,

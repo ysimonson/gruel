@@ -5,13 +5,13 @@ template = "std/section.html"
 page_template = "std/page.html"
 +++
 
-The Rue standard library provides common utilities for Rue programs. It is organized into modules that can be imported using `@import("std")`.
+The Gruel standard library provides common utilities for Gruel programs. It is organized into modules that can be imported using `@import("std")`.
 
 ## Importing the Standard Library
 
 The standard library is **not** implicitly imported. You must explicitly import what you need:
 
-```rue
+```gruel
 const std = @import("std");
 const math = std.math;
 
@@ -22,7 +22,7 @@ fn main() -> i32 {
 
 Or import specific modules directly:
 
-```rue
+```gruel
 const math = @import("std").math;
 
 fn main() -> i32 {
@@ -36,15 +36,15 @@ The standard library is organized as a module tree:
 
 ```
 std/
-  _std.rue      # Module root - re-exports submodules
-  math.rue      # Mathematical utilities
+  _std.gruel      # Module root - re-exports submodules
+  math.gruel      # Mathematical utilities
 ```
 
-When you write `@import("std")`, the compiler resolves this to the `_std.rue` file in the standard library directory. This file re-exports the submodules:
+When you write `@import("std")`, the compiler resolves this to the `_std.gruel` file in the standard library directory. This file re-exports the submodules:
 
-```rue
-// std/_std.rue
-pub const math = @import("math.rue");
+```gruel
+// std/_std.gruel
+pub const math = @import("math.gruel");
 ```
 
 ## Available Modules
@@ -55,7 +55,7 @@ pub const math = @import("math.rue");
 
 ## Future Modules
 
-As Rue matures, the standard library will grow to include:
+As Gruel matures, the standard library will grow to include:
 
 - **io** - Input/output operations
 - **collections** - Data structures like `Vec`, `HashMap`
@@ -64,11 +64,11 @@ As Rue matures, the standard library will grow to include:
 
 ## Design Philosophy
 
-The Rue standard library follows several design principles:
+The Gruel standard library follows several design principles:
 
 1. **Explicit imports** - No implicit prelude; all dependencies are visible
 2. **Lazy analysis** - Only imported code is analyzed, enabling fast compilation
-3. **File = module** - Each `.rue` file is a module; the filesystem is the source of truth
+3. **File = module** - Each `.gruel` file is a module; the filesystem is the source of truth
 4. **Simple visibility** - Just `pub` (public) or nothing (private)
 
-For more details on the module system, see [ADR-0026: Module System](https://github.com/rue-language/rue/blob/trunk/docs/designs/0026-module-system.md).
+For more details on the module system, see [ADR-0026: Module System](https://github.com/gruel-language/gruel/blob/trunk/docs/designs/0026-module-system.md).

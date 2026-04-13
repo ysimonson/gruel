@@ -1,6 +1,6 @@
-# Rue Development Process
+# Gruel Development Process
 
-This directory documents how we develop the Rue compiler. Whether you're a human contributor or an AI assistant, these documents describe the workflow we follow.
+This directory documents how we develop the Gruel compiler. Whether you're a human contributor or an AI assistant, these documents describe the workflow we follow.
 
 ## Overview
 

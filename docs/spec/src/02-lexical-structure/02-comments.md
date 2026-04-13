@@ -20,7 +20,7 @@ Comments are discarded during lexical analysis and do not affect program semanti
 
 {{ rule(id="2.2:3") }}
 
-```rue
+```gruel
 // This is a comment
 fn main() -> i32 {
     42  // This is also a comment

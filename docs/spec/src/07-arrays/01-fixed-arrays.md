@@ -28,7 +28,7 @@ The number of elements **MUST** match the declared array size.
 
 {{ rule(id="7.1:5") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 12];
     arr[0] + arr[1] + arr[2]  // 42
@@ -47,7 +47,7 @@ The index **MUST** be an integer type.
 
 {{ rule(id="7.1:8") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [100, 42, 200];
     arr[1]  // 42
@@ -76,7 +76,7 @@ Mutable arrays allow element assignment.
 
 {{ rule(id="7.1:13") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut arr: [i32; 2] = [0, 0];
     arr[0] = 20;
@@ -109,7 +109,7 @@ Nested arrays are indexed using chained bracket notation, evaluated left to righ
 
 {{ rule(id="7.1:18") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let matrix: [[i32; 2]; 2] = [[1, 2], [3, 4]];
     matrix[1][1]  // 4
@@ -128,7 +128,7 @@ Array fields are accessed by combining field access with array indexing.
 
 {{ rule(id="7.1:21") }}
 
-```rue
+```gruel
 struct Container { values: [i32; 3] }
 
 fn main() -> i32 {
@@ -149,7 +149,7 @@ Array parameters are passed by value; the entire array is copied to the function
 
 {{ rule(id="7.1:24") }}
 
-```rue
+```gruel
 fn sum(arr: [i32; 3]) -> i32 {
     arr[0] + arr[1] + arr[2]
 }
@@ -172,7 +172,7 @@ When reading an element of a Copy type (e.g., integers, booleans), the element i
 
 {{ rule(id="7.1:27") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 30];
     let x = arr[0];     // i32 is Copy, so x is a copy
@@ -187,7 +187,7 @@ When reading an element of a non-Copy type, it is a compile-time error to move t
 
 {{ rule(id="7.1:29") }}
 
-```rue
+```gruel
 struct BigThing { value: i32 }
 
 fn main() -> i32 {
@@ -203,7 +203,7 @@ Array element assignment is an in-place mutation. It modifies the array without 
 
 {{ rule(id="7.1:31") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut arr: [i32; 3] = [1, 2, 3];
     arr[0] = 10;        // Mutates in place

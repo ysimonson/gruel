@@ -1,17 +1,17 @@
-# Rue Language Reference
+# Gruel Language Reference
 
-This document provides an overview of the Rue programming language. For the authoritative specification with test cases, see `crates/rue-spec/cases/`.
+This document provides an overview of the Gruel programming language. For the authoritative specification with test cases, see `crates/gruel-spec/cases/`.
 
 ## Overview
 
-Rue is a systems programming language aiming for:
+Gruel is a systems programming language aiming for:
 - Memory safety without garbage collection
 - Higher-level ergonomics than Rust/Zig
 - Rust-like syntax (initially)
 
 ## Current Status
 
-Rue is in early development. The implemented feature set is minimal:
+Gruel is in early development. The implemented feature set is minimal:
 
 | Feature | Status |
 |---------|--------|
@@ -32,7 +32,7 @@ Rue is in early development. The implemented feature set is minimal:
 
 ## Specification Tests
 
-The executable specification lives in `crates/rue-spec/cases/`:
+The executable specification lives in `crates/gruel-spec/cases/`:
 
 | File | Section | Description |
 |------|---------|-------------|
@@ -62,13 +62,13 @@ source = "fn main() -> i32 { 42 }"
 exit_code = 42
 ```
 
-Run specs with `./test.sh` or directly with `buck2 run //crates/rue-spec:rue-spec`.
+Run specs with `./test.sh` or directly with `buck2 run //crates/gruel-spec:gruel-spec`.
 
 ## Quick Reference
 
 ### Minimal Program
 
-```rue
+```gruel
 fn main() -> i32 {
     0
 }
@@ -78,7 +78,7 @@ fn main() -> i32 {
 
 Functions are declared with the `fn` keyword, followed by the function name, parameters in parentheses, a return type, and a body:
 
-```rue
+```gruel
 fn add(x: i32, y: i32) -> i32 {
     x + y
 }
@@ -92,7 +92,7 @@ Parameters must have explicit type annotations. The return type is also required
 
 Functions can call other functions:
 
-```rue
+```gruel
 fn double(x: i32) -> i32 {
     x + x
 }
@@ -110,7 +110,7 @@ Functions must be defined before `main`. The `main` function is the program's en
 
 Recursion is supported:
 
-```rue
+```gruel
 fn factorial(n: i32) -> i32 {
     if n <= 1 { 1 }
     else { n * factorial(n - 1) }
@@ -123,7 +123,7 @@ fn main() -> i32 {
 
 ### With Comments
 
-```rue
+```gruel
 // A comment
 fn main() -> i32 {
     42  // inline comment
@@ -132,19 +132,19 @@ fn main() -> i32 {
 
 ### Arithmetic
 
-```rue
+```gruel
 fn main() -> i32 {
     1 + 2 * 3  // = 7 (multiplication binds tighter)
 }
 ```
 
-```rue
+```gruel
 fn main() -> i32 {
     (1 + 2) * 3  // = 9 (parentheses override)
 }
 ```
 
-```rue
+```gruel
 fn main() -> i32 {
     -42  // unary negation
 }
@@ -152,7 +152,7 @@ fn main() -> i32 {
 
 ### Variables
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 40;
     let y = 2;
@@ -162,7 +162,7 @@ fn main() -> i32 {
 
 Variables are immutable by default. Use `let mut` for mutable bindings:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut counter = 0;
     counter = counter + 1;
@@ -172,7 +172,7 @@ fn main() -> i32 {
 
 Type annotations are optional:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i32 = 42;
     x
@@ -181,7 +181,7 @@ fn main() -> i32 {
 
 Shadowing is allowed:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 10;
     let x = x + 5;  // shadows previous x
@@ -193,7 +193,7 @@ fn main() -> i32 {
 
 Arrays are fixed-size sequences of elements of the same type. The syntax `[T; N]` declares an array of `N` elements of type `T`:
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 12];
     arr[0] + arr[1] + arr[2]  // returns 42
@@ -202,7 +202,7 @@ fn main() -> i32 {
 
 Array elements are accessed using index syntax `arr[index]`:
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [100, 42, 200];
     arr[1]  // returns 42
@@ -211,7 +211,7 @@ fn main() -> i32 {
 
 Mutable arrays allow element assignment:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut arr: [i32; 2] = [0, 0];
     arr[0] = 20;
@@ -222,7 +222,7 @@ fn main() -> i32 {
 
 Array indices can be variables or expressions:
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 42, 100];
     let idx = 1;
@@ -230,7 +230,7 @@ fn main() -> i32 {
 }
 ```
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 5] = [5, 10, 42, 100, 200];
     let base = 1;
@@ -240,7 +240,7 @@ fn main() -> i32 {
 
 Array elements can be initialized with expressions:
 
-```rue
+```gruel
 fn double(x: i32) -> i32 { x * 2 }
 
 fn main() -> i32 {
@@ -255,7 +255,7 @@ fn main() -> i32 {
 - Immutable arrays cannot be assigned to
 - Constant indices are bounds-checked at compile time
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2];     // ERROR: expected array of 3 elements
     let arr: [i32; 2] = [1, true];  // ERROR: type mismatch
@@ -269,7 +269,7 @@ fn main() -> i32 {
 
 Array indices are checked against the array length. For constant indices, this check happens at compile time:
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     arr[5]  // ERROR: index out of bounds: the length is 3 but the index is 5
@@ -278,7 +278,7 @@ fn main() -> i32 {
 
 For variable indices, bounds checking happens at runtime:
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     let idx = 5;
@@ -288,7 +288,7 @@ fn main() -> i32 {
 
 Negative indices are also caught (they're treated as large unsigned values):
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     arr[-1]  // ERROR: index out of bounds
@@ -297,7 +297,7 @@ fn main() -> i32 {
 
 ### Types
 
-Rue supports the following primitive types:
+Gruel supports the following primitive types:
 
 | Type | Description | Literals |
 |------|-------------|----------|
@@ -317,7 +317,7 @@ Integer literals without a type annotation default to `i32`.
 
 Type annotations are optional when the type can be inferred:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 42;        // inferred as i32
     let flag = true;   // inferred as bool
@@ -341,7 +341,7 @@ All binary operators are left-associative: `10 - 3 - 2` equals `5` (not `9`).
 
 Comparison operators return `bool` and use bidirectional type inference:
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = 1 == 1;    // true
     let b = 2 < 3;     // true
@@ -352,7 +352,7 @@ fn main() -> i32 {
 
 Integer literals in binary operations use bidirectional type inference—they adopt the type of the other operand when possible:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i64 = 100;
     if x == 100 { 1 } else { 0 }  // 100 is inferred as i64
@@ -362,7 +362,7 @@ fn main() -> i32 {
 
 This applies to both comparison and arithmetic operators:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i64 = 50;
     let y: i64 = 50 + x;  // 50 is inferred as i64
@@ -372,7 +372,7 @@ fn main() -> i32 {
 
 Equality operators (`==`, `!=`) work on both integers and booleans. Ordering operators (`<`, `>`, `<=`, `>=`) only work on integers:
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = true == false;  // ok: bool equality
     let b = 10 < 20;        // ok: integer ordering
@@ -383,7 +383,7 @@ fn main() -> i32 {
 
 Both operands must have the same type:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i64 = 100;
     let y: i32 = 100;
@@ -396,7 +396,7 @@ fn main() -> i32 {
 
 Logical operators work on `bool` values:
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = !false;           // true (negation)
     let b = true && true;     // true (and)
@@ -407,7 +407,7 @@ fn main() -> i32 {
 
 `&&` binds tighter than `||`, so `a || b && c` means `a || (b && c)`:
 
-```rue
+```gruel
 fn main() -> i32 {
     // true || false && false  =>  true || (false && false)  =>  true
     if true || false && false { 1 } else { 0 }
@@ -420,7 +420,7 @@ fn main() -> i32 {
 
 If/else is an expression that returns a value:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = if true { 42 } else { 0 };
     x
@@ -429,7 +429,7 @@ fn main() -> i32 {
 
 Both branches must have the same type:
 
-```rue
+```gruel
 fn main() -> i32 {
     let n = 5;
     if n > 0 { 100 } else { 0 }
@@ -438,7 +438,7 @@ fn main() -> i32 {
 
 If/else can be chained with `else if`:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 5;
     if x < 3 { 1 }
@@ -449,7 +449,7 @@ fn main() -> i32 {
 
 This is syntactic sugar for nested if/else:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 5;
     if x < 3 { 1 }
@@ -460,7 +460,7 @@ fn main() -> i32 {
 
 The condition must be of type `bool`. Integer values are not implicitly converted to booleans:
 
-```rue
+```gruel
 fn main() -> i32 {
     if 1 { 42 } else { 0 }  // ERROR: expected bool, found i32
 }
@@ -468,7 +468,7 @@ fn main() -> i32 {
 
 **If without else:** When the else branch is omitted, the then branch must have unit type `()`. The entire if expression evaluates to unit:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut x = 0;
     if true { x = 42; }  // OK: then branch has unit type
@@ -476,7 +476,7 @@ fn main() -> i32 {
 }
 ```
 
-```rue
+```gruel
 fn main() -> i32 {
     if true { 42 }  // ERROR: expected (), found i32
     0
@@ -485,7 +485,7 @@ fn main() -> i32 {
 
 Control flow expressions like `break`, `continue`, and `return` are allowed in the then branch because they have the never type `!`, which coerces to any type including unit:
 
-```rue
+```gruel
 fn main() -> i32 {
     if true { return 42; }  // OK: return has never type
     0
@@ -496,7 +496,7 @@ fn main() -> i32 {
 
 Match expressions provide multi-way branching on values:
 
-```rue
+```gruel
 fn main() -> i32 {
     match 2 {
         1 => 10,
@@ -508,7 +508,7 @@ fn main() -> i32 {
 
 Match is an expression that returns a value. All arms must have the same type:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 3;
     let result = match x {
@@ -538,7 +538,7 @@ Match expressions must be exhaustive—they must cover all possible values:
 
 **For booleans**: You must cover both `true` and `false`, or use a wildcard:
 
-```rue
+```gruel
 fn main() -> i32 {
     // Both values covered explicitly
     match true {
@@ -548,7 +548,7 @@ fn main() -> i32 {
 }
 ```
 
-```rue
+```gruel
 fn main() -> i32 {
     // Wildcard covers remaining cases
     match false {
@@ -560,7 +560,7 @@ fn main() -> i32 {
 
 **For integers**: You must include a wildcard pattern since integers have too many possible values:
 
-```rue
+```gruel
 fn main() -> i32 {
     match 42 {
         1 => 10,
@@ -572,7 +572,7 @@ fn main() -> i32 {
 
 Non-exhaustive matches are compile-time errors:
 
-```rue
+```gruel
 fn main() -> i32 {
     match 1 {
         1 => 10,
@@ -586,7 +586,7 @@ fn main() -> i32 {
 
 Match arms can have block bodies for more complex expressions:
 
-```rue
+```gruel
 fn main() -> i32 {
     match 2 {
         1 => {
@@ -607,7 +607,7 @@ fn main() -> i32 {
 
 The scrutinee (value being matched) can be any expression:
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 5;
     match x > 3 {
@@ -617,7 +617,7 @@ fn main() -> i32 {
 }
 ```
 
-```rue
+```gruel
 fn main() -> i32 {
     match 1 + 1 {
         2 => 42,
@@ -630,7 +630,7 @@ fn main() -> i32 {
 
 Match expressions can be nested:
 
-```rue
+```gruel
 fn main() -> i32 {
     match 1 {
         1 => match 2 {
@@ -646,7 +646,7 @@ fn main() -> i32 {
 
 Trailing commas after the last arm are optional:
 
-```rue
+```gruel
 fn main() -> i32 {
     // With trailing comma
     match 1 {
@@ -656,7 +656,7 @@ fn main() -> i32 {
 }
 ```
 
-```rue
+```gruel
 fn main() -> i32 {
     // Without trailing comma
     match 1 {
@@ -670,7 +670,7 @@ fn main() -> i32 {
 
 `while` loops repeat a block of code while a condition is true:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut sum = 0;
     let mut i = 1;
@@ -688,7 +688,7 @@ The condition must be of type `bool`. While loops evaluate to unit type `()`.
 
 `break` exits the innermost loop immediately:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut x = 0;
     while true {
@@ -703,7 +703,7 @@ fn main() -> i32 {
 
 `continue` skips to the next iteration of the innermost loop:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut sum = 0;
     let mut i = 0;
@@ -720,7 +720,7 @@ fn main() -> i32 {
 
 Both `break` and `continue` must appear inside a loop. Using them outside a loop is a compile-time error:
 
-```rue
+```gruel
 fn main() -> i32 {
     break;  // ERROR: 'break' outside of loop
     0
@@ -729,7 +729,7 @@ fn main() -> i32 {
 
 In nested loops, `break` and `continue` affect only the innermost loop:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut total = 0;
     let mut outer = 0;
@@ -752,7 +752,7 @@ fn main() -> i32 {
 
 The `return` keyword explicitly returns a value from the current function:
 
-```rue
+```gruel
 fn main() -> i32 {
     return 42;
 }
@@ -760,7 +760,7 @@ fn main() -> i32 {
 
 `return` is useful for early exits from functions:
 
-```rue
+```gruel
 fn abs(x: i32) -> i32 {
     if x < 0 {
         return 0 - x;
@@ -775,7 +775,7 @@ fn main() -> i32 {
 
 The returned expression must match the function's declared return type:
 
-```rue
+```gruel
 fn main() -> i32 {
     return true;  // ERROR: type mismatch: expected i32, found bool
 }
@@ -783,7 +783,7 @@ fn main() -> i32 {
 
 `return` can be used inside loops to exit the function:
 
-```rue
+```gruel
 fn find_first_even(start: i32) -> i32 {
     let mut x = start;
     while x < 100 {
@@ -802,7 +802,7 @@ fn main() -> i32 {
 
 The `return` expression has the never type (`!`) because it diverges - it never produces a local value. This allows `return` to be used in either branch of an if/else:
 
-```rue
+```gruel
 fn test(x: i32) -> i32 {
     let y = if x > 5 { return 100 } else { x };
     y * 2
@@ -818,7 +818,7 @@ fn main() -> i32 {
 Certain operations cause runtime panics (exit code 101):
 
 **Division by zero:**
-```rue
+```gruel
 fn main() -> i32 { 10 / 0 }           // runtime panic
 ```
 
@@ -830,7 +830,7 @@ Arithmetic overflow is detected for all signed and unsigned integer types (`i8`,
 - Multiplication (`*`)
 - Negation (`-x`)
 
-```rue
+```gruel
 // Signed overflow
 fn main() -> i32 { 2147483647 + 1 }   // i32 max + 1: panic
 fn main() -> i8 { let x: i8 = 127; x + 1 }  // i8 max + 1: panic
@@ -843,7 +843,7 @@ fn main() -> u64 { let x: u64 = 18446744073709551615; x + 1 }  // u64 max + 1: p
 ```
 
 **Array bounds violations:**
-```rue
+```gruel
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     let idx = 10;

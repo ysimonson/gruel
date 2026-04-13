@@ -19,7 +19,7 @@ Stable (no longer requires `--preview module_types`)
 
 ## Summary
 
-Introduce a module system for Rue that prioritizes fast compilation through lazy semantic analysis, uses a simple "file = struct" model inspired by Zig, and provides straightforward pub/private visibility. This design supersedes the flat namespace from ADR-0023 (multi-file compilation) while preserving forward compatibility with future package management.
+Introduce a module system for Gruel that prioritizes fast compilation through lazy semantic analysis, uses a simple "file = struct" model inspired by Zig, and provides straightforward pub/private visibility. This design supersedes the flat namespace from ADR-0023 (multi-file compilation) while preserving forward compatibility with future package management.
 
 ## Context
 
@@ -27,7 +27,7 @@ Introduce a module system for Rue that prioritizes fast compilation through lazy
 
 ADR-0023 introduced multi-file compilation with a flat global namespace—all functions, structs, and enums are globally visible across files. This was explicitly a stepping stone:
 
-> "The UX is admittedly awkward (`rue a.rue b.rue c.rue -o out`), but this is a stepping stone, not the final design."
+> "The UX is admittedly awkward (`gruel a.gruel b.gruel c.gruel -o out`), but this is a stepping stone, not the final design."
 
 We now need a proper module system that provides:
 1. **Namespacing** — Avoid symbol collisions as codebases grow
@@ -62,16 +62,16 @@ We analyzed module systems from several languages:
 
 ### Core Principle: Files Are Structs
 
-Every `.rue` file is implicitly a struct. Importing a file returns a struct type containing all `pub` declarations from that file.
+Every `.gruel` file is implicitly a struct. Importing a file returns a struct type containing all `pub` declarations from that file.
 
-```rue
-// math.rue
+```gruel
+// math.gruel
 pub fn add(a: i32, b: i32) -> i32 { a + b }
 pub fn sub(a: i32, b: i32) -> i32 { a - b }
 fn helper() -> i32 { 42 }  // private, not exported
 
-// main.rue
-const math = @import("math.rue");
+// main.gruel
+const math = @import("math.gruel");
 
 fn main() -> i32 {
     math.add(1, 2)  // OK
@@ -83,29 +83,29 @@ fn main() -> i32 {
 
 Following Zig's model, `@import` is a builtin that returns a struct type containing all `pub` declarations from the imported file:
 
-```rue
+```gruel
 // @import returns a struct type
-const math = @import("math.rue");
+const math = @import("math.gruel");
 math.add(1, 2)
 
 // You can alias to any name
-const m = @import("math.rue");
+const m = @import("math.gruel");
 m.add(1, 2)
 
 // Access nested items directly
-const add = @import("math.rue").add;
+const add = @import("math.gruel").add;
 add(1, 2)
 ```
 
-The key insight: `@import("foo.rue")` is equivalent to a struct containing the file's contents:
+The key insight: `@import("foo.gruel")` is equivalent to a struct containing the file's contents:
 
-```rue
-// If math.rue contains:
+```gruel
+// If math.gruel contains:
 pub fn add(a: i32, b: i32) -> i32 { a + b }
 pub fn sub(a: i32, b: i32) -> i32 { a - b }
 fn helper() -> i32 { 42 }  // private
 
-// Then @import("math.rue") returns something like:
+// Then @import("math.gruel") returns something like:
 // struct {
 //     pub fn add(a: i32, b: i32) -> i32 { ... }
 //     pub fn sub(a: i32, b: i32) -> i32 { ... }
@@ -114,9 +114,9 @@ fn helper() -> i32 { 42 }  // private
 ```
 
 **Resolution order for `@import("foo")`:**
-1. Local file `foo.rue` (simple file module)
-2. Local file `_foo.rue` with directory `foo/` (directory module)
-3. (Future) Dependency named `foo` in `rue.toml`
+1. Local file `foo.gruel` (simple file module)
+2. Local file `_foo.gruel` with directory `foo/` (directory module)
+3. (Future) Dependency named `foo` in `gruel.toml`
 
 ### Directory Modules
 
@@ -124,24 +124,24 @@ A directory becomes a module when it contains a `_` prefixed file with the same 
 
 ```
 src/
-  main.rue
-  math.rue           # const math = @import("math.rue");
-  _utils.rue         # const utils = @import("utils"); — module root for utils/
+  main.gruel
+  math.gruel           # const math = @import("math.gruel");
+  _utils.gruel         # const utils = @import("utils"); — module root for utils/
   utils/
-    strings.rue      # Submodule
-    internal.rue     # Submodule
+    strings.gruel      # Submodule
+    internal.gruel     # Submodule
 ```
 
-The `_utils.rue` file controls what the directory exports using Zig's `pub const` pattern for re-exports:
+The `_utils.gruel` file controls what the directory exports using Zig's `pub const` pattern for re-exports:
 
-```rue
-// _utils.rue — the module root for utils/
+```gruel
+// _utils.gruel — the module root for utils/
 
 // Re-export the entire strings module
-pub const strings = @import("utils/strings.rue");
+pub const strings = @import("utils/strings.gruel");
 
 // Re-export a specific function from internal
-pub const helper = @import("utils/internal.rue").helper;
+pub const helper = @import("utils/internal.gruel").helper;
 
 // internal module itself is not re-exported, so users can't access
 // @import("utils").internal — they'd have to import it directly
@@ -149,8 +149,8 @@ pub const helper = @import("utils/internal.rue").helper;
 
 Usage:
 
-```rue
-// main.rue
+```gruel
+// main.gruel
 const utils = @import("utils");
 
 // Access re-exported submodule
@@ -161,13 +161,13 @@ utils.helper()
 ```
 
 **Why `_` prefix?**
-1. **Sorts first** — In file listings, `_utils.rue` appears before `utils/`, making the module entry point immediately visible
-2. **Unambiguous** — `_foo.rue` is always a directory module root; `foo.rue` is always a standalone file module
+1. **Sorts first** — In file listings, `_utils.gruel` appears before `utils/`, making the module entry point immediately visible
+2. **Unambiguous** — `_foo.gruel` is always a directory module root; `foo.gruel` is always a standalone file module
 3. **No dual-file confusion** — Rust's `foo.rs` + `foo/` pattern requires remembering that both exist; here the `_` makes it explicit
 
 This follows matklad's suggestion from "Notes on Module System" for improving discoverability.
 
-**No `mod` declarations needed.** Unlike Rust, there's no need to write `mod strings;` to declare that `strings.rue` exists. The filesystem is the source of truth — if the file exists, it can be imported. Re-exports are explicit `pub const` bindings, following Zig's pattern.
+**No `mod` declarations needed.** Unlike Rust, there's no need to write `mod strings;` to declare that `strings.gruel` exists. The filesystem is the source of truth — if the file exists, it can be imported. Re-exports are explicit `pub const` bindings, following Zig's pattern.
 
 ### Visibility: Simple pub/private
 
@@ -182,17 +182,17 @@ Only two visibility levels:
 
 **Intra-module visibility:** Files within the same directory can access each other's non-pub items. This matches Hylo's model where `pub` only affects cross-module (cross-directory) visibility.
 
-```rue
-// utils/strings.rue
+```gruel
+// utils/strings.gruel
 fn internal_helper() { ... }  // Private
 
-// utils/parser.rue
-const strings = @import("strings.rue");
+// utils/parser.gruel
+const strings = @import("strings.gruel");
 fn parse() {
     strings.internal_helper()  // OK - same directory
 }
 
-// main.rue
+// main.gruel
 const utils = @import("utils");
 fn main() {
     // utils.strings.internal_helper()  // Error - different directory
@@ -203,13 +203,13 @@ fn main() {
 
 **The key to fast compilation.** The compiler only analyzes code that is actually referenced from entry points.
 
-```rue
-// broken.rue
+```gruel
+// broken.gruel
 pub fn works() -> i32 { 42 }
 pub fn broken() -> i32 { "not an int" }  // Type error!
 
-// main.rue
-const broken = @import("broken.rue");
+// main.gruel
+const broken = @import("broken.gruel");
 fn main() -> i32 {
     broken.works()  // Only this is analyzed
     // broken.broken() is never called, so its error is NOT reported
@@ -233,7 +233,7 @@ fn main() -> i32 {
 
 The standard library is **not** implicitly imported (unlike Hylo). Users must explicitly import what they need:
 
-```rue
+```gruel
 const io = @import("std").io;
 const Vec = @import("std").collections.Vec;
 ```
@@ -244,23 +244,23 @@ const Vec = @import("std").collections.Vec;
 
 Circular imports between files are **allowed** at the type level but not at the value level:
 
-```rue
-// a.rue
-const b = @import("b.rue");
+```gruel
+// a.gruel
+const b = @import("b.gruel");
 pub struct Foo { b: b.Bar }  // OK - type reference
 
-// b.rue
-const a = @import("a.rue");
+// b.gruel
+const a = @import("a.gruel");
 pub struct Bar { a: a.Foo }  // OK - type reference
 ```
 
-```rue
-// a.rue
-const b = @import("b.rue");
+```gruel
+// a.gruel
+const b = @import("b.gruel");
 pub const X: i32 = b.Y + 1;  // Error - circular value dependency
 
-// b.rue
-const a = @import("a.rue");
+// b.gruel
+const a = @import("a.gruel");
 pub const Y: i32 = a.X + 1;  // Error - circular value dependency
 ```
 
@@ -272,7 +272,7 @@ This ADR **supersedes** the flat namespace from ADR-0023. The compilation model 
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  main.rue   │     │  math.rue   │     │  utils/     │
+│  main.gruel   │     │  math.gruel   │     │  utils/     │
 └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
        │                   │                   │
        ▼                   ▼                   ▼
@@ -289,24 +289,24 @@ This ADR **supersedes** the flat namespace from ADR-0023. The compilation model 
 
 **Key change:** Instead of merging all symbols into a flat namespace, we now:
 1. Start analysis at `main()`
-2. When encountering `@import("foo.rue")`, lazily analyze `foo.rue`
+2. When encountering `@import("foo.gruel")`, lazily analyze `foo.gruel`
 3. Only analyze declarations that are actually referenced
 
 ### Future: Package Management
 
-This module system is designed to be forward-compatible with packages. A future `rue.toml` would map package names to sources:
+This module system is designed to be forward-compatible with packages. A future `gruel.toml` would map package names to sources:
 
 ```toml
-# rue.toml (future)
+# gruel.toml (future)
 [dependencies]
 http = { url = "https://...", hash = "sha256:..." }
 json = { path = "../json-lib" }
 ```
 
 The resolution order becomes:
-1. Local file `foo.rue` (simple file module)
-2. Local file `_foo.rue` with `foo/` directory (directory module)
-3. Dependency `foo` from `rue.toml`
+1. Local file `foo.gruel` (simple file module)
+2. Local file `_foo.gruel` with `foo/` directory (directory module)
+3. Dependency `foo` from `gruel.toml`
 
 The import syntax (`@import("foo")`) remains unchanged—the package manager just adds another resolution step.
 
@@ -316,7 +316,7 @@ All phases are complete. 40 spec tests pass.
 
 ### Phase 1: Basic Module Imports ✓
 
-**Goal:** `@import("foo.rue")` imports `foo.rue` from the same directory.
+**Goal:** `@import("foo.gruel")` imports `foo.gruel` from the same directory.
 
 - [x] `@import` parses as `IntrinsicCall`
 - [x] Resolve relative file paths from importing file
@@ -335,9 +335,9 @@ All phases are complete. 40 spec tests pass.
 
 ### Phase 3: Directory Modules ✓
 
-**Goal:** `@import("foo")` can import `_foo.rue` which has submodules in `foo/`.
+**Goal:** `@import("foo")` can import `_foo.gruel` which has submodules in `foo/`.
 
-- [x] Directory module resolution (`_foo.rue` + `foo/` pattern)
+- [x] Directory module resolution (`_foo.gruel` + `foo/` pattern)
 - [x] Re-exports via `pub const`
 - [x] Intra-directory visibility rules
 
@@ -354,7 +354,7 @@ All phases are complete. 40 spec tests pass.
 
 **Goal:** Organize std as proper modules.
 
-- [x] `std/` directory with `_std.rue` root
+- [x] `std/` directory with `_std.gruel` root
 - [x] `@import("std")` resolution
 - [x] `std.math` submodule with abs, min, max, clamp
 
@@ -380,11 +380,11 @@ All phases are complete. 40 spec tests pass.
 
 ## Open Questions
 
-1. **IDE support for lazy analysis** — Should we provide a `rue check --all` mode that analyzes everything regardless of reachability? (Not needed immediately, but maybe someday.)
+1. **IDE support for lazy analysis** — Should we provide a `gruel check --all` mode that analyzes everything regardless of reachability? (Not needed immediately, but maybe someday.)
 
 ## Future Work
 
-- **Package management** — `rue.toml`, dependency resolution, content-addressed packages
+- **Package management** — `gruel.toml`, dependency resolution, content-addressed packages
 - **Package visibility** — `pub(pkg)` for package-internal APIs if needed
 - **Incremental compilation** — Build on lazy analysis for file-level caching
 - **Conditional compilation** — `#[cfg(...)]` attributes for platform-specific code

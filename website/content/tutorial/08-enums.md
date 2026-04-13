@@ -10,7 +10,7 @@ Enums define types with a fixed set of possible values, called variants.
 
 ## Defining Enums
 
-```rue
+```gruel
 enum Color {
     Red,
     Green,
@@ -29,7 +29,7 @@ Variants are accessed with the `::` syntax: `EnumName::VariantName`.
 
 Use `match` to handle each variant:
 
-```rue
+```gruel
 enum Color {
     Red,
     Green,
@@ -56,7 +56,7 @@ fn main() -> i32 {
 
 Match expressions on enums must be exhaustive—you must handle all variants:
 
-```rue
+```gruel
 enum Direction {
     North,
     South,
@@ -76,7 +76,7 @@ fn to_degrees(d: Direction) -> i32 {
 
 If you forget a variant, the compiler will tell you:
 
-```rue
+```gruel
 fn to_degrees(d: Direction) -> i32 {
     match d {
         Direction::North => 0,
@@ -90,7 +90,7 @@ fn to_degrees(d: Direction) -> i32 {
 
 Enums can be fields in structs:
 
-```rue
+```gruel
 enum Status {
     Pending,
     Active,
@@ -122,7 +122,7 @@ fn main() -> i32 {
 
 ## Example: Simple State Machine
 
-```rue
+```gruel
 enum TrafficLight {
     Red,
     Yellow,

@@ -1,0 +1,298 @@
+//! Shared type utilities for code generation backends.
+//!
+//! This module provides common functions for calculating type sizes and
+//! field offsets, shared between x86_64 and aarch64 backends.
+//!
+//! As of Phase 3 (ADR-0024), all struct/enum lookups go through `TypeInternPool`
+//! instead of separate `&[StructDef]` slices.
+
+use gruel_air::{ArrayTypeId, StructId, TypeInternPool, TypeKind};
+use gruel_cfg::{Cfg, CfgInstData, CfgValue, Type};
+use std::collections::HashMap;
+
+use crate::vreg::VReg;
+
+/// Extract the ArrayTypeId from a Type::Array.
+/// Returns None if the type is not an array type.
+#[inline]
+pub fn extract_array_type_id(ty: Type) -> Option<ArrayTypeId> {
+    match ty.kind() {
+        TypeKind::Array(id) => Some(id),
+        _ => None,
+    }
+}
+
+/// Get the array type definition for an array type ID.
+///
+/// Returns `(element_type, length)`.
+pub fn array_type_def(type_pool: &TypeInternPool, array_type_id: ArrayTypeId) -> (Type, u64) {
+    type_pool.array_def(array_type_id)
+}
+
+/// Get the array type definition from a Type.
+///
+/// Returns `Some((element_type, length))` if the type is an array type, `None` otherwise.
+#[inline]
+pub fn array_type_def_from_type(type_pool: &TypeInternPool, ty: Type) -> Option<(Type, u64)> {
+    extract_array_type_id(ty).map(|id| array_type_def(type_pool, id))
+}
+
+/// Get the length of an array from its Type.
+/// Returns 0 if the type is not an array.
+#[inline]
+pub fn array_length_from_type(type_pool: &TypeInternPool, ty: Type) -> u64 {
+    array_type_def_from_type(type_pool, ty)
+        .map(|(_element_type, length)| length)
+        .unwrap_or(0)
+}
+
+/// Calculate the slot count for a single element of an array from its Type.
+#[inline]
+pub fn array_element_slot_count_from_type(type_pool: &TypeInternPool, ty: Type) -> u32 {
+    if let Some((element_type, _length)) = array_type_def_from_type(type_pool, ty) {
+        type_slot_count(type_pool, element_type)
+    } else {
+        1
+    }
+}
+
+/// Calculate the total number of slots needed to store a type.
+///
+/// For scalars, this is 1. For arrays, it's `length * slot_count(element_type)`.
+/// For structs, this is the sum of slot counts for all fields.
+/// For nested types, this recursively calculates.
+/// Zero-sized types (unit, never, empty structs, zero-length arrays) return 0.
+pub fn type_slot_count(type_pool: &TypeInternPool, ty: Type) -> u32 {
+    match ty.kind() {
+        // Zero-sized types
+        TypeKind::Unit | TypeKind::Never => 0,
+        TypeKind::Array(array_type_id) => {
+            // Zero-length arrays naturally get 0 slots (0 * element_slots)
+            let (element_type, length) = type_pool.array_def(array_type_id);
+            let elem_slots = type_slot_count(type_pool, element_type);
+            (length as u32) * elem_slots
+        }
+        TypeKind::Struct(struct_id) => {
+            // Sum the slot counts of all fields
+            // Empty structs naturally get 0 slots here
+            let struct_def = type_pool.struct_def(struct_id);
+            let mut total = 0u32;
+            for field in &struct_def.fields {
+                total += type_slot_count(type_pool, field.ty);
+            }
+            total
+        }
+        // Scalars and other types use 1 slot
+        _ => 1,
+    }
+}
+
+/// Calculate the slot count for a single element of an array type.
+pub fn array_element_slot_count(type_pool: &TypeInternPool, array_type_id: ArrayTypeId) -> u32 {
+    let (element_type, _length) = type_pool.array_def(array_type_id);
+    type_slot_count(type_pool, element_type)
+}
+
+/// Calculate the size in bytes of a type.
+///
+/// This is used for pointer arithmetic where we need the actual byte size,
+/// not the slot count. Each slot is 8 bytes, but primitive types may use
+/// fewer bytes (e.g., i8 uses 1 byte, i16 uses 2 bytes).
+///
+/// However, for simplicity and alignment purposes, all types currently use
+/// 8 bytes per slot. This function returns `slot_count * 8`.
+pub fn type_size_bytes(type_pool: &TypeInternPool, ty: Type) -> u64 {
+    let slots = type_slot_count(type_pool, ty);
+    (slots as u64) * 8
+}
+
+/// Calculate the slot offset for a field within a struct.
+///
+/// This accounts for the sizes of all preceding fields.
+pub fn struct_field_slot_offset(
+    type_pool: &TypeInternPool,
+    struct_id: StructId,
+    field_index: u32,
+) -> u32 {
+    let struct_def = type_pool.struct_def(struct_id);
+    let mut offset = 0u32;
+    for i in 0..(field_index as usize) {
+        if let Some(field) = struct_def.fields.get(i) {
+            offset += type_slot_count(type_pool, field.ty);
+        }
+    }
+    offset
+}
+
+/// Recursively collect all scalar vregs from an array value.
+///
+/// For nested arrays, this flattens them to a list of scalar vregs.
+/// This is used during code generation to handle array arguments that need
+/// to be passed in registers or stored to memory slot by slot.
+///
+/// # Arguments
+/// * `cfg` - The control flow graph containing the instructions
+/// * `struct_slot_vregs` - Cache mapping CFG values to their slot vregs
+/// * `value` - The CFG value to collect vregs from
+/// * `get_vreg` - Closure to get/allocate a vreg for a given CFG value
+pub fn collect_array_scalar_vregs(
+    cfg: &Cfg,
+    struct_slot_vregs: &HashMap<CfgValue, Vec<VReg>>,
+    value: CfgValue,
+    get_vreg: &mut impl FnMut(CfgValue) -> VReg,
+) -> Vec<VReg> {
+    let inst = cfg.get_inst(value);
+    match &inst.data {
+        CfgInstData::ArrayInit {
+            elements_start,
+            elements_len,
+            ..
+        } => {
+            let elements = cfg.get_extra(*elements_start, *elements_len);
+            let mut result = Vec::new();
+            for elem in elements {
+                let elem_inst = cfg.get_inst(*elem);
+                if elem_inst.ty.is_array() {
+                    // Recursively collect from nested array
+                    result.extend(collect_array_scalar_vregs(
+                        cfg,
+                        struct_slot_vregs,
+                        *elem,
+                        get_vreg,
+                    ));
+                } else if elem_inst.ty.is_struct() {
+                    // Recursively collect from struct element (includes builtin String)
+                    result.extend(collect_struct_scalar_vregs(
+                        cfg,
+                        struct_slot_vregs,
+                        *elem,
+                        get_vreg,
+                    ));
+                } else {
+                    // Scalar element - get its vreg
+                    result.push(get_vreg(*elem));
+                }
+            }
+            result
+        }
+        _ => {
+            // For non-ArrayInit sources, try struct_slot_vregs cache
+            if let Some(vregs) = struct_slot_vregs.get(&value).cloned() {
+                vregs
+            } else {
+                vec![get_vreg(value)]
+            }
+        }
+    }
+}
+
+/// Generate the drop glue function name for an array type.
+///
+/// The name encodes the element type and length, e.g., `__gruel_drop_array_String_3`.
+/// This must match the name generated by `gruel_compiler::drop_glue::array_drop_glue_name`.
+pub fn array_drop_glue_name(array_id: ArrayTypeId, type_pool: &TypeInternPool) -> String {
+    let (element_type, length) = type_pool.array_def(array_id);
+    let element_type_name = type_name(element_type, type_pool);
+    format!("__gruel_drop_array_{}_{}", element_type_name, length)
+}
+
+/// Get a name for a type (used for generating drop glue function names).
+fn type_name(ty: Type, type_pool: &TypeInternPool) -> String {
+    match ty.kind() {
+        TypeKind::I8 => "i8".to_string(),
+        TypeKind::I16 => "i16".to_string(),
+        TypeKind::I32 => "i32".to_string(),
+        TypeKind::I64 => "i64".to_string(),
+        TypeKind::U8 => "u8".to_string(),
+        TypeKind::U16 => "u16".to_string(),
+        TypeKind::U32 => "u32".to_string(),
+        TypeKind::U64 => "u64".to_string(),
+        TypeKind::Bool => "bool".to_string(),
+        TypeKind::Unit => "unit".to_string(),
+        TypeKind::Never => "never".to_string(),
+        TypeKind::Error => "error".to_string(),
+        // ComptimeType only exists at compile time, no runtime representation
+        TypeKind::ComptimeType => "comptime_type".to_string(),
+        TypeKind::Enum(enum_id) => format!("enum{}", enum_id.0),
+        // Struct types include builtin types like String
+        TypeKind::Struct(struct_id) => type_pool.struct_def(struct_id).name.clone(),
+        TypeKind::Array(array_id) => {
+            let (element_type, length) = type_pool.array_def(array_id);
+            let elem_name = type_name(element_type, type_pool);
+            format!("array_{}_{}", elem_name, length)
+        }
+        // Module types should never reach codegen (compile-time only)
+        TypeKind::Module(_) => "module".to_string(),
+        // Pointer types
+        TypeKind::PtrConst(ptr_id) => {
+            let pointee = type_pool.ptr_const_def(ptr_id);
+            format!("ptr_const_{}", type_name(pointee, type_pool))
+        }
+        TypeKind::PtrMut(ptr_id) => {
+            let pointee = type_pool.ptr_mut_def(ptr_id);
+            format!("ptr_mut_{}", type_name(pointee, type_pool))
+        }
+    }
+}
+
+/// Recursively collect all scalar vregs from a struct value.
+///
+/// This flattens any array fields to their scalar elements.
+/// This is used during code generation to handle struct arguments that need
+/// to be passed in registers or stored to memory slot by slot.
+///
+/// # Arguments
+/// * `cfg` - The control flow graph containing the instructions
+/// * `struct_slot_vregs` - Cache mapping CFG values to their slot vregs
+/// * `value` - The CFG value to collect vregs from
+/// * `get_vreg` - Closure to get/allocate a vreg for a given CFG value
+pub fn collect_struct_scalar_vregs(
+    cfg: &Cfg,
+    struct_slot_vregs: &HashMap<CfgValue, Vec<VReg>>,
+    value: CfgValue,
+    get_vreg: &mut impl FnMut(CfgValue) -> VReg,
+) -> Vec<VReg> {
+    let inst = cfg.get_inst(value);
+    match &inst.data {
+        CfgInstData::StructInit {
+            fields_start,
+            fields_len,
+            ..
+        } => {
+            let fields = cfg.get_extra(*fields_start, *fields_len);
+            let mut result = Vec::new();
+            for field in fields {
+                let field_inst = cfg.get_inst(*field);
+                if field_inst.ty.is_array() {
+                    // Recursively collect from array field
+                    result.extend(collect_array_scalar_vregs(
+                        cfg,
+                        struct_slot_vregs,
+                        *field,
+                        get_vreg,
+                    ));
+                } else if field_inst.ty.is_struct() {
+                    // Recursively collect from nested struct field (includes builtin String)
+                    result.extend(collect_struct_scalar_vregs(
+                        cfg,
+                        struct_slot_vregs,
+                        *field,
+                        get_vreg,
+                    ));
+                } else {
+                    // Scalar field - get its vreg
+                    result.push(get_vreg(*field));
+                }
+            }
+            result
+        }
+        _ => {
+            // For non-StructInit sources, try struct_slot_vregs cache
+            if let Some(vregs) = struct_slot_vregs.get(&value).cloned() {
+                vregs
+            } else {
+                vec![get_vreg(value)]
+            }
+        }
+    }
+}

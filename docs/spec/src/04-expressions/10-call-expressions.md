@@ -30,7 +30,7 @@ The type of a call expression is the function's return type.
 
 {{ rule(id="4.10:6") }}
 
-```rue
+```gruel
 fn add(x: i32, y: i32) -> i32 {
     x + y
 }
@@ -48,7 +48,7 @@ Arguments are evaluated left-to-right before the function is called, as specifie
 
 Call expressions can be nested:
 
-```rue
+```gruel
 fn add(x: i32, y: i32) -> i32 { x + y }
 
 fn main() -> i32 {

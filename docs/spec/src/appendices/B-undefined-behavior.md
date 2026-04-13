@@ -8,21 +8,21 @@ template = "spec/page.html"
 
 {{ rule(id="B.1:1") }}
 
-Rue currently has no undefined behavior. All operations in Rue have defined semantics: they either complete successfully, fail to compile, or cause a runtime panic.
+Gruel currently has no undefined behavior. All operations in Gruel have defined semantics: they either complete successfully, fail to compile, or cause a runtime panic.
 
 {{ rule(id="B.1:2") }}
 
-This is a deliberate design choice. Where other systems languages define certain conditions as undefined behavior (allowing implementations to assume they never occur), Rue instead detects these conditions and responds with a defined runtime panic.
+This is a deliberate design choice. Where other systems languages define certain conditions as undefined behavior (allowing implementations to assume they never occur), Gruel instead detects these conditions and responds with a defined runtime panic.
 
 {{ rule(id="B.1:3") }}
 
-Future versions of Rue may introduce undefined behavior for specific low-level operations (such as unchecked arithmetic or raw pointer manipulation), but these will be explicitly marked as such and will require opt-in syntax.
+Future versions of Gruel may introduce undefined behavior for specific low-level operations (such as unchecked arithmetic or raw pointer manipulation), but these will be explicitly marked as such and will require opt-in syntax.
 
 ## Runtime Panics
 
 {{ rule(id="B.2:1") }}
 
-Rue detects certain error conditions at runtime and responds with a panic, terminating the program with a specific exit code.
+Gruel detects certain error conditions at runtime and responds with a panic, terminating the program with a specific exit code.
 
 ## Integer Overflow
 

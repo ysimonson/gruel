@@ -23,11 +23,11 @@ Implemented
 
 ## Summary
 
-Add optimization passes to the Rue compiler operating at the CFG level. Initial passes include constant folding (at CFG level to complement existing RIR-level evaluation) and dead code elimination. These improve codegen quality without changing program semantics. Optimization levels follow standard compiler conventions (`-O0` through `-O3`).
+Add optimization passes to the Gruel compiler operating at the CFG level. Initial passes include constant folding (at CFG level to complement existing RIR-level evaluation) and dead code elimination. These improve codegen quality without changing program semantics. Optimization levels follow standard compiler conventions (`-O0` through `-O3`).
 
 ## Context
 
-Currently, the Rue compiler has minimal optimization:
+Currently, the Gruel compiler has minimal optimization:
 
 1. **Constant evaluation at RIR level** (ADR-0003): `try_evaluate_const()` in sema.rs folds arithmetic on literal constants during semantic analysis. This handles `let x = 2 + 3` by computing 5 at compile time.
 
@@ -63,10 +63,10 @@ Add a CFG optimization pass that runs after CFG construction and before lowering
 
 ### Architecture
 
-Create a new module `crates/rue-cfg/src/opt/` with:
+Create a new module `crates/gruel-cfg/src/opt/` with:
 
 ```
-rue-cfg/src/opt/
+gruel-cfg/src/opt/
 ├── mod.rs           # Optimization pipeline orchestration
 ├── constfold.rs     # Constant folding pass
 └── dce.rs           # Dead code elimination
@@ -154,7 +154,7 @@ Future optimization passes will be added at appropriate levels.
 ### API
 
 ```rust
-// In rue-cfg/src/opt/mod.rs
+// In gruel-cfg/src/opt/mod.rs
 
 /// Optimization level, following standard compiler conventions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -186,7 +186,7 @@ pub fn optimize(cfg: &mut Cfg, level: OptLevel) {
 
 ### Integration
 
-In `rue-compiler/src/lib.rs`, add optimization after CFG building:
+In `gruel-compiler/src/lib.rs`, add optimization after CFG building:
 
 ```rust
 // Build CFG
@@ -194,7 +194,7 @@ let cfg = CfgBuilder::new(&air, &struct_defs, &array_types).build()?;
 
 // Optimize based on -O level
 let mut cfg = cfg;
-rue_cfg::opt::optimize(&mut cfg, options.opt_level);
+gruel_cfg::opt::optimize(&mut cfg, options.opt_level);
 
 // Lower to MIR
 let mir = CfgLower::new(&cfg, ...).lower()?;
@@ -206,9 +206,9 @@ Optimizations don't change program semantics, so existing spec tests continue to
 
 1. **Functional tests (spec tests)**: All existing tests remain valid - programs produce the same results.
 
-2. **Golden tests (IR dumps)**: Update `crates/rue-spec/cases/golden/ir-dumps.toml` to reflect optimized CFG/MIR output. Add new cases specifically for optimization.
+2. **Golden tests (IR dumps)**: Update `crates/gruel-spec/cases/golden/ir-dumps.toml` to reflect optimized CFG/MIR output. Add new cases specifically for optimization.
 
-3. **UI tests**: Add `crates/rue-ui-tests/cases/optimization/` for:
+3. **UI tests**: Add `crates/gruel-ui-tests/cases/optimization/` for:
    - Verifying specific optimizations trigger
    - Testing optimization flags (`-O0`, `-O1`, etc.)
    - Regression tests for miscompilations
@@ -246,18 +246,18 @@ CFG optimization is target-independent - it operates on typed CFG instructions b
 
 ## Implementation Phases
 
-- [x] **Phase 1: Optimization framework** - rue-aapc.1
-  - Create `rue-cfg/src/opt/mod.rs` with `OptLevel` enum and pass orchestration
+- [x] **Phase 1: Optimization framework** - gruel-aapc.1
+  - Create `gruel-cfg/src/opt/mod.rs` with `OptLevel` enum and pass orchestration
   - Add `-O0` through `-O3` flags to CLI
   - Add UI test infrastructure with `opt_level` support
-  - Wire up in rue-compiler
+  - Wire up in gruel-compiler
 
-- [x] **Phase 2: Constant folding** - rue-aapc.2
+- [x] **Phase 2: Constant folding** - gruel-aapc.2
   - Implement `constfold.rs`
   - Add tests verifying folding occurs at -O1+
   - Update golden tests as needed
 
-- [x] **Phase 3: Dead code elimination** - rue-aapc.3
+- [x] **Phase 3: Dead code elimination** - gruel-aapc.3
   - Implement `dce.rs` with liveness analysis
   - Handle side-effects correctly (calls, escaping stores)
   - Add tests for dead store/block elimination

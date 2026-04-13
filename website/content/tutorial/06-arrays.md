@@ -6,11 +6,11 @@ template = "tutorial/page.html"
 
 # Arrays
 
-Rue has fixed-size arrays with bounds checking at runtime.
+Gruel has fixed-size arrays with bounds checking at runtime.
 
 ## Creating Arrays
 
-```rue
+```gruel
 fn main() -> i32 {
     let numbers = [10, 20, 30, 40, 50];
 
@@ -28,7 +28,7 @@ Array indices are zero-based and must be `u64`.
 
 The type of an array includes its element type and length:
 
-```rue
+```gruel
 fn main() -> i32 {
     let a: [i32; 3] = [1, 2, 3];     // 3 elements
     let b: [bool; 2] = [true, false]; // 2 booleans
@@ -42,7 +42,7 @@ fn main() -> i32 {
 
 Use a while loop with an index:
 
-```rue
+```gruel
 fn main() -> i32 {
     let numbers = [10, 20, 30, 40, 50];
 
@@ -62,7 +62,7 @@ fn main() -> i32 {
 
 Arrays are mutable if declared with `let mut`:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut scores = [0, 0, 0];
     scores[0] = 100;
@@ -76,9 +76,9 @@ fn main() -> i32 {
 
 ## Bounds Checking
 
-Rue checks array bounds at runtime. Accessing an invalid index causes a panic:
+Gruel checks array bounds at runtime. Accessing an invalid index causes a panic:
 
-```rue
+```gruel
 fn main() -> i32 {
     let arr = [1, 2, 3];
     @dbg(arr[10]);  // Runtime panic: index out of bounds
@@ -90,7 +90,7 @@ This prevents memory safety bugs common in C and C++.
 
 ## Example: Finding Maximum
 
-```rue
+```gruel
 fn main() -> i32 {
     let numbers = [64, 34, 25, 12, 22];
 

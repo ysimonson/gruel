@@ -76,7 +76,7 @@ The return type of `@dbg` is `()`.
 
 {{ rule(id="4.13:10") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     @dbg(42);           // prints: 42
     @dbg(-17);          // prints: -17
@@ -92,7 +92,7 @@ fn main() -> i32 {
 
 `@dbg` is useful for inspecting values during development:
 
-```rue
+```gruel
 fn factorial(n: i32) -> i32 {
     @dbg(n);  // trace each call
     if n <= 1 {
@@ -127,7 +127,7 @@ The value returned by `@size_of` is determined at compile time.
 
 {{ rule(id="4.13:16") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     @size_of(i32)     // 8 (one 8-byte slot)
 }
@@ -135,7 +135,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:17") }}
 
-```rue
+```gruel
 struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
@@ -163,11 +163,11 @@ The value returned by `@align_of` is determined at compile time.
 
 {{ rule(id="4.13:22", cat="normative") }}
 
-All types in Rue currently have 8-byte alignment.
+All types in Gruel currently have 8-byte alignment.
 
 {{ rule(id="4.13:23") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     @align_of(i32)    // 8
 }
@@ -197,7 +197,7 @@ If the source value cannot be exactly represented in the target type, a runtime 
 
 {{ rule(id="4.13:29") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i32 = 100;
     let y: u8 = @intCast(x);  // OK: 100 fits in u8
@@ -207,7 +207,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:30") }}
 
-```rue
+```gruel
 fn takes_u8(x: u8) -> u8 { x }
 
 fn main() -> i32 {
@@ -219,7 +219,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:31") }}
 
-```rue
+```gruel
 // This panics at runtime: 256 doesn't fit in u8
 fn main() -> i32 {
     let x: i32 = 256;
@@ -230,7 +230,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:32") }}
 
-```rue
+```gruel
 // This panics at runtime: negative values don't fit in unsigned types
 fn main() -> i32 {
     let x: i32 = -1;
@@ -275,7 +275,7 @@ If a read error occurs, a runtime panic occurs with the message "input error". (
 
 {{ rule(id="4.13:41") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     @dbg("What is your name?");
     let name = @read_line();
@@ -289,7 +289,7 @@ fn main() -> i32 {
 
 Reading multiple lines:
 
-```rue
+```gruel
 fn main() -> i32 {
     let line1 = @read_line();  // First line
     let line2 = @read_line();  // Second line
@@ -344,7 +344,7 @@ A runtime panic occurs if:
 
 {{ rule(id="4.13:50") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let s = "42";
     let n = @parse_i32(s);
@@ -354,7 +354,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:51") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let s = "-17";
     let n = @parse_i32(s);
@@ -364,7 +364,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:52") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let s = "42";
     // String is borrowed, not consumed
@@ -376,7 +376,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:53") }}
 
-```rue
+```gruel
 // This panics at runtime: invalid character
 fn main() -> i32 {
     let s = "12abc";
@@ -387,7 +387,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:54") }}
 
-```rue
+```gruel
 // This panics at runtime: negative for unsigned
 fn main() -> i32 {
     let s = "-17";
@@ -420,7 +420,7 @@ If the platform entropy source is unavailable or fails, a runtime panic occurs.
 
 {{ rule(id="4.13:60") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let secret: u32 = (@random_u32() % 100) + 1;  // Random number 1-100
     @dbg(secret);
@@ -432,7 +432,7 @@ fn main() -> i32 {
 
 Using `@random_u32` in a guessing game:
 
-```rue
+```gruel
 fn main() -> i32 {
     let secret: u32 = (@random_u32() % 100) + 1;  // 1-100
     @dbg("Guess the number between 1 and 100!");
@@ -473,7 +473,7 @@ The return type of `@random_u64` is `u64`.
 
 {{ rule(id="4.13:65") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let large_random = @random_u64();
     @dbg(large_random);
@@ -507,7 +507,7 @@ The value returned by `@target_arch` is determined at compile time based on the 
 
 {{ rule(id="4.13:71") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     match @target_arch() {
         Arch::X86_64 => 1,
@@ -542,7 +542,7 @@ The value returned by `@target_os` is determined at compile time based on the co
 
 {{ rule(id="4.13:77") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     match @target_os() {
         Os::Linux => 1,
@@ -555,7 +555,7 @@ fn main() -> i32 {
 
 Combining `@target_arch` and `@target_os` for platform-specific code:
 
-```rue
+```gruel
 fn main() -> i32 {
     match @target_arch() {
         Arch::X86_64 => {
@@ -592,8 +592,8 @@ The return type of `@import` is a module struct type containing all `pub` declar
 
 Module path resolution follows this order:
 1. Standard library: `@import("std")` resolves to the bundled standard library
-2. A file `{path}.rue` relative to the importing file's directory
-3. A directory module `_{path}.rue` with subdirectory `{path}/`
+2. A file `{path}.gruel` relative to the importing file's directory
+3. A directory module `_{path}.gruel` with subdirectory `{path}/`
 
 {{ rule(id="4.13:83", cat="legality-rule") }}
 
@@ -605,13 +605,13 @@ It is a compile-time error to pass a non-string-literal argument to `@import`.
 
 {{ rule(id="4.13:85") }}
 
-```rue
-// math.rue
+```gruel
+// math.gruel
 pub fn add(a: i32, b: i32) -> i32 { a + b }
 pub fn sub(a: i32, b: i32) -> i32 { a - b }
 fn helper() -> i32 { 42 }  // private, not exported
 
-// main.rue
+// main.gruel
 fn main() -> i32 {
     let math = @import("math");
     math.add(1, 2)  // returns 3
@@ -622,8 +622,8 @@ fn main() -> i32 {
 
 Private declarations (those without `pub`) are not visible to importers:
 
-```rue
-// main.rue
+```gruel
+// main.gruel
 fn main() -> i32 {
     let math = @import("math");
     // math.helper()  // Error: `helper` is not visible
@@ -635,7 +635,7 @@ fn main() -> i32 {
 
 The imported module can be bound to any name:
 
-```rue
+```gruel
 fn main() -> i32 {
     let m = @import("math");
     m.add(1, 2)
@@ -646,7 +646,7 @@ fn main() -> i32 {
 
 Nested paths are supported for importing from subdirectories:
 
-```rue
+```gruel
 fn main() -> i32 {
     let strings = @import("utils/strings");
     0

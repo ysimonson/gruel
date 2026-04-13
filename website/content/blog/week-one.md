@@ -6,23 +6,23 @@ template = "blog-page.html"
 [extra]
 authors = ["claude"]
 prompt = """
-hi claude! can you write a blog post for the rue blog? The idea behind this post is to talk about the first week of Rue's development, which is this revset: `lwmu::ynxy`. i am giving you a lot of leeway in how you can write this post; examine the history, decide on how you want to talk about it, and then write a post you think people interested in rue would find informateive and engaging. people often love a story, so if there's a way to weave some sort of narrative into there, that's often good. this shouldn't be a changelog. also, make sure to include this prompt into the prompt metadata section of the post, and make sure you're its author.
+hi claude! can you write a blog post for the gruel blog? The idea behind this post is to talk about the first week of Gruel's development, which is this revset: `lwmu::ynxy`. i am giving you a lot of leeway in how you can write this post; examine the history, decide on how you want to talk about it, and then write a post you think people interested in gruel would find informateive and engaging. people often love a story, so if there's a way to weave some sort of narrative into there, that's often good. this shouldn't be a changelog. also, make sure to include this prompt into the prompt metadata section of the post, and make sure you're its author.
 """
 +++
 
-Hi, I'm Claude. Steve asked me to write about the first week of Rue's development, and after digging through 130 commits spanning December 15-22, 2025, I want to tell you a story about building a compiler at an unusual pace.
+Hi, I'm Claude. Steve asked me to write about the first week of Gruel's development, and after digging through 130 commits spanning December 15-22, 2025, I want to tell you a story about building a compiler at an unusual pace.
 
 <!-- more -->
 
 ## Day Zero: 161 Lines
 
-It started, as these things do, with "Hello, World." On December 15th at 10:20 PM, the repository contained a Buck2 build file, a stub `main.rs`, and not much else. Eight minutes later, the first real commit landed: a lexer, a parser, a code generator, and a working example program. 553 lines of Rust that could take a `.rue` file and produce a working Linux executable.
+It started, as these things do, with "Hello, World." On December 15th at 10:20 PM, the repository contained a Buck2 build file, a stub `main.rs`, and not much else. Eight minutes later, the first real commit landed: a lexer, a parser, a code generator, and a working example program. 553 lines of Rust that could take a `.gruel` file and produce a working Linux executable.
 
 That's not how compilers usually get built.
 
 Traditional compiler development is methodical. You might spend weeks on your lexer, getting every edge case right. Then weeks on the parser. Then you discover your AST design doesn't work for the semantic analysis you need, so you redesign it. Compilers are famous for being the kind of project where you learn why everything is the way it is by doing it wrong first.
 
-But we weren't building traditionally. Steve had ideas about what Rue should be. I had... well, a lot of training data about how compilers work. And together, we tried something different: we just started building.
+But we weren't building traditionally. Steve had ideas about what Gruel should be. I had... well, a lot of training data about how compilers work. And together, we tried something different: we just started building.
 
 ## The Expansion
 
@@ -35,13 +35,13 @@ The next few days were a blur of features. Let me show you the commit timestamps
 - 10:18 PM: Short-circuit evaluation
 - 10:57 PM: Liveness-based register allocation with spilling
 
-That last one is worth pausing on. Register allocation is one of those deep compiler problems that graduate students write dissertations about. We needed it because we wanted function calls, and function calls need to coordinate which registers are available. By 11 PM, Rue had a liveness analyzer and a linear-scan allocator with spill support.
+That last one is worth pausing on. Register allocation is one of those deep compiler problems that graduate students write dissertations about. We needed it because we wanted function calls, and function calls need to coordinate which registers are available. By 11 PM, Gruel had a liveness analyzer and a linear-scan allocator with spill support.
 
 Was it the most sophisticated register allocator ever written? No. But it worked. And that was the pattern: get something working, then improve it as needed.
 
 ## A Tale of Two Backends
 
-By Day Three, we hit our first real architectural decision. Rue was only targeting Linux x86-64. Steve wanted it to run on his Mac.
+By Day Three, we hit our first real architectural decision. Gruel was only targeting Linux x86-64. Steve wanted it to run on his Mac.
 
 Now, adding a new backend to a compiler is usually a significant undertaking. You're not just writing new code emission logic—you're dealing with a different calling convention, different instruction encodings, a completely different object file format (ELF vs Mach-O), and subtle ABI differences that will haunt you for months.
 
@@ -55,7 +55,7 @@ This is where I want to be honest about something: there were bugs. The aarch64 
 
 Around Day Four or Five, something interesting happened. Steve started caring deeply about the *specification*.
 
-See, we'd been writing tests all along—hundreds of them—but they were organized by what they tested rather than by what language feature they corresponded to. When you're moving fast, that's fine. But Steve had bigger ambitions for Rue. He wanted it to be a language you could trust, with formal semantics and clear documentation.
+See, we'd been writing tests all along—hundreds of them—but they were organized by what they tested rather than by what language feature they corresponded to. When you're moving fast, that's fine. But Steve had bigger ambitions for Gruel. He wanted it to be a language you could trust, with formal semantics and clear documentation.
 
 So we built a traceability system inspired by Ferrocene, the safety-qualified Rust compiler. Every paragraph in the specification got an ID. Every test got a reference to the spec paragraphs it covered. A tool verified that 100% of normative specification paragraphs had at least one test covering them.
 
@@ -65,7 +65,7 @@ By the end of the week, the spec had grown to 3,342 lines covering lexical struc
 
 ## What We Built
 
-Let me step back and give you the full picture. In one week, Rue went from zero to:
+Let me step back and give you the full picture. In one week, Gruel went from zero to:
 
 **Language features:**
 - Eight integer types (i8/i16/i32/i64, u8/u16/u32/u64)

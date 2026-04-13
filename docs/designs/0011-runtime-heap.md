@@ -19,13 +19,13 @@ Implemented
 
 ## Summary
 
-Add heap allocation support to the Rue runtime via a simple bump allocator backed by `mmap`/`munmap` syscalls. This provides the foundation for heap-allocated types like `String`, `Vec`, and `Box` without depending on libc. The implementation exposes `__rue_alloc`, `__rue_realloc`, and `__rue_free` functions that can be called from generated code.
+Add heap allocation support to the Gruel runtime via a simple bump allocator backed by `mmap`/`munmap` syscalls. This provides the foundation for heap-allocated types like `String`, `Vec`, and `Box` without depending on libc. The implementation exposes `__gruel_alloc`, `__gruel_realloc`, and `__gruel_free` functions that can be called from generated code.
 
 ## Context
 
 ### Why a Custom Allocator?
 
-Rue compiles to standalone executables with no libc dependency. The runtime uses direct syscalls for all system interactions (exit, write). For heap allocation, we need to continue this pattern:
+Gruel compiles to standalone executables with no libc dependency. The runtime uses direct syscalls for all system interactions (exit, write). For heap allocation, we need to continue this pattern:
 
 1. **No libc dependency**: Keep executables minimal and self-contained
 2. **Control**: Understand exactly what's happening with memory
@@ -44,7 +44,7 @@ This ADR answers: custom allocator using mmap/munmap directly.
 
 1. **Platform support**: Must work on x86-64 Linux and AArch64 macOS
 2. **No global state initialization**: The allocator must work without explicit init
-3. **Thread safety**: Not required initially (Rue is single-threaded)
+3. **Thread safety**: Not required initially (Gruel is single-threaded)
 4. **Simplicity over performance**: This is V1; optimize later if needed
 
 ## Decision
@@ -59,7 +59,7 @@ We use a **bump allocator** - the simplest possible design:
 4. Individual `free()` is a no-op; memory is only returned when all arenas are freed
 
 This trades memory efficiency for simplicity. It's appropriate because:
-- Rue programs are typically short-lived (compile, run, exit)
+- Gruel programs are typically short-lived (compile, run, exit)
 - Memory is reclaimed by the OS on exit anyway
 - Future optimization can add a more sophisticated allocator
 
@@ -71,18 +71,18 @@ Three functions exported from the runtime:
 /// Allocate `size` bytes aligned to `align`.
 /// Returns null on failure (OOM or invalid arguments).
 #[no_mangle]
-pub extern "C" fn __rue_alloc(size: u64, align: u64) -> *mut u8
+pub extern "C" fn __gruel_alloc(size: u64, align: u64) -> *mut u8
 
 /// Reallocate `ptr` from `old_size` to `new_size` bytes.
 /// Returns null on failure. Old data is copied to new location.
 /// If ptr is null, behaves like alloc. If new_size is 0, behaves like free.
 #[no_mangle]
-pub extern "C" fn __rue_realloc(ptr: *mut u8, old_size: u64, new_size: u64, align: u64) -> *mut u8
+pub extern "C" fn __gruel_realloc(ptr: *mut u8, old_size: u64, new_size: u64, align: u64) -> *mut u8
 
 /// Free memory at `ptr`.
 /// For the bump allocator, this is a no-op (memory reclaimed on exit).
 #[no_mangle]
-pub extern "C" fn __rue_free(ptr: *mut u8, size: u64, align: u64)
+pub extern "C" fn __gruel_free(ptr: *mut u8, size: u64, align: u64)
 ```
 
 The API includes `size` and `align` parameters even for `free` to enable future allocator upgrades without API changes.
@@ -157,14 +157,14 @@ No panics in the allocator - it just returns null on failure. Higher-level code 
 ### Testing Strategy
 
 1. **Unit tests in runtime**: Test allocator directly with various sizes/alignments
-2. **Integration tests**: Allocate from Rue code, verify memory is usable
+2. **Integration tests**: Allocate from Gruel code, verify memory is usable
 3. **Valgrind/ASan**: Verify no memory corruption (on Linux)
 
 ## Implementation Phases
 
-Epic: rue-n50n
+Epic: gruel-n50n
 
-### Phase 1: Syscall Wrappers (rue-n50n.1)
+### Phase 1: Syscall Wrappers (gruel-n50n.1)
 
 Add mmap/munmap wrappers to each platform module:
 - `x86_64_linux.rs`: `mmap()`, `munmap()`
@@ -173,37 +173,37 @@ Add mmap/munmap wrappers to each platform module:
 
 **Testable**: Call mmap, write to memory, munmap without crashing.
 
-### Phase 2: Bump Allocator Core (rue-n50n.2)
+### Phase 2: Bump Allocator Core (gruel-n50n.2)
 
 Implement the allocator logic:
 - Arena header structure
-- `__rue_alloc` with alignment support
-- `__rue_free` (no-op for now)
+- `__gruel_alloc` with alignment support
+- `__gruel_free` (no-op for now)
 - Lazy initialization of first arena
 
 **Testable**: Allocate various sizes, verify returned pointers are aligned.
 
-### Phase 3: Realloc and Large Allocations (rue-n50n.3)
+### Phase 3: Realloc and Large Allocations (gruel-n50n.3)
 
-- `__rue_realloc` implementation
+- `__gruel_realloc` implementation
 - Large allocation handling (dedicated arenas)
 - Edge cases (null ptr, zero size)
 
 **Testable**: Realloc growing and shrinking, large allocations.
 
-### Phase 4: Integration with Compiler (rue-n50n.4)
+### Phase 4: Integration with Compiler (gruel-n50n.4)
 
-- Add codegen support for calling `__rue_alloc`/`__rue_free`
+- Add codegen support for calling `__gruel_alloc`/`__gruel_free`
 - Wire up for future String/Vec types
 - Document calling convention
 
-**Testable**: Rue code can call allocation intrinsics.
+**Testable**: Gruel code can call allocation intrinsics.
 
 ## Consequences
 
 ### Positive
 
-- **No libc dependency**: Maintains Rue's minimal runtime philosophy
+- **No libc dependency**: Maintains Gruel's minimal runtime philosophy
 - **Simplicity**: Bump allocator is ~100 lines of code
 - **Cross-platform**: Same API on Linux and macOS
 - **Foundation**: Enables all heap-allocated types
@@ -223,7 +223,7 @@ Implement the allocator logic:
 
 1. **Arena size**: 64 KiB reasonable? Should it grow dynamically?
 
-2. **Thread safety**: When Rue adds threading, need mutex or thread-local arenas?
+2. **Thread safety**: When Gruel adds threading, need mutex or thread-local arenas?
 
 3. **Debug mode**: Should we poison freed memory in debug builds?
 

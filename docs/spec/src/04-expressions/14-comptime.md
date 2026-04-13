@@ -29,7 +29,7 @@ The expression inside a comptime block is evaluated during compilation. The foll
 
 A comptime expression can be used anywhere an expression is expected. The result of the comptime evaluation replaces the comptime block.
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i32 = comptime { 21 * 2 };
     x
@@ -46,7 +46,7 @@ It is a compile-time error if an expression inside a comptime block cannot be ev
 - Function calls (except to comptime-evaluable functions in future versions)
 - Operations that would panic at runtime
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = 10;
     comptime { x + 1 }  // ERROR: x cannot be known at compile time
@@ -65,7 +65,7 @@ parameter = [ "comptime" ] IDENT ":" type ;
 
 Comptime parameters can have any type, including the special `type` type (see below).
 
-```rue
+```gruel
 fn multiply(comptime n: i32, value: i32) -> i32 {
     n * value
 }
@@ -79,7 +79,7 @@ Comptime parameters enable monomorphization: each unique combination of comptime
 
 The keyword `type` is a comptime-only type whose values are types themselves. A parameter of type `type` must be marked `comptime`.
 
-```rue
+```gruel
 fn identity(comptime T: type, x: T) -> T {
     x
 }
@@ -95,7 +95,7 @@ When a function has a `comptime T: type` parameter, occurrences of `T` in parame
 
 It is a compile-time error to pass a runtime value to a comptime parameter.
 
-```rue
+```gruel
 fn double(comptime n: i32) -> i32 { n * 2 }
 
 fn main() -> i32 {
@@ -106,7 +106,7 @@ fn main() -> i32 {
 
 Type values cannot exist at runtime. It is a compile-time error to attempt to store a type value in a runtime variable.
 
-```rue
+```gruel
 fn main() -> i32 {
     let t = comptime { i32 };  // ERROR: type values cannot exist at runtime
     0
@@ -124,7 +124,7 @@ anon_struct_type = "struct" "{" struct_field { "," struct_field } "}" ;
 struct_field = IDENT ":" type ;
 ```
 
-```rue
+```gruel
 fn Point() -> type {
     struct { x: i32, y: i32 }
 }
@@ -138,7 +138,7 @@ fn main() -> i32 {
 
 Anonymous structs can be parameterized using comptime type parameters:
 
-```rue
+```gruel
 fn Pair(comptime T: type) -> type {
     struct { first: T, second: T }
 }
@@ -154,7 +154,7 @@ fn main() -> i32 {
 
 Two anonymous struct types are structurally equal if and only if they have the same field names in the same order with the same types.
 
-```rue
+```gruel
 fn make_point1() -> type { struct { x: i32, y: i32 } }
 fn make_point2() -> type { struct { x: i32, y: i32 } }
 
@@ -173,7 +173,7 @@ Anonymous structs with different field names or different field types are differ
 
 It is a compile-time error to define an anonymous struct type with no fields and no methods.
 
-```rue
+```gruel
 fn empty() -> type {
     struct { }  // ERROR: empty struct
 }
@@ -192,7 +192,7 @@ method_def = "fn" IDENT "(" [ param { "," param } ] ")" [ "->" type ] block ;
 
 Methods defined inside an anonymous struct type become methods on that struct type:
 
-```rue
+```gruel
 fn Counter() -> type {
     struct {
         value: i32,
@@ -219,7 +219,7 @@ fn main() -> i32 {
 
 Inside an anonymous struct's method definitions, `Self` refers to the anonymous struct type being defined. `Self` can be used as a type annotation, in struct literal expressions, and as a return type.
 
-```rue
+```gruel
 fn Pair(comptime T: type) -> type {
     struct {
         first: T,
@@ -236,7 +236,7 @@ fn Pair(comptime T: type) -> type {
 
 Methods inside anonymous structs can access comptime parameters from the enclosing function:
 
-```rue
+```gruel
 fn Array(comptime T: type, comptime N: i32) -> type {
     struct {
         len: i32,
@@ -252,7 +252,7 @@ fn Array(comptime T: type, comptime N: i32) -> type {
 
 Functions defined without a `self` parameter are associated functions, called using the `Type::function()` syntax:
 
-```rue
+```gruel
 fn Point() -> type {
     struct {
         x: i32,
@@ -283,7 +283,7 @@ Two anonymous struct types are structurally equal if and only if they have:
 
 Method bodies do not affect structural equality—only signatures matter.
 
-```rue
+```gruel
 fn A() -> type {
     struct { x: i32, fn get(self) -> i32 { self.x } }
 }

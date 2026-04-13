@@ -19,19 +19,19 @@ Implemented and stabilized (2026-01-11)
 
 ## Summary
 
-Add `checked` blocks, `unchecked` functions, and raw pointer types (`ptr const T`, `ptr mut T`) to Rue, enabling low-level operations necessary for implementing the standard library in Rue itself.
+Add `checked` blocks, `unchecked` functions, and raw pointer types (`ptr const T`, `ptr mut T`) to Gruel, enabling low-level operations necessary for implementing the standard library in Gruel itself.
 
 ## Context
 
 ### The Standard Library Problem
 
-Rue aims to provide a useful standard library with:
+Gruel aims to provide a useful standard library with:
 - Collections (Vec, HashMap)
 - I/O (File, stdin, stdout)
 - Process control (exit, args)
 - String operations (already partially implemented)
 
-Currently, all low-level operations are implemented in `rue-runtime` (Rust code) and exposed via intrinsics like `@dbg`, `@read_line`, `@parse_i32`, etc. This works but has limitations:
+Currently, all low-level operations are implemented in `gruel-runtime` (Rust code) and exposed via intrinsics like `@dbg`, `@read_line`, `@parse_i32`, etc. This works but has limitations:
 
 1. **Every OS capability needs a new intrinsic**: Adding file I/O means adding `@open`, `@read`, `@write`, `@close`, etc.
 2. **Cannot self-host the stdlib**: The standard library will always depend on Rust code
@@ -79,7 +79,7 @@ With raw pointers, users can implement their own allocators, data structures, an
 
 The `checked` keyword introduces a block where unchecked operations are permitted:
 
-```rue
+```gruel
 fn example() {
     // Normal code here
 
@@ -97,7 +97,7 @@ The name `checked` (rather than `unsafe`) reflects that the programmer is taking
 
 Functions that perform low-level operations can be marked `unchecked`:
 
-```rue
+```gruel
 unchecked fn dangerous_operation(p: ptr mut i32) {
     // Body is NOT implicitly a checked block
     // Must still use checked { } for unchecked operations
@@ -115,15 +115,15 @@ fn caller() {
 
 ### Raw Pointer Types
 
-Introduce two raw pointer types following Rue's keyword-based syntax:
+Introduce two raw pointer types following Gruel's keyword-based syntax:
 
-```rue
+```gruel
 ptr const T   // Pointer to immutable T
 ptr mut T     // Pointer to mutable T
 ```
 
 Why `ptr const`/`ptr mut` instead of `*const`/`*mut`:
-- Consistent with Rue's keyword-based approach (cf. `borrow`, `inout`)
+- Consistent with Gruel's keyword-based approach (cf. `borrow`, `inout`)
 - Avoids overloading `*` which is already the dereference operator
 - More readable, especially in complex types: `ptr mut ptr const i32` vs `*mut *const i32`
 
@@ -131,7 +131,7 @@ Why `ptr const`/`ptr mut` instead of `*const`/`*mut`:
 
 All pointer operations require a `checked` block:
 
-```rue
+```gruel
 checked {
     // Create pointer from integer address
     let p: ptr mut i32 = @int_to_ptr(0x1000);
@@ -173,7 +173,7 @@ checked {
 
 To get pointers from values, use `@raw` and `@raw_mut`:
 
-```rue
+```gruel
 // From a borrow - get const pointer
 fn print_impl(borrow s: String) {
     checked {
@@ -220,21 +220,21 @@ let p: *const i32 = &x as *const i32;  // Safe in Rust
 unsafe { *p }                           // Unsafe in Rust
 ```
 
-In Rue, we require `checked` for both creating and using pointers. This is more conservative but makes all pointer-related code visibly marked. The tradeoff:
+In Gruel, we require `checked` for both creating and using pointers. This is more conservative but makes all pointer-related code visibly marked. The tradeoff:
 
-| Operation | Rust | Rue |
+| Operation | Rust | Gruel |
 |-----------|------|-----|
 | Create pointer from value | Safe | Requires `checked` |
 | Pointer arithmetic | Safe | Requires `checked` |
 | Dereference pointer | Unsafe | Requires `checked` |
 
-Rue's approach means any code touching pointers is auditable by searching for `checked` blocks.
+Gruel's approach means any code touching pointers is auditable by searching for `checked` blocks.
 
 ### Syscall Intrinsic
 
 For OS interaction, add a syscall intrinsic:
 
-```rue
+```gruel
 checked {
     // Linux write(fd, buf, len)
     let result = @syscall(1, fd, buf_ptr, len);
@@ -254,9 +254,9 @@ A future ADR will address platform abstraction (`std.os.linux`, `std.os.macos`).
 
 ### Integration with Borrow Modes
 
-Raw pointers integrate with Rue's borrow system via `@raw` and `@raw_mut`:
+Raw pointers integrate with Gruel's borrow system via `@raw` and `@raw_mut`:
 
-```rue
+```gruel
 // Safe API - takes borrow, doesn't consume
 fn print(borrow s: String) {
     checked {
@@ -279,7 +279,7 @@ Without `@raw`, pointers could only be obtained from owned values, forcing APIs 
 
 Raw pointers work with comptime generics:
 
-```rue
+```gruel
 fn Vec(comptime T: type) -> type {
     struct {
         ptr: ptr mut T,
@@ -317,22 +317,22 @@ Inside `checked` blocks, the programmer is responsible for:
 
 The compiler does NOT verify these - that's what makes it unchecked.
 
-Outside `checked` blocks, all of Rue's safety guarantees still hold.
+Outside `checked` blocks, all of Gruel's safety guarantees still hold.
 
 ## Implementation Phases
 
-- [x] **Phase 1: Parser support** (rue-7qxm) - Add `checked` block syntax, `unchecked` function modifier, `ptr const`/`ptr mut` types
-- [x] **Phase 2: Type system** (rue-pb4z) - Pointer types in sema, checked block tracking
-- [x] **Phase 3: Pointer intrinsics** (rue-u9a4) - `@ptr_read`, `@ptr_write`, `@ptr_offset`, `@addr_of`, `@addr_of_mut`, `@ptr_to_int`, `@int_to_ptr`
-- [x] **Phase 4: Syscall intrinsic** (rue-pwyw) - `@syscall` for direct OS calls
-- [x] **Phase 5: Codegen** (rue-bk7s) - Generate correct code for pointer operations in both x86_64 and aarch64 backends
-- [ ] **Phase 6: Stdlib foundation** (rue-i3ti) - Implement basic Vec and I/O using unchecked code (follow-on work)
+- [x] **Phase 1: Parser support** (gruel-7qxm) - Add `checked` block syntax, `unchecked` function modifier, `ptr const`/`ptr mut` types
+- [x] **Phase 2: Type system** (gruel-pb4z) - Pointer types in sema, checked block tracking
+- [x] **Phase 3: Pointer intrinsics** (gruel-u9a4) - `@ptr_read`, `@ptr_write`, `@ptr_offset`, `@addr_of`, `@addr_of_mut`, `@ptr_to_int`, `@int_to_ptr`
+- [x] **Phase 4: Syscall intrinsic** (gruel-pwyw) - `@syscall` for direct OS calls
+- [x] **Phase 5: Codegen** (gruel-bk7s) - Generate correct code for pointer operations in both x86_64 and aarch64 backends
+- [ ] **Phase 6: Stdlib foundation** (gruel-i3ti) - Implement basic Vec and I/O using unchecked code (follow-on work)
 
 ## Consequences
 
 ### Positive
 
-- **Self-hosting path**: Stdlib can be written in Rue
+- **Self-hosting path**: Stdlib can be written in Gruel
 - **User extensibility**: Advanced users can write low-level code
 - **Minimal intrinsics**: Don't need a new intrinsic for every OS operation
 - **FFI foundation**: Groundwork for calling C libraries
@@ -355,13 +355,13 @@ Outside `checked` blocks, all of Rue's safety guarantees still hold.
 
 1. **Should pointers be nullable by default?** Yes, with `@is_null` check.
 
-2. **Pointer-to-borrow conversion?** No. Rue doesn't have the lifetime tracking needed to make this safe.
+2. **Pointer-to-borrow conversion?** No. Gruel doesn't have the lifetime tracking needed to make this safe.
 
 3. **Platform abstraction for syscalls?** Will be addressed in a follow-up ADR with `std.os` wrappers.
 
 4. **Should `unchecked fn` require `checked { }` at call site?** Yes.
 
-5. **Sized types only?** Yes. Rue doesn't have unsized types yet.
+5. **Sized types only?** Yes. Gruel doesn't have unsized types yet.
 
 ## Future Work
 
@@ -377,6 +377,6 @@ Outside `checked` blocks, all of Rue's safety guarantees still hold.
 - [Rust RFC: unsafe_op_in_unsafe_fn](https://rust-lang.github.io/rfcs/2585-unsafe-block-in-unsafe-fn.html) - Fixing the implicit unsafe body mistake
 - [Zig Pointers](https://ziglang.org/documentation/master/#Pointers) - Zig's pointer types
 - [Swift UnsafePointer](https://developer.apple.com/documentation/swift/unsafepointer) - Swift's unsafe types
-- [ADR-0008: Affine Types and MVS](0008-affine-types-mvs.md) - Rue's ownership model
-- [ADR-0013: Borrowing Modes](0013-borrowing-modes.md) - Rue's borrow system
+- [ADR-0008: Affine Types and MVS](0008-affine-types-mvs.md) - Gruel's ownership model
+- [ADR-0013: Borrowing Modes](0013-borrowing-modes.md) - Gruel's borrow system
 - [ADR-0025: Comptime](0025-comptime.md) - Generic type parameters

@@ -1,6 +1,6 @@
 # Development Guide
 
-This document covers how to build, test, and contribute to the Rue compiler.
+This document covers how to build, test, and contribute to the Gruel compiler.
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ This document covers how to build, test, and contribute to the Rue compiler.
 
 ### Platform-Specific
 
-The Rust toolchain is downloaded automatically by Buck2 (hermetic build). However, running Rue programs has platform requirements:
+The Rust toolchain is downloaded automatically by Buck2 (hermetic build). However, running Gruel programs has platform requirements:
 
 | Platform | Requirements |
 |----------|--------------|
@@ -18,7 +18,7 @@ The Rust toolchain is downloaded automatically by Buck2 (hermetic build). Howeve
 | macOS ARM64 | Xcode Command Line Tools (`xcode-select --install`) |
 | macOS x86_64 | Xcode Command Line Tools (`xcode-select --install`) |
 
-**Why macOS needs Xcode**: The Rue compiler uses the system `clang` to link executables on macOS. On Linux, Rue uses its own internal ELF linker.
+**Why macOS needs Xcode**: The Gruel compiler uses the system `clang` to link executables on macOS. On Linux, Gruel uses its own internal ELF linker.
 
 ### Optional (for IDE support)
 
@@ -27,22 +27,22 @@ The Rust toolchain is downloaded automatically by Buck2 (hermetic build). Howeve
 ## Repository Structure
 
 ```
-rue/
+gruel/
 ├── crates/
-│   ├── rue/           # CLI binary
-│   ├── rue-air/       # Typed IR + semantic analysis
-│   ├── rue-codegen/   # Machine code generation
-│   ├── rue-compiler/  # Pipeline orchestration
-│   ├── rue-error/     # Error types
-│   ├── rue-lexer/     # Tokenizer
-│   ├── rue-linker/    # Object file creation and linking
-│   ├── rue-parser/    # AST construction
-│   ├── rue-rir/       # Untyped IR
-│   ├── rue-runtime/    # The runtime
-│   ├── rue-span/      # Source locations
-│   └── rue-spec/      # Specification test runner
+│   ├── gruel/           # CLI binary
+│   ├── gruel-air/       # Typed IR + semantic analysis
+│   ├── gruel-codegen/   # Machine code generation
+│   ├── gruel-compiler/  # Pipeline orchestration
+│   ├── gruel-error/     # Error types
+│   ├── gruel-lexer/     # Tokenizer
+│   ├── gruel-linker/    # Object file creation and linking
+│   ├── gruel-parser/    # AST construction
+│   ├── gruel-rir/       # Untyped IR
+│   ├── gruel-runtime/    # The runtime
+│   ├── gruel-span/      # Source locations
+│   └── gruel-spec/      # Specification test runner
 ├── docs/              # Documentation
-├── examples/          # Example .rue programs
+├── examples/          # Example .gruel programs
 ├── third-party/       # Vendored dependencies
 └── toolchains/        # Buck2 toolchain definitions
 ```
@@ -58,15 +58,15 @@ rue/
 ### Build the Compiler
 
 ```bash
-./buck2 build //crates/rue:rue
+./buck2 build //crates/gruel:gruel
 ```
 
-The binary is output to `buck-out/v2/gen/root/crates/rue/__rue__/rue`.
+The binary is output to `buck-out/v2/gen/root/crates/gruel/__gruel__/gruel`.
 
 ### Build a Specific Crate
 
 ```bash
-./buck2 build //crates/rue-lexer:rue-lexer
+./buck2 build //crates/gruel-lexer:gruel-lexer
 ```
 
 ## Testing
@@ -79,7 +79,7 @@ The binary is output to `buck-out/v2/gen/root/crates/rue/__rue__/rue`.
 
 This runs:
 1. Unit tests for all crates (`buck2 test`)
-2. Specification tests (`buck2 run //crates/rue-spec:rue-spec`)
+2. Specification tests (`buck2 run //crates/gruel-spec:gruel-spec`)
 
 ### Run Unit Tests Only
 
@@ -90,20 +90,20 @@ This runs:
 ### Run Spec Tests Only
 
 ```bash
-./buck2 run //crates/rue-spec:rue-spec
+./buck2 run //crates/gruel-spec:gruel-spec
 ```
 
 ### Run a Specific Test
 
 ```bash
-./buck2 test //crates/rue-lexer:rue-lexer-test
+./buck2 test //crates/gruel-lexer:gruel-lexer-test
 ```
 
 ### Filter Spec Tests
 
 ```bash
-./buck2 run //crates/rue-spec:rue-spec -- "1.1"  # Run section 1.1 tests
-./buck2 run //crates/rue-spec:rue-spec -- "zero" # Run tests matching "zero"
+./buck2 run //crates/gruel-spec:gruel-spec -- "1.1"  # Run section 1.1 tests
+./buck2 run //crates/gruel-spec:gruel-spec -- "zero" # Run tests matching "zero"
 ```
 
 ## Using the Compiler
@@ -111,7 +111,7 @@ This runs:
 ### Compile a Program
 
 ```bash
-./buck2 run //crates/rue:rue -- source.rue output
+./buck2 run //crates/gruel:gruel -- source.gruel output
 ./output
 echo $?  # Check exit code
 ```
@@ -120,13 +120,13 @@ echo $?  # Check exit code
 
 ```bash
 # Dump RIR (untyped IR)
-./buck2 run //crates/rue:rue -- --dump-rir source.rue
+./buck2 run //crates/gruel:gruel -- --dump-rir source.gruel
 
 # Dump AIR (typed IR)
-./buck2 run //crates/rue:rue -- --dump-air source.rue
+./buck2 run //crates/gruel:gruel -- --dump-air source.gruel
 
 # Dump MIR (machine IR before register allocation)
-./buck2 run //crates/rue:rue -- --dump-mir source.rue
+./buck2 run //crates/gruel:gruel -- --dump-mir source.gruel
 ```
 
 ## Adding Tests
@@ -151,7 +151,7 @@ Ensure the crate has a `rust_test` target in its `BUCK` file.
 
 ### Specification Tests
 
-Add test cases to `.toml` files in `crates/rue-spec/cases/`:
+Add test cases to `.toml` files in `crates/gruel-spec/cases/`:
 
 ```toml
 [[case]]
@@ -218,23 +218,23 @@ jj commit -m "Add feature X"
 Use the `--dump-*` flags to see the IR at each compilation stage:
 
 ```bash
-echo 'fn main() -> i32 { 42 }' > /tmp/test.rue
-./buck2 run //crates/rue:rue -- --dump-rir /tmp/test.rue
-./buck2 run //crates/rue:rue -- --dump-air /tmp/test.rue
-./buck2 run //crates/rue:rue -- --dump-mir /tmp/test.rue
+echo 'fn main() -> i32 { 42 }' > /tmp/test.gruel
+./buck2 run //crates/gruel:gruel -- --dump-rir /tmp/test.gruel
+./buck2 run //crates/gruel:gruel -- --dump-air /tmp/test.gruel
+./buck2 run //crates/gruel:gruel -- --dump-mir /tmp/test.gruel
 ```
 
 ### Disassemble Output
 
 ```bash
-./buck2 run //crates/rue:rue -- /tmp/test.rue /tmp/test
+./buck2 run //crates/gruel:gruel -- /tmp/test.gruel /tmp/test
 objdump -d /tmp/test
 ```
 
 ### Run Under GDB
 
 ```bash
-./buck2 run //crates/rue:rue -- /tmp/test.rue /tmp/test
+./buck2 run //crates/gruel:gruel -- /tmp/test.gruel /tmp/test
 gdb /tmp/test
 ```
 
@@ -242,7 +242,7 @@ gdb /tmp/test
 
 ### Add a New Crate
 
-1. Create directory `crates/rue-newcrate/`
+1. Create directory `crates/gruel-newcrate/`
 2. Add `BUCK` file with `rust_library` and `rust_test` targets
 3. Add to dependencies in consuming crates' `BUCK` files
 
@@ -252,9 +252,9 @@ Dependencies are vendored in `third-party/`. See existing setup for patterns.
 
 ### Modify the Grammar
 
-1. Update `rue-lexer` if new tokens needed
-2. Update `rue-parser` for new syntax
-3. Update `rue-rir` for new IR instructions
-4. Update `rue-air` for typed versions
-5. Update `rue-codegen` for code generation
+1. Update `gruel-lexer` if new tokens needed
+2. Update `gruel-parser` for new syntax
+3. Update `gruel-rir` for new IR instructions
+4. Update `gruel-air` for typed versions
+5. Update `gruel-codegen` for code generation
 6. Add spec tests for new behavior

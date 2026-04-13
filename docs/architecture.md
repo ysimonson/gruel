@@ -1,71 +1,71 @@
-# Rue Compiler Architecture
+# Gruel Compiler Architecture
 
-This document describes the internal architecture of the Rue compiler.
+This document describes the internal architecture of the Gruel compiler.
 
 ## Overview
 
-Rue compiles source code through a series of intermediate representations (IRs), each serving a specific purpose in the compilation pipeline:
+Gruel compiles source code through a series of intermediate representations (IRs), each serving a specific purpose in the compilation pipeline:
 
 ```
 Source Code
     │
     ▼
 ┌─────────┐
-│  Lexer  │  rue-lexer: Tokenizes source into tokens
+│  Lexer  │  gruel-lexer: Tokenizes source into tokens
 └────┬────┘
      │
      ▼
 ┌─────────┐
-│ Parser  │  rue-parser: Builds AST from tokens
+│ Parser  │  gruel-parser: Builds AST from tokens
 └────┬────┘
      │
      ▼
 ┌─────────┐
-│ AstGen  │  rue-rir: Lowers AST to RIR (untyped IR)
+│ AstGen  │  gruel-rir: Lowers AST to RIR (untyped IR)
 └────┬────┘
      │
      ▼
 ┌─────────┐
-│  Sema   │  rue-air: Semantic analysis, produces AIR (typed IR)
+│  Sema   │  gruel-air: Semantic analysis, produces AIR (typed IR)
 └────┬────┘
      │
      ▼
 ┌─────────┐
-│  Lower  │  rue-codegen: Lowers AIR to X86Mir (machine IR)
+│  Lower  │  gruel-codegen: Lowers AIR to X86Mir (machine IR)
 └────┬────┘
      │
      ▼
 ┌─────────┐
-│RegAlloc │  rue-codegen: Maps virtual registers to physical
+│RegAlloc │  gruel-codegen: Maps virtual registers to physical
 └────┬────┘
      │
      ▼
 ┌─────────┐
-│  Emit   │  rue-codegen: Emits machine code bytes
+│  Emit   │  gruel-codegen: Emits machine code bytes
 └────┬────┘
      │
      ▼
 ┌─────────┐
-│ Object  │  rue-linker: Creates relocatable object file
+│ Object  │  gruel-linker: Creates relocatable object file
 └────┬────┘
      │
      ▼
 ┌─────────┐
-│  Link   │  rue-linker: Links objects into ELF executable
+│  Link   │  gruel-linker: Links objects into ELF executable
 └─────────┘
 ```
 
 ## Crate Responsibilities
 
-### `rue-lexer`
+### `gruel-lexer`
 Converts source text into a stream of tokens. Each token carries:
 - Kind (keyword, identifier, literal, punctuation)
 - Span (start/end byte offsets for error reporting)
 
-### `rue-parser`
+### `gruel-parser`
 Builds an Abstract Syntax Tree (AST) from tokens. The AST represents the syntactic structure but doesn't resolve names or types.
 
-### `rue-rir` (Rue Intermediate Representation)
+### `gruel-rir` (Gruel Intermediate Representation)
 **Purpose:** First IR after parsing, still untyped.
 
 The RIR is inspired by Zig's ZIR. It linearizes the AST into a dense array of instructions referenced by index. This representation is:
@@ -78,7 +78,7 @@ Key types:
 - `InstRef` - Index into the instruction array
 - `InstData` - The actual instruction payload
 
-### `rue-air` (Analyzed Intermediate Representation)
+### `gruel-air` (Analyzed Intermediate Representation)
 **Purpose:** Typed IR after semantic analysis.
 
 AIR is the result of semantic analysis (sema). It:
@@ -92,7 +92,7 @@ Key types:
 - `AirInstData` - Typed instruction variants (Const, Ret, etc.)
 - `Type` - Type information (I32, etc.)
 
-### `rue-codegen`
+### `gruel-codegen`
 **Purpose:** Generate machine code from AIR.
 
 The codegen uses a multi-phase approach:
@@ -113,31 +113,31 @@ Key types:
 - `Operand` - Virtual register, physical register, or immediate
 - `X86Inst` - Individual machine instruction
 
-### `rue-linker`
-A minimal linker for the Rue compiler. Handles:
+### `gruel-linker`
+A minimal linker for the Gruel compiler. Handles:
 - **Object file creation** (`ObjectBuilder`): Creates ELF64 relocatable object files (.o) from machine code
 - **Object file parsing** (`ObjectFile`): Reads ELF64 relocatable objects
 - **Linking** (`Linker`): Combines object files, resolves symbols, applies relocations, and produces a final ELF64 executable
 
 The linker supports standard x86-64 relocation types (PC32, PLT32, Abs64, Abs32, Abs32S) and handles symbol resolution including weak symbols. This architecture enables future multi-file compilation and linking with external libraries.
 
-### `rue-compiler`
+### `gruel-compiler`
 Orchestrates the full pipeline. Provides:
 - `compile(source) -> ELF bytes` - Full compilation
 - `compile_frontend(source) -> CompileState` - Frontend compilation (through CFG) for debugging
 
-### `rue-error`
+### `gruel-error`
 Shared error types and reporting infrastructure.
 
-### `rue-span`
+### `gruel-span`
 Source location tracking (`Span` type) used throughout for error messages.
 
-### `rue`
+### `gruel`
 The CLI binary. Supports:
-- Normal compilation: `rue source.rue [output]`
+- Normal compilation: `gruel source.gruel [output]`
 - IR dumps: `--dump-rir`, `--dump-air`, `--dump-mir`
 
-### `rue-spec`
+### `gruel-spec`
 Test harness for specification tests. Runs `.toml` test cases that verify:
 - Exit codes
 - Compilation failures
@@ -205,4 +205,4 @@ B8 3C 00 00 00       mov eax, 60
 
 3. **Explicit Phases**: Each transformation is explicit and inspectable. The `--dump-*` flags let you see the IR at each stage.
 
-4. **Minimal Runtime**: Rue currently produces standalone executables with no runtime dependencies. Exit is via direct syscall.
+4. **Minimal Runtime**: Gruel currently produces standalone executables with no runtime dependencies. Exit is via direct syscall.

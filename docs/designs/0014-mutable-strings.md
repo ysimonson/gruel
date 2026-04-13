@@ -25,9 +25,9 @@ Add a mutable `String` type that owns a heap-allocated byte buffer. String liter
 
 ### Current String Situation
 
-Rue currently has string literals but they're severely limited:
+Gruel currently has string literals but they're severely limited:
 
-```rue
+```gruel
 let s = "hello";      // Type: String (but immutable, points to rodata)
 @dbg_str(s);          // Can print
 if s == "hello" { }   // Can compare
@@ -53,11 +53,11 @@ Following ADR-0008 (Affine Types and MVS), strings should be values:
 - **Mutation via ownership**: You can mutate what you own
 - **Explicit duplication**: Use `.clone()` if you need a copy
 
-This differs from languages with garbage collection where strings are often immutable and cheap to share (Java, Python) or reference-counted (Swift). In Rue, a String is like Rust's `String`: an owned, mutable buffer.
+This differs from languages with garbage collection where strings are often immutable and cheap to share (Java, Python) or reference-counted (Swift). In Gruel, a String is like Rust's `String`: an owned, mutable buffer.
 
 ### Byte String Semantics (like bstr/Go)
 
-Rue strings are **conventionally UTF-8** rather than strictly validated:
+Gruel strings are **conventionally UTF-8** rather than strictly validated:
 
 - String literals are valid UTF-8 (validated at compile time)
 - At runtime, strings are byte sequences
@@ -74,14 +74,14 @@ This feature builds on infrastructure that is already implemented:
 - **ADR-0008 (Affine Types)**: Strings are affine, move on use ✓
 - **ADR-0009 (Struct Methods)**: Methods on String ✓
 - **ADR-0010 (Destructors)**: String destructor frees the buffer ✓
-- **ADR-0011 (Runtime Heap)**: `__rue_alloc`/`__rue_free` for buffer management ✓
+- **ADR-0011 (Runtime Heap)**: `__gruel_alloc`/`__gruel_free` for buffer management ✓
 - **ADR-0013 (Borrowing Modes)**: `borrow self` for query methods ✓
 
 ## Decision
 
 ### String Representation
 
-```rue
+```gruel
 // Conceptually, though users don't see the internals:
 struct String {
     ptr: *mut u8,    // Pointer to data (heap or rodata)
@@ -98,7 +98,7 @@ Size: 24 bytes (3 × 8-byte fields).
 
 There is only one `String` type. Literals simply have `cap=0`:
 
-```rue
+```gruel
 let s = "hello";           // cap=0, ptr points to rodata, len=5
 var t = "world";           // cap=0, ptr points to rodata, len=5
 t.push_str("!");           // push_str promotes to heap, then appends
@@ -120,7 +120,7 @@ This is transparent to the user - there's no "owned" vs "borrowed" distinction.
 - **Affine**: Consumed on use, cannot be used twice without explicit clone
 - **Has destructor**: Frees heap buffer when dropped (if cap > 0)
 
-```rue
+```gruel
 fn takes_string(s: String) { ... }
 
 fn main() -> i32 {
@@ -137,7 +137,7 @@ All operations are methods via `impl String`:
 
 #### Construction
 
-```rue
+```gruel
 impl String {
     // Empty string (no allocation until first push)
     fn new() -> String { ... }
@@ -153,7 +153,7 @@ let s = String::with_capacity(1024);
 
 #### Query Methods
 
-```rue
+```gruel
 impl String {
     // Length in bytes
     fn len(borrow self) -> u64 { ... }
@@ -170,7 +170,7 @@ These borrow `self` (read-only access) so the string remains valid after the cal
 
 #### Mutation Methods
 
-```rue
+```gruel
 impl String {
     // Append bytes from another string
     fn push_str(inout self, other: String) { ... }
@@ -195,7 +195,7 @@ s.push(33);  // '!'
 
 #### Clone
 
-```rue
+```gruel
 impl String {
     // Deep copy
     fn clone(borrow self) -> String { ... }
@@ -213,18 +213,18 @@ Clone borrows `self` so the original remains valid. It's explicit (not implicit 
 
 When a String goes out of scope:
 
-```rue
+```gruel
 fn example() {
     var s = "hello";
     s.push_str("!");  // Promotes to heap
-}  // __rue_drop_String called: frees heap buffer
+}  // __gruel_drop_String called: frees heap buffer
 ```
 
 Destructor logic:
 ```rust
-fn __rue_drop_String(ptr: *mut u8, len: u64, cap: u64) {
+fn __gruel_drop_String(ptr: *mut u8, len: u64, cap: u64) {
     if cap > 0 {
-        __rue_free(ptr, cap, 1);  // Only free heap strings
+        __gruel_free(ptr, cap, 1);  // Only free heap strings
     }
     // rodata strings (cap == 0) are not freed
 }
@@ -250,20 +250,20 @@ String comparison (`==`, `!=`) uses an optimized algorithm:
 
 This optimization is significant for literal comparisons:
 
-```rue
+```gruel
 let s = "hello";
 if s == "hello" {  // Same rodata pointer - fast path!
     // ...
 }
 ```
 
-The runtime function `__rue_str_eq` implements this logic.
+The runtime function `__gruel_str_eq` implements this logic.
 
 ### Rodata to Heap Promotion
 
 When a mutation method is called on a rodata string (cap == 0, but ptr is non-null):
 
-```rue
+```gruel
 let s = "hello";     // rodata: cap=0, len=5
 var t = s;           // Still rodata (no copy needed for move)
 t.push_str("!");     // Promotes to heap: allocate, copy, then append
@@ -273,15 +273,15 @@ The promotion happens transparently inside mutation methods.
 
 ## Implementation Phases
 
-Epic: rue-0hef
+Epic: gruel-0hef
 
 **Note**: As of 2025-12-27, mutable strings are now stable. All phases are complete.
 
-### Phase 1: Specification and Feature Gate - rue-0hef.1 (COMPLETE)
+### Phase 1: Specification and Feature Gate - gruel-0hef.1 (COMPLETE)
 
 Write the specification first:
 
-- [x] Add `MutableStrings` to `PreviewFeature` enum in `rue-error`
+- [x] Add `MutableStrings` to `PreviewFeature` enum in `gruel-error`
 - [x] Add spec section 3.10 for mutable strings
 - [x] Define String representation (ptr, len, cap)
 - [x] Define all method signatures and semantics
@@ -289,7 +289,7 @@ Write the specification first:
 
 **Testable**: Spec tests exist and are ignored (preview feature not yet implemented).
 
-### Phase 2: Three-Field String Representation - rue-0hef.2 (COMPLETE)
+### Phase 2: Three-Field String Representation - gruel-0hef.2 (COMPLETE)
 
 Extend String from 2 fields (ptr, len) to 3 fields (ptr, len, cap):
 
@@ -300,29 +300,29 @@ Extend String from 2 fields (ptr, len) to 3 fields (ptr, len, cap):
 
 **Testable**: Existing string tests still pass with new representation.
 
-### Phase 3: Runtime String Functions - rue-0hef.3 (COMPLETE)
+### Phase 3: Runtime String Functions - gruel-0hef.3 (COMPLETE)
 
 Add string-specific functions to runtime:
 
-- [x] `__rue_string_alloc(cap: u64) -> *mut u8` - allocate buffer (min 16 bytes)
-- [x] `__rue_string_realloc(ptr: *mut u8, old_cap: u64, new_cap: u64) -> *mut u8` - grow buffer
-- [x] `__rue_string_clone(ptr: *const u8, len: u64) -> *mut u8` - deep copy
-- [x] `__rue_drop_String(ptr: *mut u8, len: u64, cap: u64)` - free if heap (cap > 0)
+- [x] `__gruel_string_alloc(cap: u64) -> *mut u8` - allocate buffer (min 16 bytes)
+- [x] `__gruel_string_realloc(ptr: *mut u8, old_cap: u64, new_cap: u64) -> *mut u8` - grow buffer
+- [x] `__gruel_string_clone(ptr: *const u8, len: u64) -> *mut u8` - deep copy
+- [x] `__gruel_drop_String(ptr: *mut u8, len: u64, cap: u64)` - free if heap (cap > 0)
 - [x] Growth strategy implementation (2x, min 16)
 
 **Testable**: Unit tests in Rust for allocation/reallocation.
 
-### Phase 4: String Destructor Integration - rue-0hef.4 (COMPLETE)
+### Phase 4: String Destructor Integration - gruel-0hef.4 (COMPLETE)
 
 Wire String type to use destructors:
 
 - [x] Mark String as `needs_drop` in type system
 - [x] Drop elaboration inserts Drop instructions for String
-- [x] Codegen calls `__rue_drop_String`
+- [x] Codegen calls `__gruel_drop_String`
 
 **Testable**: Valgrind-clean string allocation and deallocation.
 
-### Phase 5: Construction Methods - rue-0hef.5 (COMPLETE)
+### Phase 5: Construction Methods - gruel-0hef.5 (COMPLETE)
 
 Add `impl String` with construction (gated):
 
@@ -331,7 +331,7 @@ Add `impl String` with construction (gated):
 
 **Testable**: Create strings, verify cap is set correctly.
 
-### Phase 6: Query Methods - rue-0hef.6 (COMPLETE)
+### Phase 6: Query Methods - gruel-0hef.6 (COMPLETE)
 
 Add query methods (gated):
 
@@ -341,7 +341,7 @@ Add query methods (gated):
 
 **Testable**: Query methods return correct values.
 
-### Phase 7: Mutation Methods - rue-0hef.7 (COMPLETE)
+### Phase 7: Mutation Methods - gruel-0hef.7 (COMPLETE)
 
 Add mutation methods with `inout self` (gated):
 
@@ -354,7 +354,7 @@ Add mutation methods with `inout self` (gated):
 
 **Testable**: Build strings through multiple appends.
 
-### Phase 8: Clone Method - rue-0hef.8 (COMPLETE)
+### Phase 8: Clone Method - gruel-0hef.8 (COMPLETE)
 
 Add explicit cloning (gated):
 
@@ -363,13 +363,13 @@ Add explicit cloning (gated):
 
 **Testable**: Clone a string, verify both are independent.
 
-### Phase 9: Equality Optimization - rue-0hef.9 (COMPLETE)
+### Phase 9: Equality Optimization - gruel-0hef.9 (COMPLETE)
 
 Optimize string comparison:
 
 - [x] If both strings have same ptr and len, return true immediately (pointer equality)
 - [x] Otherwise fall back to byte-by-byte comparison
-- [x] Update `__rue_str_eq` runtime function
+- [x] Update `__gruel_str_eq` runtime function
 
 **Testable**: Comparing a literal to itself uses fast path.
 

@@ -30,7 +30,7 @@ A return expression has the never type `!` because it never produces a local val
 
 {{ rule(id="4.9:6") }}
 
-```rue
+```gruel
 fn abs(x: i32) -> i32 {
     if x < 0 {
         return 0 - x;
@@ -53,7 +53,7 @@ Because return has type `!`, it can appear in contexts that expect any type.
 
 {{ rule(id="4.9:9") }}
 
-```rue
+```gruel
 fn test(x: i32) -> i32 {
     // `return 100` has type !, which coerces to i32
     let y = if x > 5 { return 100 } else { x };
@@ -67,7 +67,7 @@ fn main() -> i32 {
 
 {{ rule(id="4.9:10") }}
 
-```rue
+```gruel
 fn do_nothing() {
     return;  // equivalent to return ()
 }

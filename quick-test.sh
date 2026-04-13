@@ -14,17 +14,17 @@ cd "$(dirname "$0")"
 
 echo "Running unit tests (quick mode)..."
 ./buck2 test \
-    //crates/rue-span:rue-span-test \
-    //crates/rue-error:rue-error-test \
-    //crates/rue-target:rue-target-test \
-    //crates/rue-lexer:rue-lexer-test \
-    //crates/rue-parser:rue-parser-test \
-    //crates/rue-rir:rue-rir-test \
-    //crates/rue-cfg:rue-cfg-test \
-    //crates/rue-air:rue-air-test \
-    //crates/rue-codegen:rue-codegen-test \
-    //crates/rue-linker:rue-linker-test \
-    //crates/rue-compiler:rue-compiler-test
+    //crates/gruel-span:gruel-span-test \
+    //crates/gruel-error:gruel-error-test \
+    //crates/gruel-target:gruel-target-test \
+    //crates/gruel-lexer:gruel-lexer-test \
+    //crates/gruel-parser:gruel-parser-test \
+    //crates/gruel-rir:gruel-rir-test \
+    //crates/gruel-cfg:gruel-cfg-test \
+    //crates/gruel-air:gruel-air-test \
+    //crates/gruel-codegen:gruel-codegen-test \
+    //crates/gruel-linker:gruel-linker-test \
+    //crates/gruel-compiler:gruel-compiler-test
 
 echo ""
 echo "Unit tests passed! Run ./test.sh for full verification before committing."

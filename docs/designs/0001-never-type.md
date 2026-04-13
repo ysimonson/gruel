@@ -26,9 +26,9 @@ Add a `Never` type that represents computations that never produce a value, allo
 
 ## Context
 
-Rue currently treats `break` and `continue` as statements that produce `Unit` type. This is limiting because it prevents patterns like:
+Gruel currently treats `break` and `continue` as statements that produce `Unit` type. This is limiting because it prevents patterns like:
 
-```rue
+```gruel
 let y = if condition { break } else { x };
 ```
 
@@ -36,13 +36,13 @@ In languages like Rust, this works because `break` has type `!` (never), which c
 
 ## Decision
 
-Add a `Never` type to Rue's type system that represents computations that never produce a value (they diverge). The never type can coerce to any other type during type unification.
+Add a `Never` type to Gruel's type system that represents computations that never produce a value (they diverge). The never type can coerce to any other type during type unification.
 
 ### Type System Changes
 
 #### 1. Extend the Type enum
 
-In `rue-air/src/types.rs`:
+In `gruel-air/src/types.rs`:
 
 ```rust
 pub enum Type {
@@ -90,7 +90,7 @@ The key insight is that the current type unification uses strict equality (`==`)
 
 #### 1. Update branch type unification
 
-In `rue-air/src/sema.rs`, the branch handling currently does:
+In `gruel-air/src/sema.rs`, the branch handling currently does:
 
 ```rust
 // Current code

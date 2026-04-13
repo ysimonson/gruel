@@ -19,16 +19,16 @@ Implemented
 
 ## Summary
 
-Enable the Rue compiler to accept multiple source files and compile them into a single executable. This is a foundational capability that unblocks real-world programs that don't fit in a single file, and lays groundwork for a future module system.
+Enable the Gruel compiler to accept multiple source files and compile them into a single executable. This is a foundational capability that unblocks real-world programs that don't fit in a single file, and lays groundwork for a future module system.
 
 ## Context
 
 ### The Problem: Single-File Limitation
 
-Today, the Rue compiler accepts exactly one source file:
+Today, the Gruel compiler accepts exactly one source file:
 
 ```bash
-rue source.rue output
+gruel source.gruel output
 ```
 
 This works for learning and small programs, but becomes limiting quickly:
@@ -40,7 +40,7 @@ This works for learning and small programs, but becomes limiting quickly:
 ### What We Need
 
 A minimal multi-file compilation model that:
-1. Accepts multiple `.rue` files on the command line
+1. Accepts multiple `.gruel` files on the command line
 2. Compiles each file independently
 3. Links them together into a single executable
 4. Handles cross-file function calls
@@ -52,7 +52,7 @@ This ADR does **not** address:
 - **Visibility/privacy** — all symbols are public for now
 - **Namespacing** — all symbols share a flat global namespace
 - **Incremental compilation** — we rebuild everything each time
-- **Build system integration** — no `rue.toml` or package manifest
+- **Build system integration** — no `gruel.toml` or package manifest
 
 ### Why Flat Namespace First?
 
@@ -63,7 +63,7 @@ A flat namespace (all functions globally visible, no `mod`/`use`) is simpler to 
 3. **Tests the linker** — exercises cross-file symbol resolution
 4. **Foundation for modules** — the plumbing we build here (multi-file parsing, symbol merging, cross-file linking) is reused when modules land
 
-The UX is admittedly awkward (`rue a.rue b.rue c.rue -o out`), but this is a stepping stone, not the final design.
+The UX is admittedly awkward (`gruel a.gruel b.gruel c.gruel -o out`), but this is a stepping stone, not the final design.
 
 ## Decision
 
@@ -71,17 +71,17 @@ The UX is admittedly awkward (`rue a.rue b.rue c.rue -o out`), but this is a ste
 
 ```bash
 # Single file (unchanged)
-rue source.rue output
+gruel source.gruel output
 
 # Multiple files (new)
-rue main.rue utils.rue math.rue -o program
+gruel main.gruel utils.gruel math.gruel -o program
 
 # Glob patterns via shell expansion
-rue src/*.rue -o program
+gruel src/*.gruel -o program
 
 # Explicit output required with multiple inputs
-rue a.rue b.rue              # Error: multiple inputs require -o
-rue a.rue b.rue -o out       # OK
+gruel a.gruel b.gruel              # Error: multiple inputs require -o
+gruel a.gruel b.gruel -o out       # OK
 ```
 
 The `-o` flag becomes required when multiple source files are provided, to avoid ambiguity about which positional argument is the output.
@@ -90,7 +90,7 @@ The `-o` flag becomes required when multiple source files are provided, to avoid
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  main.rue   │     │  utils.rue  │     │  math.rue   │
+│  main.gruel   │     │  utils.gruel  │     │  math.gruel   │
 └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
        │                   │                   │
        ▼                   ▼                   ▼
@@ -135,7 +135,7 @@ The `-o` flag becomes required when multiple source files are provided, to avoid
 
 ### Implementation Details
 
-#### 1. CLI Changes (`rue/src/main.rs`)
+#### 1. CLI Changes (`gruel/src/main.rs`)
 
 ```rust
 struct Options {
@@ -150,7 +150,7 @@ Argument parsing:
 - If multiple sources and no `-o`, error
 - If single source and no `-o`, use `a.out` (unchanged behavior)
 
-#### 2. CompileOptions Changes (`rue-compiler/src/lib.rs`)
+#### 2. CompileOptions Changes (`gruel-compiler/src/lib.rs`)
 
 ```rust
 /// Input to the compiler - either single source or multiple files.
@@ -233,19 +233,19 @@ Errors must include the source file path:
 
 ```
 error[E0001]: type mismatch
-  --> utils.rue:15:12
+  --> utils.gruel:15:12
    |
 15 |     return "hello";
    |            ^^^^^^^ expected i32, found String
 
 error[E0002]: duplicate function definition
-  --> math.rue:5:1
+  --> math.gruel:5:1
    |
  5 | fn add(a: i32, b: i32) -> i32 { a + b }
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
 note: first defined here
-  --> utils.rue:10:1
+  --> utils.gruel:10:1
    |
 10 | fn add(x: i32, y: i32) -> i32 { x + y }
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -262,7 +262,7 @@ The linker already supports multiple object files — one per function. Multi-fi
 Single-file compilation remains unchanged:
 
 ```bash
-rue source.rue output    # Still works exactly as before
+gruel source.gruel output    # Still works exactly as before
 ```
 
 The new multi-file mode is additive.
@@ -285,7 +285,7 @@ The `main()` function must exist in exactly one of the input files:
 - Update argument parsing tests
 - Read all source files into memory
 
-**Verification**: `rue a.rue b.rue -o out` reads both files but only compiles `a.rue`.
+**Verification**: `gruel a.gruel b.gruel -o out` reads both files but only compiles `a.gruel`.
 
 ### Phase 2: Parallel Parsing
 
@@ -321,7 +321,7 @@ The `main()` function must exist in exactly one of the input files:
 - Struct and enum types visible across files
 - Update tests
 
-**Verification**: `main.rue` can call `helper()` defined in `utils.rue`.
+**Verification**: `main.gruel` can call `helper()` defined in `utils.gruel`.
 
 ### Phase 5: Documentation and Polish ✓
 
@@ -359,7 +359,7 @@ The `main()` function must exist in exactly one of the input files:
 
 ### 1. Why require `-o` for multiple files?
 
-Without it, `rue a.rue b.rue` is ambiguous — is `b.rue` the output or a second source file? Requiring `-o` makes intent explicit.
+Without it, `gruel a.gruel b.gruel` is ambiguous — is `b.gruel` the output or a second source file? Requiring `-o` makes intent explicit.
 
 ### 2. Why not auto-discover files?
 
@@ -385,11 +385,11 @@ Each file gets its own interner during parsing (since `ThreadedRodeo` is thread-
 The `--emit` modes (tokens, ast, air, etc.) work per-file in multi-file mode:
 
 ```bash
-rue --emit ast a.rue b.rue -o out
+gruel --emit ast a.gruel b.gruel -o out
 # Outputs:
-# === AST (a.rue) ===
+# === AST (a.gruel) ===
 # ...
-# === AST (b.rue) ===
+# === AST (b.gruel) ===
 # ...
 ```
 
@@ -404,11 +404,11 @@ None at this time.
 - **Module system**: Adds `mod`, `use`, `pub` syntax (future ADR)
 - **Visibility**: Private-by-default, explicit `pub` for exports
 - **Incremental compilation**: Rebuild only changed files
-- **Build system**: `rue.toml` or similar for project definition
+- **Build system**: `gruel.toml` or similar for project definition
 - **Parallel sema**: Currently sema is single-threaded; could parallelize per-function
 
 ## References
 
 - [ADR-0020: Built-in Types as Synthetic Structs](0020-builtin-types-as-structs.md) — Related type system work
-- Current CLI implementation: `crates/rue/src/main.rs`
-- Current compiler driver: `crates/rue-compiler/src/lib.rs`
+- Current CLI implementation: `crates/gruel/src/main.rs`
+- Current compiler driver: `crates/gruel-compiler/src/lib.rs`

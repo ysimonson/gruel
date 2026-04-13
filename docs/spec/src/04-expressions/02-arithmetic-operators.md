@@ -32,7 +32,7 @@ Parentheses can be used to override the default precedence of operators. A paren
 
 {{ rule(id="4.2:13") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     1 + 2 * 3    // = 7 (not 9)
     (1 + 2) * 3  // = 9 (parentheses override)
@@ -47,7 +47,7 @@ All binary arithmetic operators are left-associative.
 
 {{ rule(id="4.2:5", cat="normative") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     10 - 3 - 2   // = 5, parsed as (10 - 3) - 2
     24 / 4 / 2   // = 3, parsed as (24 / 4) / 2
@@ -70,7 +70,7 @@ Unary negation binds tighter than all binary operators.
 
 {{ rule(id="4.2:8") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     -42      // negation
     --5      // double negation = 5
@@ -88,7 +88,7 @@ When negation is applied to a non-literal expression holding the minimum value o
 
 {{ rule(id="4.2:17") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x: i8 = -128;    // valid: compile-time constant
     let y: i8 = -x;      // runtime panic: negating -128 overflows
@@ -104,7 +104,7 @@ Arithmetic operations that overflow the range of their type **MUST** cause a run
 
 {{ rule(id="4.2:10") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     2147483647 + 1  // Runtime error: integer overflow
 }
@@ -118,7 +118,7 @@ Division or remainder by zero **MUST** cause a runtime panic.
 
 {{ rule(id="4.2:12") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     10 / 0  // Runtime error: division by zero
     10 % 0  // Runtime error: division by zero

@@ -36,7 +36,7 @@ This representation allows string literals to remain cheap (no allocation) while
 
 {{ rule(id="3.10:6", cat="example") }}
 
-```rue
+```gruel
 fn takes_string(s: String) -> i32 { 0 }
 
 fn main() -> i32 {
@@ -59,7 +59,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.10:9", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let empty = String::new();
     let prealloc = String::with_capacity(1024);
@@ -87,7 +87,7 @@ Query methods use `borrow self` to access the string without consuming it, leavi
 
 {{ rule(id="3.10:14", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let s = "hello";
     if s.len() == 5 && !s.is_empty() {
@@ -122,7 +122,7 @@ Mutation methods use `inout self` to modify the string in place. The variable mu
 
 {{ rule(id="3.10:20", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     var s = String::new();
     s.push_str("hello");
@@ -148,7 +148,7 @@ Heap promotion is transparent to the user. There is no separate "owned" vs "borr
 
 {{ rule(id="3.10:23", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     var s = "hello";     // literal: capacity = 0
     s.push_str("!");     // promotes to heap, then appends
@@ -179,7 +179,7 @@ Clone borrows `self` so the original string remains valid. Cloning always alloca
 
 {{ rule(id="3.10:28", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let a = "hello";
     let b = a.clone();  // deep copy
@@ -202,7 +202,7 @@ The destructor automatically distinguishes between string literals and heap-allo
 
 {{ rule(id="3.10:31", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     var s = "hello";
     s.push_str("!");  // promotes to heap
@@ -214,7 +214,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.10:32", cat="informative") }}
 
-Rue strings are *conventionally UTF-8* rather than strictly validated:
+Gruel strings are *conventionally UTF-8* rather than strictly validated:
 - String literals are valid UTF-8 (validated at compile time)
 - At runtime, strings are byte sequences
 - Methods like `push_str` accept any bytes

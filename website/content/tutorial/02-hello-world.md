@@ -6,33 +6,33 @@ template = "tutorial/page.html"
 
 # Hello, World
 
-Let's start with the simplest possible program. Create a file called `hello.rue`:
+Let's start with the simplest possible program. Create a file called `hello.gruel`:
 
-```rue
+```gruel
 fn main() -> i32 {
     0
 }
 ```
 
-Every Rue program needs a `main` function that returns an `i32`. This return value becomes the program's exit code—`0` means success.
+Every Gruel program needs a `main` function that returns an `i32`. This return value becomes the program's exit code—`0` means success.
 
 ## Compiling and Running
 
 Compile and run it:
 
 ```bash
-./buck2 run //crates/rue:rue -- hello.rue hello
+./buck2 run //crates/gruel:gruel -- hello.gruel hello
 ./hello
 echo $?  # prints: 0
 ```
 
-The compiler takes the source file (`hello.rue`) and produces an executable (`hello`).
+The compiler takes the source file (`hello.gruel`) and produces an executable (`hello`).
 
 ## Printing Output
 
 To see output, use the `@dbg` intrinsic:
 
-```rue
+```gruel
 fn main() -> i32 {
     @dbg(42);
     0

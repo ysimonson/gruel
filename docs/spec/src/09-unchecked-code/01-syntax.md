@@ -22,7 +22,7 @@ function = [ "pub" ] [ "unchecked" ] "fn" IDENT "(" [ params ] ")" [ "->" type ]
 
 {{ rule(id="9.1:3", cat="example") }}
 
-```rue
+```gruel
 unchecked fn dangerous_operation() -> i32 {
     42
 }
@@ -50,7 +50,7 @@ A `checked` block evaluates its body and returns the value of the final expressi
 
 {{ rule(id="9.1:7", cat="example") }}
 
-```rue
+```gruel
 fn main() -> i32 {
     let x = checked {
         let a = 10;
@@ -65,7 +65,7 @@ fn main() -> i32 {
 
 {{ rule(id="9.1:8", cat="normative") }}
 
-Rue provides two raw pointer types for low-level memory access:
+Gruel provides two raw pointer types for low-level memory access:
 - `ptr const T` - a pointer to immutable data of type `T`
 - `ptr mut T` - a pointer to mutable data of type `T`
 
@@ -81,7 +81,7 @@ Raw pointer types are parsed in Phase 1 but semantic analysis (type checking, po
 
 {{ rule(id="9.1:11", cat="example") }}
 
-```rue
+```gruel
 // These parse correctly but fail type checking until Phase 2
 fn takes_ptr(p: ptr const i32) -> i32 { 0 }
 fn takes_mut_ptr(p: ptr mut i32) -> i32 { 0 }

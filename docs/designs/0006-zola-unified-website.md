@@ -46,13 +46,13 @@ The specification uses these mdbook features:
 
 ### Test Framework Integration
 
-The `rue-spec` crate's traceability system parses spec markdown files to extract `r[X.Y:Z]` rule definitions. This system is path-agnostic - it finds all `.md` files under the spec directory. Moving to Zola won't break this as long as:
+The `gruel-spec` crate's traceability system parses spec markdown files to extract `r[X.Y:Z]` rule definitions. This system is path-agnostic - it finds all `.md` files under the spec directory. Moving to Zola won't break this as long as:
 1. The markdown files remain accessible
 2. The `r[X.Y:Z]` syntax is preserved in the source files
 
 ## Decision
 
-Migrate the specification to Zola using a custom "book" template inspired by Zola's [book theme](https://github.com/getzola/book) and mdbook's layout, but integrated with the existing Rue website styling.
+Migrate the specification to Zola using a custom "book" template inspired by Zola's [book theme](https://github.com/getzola/book) and mdbook's layout, but integrated with the existing Gruel website styling.
 
 ### Architecture
 
@@ -113,11 +113,11 @@ The shortcode generates the same HTML structure:
 
 ### Traceability System Update
 
-The `rue-spec` traceability parser must be updated to recognize both:
+The `gruel-spec` traceability parser must be updated to recognize both:
 1. The new shortcode syntax: `{{ rule(id="3.1:1", cat="normative") }}`
 2. The original pattern (for backwards compatibility during migration)
 
-This is a simple regex change in `crates/rue-spec/src/traceability.rs`.
+This is a simple regex change in `crates/gruel-spec/src/traceability.rs`.
 
 ### Sidebar Navigation
 

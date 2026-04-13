@@ -6,13 +6,13 @@ template = "tutorial/page.html"
 
 # Borrow and Inout Parameters
 
-When you read code, you want to understand what it does without tracing through every function. Rue helps by making mutation visible at the call site.
+When you read code, you want to understand what it does without tracing through every function. Gruel helps by making mutation visible at the call site.
 
 ## Reading Code at a Glance
 
 Look at this code:
 
-```rue
+```gruel
 fn main() -> i32 {
     let mut values = [10, 20, 30];
     double_all(inout values);
@@ -34,7 +34,7 @@ sort.Ints(values)
 values.sort()
 ```
 
-In Rue, mutation is always explicit at the call site.
+In Gruel, mutation is always explicit at the call site.
 
 ## How It Works
 
@@ -42,7 +42,7 @@ In Rue, mutation is always explicit at the call site.
 
 Use `inout` when a function needs to modify its argument:
 
-```rue
+```gruel
 fn double_all(inout arr: [i32; 3]) {
     let mut i: u64 = 0;
     while i < 3 {
@@ -69,7 +69,7 @@ Both the function signature and the call site use `inout`. There's no way to acc
 
 Use `borrow` when you want to read data without copying it:
 
-```rue
+```gruel
 fn sum_array(borrow arr: [i32; 5]) -> i32 {
     let mut total = 0;
     let mut i: u64 = 0;
@@ -94,7 +94,7 @@ With `borrow`, you know the function won't change your data.
 
 You can mix borrow and inout in a single function:
 
-```rue
+```gruel
 fn copy_into(borrow src: [i32; 3], inout dst: [i32; 3]) {
     let mut i: u64 = 0;
     while i < 3 {
@@ -123,7 +123,7 @@ Reading the call site, you immediately know: `source` is read, `dest` is modifie
 
 These work with any type:
 
-```rue
+```gruel
 struct Point {
     x: i32,
     y: i32,
