@@ -20,7 +20,7 @@ Write an ADR for **large features** that:
 - Introduce new type system concepts
 - May span multiple development sessions
 
-**Do NOT write an ADR for small features** like adding a single operator, fixing bugs, or simple refactoring. Those just need a bd issue.
+**Do NOT write an ADR for small features** like adding a single operator, fixing bugs, or simple refactoring.
 
 **Rule of thumb**: If it needs a preview feature gate, it needs an ADR.
 
@@ -79,8 +79,8 @@ superseded-by:  # fill if superseded
 
 **Implementation Phases**: Break into independently-committable chunks
 ```markdown
-- [ ] **Phase 1: Core parsing** - bd-XXX
-- [ ] **Phase 2: Type checking** - bd-XXX
+- [ ] **Phase 1: Core parsing**
+- [ ] **Phase 2: Type checking**
 ```
 
 **Consequences**: Positive, negative, and neutral implications
@@ -89,21 +89,7 @@ superseded-by:  # fill if superseded
 
 **Future Work**: Out of scope for this ADR, but related
 
-### 4. Create bd Issues
-
-After the ADR is drafted:
-
-```bash
-# Create epic
-bd create "<feature title>" -t epic -p 2 --json
-
-# Create subtask for each phase
-bd create "Phase 1: <description>" -t task --parent <epic-id> --json
-```
-
-Update the ADR with the bd issue IDs.
-
-### 5. Add Preview Feature
+### 4. Add Preview Feature
 
 In `crates/gruel-error/src/lib.rs`:
 ```rust

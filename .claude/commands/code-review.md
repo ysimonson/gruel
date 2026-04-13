@@ -104,8 +104,7 @@ Provide specific, actionable feedback with file:line references.
 - Explain what's wrong and how to fix it
 
 **Non-blocking improvements**: Can be addressed later
-- File as bd issues: `bd create "..." -t bug -p 3`
-- Note in review that it's non-blocking
+- Note in review that it's non-blocking (can be added to the ADR's Implementation Phases checklist if part of a large feature)
 
 Example:
 ```
@@ -119,9 +118,9 @@ Example:
 2. **Wrong span on error** - sema.rs:567
    Error points to the whole expression; should point to the specific operand.
 
-### Non-Blocking (filed as issues)
+### Non-Blocking
 
-- bd-45: Consider optimizing modulo by power of 2 to bitwise AND
+- Consider optimizing modulo by power of 2 to bitwise AND
 
 ### Looks Good
 

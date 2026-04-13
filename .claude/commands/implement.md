@@ -1,56 +1,32 @@
 ---
-description: Implement a planned feature from a bd issue
+description: Implement a planned feature from an ADR or checklist
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task
-argument-hint: <bd-id>
+argument-hint: <adr-id or feature description>
 ---
 
 ## Task
 
-Implement the feature tracked by: $ARGUMENTS
+Implement the feature: $ARGUMENTS
 
 ## Prerequisites
 
 Before implementing:
-1. A plan exists (bd issue, and ADR for large features)
+1. A plan exists (ADR for large features, or a clear description for small ones)
 2. You understand what needs to be done
 3. The work fits in a single session (split if not)
 
 ## Step 1: Load Context
 
-1. **Get the issue details**:
-   ```bash
-   bd show <bd-id> --json
-   ```
-
-2. **For large features**, read the ADR in `docs/designs/`:
+1. **For large features**, read the ADR in `docs/designs/`:
    - Identify which phase you're implementing
    - Understand how this phase fits into the whole
+   - Check the Implementation Phases checklist for what's done
 
-3. **Mark work in progress**:
-   ```bash
-   bd update <bd-id> --status in_progress --json
-   ```
+2. **Scope check** before starting:
+   - Clear, bounded changes (1-5 files to modify) → proceed
+   - More than 5-7 files or multiple unrelated changes → split into phases
 
-## Step 2: Scope Check
-
-**Good scope (proceed):**
-- Clear, bounded changes
-- 1-5 files to modify
-- Single logical unit of work
-
-**Too large (split it):**
-- More than 5-7 files
-- Multiple unrelated changes
-- Would require extensive exploration
-
-If too large, create subtasks:
-```bash
-bd create "Subtask: <description>" --parent <bd-id> -t task --json
-```
-
-Then implement subtasks one at a time.
-
-## Step 3: Implementation Order
+## Step 2: Implementation Order
 
 Follow this order for consistent, reviewable changes:
 
@@ -108,7 +84,7 @@ if using_preview_syntax {
 
 Preview tests run but are allowed to fail until the feature is complete.
 
-## Step 4: Verify
+## Step 3: Verify
 
 ```bash
 ./test.sh
@@ -117,15 +93,15 @@ Preview tests run but are allowed to fail until the feature is complete.
 **For stable work**: All tests must pass.
 **For preview features**: Stable tests must pass. Preview tests for your feature should pass when your phase is complete.
 
-## Step 5: Update Progress
+## Step 4: Update the ADR Checklist
 
-For large features, check off the completed phase in the ADR:
+Check off the completed phase in the ADR:
 ```markdown
-- [x] **Phase 1: Core parsing** - bd-42
-- [ ] **Phase 2: Type checking** - bd-43
+- [x] **Phase 1: Core parsing**
+- [ ] **Phase 2: Type checking**
 ```
 
-## Step 6: Review and Commit
+## Step 5: Review and Commit
 
 1. Run `/code-review`
 2. Fix any blocking issues
@@ -172,6 +148,6 @@ When all phases are complete:
 
 - If touching `gruel-codegen`, implement in ALL backends (x86_64 and aarch64)
 - Each commit should leave tests passing
-- Split work that's too large into subtasks
+- Split work that's too large into phases
 - Use Buck2 (`./buck2`), not Cargo
 - Use `jj` for version control, not git

@@ -1,5 +1,5 @@
 ---
-description: Plan a new feature (outputs ADR or bd issue)
+description: Plan a new feature (outputs ADR or brief plan)
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task
 argument-hint: <feature description>
 ---
@@ -26,7 +26,7 @@ Before planning, ensure you understand:
 
 1. **What problem does this solve?** - Be specific about the use case
 2. **What's the desired behavior?** - How should it work from a user's perspective
-3. **What exists already?** - Check for related code, existing issues (`bd ready`)
+3. **What exists already?** - Check for related code
 
 Ask clarifying questions if requirements are ambiguous.
 
@@ -43,7 +43,7 @@ Characteristics:
 
 Examples: Add `%` operator, add `else if` syntax, add unary `+`, new warning type
 
-**Output**: A bd issue
+**Output**: A brief implementation plan
 
 ### Large Features
 
@@ -57,13 +57,13 @@ Characteristics:
 
 Examples: Mutable strings, inout parameters, enums and pattern matching, trait system
 
-**Output**: An ADR + bd epic with subtasks
+**Output**: An ADR with a checklist of implementation phases
 
 ## Step 3: Create the Plan
 
 ### For Small Features
 
-Draft a brief implementation plan: which files change and what tests are needed. Present it for approval before creating issues.
+Draft a brief implementation plan: which files change and what tests are needed. Present it for approval.
 
 ### For Large Features
 
@@ -80,7 +80,7 @@ Draft a brief implementation plan: which files change and what tests are needed.
    - **Summary**: One paragraph explaining the decision
    - **Context**: Why this is needed
    - **Decision**: Technical details of the approach
-   - **Implementation Phases**: Break into independently-committable chunks
+   - **Implementation Phases**: Break into independently-committable chunks as a checklist
    - **Consequences**: Trade-offs and implications
 
 2. **Add the preview feature** (in `crates/gruel-error/src/lib.rs`):
@@ -92,23 +92,9 @@ Draft a brief implementation plan: which files change and what tests are needed.
    ```
    Also update `name()`, `adr()`, `all()`, and `FromStr` impl.
 
-3. **Create the bd epic and subtasks** (after approval):
-   ```bash
-   bd create "<feature title>" -t epic -p 2 --json
-   bd create "Phase 1: <description>" -t task --parent <epic-id> --json
-   bd create "Phase 2: <description>" -t task --parent <epic-id> --json
-   ```
-
-4. **Update the ADR with issue IDs**:
-   ```markdown
-   ## Implementation Phases
-   - [ ] **Phase 1: Core parsing** - bd-42
-   - [ ] **Phase 2: Type checking** - bd-43
-   ```
-
 ## Step 4: Get Approval
 
-Before creating issues or writing implementation code, present the plan and confirm:
+Before writing implementation code, present the plan and confirm:
 - Does the scope look correct?
 - Are the phases reasonable?
 - Any concerns about the approach?
@@ -124,21 +110,20 @@ Before creating issues or writing implementation code, present the plan and conf
 
 [For large: ADR written to docs/designs/NNNN-<feature>.md]
 
-Please review. Say "approved" to create bd issues, or request changes.
+Please review. Say "approved" to proceed, or request changes.
 ```
 
 **After approval:**
 ```
 ## Plan Complete
 
-**Issue:** bd-XX - <title>
-[For large: **Epic:** bd-XX with subtasks bd-YY, bd-ZZ]
+[For large: ADR at docs/designs/NNNN-<feature>.md with implementation checklist]
 
-Next: `/implement bd-XX`
+Next: `/implement <feature>`
 ```
 
 ## Important
 
 - Planning only - do not write implementation code
-- Do NOT create bd issues until user approves the plan
+- Do NOT start implementing until user approves the plan
 - For large features, each phase should fit in one context window
