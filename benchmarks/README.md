@@ -60,10 +60,10 @@ For manual testing or debugging:
 
 ```bash
 # Run a single benchmark with timing output
-./buck2 run //crates/gruel:gruel -- --time-passes benchmarks/stress/many_functions.gruel /tmp/out
+cargo run -p gruel -- --time-passes benchmarks/stress/many_functions.gruel /tmp/out
 
 # Get JSON timing output
-./buck2 run //crates/gruel:gruel -- --benchmark-json benchmarks/stress/many_functions.gruel /tmp/out
+cargo run -p gruel -- --benchmark-json benchmarks/stress/many_functions.gruel /tmp/out
 ```
 
 ## Adding Benchmarks

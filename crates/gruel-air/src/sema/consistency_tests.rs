@@ -219,10 +219,7 @@ mod tests {
         );
     }
 
-    // NOTE: We cannot automatically check ALL_INSTDATA_VARIANTS against the actual
-    // InstData enum in gruel-rir because Buck2's sandboxed build environment doesn't
-    // allow include_str! paths across crate boundaries. The solution is to keep
-    // ALL_INSTDATA_VARIANTS manually in sync with gruel_rir::InstData.
+    // NOTE: ALL_INSTDATA_VARIANTS must be kept manually in sync with gruel_rir::InstData.
     //
     // When adding a new InstData variant:
     // 1. Add it to gruel-rir/src/inst.rs (InstData enum)

@@ -10,19 +10,17 @@ Gruel is currently in early development. To try it out, you'll need to build fro
 
 ## Prerequisites
 
-- [dotslash](https://dotslash-cli.com) - Used to bootstrap Buck2 and the Rust toolchain
-- `clang` - Used as the linker (install via your system package manager)
-
-The repository includes everything else: Buck2 is bootstrapped via dotslash, and a hermetic Rust toolchain is downloaded automatically on first build.
+- [Rust toolchain](https://rustup.rs) - Install via rustup
+- `clang` - Used as the linker on macOS (install via `xcode-select --install`)
 
 ## Building from Source
 
 ```bash
 git clone https://github.com/gruel-language/gruel
 cd gruel
-./buck2 build //crates/gruel:gruel
+cargo build -p gruel --release
 ```
 
-The first build will download the Rust toolchain, which may take a minute. Subsequent builds are fast.
+The first build will compile all dependencies, which may take a minute. Subsequent builds are fast.
 
-That's it! You now have a working Gruel compiler. In the next chapter, we'll write our first program.
+That's it! You now have a working Gruel compiler at `target/release/gruel`. In the next chapter, we'll write our first program.

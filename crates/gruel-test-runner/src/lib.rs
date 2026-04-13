@@ -1079,42 +1079,16 @@ pub fn find_dir(env_var: &str, possible_paths: &[&str], fallback: &str) -> PathB
 
 /// Find the gruel binary in common locations.
 ///
-/// When multiple Buck2 build outputs exist (each in a UUID-named directory),
-/// this function selects the most recently modified binary to avoid using
-/// stale binaries from previous builds.
+/// Checks `GRUEL_BINARY` env var first, then falls back to the Cargo target
+/// directory (release, then debug).
 pub fn find_gruel_binary() -> PathBuf {
     std::env::var("GRUEL_BINARY")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            // Try to find it in common buck output locations
-            // First try the buck2 output (has UUID in path)
-            let buck_root = Path::new("buck-out/v2/gen/root");
-            if buck_root.exists() {
-                if let Ok(entries) = std::fs::read_dir(buck_root) {
-                    // Collect all valid gruel binaries with their modification times
-                    let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = entries
-                        .flatten()
-                        .filter_map(|entry| {
-                            let gruel_path = entry.path().join("crates/gruel/__gruel__/gruel");
-                            if gruel_path.exists() {
-                                // Get modification time; skip if we can't read it
-                                gruel_path.metadata().ok().and_then(|meta| {
-                                    meta.modified().ok().map(|mtime| (gruel_path, mtime))
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    // Sort by modification time (newest first) and return the most recent
-                    candidates.sort_by(|a, b| b.1.cmp(&a.1));
-                    if let Some((path, _)) = candidates.into_iter().next() {
-                        return path;
-                    }
-                }
-            }
-            let possible_paths = ["../gruel/gruel", "./gruel"];
+            let possible_paths = [
+                "target/release/gruel",
+                "target/debug/gruel",
+            ];
             for path in possible_paths {
                 let p = Path::new(path);
                 if p.exists() {

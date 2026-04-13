@@ -19,11 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dotslash
-        uses: facebook/install-dotslash@latest
-
       - name: Check formatting
-        # Uses hermetic rustfmt from Buck2 toolchain
         run: ./fmt.sh check
 
   test:
@@ -41,28 +37,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode 16.2
-        if: runner.os == 'macOS'
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app
-
-      - name: Install dotslash
-        uses: facebook/install-dotslash@latest
-
-      # Cache Buck2 outputs including downloaded Rust toolchain
-      - name: Cache Buck2 outputs
+      - name: Cache Cargo registry and build outputs
         uses: actions/cache@v4
         with:
           path: |
-            buck-out/v2/gen
-            ~/.cache/buck2
-          key: buck2-${{ matrix.name }}-${{ hashFiles('**/BUCK', 'toolchains/rust/defs.bzl') }}
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ matrix.name }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            buck2-${{ matrix.name }}-
+            cargo-${{ matrix.name }}-
 
-      # Uses hermetic Rust toolchain downloaded by Buck2
-      # First verify everything builds (catches issues tests might miss)
       - name: Build all targets
-        run: ./buck2 build //crates/...
+        run: cargo build --workspace --exclude gruel-runtime
 
       - name: Run tests
         run: ./test.sh

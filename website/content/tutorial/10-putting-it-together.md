@@ -89,7 +89,7 @@ This example uses almost everything from the tutorial:
 ## Running It
 
 ```bash
-./buck2 run //crates/gruel:gruel -- quicksort.gruel quicksort
+cargo run -p gruel -- quicksort.gruel quicksort
 ./quicksort
 ```
 

@@ -4,25 +4,17 @@ This document covers how to build, test, and contribute to the Gruel compiler.
 
 ## Prerequisites
 
-### Required
-
-- **dotslash** - For bootstrapping Buck2. Install via `brew install dotslash` (macOS) or see [dotslash docs](https://dotslash-cli.com/).
+- **Rust toolchain** - Install via [rustup](https://rustup.rs/). The `rust-toolchain.toml` in the repo root ensures the right version.
 
 ### Platform-Specific
 
-The Rust toolchain is downloaded automatically by Buck2 (hermetic build). However, running Gruel programs has platform requirements:
-
 | Platform | Requirements |
 |----------|--------------|
-| Linux x86_64 | None (fully hermetic) |
+| Linux x86_64 | None |
 | macOS ARM64 | Xcode Command Line Tools (`xcode-select --install`) |
 | macOS x86_64 | Xcode Command Line Tools (`xcode-select --install`) |
 
 **Why macOS needs Xcode**: The Gruel compiler uses the system `clang` to link executables on macOS. On Linux, Gruel uses its own internal ELF linker.
-
-### Optional (for IDE support)
-
-- **Rust toolchain via rustup** - For IDE features (rust-analyzer, etc.). The `rust-toolchain.toml` in the repo root ensures the right version.
 
 ## Repository Structure
 
@@ -38,13 +30,11 @@ gruel/
 │   ├── gruel-linker/    # Object file creation and linking
 │   ├── gruel-parser/    # AST construction
 │   ├── gruel-rir/       # Untyped IR
-│   ├── gruel-runtime/    # The runtime
+│   ├── gruel-runtime/   # The runtime
 │   ├── gruel-span/      # Source locations
 │   └── gruel-spec/      # Specification test runner
 ├── docs/              # Documentation
-├── examples/          # Example .gruel programs
-├── third-party/       # Vendored dependencies
-└── toolchains/        # Buck2 toolchain definitions
+└── examples/          # Example .gruel programs
 ```
 
 ## Building
@@ -52,21 +42,21 @@ gruel/
 ### Build Everything
 
 ```bash
-./buck2 build //...
+cargo build --workspace --exclude gruel-runtime
 ```
 
 ### Build the Compiler
 
 ```bash
-./buck2 build //crates/gruel:gruel
+cargo build -p gruel
 ```
 
-The binary is output to `buck-out/v2/gen/root/crates/gruel/__gruel__/gruel`.
+The binary is output to `target/debug/gruel` (or `target/release/gruel` with `--release`).
 
 ### Build a Specific Crate
 
 ```bash
-./buck2 build //crates/gruel-lexer:gruel-lexer
+cargo build -p gruel-lexer
 ```
 
 ## Testing
@@ -78,32 +68,36 @@ The binary is output to `buck-out/v2/gen/root/crates/gruel/__gruel__/gruel`.
 ```
 
 This runs:
-1. Unit tests for all crates (`buck2 test`)
-2. Specification tests (`buck2 run //crates/gruel-spec:gruel-spec`)
+1. Unit tests for all crates (`cargo test --workspace`)
+2. Specification tests (`cargo run -p gruel-spec`)
+3. Spec traceability check
+4. UI tests (`cargo run -p gruel-ui-tests`)
 
 ### Run Unit Tests Only
 
 ```bash
-./buck2 test //...
+./quick-test.sh
+# or
+cargo test --workspace --exclude gruel-runtime
 ```
 
 ### Run Spec Tests Only
 
 ```bash
-./buck2 run //crates/gruel-spec:gruel-spec
+cargo run -p gruel-spec
 ```
 
-### Run a Specific Test
+### Run a Specific Crate's Tests
 
 ```bash
-./buck2 test //crates/gruel-lexer:gruel-lexer-test
+cargo test -p gruel-lexer
 ```
 
 ### Filter Spec Tests
 
 ```bash
-./buck2 run //crates/gruel-spec:gruel-spec -- "1.1"  # Run section 1.1 tests
-./buck2 run //crates/gruel-spec:gruel-spec -- "zero" # Run tests matching "zero"
+cargo run -p gruel-spec -- "1.1"    # Run section 1.1 tests
+cargo run -p gruel-spec -- "zero"   # Run tests matching "zero"
 ```
 
 ## Using the Compiler
@@ -111,7 +105,7 @@ This runs:
 ### Compile a Program
 
 ```bash
-./buck2 run //crates/gruel:gruel -- source.gruel output
+cargo run -p gruel -- source.gruel output
 ./output
 echo $?  # Check exit code
 ```
@@ -119,14 +113,9 @@ echo $?  # Check exit code
 ### Dump Intermediate Representations
 
 ```bash
-# Dump RIR (untyped IR)
-./buck2 run //crates/gruel:gruel -- --dump-rir source.gruel
-
-# Dump AIR (typed IR)
-./buck2 run //crates/gruel:gruel -- --dump-air source.gruel
-
-# Dump MIR (machine IR before register allocation)
-./buck2 run //crates/gruel:gruel -- --dump-mir source.gruel
+cargo run -p gruel -- --emit rir source.gruel
+cargo run -p gruel -- --emit air source.gruel
+cargo run -p gruel -- --emit mir source.gruel
 ```
 
 ## Adding Tests
@@ -146,8 +135,6 @@ mod tests {
     }
 }
 ```
-
-Ensure the crate has a `rust_test` target in its `BUCK` file.
 
 ### Specification Tests
 
@@ -189,15 +176,6 @@ air (return_type: i32) {
 
 This project uses git.
 
-### Common Commands
-
-```bash
-git status         # Show working copy changes
-git diff           # Show diff
-git add -p && git commit -m "msg" # Create a commit
-git log            # Show history
-```
-
 ### Creating a Commit
 
 ```bash
@@ -207,7 +185,7 @@ git commit -m "Add feature X"
 
 ## Code Style
 
-- Follow standard Rust formatting (`rustfmt`)
+- Follow standard Rust formatting (`cargo fmt`)
 - Keep functions small and focused
 - Prefer explicit types in public APIs
 - Add doc comments to public items
@@ -216,26 +194,26 @@ git commit -m "Add feature X"
 
 ### Print IR at Each Stage
 
-Use the `--dump-*` flags to see the IR at each compilation stage:
+Use the `--emit` flags to see the IR at each compilation stage:
 
 ```bash
 echo 'fn main() -> i32 { 42 }' > /tmp/test.gruel
-./buck2 run //crates/gruel:gruel -- --dump-rir /tmp/test.gruel
-./buck2 run //crates/gruel:gruel -- --dump-air /tmp/test.gruel
-./buck2 run //crates/gruel:gruel -- --dump-mir /tmp/test.gruel
+cargo run -p gruel -- --emit rir /tmp/test.gruel
+cargo run -p gruel -- --emit air /tmp/test.gruel
+cargo run -p gruel -- --emit mir /tmp/test.gruel
 ```
 
 ### Disassemble Output
 
 ```bash
-./buck2 run //crates/gruel:gruel -- /tmp/test.gruel /tmp/test
+cargo run -p gruel -- /tmp/test.gruel /tmp/test
 objdump -d /tmp/test
 ```
 
 ### Run Under GDB
 
 ```bash
-./buck2 run //crates/gruel:gruel -- /tmp/test.gruel /tmp/test
+cargo run -p gruel -- /tmp/test.gruel /tmp/test
 gdb /tmp/test
 ```
 
@@ -244,12 +222,14 @@ gdb /tmp/test
 ### Add a New Crate
 
 1. Create directory `crates/gruel-newcrate/`
-2. Add `BUCK` file with `rust_library` and `rust_test` targets
-3. Add to dependencies in consuming crates' `BUCK` files
+2. Add `Cargo.toml` with the new crate's metadata and dependencies
+3. Add the crate to the workspace `members` list in the root `Cargo.toml`
+4. Add it as a dependency in consuming crates' `Cargo.toml` files
 
 ### Add a Third-Party Dependency
 
-Dependencies are vendored in `third-party/`. See existing setup for patterns.
+1. Add the dependency to `[workspace.dependencies]` in the root `Cargo.toml`
+2. Reference it with `dep.workspace = true` in the crate's `Cargo.toml`
 
 ### Modify the Grammar
 

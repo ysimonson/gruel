@@ -154,7 +154,7 @@ impl Drop for TempLinkDir {
 
 /// The gruel-runtime staticlib archive bytes, embedded at compile time.
 /// This is linked into every Gruel executable.
-static RUNTIME_BYTES: &[u8] = include_bytes!("libgruel_runtime.a");
+static RUNTIME_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libgruel_runtime.a"));
 
 /// Validate that the embedded runtime archive is well-formed.
 ///

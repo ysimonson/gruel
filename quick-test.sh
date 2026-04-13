@@ -13,18 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "Running unit tests (quick mode)..."
-./buck2 test \
-    //crates/gruel-span:gruel-span-test \
-    //crates/gruel-error:gruel-error-test \
-    //crates/gruel-target:gruel-target-test \
-    //crates/gruel-lexer:gruel-lexer-test \
-    //crates/gruel-parser:gruel-parser-test \
-    //crates/gruel-rir:gruel-rir-test \
-    //crates/gruel-cfg:gruel-cfg-test \
-    //crates/gruel-air:gruel-air-test \
-    //crates/gruel-codegen:gruel-codegen-test \
-    //crates/gruel-linker:gruel-linker-test \
-    //crates/gruel-compiler:gruel-compiler-test
+cargo test --workspace --exclude gruel-runtime
 
 echo ""
 echo "Unit tests passed! Run ./test.sh for full verification before committing."

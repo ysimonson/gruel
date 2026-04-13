@@ -21,7 +21,7 @@ Every Gruel program needs a `main` function that returns an `i32`. This return v
 Compile and run it:
 
 ```bash
-./buck2 run //crates/gruel:gruel -- hello.gruel hello
+cargo run -p gruel -- hello.gruel hello
 ./hello
 echo $?  # prints: 0
 ```

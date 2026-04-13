@@ -1,0 +1,14 @@
+[package]
+name = "gruel-runtime"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+# staticlib: produces libgruel_runtime.a for embedding by gruel-compiler's build.rs
+# rlib: allows the crate to participate in the workspace (needed for cargo check/clippy)
+crate-type = ["staticlib", "rlib"]
+
+# Note: This crate is #![no_std] with #[no_mangle] entry points that conflict
+# with the test harness. Do not run cargo test on this crate directly.
+# Tests are covered indirectly through spec tests.
+# Exclude from workspace-wide test runs: cargo test --workspace --exclude gruel-runtime

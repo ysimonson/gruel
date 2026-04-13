@@ -102,10 +102,13 @@ arch=$(uname -m)
 
 # Build the compiler
 log_info "Building gruel compiler ($BUILD_MODE mode)..."
-./buck2 build //crates/gruel:gruel --modifier //constraints:$BUILD_MODE 2>&1 | tail -3
-
-# Get the path to the built compiler
-GRUEL_BIN="$(./buck2 build //crates/gruel:gruel --modifier //constraints:$BUILD_MODE --show-output 2>/dev/null | awk '{print $2}')"
+if [[ "$BUILD_MODE" == "release" ]]; then
+    cargo build -p gruel --release 2>&1 | tail -3
+    GRUEL_BIN="$SCRIPT_DIR/target/release/gruel"
+else
+    cargo build -p gruel 2>&1 | tail -3
+    GRUEL_BIN="$SCRIPT_DIR/target/debug/gruel"
+fi
 if [[ ! -x "$GRUEL_BIN" ]]; then
     log_error "Failed to find gruel binary at: $GRUEL_BIN"
     exit 1

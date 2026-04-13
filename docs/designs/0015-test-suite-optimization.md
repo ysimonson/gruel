@@ -159,13 +159,13 @@ Update CLAUDE.md with recommended workflow:
 
 ```bash
 # During development - fast feedback (unit tests only)
-./buck2 test //crates/...             # Unit tests only (~2-5 seconds)
+./quick-test.sh                       # Unit tests only (~2-5 seconds)
 
 # Before committing - full verification
 ./test.sh                             # Full suite including spec tests
 
 # Targeted spec tests
-./buck2 run //crates/gruel-spec:gruel-spec -- "arithmetic"  # Run specific tests
+cargo run -p gruel-spec -- "arithmetic"  # Run specific tests
 ```
 
 Add a new script `./quick-test.sh` that runs only unit tests for faster iteration.

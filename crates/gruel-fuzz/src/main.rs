@@ -4,16 +4,16 @@
 //!
 //! ```bash
 //! # Run the lexer fuzzer with a corpus directory
-//! ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- lexer corpus/
+//! cargo run -p gruel-fuzz -- lexer corpus/
 //!
 //! # Run with mutations for a specific duration
-//! ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=60 parser corpus/
+//! cargo run -p gruel-fuzz -- --mutate --max-time=60 parser corpus/
 //!
 //! # Generate a seed corpus from test files
-//! ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --init-corpus output_dir/
+//! cargo run -p gruel-fuzz -- --init-corpus output_dir/
 //!
 //! # List available targets
-//! ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --list
+//! cargo run -p gruel-fuzz -- --list
 //! ```
 
 pub mod codegen_generators;

@@ -115,9 +115,8 @@ pub fn compile_frontend_with_options(...) -> CompileResult<...> {
 ## Implementation Phases
 
 - [x] **Phase 1: Add dependencies** - gruel-irz1.1
-  - Update `third-party/Cargo.toml` with tracing, tracing-subscriber
-  - Run `reindeer buckify`
-  - Update crate BUCK files
+  - Add tracing, tracing-subscriber to `[workspace.dependencies]` in `Cargo.toml`
+  - Add to relevant crate `Cargo.toml` files
 
 - [x] **Phase 2: CLI and subscriber** - gruel-irz1.2
   - Initialize tracing-subscriber in main.rs

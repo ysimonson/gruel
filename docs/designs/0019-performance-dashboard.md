@@ -127,8 +127,8 @@ Since benchmarks run on every commit to trunk, storing results directly in the m
 ```bash
 #!/bin/bash
 # Build release compiler, run benchmarks, append to history
-./buck2 build //crates/gruel:gruel --release
-./buck2 run //crates/gruel:gruel -- --benchmark-json /tmp/bench.json benchmarks/
+cargo build -p gruel --release
+cargo run -p gruel -- --benchmark-json /tmp/bench.json benchmarks/
 # Append to history (via a small Rust tool or script)
 ./scripts/append-benchmark.py /tmp/bench.json website/static/benchmarks/history.json
 ```
@@ -185,7 +185,7 @@ website/
   - Create `scripts/append-benchmark.py` to manage history
   - Set up `perf` branch structure
   - Document benchmark workflow
-  - Add release/debug build modes via Buck2 modifiers
+  - Add release/debug build modes via `--release` flag
 
 - [x] **Phase 4: CI integration** - gruel-a5ah.4
   - GitHub Actions workflow to run benchmarks on trunk commits

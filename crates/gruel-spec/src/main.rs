@@ -12,20 +12,20 @@
 //!
 //! ```bash
 //! # Run all specification tests
-//! ./buck2 run //crates/gruel-spec:gruel-spec
+//! cargo run -p gruel-spec
 //!
 //! # Filter tests by pattern
-//! ./buck2 run //crates/gruel-spec:gruel-spec -- "arithmetic"
+//! cargo run -p gruel-spec -- "arithmetic"
 //! ```
 //!
 //! ## Traceability Reports
 //!
 //! ```bash
 //! # Generate a coverage summary
-//! ./buck2 run //crates/gruel-spec:gruel-spec -- --traceability
+//! cargo run -p gruel-spec -- --traceability
 //!
 //! # Generate a detailed traceability matrix
-//! ./buck2 run //crates/gruel-spec:gruel-spec -- --traceability --detailed
+//! cargo run -p gruel-spec -- --traceability --detailed
 //! ```
 //!
 //! # Environment Variables

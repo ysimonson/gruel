@@ -6,16 +6,16 @@ Fuzz testing infrastructure for the Gruel compiler. This crate helps find edge c
 
 ```bash
 # Create a seed corpus from existing test files
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
+cargo run -p gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
 
 # Run the lexer fuzzer
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- lexer crates/gruel-fuzz/corpus
+cargo run -p gruel-fuzz -- lexer crates/gruel-fuzz/corpus
 
 # Run with mutations for better coverage
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate parser crates/gruel-fuzz/corpus
+cargo run -p gruel-fuzz -- --mutate parser crates/gruel-fuzz/corpus
 
 # Run for a specific duration
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 compiler crates/gruel-fuzz/corpus
+cargo run -p gruel-fuzz -- --mutate --max-time=300 compiler crates/gruel-fuzz/corpus
 ```
 
 ## Fuzz Targets
@@ -46,7 +46,7 @@ Fuzz testing infrastructure for the Gruel compiler. This crate helps find edge c
 The fuzzer uses a corpus of source files as seeds. A seed corpus can be automatically generated from the specification test files:
 
 ```bash
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
+cargo run -p gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
 ```
 
 This extracts source code from all `.toml` test files in `crates/gruel-spec/cases/`.
@@ -68,10 +68,10 @@ When a panic is detected, the crashing input is saved to the crash directory (de
 
 ```bash
 # After finding a crash
-./buck2 run //crates/gruel:gruel -- --emit tokens crashes/crash-*.txt
+cargo run -p gruel -- --emit tokens crashes/crash-*.txt
 
 # Or compile it
-./buck2 run //crates/gruel:gruel -- crashes/crash-*.txt output
+cargo run -p gruel -- crashes/crash-*.txt output
 ```
 
 ## Integration with CI
@@ -83,7 +83,7 @@ To run fuzzing locally for a limited time:
 ```bash
 # Run each target for 5 minutes
 for target in lexer parser sema compiler emitter emitter_sequence; do
-    ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 $target crates/gruel-fuzz/corpus
+    cargo run -p gruel-fuzz -- --mutate --max-time=300 $target crates/gruel-fuzz/corpus
 done
 ```
 
@@ -94,7 +94,7 @@ Any panics will cause a non-zero exit code.
 The fuzzer includes proptest-based tests that generate syntactically valid Gruel programs. These run as part of the unit tests:
 
 ```bash
-./buck2 test //crates/gruel-fuzz:gruel-fuzz-test
+cargo test -p gruel-fuzz
 ```
 
 The proptest generators (`src/generators.rs`) can create:
@@ -131,12 +131,7 @@ These enable testing the instruction emitter with structured inputs that exercis
 
 ## Design
 
-The fuzzer is designed to work with Buck2 without requiring cargo-fuzz or libFuzzer. It:
-
-1. Loads inputs from a corpus directory
-2. Optionally mutates inputs (byte-level mutations)
-3. Runs the fuzz target in a panic-catching wrapper
-4. Saves any crashing inputs
+The fuzzer loads inputs from a corpus directory, optionally mutates them (byte-level mutations), runs the fuzz target in a panic-catching wrapper, and saves any crashing inputs.
 
 Additionally, proptest-based generators create syntactically valid programs and structured codegen inputs for deeper testing.
 

@@ -8,59 +8,59 @@ Gruel is a systems programming language aiming for memory safety without garbage
 
 ## Build System
 
-This project uses Buck2 (via `./buck2` wrapper script), not Cargo.
+This project uses Cargo.
 
 ### Common Commands
 
 ```bash
 # Build the compiler
-./buck2 build //crates/gruel:gruel
+cargo build -p gruel
 
 # Build everything
-./buck2 build //...
+cargo build --workspace --exclude gruel-runtime
 
 # Run all tests (unit + spec)
 ./test.sh
 
 # Run unit tests only
-./buck2 test //...
+cargo test --workspace --exclude gruel-runtime
 
 # Run spec tests only
-./buck2 run //crates/gruel-spec:gruel-spec
+cargo run -p gruel-spec
 
 # Run a specific crate's tests
-./buck2 test //crates/gruel-lexer:gruel-lexer-test
+cargo test -p gruel-lexer
 
 # Filter spec tests by pattern
-./buck2 run //crates/gruel-spec:gruel-spec -- "1.1"  # Section 1.1
-./buck2 run //crates/gruel-spec:gruel-spec -- "zero" # Tests matching "zero"
+cargo run -p gruel-spec -- "1.1"  # Section 1.1
+cargo run -p gruel-spec -- "zero" # Tests matching "zero"
 
 # Compile and run a program (single file)
-./buck2 run //crates/gruel:gruel -- source.gruel output
+cargo run -p gruel -- source.gruel output
 ./output
 
 # Compile multiple files into one program
-./buck2 run //crates/gruel:gruel -- main.gruel utils.gruel math.gruel -o program
+cargo run -p gruel -- main.gruel utils.gruel math.gruel -o program
 ./program
 
 # With shell glob expansion
-./buck2 run //crates/gruel:gruel -- src/*.gruel -o program
+cargo run -p gruel -- src/*.gruel -o program
 
 # Note: -o is required when compiling multiple files
-./buck2 run //crates/gruel:gruel -- a.gruel b.gruel          # Error!
-./buck2 run //crates/gruel:gruel -- a.gruel b.gruel -o out   # OK
+cargo run -p gruel -- a.gruel b.gruel          # Error!
+cargo run -p gruel -- a.gruel b.gruel -o out   # OK
 
 # Emit intermediate representations (can specify multiple stages)
-./buck2 run //crates/gruel:gruel -- --emit tokens source.gruel  # Lexer tokens
-./buck2 run //crates/gruel:gruel -- --emit ast source.gruel     # Abstract syntax tree
-./buck2 run //crates/gruel:gruel -- --emit rir source.gruel     # Untyped IR
-./buck2 run //crates/gruel:gruel -- --emit air source.gruel     # Typed IR
-./buck2 run //crates/gruel:gruel -- --emit cfg source.gruel     # Control flow graph
-./buck2 run //crates/gruel:gruel -- --emit mir source.gruel     # Machine IR (virtual registers)
-./buck2 run //crates/gruel:gruel -- --emit asm source.gruel     # Assembly (physical registers)
+cargo run -p gruel -- --emit tokens source.gruel  # Lexer tokens
+cargo run -p gruel -- --emit ast source.gruel     # Abstract syntax tree
+cargo run -p gruel -- --emit rir source.gruel     # Untyped IR
+cargo run -p gruel -- --emit air source.gruel     # Typed IR
+cargo run -p gruel -- --emit cfg source.gruel     # Control flow graph
+cargo run -p gruel -- --emit mir source.gruel     # Machine IR (virtual registers)
+cargo run -p gruel -- --emit asm source.gruel     # Assembly (physical registers)
 
 # Chain multiple stages to see the full pipeline
-./buck2 run //crates/gruel:gruel -- --emit tokens --emit ast --emit rir source.gruel
+cargo run -p gruel -- --emit tokens --emit ast --emit rir source.gruel
 ```
 
 ## Architecture
@@ -169,7 +169,7 @@ The test suite has three layers optimized for different stages of development:
 |-----------|---------|-------|-------------|
 | Unit tests | `./quick-test.sh` | ~2-5s | During active development |
 | Full suite | `./test.sh` | ~30-60s | Before committing |
-| Targeted spec | `./buck2 run //crates/gruel-spec:gruel-spec -- "pattern"` | Varies | Testing specific features |
+| Targeted spec | `cargo run -p gruel-spec -- "pattern"` | Varies | Testing specific features |
 
 **Recommended workflow:**
 
@@ -181,8 +181,8 @@ The test suite has three layers optimized for different stages of development:
 ./test.sh                      # Unit + spec + UI + traceability
 
 # Debugging specific areas
-./buck2 run //crates/gruel-spec:gruel-spec -- "arithmetic"  # Specific spec tests
-./buck2 test //crates/gruel-codegen:gruel-codegen-test      # Specific crate
+cargo run -p gruel-spec -- "arithmetic"  # Specific spec tests
+cargo test -p gruel-codegen              # Specific crate
 ```
 
 ### Choosing the Right Test Type
@@ -200,7 +200,7 @@ The test suite has three layers optimized for different stages of development:
 - **UI tests** verify compiler quality-of-life features (warnings, error messages)
 
 ### Unit Tests
-Add to relevant crate's source file with `#[cfg(test)]` modules. Ensure crate has `rust_test` target in its `BUCK` file.
+Add to relevant crate's source file with `#[cfg(test)]` modules.
 
 The `gruel-compiler` crate includes integration unit tests that test the full pipeline without execution. Use `compile_to_air()` and `compile_to_cfg()` helpers to test compilation without spawning processes.
 
@@ -260,10 +260,10 @@ no_warnings = true
 
 ```bash
 # Run all UI tests
-./buck2 run //crates/gruel-ui-tests:gruel-ui-tests
+cargo run -p gruel-ui-tests
 
 # Filter by pattern
-./buck2 run //crates/gruel-ui-tests:gruel-ui-tests -- "unused"
+cargo run -p gruel-ui-tests -- "unused"
 ```
 
 #### When to Add UI Tests vs Spec Tests
@@ -432,10 +432,10 @@ Generate a report showing test coverage of spec paragraphs:
 
 ```bash
 # Summary report
-./buck2 run //crates/gruel-spec:gruel-spec -- --traceability
+cargo run -p gruel-spec -- --traceability
 
 # Detailed matrix (shows all paragraphs and their covering tests)
-./buck2 run //crates/gruel-spec:gruel-spec -- --traceability --detailed
+cargo run -p gruel-spec -- --traceability --detailed
 ```
 
 The traceability check is run as part of `./test.sh` and fails if:
@@ -450,7 +450,7 @@ The project has comprehensive fuzz testing infrastructure in `crates/gruel-fuzz`
 
 ```bash
 # List all fuzz targets
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --list
+cargo run -p gruel-fuzz -- --list
 
 # Available targets:
 # - lexer: Tokenization only (~27,000 exec/s)
@@ -465,20 +465,20 @@ The project has comprehensive fuzz testing infrastructure in `crates/gruel-fuzz`
 
 ```bash
 # Initialize corpus from spec tests
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
+cargo run -p gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
 
 # Run a fuzz target with mutations
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate lexer crates/gruel-fuzz/corpus
+cargo run -p gruel-fuzz -- --mutate lexer crates/gruel-fuzz/corpus
 
 # Run for a specific duration (300 seconds = 5 minutes)
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 parser crates/gruel-fuzz/corpus
+cargo run -p gruel-fuzz -- --mutate --max-time=300 parser crates/gruel-fuzz/corpus
 
 # Run for a specific number of iterations
-./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --max-runs=10000 sema crates/gruel-fuzz/corpus
+cargo run -p gruel-fuzz -- --max-runs=10000 sema crates/gruel-fuzz/corpus
 
 # Run all fuzz targets for 5 minutes each
 for target in lexer parser sema compiler emitter emitter_sequence; do
-    ./buck2 run //crates/gruel-fuzz:gruel-fuzz -- --mutate --max-time=300 $target crates/gruel-fuzz/corpus
+    cargo run -p gruel-fuzz -- --mutate --max-time=300 $target crates/gruel-fuzz/corpus
 done
 ```
 
@@ -488,7 +488,7 @@ The fuzzer includes proptest-based generators that create syntactically valid Gr
 
 ```bash
 # Run proptest-based fuzz tests
-./buck2 test //crates/gruel-fuzz:gruel-fuzz-test
+cargo test -p gruel-fuzz
 ```
 
 These generators create valid identifiers, types, expressions, statements, functions, and complete programs. This enables deeper testing than random byte mutation since the inputs exercise semantic analysis and type checking.
@@ -503,10 +503,10 @@ If fuzzing finds a crash, the input is saved to `crates/gruel-fuzz/crashes/`:
 
 ```bash
 # Reproduce the crash
-./buck2 run //crates/gruel:gruel -- crates/gruel-fuzz/crashes/crash-*.txt output
+cargo run -p gruel -- crates/gruel-fuzz/crashes/crash-*.txt output
 
 # Or just tokenize to see the issue
-./buck2 run //crates/gruel:gruel -- --emit tokens crates/gruel-fuzz/crashes/crash-*.txt
+cargo run -p gruel -- --emit tokens crates/gruel-fuzz/crashes/crash-*.txt
 ```
 
 See `crates/gruel-fuzz/README.md` for complete documentation.

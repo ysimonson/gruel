@@ -62,7 +62,7 @@ source = "fn main() -> i32 { 42 }"
 exit_code = 42
 ```
 
-Run specs with `./test.sh` or directly with `buck2 run //crates/gruel-spec:gruel-spec`.
+Run specs with `./test.sh` or directly with `cargo run -p gruel-spec`.
 
 ## Quick Reference
 
