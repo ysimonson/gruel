@@ -61,6 +61,34 @@ fn main() -> i32 {
 }
 ```
 
+## Integer Casts
+
+To convert between integer types, use `@intCast`. The target type is inferred from context:
+
+```gruel
+fn main() -> i32 {
+    let big: i64 = 1000;
+    let small: i32 = @intCast(big);  // i64 -> i32
+
+    let index: i32 = 5;
+    let as_u64: u64 = @intCast(index);  // i32 -> u64
+
+    @dbg(small);   // prints: 1000
+    @dbg(as_u64);  // prints: 5
+    0
+}
+```
+
+If the value doesn't fit in the target type, the program panics at runtime:
+
+```gruel
+fn main() -> i32 {
+    let x: i32 = 300;
+    let y: u8 = @intCast(x);  // panics: 300 doesn't fit in u8 (max 255)
+    @intCast(y)
+}
+```
+
 ## Mutability
 
 Variables are immutable by default. Use `let mut` to make them mutable:

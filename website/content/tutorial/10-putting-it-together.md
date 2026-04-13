@@ -112,7 +112,7 @@ The array is sorted!
 
 ## More Examples
 
-The [GitHub repository](https://github.com/gruel-language/gruel) has more examples in the `examples/` directory:
+The [GitHub repository](https://github.com/ysimonson/gruel) has more examples in the `examples/` directory:
 
 - `fibonacci.gruel` - Iterative and recursive Fibonacci
 - `primes.gruel` - Prime number sieve with trial division
@@ -122,6 +122,16 @@ The [GitHub repository](https://github.com/gruel-language/gruel) has more exampl
 
 ## Next Steps
 
-You've learned the core of Gruel! For the complete language reference, read the [Language Specification](/spec/).
+You've learned the fundamentals of Gruel! The next chapters cover more features:
 
-Gruel is still in early development. If you find bugs or have ideas, please [file an issue](https://github.com/gruel-language/gruel/issues)!
+- [Methods](/tutorial/11-methods/) — dot-syntax operations on structs using `impl` blocks
+- [Strings](/tutorial/12-strings/) — the `String` type with heap allocation and automatic cleanup
+- [Input and Parsing](/tutorial/13-input-and-parsing/) — reading user input and converting strings to numbers
+- [Comptime and Generics](/tutorial/14-comptime/) — compile-time evaluation and generic functions
+- [Modules](/tutorial/15-modules/) — splitting code across multiple files with `@import`
+- [Linear Types](/tutorial/16-linear-types/) — must-consume types and explicit duplication with `@handle`
+- [Unchecked Code and Raw Pointers](/tutorial/17-unchecked/) — `checked` blocks, raw pointers, and syscalls
+
+For the complete language reference, read the [Language Specification](/spec/).
+
+Gruel is still in early development. If you find bugs or have ideas, please [file an issue](https://github.com/ysimonson/gruel/issues)!

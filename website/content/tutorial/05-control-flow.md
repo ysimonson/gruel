@@ -54,6 +54,52 @@ fn main() -> i32 {
 }
 ```
 
+Use `break` to exit a loop early, and `continue` to skip the rest of the current iteration:
+
+```gruel
+fn main() -> i32 {
+    // break: exit as soon as we find 5
+    let mut i = 0;
+    while true {
+        i = i + 1;
+        if i == 5 { break }
+    }
+    @dbg(i);  // prints: 5
+
+    // continue: skip odd numbers, sum even ones up to 10
+    let mut sum = 0;
+    let mut j = 0;
+    while j < 10 {
+        j = j + 1;
+        if j % 2 != 0 { continue }
+        sum = sum + j;
+    }
+    @dbg(sum);  // prints: 30  (2+4+6+8+10)
+
+    0
+}
+```
+
+`break` and `continue` only affect the innermost loop.
+
+## Infinite Loops
+
+Use `loop` for an unconditional loop. It runs forever unless `break` is used:
+
+```gruel
+fn main() -> i32 {
+    let mut count = 0;
+    loop {
+        count = count + 1;
+        if count == 3 { break }
+    }
+    @dbg(count);  // prints: 3
+    count
+}
+```
+
+`loop` is equivalent to `while true` but more clearly signals intent.
+
 ## Match Expressions
 
 For multi-way branching, use `match`:
