@@ -87,7 +87,7 @@ Preview tests run but are allowed to fail until the feature is complete.
 ## Step 3: Verify
 
 ```bash
-./test.sh
+make test
 ```
 
 **For stable work**: All tests must pass.

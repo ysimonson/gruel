@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check formatting
-        run: ./fmt.sh check
+        run: make check
 
   test:
     strategy:
@@ -52,4 +52,4 @@ jobs:
         run: cargo build --workspace --exclude gruel-runtime
 
       - name: Run tests
-        run: ./test.sh
+        run: make test
