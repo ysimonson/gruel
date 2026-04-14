@@ -20,7 +20,7 @@ cargo build -p gruel
 cargo build --workspace --exclude gruel-runtime
 
 # Run all tests (unit + spec)
-./test.sh
+make test
 
 # Run unit tests only
 cargo test --workspace --exclude gruel-runtime
@@ -167,18 +167,18 @@ The test suite has three layers optimized for different stages of development:
 
 | Test Type | Command | Speed | When to Use |
 |-----------|---------|-------|-------------|
-| Unit tests | `./quick-test.sh` | ~2-5s | During active development |
-| Full suite | `./test.sh` | ~30-60s | Before committing |
+| Unit tests | `make quick-test` | ~2-5s | During active development |
+| Full suite | `make test` | ~30-60s | Before committing |
 | Targeted spec | `cargo run -p gruel-spec -- "pattern"` | Varies | Testing specific features |
 
 **Recommended workflow:**
 
 ```bash
 # During development - fast feedback loop
-./quick-test.sh                # Unit tests only
+make quick-test                # Unit tests only
 
 # Before committing - full verification
-./test.sh                      # Unit + spec + UI + traceability
+make test                      # Unit + spec + UI + traceability
 
 # Debugging specific areas
 cargo run -p gruel-spec -- "arithmetic"  # Specific spec tests
@@ -189,10 +189,10 @@ cargo test -p gruel-codegen              # Specific crate
 
 | If you're... | Use... | Why |
 |--------------|--------|-----|
-| Iterating on a fix | `./quick-test.sh` | Fast feedback, catches most issues |
+| Iterating on a fix | `make quick-test` | Fast feedback, catches most issues |
 | Adding a language feature | Spec tests | Required for traceability |
 | Improving diagnostics | UI tests | Not spec-mandated behavior |
-| About to commit | `./test.sh` | Ensures nothing is broken |
+| About to commit | `make test` | Ensures nothing is broken |
 
 **Rule of thumb:**
 - **Unit tests** catch logic errors quickly during development
@@ -438,7 +438,7 @@ cargo run -p gruel-spec -- --traceability
 cargo run -p gruel-spec -- --traceability --detailed
 ```
 
-The traceability check is run as part of `./test.sh` and fails if:
+The traceability check is run as part of `make test` and fails if:
 - Any spec paragraph has no covering test (coverage < 100%)
 - Any test references a non-existent spec paragraph ID
 
@@ -595,7 +595,7 @@ When all tests pass and the feature is complete:
    - Changes to error message formatting
    - New compiler flags or options
 
-9. **Run `./test.sh`** to verify all tests pass and traceability is maintained
+9. **Run `make test`** to verify all tests pass and traceability is maintained
 
 ## Codegen: Multi-Backend Considerations
 

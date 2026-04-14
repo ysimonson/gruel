@@ -131,5 +131,5 @@ Example:
 ## After Review
 
 1. Fix all blocking issues
-2. Re-run tests: `./test.sh`
+2. Re-run tests: `make test`
 3. Proceed to commit: `/commit`

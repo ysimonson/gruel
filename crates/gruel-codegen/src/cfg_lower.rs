@@ -19,10 +19,10 @@
 
 use std::fmt;
 
-use lasso::Key;
 use gruel_air::{StructId, TypeInternPool, TypeKind};
 use gruel_builtins::{BinOp, get_builtin_type};
-use gruel_cfg::{BlockId, Cfg, CfgInstData, CfgValue, Type};
+use gruel_cfg::{BlockId, Cfg, CfgValue, Type};
+use lasso::Key;
 
 use crate::types;
 

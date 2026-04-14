@@ -27,12 +27,12 @@
 
 use std::collections::HashMap;
 
-use lasso::ThreadedRodeo;
 use gruel_air::{StructId, TypeInternPool, TypeKind};
-use gruel_builtins::{BinOp, get_builtin_type};
+use gruel_builtins::BinOp;
 use gruel_cfg::{
     BasicBlock, BlockId, Cfg, CfgInstData, CfgValue, Place, PlaceBase, Projection, Terminator, Type,
 };
+use lasso::ThreadedRodeo;
 
 use super::mir::{LabelId, Operand, Reg, VReg, X86Inst, X86Mir};
 use crate::cfg_lower::{CfgLowerContext, IndexLevel};
@@ -49,8 +49,6 @@ const RET_REGS: [Reg; 6] = [Reg::Rax, Reg::Rdx, Reg::Rcx, Reg::R8, Reg::R9, Reg:
 pub struct CfgLower<'a> {
     /// Shared context with type helpers and chain tracing.
     ctx: CfgLowerContext<'a>,
-    /// String table from semantic analysis (indexed by StringId).
-    strings: &'a [String],
     /// Interner for resolving Spur to string
     interner: &'a ThreadedRodeo,
     mir: X86Mir,
@@ -78,7 +76,7 @@ impl<'a> CfgLower<'a> {
     pub fn new(
         cfg: &'a Cfg,
         type_pool: &'a TypeInternPool,
-        strings: &'a [String],
+        _strings: &'a [String],
         interner: &'a ThreadedRodeo,
     ) -> Self {
         let num_params = cfg.num_params();
@@ -95,7 +93,6 @@ impl<'a> CfgLower<'a> {
 
         Self {
             ctx: CfgLowerContext::new(cfg, type_pool),
-            strings,
             interner,
             mir: X86Mir::new(),
             value_map: HashMap::with_capacity(num_values),
@@ -134,10 +131,10 @@ impl<'a> CfgLower<'a> {
 
     /// Check if a slot corresponds to an inout parameter.
     fn slot_to_inout_param_index(&self, slot: u32) -> Option<u32> {
-        if let Some(param_index) = self.ctx.slot_to_inout_param_index(slot) {
-            if self.ctx.cfg.is_param_inout(param_index) {
-                return Some(param_index);
-            }
+        if let Some(param_index) = self.ctx.slot_to_inout_param_index(slot)
+            && self.ctx.cfg.is_param_inout(param_index)
+        {
+            return Some(param_index);
         }
         None
     }
@@ -1880,9 +1877,9 @@ impl<'a> CfgLower<'a> {
                 }
 
                 // Pop into argument registers
-                for i in 0..num_reg_args {
+                for &reg in &ARG_REGS[..num_reg_args] {
                     self.mir.push(X86Inst::Pop {
-                        dst: Operand::Physical(ARG_REGS[i]),
+                        dst: Operand::Physical(reg),
                     });
                 }
 
@@ -1910,7 +1907,7 @@ impl<'a> CfgLower<'a> {
                     let mut slot_vregs = Vec::new();
                     for slot_idx in 0..3 {
                         let slot_vreg = self.mir.alloc_vreg();
-                        let offset = (slot_idx * 8) as i32;
+                        let offset = slot_idx * 8;
                         self.mir.push(X86Inst::MovRM {
                             dst: Operand::Virtual(slot_vreg),
                             base: Reg::Rsp,
@@ -1988,7 +1985,7 @@ impl<'a> CfgLower<'a> {
                     let mut slot_vregs = Vec::new();
                     for slot_idx in 0..3 {
                         let slot_vreg = self.mir.alloc_vreg();
-                        let offset = (slot_idx * 8) as i32;
+                        let offset = slot_idx * 8;
                         self.mir.push(X86Inst::MovRM {
                             dst: Operand::Virtual(slot_vreg),
                             base: Reg::Rsp,
@@ -3501,7 +3498,7 @@ impl<'a> CfgLower<'a> {
 
                 // If false (zero), jump to else setup (where we copy else_args)
                 self.mir.push(X86Inst::Jz {
-                    label: else_setup_label.clone(),
+                    label: else_setup_label,
                 });
 
                 // Copy then_args to then_block's params
@@ -4272,8 +4269,7 @@ impl<'a> CfgLower<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lasso::ThreadedRodeo;
-    use gruel_air::{ArrayTypeId, Sema};
+    use gruel_air::Sema;
     use gruel_cfg::CfgBuilder;
     use gruel_error::PreviewFeatures;
     use gruel_lexer::Lexer;
@@ -4302,7 +4298,6 @@ mod tests {
             &func.name,
             type_pool,
             func.param_modes.clone(),
-            &interner,
         );
 
         CfgLower::new(&cfg_output.cfg, type_pool, strings, &interner).lower()

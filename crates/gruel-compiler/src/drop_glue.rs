@@ -401,7 +401,10 @@ fn create_array_drop_glue_function(
 /// Generate the drop glue function name for an array type.
 ///
 /// The name encodes the element type and length, e.g., `__gruel_drop_array_String_3`
-pub fn array_drop_glue_name(array_id: gruel_air::ArrayTypeId, type_pool: &TypeInternPool) -> String {
+pub fn array_drop_glue_name(
+    array_id: gruel_air::ArrayTypeId,
+    type_pool: &TypeInternPool,
+) -> String {
     let (element_type, length) = type_pool.array_def(array_id);
     let element_type_name = type_name(element_type, type_pool);
     format!("__gruel_drop_array_{}_{}", element_type_name, length)

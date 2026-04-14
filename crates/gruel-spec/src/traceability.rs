@@ -97,8 +97,6 @@ pub struct SpecParagraph {
     pub category: String,
     /// The text content of the paragraph (first non-empty line after the marker).
     pub text: String,
-    /// Source file path where this paragraph is defined.
-    pub source_file: String,
 }
 
 /// A reference from a test case to specification paragraphs.
@@ -110,8 +108,6 @@ pub struct TestReference {
     /// Full test name in the format `section::case_name`
     /// (e.g., "lexical.comments::line_comment_after_code").
     pub test_name: String,
-    /// Path to the TOML file where this test is defined.
-    pub source_file: String,
 }
 
 /// A complete traceability report linking specification paragraphs to tests.
@@ -225,24 +221,6 @@ impl TraceabilityReport {
             .iter()
             .filter(|(id, tests)| self.paragraphs.contains_key(*id) && !tests.is_empty())
             .count()
-    }
-
-    /// Returns the count of all paragraphs (normative and informative) that have no tests.
-    pub fn uncovered_count(&self) -> usize {
-        self.paragraphs.len() - self.covered_count()
-    }
-
-    /// Returns the IDs of all paragraphs (normative and informative) that have no tests.
-    pub fn uncovered_paragraphs(&self) -> Vec<&String> {
-        self.paragraphs
-            .keys()
-            .filter(|id| {
-                self.coverage
-                    .get(*id)
-                    .map(|tests| tests.is_empty())
-                    .unwrap_or(true)
-            })
-            .collect()
     }
 
     /// Returns the overall coverage percentage for all paragraphs (0.0 to 100.0).
@@ -459,14 +437,11 @@ fn parse_spec_file(path: &Path, paragraphs: &mut BTreeMap<String, SpecParagraph>
     };
 
     let lines: Vec<&str> = content.lines().collect();
-    let source_file = path.to_string_lossy().to_string();
-
     for (i, line) in lines.iter().enumerate() {
         if let Some((id, category)) = parse_spec_comment(line) {
             // Get the next non-empty line as the paragraph text
             let mut text = String::new();
-            for j in (i + 1)..lines.len() {
-                let next_line = lines[j].trim();
+            for next_line in lines.iter().skip(i + 1).map(|l| l.trim()) {
                 if next_line.is_empty() {
                     continue;
                 }
@@ -481,15 +456,7 @@ fn parse_spec_file(path: &Path, paragraphs: &mut BTreeMap<String, SpecParagraph>
                 break;
             }
 
-            paragraphs.insert(
-                id.clone(),
-                SpecParagraph {
-                    id,
-                    category,
-                    text,
-                    source_file: source_file.clone(),
-                },
-            );
+            paragraphs.insert(id.clone(), SpecParagraph { id, category, text });
         }
     }
 }
@@ -528,8 +495,6 @@ pub struct TestFile {
     pub section_id: String,
     /// All test cases defined in this file.
     pub cases: Vec<TestCase>,
-    /// Path to the source TOML file.
-    pub source_file: String,
 }
 
 /// A single test case with its specification references.
@@ -637,12 +602,12 @@ pub fn parse_test_files(cases_dir: &Path) -> Vec<TestFile> {
 
                         // Merge base spec refs with spec_extra from params
                         let mut spec_refs = base_spec_refs.clone();
-                        if let Some(spec_extra) = param_table.get("spec_extra") {
-                            if let Some(arr) = spec_extra.as_array() {
-                                for item in arr {
-                                    if let Some(s) = item.as_str() {
-                                        spec_refs.push(s.to_string());
-                                    }
+                        if let Some(spec_extra) = param_table.get("spec_extra")
+                            && let Some(arr) = spec_extra.as_array()
+                        {
+                            for item in arr {
+                                if let Some(s) = item.as_str() {
+                                    spec_refs.push(s.to_string());
                                 }
                             }
                         }
@@ -662,11 +627,7 @@ pub fn parse_test_files(cases_dir: &Path) -> Vec<TestFile> {
             }
         }
 
-        test_files.push(TestFile {
-            section_id,
-            cases,
-            source_file: path.to_string_lossy().to_string(),
-        });
+        test_files.push(TestFile { section_id, cases });
     }
 
     test_files
@@ -721,7 +682,6 @@ pub fn generate_report(spec_dir: &Path, cases_dir: &Path) -> TraceabilityReport 
                 if let Some(tests) = coverage.get_mut(spec_ref) {
                     tests.push(TestReference {
                         test_name: test_name.clone(),
-                        source_file: test_file.source_file.clone(),
                     });
                 } else {
                     orphan_references.push((test_name.clone(), spec_ref.clone()));
@@ -835,7 +795,6 @@ fn main() { }
                 id: "1.1:1".to_string(),
                 category: "legality-rule".to_string(),
                 text: "Test".to_string(),
-                source_file: "test.md".to_string(),
             },
         );
         paragraphs.insert(
@@ -844,7 +803,6 @@ fn main() { }
                 id: "1.1:2".to_string(),
                 category: "legality-rule".to_string(),
                 text: "Test 2".to_string(),
-                source_file: "test.md".to_string(),
             },
         );
 
@@ -853,7 +811,6 @@ fn main() { }
             "1.1:1".to_string(),
             vec![TestReference {
                 test_name: "test::case1".to_string(),
-                source_file: "test.toml".to_string(),
             }],
         );
         coverage.insert("1.1:2".to_string(), vec![]);
@@ -865,7 +822,7 @@ fn main() { }
         };
 
         assert_eq!(report.covered_count(), 1);
-        assert_eq!(report.uncovered_count(), 1);
+        assert_eq!(report.paragraphs.len() - report.covered_count(), 1);
         assert_eq!(report.coverage_percentage(), 50.0);
     }
 

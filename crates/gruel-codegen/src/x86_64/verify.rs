@@ -34,7 +34,7 @@
 use std::collections::HashMap;
 
 use super::mir::{LabelId, Operand, Reg, X86Inst, X86Mir};
-use gruel_error::{CompileError, CompileResult, ErrorKind, ice_error};
+use gruel_error::{CompileError, CompileResult, ice_error};
 
 /// Verifies that the stack is properly aligned throughout function execution.
 ///
@@ -99,13 +99,15 @@ impl StackVerifier {
 
             // AddRI on RSP: used to deallocate stack space (positive imm) or
             // allocate stack space (negative imm, though rare in current codegen)
-            X86Inst::AddRI { dst, imm } => {
-                if let Operand::Physical(Reg::Rsp) = dst {
-                    // add rsp, N → decreases depth (deallocates)
-                    // add rsp, -N → increases depth (allocates)
-                    self.current_depth -= *imm as i64;
-                }
+            X86Inst::AddRI {
+                dst: Operand::Physical(Reg::Rsp),
+                imm,
+            } => {
+                // add rsp, N → decreases depth (deallocates)
+                // add rsp, -N → increases depth (allocates)
+                self.current_depth -= *imm as i64;
             }
+            X86Inst::AddRI { .. } => {}
 
             // Call instructions require 16-byte alignment
             X86Inst::CallRel { .. } => {

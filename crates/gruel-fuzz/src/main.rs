@@ -118,16 +118,16 @@ pub fn run_fuzzer<T: FuzzTarget + ?Sized>(
 
     loop {
         let elapsed = start.elapsed();
-        if let Some(max_time) = config.max_time {
-            if elapsed >= max_time {
-                break;
-            }
+        if let Some(max_time) = config.max_time
+            && elapsed >= max_time
+        {
+            break;
         }
         let current_runs = runs.load(Ordering::Relaxed);
-        if let Some(max_runs) = config.max_runs {
-            if current_runs >= max_runs {
-                break;
-            }
+        if let Some(max_runs) = config.max_runs
+            && current_runs >= max_runs
+        {
+            break;
         }
 
         let input_idx = rng.next_u64() as usize % corpus.len();
@@ -144,16 +144,16 @@ pub fn run_fuzzer<T: FuzzTarget + ?Sized>(
         if result.is_err() {
             panics.fetch_add(1, Ordering::Relaxed);
 
-            if let Some(ref crash_dir) = config.crash_dir {
-                if let Err(e) = save_crash(crash_dir, &input, current_runs) {
-                    eprintln!("Warning: failed to save crash: {}", e);
-                }
+            if let Some(ref crash_dir) = config.crash_dir
+                && let Err(e) = save_crash(crash_dir, &input, current_runs)
+            {
+                eprintln!("Warning: failed to save crash: {}", e);
             }
         }
 
         runs.fetch_add(1, Ordering::Relaxed);
 
-        if current_runs > 0 && current_runs % config.print_interval == 0 {
+        if current_runs > 0 && current_runs.is_multiple_of(config.print_interval) {
             let stats = FuzzStats {
                 runs: current_runs,
                 crashes: crashes.load(Ordering::Relaxed),
@@ -226,16 +226,16 @@ fn main() {
             }
         } else if arg == "--mutate" {
             config.mutate = true;
-        } else if arg.starts_with("--max-time=") {
-            let secs: u64 = arg["--max-time=".len()..].parse().unwrap_or(0);
+        } else if let Some(stripped) = arg.strip_prefix("--max-time=") {
+            let secs: u64 = stripped.parse().unwrap_or(0);
             config.max_time = Some(Duration::from_secs(secs));
-        } else if arg.starts_with("--max-runs=") {
-            let runs: u64 = arg["--max-runs=".len()..].parse().unwrap_or(0);
+        } else if let Some(stripped) = arg.strip_prefix("--max-runs=") {
+            let runs: u64 = stripped.parse().unwrap_or(0);
             config.max_runs = Some(runs);
-        } else if arg.starts_with("--crash-dir=") {
-            config.crash_dir = Some(PathBuf::from(&arg["--crash-dir=".len()..]));
-        } else if arg.starts_with("--print-interval=") {
-            config.print_interval = arg["--print-interval=".len()..].parse().unwrap_or(1000);
+        } else if let Some(stripped) = arg.strip_prefix("--crash-dir=") {
+            config.crash_dir = Some(PathBuf::from(stripped));
+        } else if let Some(stripped) = arg.strip_prefix("--print-interval=") {
+            config.print_interval = stripped.parse().unwrap_or(1000);
         } else if !arg.starts_with('-') {
             if target_name.is_none() {
                 target_name = Some(arg.clone());

@@ -167,7 +167,6 @@ pub fn validate_runtime() -> Result<(), String> {
 }
 
 // Re-export commonly used types
-pub use lasso::{Spur, ThreadedRodeo};
 pub use gruel_air::{Air, AnalyzedFunction, Sema, SemaOutput, StructDef, Type, TypeInternPool};
 pub use gruel_cfg::{Cfg, CfgBuilder, CfgOutput, OptLevel};
 pub use gruel_codegen::{
@@ -180,11 +179,14 @@ pub use gruel_error::{
     WarningKind,
 };
 pub use gruel_lexer::{Lexer, Token, TokenKind};
-pub use gruel_linker::{Archive, CodeRelocation, Linker, ObjectBuilder, ObjectFile, RelocationType};
+pub use gruel_linker::{
+    Archive, CodeRelocation, Linker, ObjectBuilder, ObjectFile, RelocationType,
+};
 pub use gruel_parser::{Ast, Expr, Function, Item, Parser};
 pub use gruel_rir::{AstGen, Rir, RirPrinter};
 pub use gruel_span::{FileId, Span};
 pub use gruel_target::{Arch, Target};
+pub use lasso::{Spur, ThreadedRodeo};
 
 // ============================================================================
 // Multi-file Compilation Types
@@ -335,8 +337,6 @@ pub struct ValidatedProgram {
 /// Information about a symbol definition for duplicate detection.
 #[derive(Debug, Clone)]
 struct SymbolDef {
-    /// Name of the symbol (function, struct, or enum name).
-    name: String,
     /// Span of the first definition.
     span: Span,
     /// File path where the first definition was found.
@@ -410,7 +410,6 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
                         functions.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: func.span,
                                 file_path: file.path.clone(),
                             },
@@ -447,7 +446,6 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
                         structs.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: s.span,
                                 file_path: file.path.clone(),
                             },
@@ -484,7 +482,6 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
                         enums.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: e.span,
                                 file_path: file.path.clone(),
                             },
@@ -583,7 +580,6 @@ pub fn validate_and_generate_rir_parallel(
                         functions.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: func.span,
                                 file_path: file.path.clone(),
                             },
@@ -617,7 +613,6 @@ pub fn validate_and_generate_rir_parallel(
                         structs.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: s.span,
                                 file_path: file.path.clone(),
                             },
@@ -651,7 +646,6 @@ pub fn validate_and_generate_rir_parallel(
                         enums.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: e.span,
                                 file_path: file.path.clone(),
                             },
@@ -713,18 +707,13 @@ pub fn validate_and_generate_rir_parallel(
 ///
 /// The Gruel compiler can either use its built-in ELF linker or delegate to
 /// an external system linker like `clang`, `gcc`, or `ld`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum LinkerMode {
     /// Use the internal linker (default).
+    #[default]
     Internal,
     /// Use an external system linker (e.g., "clang", "ld", "gcc").
     System(String),
-}
-
-impl Default for LinkerMode {
-    fn default() -> Self {
-        LinkerMode::Internal
-    }
 }
 
 /// Configuration options for compilation.
@@ -946,7 +935,6 @@ pub fn compile_frontend_from_ast_with_options(
                     &func.name,
                     &sema_output.type_pool,
                     func.param_modes.clone(),
-                    &interner,
                 );
 
                 // Apply optimizations to the CFG
@@ -1072,7 +1060,6 @@ pub fn compile_frontend_from_rir_with_file_paths(
                     &func.name,
                     &sema_output.type_pool,
                     func.param_modes.clone(),
-                    &interner,
                 );
 
                 // Apply optimizations to the CFG
@@ -1605,7 +1592,8 @@ pub fn generate_mir(
 ) -> Mir {
     match target.arch() {
         Arch::X86_64 => {
-            let mir = gruel_codegen::x86_64::CfgLower::new(cfg, type_pool, strings, interner).lower();
+            let mir =
+                gruel_codegen::x86_64::CfgLower::new(cfg, type_pool, strings, interner).lower();
             Mir::X86_64(mir)
         }
         Arch::Aarch64 => {
@@ -1635,7 +1623,8 @@ pub fn generate_allocated_mir(
     match target.arch() {
         Arch::X86_64 => {
             // Lower CFG to X86Mir with virtual registers
-            let mir = gruel_codegen::x86_64::CfgLower::new(cfg, type_pool, strings, interner).lower();
+            let mir =
+                gruel_codegen::x86_64::CfgLower::new(cfg, type_pool, strings, interner).lower();
 
             // Allocate physical registers
             let (mir, _num_spills, _used_callee_saved) =
@@ -1651,7 +1640,8 @@ pub fn generate_allocated_mir(
 
             // Allocate physical registers
             let (mir, _num_spills, _used_callee_saved) =
-                gruel_codegen::aarch64::RegAlloc::new(mir, existing_slots).allocate_with_spills()?;
+                gruel_codegen::aarch64::RegAlloc::new(mir, existing_slots)
+                    .allocate_with_spills()?;
 
             Ok(Mir::Aarch64(mir))
         }
@@ -1673,7 +1663,8 @@ pub fn generate_liveness_info(
 ) -> gruel_codegen::LivenessDebugInfo {
     match target.arch() {
         Arch::X86_64 => {
-            let mir = gruel_codegen::x86_64::CfgLower::new(cfg, type_pool, strings, interner).lower();
+            let mir =
+                gruel_codegen::x86_64::CfgLower::new(cfg, type_pool, strings, interner).lower();
             gruel_codegen::x86_64::liveness::analyze_debug(&mir)
         }
         Arch::Aarch64 => {
@@ -1736,8 +1727,9 @@ pub fn generate_emitted_asm(
             Ok(asm)
         }
         Arch::Aarch64 => {
-            let (_machine_code, asm) =
-                gruel_codegen::aarch64::generate_with_asm(cfg, type_pool, strings, interner, target)?;
+            let (_machine_code, asm) = gruel_codegen::aarch64::generate_with_asm(
+                cfg, type_pool, strings, interner, target,
+            )?;
             Ok(asm)
         }
     }
@@ -2154,7 +2146,11 @@ mod tests {
     fn test_cross_file_function_call() {
         // Function in main.gruel calls function in utils.gruel
         let sources = vec![
-            SourceFile::new("main.gruel", "fn main() -> i32 { helper() }", FileId::new(1)),
+            SourceFile::new(
+                "main.gruel",
+                "fn main() -> i32 { helper() }",
+                FileId::new(1),
+            ),
             SourceFile::new("utils.gruel", "fn helper() -> i32 { 42 }", FileId::new(2)),
         ];
         let result = compile_multi_file_with_options(&sources, &CompileOptions::default());
@@ -3580,7 +3576,11 @@ mod integration_tests {
         #[test]
         fn parse_multiple_files() {
             let sources = vec![
-                SourceFile::new("main.gruel", "fn main() -> i32 { helper() }", FileId::new(1)),
+                SourceFile::new(
+                    "main.gruel",
+                    "fn main() -> i32 { helper() }",
+                    FileId::new(1),
+                ),
                 SourceFile::new("utils.gruel", "fn helper() -> i32 { 42 }", FileId::new(2)),
             ];
             let program = parse_all_files(&sources).unwrap();

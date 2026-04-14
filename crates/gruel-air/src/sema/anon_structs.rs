@@ -121,7 +121,7 @@ impl Sema<'_> {
             is_linear: false,
             destructor: None,
             is_builtin: false,
-            is_pub: false,                     // Anonymous structs are private
+            is_pub: false,                       // Anonymous structs are private
             file_id: gruel_span::FileId::new(0), // Anonymous, no source file
         };
 

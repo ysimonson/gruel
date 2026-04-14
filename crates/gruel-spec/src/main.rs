@@ -34,10 +34,10 @@
 //! - `GRUEL_SPEC_CASES` - Path to test case TOML files (default: `crates/gruel-spec/cases`)
 //! - `GRUEL_BINARY` - Path to the gruel compiler binary
 
-use libtest2_mimic::{Harness, RunContext, RunError, Trial};
 use gruel_test_runner::{
     Case, find_dir, find_gruel_binary, load_test_files, run_test_case, should_skip_for_platform,
 };
+use libtest2_mimic::{Harness, RunContext, RunError, Trial};
 use std::path::Path;
 
 mod traceability;
@@ -136,7 +136,9 @@ fn main() {
         println!();
         println!("Environment Variables:");
         println!("  GRUEL_SPEC_DIR       Path to spec markdown files (default: docs/spec/src)");
-        println!("  GRUEL_SPEC_CASES     Path to test case files (default: crates/gruel-spec/cases)");
+        println!(
+            "  GRUEL_SPEC_CASES     Path to test case files (default: crates/gruel-spec/cases)"
+        );
         return;
     }
 

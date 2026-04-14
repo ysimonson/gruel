@@ -24,9 +24,9 @@ use std::fmt;
 const _: () = assert!(std::mem::size_of::<CfgInst>() <= 48);
 const _: () = assert!(std::mem::size_of::<CfgInstData>() <= 32);
 
-use lasso::{Key, Spur};
 use gruel_air::{EnumId, StructId, Type};
 use gruel_span::Span;
+use lasso::{Key, Spur};
 
 // ============================================================================
 // Place Expressions (ADR-0030)

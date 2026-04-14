@@ -32,13 +32,10 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use super::mir::{Aarch64Inst, Aarch64Mir, Operand, Reg};
-use crate::vreg::LabelId;
 
 /// A node in the scheduling dependency graph.
 #[derive(Debug)]
 struct SchedNode {
-    /// Index of this instruction in the original sequence.
-    inst_idx: usize,
     /// Instructions this depends on (must execute before this).
     deps: Vec<usize>,
     /// Instructions that depend on this (must execute after this).
@@ -50,9 +47,8 @@ struct SchedNode {
 }
 
 impl SchedNode {
-    fn new(inst_idx: usize, latency: u32) -> Self {
+    fn new(_inst_idx: usize, latency: u32) -> Self {
         Self {
-            inst_idx,
             deps: Vec::new(),
             users: Vec::new(),
             priority: 0,
@@ -478,21 +474,21 @@ fn build_dep_graph(instructions: &[Aarch64Inst], start: usize, end: usize) -> Ve
 
         // RAW (Read After Write): this instruction reads what another wrote
         for reg in &reads {
-            if let Some(&writer) = last_writer.get(reg) {
-                if !nodes[i].deps.contains(&writer) {
-                    nodes[i].deps.push(writer);
-                    nodes[writer].users.push(i);
-                }
+            if let Some(&writer) = last_writer.get(reg)
+                && !nodes[i].deps.contains(&writer)
+            {
+                nodes[i].deps.push(writer);
+                nodes[writer].users.push(i);
             }
         }
 
         // WAW (Write After Write): this instruction writes what another wrote
         for reg in &writes {
-            if let Some(&prev_writer) = last_writer.get(reg) {
-                if !nodes[i].deps.contains(&prev_writer) {
-                    nodes[i].deps.push(prev_writer);
-                    nodes[prev_writer].users.push(i);
-                }
+            if let Some(&prev_writer) = last_writer.get(reg)
+                && !nodes[i].deps.contains(&prev_writer)
+            {
+                nodes[i].deps.push(prev_writer);
+                nodes[prev_writer].users.push(i);
             }
         }
 
@@ -510,23 +506,21 @@ fn build_dep_graph(instructions: &[Aarch64Inst], start: usize, end: usize) -> Ve
 
         // FLAGS dependencies
         // RAW: instruction reads flags written by another
-        if reads_flags(inst) {
-            if let Some(writer) = last_flags_writer {
-                if !nodes[i].deps.contains(&writer) {
-                    nodes[i].deps.push(writer);
-                    nodes[writer].users.push(i);
-                }
-            }
+        if reads_flags(inst)
+            && let Some(writer) = last_flags_writer
+            && !nodes[i].deps.contains(&writer)
+        {
+            nodes[i].deps.push(writer);
+            nodes[writer].users.push(i);
         }
 
         // WAW: instruction writes flags written by another
-        if writes_flags(inst) {
-            if let Some(prev_writer) = last_flags_writer {
-                if !nodes[i].deps.contains(&prev_writer) {
-                    nodes[i].deps.push(prev_writer);
-                    nodes[prev_writer].users.push(i);
-                }
-            }
+        if writes_flags(inst)
+            && let Some(prev_writer) = last_flags_writer
+            && !nodes[i].deps.contains(&prev_writer)
+        {
+            nodes[i].deps.push(prev_writer);
+            nodes[prev_writer].users.push(i);
         }
 
         // WAR: instruction writes flags read by another
@@ -541,11 +535,11 @@ fn build_dep_graph(instructions: &[Aarch64Inst], start: usize, end: usize) -> Ve
 
         // Memory dependencies (conservative: order all memory accesses)
         if accesses_memory(inst) {
-            if let Some(prev) = last_memory_access {
-                if !nodes[i].deps.contains(&prev) {
-                    nodes[i].deps.push(prev);
-                    nodes[prev].users.push(i);
-                }
+            if let Some(prev) = last_memory_access
+                && !nodes[i].deps.contains(&prev)
+            {
+                nodes[i].deps.push(prev);
+                nodes[prev].users.push(i);
             }
             last_memory_access = Some(i);
         }
@@ -562,11 +556,11 @@ fn build_dep_graph(instructions: &[Aarch64Inst], start: usize, end: usize) -> Ve
                 }
             }
             // And after the last writer
-            if let Some(&writer) = last_writer.get(&clobbered) {
-                if !nodes[i].deps.contains(&writer) {
-                    nodes[i].deps.push(writer);
-                    nodes[writer].users.push(i);
-                }
+            if let Some(&writer) = last_writer.get(&clobbered)
+                && !nodes[i].deps.contains(&writer)
+            {
+                nodes[i].deps.push(writer);
+                nodes[writer].users.push(i);
             }
         }
 
@@ -698,9 +692,7 @@ pub fn schedule(mir: &mut Aarch64Mir) {
 
         // Don't schedule blocks that are too small
         if end - start <= 2 {
-            for i in start..end {
-                new_instructions.push(instructions[i].clone());
-            }
+            new_instructions.extend_from_slice(&instructions[start..end]);
             continue;
         }
 
@@ -710,9 +702,7 @@ pub fn schedule(mir: &mut Aarch64Mir) {
 
         if sched_end - start <= 2 {
             // Not enough instructions to schedule
-            for i in start..end {
-                new_instructions.push(instructions[i].clone());
-            }
+            new_instructions.extend_from_slice(&instructions[start..end]);
             continue;
         }
 
@@ -738,6 +728,7 @@ pub fn schedule(mir: &mut Aarch64Mir) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::LabelId;
 
     #[test]
     fn test_latency_values() {

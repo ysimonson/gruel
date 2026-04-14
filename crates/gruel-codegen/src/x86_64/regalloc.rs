@@ -19,7 +19,7 @@ use crate::alloc_dst;
 use crate::index_map::IndexMap;
 use crate::regalloc::{
     Allocation, CoalesceCandidate, CoalesceResult, CostModel, LoopInfo, RegAllocDebugInfo,
-    SplitInfo, SplitReason, coalesce, find_loop_split_points, linear_scan_with_cost_model,
+    coalesce, find_loop_split_points, linear_scan_with_cost_model,
     linear_scan_with_cost_model_and_debug,
 };
 
@@ -53,9 +53,6 @@ pub struct RegAlloc {
     liveness: LivenessInfo,
     /// Loop information for each instruction.
     loop_info: LoopInfo,
-    /// Split points detected at loop boundaries.
-    #[allow(dead_code)]
-    split_info: SplitInfo,
     /// Result of register coalescing.
     coalesce_result: CoalesceResult,
     /// Number of spill slots used.
@@ -109,12 +106,12 @@ impl RegAlloc {
         let mut allocation = IndexMap::with_capacity(vreg_count);
         allocation.resize(vreg_count, None);
 
+        let _ = split_info; // Computed but not yet used for live range splitting
         Self {
             mir,
             allocation,
             liveness,
             loop_info,
-            split_info,
             coalesce_result,
             num_spills: 0,
             used_callee_saved: Vec::new(),

@@ -271,7 +271,7 @@ impl LoadCommand for LoadDylinker {
         let string_size = self.path.len() + 1; // null terminated
         let total = base_size + string_size;
         // Round up to 8-byte alignment
-        ((total + 7) / 8 * 8) as u32
+        (total.div_ceil(8) * 8) as u32
     }
 
     fn write(&self, buf: &mut Vec<u8>) {
@@ -337,7 +337,7 @@ impl LoadCommand for LoadDylib {
         let base_size = 24;
         let string_size = self.path.len() + 1;
         let total = base_size + string_size;
-        ((total + 7) / 8 * 8) as u32
+        (total.div_ceil(8) * 8) as u32
     }
 
     fn write(&self, buf: &mut Vec<u8>) {
@@ -750,7 +750,7 @@ impl MachOBuilder {
             + self
                 .commands
                 .iter()
-                .map(|c: &Box<dyn LoadCommand>| c.cmdsize() as usize)
+                .map(|c| c.cmdsize() as usize)
                 .sum::<usize>()
             + data_segment_cmd_size;
 
@@ -1056,16 +1056,12 @@ impl MachOBuilder {
             // Write rodata with alignment padding
             buf.extend_from_slice(&self.rodata);
             let rodata_padding = align_up(self.rodata.len() as u64, 8) as usize - self.rodata.len();
-            for _ in 0..rodata_padding {
-                buf.push(0);
-            }
+            buf.extend(std::iter::repeat_n(0u8, rodata_padding));
 
             // Write data with alignment padding
             buf.extend_from_slice(&self.data);
             let data_padding = align_up(self.data.len() as u64, 8) as usize - self.data.len();
-            for _ in 0..data_padding {
-                buf.push(0);
-            }
+            buf.extend(std::iter::repeat_n(0u8, data_padding));
             // Note: BSS is not written to file (it's zero-filled at runtime)
         }
 

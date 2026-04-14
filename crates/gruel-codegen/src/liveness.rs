@@ -94,7 +94,7 @@ where
     let live_at = compute_live_at(num_insts, vreg_count, &live_in, &live_out);
 
     // Step 7: Collect clobbers
-    let clobbers_at: Vec<Vec<R>> = instructions.iter().map(|i| get_clobbers(i)).collect();
+    let clobbers_at: Vec<Vec<R>> = instructions.iter().map(get_clobbers).collect();
 
     LivenessInfo {
         ranges,
@@ -379,8 +379,8 @@ pub fn compute_loop_info(num_insts: usize, successors: &[Vec<usize>]) -> LoopInf
     let mut depths = vec![0u32; num_insts];
 
     for (loop_start, loop_end) in &loop_ranges {
-        for idx in *loop_start..=*loop_end {
-            depths[idx] = depths[idx].saturating_add(1);
+        for depth in &mut depths[*loop_start..=*loop_end] {
+            *depth = depth.saturating_add(1);
         }
     }
 

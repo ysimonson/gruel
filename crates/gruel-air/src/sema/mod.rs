@@ -57,10 +57,10 @@ pub use output::{AnalyzedFunction, SemaOutput};
 
 use std::collections::HashMap;
 
-use lasso::{Spur, ThreadedRodeo};
 use gruel_error::{CompileErrors, MultiErrorResult, PreviewFeatures};
 use gruel_rir::Rir;
 use gruel_span::FileId;
+use lasso::{Spur, ThreadedRodeo};
 
 use crate::intern_pool::TypeInternPool;
 use crate::param_arena::ParamArena;

@@ -332,10 +332,10 @@ pub use x86_64::{Operand, Reg, X86Inst, X86Mir};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lasso::ThreadedRodeo;
     use gruel_air::{Air, AirInst, AirInstData, Type};
     use gruel_cfg::CfgBuilder;
     use gruel_span::Span;
+    use lasso::ThreadedRodeo;
 
     #[test]
     fn test_generate_x86_64() {
@@ -356,7 +356,7 @@ mod tests {
         // Build CFG from AIR (no struct/array types in this simple test)
         let interner = ThreadedRodeo::new();
         let type_pool = gruel_air::TypeInternPool::new();
-        let cfg_output = CfgBuilder::build(&air, 0, 0, "main", &type_pool, vec![], &interner);
+        let cfg_output = CfgBuilder::build(&air, 0, 0, "main", &type_pool, vec![]);
 
         // Test the generate function
         let machine_code = generate(&cfg_output.cfg, &type_pool, &[], &interner).unwrap();

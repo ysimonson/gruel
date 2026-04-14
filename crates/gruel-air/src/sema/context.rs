@@ -6,11 +6,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lasso::Spur;
 use gruel_builtins::BuiltinTypeDef;
 use gruel_error::CompileWarning;
 use gruel_rir::RirParamMode;
 use gruel_span::Span;
+use lasso::Spur;
 
 use crate::scope::ScopedContext;
 use crate::types::{StructId, Type};
@@ -348,10 +348,6 @@ pub enum ConstValue {
     /// This is used when a `comptime T: type` parameter is instantiated
     /// with a specific type like `i32` or `bool`.
     Type(Type),
-    /// Unit value - the value of `()`.
-    // TODO(gruel-c6gi): Remove #[allow] when Unit const evaluation is implemented
-    #[allow(dead_code)]
-    Unit,
 }
 
 impl ConstValue {
@@ -368,35 +364,6 @@ impl ConstValue {
         match self {
             ConstValue::Bool(b) => Some(b),
             _ => None,
-        }
-    }
-
-    /// Try to extract a type value.
-    // TODO(gruel-c6gi): Remove #[allow] when Unit const evaluation is implemented
-    #[allow(dead_code)]
-    pub fn as_type(self) -> Option<Type> {
-        match self {
-            ConstValue::Type(ty) => Some(ty),
-            _ => None,
-        }
-    }
-
-    /// Check if this is a unit value.
-    // TODO(gruel-c6gi): Remove #[allow] when Unit const evaluation is implemented
-    #[allow(dead_code)]
-    pub fn is_unit(self) -> bool {
-        matches!(self, ConstValue::Unit)
-    }
-
-    /// Get the type of this constant value.
-    // TODO(gruel-c6gi): Remove #[allow] when Unit const evaluation is implemented
-    #[allow(dead_code)]
-    pub fn get_type(&self) -> Type {
-        match self {
-            ConstValue::Integer(_) => Type::I64, // Default to i64 for comptime integers
-            ConstValue::Bool(_) => Type::BOOL,
-            ConstValue::Type(_) => Type::COMPTIME_TYPE,
-            ConstValue::Unit => Type::UNIT,
         }
     }
 }
@@ -722,34 +689,6 @@ mod tests {
         assert_eq!(ConstValue::Bool(true), ConstValue::Bool(true));
         assert_ne!(ConstValue::Bool(true), ConstValue::Bool(false));
         assert_ne!(ConstValue::Integer(1), ConstValue::Bool(true));
-    }
-
-    #[test]
-    fn const_value_as_type() {
-        let cv = ConstValue::Type(Type::I32);
-        assert_eq!(cv.as_type(), Some(Type::I32));
-        assert_eq!(cv.as_integer(), None);
-        assert_eq!(cv.as_bool(), None);
-
-        let cv2 = ConstValue::Type(Type::BOOL);
-        assert_eq!(cv2.as_type(), Some(Type::BOOL));
-    }
-
-    #[test]
-    fn const_value_unit() {
-        let cv = ConstValue::Unit;
-        assert!(cv.is_unit());
-        assert_eq!(cv.as_integer(), None);
-        assert_eq!(cv.as_bool(), None);
-        assert_eq!(cv.as_type(), None);
-    }
-
-    #[test]
-    fn const_value_get_type() {
-        assert_eq!(ConstValue::Integer(42).get_type(), Type::I64);
-        assert_eq!(ConstValue::Bool(true).get_type(), Type::BOOL);
-        assert_eq!(ConstValue::Type(Type::I32).get_type(), Type::COMPTIME_TYPE);
-        assert_eq!(ConstValue::Unit.get_type(), Type::UNIT);
     }
 
     #[test]

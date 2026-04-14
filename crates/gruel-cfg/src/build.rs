@@ -3,18 +3,20 @@
 //! This module converts the structured control flow in AIR (Branch, Loop)
 //! into explicit basic blocks with terminators.
 
-use lasso::ThreadedRodeo;
 use gruel_air::{
     Air, AirArgMode, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef, AirProjection, AirRef,
     Type, TypeInternPool, TypeKind,
 };
-use gruel_error::{CompileWarning, WarningKind, ice_error};
+use gruel_error::{CompileWarning, WarningKind};
 
 use crate::CfgOutput;
 use crate::inst::{
     BlockId, Cfg, CfgArgMode, CfgCallArg, CfgInst, CfgInstData, CfgValue, Place, PlaceBase,
     Projection, Terminator,
 };
+
+/// A traced place: (base, list of (projection, optional index value)).
+type TracedPlace = Option<(PlaceBase, Vec<(Projection, Option<CfgValue>)>)>;
 
 /// Result of lowering an expression.
 struct ExprResult {
@@ -63,8 +65,6 @@ pub struct CfgBuilder<'a> {
     cfg: Cfg,
     /// Type intern pool for struct/enum/array lookups (Phase 2B ADR-0024)
     type_pool: &'a TypeInternPool,
-    /// Interner for resolving symbols to strings
-    interner: &'a ThreadedRodeo,
     /// Current block we're building
     current_block: BlockId,
     /// Stack of loop contexts for nested loops
@@ -83,7 +83,7 @@ impl<'a> CfgBuilder<'a> {
     /// Build a CFG from AIR, returning the CFG and any warnings.
     ///
     /// The `type_pool` provides struct/enum/array definitions needed for queries like
-    /// `type_needs_drop`. The `interner` is used to resolve Symbol values to strings for the CFG.
+    /// `type_needs_drop`.
     pub fn build(
         air: &'a Air,
         num_locals: u32,
@@ -91,7 +91,6 @@ impl<'a> CfgBuilder<'a> {
         fn_name: &str,
         type_pool: &'a TypeInternPool,
         param_modes: Vec<bool>,
-        interner: &'a ThreadedRodeo,
     ) -> CfgOutput {
         let mut builder = CfgBuilder {
             air,
@@ -103,7 +102,6 @@ impl<'a> CfgBuilder<'a> {
                 param_modes,
             ),
             type_pool,
-            interner,
             current_block: BlockId(0),
             loop_stack: Vec::new(),
             value_cache: vec![None; air.len()],
@@ -116,7 +114,7 @@ impl<'a> CfgBuilder<'a> {
         builder.cfg.entry = builder.current_block;
 
         // Find the root (should be Ret as last instruction)
-        if air.len() > 0 {
+        if !air.is_empty() {
             let root = AirRef::from_raw((air.len() - 1) as u32);
             builder.lower_inst(root);
         }
@@ -986,34 +984,32 @@ impl<'a> CfgBuilder<'a> {
                 // BUT: if the value diverged (break/continue/return), the diverging
                 // instruction already emitted drops for all scopes via emit_drops_for_all_scopes,
                 // so we must NOT emit duplicate StorageDead here.
-                if !is_storage_live_wrapper {
-                    if let Some(scope_slots) = self.scope_stack.pop() {
-                        // Only emit scope cleanup if the value didn't diverge
-                        if !matches!(result.continuation, Continuation::Diverged) {
-                            for live_slot in scope_slots.into_iter().rev() {
-                                // Emit Drop for types that need cleanup (e.g., heap-allocated String)
-                                if self.type_needs_drop(live_slot.ty) {
-                                    let slot_val = self.emit(
-                                        CfgInstData::Load {
-                                            slot: live_slot.slot,
-                                        },
-                                        live_slot.ty,
-                                        live_slot.span,
-                                    );
-                                    self.emit(
-                                        CfgInstData::Drop { value: slot_val },
-                                        Type::UNIT,
-                                        live_slot.span,
-                                    );
-                                }
-                                self.emit(
-                                    CfgInstData::StorageDead {
+                if !is_storage_live_wrapper && let Some(scope_slots) = self.scope_stack.pop() {
+                    // Only emit scope cleanup if the value didn't diverge
+                    if !matches!(result.continuation, Continuation::Diverged) {
+                        for live_slot in scope_slots.into_iter().rev() {
+                            // Emit Drop for types that need cleanup (e.g., heap-allocated String)
+                            if self.type_needs_drop(live_slot.ty) {
+                                let slot_val = self.emit(
+                                    CfgInstData::Load {
                                         slot: live_slot.slot,
                                     },
+                                    live_slot.ty,
+                                    live_slot.span,
+                                );
+                                self.emit(
+                                    CfgInstData::Drop { value: slot_val },
                                     Type::UNIT,
                                     live_slot.span,
                                 );
                             }
+                            self.emit(
+                                CfgInstData::StorageDead {
+                                    slot: live_slot.slot,
+                                },
+                                Type::UNIT,
+                                live_slot.span,
+                            );
                         }
                     }
                 }
@@ -1885,13 +1881,8 @@ impl<'a> CfgBuilder<'a> {
             }
 
             // Pointer types don't need drop (they're just addresses)
-            TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => false,
-
             // Module types don't need drop (compile-time only)
-            TypeKind::Module(_) => false,
-
-            // Pointer types are trivially droppable (just addresses)
-            TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => false,
+            TypeKind::PtrConst(_) | TypeKind::PtrMut(_) | TypeKind::Module(_) => false,
         }
     }
 
@@ -1977,10 +1968,7 @@ impl<'a> CfgBuilder<'a> {
     ///
     /// The returned CfgValue indices for Index projections are the already-lowered
     /// index values, which must be computed before calling this function.
-    fn try_trace_place(
-        &mut self,
-        air_ref: AirRef,
-    ) -> Option<(PlaceBase, Vec<(Projection, Option<CfgValue>)>)> {
+    fn try_trace_place(&mut self, air_ref: AirRef) -> TracedPlace {
         let inst = self.air.get(air_ref);
 
         match &inst.data {
@@ -2114,7 +2102,6 @@ impl<'a> CfgBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lasso::ThreadedRodeo;
     use gruel_air::Sema;
     use gruel_error::PreviewFeatures;
     use gruel_lexer::Lexer;
@@ -2141,7 +2128,6 @@ mod tests {
             &func.name,
             &output.type_pool,
             func.param_modes.clone(),
-            &interner,
         )
         .cfg
     }

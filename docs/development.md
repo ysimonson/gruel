@@ -64,7 +64,7 @@ cargo build -p gruel-lexer
 ### Run All Tests
 
 ```bash
-./test.sh
+make test
 ```
 
 This runs:
@@ -76,7 +76,7 @@ This runs:
 ### Run Unit Tests Only
 
 ```bash
-./quick-test.sh
+make quick-test
 # or
 cargo test --workspace --exclude gruel-runtime
 ```

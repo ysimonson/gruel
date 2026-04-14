@@ -40,7 +40,7 @@ pub fn create_seed_corpus(source_dir: &Path, output_dir: &Path) -> anyhow::Resul
 
             if path.is_dir() {
                 visit_dir(&path, output_dir, count)?;
-            } else if path.extension().map_or(false, |ext| ext == "toml") {
+            } else if path.extension().is_some_and(|ext| ext == "toml") {
                 // Extract source from TOML test files
                 if let Ok(contents) = std::fs::read_to_string(&path) {
                     extract_sources_from_toml(&contents, output_dir, count)?;

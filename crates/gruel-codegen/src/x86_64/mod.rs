@@ -28,10 +28,10 @@ pub use regalloc::RegAlloc;
 
 use crate::regalloc::RegAllocDebugInfo;
 
-use lasso::ThreadedRodeo;
 use gruel_air::TypeInternPool;
 use gruel_cfg::Cfg;
 use gruel_error::CompileResult;
+use lasso::ThreadedRodeo;
 
 // Re-export from parent
 pub use super::{EmittedCode, EmittedRelocation, MachineCode};

@@ -5,10 +5,10 @@
 
 mod logos_lexer;
 
-pub use lasso::{Key, Spur, ThreadedRodeo};
-pub use logos_lexer::LogosLexer as Lexer;
 pub use gruel_span::FileId;
 use gruel_span::Span;
+pub use lasso::{Key, Spur, ThreadedRodeo};
+pub use logos_lexer::LogosLexer as Lexer;
 
 /// Token kinds in the Gruel language.
 ///

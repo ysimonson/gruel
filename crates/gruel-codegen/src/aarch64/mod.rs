@@ -26,11 +26,11 @@ pub use emit::Emitter;
 pub use mir::{Aarch64Inst, Aarch64Mir, Cond, Operand, Reg, VReg};
 pub use regalloc::RegAlloc;
 
-use lasso::ThreadedRodeo;
 use gruel_air::TypeInternPool;
 use gruel_cfg::Cfg;
 use gruel_error::CompileResult;
 use gruel_target::Target;
+use lasso::ThreadedRodeo;
 
 use crate::MachineCode;
 use crate::regalloc::RegAllocDebugInfo;

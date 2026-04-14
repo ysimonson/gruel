@@ -20,7 +20,7 @@ See [docs/development.md](docs/development.md) for:
 
 ```bash
 # Run all tests
-./test.sh
+make test
 
 # Build and run the compiler
 cargo run -p gruel -- source.gruel output

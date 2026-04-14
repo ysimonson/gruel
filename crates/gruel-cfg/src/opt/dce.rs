@@ -37,7 +37,7 @@ struct BitSet {
 impl BitSet {
     /// Create a new bitset with capacity for at least `capacity` elements.
     fn with_capacity(capacity: usize) -> Self {
-        let num_words = (capacity + 63) / 64;
+        let num_words = capacity.div_ceil(64);
         Self {
             bits: vec![0; num_words],
         }
@@ -98,10 +98,8 @@ fn compute_live_values(cfg: &Cfg) -> BitSet {
     // Pass 1: Mark all side-effecting instructions as live
     for i in 0..cfg.value_count() {
         let value = CfgValue::from_raw(i as u32);
-        if has_side_effects(cfg, value) {
-            if live.insert(value.as_u32()) {
-                worklist.push(value);
-            }
+        if has_side_effects(cfg, value) && live.insert(value.as_u32()) {
+            worklist.push(value);
         }
     }
 
@@ -425,9 +423,9 @@ fn compute_reachable_blocks(cfg: &Cfg) -> BitSet {
 mod tests {
     use super::*;
     use crate::{CfgInst, CfgInstData};
-    use lasso::ThreadedRodeo;
     use gruel_air::Type;
     use gruel_span::Span;
+    use lasso::ThreadedRodeo;
 
     fn make_cfg() -> Cfg {
         let mut cfg = Cfg::new(Type::I32, 0, 0, "test".to_string(), vec![]);
