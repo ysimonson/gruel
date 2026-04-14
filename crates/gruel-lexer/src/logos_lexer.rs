@@ -3,10 +3,10 @@
 //! This module provides a lexer implementation using the logos derive macro
 //! for efficient tokenization.
 
-use lasso::{Spur, ThreadedRodeo};
-use logos::Logos;
 use gruel_error::{CompileError, CompileResult, ErrorKind};
 use gruel_span::{FileId, Span};
+use lasso::{Spur, ThreadedRodeo};
+use logos::Logos;
 
 /// Error type for lexing failures.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -449,11 +449,7 @@ impl<'a> LogosLexer<'a> {
                     };
                     tokens.push(Token {
                         kind: token_kind,
-                        span: Span::with_file(
-                            self.file_id,
-                            span.start as u32,
-                            span.end as u32,
-                        ),
+                        span: Span::with_file(self.file_id, span.start as u32, span.end as u32),
                     });
                 }
                 Err(lex_error) => {
@@ -463,9 +459,7 @@ impl<'a> LogosLexer<'a> {
                     let error_char = slice.chars().next().unwrap_or('?');
                     let kind = match lex_error {
                         LexError::InvalidInteger => ErrorKind::InvalidInteger,
-                        LexError::UnexpectedCharacter => {
-                            ErrorKind::UnexpectedCharacter(error_char)
-                        }
+                        LexError::UnexpectedCharacter => ErrorKind::UnexpectedCharacter(error_char),
                         LexError::InvalidStringEscape => {
                             // Find the escape character after backslash
                             let escape_char = slice
@@ -587,7 +581,10 @@ mod tests {
         let (tokens, interner) = lexer.tokenize().unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::AtImport(_)));
         assert!(matches!(tokens[1].kind, TokenKind::LParen));
-        assert_eq!(get_string_str(&tokens[2].kind, &interner), Some("math.gruel"));
+        assert_eq!(
+            get_string_str(&tokens[2].kind, &interner),
+            Some("math.gruel")
+        );
         assert!(matches!(tokens[3].kind, TokenKind::RParen));
     }
 

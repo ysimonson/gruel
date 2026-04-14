@@ -6,11 +6,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lasso::Spur;
 use gruel_builtins::BuiltinTypeDef;
 use gruel_error::CompileWarning;
 use gruel_rir::RirParamMode;
 use gruel_span::Span;
+use lasso::Spur;
 
 use crate::scope::ScopedContext;
 use crate::types::{StructId, Type};

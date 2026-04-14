@@ -769,11 +769,12 @@ pub fn coalesce<Reg: Copy + Eq + std::hash::Hash>(
     // Find the representative of a vreg in the union-find
     fn find(parent: &mut HashMap<VReg, VReg>, vreg: VReg) -> VReg {
         if let Some(&p) = parent.get(&vreg)
-            && p != vreg {
-                let root = find(parent, p);
-                parent.insert(vreg, root);
-                return root;
-            }
+            && p != vreg
+        {
+            let root = find(parent, p);
+            parent.insert(vreg, root);
+            return root;
+        }
         vreg
     }
 

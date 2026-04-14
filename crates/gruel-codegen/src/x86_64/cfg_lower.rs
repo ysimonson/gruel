@@ -27,12 +27,12 @@
 
 use std::collections::HashMap;
 
-use lasso::ThreadedRodeo;
 use gruel_air::{StructId, TypeInternPool, TypeKind};
 use gruel_builtins::BinOp;
 use gruel_cfg::{
     BasicBlock, BlockId, Cfg, CfgInstData, CfgValue, Place, PlaceBase, Projection, Terminator, Type,
 };
+use lasso::ThreadedRodeo;
 
 use super::mir::{LabelId, Operand, Reg, VReg, X86Inst, X86Mir};
 use crate::cfg_lower::{CfgLowerContext, IndexLevel};
@@ -132,9 +132,10 @@ impl<'a> CfgLower<'a> {
     /// Check if a slot corresponds to an inout parameter.
     fn slot_to_inout_param_index(&self, slot: u32) -> Option<u32> {
         if let Some(param_index) = self.ctx.slot_to_inout_param_index(slot)
-            && self.ctx.cfg.is_param_inout(param_index) {
-                return Some(param_index);
-            }
+            && self.ctx.cfg.is_param_inout(param_index)
+        {
+            return Some(param_index);
+        }
         None
     }
 

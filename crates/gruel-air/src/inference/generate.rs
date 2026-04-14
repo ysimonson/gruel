@@ -12,9 +12,9 @@ use crate::Type;
 use crate::intern_pool::TypeInternPool;
 use crate::scope::ScopedContext;
 use crate::types::{PtrMutability, StructId, parse_array_type_syntax, parse_pointer_type_syntax};
-use lasso::{Spur, ThreadedRodeo};
 use gruel_rir::{InstData, InstRef, Rir};
 use gruel_span::Span;
+use lasso::{Spur, ThreadedRodeo};
 use std::collections::HashMap;
 
 /// Information about a local variable during constraint generation.
@@ -537,18 +537,17 @@ impl<'a> ConstraintGenerator<'a> {
                         }
 
                         // Compute the actual return type by substituting type parameters
-                        
 
                         if func.return_type == InferType::Concrete(Type::COMPTIME_TYPE) {
-                                // Return type is a type parameter - look it up in substitutions
-                                if let Some(&concrete_ty) = type_subst.get(&func.return_type_sym) {
-                                    InferType::Concrete(concrete_ty)
-                                } else {
-                                    func.return_type.clone()
-                                }
+                            // Return type is a type parameter - look it up in substitutions
+                            if let Some(&concrete_ty) = type_subst.get(&func.return_type_sym) {
+                                InferType::Concrete(concrete_ty)
                             } else {
                                 func.return_type.clone()
                             }
+                        } else {
+                            func.return_type.clone()
+                        }
                     } else if args.len() != func.param_types.len() {
                         // Check argument count matches parameter count.
                         // Semantic analysis will emit a proper error; we just need to avoid
@@ -1057,7 +1056,6 @@ impl<'a> ConstraintGenerator<'a> {
                 // Get struct name from receiver type if it's a struct
                 // If we can't determine the struct type, we still generate constraints
                 // for the arguments and return a type variable (actual error is in sema)
-                
 
                 if let InferType::Concrete(ty) = &receiver_info.ty {
                     if let Some(struct_id) = ty.as_struct() {
@@ -1109,7 +1107,7 @@ impl<'a> ConstraintGenerator<'a> {
                 let args = self.rir.get_call_args(*args_start, *args_len);
                 // Get struct ID from type name for method lookup
                 let struct_id = self.structs.get(type_name).and_then(|ty| ty.as_struct());
-                
+
                 if let Some(struct_id) = struct_id {
                     let method_key = (struct_id, *function);
                     if let Some(method_sig) = self.methods.get(&method_key) {

@@ -4,11 +4,11 @@
 //! information from compiled code. This is useful for debugging ABI issues,
 //! calling convention bugs, and understanding how values are laid out on the stack.
 
-use lasso::ThreadedRodeo;
 use gruel_air::TypeInternPool;
 use gruel_cfg::Cfg;
 use gruel_error::CompileResult;
 use gruel_target::{Arch, Target};
+use lasso::ThreadedRodeo;
 
 /// A slot on the stack (local variable or spill slot).
 #[derive(Debug, Clone)]
@@ -545,10 +545,10 @@ fn generate_aarch64_stack_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lasso::ThreadedRodeo;
     use gruel_air::{Air, AirInst, AirInstData, Type, TypeInternPool};
     use gruel_cfg::CfgBuilder;
     use gruel_span::Span;
+    use lasso::ThreadedRodeo;
 
     fn create_simple_cfg() -> (gruel_cfg::Cfg, TypeInternPool, ThreadedRodeo) {
         let mut air = Air::new(Type::I32);

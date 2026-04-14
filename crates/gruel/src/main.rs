@@ -1243,7 +1243,9 @@ mod tests {
     #[test]
     fn parse_multi_file_without_output_flag_error() {
         // Three positional args without -o should error
-        assert!(is_error(&parse_args_from(&["a.gruel", "b.gruel", "c.gruel"])));
+        assert!(is_error(&parse_args_from(&[
+            "a.gruel", "b.gruel", "c.gruel"
+        ])));
     }
 
     #[test]
@@ -1256,7 +1258,10 @@ mod tests {
             "-o",
             "program",
         ]));
-        assert_eq!(opts.source_paths, vec!["main.gruel", "utils.gruel", "lib.gruel"]);
+        assert_eq!(
+            opts.source_paths,
+            vec!["main.gruel", "utils.gruel", "lib.gruel"]
+        );
         assert_eq!(opts.output_path, "program");
         assert_eq!(opts.opt_level, OptLevel::O2);
     }
@@ -1365,7 +1370,11 @@ mod tests {
 
     #[test]
     fn parse_target_x86_64_linux() {
-        let opts = unwrap_options(parse_args_from(&["--target", "x86_64-linux", "source.gruel"]));
+        let opts = unwrap_options(parse_args_from(&[
+            "--target",
+            "x86_64-linux",
+            "source.gruel",
+        ]));
         assert_eq!(opts.target, Target::X86_64Linux);
     }
 
@@ -1453,7 +1462,11 @@ mod tests {
 
     #[test]
     fn parse_preview_valid_feature() {
-        let opts = unwrap_options(parse_args_from(&["--preview", "test_infra", "source.gruel"]));
+        let opts = unwrap_options(parse_args_from(&[
+            "--preview",
+            "test_infra",
+            "source.gruel",
+        ]));
         assert!(opts.preview_features.contains(&PreviewFeature::TestInfra));
     }
 
@@ -1554,7 +1567,10 @@ mod tests {
 
     #[test]
     fn parse_log_format_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "--log-format"])));
+        assert!(is_error(&parse_args_from(&[
+            "source.gruel",
+            "--log-format"
+        ])));
     }
 
     #[test]
@@ -1796,13 +1812,21 @@ mod tests {
 
     #[test]
     fn parse_jobs_invalid_value() {
-        assert!(is_error(&parse_args_from(&["--jobs", "abc", "source.gruel"])));
+        assert!(is_error(&parse_args_from(&[
+            "--jobs",
+            "abc",
+            "source.gruel"
+        ])));
     }
 
     #[test]
     fn parse_jobs_negative_value() {
         // Negative values should fail to parse as usize
-        assert!(is_error(&parse_args_from(&["--jobs", "-1", "source.gruel"])));
+        assert!(is_error(&parse_args_from(&[
+            "--jobs",
+            "-1",
+            "source.gruel"
+        ])));
     }
 
     #[test]

@@ -223,8 +223,6 @@ impl TraceabilityReport {
             .count()
     }
 
-
-
     /// Returns the overall coverage percentage for all paragraphs (0.0 to 100.0).
     ///
     /// This includes both normative and informative paragraphs. For the metric
@@ -458,14 +456,7 @@ fn parse_spec_file(path: &Path, paragraphs: &mut BTreeMap<String, SpecParagraph>
                 break;
             }
 
-            paragraphs.insert(
-                id.clone(),
-                SpecParagraph {
-                    id,
-                    category,
-                    text,
-                },
-            );
+            paragraphs.insert(id.clone(), SpecParagraph { id, category, text });
         }
     }
 }
@@ -612,13 +603,14 @@ pub fn parse_test_files(cases_dir: &Path) -> Vec<TestFile> {
                         // Merge base spec refs with spec_extra from params
                         let mut spec_refs = base_spec_refs.clone();
                         if let Some(spec_extra) = param_table.get("spec_extra")
-                            && let Some(arr) = spec_extra.as_array() {
-                                for item in arr {
-                                    if let Some(s) = item.as_str() {
-                                        spec_refs.push(s.to_string());
-                                    }
+                            && let Some(arr) = spec_extra.as_array()
+                        {
+                            for item in arr {
+                                if let Some(s) = item.as_str() {
+                                    spec_refs.push(s.to_string());
                                 }
                             }
+                        }
 
                         cases.push(TestCase {
                             name: expanded_name,
@@ -635,10 +627,7 @@ pub fn parse_test_files(cases_dir: &Path) -> Vec<TestFile> {
             }
         }
 
-        test_files.push(TestFile {
-            section_id,
-            cases,
-        });
+        test_files.push(TestFile { section_id, cases });
     }
 
     test_files

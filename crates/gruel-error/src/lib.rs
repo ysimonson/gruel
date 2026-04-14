@@ -435,8 +435,7 @@ impl std::fmt::Display for Help {
 ///
 /// This follows rustc's conventions for suggestion applicability levels.
 /// IDEs and tools can use this to decide whether to auto-apply suggestions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Applicability {
     /// The suggestion is definitely correct and can be safely auto-applied.
     ///
@@ -462,7 +461,6 @@ pub enum Applicability {
     #[default]
     Unspecified,
 }
-
 
 impl std::fmt::Display for Applicability {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

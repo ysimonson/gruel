@@ -119,14 +119,16 @@ pub fn run_fuzzer<T: FuzzTarget + ?Sized>(
     loop {
         let elapsed = start.elapsed();
         if let Some(max_time) = config.max_time
-            && elapsed >= max_time {
-                break;
-            }
+            && elapsed >= max_time
+        {
+            break;
+        }
         let current_runs = runs.load(Ordering::Relaxed);
         if let Some(max_runs) = config.max_runs
-            && current_runs >= max_runs {
-                break;
-            }
+            && current_runs >= max_runs
+        {
+            break;
+        }
 
         let input_idx = rng.next_u64() as usize % corpus.len();
         let mut input = corpus[input_idx].clone();
@@ -143,9 +145,10 @@ pub fn run_fuzzer<T: FuzzTarget + ?Sized>(
             panics.fetch_add(1, Ordering::Relaxed);
 
             if let Some(ref crash_dir) = config.crash_dir
-                && let Err(e) = save_crash(crash_dir, &input, current_runs) {
-                    eprintln!("Warning: failed to save crash: {}", e);
-                }
+                && let Err(e) = save_crash(crash_dir, &input, current_runs)
+            {
+                eprintln!("Warning: failed to save crash: {}", e);
+            }
         }
 
         runs.fetch_add(1, Ordering::Relaxed);

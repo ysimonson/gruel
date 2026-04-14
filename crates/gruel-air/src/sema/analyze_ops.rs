@@ -22,12 +22,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lasso::Spur;
 use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
     WarningKind,
 };
 use gruel_rir::{InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern};
+use lasso::Spur;
 
 use crate::sema::context::ConstValue;
 use gruel_span::Span;
@@ -1286,9 +1286,21 @@ impl<'a> Sema<'a> {
     ) -> CompileResult<AnalysisResult> {
         let inst = self.rir.get(inst_ref);
         let (directives_start, directives_len, name, is_mut, init, span) = match inst.data {
-            InstData::Alloc { directives_start, directives_len, name, is_mut, init, .. } => {
-                (directives_start, directives_len, name, is_mut, init, inst.span)
-            }
+            InstData::Alloc {
+                directives_start,
+                directives_len,
+                name,
+                is_mut,
+                init,
+                ..
+            } => (
+                directives_start,
+                directives_len,
+                name,
+                is_mut,
+                init,
+                inst.span,
+            ),
             _ => unreachable!("analyze_alloc called with non-Alloc instruction"),
         };
 
@@ -1399,13 +1411,13 @@ impl<'a> Sema<'a> {
 
             // Check if this parameter has been moved
             if let Some(move_state) = ctx.moved_vars.get(&name)
-                && let Some(moved_span) = move_state.is_any_part_moved() {
-                    return Err(CompileError::new(
-                        ErrorKind::UseAfterMove(name_str.to_string()),
-                        span,
-                    )
-                    .with_label("value moved here", moved_span));
-                }
+                && let Some(moved_span) = move_state.is_any_part_moved()
+            {
+                return Err(
+                    CompileError::new(ErrorKind::UseAfterMove(name_str.to_string()), span)
+                        .with_label("value moved here", moved_span),
+                );
+            }
 
             // Handle move semantics based on parameter mode
             if !self.is_type_copy(ty) {
@@ -1456,13 +1468,13 @@ impl<'a> Sema<'a> {
 
             // Check if this variable has been moved
             if let Some(move_state) = ctx.moved_vars.get(&name)
-                && let Some(moved_span) = move_state.is_any_part_moved() {
-                    return Err(CompileError::new(
-                        ErrorKind::UseAfterMove(name_str.to_string()),
-                        span,
-                    )
-                    .with_label("value moved here", moved_span));
-                }
+                && let Some(moved_span) = move_state.is_any_part_moved()
+            {
+                return Err(
+                    CompileError::new(ErrorKind::UseAfterMove(name_str.to_string()), span)
+                        .with_label("value moved here", moved_span),
+                );
+            }
 
             // If type is not Copy, mark as moved
             if !self.is_type_copy(ty) {
@@ -1968,11 +1980,12 @@ impl<'a> Sema<'a> {
         if let InstData::VarRef { name } = &base_inst.data {
             // Check if this VarRef refers to a module
             if let Some(local) = ctx.locals.get(name)
-                && local.ty.as_module().is_some() {
-                    // This is module.Member access - handle specially
-                    let module_id = local.ty.as_module().unwrap();
-                    return self.analyze_module_type_member_access(air, module_id, field, span);
-                }
+                && local.ty.as_module().is_some()
+            {
+                // This is module.Member access - handle specially
+                let module_id = local.ty.as_module().unwrap();
+                return self.analyze_module_type_member_access(air, module_id, field, span);
+            }
         }
 
         // Try to trace this expression to a place (lvalue)
@@ -1981,14 +1994,15 @@ impl<'a> Sema<'a> {
 
             // Check if the root variable was fully moved (applies regardless of field type)
             if let Some(state) = ctx.moved_vars.get(&trace.root_var)
-                && let Some(moved_span) = state.full_move {
-                    let root_name = self.interner.resolve(&trace.root_var);
-                    return Err(CompileError::new(
-                        ErrorKind::UseAfterMove(root_name.to_string()),
-                        span,
-                    )
-                    .with_label("value moved here", moved_span));
-                }
+                && let Some(moved_span) = state.full_move
+            {
+                let root_name = self.interner.resolve(&trace.root_var);
+                return Err(CompileError::new(
+                    ErrorKind::UseAfterMove(root_name.to_string()),
+                    span,
+                )
+                .with_label("value moved here", moved_span));
+            }
 
             // Get struct info for move checking
             // The trace's result type is the field type, but we need the parent struct type
@@ -2017,20 +2031,21 @@ impl<'a> Sema<'a> {
 
                 // Check if this field path is already moved (partial moves)
                 if let Some(state) = ctx.moved_vars.get(&trace.root_var)
-                    && let Some(moved_span) = state.is_path_moved(&field_path) {
-                        let root_name = self.interner.resolve(&trace.root_var);
-                        let path_str = if field_path.is_empty() {
-                            root_name.to_string()
-                        } else {
-                            let field_names: Vec<_> = field_path
-                                .iter()
-                                .map(|s| self.interner.resolve(s).to_string())
-                                .collect();
-                            format!("{}.{}", root_name, field_names.join("."))
-                        };
-                        return Err(CompileError::new(ErrorKind::UseAfterMove(path_str), span)
-                            .with_label("value moved here", moved_span));
-                    }
+                    && let Some(moved_span) = state.is_path_moved(&field_path)
+                {
+                    let root_name = self.interner.resolve(&trace.root_var);
+                    let path_str = if field_path.is_empty() {
+                        root_name.to_string()
+                    } else {
+                        let field_names: Vec<_> = field_path
+                            .iter()
+                            .map(|s| self.interner.resolve(s).to_string())
+                            .collect();
+                        format!("{}.{}", root_name, field_names.join("."))
+                    };
+                    return Err(CompileError::new(ErrorKind::UseAfterMove(path_str), span)
+                        .with_label("value moved here", moved_span));
+                }
 
                 // Mark this field path as moved
                 ctx.moved_vars
@@ -2193,39 +2208,40 @@ impl<'a> Sema<'a> {
 
             // Check if this struct was defined in the module's file
             if let Some(struct_file_path) = self.get_file_path(struct_def.file_id)
-                && struct_file_path == module_file_path {
-                    // Check visibility: pub structs are visible to all, private only to same directory
-                    if !struct_def.is_pub {
-                        // Check if accessing from same directory
-                        let same_dir = match &accessing_file_path {
-                            Some(accessing) => {
-                                let accessing_dir = std::path::Path::new(accessing).parent();
-                                let module_dir = std::path::Path::new(&module_file_path).parent();
-                                accessing_dir == module_dir
-                            }
-                            None => true, // Be permissive if we can't determine the path
-                        };
-
-                        if !same_dir {
-                            return Err(CompileError::new(
-                                ErrorKind::PrivateMemberAccess {
-                                    item_kind: "struct".to_string(),
-                                    name: member_name_str,
-                                },
-                                span,
-                            ));
+                && struct_file_path == module_file_path
+            {
+                // Check visibility: pub structs are visible to all, private only to same directory
+                if !struct_def.is_pub {
+                    // Check if accessing from same directory
+                    let same_dir = match &accessing_file_path {
+                        Some(accessing) => {
+                            let accessing_dir = std::path::Path::new(accessing).parent();
+                            let module_dir = std::path::Path::new(&module_file_path).parent();
+                            accessing_dir == module_dir
                         }
-                    }
+                        None => true, // Be permissive if we can't determine the path
+                    };
 
-                    // Return a TypeConst instruction with the struct type
-                    let struct_type = Type::new_struct(struct_id);
-                    let air_ref = air.add_inst(AirInst {
-                        data: AirInstData::TypeConst(struct_type),
-                        ty: Type::COMPTIME_TYPE,
-                        span,
-                    });
-                    return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
+                    if !same_dir {
+                        return Err(CompileError::new(
+                            ErrorKind::PrivateMemberAccess {
+                                item_kind: "struct".to_string(),
+                                name: member_name_str,
+                            },
+                            span,
+                        ));
+                    }
                 }
+
+                // Return a TypeConst instruction with the struct type
+                let struct_type = Type::new_struct(struct_id);
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::TypeConst(struct_type),
+                    ty: Type::COMPTIME_TYPE,
+                    span,
+                });
+                return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
+            }
         }
 
         // Next, try to find an enum with this name that belongs to the module's file
@@ -2234,39 +2250,40 @@ impl<'a> Sema<'a> {
 
             // Check if this enum was defined in the module's file
             if let Some(enum_file_path) = self.get_file_path(enum_def.file_id)
-                && enum_file_path == module_file_path {
-                    // Check visibility: pub enums are visible to all, private only to same directory
-                    if !enum_def.is_pub {
-                        // Check if accessing from same directory
-                        let same_dir = match &accessing_file_path {
-                            Some(accessing) => {
-                                let accessing_dir = std::path::Path::new(accessing).parent();
-                                let module_dir = std::path::Path::new(&module_file_path).parent();
-                                accessing_dir == module_dir
-                            }
-                            None => true, // Be permissive if we can't determine the path
-                        };
-
-                        if !same_dir {
-                            return Err(CompileError::new(
-                                ErrorKind::PrivateMemberAccess {
-                                    item_kind: "enum".to_string(),
-                                    name: member_name_str,
-                                },
-                                span,
-                            ));
+                && enum_file_path == module_file_path
+            {
+                // Check visibility: pub enums are visible to all, private only to same directory
+                if !enum_def.is_pub {
+                    // Check if accessing from same directory
+                    let same_dir = match &accessing_file_path {
+                        Some(accessing) => {
+                            let accessing_dir = std::path::Path::new(accessing).parent();
+                            let module_dir = std::path::Path::new(&module_file_path).parent();
+                            accessing_dir == module_dir
                         }
-                    }
+                        None => true, // Be permissive if we can't determine the path
+                    };
 
-                    // Return a TypeConst instruction with the enum type
-                    let enum_type = Type::new_enum(enum_id);
-                    let air_ref = air.add_inst(AirInst {
-                        data: AirInstData::TypeConst(enum_type),
-                        ty: Type::COMPTIME_TYPE,
-                        span,
-                    });
-                    return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
+                    if !same_dir {
+                        return Err(CompileError::new(
+                            ErrorKind::PrivateMemberAccess {
+                                item_kind: "enum".to_string(),
+                                name: member_name_str,
+                            },
+                            span,
+                        ));
+                    }
                 }
+
+                // Return a TypeConst instruction with the enum type
+                let enum_type = Type::new_enum(enum_id);
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::TypeConst(enum_type),
+                    ty: Type::COMPTIME_TYPE,
+                    span,
+                });
+                return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
+            }
         }
 
         // Member not found in the module
@@ -2428,15 +2445,16 @@ impl<'a> Sema<'a> {
 
             // Check for constant out-of-bounds index
             if let Some(const_idx) = self.try_get_const_index(index)
-                && (const_idx < 0 || const_idx as u64 >= array_len) {
-                    return Err(CompileError::new(
-                        ErrorKind::IndexOutOfBounds {
-                            index: const_idx,
-                            length: array_len,
-                        },
-                        self.rir.get(index).span,
-                    ));
-                }
+                && (const_idx < 0 || const_idx as u64 >= array_len)
+            {
+                return Err(CompileError::new(
+                    ErrorKind::IndexOutOfBounds {
+                        index: const_idx,
+                        length: array_len,
+                    },
+                    self.rir.get(index).span,
+                ));
+            }
 
             // Prevent moving non-Copy elements out of arrays.
             if !self.is_type_copy(elem_type) {
@@ -2484,15 +2502,16 @@ impl<'a> Sema<'a> {
 
         // Check for constant out-of-bounds index
         if let Some(const_idx) = self.try_get_const_index(index)
-            && (const_idx < 0 || const_idx as u64 >= array_len) {
-                return Err(CompileError::new(
-                    ErrorKind::IndexOutOfBounds {
-                        index: const_idx,
-                        length: array_len,
-                    },
-                    self.rir.get(index).span,
-                ));
-            }
+            && (const_idx < 0 || const_idx as u64 >= array_len)
+        {
+            return Err(CompileError::new(
+                ErrorKind::IndexOutOfBounds {
+                    index: const_idx,
+                    length: array_len,
+                },
+                self.rir.get(index).span,
+            ));
+        }
 
         // Prevent moving non-Copy elements out of arrays.
         if !self.is_type_copy(elem_type) {
@@ -3011,7 +3030,10 @@ impl<'a> Sema<'a> {
                 let arg_refs = self.rir.get_inst_refs(*args_start, *args_len);
                 let args: Vec<RirCallArg> = arg_refs
                     .into_iter()
-                    .map(|value| RirCallArg { value, mode: RirArgMode::Normal })
+                    .map(|value| RirCallArg {
+                        value,
+                        mode: RirArgMode::Normal,
+                    })
                     .collect();
                 self.analyze_intrinsic_impl(air, inst_ref, *name, args, inst.span, ctx)
             }

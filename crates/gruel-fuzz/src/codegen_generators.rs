@@ -3,9 +3,9 @@
 //! These generators produce random instruction sequences for fuzzing
 //! the emitter, register allocator, and liveness analysis.
 
+use gruel_codegen::x86_64::{LabelId, Operand, Reg, VReg, X86Inst, X86Mir};
 use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
-use gruel_codegen::x86_64::{LabelId, Operand, Reg, VReg, X86Inst, X86Mir};
 
 /// Generate a random physical register.
 pub fn arb_reg() -> BoxedStrategy<Reg> {

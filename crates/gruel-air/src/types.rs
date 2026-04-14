@@ -940,7 +940,11 @@ pub fn parse_pointer_type_syntax(type_name: &str) -> Option<(String, PtrMutabili
     let type_name = type_name.trim();
     if let Some(rest) = type_name.strip_prefix("ptr const ") {
         Some((rest.trim().to_string(), PtrMutability::Const))
-    } else { type_name.strip_prefix("ptr mut ").map(|rest| (rest.trim().to_string(), PtrMutability::Mut)) }
+    } else {
+        type_name
+            .strip_prefix("ptr mut ")
+            .map(|rest| (rest.trim().to_string(), PtrMutability::Mut))
+    }
 }
 
 /// Parse array type syntax "[T; N]" and return (element_type_str, length).

@@ -382,59 +382,71 @@ pub fn expand_case(case: Case) -> Vec<Case> {
 
             // Apply field overrides from params
             if let Some(value) = params.get("exit_code")
-                && let Some(i) = value.as_integer() {
-                    expanded.exit_code = Some(i as i32);
-                }
+                && let Some(i) = value.as_integer()
+            {
+                expanded.exit_code = Some(i as i32);
+            }
             if let Some(value) = params.get("compile_fail")
-                && let Some(b) = value.as_bool() {
-                    expanded.compile_fail = b;
-                }
+                && let Some(b) = value.as_bool()
+            {
+                expanded.compile_fail = b;
+            }
             if let Some(value) = params.get("compile_only")
-                && let Some(b) = value.as_bool() {
-                    expanded.compile_only = b;
-                }
+                && let Some(b) = value.as_bool()
+            {
+                expanded.compile_only = b;
+            }
             if let Some(value) = params.get("skip")
-                && let Some(b) = value.as_bool() {
-                    expanded.skip = b;
-                }
+                && let Some(b) = value.as_bool()
+            {
+                expanded.skip = b;
+            }
             if let Some(value) = params.get("runtime_exit_code")
-                && let Some(i) = value.as_integer() {
-                    expanded.runtime_exit_code = Some(i as i32);
-                }
+                && let Some(i) = value.as_integer()
+            {
+                expanded.runtime_exit_code = Some(i as i32);
+            }
             if let Some(value) = params.get("no_warnings")
-                && let Some(b) = value.as_bool() {
-                    expanded.no_warnings = b;
-                }
+                && let Some(b) = value.as_bool()
+            {
+                expanded.no_warnings = b;
+            }
             if let Some(value) = params.get("opt_level")
-                && let Some(i) = value.as_integer() {
-                    expanded.opt_level = Some(i as u8);
-                }
+                && let Some(i) = value.as_integer()
+            {
+                expanded.opt_level = Some(i as u8);
+            }
             if let Some(value) = params.get("target")
-                && let Some(s) = value.as_str() {
-                    expanded.target = Some(s.to_string());
-                }
+                && let Some(s) = value.as_str()
+            {
+                expanded.target = Some(s.to_string());
+            }
             if let Some(value) = params.get("preview")
-                && let Some(s) = value.as_str() {
-                    expanded.preview = Some(s.to_string());
-                }
+                && let Some(s) = value.as_str()
+            {
+                expanded.preview = Some(s.to_string());
+            }
             if let Some(value) = params.get("preview_should_pass")
-                && let Some(b) = value.as_bool() {
-                    expanded.preview_should_pass = b;
-                }
+                && let Some(b) = value.as_bool()
+            {
+                expanded.preview_should_pass = b;
+            }
             if let Some(value) = params.get("timeout_ms")
-                && let Some(i) = value.as_integer() {
-                    expanded.timeout_ms = Some(i as u64);
-                }
+                && let Some(i) = value.as_integer()
+            {
+                expanded.timeout_ms = Some(i as u64);
+            }
 
             // Merge spec_extra into spec
             if let Some(value) = params.get("spec_extra")
-                && let Some(arr) = value.as_array() {
-                    for item in arr {
-                        if let Some(s) = item.as_str() {
-                            expanded.spec.push(s.to_string());
-                        }
+                && let Some(arr) = value.as_array()
+            {
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        expanded.spec.push(s.to_string());
                     }
                 }
+            }
 
             expanded
         })
@@ -734,12 +746,13 @@ fn run_with_timeout(
 
     // Write stdin input if provided
     if let Some(input) = stdin_input
-        && let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(input.as_bytes())
-                .map_err(|e| format!("Failed to write stdin: {}", e))?;
-            // Closing stdin signals EOF to the child process
-        }
+        && let Some(mut stdin) = child.stdin.take()
+    {
+        stdin
+            .write_all(input.as_bytes())
+            .map_err(|e| format!("Failed to write stdin: {}", e))?;
+        // Closing stdin signals EOF to the child process
+    }
 
     let start = Instant::now();
 
@@ -829,7 +842,13 @@ pub fn run_test_case(case: &Case, gruel_binary: &Path) -> TestResult {
     {
         // Run dump commands and check golden output
         if let Some(ref expected) = case.expected_tokens {
-            run_golden_ir_test(gruel_binary, &source_path, "tokens", expected, build_command)?;
+            run_golden_ir_test(
+                gruel_binary,
+                &source_path,
+                "tokens",
+                expected,
+                build_command,
+            )?;
         }
 
         if let Some(ref expected) = case.expected_ast {
@@ -928,13 +947,12 @@ pub fn run_test_case(case: &Case, gruel_binary: &Path) -> TestResult {
     let compile_stderr = stderr.to_string();
 
     // Check if no warnings expected
-    if case.no_warnings
-        && compile_stderr.contains("warning:") {
-            return Err(format!(
-                "Expected no warnings but got:\n{}\n  source: {}",
-                compile_stderr, case.source
-            ));
-        }
+    if case.no_warnings && compile_stderr.contains("warning:") {
+        return Err(format!(
+            "Expected no warnings but got:\n{}\n  source: {}",
+            compile_stderr, case.source
+        ));
+    }
 
     // Check expected warning count
     if let Some(expected_count) = case.expected_warning_count {
@@ -1009,12 +1027,13 @@ pub fn run_test_case(case: &Case, gruel_binary: &Path) -> TestResult {
 
     // Check stderr contains expected substring (for non-error cases)
     if let Some(ref expected) = case.stderr_contains
-        && !stderr.contains(expected.as_str()) {
-            return Err(format!(
-                "Stderr mismatch:\n  expected to contain: {}\n  actual stderr: {}\n  source: {}",
-                expected, stderr, case.source
-            ));
-        }
+        && !stderr.contains(expected.as_str())
+    {
+        return Err(format!(
+            "Stderr mismatch:\n  expected to contain: {}\n  actual stderr: {}\n  source: {}",
+            expected, stderr, case.source
+        ));
+    }
 
     // Normal exit code test
     let expected_exit_code = case.exit_code.ok_or_else(|| {
@@ -1066,10 +1085,7 @@ pub fn find_gruel_binary() -> PathBuf {
     std::env::var("GRUEL_BINARY")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            let possible_paths = [
-                "target/release/gruel",
-                "target/debug/gruel",
-            ];
+            let possible_paths = ["target/release/gruel", "target/debug/gruel"];
             for path in possible_paths {
                 let p = Path::new(path);
                 if p.exists() {

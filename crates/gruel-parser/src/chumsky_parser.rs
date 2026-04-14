@@ -17,10 +17,10 @@ use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::pratt::{infix, left, prefix};
 use chumsky::prelude::*;
 use chumsky::recovery::via_parser;
-use lasso::{Spur, ThreadedRodeo};
 use gruel_error::{CompileError, CompileErrors, ErrorKind, MultiErrorResult};
 use gruel_lexer::TokenKind;
 use gruel_span::{FileId, Span};
+use lasso::{Spur, ThreadedRodeo};
 use std::borrow::Cow;
 
 use chumsky::extra::SimpleState;
@@ -1843,13 +1843,14 @@ fn process_block_items(items: Vec<BlockItem>, block_span: Span) -> (Vec<Statemen
         // expression (break, continue, return) - if so, promote it to the final
         // expression since it has type Never which coerces to any type.
         if let Some(Statement::Expr(e)) = statements.last()
-            && is_diverging_expr(e) {
-                // Safe to unwrap: we just checked last() is Some(Statement::Expr(_))
-                let Statement::Expr(e) = statements.pop().unwrap() else {
-                    unreachable!()
-                };
-                return e;
-            }
+            && is_diverging_expr(e)
+        {
+            // Safe to unwrap: we just checked last() is Some(Statement::Expr(_))
+            let Statement::Expr(e) = statements.pop().unwrap() else {
+                unreachable!()
+            };
+            return e;
+        }
         // Fallback: use a unit expression (block produces unit type)
         Expr::Unit(UnitLit {
             span: Span::new(block_span.end, block_span.end),

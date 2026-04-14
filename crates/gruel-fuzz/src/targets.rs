@@ -614,8 +614,8 @@ mod proptest_tests {
 #[cfg(test)]
 mod codegen_proptest_tests {
     use crate::codegen_generators;
-    use proptest::prelude::*;
     use gruel_codegen::x86_64::{Emitter, Operand, Reg, X86Inst, X86Mir};
+    use proptest::prelude::*;
 
     proptest! {
         /// The emitter should never panic on any valid instruction.

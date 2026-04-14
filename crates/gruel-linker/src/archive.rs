@@ -111,10 +111,7 @@ impl Archive {
             // The real filename is embedded at the start of the member data.
             let (actual_name, name_len) = if let Some(stripped) = name.strip_prefix("#1/") {
                 let name_len: usize = stripped.trim().parse().map_err(|_| {
-                    ArchiveError::InvalidHeader(format!(
-                        "invalid BSD name length: '{}'",
-                        stripped
-                    ))
+                    ArchiveError::InvalidHeader(format!("invalid BSD name length: '{}'", stripped))
                 })?;
                 // The actual name is at the start of the member data
                 if offset + name_len > data.len() {

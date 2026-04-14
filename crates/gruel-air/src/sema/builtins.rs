@@ -48,7 +48,7 @@ impl<'a> Sema<'a> {
                 is_linear: false, // Built-in types are not linear
                 destructor: builtin.drop_fn.map(|s| s.to_string()),
                 is_builtin: true,
-                is_pub: true,                      // Built-in types are always public
+                is_pub: true,                        // Built-in types are always public
                 file_id: gruel_span::FileId::new(0), // Synthetic, no source file
             };
 
@@ -81,7 +81,7 @@ impl<'a> Sema<'a> {
             let enum_def = EnumDef {
                 name: builtin_enum.name.to_string(),
                 variants,
-                is_pub: true,                      // Built-in enums are always public
+                is_pub: true,                        // Built-in enums are always public
                 file_id: gruel_span::FileId::new(0), // Synthetic, no source file
             };
 
@@ -152,9 +152,10 @@ impl<'a> Sema<'a> {
         // Check all builtin types for methods with ByMutRef receiver
         for builtin in BUILTIN_TYPES {
             if let Some(method) = builtin.find_method(method_name)
-                && method.receiver_mode == ReceiverMode::ByMutRef {
-                    return true;
-                }
+                && method.receiver_mode == ReceiverMode::ByMutRef
+            {
+                return true;
+            }
         }
         false
     }

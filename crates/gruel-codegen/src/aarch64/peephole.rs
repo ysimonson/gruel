@@ -136,18 +136,19 @@ fn combine_adjacent(instructions: &mut Vec<Aarch64Inst>) -> usize {
             },
         ) = (&instructions[i], &instructions[i + 1])
             && operands_equal(dst1, src1)
-                && operands_equal(dst2, src2)
-                && operands_equal(dst1, dst2)
-                && let Some(combined) = imm1.checked_add(*imm2) {
-                    instructions[i] = Aarch64Inst::SubImm {
-                        dst: *dst1,
-                        src: *src1,
-                        imm: combined,
-                    };
-                    instructions.remove(i + 1);
-                    changes += 1;
-                    continue;
-                }
+            && operands_equal(dst2, src2)
+            && operands_equal(dst1, dst2)
+            && let Some(combined) = imm1.checked_add(*imm2)
+        {
+            instructions[i] = Aarch64Inst::SubImm {
+                dst: *dst1,
+                src: *src1,
+                imm: combined,
+            };
+            instructions.remove(i + 1);
+            changes += 1;
+            continue;
+        }
 
         i += 1;
     }

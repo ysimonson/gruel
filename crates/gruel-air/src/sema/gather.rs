@@ -5,9 +5,9 @@
 
 use std::collections::HashMap;
 
-use lasso::{Spur, ThreadedRodeo};
 use gruel_error::PreviewFeatures;
 use gruel_rir::Rir;
+use lasso::{Spur, ThreadedRodeo};
 
 use crate::intern_pool::TypeInternPool;
 use crate::param_arena::ParamArena;

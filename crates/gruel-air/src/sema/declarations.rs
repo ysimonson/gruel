@@ -11,11 +11,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lasso::Spur;
 use gruel_builtins::is_reserved_type_name;
 use gruel_error::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_span::Span;
+use lasso::Spur;
 
 use super::{ConstInfo, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::inference::{FunctionSig, MethodSig};
@@ -166,8 +166,7 @@ impl<'a> Sema<'a> {
                     let mut seen_variants: HashSet<Spur> = HashSet::new();
                     for variant_name in &variants {
                         if !seen_variants.insert(*variant_name) {
-                            let variant_name_str =
-                                self.interner.resolve(variant_name).to_string();
+                            let variant_name_str = self.interner.resolve(variant_name).to_string();
                             return Err(CompileError::new(
                                 ErrorKind::DuplicateVariant {
                                     enum_name: enum_name.clone(),
@@ -761,12 +760,9 @@ impl<'a> Sema<'a> {
         };
 
         // Allocate parameter data in the arena
-        let params_range = self.param_arena.alloc(
-            param_names,
-            param_types,
-            param_modes,
-            param_comptime,
-        );
+        let params_range =
+            self.param_arena
+                .alloc(param_names, param_types, param_modes, param_comptime);
 
         self.functions.insert(
             name,

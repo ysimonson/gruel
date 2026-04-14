@@ -541,7 +541,11 @@ impl<'a> Emitter<'a> {
             Reg::X7,
         ];
         let callee_saved_size = self.callee_saved_stack_size();
-        for (i, &reg) in param_regs.iter().enumerate().take(self.num_params.min(8) as usize) {
+        for (i, &reg) in param_regs
+            .iter()
+            .enumerate()
+            .take(self.num_params.min(8) as usize)
+        {
             let slot = self.num_locals + i as u32;
             // Skip past callee-saved registers in the offset calculation
             let offset = -callee_saved_size - ((slot as i32 + 1) * 8);

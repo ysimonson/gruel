@@ -688,7 +688,7 @@ impl ObjectFile {
                     // Local/section relocation: r_symbolnum is 1-indexed section number
                     // Find the function symbol for this section (should be at offset 0)
                     let target_section = (r_symbolnum - 1) as usize;
-                    
+
                     symbols
                         .iter()
                         .position(|s| {

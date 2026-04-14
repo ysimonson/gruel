@@ -984,36 +984,35 @@ impl<'a> CfgBuilder<'a> {
                 // BUT: if the value diverged (break/continue/return), the diverging
                 // instruction already emitted drops for all scopes via emit_drops_for_all_scopes,
                 // so we must NOT emit duplicate StorageDead here.
-                if !is_storage_live_wrapper
-                    && let Some(scope_slots) = self.scope_stack.pop() {
-                        // Only emit scope cleanup if the value didn't diverge
-                        if !matches!(result.continuation, Continuation::Diverged) {
-                            for live_slot in scope_slots.into_iter().rev() {
-                                // Emit Drop for types that need cleanup (e.g., heap-allocated String)
-                                if self.type_needs_drop(live_slot.ty) {
-                                    let slot_val = self.emit(
-                                        CfgInstData::Load {
-                                            slot: live_slot.slot,
-                                        },
-                                        live_slot.ty,
-                                        live_slot.span,
-                                    );
-                                    self.emit(
-                                        CfgInstData::Drop { value: slot_val },
-                                        Type::UNIT,
-                                        live_slot.span,
-                                    );
-                                }
-                                self.emit(
-                                    CfgInstData::StorageDead {
+                if !is_storage_live_wrapper && let Some(scope_slots) = self.scope_stack.pop() {
+                    // Only emit scope cleanup if the value didn't diverge
+                    if !matches!(result.continuation, Continuation::Diverged) {
+                        for live_slot in scope_slots.into_iter().rev() {
+                            // Emit Drop for types that need cleanup (e.g., heap-allocated String)
+                            if self.type_needs_drop(live_slot.ty) {
+                                let slot_val = self.emit(
+                                    CfgInstData::Load {
                                         slot: live_slot.slot,
                                     },
+                                    live_slot.ty,
+                                    live_slot.span,
+                                );
+                                self.emit(
+                                    CfgInstData::Drop { value: slot_val },
                                     Type::UNIT,
                                     live_slot.span,
                                 );
                             }
+                            self.emit(
+                                CfgInstData::StorageDead {
+                                    slot: live_slot.slot,
+                                },
+                                Type::UNIT,
+                                live_slot.span,
+                            );
                         }
                     }
+                }
 
                 result
             }
@@ -1969,10 +1968,7 @@ impl<'a> CfgBuilder<'a> {
     ///
     /// The returned CfgValue indices for Index projections are the already-lowered
     /// index values, which must be computed before calling this function.
-    fn try_trace_place(
-        &mut self,
-        air_ref: AirRef,
-    ) -> TracedPlace {
+    fn try_trace_place(&mut self, air_ref: AirRef) -> TracedPlace {
         let inst = self.air.get(air_ref);
 
         match &inst.data {

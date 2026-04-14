@@ -31,9 +31,9 @@
 use std::collections::HashMap;
 use std::sync::{PoisonError, RwLock};
 
-use lasso::{Spur, ThreadedRodeo};
 use gruel_error::PreviewFeatures;
 use gruel_rir::Rir;
+use lasso::{Spur, ThreadedRodeo};
 
 use crate::inference::{FunctionSig, InferType, MethodSig};
 use crate::intern_pool::TypeInternPool;
@@ -585,9 +585,10 @@ impl<'a> SemaContext<'a> {
 
         for builtin in BUILTIN_TYPES {
             if let Some(method) = builtin.find_method(method_name)
-                && method.receiver_mode == ReceiverMode::ByMutRef {
-                    return true;
-                }
+                && method.receiver_mode == ReceiverMode::ByMutRef
+            {
+                return true;
+            }
         }
         false
     }

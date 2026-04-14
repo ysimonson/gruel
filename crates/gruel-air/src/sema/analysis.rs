@@ -16,7 +16,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lasso::Spur;
 use gruel_builtins::BuiltinTypeDef;
 use gruel_error::{
     CompileError, CompileErrors, CompileResult, CompileWarning, ErrorKind,
@@ -25,19 +24,18 @@ use gruel_error::{
 use gruel_rir::{InstData, InstRef, RirArgMode, RirCallArg, RirDirective, RirParamMode};
 use gruel_span::Span;
 use gruel_target::{Arch, Os};
+use lasso::Spur;
 
 use super::context::{
-    AnalysisContext, AnalysisResult, BuiltinMethodContext, ConstValue, ParamInfo,
-    ReceiverInfo, StringReceiverStorage,
+    AnalysisContext, AnalysisResult, BuiltinMethodContext, ConstValue, ParamInfo, ReceiverInfo,
+    StringReceiverStorage,
 };
 use super::{AnalyzedFunction, InferenceContext, MethodInfo, Sema, SemaOutput};
 use crate::inference::{
-    Constraint, ConstraintContext, ConstraintGenerator, ParamVarInfo, Unifier,
-    UnifyResult,
+    Constraint, ConstraintContext, ConstraintGenerator, ParamVarInfo, Unifier, UnifyResult,
 };
 use crate::inst::{
-    Air, AirArgMode, AirCallArg, AirInst, AirInstData, AirPlaceBase, AirProjection,
-    AirRef,
+    Air, AirArgMode, AirCallArg, AirInst, AirInstData, AirPlaceBase, AirProjection, AirRef,
 };
 use crate::types::{StructField, StructId, Type, TypeKind};
 
@@ -178,9 +176,10 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
 
             // Skip generic functions - they'll be analyzed during specialization
             if let Some(fn_info) = sema.functions.get(name)
-                && fn_info.is_generic {
-                    continue;
-                }
+                && fn_info.is_generic
+            {
+                continue;
+            }
 
             let fn_name = sema.interner.resolve(name).to_string();
             let params = sema.rir.get_params(*params_start, *params_len);
@@ -536,44 +535,46 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                     body,
                     ..
                 } = &inst.data
-                    && *name == fn_name && !method_refs.contains(&inst_ref) {
-                        found = true;
-                        let params = sema.rir.get_params(*params_start, *params_len);
+                    && *name == fn_name
+                    && !method_refs.contains(&inst_ref)
+                {
+                    found = true;
+                    let params = sema.rir.get_params(*params_start, *params_len);
 
-                        match sema.analyze_single_function(
-                            &infer_ctx,
-                            &fn_name_str,
-                            *return_type,
-                            &params,
-                            *body,
-                            inst.span,
-                        ) {
-                            Ok((
-                                analyzed,
-                                warnings,
-                                local_strings,
-                                referenced_fns,
-                                referenced_meths,
-                            )) => {
-                                functions_with_strings.push((analyzed, local_strings));
-                                all_warnings.extend(warnings);
+                    match sema.analyze_single_function(
+                        &infer_ctx,
+                        &fn_name_str,
+                        *return_type,
+                        &params,
+                        *body,
+                        inst.span,
+                    ) {
+                        Ok((
+                            analyzed,
+                            warnings,
+                            local_strings,
+                            referenced_fns,
+                            referenced_meths,
+                        )) => {
+                            functions_with_strings.push((analyzed, local_strings));
+                            all_warnings.extend(warnings);
 
-                                // Add newly referenced functions to the work queue
-                                for ref_fn in referenced_fns {
-                                    if !analyzed_functions.contains(&ref_fn) {
-                                        pending_functions.push(ref_fn);
-                                    }
-                                }
-                                for ref_meth in referenced_meths {
-                                    if !analyzed_methods.contains(&ref_meth) {
-                                        pending_methods.push(ref_meth);
-                                    }
+                            // Add newly referenced functions to the work queue
+                            for ref_fn in referenced_fns {
+                                if !analyzed_functions.contains(&ref_fn) {
+                                    pending_functions.push(ref_fn);
                                 }
                             }
-                            Err(e) => errors.push(e),
+                            for ref_meth in referenced_meths {
+                                if !analyzed_methods.contains(&ref_meth) {
+                                    pending_methods.push(ref_meth);
+                                }
+                            }
                         }
-                        break;
+                        Err(e) => errors.push(e),
                     }
+                    break;
+                }
             }
 
             if !found {
@@ -873,7 +874,6 @@ impl<'a> Sema<'a> {
             )))
         }
     }
-
 
     fn analyze_single_function(
         &mut self,
@@ -1380,14 +1380,15 @@ impl<'a> Sema<'a> {
                 // Check if this parameter has been fully moved
                 // (Partial moves are checked at the FieldGet level)
                 if let Some(move_state) = ctx.moved_vars.get(name)
-                    && let Some(moved_span) = move_state.full_move {
-                        let name_str = self.interner.resolve(name);
-                        return Err(CompileError::new(
-                            ErrorKind::UseAfterMove(name_str.to_string()),
-                            inst.span,
-                        )
-                        .with_label("value moved here", moved_span));
-                    }
+                    && let Some(moved_span) = move_state.full_move
+                {
+                    let name_str = self.interner.resolve(name);
+                    return Err(CompileError::new(
+                        ErrorKind::UseAfterMove(name_str.to_string()),
+                        inst.span,
+                    )
+                    .with_label("value moved here", moved_span));
+                }
 
                 // NOTE: We do NOT mark as moved here - this is a projection
 
@@ -1414,13 +1415,14 @@ impl<'a> Sema<'a> {
             // Check if this variable has been fully moved
             // (Partial moves are checked at the FieldGet level)
             if let Some(move_state) = ctx.moved_vars.get(name)
-                && let Some(moved_span) = move_state.full_move {
-                    return Err(CompileError::new(
-                        ErrorKind::UseAfterMove(name_str.to_string()),
-                        inst.span,
-                    )
-                    .with_label("value moved here", moved_span));
-                }
+                && let Some(moved_span) = move_state.full_move
+            {
+                return Err(CompileError::new(
+                    ErrorKind::UseAfterMove(name_str.to_string()),
+                    inst.span,
+                )
+                .with_label("value moved here", moved_span));
+            }
 
             // NOTE: We do NOT mark as moved here - this is a projection
 
@@ -1517,15 +1519,16 @@ impl<'a> Sema<'a> {
 
             // Compile-time bounds check for constant indices
             if let Some(const_index) = self.try_get_const_index(*index)
-                && (const_index < 0 || const_index as u64 >= array_length) {
-                    return Err(CompileError::new(
-                        ErrorKind::IndexOutOfBounds {
-                            index: const_index,
-                            length: array_length,
-                        },
-                        self.rir.get(*index).span,
-                    ));
-                }
+                && (const_index < 0 || const_index as u64 >= array_length)
+            {
+                return Err(CompileError::new(
+                    ErrorKind::IndexOutOfBounds {
+                        index: const_index,
+                        length: array_length,
+                    },
+                    self.rir.get(*index).span,
+                ));
+            }
 
             // NOTE: We do NOT check if element_type is Copy here.
             // In projection mode, we allow accessing elements for further projection
@@ -1890,14 +1893,15 @@ impl<'a> Sema<'a> {
         if let Some(mut trace) = self.try_trace_place(base, air, ctx)? {
             // Check if the root variable was fully moved
             if let Some(state) = ctx.moved_vars.get(&trace.root_var)
-                && let Some(moved_span) = state.full_move {
-                    let root_name = self.interner.resolve(&trace.root_var);
-                    return Err(CompileError::new(
-                        ErrorKind::UseAfterMove(root_name.to_string()),
-                        span,
-                    )
-                    .with_label("value moved here", moved_span));
-                }
+                && let Some(moved_span) = state.full_move
+            {
+                let root_name = self.interner.resolve(&trace.root_var);
+                return Err(CompileError::new(
+                    ErrorKind::UseAfterMove(root_name.to_string()),
+                    span,
+                )
+                .with_label("value moved here", moved_span));
+            }
 
             // Check mutability
             let root_name = self.interner.resolve(&trace.root_var).to_string();
@@ -2011,14 +2015,15 @@ impl<'a> Sema<'a> {
         if let Some(mut trace) = self.try_trace_place(base, air, ctx)? {
             // Check if the root variable was fully moved
             if let Some(state) = ctx.moved_vars.get(&trace.root_var)
-                && let Some(moved_span) = state.full_move {
-                    let root_name = self.interner.resolve(&trace.root_var);
-                    return Err(CompileError::new(
-                        ErrorKind::UseAfterMove(root_name.to_string()),
-                        span,
-                    )
-                    .with_label("value moved here", moved_span));
-                }
+                && let Some(moved_span) = state.full_move
+            {
+                let root_name = self.interner.resolve(&trace.root_var);
+                return Err(CompileError::new(
+                    ErrorKind::UseAfterMove(root_name.to_string()),
+                    span,
+                )
+                .with_label("value moved here", moved_span));
+            }
 
             // Check mutability
             let root_name = self.interner.resolve(&trace.root_var).to_string();
@@ -2087,15 +2092,16 @@ impl<'a> Sema<'a> {
 
             // Compile-time bounds check for constant indices
             if let Some(const_index) = self.try_get_const_index(index)
-                && (const_index < 0 || const_index as u64 >= array_len) {
-                    return Err(CompileError::new(
-                        ErrorKind::IndexOutOfBounds {
-                            index: const_index,
-                            length: array_len,
-                        },
-                        self.rir.get(index).span,
-                    ));
-                }
+                && (const_index < 0 || const_index as u64 >= array_len)
+            {
+                return Err(CompileError::new(
+                    ErrorKind::IndexOutOfBounds {
+                        index: const_index,
+                        length: array_len,
+                    },
+                    self.rir.get(index).span,
+                ));
+            }
 
             // Add the index projection
             trace.projections.push(ProjectionInfo {
@@ -2156,8 +2162,7 @@ impl<'a> Sema<'a> {
 
         // Handle module member access: module.function() becomes a direct function call
         if receiver_type.is_module() {
-            return self
-                .analyze_module_member_call_impl(air, method, args, span, ctx);
+            return self.analyze_module_member_call_impl(air, method, args, span, ctx);
         }
 
         // Check that receiver is a struct type
@@ -3132,9 +3137,10 @@ impl<'a> Sema<'a> {
             let import_base = import_path.strip_suffix(".gruel").unwrap_or(import_path);
             let file_name = Path::new(path).file_stem().and_then(|s| s.to_str());
             if let Some(name) = file_name
-                && name == import_base {
-                    return Ok(path.clone());
-                }
+                && name == import_base
+            {
+                return Ok(path.clone());
+            }
         }
 
         // Phase 2: Try to find the file on disk (for directory modules and actual file imports)
@@ -4685,7 +4691,12 @@ impl<'a> Sema<'a> {
         type_subst: &std::collections::HashMap<Spur, Type>,
         _value_subst: &std::collections::HashMap<Spur, ConstValue>,
     ) -> Option<()> {
-        let AnonStructSpec { struct_id, struct_type, methods_start, methods_len } = spec;
+        let AnonStructSpec {
+            struct_id,
+            struct_type,
+            methods_start,
+            methods_len,
+        } = spec;
         let method_refs = self.rir.get_inst_refs(methods_start, methods_len);
 
         let mut seen_methods: std::collections::HashSet<Spur> = std::collections::HashSet::new();

@@ -332,10 +332,10 @@ pub use x86_64::{Operand, Reg, X86Inst, X86Mir};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lasso::ThreadedRodeo;
     use gruel_air::{Air, AirInst, AirInstData, Type};
     use gruel_cfg::CfgBuilder;
     use gruel_span::Span;
+    use lasso::ThreadedRodeo;
 
     #[test]
     fn test_generate_x86_64() {

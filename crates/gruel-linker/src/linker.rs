@@ -253,21 +253,22 @@ impl Linker {
             let mut added_any = false;
             for sym_name in undefined {
                 if let Some(&obj_idx) = symbol_to_obj.get(&sym_name)
-                    && !selected[obj_idx] {
-                        selected[obj_idx] = true;
-                        added_any = true;
+                    && !selected[obj_idx]
+                {
+                    selected[obj_idx] = true;
+                    added_any = true;
 
-                        // Add defined symbols from this object
-                        for sym in &archive_objects[obj_idx].symbols {
-                            if sym.section_index.is_some()
-                                && (sym.binding == SymbolBinding::Global
-                                    || sym.binding == SymbolBinding::Weak)
-                                && !sym.name.is_empty()
-                            {
-                                defined_symbols.insert(sym.name.clone());
-                            }
+                    // Add defined symbols from this object
+                    for sym in &archive_objects[obj_idx].symbols {
+                        if sym.section_index.is_some()
+                            && (sym.binding == SymbolBinding::Global
+                                || sym.binding == SymbolBinding::Weak)
+                            && !sym.name.is_empty()
+                        {
+                            defined_symbols.insert(sym.name.clone());
                         }
                     }
+                }
             }
 
             if !added_any {
@@ -385,17 +386,18 @@ impl Linker {
 
                     // Skip relocations to debug/unwinding sections
                     if let Some(sec_idx) = sym.section_index
-                        && sec_idx < obj.sections.len() {
-                            let target_sec = &obj.sections[sec_idx];
-                            if !is_text_section(&target_sec.name)
-                                && !is_rodata_section(&target_sec.name)
-                                && !is_data_section(&target_sec.name)
-                                && !is_bss_section(&target_sec.name)
-                            {
-                                // Symbol is in a section we don't link
-                                continue;
-                            }
+                        && sec_idx < obj.sections.len()
+                    {
+                        let target_sec = &obj.sections[sec_idx];
+                        if !is_text_section(&target_sec.name)
+                            && !is_rodata_section(&target_sec.name)
+                            && !is_data_section(&target_sec.name)
+                            && !is_bss_section(&target_sec.name)
+                        {
+                            // Symbol is in a section we don't link
+                            continue;
                         }
+                    }
 
                     pending_relocations.push((
                         offset + reloc.offset,
@@ -576,7 +578,8 @@ impl Linker {
         eprintln!("DEBUG: text_file_offset = 0x{:x}", text_file_offset);
 
         // Apply relocations
-        for (patch_offset, sym_name, _sym_section, _obj_idx, rel_type, addend) in pending_relocations
+        for (patch_offset, sym_name, _sym_section, _obj_idx, rel_type, addend) in
+            pending_relocations
         {
             // Debug: log function call relocations
             if matches!(rel_type, RelocationType::Call26)
@@ -823,18 +826,19 @@ impl Linker {
                     // We now support .text, .rodata, .data, and .bss
                     // Only skip debug/unwinding sections
                     if let Some(sec_idx) = sym.section_index
-                        && sec_idx < obj.sections.len() {
-                            let target_sec = &obj.sections[sec_idx];
-                            if !target_sec.name.starts_with(".text")
-                                && !target_sec.name.starts_with(".rodata")
-                                && !target_sec.name.starts_with(".data")
-                                && !target_sec.name.starts_with(".bss")
-                            {
-                                // Symbol is in a section we don't link (e.g., debug)
-                                // Skip this relocation
-                                continue;
-                            }
+                        && sec_idx < obj.sections.len()
+                    {
+                        let target_sec = &obj.sections[sec_idx];
+                        if !target_sec.name.starts_with(".text")
+                            && !target_sec.name.starts_with(".rodata")
+                            && !target_sec.name.starts_with(".data")
+                            && !target_sec.name.starts_with(".bss")
+                        {
+                            // Symbol is in a section we don't link (e.g., debug)
+                            // Skip this relocation
+                            continue;
                         }
+                    }
 
                     pending_relocations.push((
                         offset + reloc.offset,

@@ -26,8 +26,8 @@
 
 use std::fmt;
 
-use lasso::{Key, Spur};
 use gruel_span::Span;
+use lasso::{Key, Spur};
 use smallvec::SmallVec;
 
 /// Type alias for a small vector of directives.
@@ -239,8 +239,7 @@ pub struct Function {
 }
 
 /// Parameter passing mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ParamMode {
     /// Normal pass-by-value parameter
     #[default]
@@ -252,7 +251,6 @@ pub enum ParamMode {
     /// Comptime parameter - evaluated at compile time (used for type parameters)
     Comptime,
 }
-
 
 /// A function parameter.
 #[derive(Debug, Clone, PartialEq, Eq)]

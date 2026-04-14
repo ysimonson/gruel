@@ -99,7 +99,10 @@ impl StackVerifier {
 
             // AddRI on RSP: used to deallocate stack space (positive imm) or
             // allocate stack space (negative imm, though rare in current codegen)
-            X86Inst::AddRI { dst: Operand::Physical(Reg::Rsp), imm } => {
+            X86Inst::AddRI {
+                dst: Operand::Physical(Reg::Rsp),
+                imm,
+            } => {
                 // add rsp, N → decreases depth (deallocates)
                 // add rsp, -N → increases depth (allocates)
                 self.current_depth -= *imm as i64;

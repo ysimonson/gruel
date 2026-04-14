@@ -17,9 +17,9 @@
 
 use std::collections::HashMap;
 
-use lasso::Spur;
 use gruel_error::{CompileError, CompileResult, CompileWarning, ErrorKind, PreviewFeature};
 use gruel_span::Span;
+use lasso::Spur;
 
 use crate::inference::InferType;
 use crate::sema_context::SemaContext;

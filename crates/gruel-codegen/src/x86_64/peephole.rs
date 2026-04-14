@@ -101,21 +101,22 @@ fn combine_adjacent(instructions: &mut Vec<X86Inst>) -> usize {
                 imm: imm2,
             },
         ) = (&instructions[i], &instructions[i + 1])
-            && operands_equal(dst1, dst2) {
-                // Check for overflow when combining immediates
-                if let Some(combined) = imm1.checked_add(*imm2) {
-                    // Replace first instruction with combined add
-                    instructions[i] = X86Inst::AddRI {
-                        dst: *dst1,
-                        imm: combined,
-                    };
-                    // Remove second instruction
-                    instructions.remove(i + 1);
-                    changes += 1;
-                    // Don't increment i - there might be more adds to combine
-                    continue;
-                }
+            && operands_equal(dst1, dst2)
+        {
+            // Check for overflow when combining immediates
+            if let Some(combined) = imm1.checked_add(*imm2) {
+                // Replace first instruction with combined add
+                instructions[i] = X86Inst::AddRI {
+                    dst: *dst1,
+                    imm: combined,
+                };
+                // Remove second instruction
+                instructions.remove(i + 1);
+                changes += 1;
+                // Don't increment i - there might be more adds to combine
+                continue;
             }
+        }
 
         i += 1;
     }

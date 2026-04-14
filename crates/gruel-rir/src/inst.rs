@@ -5,8 +5,8 @@
 
 use std::fmt;
 
-use lasso::{Key, Spur};
 use gruel_span::Span;
+use lasso::{Key, Spur};
 
 /// A reference to an instruction in the RIR.
 ///
@@ -2196,12 +2196,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
 
                 // Drop
                 InstData::DropFnDecl { type_name, body } => {
-                    writeln!(
-                        out,
-                        "drop fn {}(self) {{",
-                        self.interner.resolve(type_name)
-                    )
-                    .unwrap();
+                    writeln!(out, "drop fn {}(self) {{", self.interner.resolve(type_name)).unwrap();
                     writeln!(out, "    {}", body).unwrap();
                     writeln!(out, "}}").unwrap();
                 }
