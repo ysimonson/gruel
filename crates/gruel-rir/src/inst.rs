@@ -136,7 +136,6 @@ impl RirPattern {
 
 /// Extra data marker types for type-safe storage in the extra array.
 /// These types represent data stored in the extra array.
-
 /// Stored representation of RirCallArg in the extra array.
 /// Layout: [value: u32, mode: u32] = 2 u32s per arg
 const CALL_ARG_SIZE: u32 = 2;
@@ -148,7 +147,6 @@ const PARAM_SIZE: u32 = 4;
 /// Stored representation of match arm in the extra array.
 /// Layout: pattern data + [body: u32]
 /// Pattern data varies by kind (see PatternKind enum).
-
 /// Pattern kinds encoded in extra array
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,7 +179,6 @@ const FIELD_DECL_SIZE: u32 = 2;
 /// Stored representation of directive in the extra array.
 /// Layout: [name: u32, span_start: u32, span_len: u32, args_len: u32, args...]
 /// Variable size due to args.
-
 /// A span marking the boundaries of a function in the RIR.
 ///
 /// This allows efficient per-function analysis by identifying which instructions
@@ -1325,7 +1322,6 @@ impl Rir {
                 | InstData::ConstDecl { .. }
                 | InstData::FieldGet { .. }
                 | InstData::FieldSet { .. }
-                | InstData::StructDecl { .. }
                 | InstData::EnumDecl { .. }
                 | InstData::EnumVariant { .. }
                 | InstData::IndexGet { .. }
@@ -1809,15 +1805,15 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 format!(
                     "{}{}::{}",
                     prefix,
-                    self.interner.resolve(&*type_name),
-                    self.interner.resolve(&*variant)
+                    self.interner.resolve(type_name),
+                    self.interner.resolve(variant)
                 )
             }
         }
     }
 
     /// Format the RIR as a string.
-    pub fn to_string(&self) -> String {
+    pub fn render(&self) -> String {
         use std::fmt::Write;
 
         let mut out = String::new();
@@ -1828,7 +1824,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::IntConst(v) => writeln!(out, "const {}", v).unwrap(),
                 InstData::BoolConst(v) => writeln!(out, "const {}", v).unwrap(),
                 InstData::StringConst(s) => {
-                    writeln!(out, "const {:?}", self.interner.resolve(&*s)).unwrap()
+                    writeln!(out, "const {:?}", self.interner.resolve(s)).unwrap()
                 }
                 InstData::UnitConst => writeln!(out, "const ()").unwrap(),
 
@@ -1901,8 +1897,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let unchecked_str = if *is_unchecked { "unchecked " } else { "" };
-                    let name_str = self.interner.resolve(&*name);
-                    let ret_str = self.interner.resolve(&*return_type);
+                    let name_str = self.interner.resolve(name);
+                    let ret_str = self.interner.resolve(return_type);
                     let self_str = if *has_self { "self, " } else { "" };
                     let params = self.rir.get_params(*params_start, *params_len);
                     let params_str: Vec<String> = params
@@ -1945,7 +1941,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     init,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
-                    let name_str = self.interner.resolve(&*name);
+                    let name_str = self.interner.resolve(name);
                     let ty_str = ty
                         .map(|t| format!(": {}", self.interner.resolve(&t)))
                         .unwrap_or_default();
@@ -1963,7 +1959,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     args_start,
                     args_len,
                 } => {
-                    let name_str = self.interner.resolve(&*name);
+                    let name_str = self.interner.resolve(name);
                     let args = self.rir.get_call_args(*args_start, *args_len);
                     writeln!(out, "call {}({})", name_str, Self::format_call_args(&args)).unwrap();
                 }
@@ -1972,18 +1968,18 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     args_start,
                     args_len,
                 } => {
-                    let name_str = self.interner.resolve(&*name);
+                    let name_str = self.interner.resolve(name);
                     let args = self.rir.get_inst_refs(*args_start, *args_len);
                     let args_str: Vec<String> = args.iter().map(|a| format!("{}", a)).collect();
                     writeln!(out, "intrinsic @{}({})", name_str, args_str.join(", ")).unwrap();
                 }
                 InstData::TypeIntrinsic { name, type_arg } => {
-                    let name_str = self.interner.resolve(&*name);
-                    let type_str = self.interner.resolve(&*type_arg);
+                    let name_str = self.interner.resolve(name);
+                    let type_str = self.interner.resolve(type_arg);
                     writeln!(out, "type_intrinsic @{}({})", name_str, type_str).unwrap();
                 }
                 InstData::ParamRef { index, name } => {
-                    writeln!(out, "param {} ({})", index, self.interner.resolve(&*name)).unwrap();
+                    writeln!(out, "param {} ({})", index, self.interner.resolve(name)).unwrap();
                 }
                 InstData::Block { extra_start, len } => {
                     writeln!(out, "block({}, {})", extra_start, len).unwrap();
@@ -2008,10 +2004,10 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     writeln!(out, "alloc {}{}{}= {}", mut_str, name_str, ty_str, init).unwrap();
                 }
                 InstData::VarRef { name } => {
-                    writeln!(out, "var_ref {}", self.interner.resolve(&*name)).unwrap();
+                    writeln!(out, "var_ref {}", self.interner.resolve(name)).unwrap();
                 }
                 InstData::Assign { name, value } => {
-                    writeln!(out, "assign {} = {}", self.interner.resolve(&*name), value).unwrap();
+                    writeln!(out, "assign {} = {}", self.interner.resolve(name), value).unwrap();
                 }
 
                 // Structs
@@ -2027,15 +2023,15 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     methods_len,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
-                    let name_str = self.interner.resolve(&*name);
+                    let name_str = self.interner.resolve(name);
                     let fields = self.rir.get_field_decls(*fields_start, *fields_len);
                     let fields_str: Vec<String> = fields
                         .iter()
                         .map(|(fname, ftype)| {
                             format!(
                                 "{}: {}",
-                                self.interner.resolve(&*fname),
-                                self.interner.resolve(&*ftype)
+                                self.interner.resolve(fname),
+                                self.interner.resolve(ftype)
                             )
                         })
                         .collect();
@@ -2077,12 +2073,12 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     fields_len,
                 } => {
                     let module_str = module.map(|m| format!("{}.", m)).unwrap_or_default();
-                    let type_str = self.interner.resolve(&*type_name);
+                    let type_str = self.interner.resolve(type_name);
                     let fields = self.rir.get_field_inits(*fields_start, *fields_len);
                     let fields_str: Vec<String> = fields
                         .iter()
                         .map(|(fname, value)| {
-                            format!("{}: {}", self.interner.resolve(&*fname), value)
+                            format!("{}: {}", self.interner.resolve(fname), value)
                         })
                         .collect();
                     writeln!(
@@ -2095,14 +2091,14 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     .unwrap();
                 }
                 InstData::FieldGet { base, field } => {
-                    writeln!(out, "field_get {}.{}", base, self.interner.resolve(&*field)).unwrap();
+                    writeln!(out, "field_get {}.{}", base, self.interner.resolve(field)).unwrap();
                 }
                 InstData::FieldSet { base, field, value } => {
                     writeln!(
                         out,
                         "field_set {}.{} = {}",
                         base,
-                        self.interner.resolve(&*field),
+                        self.interner.resolve(field),
                         value
                     )
                     .unwrap();
@@ -2116,11 +2112,11 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     variants_len,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
-                    let name_str = self.interner.resolve(&*name);
+                    let name_str = self.interner.resolve(name);
                     let variants = self.rir.get_symbols(*variants_start, *variants_len);
                     let variants_str: Vec<String> = variants
                         .iter()
-                        .map(|v| self.interner.resolve(&*v).to_string())
+                        .map(|v| self.interner.resolve(v).to_string())
                         .collect();
                     writeln!(
                         out,
@@ -2141,8 +2137,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         out,
                         "enum_variant {}{}::{}",
                         module_str,
-                        self.interner.resolve(&*type_name),
-                        self.interner.resolve(&*variant)
+                        self.interner.resolve(type_name),
+                        self.interner.resolve(variant)
                     )
                     .unwrap();
                 }
@@ -2176,7 +2172,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         out,
                         "method_call {}.{}({})",
                         receiver,
-                        self.interner.resolve(&*method),
+                        self.interner.resolve(method),
                         Self::format_call_args(&args)
                     )
                     .unwrap();
@@ -2191,8 +2187,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     writeln!(
                         out,
                         "assoc_fn_call {}::{}({})",
-                        self.interner.resolve(&*type_name),
-                        self.interner.resolve(&*function),
+                        self.interner.resolve(type_name),
+                        self.interner.resolve(function),
                         Self::format_call_args(&args)
                     )
                     .unwrap();
@@ -2203,7 +2199,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     writeln!(
                         out,
                         "drop fn {}(self) {{",
-                        self.interner.resolve(&*type_name)
+                        self.interner.resolve(type_name)
                     )
                     .unwrap();
                     writeln!(out, "    {}", body).unwrap();
@@ -2263,7 +2259,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
 
 impl fmt::Display for RirPrinter<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self.render())
     }
 }
 

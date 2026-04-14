@@ -252,8 +252,8 @@ impl Linker {
             // Try to resolve undefined symbols from the archive
             let mut added_any = false;
             for sym_name in undefined {
-                if let Some(&obj_idx) = symbol_to_obj.get(&sym_name) {
-                    if !selected[obj_idx] {
+                if let Some(&obj_idx) = symbol_to_obj.get(&sym_name)
+                    && !selected[obj_idx] {
                         selected[obj_idx] = true;
                         added_any = true;
 
@@ -268,7 +268,6 @@ impl Linker {
                             }
                         }
                     }
-                }
             }
 
             if !added_any {
@@ -361,9 +360,7 @@ impl Linker {
                     merged_text.extend_from_slice(&[0x00, 0x00, 0x20, 0xD4]);
                 }
                 // Handle non-aligned padding
-                for _ in 0..(padding % 4) {
-                    merged_text.push(0x00);
-                }
+                merged_text.extend(std::iter::repeat_n(0x00, (padding % 4) as usize));
 
                 let offset = merged_text.len() as u64;
                 section_offsets.insert((obj_idx, sec_idx), offset);
@@ -387,8 +384,8 @@ impl Linker {
                     }
 
                     // Skip relocations to debug/unwinding sections
-                    if let Some(sec_idx) = sym.section_index {
-                        if sec_idx < obj.sections.len() {
+                    if let Some(sec_idx) = sym.section_index
+                        && sec_idx < obj.sections.len() {
                             let target_sec = &obj.sections[sec_idx];
                             if !is_text_section(&target_sec.name)
                                 && !is_rodata_section(&target_sec.name)
@@ -399,7 +396,6 @@ impl Linker {
                                 continue;
                             }
                         }
-                    }
 
                     pending_relocations.push((
                         offset + reloc.offset,
@@ -580,7 +576,7 @@ impl Linker {
         eprintln!("DEBUG: text_file_offset = 0x{:x}", text_file_offset);
 
         // Apply relocations
-        for (patch_offset, sym_name, sym_section, _obj_idx, rel_type, addend) in pending_relocations
+        for (patch_offset, sym_name, _sym_section, _obj_idx, rel_type, addend) in pending_relocations
         {
             // Debug: log function call relocations
             if matches!(rel_type, RelocationType::Call26)
@@ -646,7 +642,7 @@ impl Linker {
                     let offset_words = offset_bytes / 4;
 
                     // Check range: 26-bit signed field gives ±128MB range
-                    if offset_words < -(1 << 25) || offset_words >= (1 << 25) {
+                    if !(-(1 << 25)..(1 << 25)).contains(&offset_words) {
                         return Err(LinkError::RelocationOverflow {
                             symbol: sym_name,
                             rel_type: "ARM64_RELOC_BRANCH26".to_string(),
@@ -678,7 +674,7 @@ impl Linker {
                     let page_offset = (target_page - patch_page) >> 12;
 
                     // 21-bit signed field
-                    if page_offset < -(1 << 20) || page_offset >= (1 << 20) {
+                    if !(-(1 << 20)..(1 << 20)).contains(&page_offset) {
                         return Err(LinkError::RelocationOverflow {
                             symbol: sym_name,
                             rel_type: "ARM64_RELOC_PAGE21".to_string(),
@@ -826,8 +822,8 @@ impl Linker {
 
                     // We now support .text, .rodata, .data, and .bss
                     // Only skip debug/unwinding sections
-                    if let Some(sec_idx) = sym.section_index {
-                        if sec_idx < obj.sections.len() {
+                    if let Some(sec_idx) = sym.section_index
+                        && sec_idx < obj.sections.len() {
                             let target_sec = &obj.sections[sec_idx];
                             if !target_sec.name.starts_with(".text")
                                 && !target_sec.name.starts_with(".rodata")
@@ -839,7 +835,6 @@ impl Linker {
                                 continue;
                             }
                         }
-                    }
 
                     pending_relocations.push((
                         offset + reloc.offset,
@@ -1314,7 +1309,7 @@ impl Linker {
                     } else {
                         "Call26"
                     };
-                    if offset < -(1 << 25) || offset >= (1 << 25) {
+                    if !(-(1 << 25)..(1 << 25)).contains(&offset) {
                         return Err(LinkError::RelocationOverflow {
                             symbol: sym_name.clone(),
                             rel_type: rel_name.to_string(),
@@ -1349,7 +1344,7 @@ impl Linker {
                     // ADRP encodes a 21-bit signed page offset (each unit = 4KB page)
                     let page_count = page_offset >> 12;
                     // Check for overflow: must fit in 21 bits signed
-                    if page_count < -(1 << 20) || page_count >= (1 << 20) {
+                    if !(-(1 << 20)..(1 << 20)).contains(&page_count) {
                         return Err(LinkError::RelocationOverflow {
                             symbol: sym_name.clone(),
                             rel_type: "AdrpPage21".to_string(),

@@ -12,7 +12,7 @@ use crate::constants::{
     ELF64_SYM_SIZE, ELFCLASS64, ELFDATA2LSB, ET_REL, EV_CURRENT, LC_BUILD_VERSION, LC_DYSYMTAB,
     LC_SEGMENT_64, LC_SYMTAB, MACHO64_BUILD_VERSION_CMD_SIZE, MACHO64_DYSYMTAB_CMD_SIZE,
     MACHO64_HEADER_SIZE, MACHO64_NLIST_SIZE, MACHO64_RELOC_SIZE, MACHO64_SECTION_SIZE,
-    MACHO64_SEGMENT_CMD_SIZE, MACHO64_SYMTAB_CMD_SIZE, MH_MAGIC_64, MH_OBJECT, N_EXT, N_PEXT,
+    MACHO64_SEGMENT_CMD_SIZE, MACHO64_SYMTAB_CMD_SIZE, MH_MAGIC_64, MH_OBJECT, N_EXT,
     N_SECT, N_UNDF, PLATFORM_MACOS, R_AARCH64_ABS64, R_AARCH64_ADD_ABS_LO12_NC,
     R_AARCH64_ADR_PREL_PG_HI21, R_AARCH64_CALL26, R_AARCH64_JUMP26, R_X86_64_32, R_X86_64_32S,
     R_X86_64_64, R_X86_64_GOTPCREL, R_X86_64_GOTPCRELX, R_X86_64_PC32, R_X86_64_PLT32,
@@ -603,7 +603,7 @@ impl ObjectBuilder {
                         .parse::<usize>()
                     {
                         // Keep relocation only if string is non-empty
-                        !self.strings.get(string_id).map_or(true, |s| s.is_empty())
+                        !self.strings.get(string_id).is_none_or(|s| s.is_empty())
                     } else {
                         true // Keep if we can't parse (shouldn't happen)
                     }

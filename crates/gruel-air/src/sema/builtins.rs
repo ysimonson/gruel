@@ -151,11 +151,10 @@ impl<'a> Sema<'a> {
 
         // Check all builtin types for methods with ByMutRef receiver
         for builtin in BUILTIN_TYPES {
-            if let Some(method) = builtin.find_method(method_name) {
-                if method.receiver_mode == ReceiverMode::ByMutRef {
+            if let Some(method) = builtin.find_method(method_name)
+                && method.receiver_mode == ReceiverMode::ByMutRef {
                     return true;
                 }
-            }
         }
         false
     }

@@ -29,6 +29,9 @@ use std::collections::HashMap;
 
 use lasso::Spur;
 
+/// Scope stack entry: (variable name, previous value to restore on pop).
+type ScopeEntry<V> = Vec<(Spur, Option<V>)>;
+
 /// Trait for types that track scoped variable bindings.
 ///
 /// This trait abstracts over the common scope management pattern shared by
@@ -49,7 +52,7 @@ pub trait ScopedContext {
     fn locals_mut(&mut self) -> &mut HashMap<Spur, Self::VarInfo>;
 
     /// Get a mutable reference to the scope stack.
-    fn scope_stack_mut(&mut self) -> &mut Vec<Vec<(Spur, Option<Self::VarInfo>)>>;
+    fn scope_stack_mut(&mut self) -> &mut Vec<ScopeEntry<Self::VarInfo>>;
 
     /// Push a new scope onto the stack.
     ///

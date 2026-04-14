@@ -240,8 +240,10 @@ pub struct Function {
 
 /// Parameter passing mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ParamMode {
     /// Normal pass-by-value parameter
+    #[default]
     Normal,
     /// Inout parameter - mutated in place and returned to caller
     Inout,
@@ -251,11 +253,6 @@ pub enum ParamMode {
     Comptime,
 }
 
-impl Default for ParamMode {
-    fn default() -> Self {
-        ParamMode::Normal
-    }
-}
 
 /// A function parameter.
 #[derive(Debug, Clone, PartialEq, Eq)]

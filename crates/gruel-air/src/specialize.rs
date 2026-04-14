@@ -76,7 +76,7 @@ pub fn specialize(
     // Phase 3: Create specialized function bodies by re-analyzing with type substitution
     for (key, info) in &specializations {
         let base_info = match sema.functions.get(&key.base_name) {
-            Some(info) => info.clone(),
+            Some(info) => *info,
             None => {
                 let func_name = interner.resolve(&key.base_name);
                 return Err(CompileError::new(
@@ -125,19 +125,16 @@ fn collect_specializations(
                 type_args: type_args.clone(),
             };
 
-            if !specializations.contains_key(&key) {
+            specializations.entry(key).or_insert_with(|| {
                 // Generate a mangled name for the specialized function
                 let base_name = interner.resolve(name);
                 let mangled = mangle_specialized_name(base_name, &type_args);
                 let mangled_sym = interner.get_or_intern(&mangled);
-                specializations.insert(
-                    key,
-                    SpecializationInfo {
+                SpecializationInfo {
                         mangled_name: mangled_sym,
                         call_site_span: inst.span,
-                    },
-                );
-            }
+                    }
+            });
         }
     }
 }
@@ -221,12 +218,11 @@ fn create_specialized_function(
     let mut type_subst: HashMap<Spur, Type> = HashMap::new();
     let mut type_arg_idx = 0;
     for (i, is_comptime) in param_comptime.iter().enumerate() {
-        if *is_comptime {
-            if type_arg_idx < key.type_args.len() {
+        if *is_comptime
+            && type_arg_idx < key.type_args.len() {
                 type_subst.insert(param_names[i], key.type_args[type_arg_idx]);
                 type_arg_idx += 1;
             }
-        }
     }
 
     // Calculate the return type by substituting type parameters
@@ -312,8 +308,7 @@ fn substitute_param_type(
             params_len,
             ..
         } = &inst.data
-        {
-            if *body == base_info.body {
+            && *body == base_info.body {
                 // Found the function declaration
                 let params = sema.rir.get_params(*params_start, *params_len);
                 for param in params {
@@ -326,7 +321,6 @@ fn substitute_param_type(
                     }
                 }
             }
-        }
     }
 
     None

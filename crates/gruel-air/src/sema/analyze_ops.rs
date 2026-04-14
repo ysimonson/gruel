@@ -27,7 +27,7 @@ use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
     WarningKind,
 };
-use gruel_rir::{InstData, InstRef, RirArgMode, RirParamMode, RirPattern};
+use gruel_rir::{InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern};
 
 use crate::sema::context::ConstValue;
 use gruel_span::Span;
@@ -345,7 +345,7 @@ impl<'a> Sema<'a> {
                 // String literals use the builtin String struct type.
                 let ty = self.builtin_string_type();
                 // Add string to the local string table (per-function for parallel analysis)
-                let string_content = self.interner.resolve(&*symbol).to_string();
+                let string_content = self.interner.resolve(symbol).to_string();
                 let local_string_id = ctx.add_local_string(string_content);
 
                 let air_ref = air.add_inst(AirInst {
@@ -865,8 +865,8 @@ impl<'a> Sema<'a> {
                     } => {
                         format!(
                             "{}::{}",
-                            self.interner.resolve(&*type_name),
-                            self.interner.resolve(&*variant)
+                            self.interner.resolve(type_name),
+                            self.interner.resolve(variant)
                         )
                     }
                 };
@@ -964,7 +964,7 @@ impl<'a> Sema<'a> {
                         // Unqualified access: EnumName::Variant
                         *self.enums.get(type_name).ok_or_compile_error(
                             ErrorKind::UnknownEnumType(
-                                self.interner.resolve(&*type_name).to_string(),
+                                self.interner.resolve(type_name).to_string(),
                             ),
                             pattern_span,
                         )?
@@ -983,7 +983,7 @@ impl<'a> Sema<'a> {
                     }
 
                     // Find the variant index
-                    let variant_name = self.interner.resolve(&*variant);
+                    let variant_name = self.interner.resolve(variant);
                     let variant_index = enum_def.find_variant(variant_name).ok_or_compile_error(
                         ErrorKind::UnknownVariant {
                             enum_name: enum_def.name.clone(),
@@ -1039,7 +1039,7 @@ impl<'a> Sema<'a> {
                     variant,
                     ..
                 } => {
-                    let type_name_str = self.interner.resolve(&*type_name).to_string();
+                    let type_name_str = self.interner.resolve(type_name).to_string();
                     let enum_id = if let Some(module_ref) = module {
                         self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
                     } else {
@@ -1054,7 +1054,7 @@ impl<'a> Sema<'a> {
                         })?
                     };
                     let enum_def = self.type_pool.enum_def(enum_id);
-                    let variant_name = self.interner.resolve(&*variant);
+                    let variant_name = self.interner.resolve(variant);
                     let variant_index = enum_def.find_variant(variant_name).ok_or_else(|| {
                         CompileError::new(
                             ErrorKind::InternalError(format!(
@@ -1255,23 +1255,7 @@ impl<'a> Sema<'a> {
         let inst = self.rir.get(inst_ref);
 
         match &inst.data {
-            InstData::Alloc {
-                directives_start,
-                directives_len,
-                name,
-                is_mut,
-                ty: _,
-                init,
-            } => self.analyze_alloc(
-                air,
-                *directives_start,
-                *directives_len,
-                *name,
-                *is_mut,
-                *init,
-                inst.span,
-                ctx,
-            ),
+            InstData::Alloc { .. } => self.analyze_alloc(air, inst_ref, ctx),
 
             InstData::VarRef { name } => self.analyze_var_ref(air, *name, inst.span, ctx),
 
@@ -1297,14 +1281,17 @@ impl<'a> Sema<'a> {
     fn analyze_alloc(
         &mut self,
         air: &mut Air,
-        directives_start: u32,
-        directives_len: u32,
-        name: Option<Spur>,
-        is_mut: bool,
-        init: InstRef,
-        span: Span,
+        inst_ref: InstRef,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        let inst = self.rir.get(inst_ref);
+        let (directives_start, directives_len, name, is_mut, init, span) = match inst.data {
+            InstData::Alloc { directives_start, directives_len, name, is_mut, init, .. } => {
+                (directives_start, directives_len, name, is_mut, init, inst.span)
+            }
+            _ => unreachable!("analyze_alloc called with non-Alloc instruction"),
+        };
+
         // Analyze the initializer
         let init_result = self.analyze_inst(air, init, ctx)?;
         let var_type = init_result.ty;
@@ -1411,15 +1398,14 @@ impl<'a> Sema<'a> {
             let name_str = self.interner.resolve(&name);
 
             // Check if this parameter has been moved
-            if let Some(move_state) = ctx.moved_vars.get(&name) {
-                if let Some(moved_span) = move_state.is_any_part_moved() {
+            if let Some(move_state) = ctx.moved_vars.get(&name)
+                && let Some(moved_span) = move_state.is_any_part_moved() {
                     return Err(CompileError::new(
                         ErrorKind::UseAfterMove(name_str.to_string()),
                         span,
                     )
                     .with_label("value moved here", moved_span));
                 }
-            }
 
             // Handle move semantics based on parameter mode
             if !self.is_type_copy(ty) {
@@ -1469,15 +1455,14 @@ impl<'a> Sema<'a> {
             let slot = local.slot;
 
             // Check if this variable has been moved
-            if let Some(move_state) = ctx.moved_vars.get(&name) {
-                if let Some(moved_span) = move_state.is_any_part_moved() {
+            if let Some(move_state) = ctx.moved_vars.get(&name)
+                && let Some(moved_span) = move_state.is_any_part_moved() {
                     return Err(CompileError::new(
                         ErrorKind::UseAfterMove(name_str.to_string()),
                         span,
                     )
                     .with_label("value moved here", moved_span));
                 }
-            }
 
             // If type is not Copy, mark as moved
             if !self.is_type_copy(ty) {
@@ -1541,14 +1526,6 @@ impl<'a> Sema<'a> {
                         span,
                     });
                     return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
-                }
-                ConstValue::Unit => {
-                    let air_ref = air.add_inst(AirInst {
-                        data: AirInstData::Const(0),
-                        ty: Type::UNIT,
-                        span,
-                    });
-                    return Ok(AnalysisResult::new(air_ref, Type::UNIT));
                 }
             }
         }
@@ -1858,7 +1835,7 @@ impl<'a> Sema<'a> {
         // Check for unknown or duplicate fields
         let mut seen_fields = std::collections::HashSet::new();
         for (init_field_name, _) in field_inits.iter() {
-            let init_name = self.interner.resolve(&*init_field_name);
+            let init_name = self.interner.resolve(init_field_name);
 
             if !field_index_map.contains_key(init_name) {
                 return Err(CompileError::new(
@@ -1903,7 +1880,7 @@ impl<'a> Sema<'a> {
         let mut source_order: Vec<usize> = Vec::with_capacity(field_inits.len());
 
         for (init_field_name, field_value) in field_inits.iter() {
-            let init_name = self.interner.resolve(&*init_field_name);
+            let init_name = self.interner.resolve(init_field_name);
             let field_idx = field_index_map[init_name];
             let expected_field_type = struct_def.fields[field_idx].ty;
 
@@ -1990,13 +1967,12 @@ impl<'a> Sema<'a> {
         let base_inst = self.rir.get(base);
         if let InstData::VarRef { name } = &base_inst.data {
             // Check if this VarRef refers to a module
-            if let Some(local) = ctx.locals.get(name) {
-                if local.ty.as_module().is_some() {
+            if let Some(local) = ctx.locals.get(name)
+                && local.ty.as_module().is_some() {
                     // This is module.Member access - handle specially
                     let module_id = local.ty.as_module().unwrap();
                     return self.analyze_module_type_member_access(air, module_id, field, span);
                 }
-            }
         }
 
         // Try to trace this expression to a place (lvalue)
@@ -2004,8 +1980,8 @@ impl<'a> Sema<'a> {
             let field_type = trace.result_type();
 
             // Check if the root variable was fully moved (applies regardless of field type)
-            if let Some(state) = ctx.moved_vars.get(&trace.root_var) {
-                if let Some(moved_span) = state.full_move {
+            if let Some(state) = ctx.moved_vars.get(&trace.root_var)
+                && let Some(moved_span) = state.full_move {
                     let root_name = self.interner.resolve(&trace.root_var);
                     return Err(CompileError::new(
                         ErrorKind::UseAfterMove(root_name.to_string()),
@@ -2013,7 +1989,6 @@ impl<'a> Sema<'a> {
                     )
                     .with_label("value moved here", moved_span));
                 }
-            }
 
             // Get struct info for move checking
             // The trace's result type is the field type, but we need the parent struct type
@@ -2041,8 +2016,8 @@ impl<'a> Sema<'a> {
                 let field_path = trace.field_path();
 
                 // Check if this field path is already moved (partial moves)
-                if let Some(state) = ctx.moved_vars.get(&trace.root_var) {
-                    if let Some(moved_span) = state.is_path_moved(&field_path) {
+                if let Some(state) = ctx.moved_vars.get(&trace.root_var)
+                    && let Some(moved_span) = state.is_path_moved(&field_path) {
                         let root_name = self.interner.resolve(&trace.root_var);
                         let path_str = if field_path.is_empty() {
                             root_name.to_string()
@@ -2056,7 +2031,6 @@ impl<'a> Sema<'a> {
                         return Err(CompileError::new(ErrorKind::UseAfterMove(path_str), span)
                             .with_label("value moved here", moved_span));
                     }
-                }
 
                 // Mark this field path as moved
                 ctx.moved_vars
@@ -2218,8 +2192,8 @@ impl<'a> Sema<'a> {
             let struct_def = self.type_pool.struct_def(struct_id);
 
             // Check if this struct was defined in the module's file
-            if let Some(struct_file_path) = self.get_file_path(struct_def.file_id) {
-                if struct_file_path == module_file_path {
+            if let Some(struct_file_path) = self.get_file_path(struct_def.file_id)
+                && struct_file_path == module_file_path {
                     // Check visibility: pub structs are visible to all, private only to same directory
                     if !struct_def.is_pub {
                         // Check if accessing from same directory
@@ -2252,7 +2226,6 @@ impl<'a> Sema<'a> {
                     });
                     return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
                 }
-            }
         }
 
         // Next, try to find an enum with this name that belongs to the module's file
@@ -2260,8 +2233,8 @@ impl<'a> Sema<'a> {
             let enum_def = self.type_pool.enum_def(enum_id);
 
             // Check if this enum was defined in the module's file
-            if let Some(enum_file_path) = self.get_file_path(enum_def.file_id) {
-                if enum_file_path == module_file_path {
+            if let Some(enum_file_path) = self.get_file_path(enum_def.file_id)
+                && enum_file_path == module_file_path {
                     // Check visibility: pub enums are visible to all, private only to same directory
                     if !enum_def.is_pub {
                         // Check if accessing from same directory
@@ -2294,7 +2267,6 @@ impl<'a> Sema<'a> {
                     });
                     return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
                 }
-            }
         }
 
         // Member not found in the module
@@ -2455,8 +2427,8 @@ impl<'a> Sema<'a> {
             };
 
             // Check for constant out-of-bounds index
-            if let Some(const_idx) = self.try_get_const_index(index) {
-                if const_idx < 0 || const_idx as u64 >= array_len {
+            if let Some(const_idx) = self.try_get_const_index(index)
+                && (const_idx < 0 || const_idx as u64 >= array_len) {
                     return Err(CompileError::new(
                         ErrorKind::IndexOutOfBounds {
                             index: const_idx,
@@ -2465,7 +2437,6 @@ impl<'a> Sema<'a> {
                         self.rir.get(index).span,
                     ));
                 }
-            }
 
             // Prevent moving non-Copy elements out of arrays.
             if !self.is_type_copy(elem_type) {
@@ -2512,8 +2483,8 @@ impl<'a> Sema<'a> {
         };
 
         // Check for constant out-of-bounds index
-        if let Some(const_idx) = self.try_get_const_index(index) {
-            if const_idx < 0 || const_idx as u64 >= array_len {
+        if let Some(const_idx) = self.try_get_const_index(index)
+            && (const_idx < 0 || const_idx as u64 >= array_len) {
                 return Err(CompileError::new(
                     ErrorKind::IndexOutOfBounds {
                         index: const_idx,
@@ -2522,7 +2493,6 @@ impl<'a> Sema<'a> {
                     self.rir.get(index).span,
                 ));
             }
-        }
 
         // Prevent moving non-Copy elements out of arrays.
         if !self.is_type_copy(elem_type) {
@@ -2641,14 +2611,14 @@ impl<'a> Sema<'a> {
                 } else {
                     // Unqualified access: EnumName::Variant
                     *self.enums.get(type_name).ok_or_compile_error(
-                        ErrorKind::UnknownEnumType(self.interner.resolve(&*type_name).to_string()),
+                        ErrorKind::UnknownEnumType(self.interner.resolve(type_name).to_string()),
                         inst.span,
                     )?
                 };
                 let enum_def = self.type_pool.enum_def(enum_id);
 
                 // Find the variant index
-                let variant_name = self.interner.resolve(&*variant);
+                let variant_name = self.interner.resolve(variant);
                 let variant_index = enum_def.find_variant(variant_name).ok_or_compile_error(
                     ErrorKind::UnknownVariant {
                         enum_name: enum_def.name.clone(),
@@ -2707,30 +2677,20 @@ impl<'a> Sema<'a> {
                 method,
                 args_start,
                 args_len,
-            } => self.analyze_method_call(
-                air,
-                *receiver,
-                *method,
-                *args_start,
-                *args_len,
-                inst.span,
-                ctx,
-            ),
+            } => {
+                let args = self.rir.get_call_args(*args_start, *args_len);
+                self.analyze_method_call_impl(air, *receiver, *method, args, inst.span, ctx)
+            }
 
             InstData::AssocFnCall {
                 type_name,
                 function,
                 args_start,
                 args_len,
-            } => self.analyze_assoc_fn_call(
-                air,
-                *type_name,
-                *function,
-                *args_start,
-                *args_len,
-                inst.span,
-                ctx,
-            ),
+            } => {
+                let args = self.rir.get_call_args(*args_start, *args_len);
+                self.analyze_assoc_fn_call_impl(air, *type_name, *function, args, inst.span, ctx)
+            }
 
             _ => Err(CompileError::new(
                 ErrorKind::InternalError(format!(
@@ -3027,41 +2987,6 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Analyze a method call.
-    ///
-    /// This is a complex operation that handles both user-defined methods and
-    /// builtin methods. The full implementation is in analysis.rs.
-    fn analyze_method_call(
-        &mut self,
-        air: &mut Air,
-        receiver: InstRef,
-        method: Spur,
-        args_start: u32,
-        args_len: u32,
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        // Delegate to the main implementation in analysis.rs
-        self.analyze_method_call_impl(air, receiver, method, args_start, args_len, span, ctx)
-    }
-
-    /// Analyze an associated function call.
-    ///
-    /// This is a complex operation. The full implementation is in analysis.rs.
-    fn analyze_assoc_fn_call(
-        &mut self,
-        air: &mut Air,
-        type_name: Spur,
-        function: Spur,
-        args_start: u32,
-        args_len: u32,
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        // Delegate to the main implementation in analysis.rs
-        self.analyze_assoc_fn_call_impl(air, type_name, function, args_start, args_len, span, ctx)
-    }
-
     // ========================================================================
     // Intrinsic operations: Intrinsic, TypeIntrinsic
     // ========================================================================
@@ -3083,7 +3008,12 @@ impl<'a> Sema<'a> {
                 args_start,
                 args_len,
             } => {
-                self.analyze_intrinsic(air, inst_ref, *name, *args_start, *args_len, inst.span, ctx)
+                let arg_refs = self.rir.get_inst_refs(*args_start, *args_len);
+                let args: Vec<RirCallArg> = arg_refs
+                    .into_iter()
+                    .map(|value| RirCallArg { value, mode: RirArgMode::Normal })
+                    .collect();
+                self.analyze_intrinsic_impl(air, inst_ref, *name, args, inst.span, ctx)
             }
 
             InstData::TypeIntrinsic { name, type_arg } => {
@@ -3137,24 +3067,6 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, Type::I32))
-    }
-
-    /// Analyze an intrinsic call.
-    ///
-    /// This is a complex operation that handles many different intrinsics.
-    /// The full implementation is in analysis.rs.
-    fn analyze_intrinsic(
-        &mut self,
-        air: &mut Air,
-        inst_ref: InstRef,
-        name: Spur,
-        args_start: u32,
-        args_len: u32,
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        // Delegate to the main implementation in analysis.rs
-        self.analyze_intrinsic_impl(air, inst_ref, name, args_start, args_len, span, ctx)
     }
 
     // ========================================================================

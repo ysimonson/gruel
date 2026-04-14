@@ -435,54 +435,49 @@ impl<'a> LogosLexer<'a> {
 
         let mut lexer = LogosTokenKind::lexer_with_extras(self.source, self.interner);
 
-        loop {
-            match lexer.next() {
-                Some(result) => {
-                    let span = lexer.span();
-                    match result {
-                        Ok(logos_kind) => {
-                            // Convert LogosTokenKind to TokenKind, handling @import specially
-                            // because it needs to carry the interned "import" symbol
-                            let token_kind = if matches!(logos_kind, LogosTokenKind::AtImport) {
-                                let import_spur = lexer.extras.get_or_intern("import");
-                                TokenKind::AtImport(import_spur)
-                            } else {
-                                logos_kind.into()
-                            };
-                            tokens.push(Token {
-                                kind: token_kind,
-                                span: Span::with_file(
-                                    self.file_id,
-                                    span.start as u32,
-                                    span.end as u32,
-                                ),
-                            });
-                        }
-                        Err(lex_error) => {
-                            let gruel_span =
-                                Span::with_file(self.file_id, span.start as u32, span.end as u32);
-                            let slice = lexer.slice();
-                            let error_char = slice.chars().next().unwrap_or('?');
-                            let kind = match lex_error {
-                                LexError::InvalidInteger => ErrorKind::InvalidInteger,
-                                LexError::UnexpectedCharacter => {
-                                    ErrorKind::UnexpectedCharacter(error_char)
-                                }
-                                LexError::InvalidStringEscape => {
-                                    // Find the escape character after backslash
-                                    let escape_char = slice
-                                        .find('\\')
-                                        .and_then(|pos| slice[pos + 1..].chars().next())
-                                        .unwrap_or('?');
-                                    ErrorKind::InvalidStringEscape(escape_char)
-                                }
-                                LexError::UnterminatedString => ErrorKind::UnterminatedString,
-                            };
-                            return Err(CompileError::new(kind, gruel_span));
-                        }
-                    }
+        while let Some(result) = lexer.next() {
+            let span = lexer.span();
+            match result {
+                Ok(logos_kind) => {
+                    // Convert LogosTokenKind to TokenKind, handling @import specially
+                    // because it needs to carry the interned "import" symbol
+                    let token_kind = if matches!(logos_kind, LogosTokenKind::AtImport) {
+                        let import_spur = lexer.extras.get_or_intern("import");
+                        TokenKind::AtImport(import_spur)
+                    } else {
+                        logos_kind.into()
+                    };
+                    tokens.push(Token {
+                        kind: token_kind,
+                        span: Span::with_file(
+                            self.file_id,
+                            span.start as u32,
+                            span.end as u32,
+                        ),
+                    });
                 }
-                None => break,
+                Err(lex_error) => {
+                    let gruel_span =
+                        Span::with_file(self.file_id, span.start as u32, span.end as u32);
+                    let slice = lexer.slice();
+                    let error_char = slice.chars().next().unwrap_or('?');
+                    let kind = match lex_error {
+                        LexError::InvalidInteger => ErrorKind::InvalidInteger,
+                        LexError::UnexpectedCharacter => {
+                            ErrorKind::UnexpectedCharacter(error_char)
+                        }
+                        LexError::InvalidStringEscape => {
+                            // Find the escape character after backslash
+                            let escape_char = slice
+                                .find('\\')
+                                .and_then(|pos| slice[pos + 1..].chars().next())
+                                .unwrap_or('?');
+                            ErrorKind::InvalidStringEscape(escape_char)
+                        }
+                        LexError::UnterminatedString => ErrorKind::UnterminatedString,
+                    };
+                    return Err(CompileError::new(kind, gruel_span));
+                }
             }
         }
 

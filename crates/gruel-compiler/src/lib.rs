@@ -335,8 +335,6 @@ pub struct ValidatedProgram {
 /// Information about a symbol definition for duplicate detection.
 #[derive(Debug, Clone)]
 struct SymbolDef {
-    /// Name of the symbol (function, struct, or enum name).
-    name: String,
     /// Span of the first definition.
     span: Span,
     /// File path where the first definition was found.
@@ -410,7 +408,6 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
                         functions.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: func.span,
                                 file_path: file.path.clone(),
                             },
@@ -447,7 +444,6 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
                         structs.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: s.span,
                                 file_path: file.path.clone(),
                             },
@@ -484,7 +480,6 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
                         enums.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: e.span,
                                 file_path: file.path.clone(),
                             },
@@ -583,7 +578,6 @@ pub fn validate_and_generate_rir_parallel(
                         functions.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: func.span,
                                 file_path: file.path.clone(),
                             },
@@ -617,7 +611,6 @@ pub fn validate_and_generate_rir_parallel(
                         structs.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: s.span,
                                 file_path: file.path.clone(),
                             },
@@ -651,7 +644,6 @@ pub fn validate_and_generate_rir_parallel(
                         enums.insert(
                             name.clone(),
                             SymbolDef {
-                                name,
                                 span: e.span,
                                 file_path: file.path.clone(),
                             },
@@ -714,18 +706,15 @@ pub fn validate_and_generate_rir_parallel(
 /// The Gruel compiler can either use its built-in ELF linker or delegate to
 /// an external system linker like `clang`, `gcc`, or `ld`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum LinkerMode {
     /// Use the internal linker (default).
+    #[default]
     Internal,
     /// Use an external system linker (e.g., "clang", "ld", "gcc").
     System(String),
 }
 
-impl Default for LinkerMode {
-    fn default() -> Self {
-        LinkerMode::Internal
-    }
-}
 
 /// Configuration options for compilation.
 ///
@@ -946,7 +935,6 @@ pub fn compile_frontend_from_ast_with_options(
                     &func.name,
                     &sema_output.type_pool,
                     func.param_modes.clone(),
-                    &interner,
                 );
 
                 // Apply optimizations to the CFG
@@ -1072,7 +1060,6 @@ pub fn compile_frontend_from_rir_with_file_paths(
                     &func.name,
                     &sema_output.type_pool,
                     func.param_modes.clone(),
-                    &interner,
                 );
 
                 // Apply optimizations to the CFG

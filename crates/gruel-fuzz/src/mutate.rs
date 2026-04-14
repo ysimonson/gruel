@@ -58,13 +58,13 @@ pub fn mutate(input: &mut Vec<u8>, rng: &mut SimpleRng) {
     }
 }
 
-fn bit_flip(input: &mut Vec<u8>, rng: &mut SimpleRng) {
+fn bit_flip(input: &mut [u8], rng: &mut SimpleRng) {
     let idx = rng.next_usize(input.len());
     let bit = rng.next_usize(8);
     input[idx] ^= 1 << bit;
 }
 
-fn byte_flip(input: &mut Vec<u8>, rng: &mut SimpleRng) {
+fn byte_flip(input: &mut [u8], rng: &mut SimpleRng) {
     let idx = rng.next_usize(input.len());
     input[idx] = rng.next_u8();
 }
@@ -97,7 +97,7 @@ fn byte_copy(input: &mut Vec<u8>, rng: &mut SimpleRng) {
 }
 
 /// Replace a byte with an "interesting" value.
-fn interesting_value(input: &mut Vec<u8>, rng: &mut SimpleRng) {
+fn interesting_value(input: &mut [u8], rng: &mut SimpleRng) {
     const INTERESTING: &[u8] = &[
         0, 1, 2, 16, 32, 64, 100, 127, 128, 255, // boundaries
         b'0', b'9', b'a', b'z', b'A', b'Z', // ASCII
@@ -111,7 +111,7 @@ fn interesting_value(input: &mut Vec<u8>, rng: &mut SimpleRng) {
     input[idx] = val;
 }
 
-fn arithmetic(input: &mut Vec<u8>, rng: &mut SimpleRng) {
+fn arithmetic(input: &mut [u8], rng: &mut SimpleRng) {
     let idx = rng.next_usize(input.len());
     let delta = (rng.next_usize(35) as i8) - 16; // -16 to +16
     input[idx] = input[idx].wrapping_add(delta as u8);
@@ -166,12 +166,12 @@ fn splice_keyword(input: &mut Vec<u8>, rng: &mut SimpleRng) {
     }
 }
 
-fn shuffle_chunk(input: &mut Vec<u8>, rng: &mut SimpleRng) {
+fn shuffle_chunk(input: &mut [u8], rng: &mut SimpleRng) {
     if input.len() < 4 {
         return;
     }
 
-    let chunk_size = rng.next_usize(input.len() / 2).max(2).min(16);
+    let chunk_size = rng.next_usize(input.len() / 2).clamp(2, 16);
     let src = rng.next_usize(input.len() - chunk_size);
     let dst = rng.next_usize(input.len() - chunk_size);
 
@@ -186,7 +186,7 @@ fn repeat_chunk(input: &mut Vec<u8>, rng: &mut SimpleRng) {
         return;
     }
 
-    let chunk_size = rng.next_usize(input.len() / 2).max(1).min(16);
+    let chunk_size = rng.next_usize(input.len() / 2).clamp(1, 16);
     let src = rng.next_usize(input.len() - chunk_size);
 
     let chunk: Vec<u8> = input[src..src + chunk_size].to_vec();

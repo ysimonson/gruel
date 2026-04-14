@@ -69,6 +69,14 @@ use fixedbitset::FixedBitSet;
 use crate::index_map::IndexMap;
 use crate::vreg::VReg;
 
+/// Return type for linear scan register allocation functions.
+type RegAllocResult<Reg> = (
+    IndexMap<VReg, Option<Allocation<Reg>>>,
+    u32,
+    Vec<Reg>,
+    RegAllocDebugInfo<Reg>,
+);
+
 // ============================================================================
 // Cost Model
 // ============================================================================
@@ -717,12 +725,6 @@ impl CoalesceResult {
         self.coalesce_map.get(&vreg).copied().unwrap_or(vreg)
     }
 
-    /// Check if a vreg was coalesced with another.
-    #[allow(dead_code)]
-    pub fn is_coalesced(&self, vreg: VReg) -> bool {
-        self.coalesce_map.contains_key(&vreg)
-    }
-
     /// Check if a move instruction at the given index was eliminated.
     pub fn is_eliminated(&self, inst_idx: usize) -> bool {
         self.eliminated_moves.contains(&inst_idx)
@@ -766,13 +768,12 @@ pub fn coalesce<Reg: Copy + Eq + std::hash::Hash>(
 
     // Find the representative of a vreg in the union-find
     fn find(parent: &mut HashMap<VReg, VReg>, vreg: VReg) -> VReg {
-        if let Some(&p) = parent.get(&vreg) {
-            if p != vreg {
+        if let Some(&p) = parent.get(&vreg)
+            && p != vreg {
                 let root = find(parent, p);
                 parent.insert(vreg, root);
                 return root;
             }
-        }
         vreg
     }
 
@@ -1309,12 +1310,7 @@ pub fn linear_scan_with_debug<Reg: Copy + Eq + std::hash::Hash>(
     liveness: &LivenessInfo<Reg>,
     allocatable_regs: &[Reg],
     existing_locals: u32,
-) -> (
-    IndexMap<VReg, Option<Allocation<Reg>>>,
-    u32,
-    Vec<Reg>,
-    RegAllocDebugInfo<Reg>,
-) {
+) -> RegAllocResult<Reg> {
     // Use default cost model with loop-aware spilling disabled (no loop info)
     let cost_model = CostModel {
         use_loop_aware_spilling: false,
@@ -1342,12 +1338,7 @@ pub fn linear_scan_with_cost_model_and_debug<Reg: Copy + Eq + std::hash::Hash>(
     existing_locals: u32,
     cost_model: &CostModel,
     loop_info: &LoopInfo,
-) -> (
-    IndexMap<VReg, Option<Allocation<Reg>>>,
-    u32,
-    Vec<Reg>,
-    RegAllocDebugInfo<Reg>,
-) {
+) -> RegAllocResult<Reg> {
     linear_scan_impl(
         vreg_count,
         liveness,
@@ -1370,12 +1361,7 @@ fn linear_scan_impl<Reg: Copy + Eq + std::hash::Hash>(
     existing_locals: u32,
     cost_model: &CostModel,
     loop_info: &LoopInfo,
-) -> (
-    IndexMap<VReg, Option<Allocation<Reg>>>,
-    u32,
-    Vec<Reg>,
-    RegAllocDebugInfo<Reg>,
-) {
+) -> RegAllocResult<Reg> {
     let vreg_count_usize = vreg_count as usize;
 
     // Initialize allocation map
@@ -1526,12 +1512,7 @@ fn linear_scan_impl_with_remat<Reg: Copy + Eq + std::hash::Hash>(
     cost_model: &CostModel,
     loop_info: &LoopInfo,
     vreg_info: &IndexMap<VReg, VRegInfo>,
-) -> (
-    IndexMap<VReg, Option<Allocation<Reg>>>,
-    u32,
-    Vec<Reg>,
-    RegAllocDebugInfo<Reg>,
-) {
+) -> RegAllocResult<Reg> {
     let vreg_count_usize = vreg_count as usize;
 
     // Initialize allocation map

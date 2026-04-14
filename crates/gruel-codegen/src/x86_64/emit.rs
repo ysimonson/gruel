@@ -95,11 +95,11 @@
 //! - Caller-saved: RAX, RCX, RDX, RSI, RDI, R8-R11, XMM0-XMM15
 //! - Callee-saved: RBX, RBP, R12-R15
 
-use gruel_error::{CompileError, CompileResult, ErrorKind, ice_error};
+use gruel_error::{CompileResult, ice_error};
 
 use super::mir::{LabelId, Reg, X86Inst, X86Mir};
 use crate::vreg::BLOCK_LABEL_BASE;
-use crate::{EmittedCode, EmittedInst, EmittedRelocation, end_inst, format_offset};
+use crate::{EmittedCode, EmittedInst, EmittedRelocation, format_offset};
 
 /// Kind of jump fixup.
 ///
@@ -138,11 +138,6 @@ struct LabelOffsets {
 }
 
 impl LabelOffsets {
-    /// Create a new empty label offset map.
-    fn new() -> Self {
-        Self::default()
-    }
-
     /// Create a new label offset map with pre-allocated capacity.
     ///
     /// - `inline_capacity`: Expected number of inline labels (overflow checks, etc.)
@@ -1356,7 +1351,7 @@ impl<'a> Emitter<'a> {
             let sib = (scale_bits << 6) | (index_bits << 3) | base_bits;
             self.code.push(sib);
             self.code.push(0x00); // 8-bit displacement of 0
-        } else if disp >= -128 && disp <= 127 {
+        } else if (-128..=127).contains(&disp) {
             // mod=01: 8-bit displacement
             let modrm = 0x44 | ((reg & 7) << 3);
             self.code.push(modrm);
@@ -1386,7 +1381,7 @@ impl<'a> Emitter<'a> {
 
         if base_bits == 4 {
             // RSP/R12 - needs SIB byte
-            if offset >= -128 && offset <= 127 {
+            if (-128..=127).contains(&offset) {
                 // mod=01 (8-bit displacement), r/m=100 (SIB follows)
                 let modrm = 0x44 | ((reg & 7) << 3);
                 self.code.push(modrm);
@@ -1409,7 +1404,7 @@ impl<'a> Emitter<'a> {
             let modrm = 0x45 | ((reg & 7) << 3);
             self.code.push(modrm);
             self.code.push(0x00); // 8-bit displacement of 0
-        } else if offset >= -128 && offset <= 127 {
+        } else if (-128..=127).contains(&offset) {
             // 8-bit displacement
             // mod=01, r/m=base
             let modrm = 0x40 | ((reg & 7) << 3) | base_bits;
@@ -1488,7 +1483,7 @@ impl<'a> Emitter<'a> {
         // mod=01 for disp8, mod=10 for disp32
         // reg=RSP (100 = 4)
         // r/m=RBP (101 = 5)
-        if offset >= -128 && offset <= 127 {
+        if (-128..=127).contains(&offset) {
             // mod=01 (disp8), reg=4 (rsp), r/m=5 (rbp)
             // ModR/M = 01 100 101 = 0x65
             self.code.push(0x65);
@@ -1608,7 +1603,7 @@ impl<'a> Emitter<'a> {
         self.code.push(rex);
 
         // For small immediates (-128..127), use 83 /0 imm8
-        if imm >= -128 && imm <= 127 {
+        if (-128..=127).contains(&imm) {
             // Opcode: 83 (group 1, /0 for ADD with imm8)
             self.code.push(0x83);
 
@@ -1771,7 +1766,7 @@ impl<'a> Emitter<'a> {
         }
 
         // For small immediates (-128..127), use 83 /6 imm8
-        if imm >= -128 && imm <= 127 {
+        if (-128..=127).contains(&imm) {
             // Opcode: 83 (group 1, /6 for XOR with imm8)
             self.code.push(0x83);
 

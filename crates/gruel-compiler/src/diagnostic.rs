@@ -27,6 +27,9 @@ use annotate_snippets::{Level, Renderer, Snippet};
 
 use crate::{CompileError, CompileErrors, CompileWarning, Diagnostic, ErrorCode, FileId, Span};
 
+/// Spans grouped by file, with optional label text and severity level.
+type FileSpanMap<'a> = HashMap<FileId, Vec<(Span, Option<&'a str>, Level)>>;
+
 /// Source code information for diagnostic rendering.
 ///
 /// Contains the source text and file path needed for rendering annotated
@@ -506,7 +509,7 @@ impl<'a> MultiFileFormatter<'a> {
         };
 
         // Collect all file IDs we need to show
-        let mut file_spans: HashMap<FileId, Vec<(Span, Option<&str>, Level)>> = HashMap::new();
+        let mut file_spans = FileSpanMap::new();
 
         // Add primary span
         file_spans

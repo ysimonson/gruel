@@ -101,8 +101,7 @@ fn combine_adjacent(instructions: &mut Vec<X86Inst>) -> usize {
                 imm: imm2,
             },
         ) = (&instructions[i], &instructions[i + 1])
-        {
-            if operands_equal(dst1, dst2) {
+            && operands_equal(dst1, dst2) {
                 // Check for overflow when combining immediates
                 if let Some(combined) = imm1.checked_add(*imm2) {
                     // Replace first instruction with combined add
@@ -117,7 +116,6 @@ fn combine_adjacent(instructions: &mut Vec<X86Inst>) -> usize {
                     continue;
                 }
             }
-        }
 
         i += 1;
     }

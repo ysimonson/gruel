@@ -60,7 +60,7 @@
 use gruel_error::{CompileError, CompileResult, ErrorKind};
 
 use super::mir::{Aarch64Inst, Aarch64Mir, BLOCK_LABEL_BASE, Cond, LabelId, Reg};
-use crate::{EmittedCode, EmittedInst, EmittedRelocation, end_inst};
+use crate::{EmittedCode, EmittedInst, EmittedRelocation};
 
 // ========== AArch64 Instruction Encoding Constants ==========
 //
@@ -252,11 +252,6 @@ struct LabelOffsets {
 }
 
 impl LabelOffsets {
-    /// Create a new empty label offset map.
-    fn new() -> Self {
-        Self::default()
-    }
-
     /// Create a new label offset map with pre-allocated capacity.
     ///
     /// - `inline_capacity`: Expected number of inline labels (overflow checks, etc.)
@@ -401,7 +396,7 @@ impl<'a> Emitter<'a> {
     /// On AArch64, registers are saved in pairs (16 bytes per pair), rounded up.
     fn callee_saved_stack_size(&self) -> i32 {
         let num_regs = self.callee_saved.len();
-        let pairs = (num_regs + 1) / 2;
+        let pairs = num_regs.div_ceil(2);
         (pairs * 16) as i32
     }
 
@@ -546,13 +541,13 @@ impl<'a> Emitter<'a> {
             Reg::X7,
         ];
         let callee_saved_size = self.callee_saved_stack_size();
-        for i in 0..self.num_params.min(8) as usize {
+        for (i, &reg) in param_regs.iter().enumerate().take(self.num_params.min(8) as usize) {
             let slot = self.num_locals + i as u32;
             // Skip past callee-saved registers in the offset calculation
             let offset = -callee_saved_size - ((slot as i32 + 1) * 8);
             self.begin_inst();
-            self.emit_str(param_regs[i], Reg::Fp, offset);
-            end_inst!(self, "str {}, [x29, #{}]", param_regs[i], offset);
+            self.emit_str(reg, Reg::Fp, offset);
+            end_inst!(self, "str {}, [x29, #{}]", reg, offset);
         }
     }
 
@@ -1286,7 +1281,7 @@ impl<'a> Emitter<'a> {
         // Check if MOVN would be more efficient by counting how many
         // 16-bit chunks are all 1s vs all 0s
         let chunks = [
-            (uimm >> 0) & IMM16_MASK,
+            uimm & IMM16_MASK,
             (uimm >> 16) & IMM16_MASK,
             (uimm >> 32) & IMM16_MASK,
             (uimm >> 48) & IMM16_MASK,
@@ -1299,7 +1294,7 @@ impl<'a> Emitter<'a> {
             // Use MOVN: find first chunk that isn't all 1s
             let inverted = !uimm;
             let inv_chunks = [
-                (inverted >> 0) & IMM16_MASK,
+                inverted & IMM16_MASK,
                 (inverted >> 16) & IMM16_MASK,
                 (inverted >> 32) & IMM16_MASK,
                 (inverted >> 48) & IMM16_MASK,
@@ -1377,7 +1372,7 @@ impl<'a> Emitter<'a> {
     fn emit_ldr(&mut self, rd: Reg, base: Reg, offset: i32) {
         // LDR Xt, [Xn, #imm]
         // Scaled offset (divide by 8 for 64-bit)
-        if offset % 8 == 0 && offset >= 0 && offset < 32768 {
+        if offset % 8 == 0 && (0..32768).contains(&offset) {
             let imm12 = (offset / 8) as u32;
             let inst = OPCODE_LDR_UOFF
                 | (imm12 << 10)
@@ -1395,7 +1390,7 @@ impl<'a> Emitter<'a> {
 
     fn emit_str(&mut self, rs: Reg, base: Reg, offset: i32) {
         // STR Xt, [Xn, #imm]
-        if offset % 8 == 0 && offset >= 0 && offset < 32768 {
+        if offset % 8 == 0 && (0..32768).contains(&offset) {
             let imm12 = (offset / 8) as u32;
             let inst = OPCODE_STR_UOFF
                 | (imm12 << 10)

@@ -254,7 +254,7 @@ where
             .ignore_then(ty.clone())
             .then_ignore(just(TokenKind::Semi))
             .then(select! {
-                TokenKind::Int(n) => n as u64,
+                TokenKind::Int(n) => n,
             })
             .then_ignore(just(TokenKind::RBracket))
             .map_with(|(element, length), e| TypeExpr::Array {
@@ -778,10 +778,10 @@ where
             // Build the base expression: first.rest[0].rest[1]...
             let base_expr = if rest.is_empty() {
                 // Just `module.Type::Variant` - base is single ident
-                Expr::Ident(first.clone())
+                Expr::Ident(first)
             } else {
                 // `a.b.c.Type::Variant` - build field access chain
-                let mut base = Expr::Ident(first.clone());
+                let mut base = Expr::Ident(first);
                 for field in rest {
                     let span = base.span().extend_to(field.span.end);
                     base = Expr::Field(FieldExpr {
@@ -1331,7 +1331,7 @@ where
             .ignore_then(type_parser())
             .then_ignore(just(TokenKind::Semi))
             .then(select! {
-                TokenKind::Int(n) => n as u64,
+                TokenKind::Int(n) => n,
             })
             .then_ignore(just(TokenKind::RBracket))
             .map_with(|(element, length), e| {
@@ -1842,15 +1842,14 @@ fn process_block_items(items: Vec<BlockItem>, block_span: Span) -> (Vec<Statemen
         // No explicit final expression. Check if the last statement is a diverging
         // expression (break, continue, return) - if so, promote it to the final
         // expression since it has type Never which coerces to any type.
-        if let Some(Statement::Expr(e)) = statements.last() {
-            if is_diverging_expr(e) {
+        if let Some(Statement::Expr(e)) = statements.last()
+            && is_diverging_expr(e) {
                 // Safe to unwrap: we just checked last() is Some(Statement::Expr(_))
                 let Statement::Expr(e) = statements.pop().unwrap() else {
                     unreachable!()
                 };
                 return e;
             }
-        }
         // Fallback: use a unit expression (block produces unit type)
         Expr::Unit(UnitLit {
             span: Span::new(block_span.end, block_span.end),

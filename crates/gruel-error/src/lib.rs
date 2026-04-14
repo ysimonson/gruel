@@ -313,7 +313,6 @@ impl std::error::Error for ParsePreviewFeatureError {}
 
 impl PreviewFeature {
     /// Get the CLI name for this feature (used with `--preview`).
-    #[allow(unreachable_code)]
     pub fn name(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
@@ -321,7 +320,6 @@ impl PreviewFeature {
     }
 
     /// Get the ADR number documenting this feature.
-    #[allow(unreachable_code)]
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
@@ -438,6 +436,7 @@ impl std::fmt::Display for Help {
 /// This follows rustc's conventions for suggestion applicability levels.
 /// IDEs and tools can use this to decide whether to auto-apply suggestions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum Applicability {
     /// The suggestion is definitely correct and can be safely auto-applied.
     ///
@@ -460,14 +459,10 @@ pub enum Applicability {
     ///
     /// Use this for illustrative suggestions that show concepts rather
     /// than working code.
+    #[default]
     Unspecified,
 }
 
-impl Default for Applicability {
-    fn default() -> Self {
-        Self::Unspecified
-    }
-}
 
 impl std::fmt::Display for Applicability {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -612,7 +607,7 @@ pub struct DiagnosticWrapper<K> {
     /// The specific kind of diagnostic.
     pub kind: K,
     span: Option<Span>,
-    diagnostic: Diagnostic,
+    diagnostic: Box<Diagnostic>,
 }
 
 impl<K> DiagnosticWrapper<K> {
@@ -622,7 +617,7 @@ impl<K> DiagnosticWrapper<K> {
         Self {
             kind,
             span: Some(span),
-            diagnostic: Diagnostic::new(),
+            diagnostic: Box::new(Diagnostic::new()),
         }
     }
 
@@ -635,7 +630,7 @@ impl<K> DiagnosticWrapper<K> {
         Self {
             kind,
             span: None,
-            diagnostic: Diagnostic::new(),
+            diagnostic: Box::new(Diagnostic::new()),
         }
     }
 
@@ -1183,7 +1178,7 @@ impl CompileError {
         Self {
             kind,
             span: Some(Span::point(pos)),
-            diagnostic: Diagnostic::new(),
+            diagnostic: Box::new(Diagnostic::new()),
         }
     }
 }
@@ -1270,11 +1265,6 @@ impl CompileErrors {
         self.errors.iter()
     }
 
-    /// Convert into an iterator over errors.
-    pub fn into_iter(self) -> impl Iterator<Item = CompileError> {
-        self.errors.into_iter()
-    }
-
     /// Get all errors as a slice.
     pub fn as_slice(&self) -> &[CompileError] {
         &self.errors
@@ -1306,6 +1296,15 @@ impl CompileErrors {
 impl Default for CompileErrors {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl IntoIterator for CompileErrors {
+    type Item = CompileError;
+    type IntoIter = std::vec::IntoIter<CompileError>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.errors.into_iter()
     }
 }
 

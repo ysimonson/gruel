@@ -41,11 +41,9 @@ use crate::constants::{
     MACHO64_SEGMENT_CMD_SIZE,
     MH_MAGIC_64,
     MH_OBJECT,
-    N_ABS,
     N_EXT,
     N_SECT,
     N_TYPE,
-    N_UNDF,
     R_AARCH64_ABS64,
     R_AARCH64_ADD_ABS_LO12_NC,
     R_AARCH64_ADR_PREL_PG_HI21,
@@ -612,12 +610,8 @@ impl ObjectFile {
                 let section_index = if sym_type_bits == N_SECT && n_sect > 0 {
                     // n_sect is 1-indexed
                     Some((n_sect - 1) as usize)
-                } else if sym_type_bits == N_UNDF {
-                    None // Undefined symbol
-                } else if sym_type_bits == N_ABS {
-                    None // Absolute symbol (no section)
                 } else {
-                    None
+                    None // Undefined, absolute, or unknown symbol
                 };
 
                 // Determine symbol type based on section flags
@@ -694,7 +688,8 @@ impl ObjectFile {
                     // Local/section relocation: r_symbolnum is 1-indexed section number
                     // Find the function symbol for this section (should be at offset 0)
                     let target_section = (r_symbolnum - 1) as usize;
-                    let idx = symbols
+                    
+                    symbols
                         .iter()
                         .position(|s| {
                             s.section_index == Some(target_section)
@@ -706,8 +701,7 @@ impl ObjectFile {
                                 "no function symbol found for section {} (reloc at 0x{:x})",
                                 target_section, r_address
                             ))
-                        })?;
-                    idx
+                        })?
                 };
 
                 // Convert Mach-O relocation type to our type
@@ -797,7 +791,6 @@ impl ObjectFile {
             flags: u64,
             offset: u64,
             size: u64,
-            link: u32,
             info: u32,
             align: u64,
             entsize: u64,
@@ -822,14 +815,13 @@ impl ObjectFile {
             let _addr = read_u64(sh, 16);
             let offset = read_u64(sh, 24);
             let size = read_u64(sh, 32);
-            let link = read_u32(sh, 40);
             let info = read_u32(sh, 44);
             let align = read_u64(sh, 48);
             let entsize = read_u64(sh, 56);
 
             if sh_type == SHT_SYMTAB {
                 symtab_idx = Some(i);
-                strtab_idx = Some(link as usize);
+                strtab_idx = Some(read_u32(sh, 40) as usize); // sh_link: index of string table
             }
 
             raw_sections.push(RawSection {
@@ -838,7 +830,6 @@ impl ObjectFile {
                 flags,
                 offset,
                 size,
-                link,
                 info,
                 align,
                 entsize,
@@ -1112,7 +1103,6 @@ impl ObjectFile {
     }
 
     /// Get all global/defined symbols.
-    #[must_use]
     pub fn defined_symbols(&self) -> impl Iterator<Item = &Symbol> {
         self.symbols.iter().filter(|s| {
             s.section_index.is_some()

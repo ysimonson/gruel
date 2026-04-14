@@ -328,8 +328,6 @@ fn generate_x86_64_stack_frame(
     }
 
     // Add parameter spill slots (for first 6 register params)
-    #[allow(unused_variables)]
-    let arg_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
     for i in 0..num_params.min(6) {
         let slot = num_locals + i;
         let slot_offset = -callee_saved_size_i32 - ((slot as i32 + 1) * 8);
@@ -356,15 +354,17 @@ fn generate_x86_64_stack_frame(
     }
 
     // Build argument locations
+    let arg_regs: &[&str] = &["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
     let mut arguments = Vec::new();
     for i in 0..num_params as usize {
-        let location = if i < 6 {
-            ArgPassingLocation::Register(arg_regs[i].to_string())
-        } else {
-            // Stack arguments are at positive offsets from rbp
-            // arg7 at [rbp+16], arg8 at [rbp+24], etc.
-            let offset = 16 + ((i - 6) as i32) * 8;
-            ArgPassingLocation::Stack { offset }
+        let location = match arg_regs.get(i) {
+            Some(&reg) => ArgPassingLocation::Register(reg.to_string()),
+            None => {
+                // Stack arguments are at positive offsets from rbp
+                // arg7 at [rbp+16], arg8 at [rbp+24], etc.
+                let offset = 16 + ((i - arg_regs.len()) as i32) * 8;
+                ArgPassingLocation::Stack { offset }
+            }
         };
         arguments.push(ArgumentLocation {
             index: i,
@@ -417,7 +417,7 @@ fn generate_aarch64_stack_frame(
     // Calculate stack layout for AArch64
     // Callee-saved registers are saved in pairs (16 bytes per pair)
     let num_callee_regs = used_callee_saved.len();
-    let callee_saved_pairs = (num_callee_regs + 1) / 2;
+    let callee_saved_pairs = num_callee_regs.div_ceil(2);
     let callee_saved_size = callee_saved_pairs * 16;
 
     // FP and LR are saved separately (16 bytes)
@@ -505,15 +505,16 @@ fn generate_aarch64_stack_frame(
     }
 
     // Build argument locations (x0-x7 for first 8 args on AArch64)
-    let arg_regs = ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"];
+    let arg_regs: &[&str] = &["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"];
     let mut arguments = Vec::new();
     for i in 0..num_params as usize {
-        let location = if i < 8 {
-            ArgPassingLocation::Register(arg_regs[i].to_string())
-        } else {
-            // Stack arguments on AArch64
-            let offset = ((i - 8) as i32) * 8;
-            ArgPassingLocation::Stack { offset }
+        let location = match arg_regs.get(i) {
+            Some(&reg) => ArgPassingLocation::Register(reg.to_string()),
+            None => {
+                // Stack arguments on AArch64
+                let offset = ((i - arg_regs.len()) as i32) * 8;
+                ArgPassingLocation::Stack { offset }
+            }
         };
         arguments.push(ArgumentLocation {
             index: i,
@@ -566,7 +567,7 @@ mod tests {
 
         let interner = ThreadedRodeo::new();
         let type_pool = TypeInternPool::new();
-        let cfg_output = CfgBuilder::build(&air, 0, 0, "test", &type_pool, vec![], &interner);
+        let cfg_output = CfgBuilder::build(&air, 0, 0, "test", &type_pool, vec![]);
         (cfg_output.cfg, type_pool, interner)
     }
 

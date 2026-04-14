@@ -180,7 +180,7 @@ impl fmt::Display for IceContext {
 
         if let Some(backtrace) = self.format_backtrace() {
             if has_details {
-                write!(f, "\n")?;
+                writeln!(f)?;
             } else {
                 write!(f, "\n\n")?;
             }

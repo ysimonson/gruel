@@ -241,9 +241,9 @@ impl ParamArena {
 
         // Methods use Normal mode and are not comptime by default
         self.modes
-            .extend(std::iter::repeat(RirParamMode::Normal).take(types_len));
+            .extend(std::iter::repeat_n(RirParamMode::Normal, types_len));
         self.comptime
-            .extend(std::iter::repeat(false).take(types_len));
+            .extend(std::iter::repeat_n(false, types_len));
 
         ParamRange::new(start, types_len as u32)
     }

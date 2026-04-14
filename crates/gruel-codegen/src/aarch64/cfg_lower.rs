@@ -44,8 +44,6 @@ const RET_REGS: [Reg; 8] = [
 pub struct CfgLower<'a> {
     /// Shared context with type helpers and chain tracing.
     ctx: CfgLowerContext<'a>,
-    /// String table from semantic analysis (indexed by StringId).
-    strings: &'a [String],
     /// Interner for resolving Spur to string
     interner: &'a ThreadedRodeo,
     /// Target platform (needed for syscall ABI differences between Linux/macOS).
@@ -70,7 +68,7 @@ impl<'a> CfgLower<'a> {
     pub fn new(
         cfg: &'a Cfg,
         type_pool: &'a TypeInternPool,
-        strings: &'a [String],
+        _strings: &'a [String],
         interner: &'a ThreadedRodeo,
         target: Target,
     ) -> Self {
@@ -88,7 +86,6 @@ impl<'a> CfgLower<'a> {
 
         Self {
             ctx: CfgLowerContext::new(cfg, type_pool),
-            strings,
             interner,
             target,
             mir: Aarch64Mir::new(),
@@ -127,11 +124,10 @@ impl<'a> CfgLower<'a> {
 
     /// Check if a slot corresponds to an inout parameter.
     fn slot_to_inout_param_index(&self, slot: u32) -> Option<u32> {
-        if let Some(param_index) = self.ctx.slot_to_inout_param_index(slot) {
-            if self.ctx.cfg.is_param_inout(param_index) {
+        if let Some(param_index) = self.ctx.slot_to_inout_param_index(slot)
+            && self.ctx.cfg.is_param_inout(param_index) {
                 return Some(param_index);
             }
-        }
         None
     }
 
@@ -222,10 +218,7 @@ impl<'a> CfgLower<'a> {
         }
 
         let inst = self.ctx.cfg.get_inst(value);
-        let struct_id = match inst.ty.as_struct() {
-            Some(id) => id,
-            None => return None,
-        };
+        let struct_id = inst.ty.as_struct()?;
 
         match &inst.data.clone() {
             CfgInstData::StructInit {
@@ -1712,7 +1705,7 @@ impl<'a> CfgLower<'a> {
 
                 // Allocate stack space for stack arguments (must be 16-byte aligned)
                 let stack_space = if num_stack_args > 0 {
-                    ((num_stack_args * 8 + 15) / 16) * 16
+                    (num_stack_args * 8).div_ceil(16) * 16
                 } else {
                     0
                 };
@@ -1765,7 +1758,7 @@ impl<'a> CfgLower<'a> {
                     let mut slot_vregs = Vec::new();
                     for slot_idx in 0..3 {
                         let slot_vreg = self.mir.alloc_vreg();
-                        let offset = (slot_idx * 8) as i32;
+                        let offset = slot_idx * 8;
                         self.mir.push(Aarch64Inst::Ldr {
                             dst: Operand::Virtual(slot_vreg),
                             base: Reg::Sp,
@@ -1845,7 +1838,7 @@ impl<'a> CfgLower<'a> {
                     let mut slot_vregs = Vec::new();
                     for slot_idx in 0..3 {
                         let slot_vreg = self.mir.alloc_vreg();
-                        let offset = (slot_idx * 8) as i32;
+                        let offset = slot_idx * 8;
                         self.mir.push(Aarch64Inst::Ldr {
                             dst: Operand::Virtual(slot_vreg),
                             base: Reg::Sp,
@@ -4360,8 +4353,7 @@ impl<'a> CfgLower<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lasso::ThreadedRodeo;
-    use gruel_air::{ArrayTypeId, Sema};
+    use gruel_air::Sema;
     use gruel_cfg::CfgBuilder;
     use gruel_error::PreviewFeatures;
     use gruel_lexer::Lexer;
@@ -4390,7 +4382,6 @@ mod tests {
             &func.name,
             type_pool,
             func.param_modes.clone(),
-            &interner,
         );
 
         // Use host target for tests

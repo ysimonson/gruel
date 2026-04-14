@@ -302,37 +302,37 @@ impl Type {
     /// Create a struct type from a StructId.
     #[inline]
     pub const fn new_struct(id: StructId) -> Type {
-        Type(TAG_STRUCT | ((id.0 as u32) << 8))
+        Type(TAG_STRUCT | (id.0 << 8))
     }
 
     /// Create an enum type from an EnumId.
     #[inline]
     pub const fn new_enum(id: EnumId) -> Type {
-        Type(TAG_ENUM | ((id.0 as u32) << 8))
+        Type(TAG_ENUM | (id.0 << 8))
     }
 
     /// Create an array type from an ArrayTypeId.
     #[inline]
     pub const fn new_array(id: ArrayTypeId) -> Type {
-        Type(TAG_ARRAY | ((id.0 as u32) << 8))
+        Type(TAG_ARRAY | (id.0 << 8))
     }
 
     /// Create a raw const pointer type from a PtrConstTypeId.
     #[inline]
     pub const fn new_ptr_const(id: PtrConstTypeId) -> Type {
-        Type(TAG_PTR_CONST | ((id.0 as u32) << 8))
+        Type(TAG_PTR_CONST | (id.0 << 8))
     }
 
     /// Create a raw mut pointer type from a PtrMutTypeId.
     #[inline]
     pub const fn new_ptr_mut(id: PtrMutTypeId) -> Type {
-        Type(TAG_PTR_MUT | ((id.0 as u32) << 8))
+        Type(TAG_PTR_MUT | (id.0 << 8))
     }
 
     /// Create a module type from a ModuleId.
     #[inline]
     pub const fn new_module(id: ModuleId) -> Type {
-        Type(TAG_MODULE | ((id.0 as u32) << 8))
+        Type(TAG_MODULE | (id.0 << 8))
     }
 }
 
@@ -940,11 +940,7 @@ pub fn parse_pointer_type_syntax(type_name: &str) -> Option<(String, PtrMutabili
     let type_name = type_name.trim();
     if let Some(rest) = type_name.strip_prefix("ptr const ") {
         Some((rest.trim().to_string(), PtrMutability::Const))
-    } else if let Some(rest) = type_name.strip_prefix("ptr mut ") {
-        Some((rest.trim().to_string(), PtrMutability::Mut))
-    } else {
-        None
-    }
+    } else { type_name.strip_prefix("ptr mut ").map(|rest| (rest.trim().to_string(), PtrMutability::Mut)) }
 }
 
 /// Parse array type syntax "[T; N]" and return (element_type_str, length).
