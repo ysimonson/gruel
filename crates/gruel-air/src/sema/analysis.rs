@@ -7329,14 +7329,7 @@ impl<'a> Sema<'a> {
                     return Err(CompileError::new(ErrorKind::EmptyStruct, inst.span));
                 }
 
-                // If methods are present, check the preview feature first
-                if *methods_len > 0 {
-                    self.require_preview(
-                        PreviewFeature::AnonStructMethods,
-                        "anonymous struct methods",
-                        inst.span,
-                    )?;
-                }
+                // Methods are fully supported (anon_struct_methods stabilized)
 
                 // Resolve each field type and build the struct fields
                 let mut struct_fields = Vec::with_capacity(field_decls.len());
@@ -9137,13 +9130,6 @@ impl<'a> Sema<'a> {
                 // This handles non-comptime functions like `fn Counter() -> type { struct { fn get() {} } }`
                 // For comptime functions with captured values, use try_evaluate_const_with_subst instead
                 if is_new && *methods_len > 0 {
-                    // Check preview feature is enabled
-                    if !self
-                        .preview_features
-                        .contains(&PreviewFeature::AnonStructMethods)
-                    {
-                        return None; // Feature not enabled, can't evaluate
-                    }
                     let struct_id = struct_ty.as_struct()?;
                     // Use comptime-safe method registration (no type subst, no value subst for non-comptime)
                     self.register_anon_struct_methods_for_comptime_with_subst(
@@ -9510,13 +9496,6 @@ impl<'a> Sema<'a> {
                 // 1. This is a newly created struct (is_new=true), OR
                 // 2. The struct exists but has no methods registered yet
                 if *methods_len > 0 {
-                    // Check preview feature is enabled
-                    if !self
-                        .preview_features
-                        .contains(&PreviewFeature::AnonStructMethods)
-                    {
-                        return None; // Feature not enabled, can't evaluate
-                    }
                     let struct_id = struct_ty.as_struct()?;
 
                     // Check if methods are already registered for this struct
