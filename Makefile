@@ -1,6 +1,7 @@
 .PHONY: test quick-test fmt fmt-check check bench website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler fuzz-emitter fuzz-emitter-sequence \
-        fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter
+        fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter \
+        fuzz-cross-backend
 
 # Run unit tests only (fast feedback during development).
 quick-test:
@@ -38,7 +39,8 @@ bench:
 # Pass FUZZ_TIME=300 for a longer run.
 FUZZ_TIME ?= 60
 fuzz: fuzz-lexer fuzz-parser fuzz-compiler fuzz-emitter fuzz-emitter-sequence \
-      fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter
+      fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter \
+      fuzz-cross-backend
 
 fuzz-lexer:
 	cargo +nightly fuzz run lexer -- -max_total_time=$(FUZZ_TIME)
@@ -63,6 +65,9 @@ fuzz-structured-invalid:
 
 fuzz-structured-emitter:
 	cargo +nightly fuzz run structured_emitter -- -max_total_time=$(FUZZ_TIME)
+
+fuzz-cross-backend:
+	cargo +nightly fuzz run cross_backend -- -max_total_time=$(FUZZ_TIME)
 
 # Build the website.
 website:
