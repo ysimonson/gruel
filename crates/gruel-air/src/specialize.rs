@@ -268,6 +268,7 @@ fn create_specialized_function(
         num_locals,
         num_param_slots,
         param_modes,
+        param_slot_types,
         _warnings,
         _local_strings,
         _ref_fns,
@@ -286,6 +287,7 @@ fn create_specialized_function(
         num_locals,
         num_param_slots,
         param_modes,
+        param_slot_types,
     })
 }
 

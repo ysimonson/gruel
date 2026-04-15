@@ -224,8 +224,8 @@ Once the LLVM backend passes all spec, UI, and integration tests:
 - [x] **Phase 1d: Interpreter composite values** — `ConstValue::Struct`, `ConstValue::Array`, struct construction, field access, array indexing; tests for comptime struct/array manipulation.
 - [x] **Phase 1e: Wire in and delete old evaluator** — replace all call sites of `try_evaluate_const_in_rir()` with the new interpreter; return `CompileError` instead of `None` in comptime contexts; delete the old function; full test suite green.
 - [x] **Phase 2a: LLVM backend scaffolding** — add `gruel-codegen-llvm` crate, `inkwell` dependency, LLVM context/module/builder setup, type mapping, function declaration stubs.
-- [ ] **Phase 2b: Basic block and arithmetic translation** — translate CFG blocks, all arithmetic/comparison/logical instructions, `BuildRet`; smoke tests with simple functions.
-- [ ] **Phase 2c: Control flow translation** — `BuildCondBr`, `BuildBr`, loops; all spec tests that don't involve structs/arrays must pass.
+- [x] **Phase 2b: Basic block and arithmetic translation** — translate CFG blocks, all arithmetic/comparison/logical instructions, `BuildRet`; smoke tests with simple functions.
+- [x] **Phase 2c: Control flow translation** — `BuildCondBr`, `BuildBr`, loops; all spec tests that don't involve structs/arrays must pass.
 - [ ] **Phase 2d: Struct and array support** — `BuildGEP`, struct layout, array indexing, calling convention for struct return values.
 - [ ] **Phase 2e: Replace linker** — emit `.o` via LLVM, invoke system linker, remove `gruel-linker` dependency from `gruel-compiler`; full spec suite green via LLVM path.
 - [ ] **Phase 2f: Feature parity verification** — run full spec + UI + integration suite against both `--codegen=native` and `--codegen=llvm`; fix any divergences.

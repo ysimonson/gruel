@@ -27,7 +27,9 @@ mod types;
 
 use gruel_air::TypeInternPool;
 use gruel_cfg::Cfg;
-use gruel_error::{CompileError, CompileResult, ErrorKind};
+use gruel_error::CompileResult;
+#[cfg(not(feature = "llvm18"))]
+use gruel_error::{CompileError, ErrorKind};
 use lasso::ThreadedRodeo;
 
 /// Generate a native object file from a collection of function CFGs using LLVM.

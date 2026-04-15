@@ -91,6 +91,7 @@ impl<'a> CfgBuilder<'a> {
         fn_name: &str,
         type_pool: &'a TypeInternPool,
         param_modes: Vec<bool>,
+        param_slot_types: Vec<Type>,
     ) -> CfgOutput {
         let mut builder = CfgBuilder {
             air,
@@ -100,6 +101,7 @@ impl<'a> CfgBuilder<'a> {
                 num_params,
                 fn_name.to_string(),
                 param_modes,
+                param_slot_types,
             ),
             type_pool,
             current_block: BlockId(0),
@@ -2128,6 +2130,7 @@ mod tests {
             &func.name,
             &output.type_pool,
             func.param_modes.clone(),
+            func.param_slot_types.clone(),
         )
         .cfg
     }

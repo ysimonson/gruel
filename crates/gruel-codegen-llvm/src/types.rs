@@ -58,6 +58,9 @@ pub fn gruel_type_to_llvm<'ctx>(
                 BasicTypeEnum::StructType(t) => t.array_type(n).into(),
                 BasicTypeEnum::ArrayType(t) => t.array_type(n).into(),
                 BasicTypeEnum::VectorType(t) => t.array_type(n).into(),
+                BasicTypeEnum::ScalableVectorType(_) => {
+                    unreachable!("Gruel has no scalable vector types")
+                }
             })
         }
 

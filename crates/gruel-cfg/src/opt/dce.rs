@@ -428,7 +428,7 @@ mod tests {
     use lasso::ThreadedRodeo;
 
     fn make_cfg() -> Cfg {
-        let mut cfg = Cfg::new(Type::I32, 0, 0, "test".to_string(), vec![]);
+        let mut cfg = Cfg::new(Type::I32, 0, 0, "test".to_string(), vec![], vec![]);
         let entry = cfg.new_block();
         cfg.entry = entry;
         cfg

@@ -445,6 +445,7 @@ impl<'src> CompilationUnit<'src> {
                     &func.name,
                     type_pool,
                     func.param_modes.clone(),
+                    func.param_slot_types.clone(),
                 );
 
                 // Apply optimizations

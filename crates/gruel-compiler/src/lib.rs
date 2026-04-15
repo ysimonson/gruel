@@ -956,6 +956,7 @@ pub fn compile_frontend_from_ast_with_options(
                     &func.name,
                     &sema_output.type_pool,
                     func.param_modes.clone(),
+                    func.param_slot_types.clone(),
                 );
 
                 // Apply optimizations to the CFG
@@ -1081,6 +1082,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
                     &func.name,
                     &sema_output.type_pool,
                     func.param_modes.clone(),
+                    func.param_slot_types.clone(),
                 );
 
                 // Apply optimizations to the CFG

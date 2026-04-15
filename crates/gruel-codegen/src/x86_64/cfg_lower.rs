@@ -4298,6 +4298,7 @@ mod tests {
             &func.name,
             type_pool,
             func.param_modes.clone(),
+            func.param_slot_types.clone(),
         );
 
         CfgLower::new(&cfg_output.cfg, type_pool, strings, &interner).lower()

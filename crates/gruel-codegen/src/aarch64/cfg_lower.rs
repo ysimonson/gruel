@@ -4383,6 +4383,7 @@ mod tests {
             &func.name,
             type_pool,
             func.param_modes.clone(),
+            func.param_slot_types.clone(),
         );
 
         // Use host target for tests

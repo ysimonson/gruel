@@ -278,6 +278,12 @@ fn create_struct_drop_glue_function(
 
     // All parameters are passed by value (normal mode)
     let param_modes = vec![false; num_param_slots as usize];
+    // Each field contributes type_slot_count slots of its own type
+    let param_slot_types: Vec<Type> = struct_def
+        .fields
+        .iter()
+        .flat_map(|f| std::iter::repeat(f.ty).take(type_slot_count(f.ty, type_pool) as usize))
+        .collect();
 
     AnalyzedFunction {
         name: fn_name,
@@ -285,6 +291,7 @@ fn create_struct_drop_glue_function(
         num_locals: 0,
         num_param_slots,
         param_modes,
+        param_slot_types,
     }
 }
 
@@ -388,6 +395,9 @@ fn create_array_drop_glue_function(
 
     // All parameters are passed by value (normal mode)
     let param_modes = vec![false; num_param_slots as usize];
+    // Each element contributes element_slot_count slots of element_type
+    let param_slot_types: Vec<Type> =
+        std::iter::repeat(element_type).take(num_param_slots as usize).collect();
 
     AnalyzedFunction {
         name: fn_name,
@@ -395,6 +405,7 @@ fn create_array_drop_glue_function(
         num_locals: 0,
         num_param_slots,
         param_modes,
+        param_slot_types,
     }
 }
 

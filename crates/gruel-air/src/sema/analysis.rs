@@ -58,13 +58,14 @@ type AnalyzedFnResult = CompileResult<(
     HashSet<(StructId, Spur)>,
 )>;
 
-/// Raw analysis output: air, local count, param slots, param modes, warnings,
-/// local strings, referenced functions, and referenced methods.
+/// Raw analysis output: air, local count, param slots, param modes, param slot types,
+/// warnings, local strings, referenced functions, and referenced methods.
 type RawFnAnalysis = CompileResult<(
     Air,
     u32,
     u32,
     Vec<bool>,
+    Vec<Type>,
     Vec<CompileWarning>,
     Vec<String>,
     HashSet<Spur>,
@@ -389,6 +390,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     num_locals,
                     num_param_slots,
                     param_modes_result,
+                    param_slot_types,
                     warnings,
                     local_strings,
                     _ref_fns,
@@ -400,6 +402,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         num_locals,
                         num_param_slots,
                         param_modes: param_modes_result,
+                        param_slot_types,
                     };
                     functions_with_strings.push((analyzed, local_strings));
                     all_warnings.extend(warnings);
@@ -653,6 +656,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                         num_locals,
                         num_param_slots,
                         param_modes_result,
+                        param_slot_types,
                         warnings,
                         local_strings,
                         referenced_fns,
@@ -664,6 +668,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                             num_locals,
                             num_param_slots,
                             param_modes: param_modes_result,
+                            param_slot_types,
                         };
                         functions_with_strings.push((analyzed, local_strings));
                         all_warnings.extend(warnings);
@@ -900,6 +905,7 @@ impl<'a> Sema<'a> {
             num_locals,
             num_param_slots,
             param_modes,
+            param_slot_types,
             warnings,
             local_strings,
             ref_fns,
@@ -913,6 +919,7 @@ impl<'a> Sema<'a> {
                 num_locals,
                 num_param_slots,
                 param_modes,
+                param_slot_types,
             },
             warnings,
             local_strings,
@@ -955,6 +962,7 @@ impl<'a> Sema<'a> {
             num_locals,
             num_param_slots,
             param_modes,
+            param_slot_types,
             warnings,
             local_strings,
             ref_fns,
@@ -968,6 +976,7 @@ impl<'a> Sema<'a> {
                 num_locals,
                 num_param_slots,
                 param_modes,
+                param_slot_types,
             },
             warnings,
             local_strings,
@@ -999,6 +1008,7 @@ impl<'a> Sema<'a> {
             num_locals,
             num_param_slots,
             param_modes,
+            param_slot_types,
             warnings,
             local_strings,
             ref_fns,
@@ -1012,6 +1022,7 @@ impl<'a> Sema<'a> {
                 num_locals,
                 num_param_slots,
                 param_modes,
+                param_slot_types,
             },
             warnings,
             local_strings,
@@ -1053,6 +1064,7 @@ impl<'a> Sema<'a> {
         let mut air = Air::new(return_type);
         let mut param_vec: Vec<ParamInfo> = Vec::new();
         let mut param_modes: Vec<bool> = Vec::new();
+        let mut param_slot_types: Vec<Type> = Vec::new();
 
         // Add parameters to the param vec, tracking ABI slot offsets.
         // Each parameter starts at the next available ABI slot.
@@ -1077,6 +1089,7 @@ impl<'a> Sema<'a> {
             };
             for _ in 0..slot_count {
                 param_modes.push(is_by_ref);
+                param_slot_types.push(*ptype);
             }
             next_abi_slot += slot_count;
         }
@@ -1140,6 +1153,7 @@ impl<'a> Sema<'a> {
             ctx.next_slot,
             num_param_slots,
             param_modes,
+            param_slot_types,
             ctx.warnings,
             ctx.local_strings,
             ctx.referenced_functions,
