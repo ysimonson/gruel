@@ -1,0 +1,64 @@
+[package]
+name = "gruel-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+gruel-lexer = { path = "../crates/gruel-lexer" }
+gruel-parser = { path = "../crates/gruel-parser" }
+gruel-compiler = { path = "../crates/gruel-compiler" }
+gruel-codegen = { path = "../crates/gruel-codegen" }
+
+[[bin]]
+name = "lexer"
+path = "fuzz_targets/lexer.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "parser"
+path = "fuzz_targets/parser.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "compiler"
+path = "fuzz_targets/compiler.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "emitter"
+path = "fuzz_targets/emitter.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "emitter_sequence"
+path = "fuzz_targets/emitter_sequence.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "structured_compiler"
+path = "fuzz_targets/structured_compiler.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "structured_invalid"
+path = "fuzz_targets/structured_invalid.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "structured_emitter"
+path = "fuzz_targets/structured_emitter.rs"
+test = false
+doc = false

@@ -1,4 +1,6 @@
-.PHONY: test quick-test fmt fmt-check check bench website website-serve website-deploy
+.PHONY: test quick-test fmt fmt-check check bench website website-serve website-deploy \
+        fuzz fuzz-lexer fuzz-parser fuzz-compiler fuzz-emitter fuzz-emitter-sequence \
+        fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter
 
 # Run unit tests only (fast feedback during development).
 quick-test:
@@ -31,6 +33,36 @@ check:
 # Run benchmarks. Pass ARGS="--iterations 10" etc. to forward options.
 bench:
 	./bench.sh $(ARGS)
+
+# Run all fuzz targets for FUZZ_TIME seconds each (default: 60).
+# Pass FUZZ_TIME=300 for a longer run.
+FUZZ_TIME ?= 60
+fuzz: fuzz-lexer fuzz-parser fuzz-compiler fuzz-emitter fuzz-emitter-sequence \
+      fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter
+
+fuzz-lexer:
+	cargo +nightly fuzz run lexer -- -max_total_time=$(FUZZ_TIME)
+
+fuzz-parser:
+	cargo +nightly fuzz run parser -- -max_total_time=$(FUZZ_TIME)
+
+fuzz-compiler:
+	cargo +nightly fuzz run compiler -- -max_total_time=$(FUZZ_TIME)
+
+fuzz-emitter:
+	cargo +nightly fuzz run emitter -- -max_total_time=$(FUZZ_TIME)
+
+fuzz-emitter-sequence:
+	cargo +nightly fuzz run emitter_sequence -- -max_total_time=$(FUZZ_TIME)
+
+fuzz-structured-compiler:
+	cargo +nightly fuzz run structured_compiler -- -max_total_time=$(FUZZ_TIME)
+
+fuzz-structured-invalid:
+	cargo +nightly fuzz run structured_invalid -- -max_total_time=$(FUZZ_TIME)
+
+fuzz-structured-emitter:
+	cargo +nightly fuzz run structured_emitter -- -max_total_time=$(FUZZ_TIME)
 
 # Build the website.
 website:

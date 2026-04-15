@@ -444,54 +444,41 @@ The traceability check is run as part of `make test` and fails if:
 
 ### Fuzz Testing
 
-The project has comprehensive fuzz testing infrastructure in `crates/gruel-fuzz` that tests the compiler for crashes, panics, and security issues using both mutation-based and property-based fuzzing.
+Fuzz testing uses [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (libFuzzer). Fuzz targets live in `fuzz/fuzz_targets/`. Requires nightly Rust.
 
 #### Available Fuzz Targets
 
 ```bash
-# List all fuzz targets
-cargo run -p gruel-fuzz -- --list
+# List targets
+cargo +nightly fuzz list
 
-# Available targets:
-# - lexer: Tokenization only (~27,000 exec/s)
-# - parser: Lexing + parsing (~6,500 exec/s)
-# - sema: Semantic analysis (~4,000-8,000 exec/s)
-# - compiler: Full frontend (~4,000-8,000 exec/s)
-# - emitter: x86-64 instruction encoding (~15,000 exec/s)
-# - emitter_sequence: Instruction sequences with labels/jumps (~10,000 exec/s)
+# Targets:
+# - lexer:               Tokenization (raw bytes)
+# - parser:              Lexing + parsing (raw bytes)
+# - compiler:            Full frontend (raw bytes)
+# - emitter:             x86-64 instruction encoding (raw bytes)
+# - emitter_sequence:    Instruction sequences with labels/jumps (raw bytes)
+# - structured_compiler: Valid Gruel programs (arbitrary crate)
+# - structured_invalid:  Semantically invalid programs (arbitrary crate)
+# - structured_emitter:  Structured x86-64 MIR sequences (arbitrary crate)
 ```
 
 #### Running Fuzz Tests
 
 ```bash
-# Initialize corpus from spec tests
-cargo run -p gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
+# Run a target indefinitely (Ctrl+C to stop)
+cargo +nightly fuzz run lexer
 
-# Run a fuzz target with mutations
-cargo run -p gruel-fuzz -- --mutate lexer crates/gruel-fuzz/corpus
+# Run for a specific duration (300 seconds)
+cargo +nightly fuzz run parser -- -max_total_time=300
 
-# Run for a specific duration (300 seconds = 5 minutes)
-cargo run -p gruel-fuzz -- --mutate --max-time=300 parser crates/gruel-fuzz/corpus
-
-# Run for a specific number of iterations
-cargo run -p gruel-fuzz -- --max-runs=10000 sema crates/gruel-fuzz/corpus
-
-# Run all fuzz targets for 5 minutes each
-for target in lexer parser sema compiler emitter emitter_sequence; do
-    cargo run -p gruel-fuzz -- --mutate --max-time=300 $target crates/gruel-fuzz/corpus
+# Run all targets for 5 minutes each
+for target in lexer parser compiler emitter emitter_sequence structured_compiler structured_invalid structured_emitter; do
+    cargo +nightly fuzz run $target -- -max_total_time=300
 done
 ```
 
-#### Property-Based Testing
-
-The fuzzer includes proptest-based generators that create syntactically valid Gruel programs:
-
-```bash
-# Run proptest-based fuzz tests
-cargo test -p gruel-fuzz
-```
-
-These generators create valid identifiers, types, expressions, statements, functions, and complete programs. This enables deeper testing than random byte mutation since the inputs exercise semantic analysis and type checking.
+Corpus files are stored in `fuzz/corpus/<target>/` and are persisted across runs.
 
 #### CI Integration
 
@@ -499,17 +486,15 @@ Fuzzing runs automatically in CI via `.github/workflows/fuzz.yml`. Each target r
 
 #### When a Crash is Found
 
-If fuzzing finds a crash, the input is saved to `crates/gruel-fuzz/crashes/`:
+Crash inputs are saved to `fuzz/artifacts/<target>/`:
 
 ```bash
 # Reproduce the crash
-cargo run -p gruel -- crates/gruel-fuzz/crashes/crash-*.txt output
+cargo +nightly fuzz run lexer fuzz/artifacts/lexer/crash-*
 
-# Or just tokenize to see the issue
-cargo run -p gruel -- --emit tokens crates/gruel-fuzz/crashes/crash-*.txt
+# Or compile the crashing input directly
+cargo run -p gruel -- fuzz/artifacts/compiler/crash-*.txt output
 ```
-
-See `crates/gruel-fuzz/README.md` for complete documentation.
 
 ## Modifying the Language
 

@@ -8,7 +8,6 @@ members = [
     "crates/gruel-codegen",
     "crates/gruel-compiler",
     "crates/gruel-error",
-    "crates/gruel-fuzz",
     "crates/gruel-lexer",
     "crates/gruel-linker",
     "crates/gruel-parser",
@@ -20,6 +19,7 @@ members = [
     "crates/gruel-ui-tests",
     "crates/gruel-spec",
 ]
+exclude = ["fuzz"]
 # gruel-runtime is no_std and staticlib-only, so exclude it from cargo test --workspace
 # Run: cargo test --workspace --exclude gruel-runtime
 
@@ -52,7 +52,6 @@ lasso = { version = "0.7", features = ["multi-threaded"] }
 libc = "0.2"
 libtest2-mimic = "0.0.4"
 logos = "0.14"
-proptest = "1.5"
 rayon = "1.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
