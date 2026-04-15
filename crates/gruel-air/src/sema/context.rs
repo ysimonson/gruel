@@ -357,6 +357,10 @@ pub enum ConstValue {
     /// Internal control-flow signal: produced by `continue` inside a comptime loop.
     /// Never escapes `evaluate_comptime_block` — consumed by Loop/InfiniteLoop cases.
     ContinueSignal,
+    /// Internal control-flow signal: produced by `return` inside a comptime function.
+    /// Never escapes a comptime `Call` handler — the return value is stored in
+    /// `Sema::comptime_return_value` before this signal is returned.
+    ReturnSignal,
 }
 
 impl ConstValue {

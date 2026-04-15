@@ -190,7 +190,7 @@ compile_fail = true
 error_contains = "cannot be known at compile time"
 
 [[case]]
-name = "comptime_cannot_call_function"
+name = "comptime_call_non_generic_function"
 spec = ["4.14:4"]
 source = """
 fn add(a: i32, b: i32) -> i32 { a + b }
@@ -198,8 +198,7 @@ fn main() -> i32 {
     comptime { add(1, 2) }
 }
 """
-compile_fail = true
-error_contains = "cannot be known at compile time"
+exit_code = 3
 
 # =============================================================================
 # Comptime Parameters (Phase 2 - ADR-0025)
@@ -1116,3 +1115,135 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "step budget"
+
+# =============================================================================
+# Phase 1c: Comptime Function Calls
+# =============================================================================
+
+[[case]]
+name = "comptime_call_simple"
+spec = ["4.14:22"]
+source = """
+fn double(x: i32) -> i32 {
+    x * 2
+}
+
+fn main() -> i32 {
+    comptime { double(21) }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_call_with_local_vars"
+spec = ["4.14:22"]
+source = """
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn main() -> i32 {
+    comptime {
+        let x = 20;
+        let y = 22;
+        add(x, y)
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_call_chain"
+spec = ["4.14:23"]
+source = """
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn sum_of_products(x: i32, y: i32, z: i32) -> i32 {
+    add(x * y, y * z)
+}
+
+fn main() -> i32 {
+    comptime { sum_of_products(2, 3, 7) }
+}
+"""
+exit_code = 27
+
+[[case]]
+name = "comptime_call_with_local_in_callee"
+spec = ["4.14:22"]
+source = """
+fn compute(x: i32) -> i32 {
+    let doubled = x * 2;
+    doubled + 2
+}
+
+fn main() -> i32 {
+    comptime { compute(20) }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_call_early_return"
+spec = ["4.14:24"]
+source = """
+fn clamp(x: i32, lo: i32, hi: i32) -> i32 {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    x
+}
+
+fn main() -> i32 {
+    comptime { clamp(100, 0, 42) }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_call_early_return_low"
+spec = ["4.14:24"]
+source = """
+fn clamp(x: i32, lo: i32, hi: i32) -> i32 {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    x
+}
+
+fn main() -> i32 {
+    comptime { clamp(-5, 0, 42) }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "comptime_call_no_early_return"
+spec = ["4.14:24"]
+source = """
+fn clamp(x: i32, lo: i32, hi: i32) -> i32 {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    x
+}
+
+fn main() -> i32 {
+    comptime { clamp(20, 0, 42) }
+}
+"""
+exit_code = 20
+
+[[case]]
+name = "comptime_call_recursive_depth_exceeded"
+spec = ["4.14:25"]
+source = """
+fn infinite(x: i32) -> i32 {
+    infinite(x + 1)
+}
+
+fn main() -> i32 {
+    comptime { infinite(0) }
+}
+"""
+compile_fail = true
+error_contains = "call stack depth"

@@ -1253,8 +1253,10 @@ impl<'a> Sema<'a> {
                     ConstValue::Bool(_) => Type::BOOL,
                     ConstValue::Type(t) => *t,
                     ConstValue::Unit => Type::UNIT,
-                    ConstValue::BreakSignal | ConstValue::ContinueSignal => {
-                        unreachable!("loop control signal in comptime_value_vars")
+                    ConstValue::BreakSignal
+                    | ConstValue::ContinueSignal
+                    | ConstValue::ReturnSignal => {
+                        unreachable!("control-flow signal in comptime_value_vars")
                     }
                 };
                 param_vars.insert(
@@ -1787,11 +1789,13 @@ impl<'a> Sema<'a> {
                         });
                         Ok(AnalysisResult::new(air_ref, Type::UNIT))
                     }
-                    // These signals are consumed by the loop cases inside evaluate_comptime_block.
-                    // A top-level BreakSignal/ContinueSignal means break/continue outside a loop,
-                    // which evaluate_comptime_block converts to an error before returning here.
-                    ConstValue::BreakSignal | ConstValue::ContinueSignal => {
-                        unreachable!("loop control signal escaped evaluate_comptime_block")
+                    // These signals are consumed by loop/call handlers inside evaluate_comptime_block.
+                    // If they escape here, it means break/continue outside a loop, or return outside
+                    // a function, which evaluate_comptime_block converts to an error before returning.
+                    ConstValue::BreakSignal
+                    | ConstValue::ContinueSignal
+                    | ConstValue::ReturnSignal => {
+                        unreachable!("control-flow signal escaped evaluate_comptime_block")
                     }
                 }
             }
@@ -3408,7 +3412,8 @@ impl<'a> Sema<'a> {
                     | ConstValue::Type(_)
                     | ConstValue::Unit
                     | ConstValue::BreakSignal
-                    | ConstValue::ContinueSignal => None,
+                    | ConstValue::ContinueSignal
+                    | ConstValue::ReturnSignal => None,
                 }
             }
 
@@ -3420,7 +3425,8 @@ impl<'a> Sema<'a> {
                     | ConstValue::Type(_)
                     | ConstValue::Unit
                     | ConstValue::BreakSignal
-                    | ConstValue::ContinueSignal => None,
+                    | ConstValue::ContinueSignal
+                    | ConstValue::ReturnSignal => None,
                 }
             }
 
@@ -3728,7 +3734,8 @@ impl<'a> Sema<'a> {
                     | ConstValue::Type(_)
                     | ConstValue::Unit
                     | ConstValue::BreakSignal
-                    | ConstValue::ContinueSignal => None,
+                    | ConstValue::ContinueSignal
+                    | ConstValue::ReturnSignal => None,
                 }
             }
 
@@ -3740,7 +3747,8 @@ impl<'a> Sema<'a> {
                     | ConstValue::Type(_)
                     | ConstValue::Unit
                     | ConstValue::BreakSignal
-                    | ConstValue::ContinueSignal => None,
+                    | ConstValue::ContinueSignal
+                    | ConstValue::ReturnSignal => None,
                 }
             }
 
@@ -4127,13 +4135,22 @@ impl<'a> Sema<'a> {
         // outer analysis context (e.g. `N` in a method of `FixedBuffer(N)`).
         let mut locals = ctx.comptime_value_vars.clone();
         let result = self.evaluate_comptime_inst(inst_ref, &mut locals, ctx, span)?;
-        // BreakSignal/ContinueSignal escaping the top level means break/continue
-        // appeared outside any loop — treat as not compile-time evaluable.
+        // Control-flow signals escaping the top level are errors.
+        // BreakSignal/ContinueSignal mean break/continue outside a loop.
+        // ReturnSignal means return outside a function (comptime block is not a function).
         match result {
             ConstValue::BreakSignal | ConstValue::ContinueSignal => {
                 Err(CompileError::new(
                     ErrorKind::ComptimeEvaluationFailed {
                         reason: "break/continue outside a loop in comptime block".into(),
+                    },
+                    span,
+                ))
+            }
+            ConstValue::ReturnSignal => {
+                Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "return outside a function in comptime block".into(),
                     },
                     span,
                 ))
@@ -4395,9 +4412,14 @@ impl<'a> Sema<'a> {
                         ctx,
                         outer_span,
                     )?;
-                    // Propagate loop control signals immediately — don't execute
-                    // remaining statements after a break or continue.
-                    if matches!(last_val, ConstValue::BreakSignal | ConstValue::ContinueSignal) {
+                    // Propagate control-flow signals immediately — don't execute
+                    // remaining statements after a break, continue, or return.
+                    if matches!(
+                        last_val,
+                        ConstValue::BreakSignal
+                            | ConstValue::ContinueSignal
+                            | ConstValue::ReturnSignal
+                    ) {
                         return Ok(last_val);
                     }
                 }
@@ -4563,8 +4585,105 @@ impl<'a> Sema<'a> {
             InstData::Break => Ok(ConstValue::BreakSignal),
             InstData::Continue => Ok(ConstValue::ContinueSignal),
 
+            // ── Return ────────────────────────────────────────────────────────
+            // `return expr` or bare `return` inside a comptime function.
+            // Stores the return value in a side channel then signals the Call handler.
+            InstData::Ret(opt_ref) => {
+                let return_val = match opt_ref {
+                    Some(val_ref) => {
+                        self.evaluate_comptime_inst(val_ref, locals, ctx, outer_span)?
+                    }
+                    None => ConstValue::Unit,
+                };
+                self.comptime_return_value = Some(return_val);
+                Ok(ConstValue::ReturnSignal)
+            }
+
+            // ── Function call ─────────────────────────────────────────────────
+            // Evaluate the callee's body with the arguments bound as locals.
+            InstData::Call {
+                name,
+                args_start,
+                args_len,
+            } => {
+                const COMPTIME_CALL_DEPTH_LIMIT: u32 = 64;
+
+                // Look up the function in the function table.
+                let fn_info = match self.functions.get(&name) {
+                    Some(info) => *info,
+                    None => return Err(not_const(inst_span)),
+                };
+
+                // Generic functions (with comptime T: type parameters) require type
+                // substitution — not supported in Phase 1c.
+                if fn_info.is_generic {
+                    return Err(not_const(inst_span));
+                }
+
+                // Evaluate all arguments before entering the callee frame.
+                let call_args = self.rir.get_call_args(args_start, args_len);
+                let mut arg_values = Vec::with_capacity(call_args.len());
+                for call_arg in &call_args {
+                    let val =
+                        self.evaluate_comptime_inst(call_arg.value, locals, ctx, outer_span)?;
+                    arg_values.push(val);
+                }
+
+                // Enforce call stack depth limit to prevent infinite recursion.
+                if self.comptime_call_depth >= COMPTIME_CALL_DEPTH_LIMIT {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "comptime call stack depth exceeded {} levels (possible infinite recursion)",
+                                COMPTIME_CALL_DEPTH_LIMIT
+                            ),
+                        },
+                        inst_span,
+                    ));
+                }
+
+                // Bind parameters to argument values in a fresh call frame.
+                let param_names = self.param_arena.names(fn_info.params).to_vec();
+                let mut call_locals: HashMap<Spur, ConstValue> =
+                    HashMap::with_capacity(param_names.len());
+                for (param_name, arg_val) in param_names.iter().zip(arg_values.iter()) {
+                    call_locals.insert(*param_name, *arg_val);
+                }
+
+                // Execute the callee body.
+                self.comptime_call_depth += 1;
+                let body_result =
+                    self.evaluate_comptime_inst(fn_info.body, &mut call_locals, ctx, outer_span);
+                self.comptime_call_depth -= 1;
+                let body_result = body_result?;
+
+                // Consume any return signal; fall through on plain values.
+                match body_result {
+                    ConstValue::ReturnSignal => {
+                        // `return val` was executed — take the stored value.
+                        self.comptime_return_value.take().ok_or_else(|| {
+                            CompileError::new(
+                                ErrorKind::ComptimeEvaluationFailed {
+                                    reason: "comptime return signal missing its value".into(),
+                                },
+                                inst_span,
+                            )
+                        })
+                    }
+                    ConstValue::BreakSignal | ConstValue::ContinueSignal => {
+                        // break/continue escaped a function body — syntax error in Gruel.
+                        Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: "break/continue outside a loop in comptime function".into(),
+                            },
+                            inst_span,
+                        ))
+                    }
+                    val => Ok(val),
+                }
+            }
+
             // ── Not yet supported ─────────────────────────────────────────────
-            // Phase 1c: function calls, return
             // Phase 1d: struct construction, field access, array ops
             _ => Err(not_const(inst_span)),
         }

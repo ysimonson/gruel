@@ -43,8 +43,9 @@ fn main() -> i32 {
 It is a compile-time error if an expression inside a comptime block cannot be evaluated at compile time. This includes:
 
 - References to runtime variables
-- Function calls (except to comptime-evaluable functions in future versions)
-- Operations that would panic at runtime
+- Calls to generic functions (functions with `comptime T: type` parameters) in a non-generic comptime context
+- Operations that would overflow or panic at runtime
+- System calls, external functions, or raw pointer dereferences
 
 ```gruel
 fn main() -> i32 {
@@ -390,5 +391,69 @@ fn main() -> i32 {
         while true { x = x + 1; }  // ERROR: exceeds step budget
         x
     }
+}
+```
+
+## Comptime Function Calls
+
+{{ rule(id="4.14:22", cat="normative") }}
+
+A comptime block can call non-generic functions. The called function's body is evaluated at compile time. All arguments must be compile-time evaluable.
+
+```gruel
+fn double(x: i32) -> i32 {
+    x * 2
+}
+
+fn main() -> i32 {
+    comptime { double(21) }   // evaluates to 42 at compile time
+}
+```
+
+{{ rule(id="4.14:23", cat="normative") }}
+
+A comptime block can call functions that themselves call other functions, forming a call chain. Each function in the chain is evaluated at compile time.
+
+```gruel
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn sum_of_products(x: i32, y: i32, z: i32) -> i32 {
+    add(x * y, y * z)
+}
+
+fn main() -> i32 {
+    comptime { sum_of_products(2, 3, 7) }   // evaluates to 27 at compile time
+}
+```
+
+{{ rule(id="4.14:24", cat="normative") }}
+
+A comptime function call can use `return` to exit the function early. The returned value becomes the result of the call.
+
+```gruel
+fn clamp(x: i32, lo: i32, hi: i32) -> i32 {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    x
+}
+
+fn main() -> i32 {
+    comptime { clamp(100, 0, 42) }   // evaluates to 42 at compile time
+}
+```
+
+{{ rule(id="4.14:25", cat="legality-rule") }}
+
+It is a compile-time error if the comptime call stack exceeds 64 frames. This prevents infinite recursion from causing the compiler to hang.
+
+```gruel
+fn infinite(x: i32) -> i32 {
+    infinite(x + 1)  // ERROR: call stack depth exceeded
+}
+
+fn main() -> i32 {
+    comptime { infinite(0) }
 }
 ```

@@ -1541,8 +1541,9 @@ impl<'a> Sema<'a> {
                 }
                 ConstValue::Unit
                 | ConstValue::BreakSignal
-                | ConstValue::ContinueSignal => {
-                    unreachable!("non-value ConstValue in comptime_value_vars")
+                | ConstValue::ContinueSignal
+                | ConstValue::ReturnSignal => {
+                    unreachable!("control-flow signal in comptime_value_vars")
                 }
             }
         }

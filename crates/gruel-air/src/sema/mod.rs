@@ -111,6 +111,14 @@ pub struct Sema<'a> {
     /// Incremented once per loop iteration; triggers an error when it exceeds
     /// `COMPTIME_MAX_STEPS` to prevent infinite loops at compile time.
     pub(crate) comptime_steps_used: u64,
+    /// Pending return value for the comptime interpreter.
+    /// Set by `Ret` instructions inside comptime function bodies; consumed
+    /// immediately by the enclosing `Call` handler in `evaluate_comptime_inst`.
+    pub(crate) comptime_return_value: Option<ConstValue>,
+    /// Current call stack depth in the comptime interpreter.
+    /// Incremented on each comptime `Call`, decremented on return.
+    /// Triggers an error if it exceeds `COMPTIME_CALL_DEPTH_LIMIT`.
+    pub(crate) comptime_call_depth: u32,
 }
 
 impl<'a> Sema<'a> {
@@ -140,6 +148,8 @@ impl<'a> Sema<'a> {
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
             comptime_steps_used: 0,
+            comptime_return_value: None,
+            comptime_call_depth: 0,
         }
     }
 

@@ -100,6 +100,8 @@ impl<'a> GatherOutput<'a> {
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
             comptime_steps_used: 0,
+            comptime_return_value: None,
+            comptime_call_depth: 0,
         }
     }
 }
