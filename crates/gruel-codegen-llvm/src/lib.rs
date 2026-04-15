@@ -5,14 +5,11 @@
 //!
 //! ## Build requirements
 //!
-//! LLVM 18 must be installed and `LLVM_SYS_180_PREFIX` or a system `llvm-config`
-//! must be available. Enable the `llvm18` Cargo feature to activate LLVM support:
+//! LLVM 22 must be installed and `LLVM_SYS_221_PREFIX` or a system `llvm-config`
+//! must be available.
 //!
-//! ```text
-//! cargo build --features gruel-codegen-llvm/llvm18
-//! ```
-//!
-//! Without the feature, [`generate`] returns an error at runtime.
+//! - On macOS: `brew install llvm`
+//! - On Linux: `apt install llvm-22-dev`
 //!
 //! ## Pipeline
 //!
@@ -20,16 +17,12 @@
 //! CFG → LLVM IR (via inkwell) → object file bytes
 //! ```
 
-#[cfg(feature = "llvm18")]
 mod codegen;
-#[cfg(feature = "llvm18")]
 mod types;
 
 use gruel_air::TypeInternPool;
 use gruel_cfg::Cfg;
 use gruel_error::CompileResult;
-#[cfg(not(feature = "llvm18"))]
-use gruel_error::{CompileError, ErrorKind};
 use lasso::ThreadedRodeo;
 
 /// Generate a native object file from a collection of function CFGs using LLVM.
@@ -40,26 +33,12 @@ use lasso::ThreadedRodeo;
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The crate was compiled without the `llvm18` feature (LLVM not available).
-/// - An LLVM compilation error occurs.
+/// Returns an error if an LLVM compilation error occurs.
 pub fn generate(
     functions: &[&Cfg],
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
 ) -> CompileResult<Vec<u8>> {
-    #[cfg(feature = "llvm18")]
-    return codegen::generate(functions, type_pool, strings, interner);
-
-    #[cfg(not(feature = "llvm18"))]
-    {
-        let _ = (functions, type_pool, strings, interner);
-        Err(CompileError::without_span(ErrorKind::InternalError(
-            "LLVM backend is not available; \
-             rebuild with --features gruel-codegen-llvm/llvm18 \
-             after installing LLVM 18 (brew install llvm@18)"
-                .into(),
-        )))
-    }
+    codegen::generate(functions, type_pool, strings, interner)
 }

@@ -722,14 +722,13 @@ pub enum LinkerMode {
 /// generator. The LLVM backend uses `inkwell` to produce LLVM IR and then
 /// compiles it with LLVM's code generator.
 ///
-/// The LLVM backend requires that `gruel-codegen-llvm` was compiled with
-/// the `llvm18` feature flag.
+/// The LLVM backend requires LLVM 22 to be installed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodegenBackend {
     /// Use the built-in native code generator (default).
     #[default]
     Native,
-    /// Use the LLVM code generator (requires `llvm18` feature).
+    /// Use the LLVM code generator (requires LLVM 22).
     Llvm,
 }
 

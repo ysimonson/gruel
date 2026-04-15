@@ -1,6 +1,6 @@
 //! LLVM IR generation from Gruel CFG.
 //!
-//! This module is only compiled when the `llvm18` feature is enabled.
+//! This module generates LLVM IR from the Gruel CFG.
 
 use std::collections::HashMap;
 
