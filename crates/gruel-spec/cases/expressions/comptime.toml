@@ -257,13 +257,14 @@ compile_fail = true
 error_contains = "comptime parameter requires a compile-time known value"
 
 [[case]]
-name = "comptime_param_function_call_arg_error"
+name = "comptime_param_function_call_runtime_arg_error"
 spec = ["4.14:6"]
 source = """
-fn get_value() -> i32 { 5 }
+fn add_one(x: i32) -> i32 { x + 1 }
 fn scale(comptime factor: i32, value: i32) -> i32 { factor * value }
 fn main() -> i32 {
-    scale(get_value(), 10)
+    let rt = 21;
+    scale(add_one(rt), 10)
 }
 """
 compile_fail = true
@@ -1371,3 +1372,47 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "out of bounds"
+
+# =============================================================================
+# Phase 1e: Function Call Results as Comptime Arguments
+# =============================================================================
+
+[[case]]
+name = "comptime_arg_from_function_call"
+spec = ["4.14:29"]
+source = """
+fn double(x: i32) -> i32 {
+    x * 2
+}
+
+fn multiply(comptime n: i32, value: i32) -> i32 {
+    n * value
+}
+
+fn main() -> i32 {
+    multiply(double(3), 7)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_arg_from_nested_calls"
+spec = ["4.14:29"]
+source = """
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn square(n: i32) -> i32 {
+    n * n
+}
+
+fn with_comptime_n(comptime n: i32) -> i32 {
+    n
+}
+
+fn main() -> i32 {
+    with_comptime_n(add(square(4), 26))
+}
+"""
+exit_code = 42

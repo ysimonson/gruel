@@ -446,7 +446,11 @@ fn main() -> i32 {
 
 {{ rule(id="4.14:25", cat="legality-rule") }}
 
-It is a compile-time error if the comptime call stack exceeds 64 frames. This prevents infinite recursion from causing the compiler to hang.
+It is a compile-time error if the comptime call stack exceeds 64 frames.
+
+{{ rule(id="4.14:29", cat="normative") }}
+
+A comptime parameter may receive the result of a function call, provided the call can be fully evaluated at compile time. The callee must be a non-generic function whose arguments are themselves compile-time known. This prevents infinite recursion from causing the compiler to hang.
 
 ```gruel
 fn infinite(x: i32) -> i32 {

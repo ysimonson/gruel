@@ -2818,8 +2818,11 @@ impl<'a> Sema<'a> {
                 std::collections::HashMap::new();
             for (i, is_comptime) in param_comptime.iter().enumerate() {
                 if *is_comptime && param_types[i] != Type::COMPTIME_TYPE {
-                    // This is a comptime VALUE parameter - extract its const value
-                    if let Some(const_val) = self.try_evaluate_const(args[i].value) {
+                    // This is a comptime VALUE parameter - extract its const value.
+                    // Use the full stateful interpreter so function calls work as comptime args.
+                    if let Some(const_val) =
+                        self.try_evaluate_comptime_arg(args[i].value, ctx, span)
+                    {
                         value_subst.insert(param_names[i], const_val);
                     }
                 }
@@ -2848,9 +2851,12 @@ impl<'a> Sema<'a> {
             // Validate each comptime parameter receives a compile-time constant
             for (i, (&is_comptime, arg)) in param_comptime.iter().zip(args.iter()).enumerate() {
                 if is_comptime {
-                    // Try to evaluate the argument at compile time
-                    let is_comptime_known = self.try_evaluate_const(arg.value).is_some()
-                        || self.is_comptime_type_var(arg.value, ctx);
+                    // Try to evaluate the argument at compile time (using the full
+                    // stateful interpreter so function call results qualify as comptime).
+                    let arg_span = self.rir.get(arg.value).span;
+                    let is_comptime_known =
+                        self.try_evaluate_comptime_arg(arg.value, ctx, arg_span).is_some()
+                            || self.is_comptime_type_var(arg.value, ctx);
                     if !is_comptime_known {
                         let param_name = self.interner.resolve(&param_names[i]).to_string();
                         return Err(CompileError::new(
@@ -2938,8 +2944,11 @@ impl<'a> Sema<'a> {
                     std::collections::HashMap::new();
                 for (i, is_comptime) in param_comptime.iter().enumerate() {
                     if *is_comptime && param_types[i] != Type::COMPTIME_TYPE {
-                        // This is a comptime VALUE parameter - extract its const value
-                        if let Some(const_val) = self.try_evaluate_const(args[i].value) {
+                        // This is a comptime VALUE parameter - extract its const value.
+                        // Use the full stateful interpreter so function calls work as comptime args.
+                        if let Some(const_val) =
+                            self.try_evaluate_comptime_arg(args[i].value, ctx, span)
+                        {
                             value_subst.insert(param_names[i], const_val);
                         }
                     }

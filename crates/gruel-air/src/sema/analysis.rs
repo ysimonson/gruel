@@ -4133,10 +4133,47 @@ impl<'a> Sema<'a> {
     //   - `let` bindings within comptime blocks
     //   - Variable assignment within comptime blocks
     //   - `if`/`else` with comptime-evaluable conditions
-    //
-    // Phase 1b will add: `while`, `loop`, `break`, `continue`
-    // Phase 1c will add: function calls (push/pop call frames)
-    // Phase 1d will add: `ConstValue::Struct`, `ConstValue::Array`
+    //   - `while`, `loop`, `break`, `continue` (Phase 1b)
+    //   - Function calls, push/pop call frames (Phase 1c)
+    //   - `ConstValue::Struct`, `ConstValue::Array` (Phase 1d)
+    //   - Comptime arg evaluation via full interpreter (Phase 1e)
+
+    /// Try to evaluate a single expression as a comptime argument value.
+    ///
+    /// Used when validating and extracting values for `comptime` parameters at
+    /// call sites (Phase 1e). First tries the lightweight non-stateful evaluator
+    /// (fast for literals and arithmetic), then falls back to the full stateful
+    /// interpreter which supports function calls and composite operations.
+    ///
+    /// Returns `Some(value)` if evaluable at compile time, `None` otherwise.
+    /// Never returns control-flow signals (`BreakSignal`, `ContinueSignal`,
+    /// `ReturnSignal`).
+    pub(crate) fn try_evaluate_comptime_arg(
+        &mut self,
+        inst_ref: InstRef,
+        ctx: &AnalysisContext,
+        outer_span: Span,
+    ) -> Option<ConstValue> {
+        // Fast path: lightweight evaluator handles literals and arithmetic.
+        if let Some(val) = self.try_evaluate_const(inst_ref) {
+            return Some(val);
+        }
+        // Full stateful interpreter: supports function calls, let bindings, etc.
+        // Save and restore step counter so arg evaluation doesn't consume the
+        // budget of any outer comptime block that may be in progress.
+        let prev_steps = self.comptime_steps_used;
+        self.comptime_steps_used = 0;
+        let mut locals = ctx.comptime_value_vars.clone();
+        let result = self.evaluate_comptime_inst(inst_ref, &mut locals, ctx, outer_span).ok();
+        self.comptime_steps_used = prev_steps;
+        // Filter out control-flow signals — they cannot be meaningful here.
+        result.filter(|v| {
+            !matches!(
+                v,
+                ConstValue::BreakSignal | ConstValue::ContinueSignal | ConstValue::ReturnSignal
+            )
+        })
+    }
 
     /// Evaluate a comptime block expression using the stateful interpreter.
     ///
