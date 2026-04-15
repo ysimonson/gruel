@@ -497,7 +497,15 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
         linker: linker.unwrap_or_default(),
         opt_level: opt_level.unwrap_or_default(),
         preview_features,
-        codegen_backend: codegen_backend.unwrap_or_default(),
+        codegen_backend: codegen_backend
+            .or_else(|| {
+                env::var("GRUEL_BACKEND").ok().and_then(|v| match v.as_str() {
+                    "llvm" => Some(CodegenBackend::Llvm),
+                    "native" => Some(CodegenBackend::Native),
+                    _ => None,
+                })
+            })
+            .unwrap_or_default(),
         log_level: log_level.unwrap_or_default(),
         log_format: log_format.unwrap_or_default(),
         time_passes,

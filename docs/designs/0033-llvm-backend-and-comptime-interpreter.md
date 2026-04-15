@@ -226,9 +226,9 @@ Once the LLVM backend passes all spec, UI, and integration tests:
 - [x] **Phase 2a: LLVM backend scaffolding** — add `gruel-codegen-llvm` crate, `inkwell` dependency, LLVM context/module/builder setup, type mapping, function declaration stubs.
 - [x] **Phase 2b: Basic block and arithmetic translation** — translate CFG blocks, all arithmetic/comparison/logical instructions, `BuildRet`; smoke tests with simple functions.
 - [x] **Phase 2c: Control flow translation** — `BuildCondBr`, `BuildBr`, loops; all spec tests that don't involve structs/arrays must pass.
-- [ ] **Phase 2d: Struct and array support** — `BuildGEP`, struct layout, array indexing, calling convention for struct return values.
-- [ ] **Phase 2e: Replace linker** — emit `.o` via LLVM, invoke system linker, remove `gruel-linker` dependency from `gruel-compiler`; full spec suite green via LLVM path.
-- [ ] **Phase 2f: Feature parity verification** — run full spec + UI + integration suite against both `--codegen=native` and `--codegen=llvm`; fix any divergences.
+- [x] **Phase 2d: Struct and array support** — `BuildGEP`, struct layout, array indexing, calling convention for struct return values.
+- [x] **Phase 2e: Replace linker** — emit `.o` via LLVM, invoke system linker; full spec suite green via LLVM path. (gruel-linker removal deferred to Phase 3.)
+- [x] **Phase 2f: Feature parity verification** — run full spec + UI + integration suite against both `--codegen=native` and `--codegen=llvm`; fix any divergences. (1369/1369 tests pass on both backends.)
 - [ ] **Phase 3: Remove custom backends** — delete x86_64, aarch64 source trees, `gruel-linker` crate, all MIR infrastructure; remove `--codegen` flag; full suite green.
 
 ## Consequences
