@@ -337,3 +337,58 @@ fn main() -> i32 {
     }
 }
 ```
+
+## Comptime Loops
+
+{{ rule(id="4.14:18", cat="normative") }}
+
+A comptime block can contain `while` loops. The condition and body must be compile-time evaluable. The loop is unrolled at compile time.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let mut sum = 0;
+        let mut i = 1;
+        while i <= 9 {
+            sum = sum + i;
+            i = i + 1;
+        }
+        sum   // evaluates to 45 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:19", cat="normative") }}
+
+A comptime block can contain `loop` expressions. The body must be compile-time evaluable. A `break` statement exits the loop.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let mut x = 0;
+        loop {
+            x = x + 1;
+            if x == 42 { break; }
+        }
+        x   // evaluates to 42 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:20", cat="normative") }}
+
+`break` and `continue` are supported within comptime loops and have their usual semantics: `break` exits the innermost loop, `continue` skips to the next iteration.
+
+{{ rule(id="4.14:21", cat="legality-rule") }}
+
+It is a compile-time error if a comptime loop executes more than 1,000,000 iterations. This prevents infinite loops from causing the compiler to hang.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let mut x = 0;
+        while true { x = x + 1; }  // ERROR: exceeds step budget
+        x
+    }
+}
+```

@@ -351,6 +351,12 @@ pub enum ConstValue {
     /// Unit value `()` — the result of statements (let bindings, assignments)
     /// and expressions of unit type within comptime blocks.
     Unit,
+    /// Internal control-flow signal: produced by `break` inside a comptime loop.
+    /// Never escapes `evaluate_comptime_block` — consumed by Loop/InfiniteLoop cases.
+    BreakSignal,
+    /// Internal control-flow signal: produced by `continue` inside a comptime loop.
+    /// Never escapes `evaluate_comptime_block` — consumed by Loop/InfiniteLoop cases.
+    ContinueSignal,
 }
 
 impl ConstValue {

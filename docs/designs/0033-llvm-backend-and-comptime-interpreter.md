@@ -219,7 +219,7 @@ Once the LLVM backend passes all spec, UI, and integration tests:
 ## Implementation Phases
 
 - [x] **Phase 1a: Interpreter core** — `ComptimeInterpreter` struct, `Frame`, `ComptimeHeap`; execute arithmetic, comparisons, `if`/`else`, mutable bindings. All existing comptime spec tests must still pass.
-- [ ] **Phase 1b: Interpreter loops and control flow** — `while`, `loop`, `break`, `continue`, `return`; add step budget; tests covering loop-based comptime computation.
+- [x] **Phase 1b: Interpreter loops and control flow** — `while`, `loop`, `break`, `continue`, `return`; add step budget; tests covering loop-based comptime computation.
 - [ ] **Phase 1c: Interpreter function calls** — push/pop frames, on-demand callee analysis, call stack depth limit; tests for comptime functions calling other comptime functions.
 - [ ] **Phase 1d: Interpreter composite values** — `ConstValue::Struct`, `ConstValue::Array`, struct construction, field access, array indexing; tests for comptime struct/array manipulation.
 - [ ] **Phase 1e: Wire in and delete old evaluator** — replace all call sites of `try_evaluate_const_in_rir()` with the new interpreter; return `CompileError` instead of `None` in comptime contexts; delete the old function; full test suite green.

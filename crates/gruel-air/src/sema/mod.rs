@@ -106,6 +106,11 @@ pub struct Sema<'a> {
     /// stored here, keyed by StructId. These values become part of type identity:
     /// FixedBuffer(42) and FixedBuffer(100) are different types.
     pub(crate) anon_struct_captured_values: HashMap<StructId, HashMap<Spur, ConstValue>>,
+    /// Loop iteration counter for the current comptime block evaluation.
+    /// Reset to 0 at the start of each `evaluate_comptime_block` call.
+    /// Incremented once per loop iteration; triggers an error when it exceeds
+    /// `COMPTIME_MAX_STEPS` to prevent infinite loops at compile time.
+    pub(crate) comptime_steps_used: u64,
 }
 
 impl<'a> Sema<'a> {
@@ -134,6 +139,7 @@ impl<'a> Sema<'a> {
             param_arena: ParamArena::new(),
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
+            comptime_steps_used: 0,
         }
     }
 

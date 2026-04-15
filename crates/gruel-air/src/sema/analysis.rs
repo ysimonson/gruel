@@ -1253,6 +1253,9 @@ impl<'a> Sema<'a> {
                     ConstValue::Bool(_) => Type::BOOL,
                     ConstValue::Type(t) => *t,
                     ConstValue::Unit => Type::UNIT,
+                    ConstValue::BreakSignal | ConstValue::ContinueSignal => {
+                        unreachable!("loop control signal in comptime_value_vars")
+                    }
                 };
                 param_vars.insert(
                     *name,
@@ -1783,6 +1786,12 @@ impl<'a> Sema<'a> {
                             span,
                         });
                         Ok(AnalysisResult::new(air_ref, Type::UNIT))
+                    }
+                    // These signals are consumed by the loop cases inside evaluate_comptime_block.
+                    // A top-level BreakSignal/ContinueSignal means break/continue outside a loop,
+                    // which evaluate_comptime_block converts to an error before returning here.
+                    ConstValue::BreakSignal | ConstValue::ContinueSignal => {
+                        unreachable!("loop control signal escaped evaluate_comptime_block")
                     }
                 }
             }
@@ -3395,8 +3404,11 @@ impl<'a> Sema<'a> {
             InstData::Neg { operand } => {
                 match self.try_evaluate_const(*operand)? {
                     ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
-                    // Can't negate a boolean, type, or unit
-                    ConstValue::Bool(_) | ConstValue::Type(_) | ConstValue::Unit => None,
+                    ConstValue::Bool(_)
+                    | ConstValue::Type(_)
+                    | ConstValue::Unit
+                    | ConstValue::BreakSignal
+                    | ConstValue::ContinueSignal => None,
                 }
             }
 
@@ -3404,8 +3416,11 @@ impl<'a> Sema<'a> {
             InstData::Not { operand } => {
                 match self.try_evaluate_const(*operand)? {
                     ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
-                    // Can't logical-NOT an integer, type, or unit
-                    ConstValue::Integer(_) | ConstValue::Type(_) | ConstValue::Unit => None,
+                    ConstValue::Integer(_)
+                    | ConstValue::Type(_)
+                    | ConstValue::Unit
+                    | ConstValue::BreakSignal
+                    | ConstValue::ContinueSignal => None,
                 }
             }
 
@@ -3709,7 +3724,11 @@ impl<'a> Sema<'a> {
             InstData::Neg { operand } => {
                 match self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)? {
                     ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
-                    ConstValue::Bool(_) | ConstValue::Type(_) | ConstValue::Unit => None,
+                    ConstValue::Bool(_)
+                    | ConstValue::Type(_)
+                    | ConstValue::Unit
+                    | ConstValue::BreakSignal
+                    | ConstValue::ContinueSignal => None,
                 }
             }
 
@@ -3717,7 +3736,11 @@ impl<'a> Sema<'a> {
             InstData::Not { operand } => {
                 match self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)? {
                     ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
-                    ConstValue::Integer(_) | ConstValue::Type(_) | ConstValue::Unit => None,
+                    ConstValue::Integer(_)
+                    | ConstValue::Type(_)
+                    | ConstValue::Unit
+                    | ConstValue::BreakSignal
+                    | ConstValue::ContinueSignal => None,
                 }
             }
 
@@ -4098,10 +4121,25 @@ impl<'a> Sema<'a> {
         ctx: &AnalysisContext,
         span: Span,
     ) -> CompileResult<ConstValue> {
+        // Reset the step counter for this comptime block evaluation.
+        self.comptime_steps_used = 0;
         // Seed interpreter locals with any comptime-captured values from the
         // outer analysis context (e.g. `N` in a method of `FixedBuffer(N)`).
         let mut locals = ctx.comptime_value_vars.clone();
-        self.evaluate_comptime_inst(inst_ref, &mut locals, ctx, span)
+        let result = self.evaluate_comptime_inst(inst_ref, &mut locals, ctx, span)?;
+        // BreakSignal/ContinueSignal escaping the top level means break/continue
+        // appeared outside any loop — treat as not compile-time evaluable.
+        match result {
+            ConstValue::BreakSignal | ConstValue::ContinueSignal => {
+                Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "break/continue outside a loop in comptime block".into(),
+                    },
+                    span,
+                ))
+            }
+            val => Ok(val),
+        }
     }
 
     /// Recursively evaluate one RIR instruction in a comptime context.
@@ -4357,6 +4395,11 @@ impl<'a> Sema<'a> {
                         ctx,
                         outer_span,
                     )?;
+                    // Propagate loop control signals immediately — don't execute
+                    // remaining statements after a break or continue.
+                    if matches!(last_val, ConstValue::BreakSignal | ConstValue::ContinueSignal) {
+                        return Ok(last_val);
+                    }
                 }
                 Ok(last_val)
             }
@@ -4459,8 +4502,68 @@ impl<'a> Sema<'a> {
                 .try_evaluate_const(inst_ref)
                 .ok_or_else(|| not_const(inst_span)),
 
+            // ── While loop ────────────────────────────────────────────────────
+            // `while cond { body }` — evaluates until condition is false.
+            InstData::Loop { cond, body } => {
+                const COMPTIME_MAX_STEPS: u64 = 1_000_000;
+                loop {
+                    let cond_val =
+                        self.evaluate_comptime_inst(cond, locals, ctx, outer_span)?;
+                    if !bool_val(cond_val, inst_span)? {
+                        break;
+                    }
+                    self.comptime_steps_used += 1;
+                    if self.comptime_steps_used > COMPTIME_MAX_STEPS {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: format!(
+                                    "comptime evaluation exceeded step budget of {} iterations",
+                                    COMPTIME_MAX_STEPS
+                                ),
+                            },
+                            inst_span,
+                        ));
+                    }
+                    match self.evaluate_comptime_inst(body, locals, ctx, outer_span)? {
+                        ConstValue::BreakSignal => break,
+                        ConstValue::ContinueSignal => continue,
+                        _ => {}
+                    }
+                }
+                Ok(ConstValue::Unit)
+            }
+
+            // ── Infinite loop ─────────────────────────────────────────────────
+            // `loop { body }` — runs until a break (or step budget exceeded).
+            InstData::InfiniteLoop { body } => {
+                const COMPTIME_MAX_STEPS: u64 = 1_000_000;
+                loop {
+                    self.comptime_steps_used += 1;
+                    if self.comptime_steps_used > COMPTIME_MAX_STEPS {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: format!(
+                                    "comptime evaluation exceeded step budget of {} iterations",
+                                    COMPTIME_MAX_STEPS
+                                ),
+                            },
+                            inst_span,
+                        ));
+                    }
+                    match self.evaluate_comptime_inst(body, locals, ctx, outer_span)? {
+                        ConstValue::BreakSignal => break,
+                        ConstValue::ContinueSignal => continue,
+                        _ => {}
+                    }
+                }
+                Ok(ConstValue::Unit)
+            }
+
+            // ── Break / Continue ──────────────────────────────────────────────
+            InstData::Break => Ok(ConstValue::BreakSignal),
+            InstData::Continue => Ok(ConstValue::ContinueSignal),
+
             // ── Not yet supported ─────────────────────────────────────────────
-            // Phase 1b: while, loop, break, continue
             // Phase 1c: function calls, return
             // Phase 1d: struct construction, field access, array ops
             _ => Err(not_const(inst_span)),

@@ -1025,3 +1025,94 @@ fn main() -> i32 {
 }
 """
 exit_code = 10
+
+# =============================================================================
+# Comptime Loops (4.14:18, 4.14:19, 4.14:20, 4.14:21)
+# =============================================================================
+
+[[case]]
+name = "comptime_while_loop_sum"
+spec = ["4.14:18"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut sum = 0;
+        let mut i = 1;
+        while i <= 9 {
+            sum = sum + i;
+            i = i + 1;
+        }
+        sum
+    }
+}
+"""
+exit_code = 45
+
+[[case]]
+name = "comptime_while_loop_countdown"
+spec = ["4.14:18"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut x = 42;
+        let mut count = 0;
+        while x > 0 {
+            x = x / 2;
+            count = count + 1;
+        }
+        count
+    }
+}
+"""
+exit_code = 6
+
+[[case]]
+name = "comptime_infinite_loop_break"
+spec = ["4.14:19", "4.14:20"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut x = 0;
+        loop {
+            x = x + 1;
+            if x == 42 { break; }
+        }
+        x
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_while_continue"
+spec = ["4.14:18", "4.14:20"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut sum = 0;
+        let mut i = 0;
+        while i < 10 {
+            i = i + 1;
+            if i % 2 == 0 { continue; }
+            sum = sum + i;
+        }
+        sum
+    }
+}
+"""
+exit_code = 25
+
+[[case]]
+name = "comptime_step_budget_exceeded"
+spec = ["4.14:21"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut x = 0;
+        while true { x = x + 1; }
+        x
+    }
+}
+"""
+compile_fail = true
+error_contains = "step budget"
