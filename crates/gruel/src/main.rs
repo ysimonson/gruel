@@ -14,8 +14,8 @@ use tracing_subscriber::{EnvFilter, fmt};
 mod timing;
 
 use gruel_compiler::{
-    CompileOptions, FileId, Lexer, LinkerMode, MultiFileFormatter, OptLevel, ParsedProgram,
-    PreviewFeature, PreviewFeatures, SourceFile, SourceInfo,
+    CodegenBackend, CompileOptions, FileId, Lexer, LinkerMode, MultiFileFormatter, OptLevel,
+    ParsedProgram, PreviewFeature, PreviewFeatures, SourceFile, SourceInfo,
     compile_frontend_from_ast_with_options, compile_multi_file_with_options, generate_emitted_asm,
     generate_liveness_info, generate_lowering_info, generate_mir, generate_regalloc_info,
     generate_stack_frame_info, merge_symbols, parse_all_files,
@@ -203,6 +203,7 @@ struct Options {
     linker: LinkerMode,
     opt_level: OptLevel,
     preview_features: PreviewFeatures,
+    codegen_backend: CodegenBackend,
     log_level: LogLevel,
     log_format: LogFormat,
     time_passes: bool,
@@ -239,6 +240,8 @@ fn print_usage() {
     eprintln!("  --emit <stage>       Emit intermediate representation and exit");
     eprintln!("                       Can be specified multiple times for multiple outputs");
     eprintln!("                       Stages: tokens, ast, rir, air, cfg, mir, asm");
+    eprintln!("  --codegen <backend>  Set code generation backend (default: native)");
+    eprintln!("                       Backends: native, llvm");
     eprintln!("  --preview <feature>  Enable a preview feature (can be repeated)");
     eprintln!(
         "                       Features: {}",
@@ -277,6 +280,7 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
     let mut linker: Option<LinkerMode> = None;
     let mut opt_level: Option<OptLevel> = None;
     let mut preview_features = PreviewFeatures::new();
+    let mut codegen_backend: Option<CodegenBackend> = None;
     let mut log_level: Option<LogLevel> = None;
     let mut log_format: Option<LogFormat> = None;
     let mut time_passes = false;
@@ -345,6 +349,23 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
                         return ParseResult::Error;
                     }
                 }
+            }
+            "--codegen" => {
+                let Some(backend_str) = args_iter.next() else {
+                    eprintln!("Error: --codegen requires a value");
+                    eprintln!("Valid backends: native, llvm");
+                    return ParseResult::Error;
+                };
+                let backend = match *backend_str {
+                    "native" => CodegenBackend::Native,
+                    "llvm" => CodegenBackend::Llvm,
+                    other => {
+                        eprintln!("Error: unknown codegen backend '{}'", other);
+                        eprintln!("Valid backends: native, llvm");
+                        return ParseResult::Error;
+                    }
+                };
+                codegen_backend = Some(backend);
             }
             "--log-level" => {
                 let Some(level_str) = args_iter.next() else {
@@ -476,6 +497,7 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
         linker: linker.unwrap_or_default(),
         opt_level: opt_level.unwrap_or_default(),
         preview_features,
+        codegen_backend: codegen_backend.unwrap_or_default(),
         log_level: log_level.unwrap_or_default(),
         log_format: log_format.unwrap_or_default(),
         time_passes,
@@ -804,6 +826,7 @@ fn main() {
         linker: options.linker.clone(),
         opt_level: options.opt_level,
         preview_features: options.preview_features.clone(),
+        codegen_backend: options.codegen_backend,
         jobs: options.jobs,
     };
     match compile_multi_file_with_options(&source_files, &compile_options) {

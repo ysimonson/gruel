@@ -716,6 +716,23 @@ pub enum LinkerMode {
     System(String),
 }
 
+/// Which code generation backend to use.
+///
+/// The native backend (default) uses the built-in x86-64 or AArch64 code
+/// generator. The LLVM backend uses `inkwell` to produce LLVM IR and then
+/// compiles it with LLVM's code generator.
+///
+/// The LLVM backend requires that `gruel-codegen-llvm` was compiled with
+/// the `llvm18` feature flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodegenBackend {
+    /// Use the built-in native code generator (default).
+    #[default]
+    Native,
+    /// Use the LLVM code generator (requires `llvm18` feature).
+    Llvm,
+}
+
 /// Configuration options for compilation.
 ///
 /// Controls target architecture, linker selection, optimization level, and feature flags.
@@ -728,6 +745,7 @@ pub enum LinkerMode {
 ///     linker: LinkerMode::Internal,
 ///     opt_level: OptLevel::O1,
 ///     preview_features: PreviewFeatures::new(),
+///     codegen_backend: CodegenBackend::Native,
 ///     jobs: 0, // 0 = auto-detect
 /// };
 /// let output = compile_with_options(source, &options)?;
@@ -742,6 +760,8 @@ pub struct CompileOptions {
     pub opt_level: OptLevel,
     /// Enabled preview features.
     pub preview_features: PreviewFeatures,
+    /// Which code generation backend to use.
+    pub codegen_backend: CodegenBackend,
     /// Number of parallel jobs (0 = auto-detect, use all cores).
     pub jobs: usize,
 }
@@ -753,6 +773,7 @@ impl Default for CompileOptions {
             linker: LinkerMode::Internal,
             opt_level: OptLevel::default(),
             preview_features: PreviewFeatures::new(),
+            codegen_backend: CodegenBackend::Native,
             jobs: 0, // 0 = auto-detect
         }
     }
@@ -1379,21 +1400,65 @@ pub fn compile_backend(
             CompileErrors::from(CompileError::without_span(ErrorKind::NoMainFunction))
         })?;
 
-    // Generate object files based on target architecture
-    let object_files = match options.target.arch() {
-        Arch::X86_64 => generate_x86_64_objects(functions, type_pool, strings, interner, options)?,
-        Arch::Aarch64 => {
-            generate_aarch64_objects(functions, type_pool, strings, interner, options)?
+    // Dispatch to the requested code generation backend.
+    match options.codegen_backend {
+        CodegenBackend::Llvm => {
+            generate_llvm_objects_and_link(functions, type_pool, strings, interner, options, warnings)
         }
-    };
+        CodegenBackend::Native => {
+            // Generate object files based on target architecture.
+            let object_files = match options.target.arch() {
+                Arch::X86_64 => {
+                    generate_x86_64_objects(functions, type_pool, strings, interner, options)?
+                }
+                Arch::Aarch64 => {
+                    generate_aarch64_objects(functions, type_pool, strings, interner, options)?
+                }
+            };
 
-    // Link to executable
-    match &options.linker {
-        LinkerMode::Internal => link_internal_with_warnings(options, &object_files, warnings),
-        LinkerMode::System(linker_cmd) => {
-            link_system_with_warnings(options, &object_files, linker_cmd, warnings)
+            // Link to executable.
+            match &options.linker {
+                LinkerMode::Internal => {
+                    link_internal_with_warnings(options, &object_files, warnings)
+                }
+                LinkerMode::System(linker_cmd) => {
+                    link_system_with_warnings(options, &object_files, linker_cmd, warnings)
+                }
+            }
         }
     }
+}
+
+/// Generate a single LLVM object file from all functions and link it.
+///
+/// Unlike the native backends, which produce one object file per function,
+/// the LLVM backend compiles all functions into a single LLVM module and emits
+/// one object file. Linking always uses the system linker because LLVM emits
+/// platform-native object formats (ELF on Linux, Mach-O on macOS).
+fn generate_llvm_objects_and_link(
+    functions: &[FunctionWithCfg],
+    type_pool: &TypeInternPool,
+    strings: &[String],
+    interner: &ThreadedRodeo,
+    options: &CompileOptions,
+    warnings: &[CompileWarning],
+) -> MultiErrorResult<CompileOutput> {
+    let _span = info_span!("codegen", backend = "llvm").entered();
+
+    let cfgs: Vec<&Cfg> = functions.iter().map(|f| &f.cfg).collect();
+    let object_bytes = gruel_codegen_llvm::generate(&cfgs, type_pool, strings, interner)
+        .map_err(CompileErrors::from)?;
+
+    // LLVM produces a single object file; wrap it as a one-element slice.
+    let object_files = vec![object_bytes];
+
+    // The LLVM backend always uses the system linker. If the user specified
+    // --linker internal, fall back to "cc" (the platform's default C compiler).
+    let linker_cmd = match &options.linker {
+        LinkerMode::System(cmd) => cmd.clone(),
+        LinkerMode::Internal => "cc".to_string(),
+    };
+    link_system_with_warnings(options, &object_files, &linker_cmd, warnings)
 }
 
 /// Generate x86-64 object files for all functions.

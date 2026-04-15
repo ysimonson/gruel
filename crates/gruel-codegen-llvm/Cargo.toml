@@ -1,0 +1,23 @@
+[package]
+name = "gruel-codegen-llvm"
+version.workspace = true
+edition.workspace = true
+description = "LLVM-based code generation for the Gruel compiler"
+
+[features]
+default = []
+# Enable LLVM 18 support via the inkwell crate.
+# Requires LLVM 18 headers and libraries to be installed.
+# On macOS: brew install llvm@18
+# On Linux: apt install llvm-18-dev
+llvm18 = ["dep:inkwell", "inkwell/llvm18-1"]
+
+[dependencies]
+gruel-air.workspace = true
+gruel-cfg.workspace = true
+gruel-error.workspace = true
+lasso.workspace = true
+
+[dependencies.inkwell]
+version = "0.9"
+optional = true
