@@ -103,7 +103,13 @@ Check off the completed phase in the ADR:
 
 ## Step 5: Commit This Phase
 
-Run `/commit` with a message naming the phase, e.g. `"Implement phase 1a: core parsing"`.
+1. Run `/code-review` and fix any blocking issues
+2. Stage relevant files and create a git commit. The message should name the phase and include a co-author trailer:
+   ```
+   Implement phase 1a: core parsing
+
+   Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+   ```
 
 ## Step 6: Repeat for the Next Phase
 
@@ -118,7 +124,7 @@ When all phases are complete:
 3. Remove the feature from `PreviewFeature` enum
 4. Update ADR status to "Implemented"
 5. Fill in `implemented:` date in ADR frontmatter
-6. Run `/commit` with a message like `"Stabilize <feature-name>"`
+6. Create stabilization commit
 
 ## Common Patterns
 
