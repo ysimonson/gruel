@@ -1,12 +1,12 @@
 ---
 id: 0033
 title: LLVM Backend and Comptime Interpreter
-status: proposal
+status: implemented
 tags: [compiler, codegen, comptime, llvm]
 feature-flag: llvm-backend
 created: 2026-04-13
-accepted:
-implemented:
+accepted: 2026-04-13
+implemented: 2026-04-15
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -229,7 +229,7 @@ Once the LLVM backend passes all spec, UI, and integration tests:
 - [x] **Phase 2d: Struct and array support** — `BuildGEP`, struct layout, array indexing, calling convention for struct return values.
 - [x] **Phase 2e: Replace linker** — emit `.o` via LLVM, invoke system linker; full spec suite green via LLVM path. (gruel-linker removal deferred to Phase 3.)
 - [x] **Phase 2f: Feature parity verification** — run full spec + UI + integration suite against both `--codegen=native` and `--codegen=llvm`; fix any divergences. (1369/1369 tests pass on both backends.)
-- [ ] **Phase 3: Remove custom backends** — delete x86_64, aarch64 source trees, `gruel-linker` crate, all MIR infrastructure; remove `--codegen` flag; full suite green.
+- [x] **Phase 3: Remove custom backends** — delete x86_64, aarch64 source trees, `gruel-linker` crate, all MIR infrastructure; remove `--codegen` flag; full suite green.
 
 ## Consequences
 

@@ -136,9 +136,6 @@ pub struct Case {
     /// Expected AIR dump (golden test)
     #[serde(default)]
     pub expected_air: Option<String>,
-    /// Expected MIR dump (golden test)
-    #[serde(default)]
-    pub expected_mir: Option<String>,
     /// Expected CFG dump (golden test)
     #[serde(default)]
     pub expected_cfg: Option<String>,
@@ -359,7 +356,6 @@ pub fn expand_case(case: Case) -> Vec<Case> {
                 expected_ast: case.expected_ast.clone(),
                 expected_rir: case.expected_rir.clone(),
                 expected_air: case.expected_air.clone(),
-                expected_mir: case.expected_mir.clone(),
                 expected_cfg: case.expected_cfg.clone(),
                 runtime_exit_code: case.runtime_exit_code,
                 skip: case.skip,
@@ -832,13 +828,12 @@ pub fn run_test_case(case: &Case, gruel_binary: &Path) -> TestResult {
         cmd
     };
 
-    // Check for golden IR tests (tokens, AST, RIR, AIR, CFG, MIR)
+    // Check for golden IR tests (tokens, AST, RIR, AIR, CFG)
     if case.expected_tokens.is_some()
         || case.expected_ast.is_some()
         || case.expected_rir.is_some()
         || case.expected_air.is_some()
         || case.expected_cfg.is_some()
-        || case.expected_mir.is_some()
     {
         // Run dump commands and check golden output
         if let Some(ref expected) = case.expected_tokens {
@@ -865,17 +860,6 @@ pub fn run_test_case(case: &Case, gruel_binary: &Path) -> TestResult {
 
         if let Some(ref expected) = case.expected_cfg {
             run_golden_ir_test(gruel_binary, &source_path, "cfg", expected, build_command)?;
-        }
-
-        if let Some(ref expected) = case.expected_mir {
-            // MIR golden tests require an explicit target since MIR is architecture-specific.
-            if case.target.is_none() {
-                return Err(
-                    "MIR golden tests require a 'target' field (e.g., target = \"x86-64-linux\")"
-                        .to_string(),
-                );
-            }
-            run_golden_ir_test(gruel_binary, &source_path, "mir", expected, build_command)?;
         }
 
         return Ok(());
@@ -1141,7 +1125,6 @@ mod tests {
             expected_ast: None,
             expected_rir: None,
             expected_air: None,
-            expected_mir: None,
             expected_cfg: None,
             runtime_error: None,
             runtime_exit_code: None,
@@ -1191,7 +1174,6 @@ mod tests {
             expected_ast: None,
             expected_rir: None,
             expected_air: None,
-            expected_mir: None,
             expected_cfg: None,
             runtime_error: None,
             runtime_exit_code: None,
@@ -1249,7 +1231,6 @@ mod tests {
             expected_ast: None,
             expected_rir: None,
             expected_air: None,
-            expected_mir: None,
             expected_cfg: None,
             runtime_error: None,
             runtime_exit_code: None,
@@ -1299,7 +1280,6 @@ mod tests {
             expected_ast: None,
             expected_rir: None,
             expected_air: None,
-            expected_mir: None,
             expected_cfg: None,
             runtime_error: None,
             runtime_exit_code: None,
@@ -1607,7 +1587,6 @@ mod tests {
             expected_ast: None,
             expected_rir: None,
             expected_air: None,
-            expected_mir: None,
             expected_cfg: None,
             runtime_error: None,
             runtime_exit_code: None,

@@ -28,34 +28,26 @@ fn llvm_error(msg: impl Into<String>) -> CompileError {
     CompileError::without_span(ErrorKind::InternalError(msg.into()))
 }
 
-/// Generate a native object file from a set of function CFGs.
+/// Build an LLVM module from a set of function CFGs.
 ///
-/// All functions are lowered into a single LLVM module. The module is then
-/// compiled to an in-memory object file buffer by the host machine's LLVM
-/// code generator.
-pub fn generate(
+/// This is the shared core for both [`generate`] (object emission) and
+/// [`generate_ir`] (textual IR emission). Callers decide what to emit.
+fn build_module<'ctx>(
+    context: &'ctx Context,
     functions: &[&Cfg],
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
-) -> CompileResult<Vec<u8>> {
-    // Initialize LLVM's native target (the machine we are running on).
-    LlvmTarget::initialize_native(&InitializationConfig::default())
-        .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
-
-    let context = Context::create();
+) -> CompileResult<Module<'ctx>> {
     let module = context.create_module("gruel_module");
     let builder = context.create_builder();
 
     // Create LLVM global constants for each string literal.
-    // Each global holds the raw UTF-8 bytes. The String struct's `ptr` field
-    // points to the start of this data.
     let string_globals: Vec<GlobalValue<'_>> = strings
         .iter()
         .enumerate()
         .map(|(i, s)| {
             let bytes = s.as_bytes();
-            // Use const_string (no null terminator needed — we have explicit len)
             let array_val = context.const_string(bytes, false);
             let global = module.add_global(
                 context.i8_type().array_type(bytes.len() as u32),
@@ -69,10 +61,10 @@ pub fn generate(
         })
         .collect();
 
-    // Declare all functions in the module first so that forward calls resolve.
+    // Declare all functions first so that forward calls resolve.
     let mut declared: Vec<(&Cfg, FunctionValue<'_>)> = Vec::with_capacity(functions.len());
     for cfg in functions {
-        let fn_value = declare_function(cfg, &context, &module, type_pool)?;
+        let fn_value = declare_function(cfg, context, &module, type_pool)?;
         declared.push((cfg, fn_value));
     }
 
@@ -84,11 +76,31 @@ pub fn generate(
 
     // Define each function body.
     for (cfg, fn_value) in &declared {
-        define_function(cfg, fn_value, &context, &builder, &module, type_pool, strings, &string_globals, interner, &fn_map)?;
+        define_function(cfg, fn_value, context, &builder, &module, type_pool, strings, &string_globals, interner, &fn_map)?;
     }
 
-    // Verify the module before emitting.
+    // Verify the module.
     module.verify().map_err(|e| llvm_error(format!("LLVM module verification failed: {}", e)))?;
+
+    Ok(module)
+}
+
+/// Generate a native object file from a set of function CFGs.
+///
+/// All functions are lowered into a single LLVM module. The module is then
+/// compiled to an in-memory object file buffer by the host machine's LLVM
+/// code generator.
+pub fn generate(
+    functions: &[&Cfg],
+    type_pool: &TypeInternPool,
+    strings: &[String],
+    interner: &ThreadedRodeo,
+) -> CompileResult<Vec<u8>> {
+    LlvmTarget::initialize_native(&InitializationConfig::default())
+        .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
+
+    let context = Context::create();
+    let module = build_module(&context, functions, type_pool, strings, interner)?;
 
     // Set up a TargetMachine for the host.
     let target_triple = TargetMachine::get_default_triple();
@@ -105,12 +117,26 @@ pub fn generate(
         )
         .ok_or_else(|| llvm_error("failed to create LLVM TargetMachine"))?;
 
-    // Emit object code into an in-memory buffer.
     let obj_buf = target_machine
         .write_to_memory_buffer(&module, FileType::Object)
         .map_err(|e| llvm_error(format!("LLVM object emission failed: {}", e)))?;
 
     Ok(obj_buf.as_slice().to_vec())
+}
+
+/// Generate LLVM textual IR (`*.ll` format) from a set of function CFGs.
+///
+/// Returns the human-readable LLVM IR as a string. This is used by
+/// `--emit asm` to produce inspectable IR in place of native assembly.
+pub fn generate_ir(
+    functions: &[&Cfg],
+    type_pool: &TypeInternPool,
+    strings: &[String],
+    interner: &ThreadedRodeo,
+) -> CompileResult<String> {
+    let context = Context::create();
+    let module = build_module(&context, functions, type_pool, strings, interner)?;
+    Ok(module.print_to_string().to_string())
 }
 
 /// Declare a Gruel function in the LLVM module (signature only).

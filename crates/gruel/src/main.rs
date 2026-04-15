@@ -14,11 +14,10 @@ use tracing_subscriber::{EnvFilter, fmt};
 mod timing;
 
 use gruel_compiler::{
-    CodegenBackend, CompileOptions, FileId, Lexer, LinkerMode, MultiFileFormatter, OptLevel,
-    ParsedProgram, PreviewFeature, PreviewFeatures, SourceFile, SourceInfo,
-    compile_frontend_from_ast_with_options, compile_multi_file_with_options, generate_emitted_asm,
-    generate_liveness_info, generate_lowering_info, generate_mir, generate_regalloc_info,
-    generate_stack_frame_info, merge_symbols, parse_all_files,
+    CompileOptions, FileId, Lexer, LinkerMode, MultiFileFormatter, OptLevel, ParsedProgram,
+    PreviewFeature, PreviewFeatures, SourceFile, SourceInfo,
+    compile_frontend_from_ast_with_options, compile_multi_file_with_options, generate_llvm_ir,
+    merge_symbols, parse_all_files,
 };
 use gruel_rir::RirPrinter;
 use gruel_target::Target;
@@ -36,18 +35,8 @@ enum EmitStage {
     Air,
     /// Emit CFG (control flow graph).
     Cfg,
-    /// Emit lowering (CFG to MIR instruction selection).
-    Lowering,
-    /// Emit MIR (machine intermediate representation).
-    Mir,
-    /// Emit liveness analysis information.
-    Liveness,
-    /// Emit register allocation debug info.
-    RegAlloc,
-    /// Emit assembly text.
+    /// Emit LLVM IR (human-readable `.ll` format).
     Asm,
-    /// Emit stack frame layout per function.
-    StackFrame,
 }
 
 /// Error returned when parsing an emit stage name fails.
@@ -72,12 +61,7 @@ impl std::str::FromStr for EmitStage {
             "rir" => Ok(EmitStage::Rir),
             "air" => Ok(EmitStage::Air),
             "cfg" => Ok(EmitStage::Cfg),
-            "lowering" => Ok(EmitStage::Lowering),
-            "mir" => Ok(EmitStage::Mir),
-            "liveness" => Ok(EmitStage::Liveness),
-            "regalloc" => Ok(EmitStage::RegAlloc),
             "asm" => Ok(EmitStage::Asm),
-            "stackframe" => Ok(EmitStage::StackFrame),
             _ => Err(ParseEmitStageError(s.to_string())),
         }
     }
@@ -85,7 +69,7 @@ impl std::str::FromStr for EmitStage {
 
 impl EmitStage {
     fn all_names() -> &'static str {
-        "tokens, ast, rir, air, cfg, lowering, mir, liveness, regalloc, asm, stackframe"
+        "tokens, ast, rir, air, cfg, asm"
     }
 }
 
@@ -203,7 +187,6 @@ struct Options {
     linker: LinkerMode,
     opt_level: OptLevel,
     preview_features: PreviewFeatures,
-    codegen_backend: CodegenBackend,
     log_level: LogLevel,
     log_format: LogFormat,
     time_passes: bool,
@@ -239,9 +222,7 @@ fn print_usage() {
     eprintln!("                       Use -j1 for single-threaded compilation");
     eprintln!("  --emit <stage>       Emit intermediate representation and exit");
     eprintln!("                       Can be specified multiple times for multiple outputs");
-    eprintln!("                       Stages: tokens, ast, rir, air, cfg, mir, asm");
-    eprintln!("  --codegen <backend>  Set code generation backend (default: native)");
-    eprintln!("                       Backends: native, llvm");
+    eprintln!("                       Stages: tokens, ast, rir, air, cfg, asm");
     eprintln!("  --preview <feature>  Enable a preview feature (can be repeated)");
     eprintln!(
         "                       Features: {}",
@@ -280,7 +261,6 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
     let mut linker: Option<LinkerMode> = None;
     let mut opt_level: Option<OptLevel> = None;
     let mut preview_features = PreviewFeatures::new();
-    let mut codegen_backend: Option<CodegenBackend> = None;
     let mut log_level: Option<LogLevel> = None;
     let mut log_format: Option<LogFormat> = None;
     let mut time_passes = false;
@@ -349,23 +329,6 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
                         return ParseResult::Error;
                     }
                 }
-            }
-            "--codegen" => {
-                let Some(backend_str) = args_iter.next() else {
-                    eprintln!("Error: --codegen requires a value");
-                    eprintln!("Valid backends: native, llvm");
-                    return ParseResult::Error;
-                };
-                let backend = match *backend_str {
-                    "native" => CodegenBackend::Native,
-                    "llvm" => CodegenBackend::Llvm,
-                    other => {
-                        eprintln!("Error: unknown codegen backend '{}'", other);
-                        eprintln!("Valid backends: native, llvm");
-                        return ParseResult::Error;
-                    }
-                };
-                codegen_backend = Some(backend);
             }
             "--log-level" => {
                 let Some(level_str) = args_iter.next() else {
@@ -497,15 +460,6 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
         linker: linker.unwrap_or_default(),
         opt_level: opt_level.unwrap_or_default(),
         preview_features,
-        codegen_backend: codegen_backend
-            .or_else(|| {
-                env::var("GRUEL_BACKEND").ok().and_then(|v| match v.as_str() {
-                    "llvm" => Some(CodegenBackend::Llvm),
-                    "native" => Some(CodegenBackend::Native),
-                    _ => None,
-                })
-            })
-            .unwrap_or_default(),
         log_level: log_level.unwrap_or_default(),
         log_format: log_format.unwrap_or_default(),
         time_passes,
@@ -834,7 +788,6 @@ fn main() {
         linker: options.linker.clone(),
         opt_level: options.opt_level,
         preview_features: options.preview_features.clone(),
-        codegen_backend: options.codegen_backend,
         jobs: options.jobs,
     };
     match compile_multi_file_with_options(&source_files, &compile_options) {
@@ -949,12 +902,7 @@ fn handle_emit_multi_file(
             EmitStage::Rir
                 | EmitStage::Air
                 | EmitStage::Cfg
-                | EmitStage::Lowering
-                | EmitStage::Mir
-                | EmitStage::Liveness
-                | EmitStage::RegAlloc
                 | EmitStage::Asm
-                | EmitStage::StackFrame
         )
     });
 
@@ -1088,122 +1036,23 @@ fn handle_emit_multi_file(
                 }
                 println!();
             }
-            EmitStage::Lowering => {
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        let lowering_info = generate_lowering_info(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        );
-                        print!("{}", lowering_info);
-                    }
-                }
-                println!();
-            }
-            EmitStage::Mir => {
-                println!("=== MIR ({}) ===", options.target);
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        let mir = generate_mir(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        );
-                        println!("function {}:", func.analyzed.name);
-                        println!("{}", mir);
-                    }
-                }
-                println!();
-            }
-            EmitStage::Liveness => {
-                println!("=== Liveness Analysis ({}) ===", options.target);
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        println!("function {}:", func.analyzed.name);
-                        let liveness_info = generate_liveness_info(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        );
-                        println!("{}", liveness_info);
-                    }
-                }
-                println!();
-            }
-            EmitStage::RegAlloc => {
-                println!("=== Register Allocation ({}) ===", options.target);
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        println!("function {}:", func.analyzed.name);
-                        let regalloc_info = match generate_regalloc_info(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        ) {
-                            Ok(info) => info,
-                            Err(e) => {
-                                eprintln!("{}", formatter.format_error(&e));
-                                return Err(());
-                            }
-                        };
-                        print!("{}", regalloc_info);
-                    }
-                }
-                println!();
-            }
             EmitStage::Asm => {
-                println!("=== Assembly ({}) ===", options.target);
+                println!("=== LLVM IR ===");
                 if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        println!(".globl {}", func.analyzed.name);
-                        println!("{}:", func.analyzed.name);
-                        let asm = match generate_emitted_asm(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        ) {
-                            Ok(asm) => asm,
-                            Err(e) => {
-                                eprintln!("{}", formatter.format_error(&e));
-                                return Err(());
-                            }
-                        };
-                        print!("{}", asm);
+                    match generate_llvm_ir(
+                        &state.functions,
+                        &state.type_pool,
+                        &state.strings,
+                        &state.interner,
+                    ) {
+                        Ok(ir) => print!("{}", ir),
+                        Err(e) => {
+                            eprintln!("{}", formatter.format_error(&e));
+                            return Err(());
+                        }
                     }
                 }
                 println!();
-            }
-            EmitStage::StackFrame => {
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        let frame_info = match generate_stack_frame_info(
-                            &func.cfg,
-                            &func.analyzed.name,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        ) {
-                            Ok(info) => info,
-                            Err(e) => {
-                                eprintln!("{}", formatter.format_error(&e));
-                                return Err(());
-                            }
-                        };
-                        println!("{}", frame_info);
-                    }
-                }
             }
         }
     }
@@ -1352,12 +1201,6 @@ mod tests {
     fn parse_emit_cfg() {
         let opts = unwrap_options(parse_args_from(&["--emit", "cfg", "source.gruel"]));
         assert_eq!(opts.emit_stages, vec![EmitStage::Cfg]);
-    }
-
-    #[test]
-    fn parse_emit_mir() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "mir", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Mir]);
     }
 
     #[test]
@@ -1889,24 +1732,7 @@ mod tests {
         assert_eq!("rir".parse::<EmitStage>().unwrap(), EmitStage::Rir);
         assert_eq!("air".parse::<EmitStage>().unwrap(), EmitStage::Air);
         assert_eq!("cfg".parse::<EmitStage>().unwrap(), EmitStage::Cfg);
-        assert_eq!(
-            "lowering".parse::<EmitStage>().unwrap(),
-            EmitStage::Lowering
-        );
-        assert_eq!("mir".parse::<EmitStage>().unwrap(), EmitStage::Mir);
-        assert_eq!(
-            "liveness".parse::<EmitStage>().unwrap(),
-            EmitStage::Liveness
-        );
-        assert_eq!(
-            "regalloc".parse::<EmitStage>().unwrap(),
-            EmitStage::RegAlloc
-        );
         assert_eq!("asm".parse::<EmitStage>().unwrap(), EmitStage::Asm);
-        assert_eq!(
-            "stackframe".parse::<EmitStage>().unwrap(),
-            EmitStage::StackFrame
-        );
     }
 
     #[test]
@@ -1919,32 +1745,8 @@ mod tests {
     fn emit_stage_all_names() {
         assert_eq!(
             EmitStage::all_names(),
-            "tokens, ast, rir, air, cfg, lowering, mir, liveness, regalloc, asm, stackframe"
+            "tokens, ast, rir, air, cfg, asm"
         );
-    }
-
-    #[test]
-    fn parse_emit_lowering() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "lowering", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Lowering]);
-    }
-
-    #[test]
-    fn parse_emit_regalloc() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "regalloc", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::RegAlloc]);
-    }
-
-    #[test]
-    fn parse_emit_stackframe() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "stackframe", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::StackFrame]);
-    }
-
-    #[test]
-    fn parse_emit_liveness() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "liveness", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Liveness]);
     }
 
     // ========== LogLevel FromStr tests ==========

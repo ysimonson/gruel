@@ -42,3 +42,16 @@ pub fn generate(
 ) -> CompileResult<Vec<u8>> {
     codegen::generate(functions, type_pool, strings, interner)
 }
+
+/// Generate LLVM textual IR from a collection of function CFGs.
+///
+/// Returns the LLVM IR in human-readable `.ll` format. Used by `--emit asm`
+/// to produce inspectable IR in place of native assembly.
+pub fn generate_ir(
+    functions: &[&Cfg],
+    type_pool: &TypeInternPool,
+    strings: &[String],
+    interner: &ThreadedRodeo,
+) -> CompileResult<String> {
+    codegen::generate_ir(functions, type_pool, strings, interner)
+}

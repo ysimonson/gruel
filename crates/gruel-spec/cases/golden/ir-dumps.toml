@@ -126,30 +126,6 @@ air (return_type: i32) {
 """
 
 [[case]]
-name = "simple_return_mir"
-spec = ["2.1:1"]
-source = "fn main() -> i32 { 42 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 42
-    mov rdi, v0
-    call __gruel_exit
-"""
-
-[[case]]
-name = "simple_return_mir_aarch64"
-spec = ["2.1:1"]
-source = "fn main() -> i32 { 42 }"
-target = "aarch64-macos"
-expected_mir = """
-function main:
-    mov v0, #42
-    mov x0, v0
-    bl __gruel_exit
-"""
-
-[[case]]
 name = "zero_rir"
 spec = ["2.1:1"]
 source = "fn main() -> i32 { 0 }"
@@ -173,30 +149,6 @@ air (return_type: i32) {
 """
 
 [[case]]
-name = "zero_mir"
-spec = ["2.1:1"]
-source = "fn main() -> i32 { 0 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 0
-    mov rdi, v0
-    call __gruel_exit
-"""
-
-[[case]]
-name = "zero_mir_aarch64"
-spec = ["2.1:1"]
-source = "fn main() -> i32 { 0 }"
-target = "aarch64-macos"
-expected_mir = """
-function main:
-    mov v0, #0
-    mov x0, v0
-    bl __gruel_exit
-"""
-
-[[case]]
 name = "max_exit_code_rir"
 spec = ["2.1:1"]
 source = "fn main() -> i32 { 255 }"
@@ -217,30 +169,6 @@ air (return_type: i32) {
     %0 : i32 = const 255
     %1 : i32 = ret %0
 }
-"""
-
-[[case]]
-name = "max_exit_code_mir"
-spec = ["2.1:1"]
-source = "fn main() -> i32 { 255 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 255
-    mov rdi, v0
-    call __gruel_exit
-"""
-
-[[case]]
-name = "max_exit_code_mir_aarch64"
-spec = ["2.1:1"]
-source = "fn main() -> i32 { 255 }"
-target = "aarch64-macos"
-expected_mir = """
-function main:
-    mov v0, #255
-    mov x0, v0
-    bl __gruel_exit
 """
 
 # =============================================================================
@@ -275,41 +203,6 @@ air (return_type: i32) {
 """
 
 [[case]]
-name = "addition_mir"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 1 + 2 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 1
-    mov v1, 2
-    mov v2, v0
-    add v2, v1
-    jno .L0
-    call __gruel_overflow
-    .L0:
-    mov rdi, v2
-    call __gruel_exit
-"""
-
-[[case]]
-name = "addition_mir_aarch64"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 1 + 2 }"
-target = "aarch64-macos"
-expected_mir = """
-function main:
-    mov v0, #1
-    mov v1, #2
-    adds v2, v0, v1
-    b.vc .L0
-    bl __gruel_overflow
-    .L0:
-    mov x0, v2
-    bl __gruel_exit
-"""
-
-[[case]]
 name = "subtraction_rir"
 spec = ["4.2:1"]
 source = "fn main() -> i32 { 5 - 3 }"
@@ -337,41 +230,6 @@ air (return_type: i32) {
 """
 
 [[case]]
-name = "subtraction_mir"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 5 - 3 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 5
-    mov v1, 3
-    mov v2, v0
-    sub v2, v1
-    jno .L0
-    call __gruel_overflow
-    .L0:
-    mov rdi, v2
-    call __gruel_exit
-"""
-
-[[case]]
-name = "subtraction_mir_aarch64"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 5 - 3 }"
-target = "aarch64-macos"
-expected_mir = """
-function main:
-    mov v0, #5
-    mov v1, #3
-    subs v2, v0, v1
-    b.vc .L0
-    bl __gruel_overflow
-    .L0:
-    mov x0, v2
-    bl __gruel_exit
-"""
-
-[[case]]
 name = "multiplication_rir"
 spec = ["4.2:1"]
 source = "fn main() -> i32 { 3 * 4 }"
@@ -396,94 +254,6 @@ air (return_type: i32) {
     %2 : i32 = mul %0, %1
     %3 : i32 = ret %2
 }
-"""
-
-# Note: 3 * 4 uses shift (shl/lsl) instead of imul/smull because 4 is a power of 2.
-# The shift-back-and-compare pattern detects overflow.
-
-[[case]]
-name = "multiplication_mir"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 3 * 4 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 3
-    mov v1, 4
-    mov v2, v0
-    shll v2, 2
-    mov v3, v2
-    sarl v3, 2
-    cmp v3, v0
-    jz .L0
-    call __gruel_overflow
-    .L0:
-    mov rdi, v2
-    call __gruel_exit
-"""
-
-[[case]]
-name = "multiplication_mir_aarch64"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 3 * 4 }"
-target = "aarch64-macos"
-expected_mir = """
-function main:
-    mov v0, #3
-    mov v1, #4
-    lsl v2, v0, #2 // 32-bit
-    asr v3, v2, #2 // 32-bit
-    cmp v3, v0
-    b.eq .L0
-    bl __gruel_overflow
-    .L0:
-    mov x0, v2
-    bl __gruel_exit
-"""
-
-# =============================================================================
-# Strength Reduction (multiply by power of 2 -> shift)
-# =============================================================================
-
-[[case]]
-name = "strength_reduction_multiply_by_8"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { let x = 5; x * 8 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 5
-    mov [rbp-8], v0
-    mov v1, [rbp-8]
-    mov v2, 8
-    mov v3, v1
-    shll v3, 3
-    mov v4, v3
-    sarl v4, 3
-    cmp v4, v1
-    jz .L0
-    call __gruel_overflow
-    .L0:
-    mov rdi, v3
-    call __gruel_exit
-"""
-
-[[case]]
-name = "non_power_of_2_uses_imul"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 3 * 5 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 3
-    mov v1, 5
-    mov v2, v0
-    imul v2, v1
-    jno .L0
-    call __gruel_overflow
-    .L0:
-    mov rdi, v2
-    call __gruel_exit
 """
 
 [[case]]
@@ -514,44 +284,6 @@ air (return_type: i32) {
 """
 
 [[case]]
-name = "division_mir"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 10 / 3 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 10
-    mov v1, 3
-    test v1, v1
-    jnz .L0
-    call __gruel_div_by_zero
-    .L0:
-    mov rax, v0
-    cdq
-    idiv v1
-    mov v2, rax
-    mov rdi, v2
-    call __gruel_exit
-"""
-
-[[case]]
-name = "division_mir_aarch64"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 10 / 3 }"
-target = "aarch64-macos"
-expected_mir = """
-function main:
-    mov v0, #10
-    mov v1, #3
-    cbnz v1, .L0
-    bl __gruel_div_by_zero
-    .L0:
-    sdiv v2, v0, v1
-    mov x0, v2
-    bl __gruel_exit
-"""
-
-[[case]]
 name = "modulo_rir"
 spec = ["4.2:1"]
 source = "fn main() -> i32 { 10 % 3 }"
@@ -576,45 +308,6 @@ air (return_type: i32) {
     %2 : i32 = mod %0, %1
     %3 : i32 = ret %2
 }
-"""
-
-[[case]]
-name = "modulo_mir"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 10 % 3 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 10
-    mov v1, 3
-    test v1, v1
-    jnz .L0
-    call __gruel_div_by_zero
-    .L0:
-    mov rax, v0
-    cdq
-    idiv v1
-    mov v2, rdx
-    mov rdi, v2
-    call __gruel_exit
-"""
-
-[[case]]
-name = "modulo_mir_aarch64"
-spec = ["4.2:1"]
-source = "fn main() -> i32 { 10 % 3 }"
-target = "aarch64-macos"
-expected_mir = """
-function main:
-    mov v0, #10
-    mov v1, #3
-    cbnz v1, .L0
-    bl __gruel_div_by_zero
-    .L0:
-    sdiv v3, v0, v1
-    msub v2, v3, v1, v0
-    mov x0, v2
-    bl __gruel_exit
 """
 
 [[case]]
@@ -706,39 +399,6 @@ air (return_type: i32) {
     %1 : i32 = neg %0
     %2 : i32 = ret %1
 }
-"""
-
-[[case]]
-name = "negation_mir"
-spec = ["4.2:3"]
-source = "fn main() -> i32 { -42 }"
-target = "x86-64-linux"
-expected_mir = """
-function main:
-    mov v0, 42
-    mov v1, v0
-    neg v1
-    jno .L0
-    call __gruel_overflow
-    .L0:
-    mov rdi, v1
-    call __gruel_exit
-"""
-
-[[case]]
-name = "negation_mir_aarch64"
-spec = ["4.2:3"]
-source = "fn main() -> i32 { -42 }"
-target = "aarch64-macos"
-expected_mir = """
-function main:
-    mov v0, #42
-    negs32 v1, v0
-    b.vc .L0
-    bl __gruel_overflow
-    .L0:
-    mov x0, v1
-    bl __gruel_exit
 """
 
 [[case]]

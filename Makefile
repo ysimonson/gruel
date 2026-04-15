@@ -1,7 +1,13 @@
 .PHONY: test quick-test fmt fmt-check check bench website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler fuzz-emitter fuzz-emitter-sequence \
-        fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter \
-        fuzz-cross-backend
+        fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter
+
+# Detect LLVM 18 on macOS (Homebrew). Set LLVM_SYS_180_PREFIX if not already set.
+# On Linux, llvm-config-18 is usually in PATH and llvm-sys finds it automatically.
+LLVM18_BREW := /opt/homebrew/opt/llvm@18
+ifeq ($(shell test -d $(LLVM18_BREW) && echo yes),yes)
+  export LLVM_SYS_180_PREFIX ?= $(LLVM18_BREW)
+endif
 
 # Run unit tests only (fast feedback during development).
 quick-test:
@@ -39,8 +45,7 @@ bench:
 # Pass FUZZ_TIME=300 for a longer run.
 FUZZ_TIME ?= 60
 fuzz: fuzz-lexer fuzz-parser fuzz-compiler fuzz-emitter fuzz-emitter-sequence \
-      fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter \
-      fuzz-cross-backend
+      fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter
 
 fuzz-lexer:
 	cargo +nightly fuzz run lexer -- -max_total_time=$(FUZZ_TIME)
@@ -65,9 +70,6 @@ fuzz-structured-invalid:
 
 fuzz-structured-emitter:
 	cargo +nightly fuzz run structured_emitter -- -max_total_time=$(FUZZ_TIME)
-
-fuzz-cross-backend:
-	cargo +nightly fuzz run cross_backend -- -max_total_time=$(FUZZ_TIME)
 
 # Build the website.
 website:

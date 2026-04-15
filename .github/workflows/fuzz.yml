@@ -53,16 +53,6 @@ jobs:
       - name: Fuzz structured emitter (5 minutes)
         run: cargo +nightly fuzz run structured_emitter -- -max_total_time=300
 
-      - name: Install LLVM 22 for cross-backend fuzzer
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          sudo add-apt-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main"
-          sudo apt-get update -qq
-          sudo apt-get install -y llvm-22-dev
-
-      - name: Fuzz cross-backend (5 minutes)
-        run: cargo +nightly fuzz run cross_backend -- -max_total_time=300
-
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4
