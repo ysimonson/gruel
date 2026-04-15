@@ -63,3 +63,28 @@ pub fn generate(
         )))
     }
 }
+
+/// Generate LLVM textual IR from a collection of function CFGs.
+///
+/// Returns the LLVM IR in human-readable `.ll` format. Used by `--emit asm`
+/// to produce inspectable IR in place of native assembly.
+pub fn generate_ir(
+    functions: &[&Cfg],
+    type_pool: &TypeInternPool,
+    strings: &[String],
+    interner: &ThreadedRodeo,
+) -> CompileResult<String> {
+    #[cfg(feature = "llvm18")]
+    return codegen::generate_ir(functions, type_pool, strings, interner);
+
+    #[cfg(not(feature = "llvm18"))]
+    {
+        let _ = (functions, type_pool, strings, interner);
+        Err(CompileError::without_span(ErrorKind::InternalError(
+            "LLVM backend is not available; \
+             rebuild with --features gruel-codegen-llvm/llvm18 \
+             after installing LLVM 18 (brew install llvm@18)"
+                .into(),
+        )))
+    }
+}

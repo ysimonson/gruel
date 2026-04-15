@@ -1,5 +1,12 @@
 .PHONY: test quick-test fmt fmt-check check bench website website-serve website-deploy
 
+# Detect LLVM 18 on macOS (Homebrew). Set LLVM_SYS_180_PREFIX if not already set.
+# On Linux, llvm-config-18 is usually in PATH and llvm-sys finds it automatically.
+LLVM18_BREW := /opt/homebrew/opt/llvm@18
+ifeq ($(shell test -d $(LLVM18_BREW) && echo yes),yes)
+  export LLVM_SYS_180_PREFIX ?= $(LLVM18_BREW)
+endif
+
 # Run unit tests only (fast feedback during development).
 quick-test:
 	cargo test --workspace --exclude gruel-runtime

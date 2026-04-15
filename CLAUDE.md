@@ -56,8 +56,7 @@ cargo run -p gruel -- --emit ast source.gruel     # Abstract syntax tree
 cargo run -p gruel -- --emit rir source.gruel     # Untyped IR
 cargo run -p gruel -- --emit air source.gruel     # Typed IR
 cargo run -p gruel -- --emit cfg source.gruel     # Control flow graph
-cargo run -p gruel -- --emit mir source.gruel     # Machine IR (virtual registers)
-cargo run -p gruel -- --emit asm source.gruel     # Assembly (physical registers)
+cargo run -p gruel -- --emit asm source.gruel     # LLVM IR (.ll format)
 
 # Chain multiple stages to see the full pipeline
 cargo run -p gruel -- --emit tokens --emit ast --emit rir source.gruel
@@ -69,7 +68,7 @@ The compiler pipeline transforms source through successive IRs:
 
 ```mermaid
 graph LR
-    Source --> Lexer --> Parser --> AstGen --> Sema --> CfgBuilder --> Lower --> RegAlloc --> Emit --> Link
+    Source --> Lexer --> Parser --> AstGen --> Sema --> CfgBuilder --> LLVM --> Link
 ```
 
 | Stage | Pass | IR Produced | `--emit` flag |
@@ -79,10 +78,8 @@ graph LR
 | 3 | AstGen | RIR (untyped) | `rir` |
 | 4 | Sema | AIR (typed) | `air` |
 | 5 | CfgBuilder | CFG | `cfg` |
-| 6 | Lower | MIR (machine) | `mir` |
-| 7 | RegAlloc | MIR (allocated) | `asm` |
-| 8 | Emit | bytes | - |
-| 9 | Link | ELF | - |
+| 6 | LLVM | object file | `asm` (LLVM IR) |
+| 7 | Link | native binary | - |
 
 ### Crate Responsibilities
 
@@ -95,8 +92,7 @@ graph LR
 | `gruel-rir` | Untyped IR (post-parse, pre-typing) |
 | `gruel-cfg` | Control flow graph construction and optimization |
 | `gruel-air` | Typed IR (after semantic analysis) |
-| `gruel-codegen` | x86-64 machine code generation |
-| `gruel-linker` | ELF object file creation and linking |
+| `gruel-codegen-llvm` | LLVM-based code generation (via inkwell) |
 | `gruel-error` | Error types and diagnostics |
 | `gruel-span` | Source location tracking |
 | `gruel-target` | Target platform configuration |
@@ -129,10 +125,9 @@ gruel main.gruel utils.gruel lib.gruel -o program
 
 ### Key Design Decisions
 
-- **Architecture-specific MIR**: Each target gets its own machine IR (currently X86Mir), following Zig's approach
+- **LLVM backend**: Code generation uses LLVM via the `inkwell` crate (`gruel-codegen-llvm`), providing cross-platform support and production-quality optimization
 - **Index-based references**: Instructions stored in vectors, referenced by u32 indices (cache-friendly, no lifetimes)
-- **Direct code emission**: No LLVM dependency; machine code emitted directly
-- **Minimal ELF**: Static executables with direct syscalls (Linux x86-64 only)
+- **System linker**: Links via `cc` or a user-specified system linker (no custom ELF writer)
 - **Built-in types as synthetic structs**: Types like `String` are defined in `gruel-builtins` and injected as synthetic structs, not as hardcoded `Type` enum variants (see [ADR-0020](docs/designs/0020-builtin-types-as-structs.md))
 
 ### Built-in Types Architecture
@@ -596,29 +591,6 @@ When all tests pass and the feature is complete:
    - New compiler flags or options
 
 9. **Run `make test`** to verify all tests pass and traceability is maintained
-
-## Codegen: Multi-Backend Considerations
-
-**IMPORTANT**: The `gruel-codegen` crate contains multiple architecture backends:
-- `x86_64/` - Linux x86-64
-- `aarch64/` - macOS ARM64
-
-When making changes to codegen, **always check if the same change is needed in all backends**. Common areas that require parallel changes:
-
-- **New MIR instructions**: Add to both `x86_64/mir.rs` and `aarch64/mir.rs`
-- **Instruction emission**: Update both `x86_64/emit.rs` and `aarch64/emit.rs`
-- **Register allocation**: Update both `x86_64/regalloc.rs` and `aarch64/regalloc.rs`
-- **Liveness analysis**: Update both `x86_64/liveness.rs` and `aarch64/liveness.rs`
-- **CFG lowering**: Update both `x86_64/cfg_lower.rs` and `aarch64/cfg_lower.rs`
-
-Example: If adding a new comparison instruction variant (e.g., 64-bit compare):
-1. Add `Cmp64RR` to both MIR definitions
-2. Add emission logic to both emitters
-3. Add register allocation handling to both allocators
-4. Add liveness tracking to both liveness analyzers
-5. Update CFG lowering in both backends to use the new instruction where appropriate
-
-**Testing across backends**: The spec tests run on the host architecture only. If you only have access to one platform, note in your commit message that the other backend may need verification.
 
 ## Version Control
 
