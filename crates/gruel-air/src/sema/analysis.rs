@@ -27,8 +27,8 @@ use gruel_target::{Arch, Os};
 use lasso::Spur;
 
 use super::context::{
-    AnalysisContext, AnalysisResult, BuiltinMethodContext, ConstValue, ParamInfo, ReceiverInfo,
-    StringReceiverStorage,
+    AnalysisContext, AnalysisResult, BuiltinMethodContext, ComptimeHeapItem, ConstValue,
+    ParamInfo, ReceiverInfo, StringReceiverStorage,
 };
 use super::{AnalyzedFunction, InferenceContext, MethodInfo, Sema, SemaOutput};
 use crate::inference::{
@@ -1253,10 +1253,12 @@ impl<'a> Sema<'a> {
                     ConstValue::Bool(_) => Type::BOOL,
                     ConstValue::Type(t) => *t,
                     ConstValue::Unit => Type::UNIT,
-                    ConstValue::BreakSignal
+                    ConstValue::Struct(_)
+                    | ConstValue::Array(_)
+                    | ConstValue::BreakSignal
                     | ConstValue::ContinueSignal
                     | ConstValue::ReturnSignal => {
-                        unreachable!("control-flow signal in comptime_value_vars")
+                        unreachable!("control-flow signal or composite value in comptime_value_vars")
                     }
                 };
                 param_vars.insert(
@@ -1788,6 +1790,16 @@ impl<'a> Sema<'a> {
                             span,
                         });
                         Ok(AnalysisResult::new(air_ref, Type::UNIT))
+                    }
+                    // Composite comptime values (structs, arrays) cannot be placed at
+                    // runtime directly. The user must access individual fields/elements.
+                    ConstValue::Struct(_) | ConstValue::Array(_) => {
+                        Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: "comptime struct/array values cannot be used at runtime; access individual fields or elements instead".into(),
+                            },
+                            span,
+                        ))
                     }
                     // These signals are consumed by loop/call handlers inside evaluate_comptime_block.
                     // If they escape here, it means break/continue outside a loop, or return outside
@@ -3411,6 +3423,8 @@ impl<'a> Sema<'a> {
                     ConstValue::Bool(_)
                     | ConstValue::Type(_)
                     | ConstValue::Unit
+                    | ConstValue::Struct(_)
+                    | ConstValue::Array(_)
                     | ConstValue::BreakSignal
                     | ConstValue::ContinueSignal
                     | ConstValue::ReturnSignal => None,
@@ -3424,6 +3438,8 @@ impl<'a> Sema<'a> {
                     ConstValue::Integer(_)
                     | ConstValue::Type(_)
                     | ConstValue::Unit
+                    | ConstValue::Struct(_)
+                    | ConstValue::Array(_)
                     | ConstValue::BreakSignal
                     | ConstValue::ContinueSignal
                     | ConstValue::ReturnSignal => None,
@@ -3733,6 +3749,8 @@ impl<'a> Sema<'a> {
                     ConstValue::Bool(_)
                     | ConstValue::Type(_)
                     | ConstValue::Unit
+                    | ConstValue::Struct(_)
+                    | ConstValue::Array(_)
                     | ConstValue::BreakSignal
                     | ConstValue::ContinueSignal
                     | ConstValue::ReturnSignal => None,
@@ -3746,6 +3764,8 @@ impl<'a> Sema<'a> {
                     ConstValue::Integer(_)
                     | ConstValue::Type(_)
                     | ConstValue::Unit
+                    | ConstValue::Struct(_)
+                    | ConstValue::Array(_)
                     | ConstValue::BreakSignal
                     | ConstValue::ContinueSignal
                     | ConstValue::ReturnSignal => None,
@@ -4129,8 +4149,9 @@ impl<'a> Sema<'a> {
         ctx: &AnalysisContext,
         span: Span,
     ) -> CompileResult<ConstValue> {
-        // Reset the step counter for this comptime block evaluation.
+        // Reset the step counter and heap for this comptime block evaluation.
         self.comptime_steps_used = 0;
+        self.comptime_heap.clear();
         // Seed interpreter locals with any comptime-captured values from the
         // outer analysis context (e.g. `N` in a method of `FixedBuffer(N)`).
         let mut locals = ctx.comptime_value_vars.clone();
@@ -4683,8 +4704,146 @@ impl<'a> Sema<'a> {
                 }
             }
 
+            // ── Struct construction ───────────────────────────────────────────
+            InstData::StructInit {
+                module,
+                type_name,
+                fields_start,
+                fields_len,
+            } => {
+                // Module-qualified struct literals are not supported in comptime.
+                if module.is_some() {
+                    return Err(not_const(inst_span));
+                }
+
+                // Resolve the struct type by name.
+                let struct_id = match self.structs.get(&type_name) {
+                    Some(&id) => id,
+                    None => {
+                        // Also check comptime_type_vars (e.g. `let P = Point(); P { ... }`)
+                        return Err(not_const(inst_span));
+                    }
+                };
+
+                // Get the struct definition to know field declaration order.
+                let struct_def = self.type_pool.struct_def(struct_id);
+                let field_count = struct_def.fields.len();
+
+                // Build a map from field name string to declaration index.
+                let field_index_map: std::collections::HashMap<String, usize> = struct_def
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| (f.name.clone(), i))
+                    .collect();
+
+                // Retrieve field initializers from the RIR (may be in any source order).
+                let field_inits = self.rir.get_field_inits(fields_start, fields_len);
+
+                // Evaluate each field expression and place it in declaration order.
+                let mut field_values = vec![ConstValue::Unit; field_count];
+                for (field_name_sym, field_value_ref) in &field_inits {
+                    let field_name = self.interner.resolve(field_name_sym).to_string();
+                    let idx = match field_index_map.get(&field_name) {
+                        Some(&i) => i,
+                        None => return Err(not_const(inst_span)),
+                    };
+                    let val =
+                        self.evaluate_comptime_inst(*field_value_ref, locals, ctx, outer_span)?;
+                    field_values[idx] = val;
+                }
+
+                // Allocate a new heap item and return its index.
+                let heap_idx = self.comptime_heap.len() as u32;
+                self.comptime_heap
+                    .push(ComptimeHeapItem::Struct { struct_id, fields: field_values });
+                Ok(ConstValue::Struct(heap_idx))
+            }
+
+            // ── Field access ──────────────────────────────────────────────────
+            InstData::FieldGet { base, field } => {
+                let base_val = self.evaluate_comptime_inst(base, locals, ctx, outer_span)?;
+                match base_val {
+                    ConstValue::Struct(heap_idx) => {
+                        // Clone data out to release the heap borrow before calling struct_def.
+                        let (struct_id, fields) = match &self.comptime_heap[heap_idx as usize] {
+                            ComptimeHeapItem::Struct { struct_id, fields } => {
+                                (*struct_id, fields.clone())
+                            }
+                            ComptimeHeapItem::Array(_) => {
+                                return Err(not_const(inst_span))
+                            }
+                        };
+                        let struct_def = self.type_pool.struct_def(struct_id);
+                        let field_name = self.interner.resolve(&field);
+                        let (field_idx, _) =
+                            struct_def.find_field(field_name).ok_or_else(|| {
+                                CompileError::new(
+                                    ErrorKind::ComptimeEvaluationFailed {
+                                        reason: format!(
+                                            "unknown field '{}' in comptime struct",
+                                            field_name
+                                        ),
+                                    },
+                                    inst_span,
+                                )
+                            })?;
+                        Ok(fields[field_idx])
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
+            }
+
+            // ── Array construction ────────────────────────────────────────────
+            InstData::ArrayInit {
+                elems_start,
+                elems_len,
+            } => {
+                let elem_refs = self.rir.get_inst_refs(elems_start, elems_len);
+                let mut elem_values = Vec::with_capacity(elem_refs.len());
+                for elem_ref in &elem_refs {
+                    let val = self.evaluate_comptime_inst(*elem_ref, locals, ctx, outer_span)?;
+                    elem_values.push(val);
+                }
+                let heap_idx = self.comptime_heap.len() as u32;
+                self.comptime_heap
+                    .push(ComptimeHeapItem::Array(elem_values));
+                Ok(ConstValue::Array(heap_idx))
+            }
+
+            // ── Array index read ──────────────────────────────────────────────
+            InstData::IndexGet { base, index } => {
+                let base_val = self.evaluate_comptime_inst(base, locals, ctx, outer_span)?;
+                let index_val = self.evaluate_comptime_inst(index, locals, ctx, outer_span)?;
+                match base_val {
+                    ConstValue::Array(heap_idx) => {
+                        let idx = int(index_val, inst_span)?;
+                        // Clone elements to release heap borrow before error construction.
+                        let elems = match &self.comptime_heap[heap_idx as usize] {
+                            ComptimeHeapItem::Array(elems) => elems.clone(),
+                            ComptimeHeapItem::Struct { .. } => {
+                                return Err(not_const(inst_span))
+                            }
+                        };
+                        if idx < 0 || idx as usize >= elems.len() {
+                            return Err(CompileError::new(
+                                ErrorKind::ComptimeEvaluationFailed {
+                                    reason: format!(
+                                        "array index {} out of bounds (length {})",
+                                        idx,
+                                        elems.len()
+                                    ),
+                                },
+                                inst_span,
+                            ));
+                        }
+                        Ok(elems[idx as usize])
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
+            }
+
             // ── Not yet supported ─────────────────────────────────────────────
-            // Phase 1d: struct construction, field access, array ops
             _ => Err(not_const(inst_span)),
         }
     }

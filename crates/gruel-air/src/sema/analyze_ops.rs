@@ -1540,10 +1540,12 @@ impl<'a> Sema<'a> {
                     return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
                 }
                 ConstValue::Unit
+                | ConstValue::Struct(_)
+                | ConstValue::Array(_)
                 | ConstValue::BreakSignal
                 | ConstValue::ContinueSignal
                 | ConstValue::ReturnSignal => {
-                    unreachable!("control-flow signal in comptime_value_vars")
+                    unreachable!("control-flow signal or composite value in comptime_value_vars")
                 }
             }
         }

@@ -334,6 +334,23 @@ impl AnalysisResult {
     }
 }
 
+/// An item stored on the comptime heap.
+///
+/// The comptime heap stores composite values (structs, arrays) created during
+/// comptime evaluation. These are referenced by index (`u32`) from
+/// `ConstValue::Struct` and `ConstValue::Array` so that `ConstValue` can
+/// remain `Copy`.
+pub enum ComptimeHeapItem {
+    /// A comptime struct instance: the struct's `StructId` and its field values
+    /// in declaration order.
+    Struct {
+        struct_id: StructId,
+        fields: Vec<ConstValue>,
+    },
+    /// A comptime array instance: element values in order.
+    Array(Vec<ConstValue>),
+}
+
 /// A value that can be computed at compile time.
 ///
 /// This is used for constant expression evaluation, primarily for compile-time
@@ -351,6 +368,11 @@ pub enum ConstValue {
     /// Unit value `()` — the result of statements (let bindings, assignments)
     /// and expressions of unit type within comptime blocks.
     Unit,
+    /// Index into `Sema::comptime_heap` for a comptime struct instance.
+    /// Preserves the `Copy` trait while supporting composite values.
+    Struct(u32),
+    /// Index into `Sema::comptime_heap` for a comptime array instance.
+    Array(u32),
     /// Internal control-flow signal: produced by `break` inside a comptime loop.
     /// Never escapes `evaluate_comptime_block` — consumed by Loop/InfiniteLoop cases.
     BreakSignal,

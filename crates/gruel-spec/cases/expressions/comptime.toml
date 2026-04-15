@@ -1247,3 +1247,127 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "call stack depth"
+
+# =============================================================================
+# Phase 1d: Comptime Composite Values (Structs and Arrays)
+# =============================================================================
+
+[[case]]
+name = "comptime_struct_field_access"
+spec = ["4.14:26"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let p = Point { x: 10, y: 32 };
+        p.x + p.y
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_struct_field_access_ops"
+spec = ["4.14:26"]
+source = """
+struct Pair { a: i32, b: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let p = Pair { a: 21, b: 21 };
+        p.a + p.b
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_struct_in_function"
+spec = ["4.14:26"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn sum_point(p: Point) -> i32 {
+    p.x + p.y
+}
+
+fn main() -> i32 {
+    comptime { sum_point(Point { x: 10, y: 32 }) }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_struct_field_in_arithmetic"
+spec = ["4.14:26"]
+source = """
+struct Val { n: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let v = Val { n: 21 };
+        v.n * 2
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_array_indexing"
+spec = ["4.14:27"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let arr = [10, 20, 12];
+        arr[0] + arr[1] + arr[2]
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_array_index_single"
+spec = ["4.14:27"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let arr = [0, 42, 100];
+        arr[1]
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_array_index_computed"
+spec = ["4.14:27"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let arr = [1, 2, 3, 4, 5];
+        let mut sum = 0;
+        let mut i = 0;
+        while i < 5 {
+            sum = sum + arr[i];
+            i = i + 1;
+        }
+        sum
+    }
+}
+"""
+exit_code = 15
+
+[[case]]
+name = "comptime_array_out_of_bounds"
+spec = ["4.14:28"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let arr = [1, 2, 3];
+        arr[5]
+    }
+}
+"""
+compile_fail = true
+error_contains = "out of bounds"

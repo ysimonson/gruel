@@ -66,6 +66,8 @@ use crate::intern_pool::TypeInternPool;
 use crate::param_arena::ParamArena;
 use crate::types::{EnumId, StructId};
 
+use context::ComptimeHeapItem;
+
 /// Semantic analyzer that converts RIR to AIR.
 pub struct Sema<'a> {
     pub(crate) rir: &'a Rir,
@@ -119,6 +121,10 @@ pub struct Sema<'a> {
     /// Incremented on each comptime `Call`, decremented on return.
     /// Triggers an error if it exceeds `COMPTIME_CALL_DEPTH_LIMIT`.
     pub(crate) comptime_call_depth: u32,
+    /// Comptime heap: stores composite values (structs, arrays) created during
+    /// comptime evaluation. `ConstValue::Struct(idx)` and `ConstValue::Array(idx)`
+    /// index into this vec. Cleared at the start of each `evaluate_comptime_block`.
+    pub(crate) comptime_heap: Vec<ComptimeHeapItem>,
 }
 
 impl<'a> Sema<'a> {
@@ -150,6 +156,7 @@ impl<'a> Sema<'a> {
             comptime_steps_used: 0,
             comptime_return_value: None,
             comptime_call_depth: 0,
+            comptime_heap: Vec::new(),
         }
     }
 

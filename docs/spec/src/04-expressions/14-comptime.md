@@ -457,3 +457,46 @@ fn main() -> i32 {
     comptime { infinite(0) }
 }
 ```
+
+## Comptime Composite Values
+
+{{ rule(id="4.14:26", cat="normative") }}
+
+A comptime block can create struct instances and access their fields. All field expressions must be compile-time evaluable. The struct type must be statically known.
+
+```gruel
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let p = Point { x: 10, y: 32 };
+        p.x + p.y   // evaluates to 42 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:27", cat="normative") }}
+
+A comptime block can create array instances and read their elements. All element expressions and the index must be compile-time evaluable. The index must be within bounds.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let arr = [10, 20, 12];
+        arr[0] + arr[1] + arr[2]   // evaluates to 42 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:28", cat="legality-rule") }}
+
+It is a compile-time error if an array index is out of bounds in a comptime expression.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let arr = [1, 2, 3];
+        arr[5]   // ERROR: array index 5 out of bounds (length 3)
+    }
+}
+```

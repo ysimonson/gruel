@@ -102,6 +102,7 @@ impl<'a> GatherOutput<'a> {
             comptime_steps_used: 0,
             comptime_return_value: None,
             comptime_call_depth: 0,
+            comptime_heap: Vec::new(),
         }
     }
 }
