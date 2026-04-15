@@ -88,6 +88,18 @@ fn run_binary(tag: &str, bytes: &[u8]) -> RunOutput {
     perms.set_mode(0o755);
     fs::set_permissions(&path, perms).expect("set permissions");
 
+    // macOS requires ad-hoc code signing for ARM64 executables.
+    // Without this the kernel sends SIGKILL before the binary reaches main.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("codesign")
+            .args(["-f", "-s", "-"])
+            .arg(&path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
     let mut child = Command::new(&path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
