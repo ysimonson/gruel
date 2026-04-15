@@ -1539,6 +1539,10 @@ impl<'a> Sema<'a> {
                     });
                     return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
                 }
+                ConstValue::Unit => {
+                    // Unit values cannot be comptime variable bindings — this should not happen
+                    unreachable!("unit value in comptime_value_vars")
+                }
             }
         }
 

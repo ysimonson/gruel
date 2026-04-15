@@ -348,6 +348,9 @@ pub enum ConstValue {
     /// This is used when a `comptime T: type` parameter is instantiated
     /// with a specific type like `i32` or `bool`.
     Type(Type),
+    /// Unit value `()` — the result of statements (let bindings, assignments)
+    /// and expressions of unit type within comptime blocks.
+    Unit,
 }
 
 impl ConstValue {

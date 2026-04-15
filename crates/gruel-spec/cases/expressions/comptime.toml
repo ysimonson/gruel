@@ -934,3 +934,94 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# =============================================================================
+# Comptime Blocks with Local State (4.14:16)
+# =============================================================================
+
+[[case]]
+name = "comptime_let_binding_in_block"
+spec = ["4.14:16"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = 20;
+        let b = 22;
+        a + b
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_mutable_variable"
+spec = ["4.14:16"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut x = 40;
+        x = x + 2;
+        x
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_multiple_assignments"
+spec = ["4.14:16"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut acc = 0;
+        acc = acc + 10;
+        acc = acc + 20;
+        acc = acc + 12;
+        acc
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Comptime If/Else (4.14:17)
+# =============================================================================
+
+[[case]]
+name = "comptime_if_branch_true"
+spec = ["4.14:17"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 10;
+        if x > 5 { x * 4 + 2 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_if_branch_false"
+spec = ["4.14:17"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 3;
+        if x > 5 { 0 } else { x * 14 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_if_no_else"
+spec = ["4.14:17"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 10;
+        if x > 5 { x } else { 0 }
+    }
+}
+"""
+exit_code = 10

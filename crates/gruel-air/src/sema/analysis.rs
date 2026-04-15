@@ -1252,6 +1252,7 @@ impl<'a> Sema<'a> {
                     ConstValue::Integer(_) => Type::I32, // TODO: Track actual type
                     ConstValue::Bool(_) => Type::BOOL,
                     ConstValue::Type(t) => *t,
+                    ConstValue::Unit => Type::UNIT,
                 };
                 param_vars.insert(
                     *name,
@@ -1725,24 +1726,24 @@ impl<'a> Sema<'a> {
 
             // Comptime block expression
             InstData::Comptime { expr } => {
-                // Try to evaluate the inner expression at compile time
-                match self.try_evaluate_const(*expr) {
-                    Some(ConstValue::Integer(value)) => {
-                        // Get the expected type from resolved types
+                let span = inst.span;
+                let expr = *expr;
+                // Use the stateful comptime interpreter (Phase 1a).
+                // This supports mutable let bindings, if/else, and blocks
+                // in addition to pure arithmetic expressions.
+                match self.evaluate_comptime_block(expr, ctx, span)? {
+                    ConstValue::Integer(value) => {
                         let ty =
-                            Self::get_resolved_type(ctx, inst_ref, inst.span, "comptime block")?;
-
-                        // Check if the value fits in the target type
+                            Self::get_resolved_type(ctx, inst_ref, span, "comptime block")?;
                         if value < 0 {
                             return Err(CompileError::new(
                                 ErrorKind::ComptimeEvaluationFailed {
                                     reason: "negative values not yet supported in comptime"
                                         .to_string(),
                                 },
-                                inst.span,
+                                span,
                             ));
                         }
-
                         let unsigned_value = value as u64;
                         if !ty.literal_fits(unsigned_value) {
                             return Err(CompileError::new(
@@ -1750,44 +1751,39 @@ impl<'a> Sema<'a> {
                                     value: unsigned_value,
                                     ty: ty.name().to_string(),
                                 },
-                                inst.span,
+                                span,
                             ));
                         }
-
                         let air_ref = air.add_inst(AirInst {
                             data: AirInstData::Const(unsigned_value),
                             ty,
-                            span: inst.span,
+                            span,
                         });
                         Ok(AnalysisResult::new(air_ref, ty))
                     }
-                    Some(ConstValue::Bool(value)) => {
+                    ConstValue::Bool(value) => {
                         let ty = Type::BOOL;
                         let air_ref = air.add_inst(AirInst {
                             data: AirInstData::BoolConst(value),
                             ty,
-                            span: inst.span,
+                            span,
                         });
                         Ok(AnalysisResult::new(air_ref, ty))
                     }
-                    Some(ConstValue::Type(_type_val)) => {
-                        // Type values can only exist at comptime - they cannot be returned
-                        // from a comptime block since they can't exist at runtime.
-                        Err(CompileError::new(
-                            ErrorKind::ComptimeEvaluationFailed {
-                                reason: "type values cannot exist at runtime".to_string(),
-                            },
-                            inst.span,
-                        ))
-                    }
-                    None => Err(CompileError::new(
+                    ConstValue::Type(_) => Err(CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
-                            reason:
-                                "expression contains values that cannot be known at compile time"
-                                    .to_string(),
+                            reason: "type values cannot exist at runtime".to_string(),
                         },
-                        inst.span,
+                        span,
                     )),
+                    ConstValue::Unit => {
+                        let air_ref = air.add_inst(AirInst {
+                            data: AirInstData::UnitConst,
+                            ty: Type::UNIT,
+                            span,
+                        });
+                        Ok(AnalysisResult::new(air_ref, Type::UNIT))
+                    }
                 }
             }
 
@@ -3399,8 +3395,8 @@ impl<'a> Sema<'a> {
             InstData::Neg { operand } => {
                 match self.try_evaluate_const(*operand)? {
                     ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
-                    // Can't negate a boolean or type
-                    ConstValue::Bool(_) | ConstValue::Type(_) => None,
+                    // Can't negate a boolean, type, or unit
+                    ConstValue::Bool(_) | ConstValue::Type(_) | ConstValue::Unit => None,
                 }
             }
 
@@ -3408,8 +3404,8 @@ impl<'a> Sema<'a> {
             InstData::Not { operand } => {
                 match self.try_evaluate_const(*operand)? {
                     ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
-                    // Can't logical-NOT an integer or type
-                    ConstValue::Integer(_) | ConstValue::Type(_) => None,
+                    // Can't logical-NOT an integer, type, or unit
+                    ConstValue::Integer(_) | ConstValue::Type(_) | ConstValue::Unit => None,
                 }
             }
 
@@ -3713,7 +3709,7 @@ impl<'a> Sema<'a> {
             InstData::Neg { operand } => {
                 match self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)? {
                     ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
-                    ConstValue::Bool(_) | ConstValue::Type(_) => None,
+                    ConstValue::Bool(_) | ConstValue::Type(_) | ConstValue::Unit => None,
                 }
             }
 
@@ -3721,7 +3717,7 @@ impl<'a> Sema<'a> {
             InstData::Not { operand } => {
                 match self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)? {
                     ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
-                    ConstValue::Integer(_) | ConstValue::Type(_) => None,
+                    ConstValue::Integer(_) | ConstValue::Type(_) | ConstValue::Unit => None,
                 }
             }
 
@@ -4073,6 +4069,401 @@ impl<'a> Sema<'a> {
 
             // Everything else requires runtime evaluation
             _ => None,
+        }
+    }
+
+    // =========================================================================
+    // Phase 1a: Stateful Comptime Interpreter
+    // =========================================================================
+    //
+    // The interpreter extends `try_evaluate_const` with mutable local variable
+    // state, enabling:
+    //   - Multi-statement `comptime { ... }` blocks
+    //   - `let` bindings within comptime blocks
+    //   - Variable assignment within comptime blocks
+    //   - `if`/`else` with comptime-evaluable conditions
+    //
+    // Phase 1b will add: `while`, `loop`, `break`, `continue`
+    // Phase 1c will add: function calls (push/pop call frames)
+    // Phase 1d will add: `ConstValue::Struct`, `ConstValue::Array`
+
+    /// Evaluate a comptime block expression using the stateful interpreter.
+    ///
+    /// Seeds the local scope from `ctx.comptime_value_vars` (captured comptime
+    /// parameters, e.g. `N` in `FixedBuffer(comptime N: i32)`), then delegates
+    /// to `evaluate_comptime_inst`.
+    fn evaluate_comptime_block(
+        &mut self,
+        inst_ref: InstRef,
+        ctx: &AnalysisContext,
+        span: Span,
+    ) -> CompileResult<ConstValue> {
+        // Seed interpreter locals with any comptime-captured values from the
+        // outer analysis context (e.g. `N` in a method of `FixedBuffer(N)`).
+        let mut locals = ctx.comptime_value_vars.clone();
+        self.evaluate_comptime_inst(inst_ref, &mut locals, ctx, span)
+    }
+
+    /// Recursively evaluate one RIR instruction in a comptime context.
+    ///
+    /// `locals` holds variables declared within the current comptime block.
+    /// Returns the evaluated `ConstValue`, or a `CompileError` if the
+    /// instruction is not compile-time evaluable.
+    fn evaluate_comptime_inst(
+        &mut self,
+        inst_ref: InstRef,
+        locals: &mut HashMap<Spur, ConstValue>,
+        ctx: &AnalysisContext,
+        outer_span: Span,
+    ) -> CompileResult<ConstValue> {
+        // Clone the instruction data up-front to release the `self.rir` borrow
+        // before any recursive calls to `evaluate_comptime_inst`.
+        let (inst_span, inst_data) = {
+            let inst = self.rir.get(inst_ref);
+            (inst.span, inst.data.clone())
+        };
+
+        /// Return a "cannot be known at compile time" error at `span`.
+        #[inline]
+        fn not_const(span: Span) -> CompileError {
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "expression contains values that cannot be known at compile time"
+                        .into(),
+                },
+                span,
+            )
+        }
+
+        /// Return an arithmetic overflow error at `span`.
+        #[inline]
+        fn overflow(span: Span) -> CompileError {
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "arithmetic overflow in comptime evaluation".into(),
+                },
+                span,
+            )
+        }
+
+        /// Extract integer from ConstValue, or return not_const error.
+        #[inline]
+        fn int(v: ConstValue, span: Span) -> CompileResult<i64> {
+            v.as_integer().ok_or_else(|| not_const(span))
+        }
+
+        /// Extract bool from ConstValue, or return not_const error.
+        #[inline]
+        fn bool_val(v: ConstValue, span: Span) -> CompileResult<bool> {
+            v.as_bool().ok_or_else(|| not_const(span))
+        }
+
+        match inst_data {
+            // ── Literals ──────────────────────────────────────────────────────
+            InstData::IntConst(value) => i64::try_from(value)
+                .map(ConstValue::Integer)
+                .map_err(|_| {
+                    CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "integer constant too large for comptime evaluation".into(),
+                        },
+                        inst_span,
+                    )
+                }),
+
+            InstData::BoolConst(value) => Ok(ConstValue::Bool(value)),
+
+            InstData::UnitConst => Ok(ConstValue::Unit),
+
+            // ── Unary operations ─────────────────────────────────────────────
+            InstData::Neg { operand } => {
+                let n = int(
+                    self.evaluate_comptime_inst(operand, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                n.checked_neg()
+                    .map(ConstValue::Integer)
+                    .ok_or_else(|| overflow(inst_span))
+            }
+
+            InstData::Not { operand } => {
+                let b = bool_val(
+                    self.evaluate_comptime_inst(operand, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                Ok(ConstValue::Bool(!b))
+            }
+
+            InstData::BitNot { operand } => {
+                let n = int(
+                    self.evaluate_comptime_inst(operand, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                Ok(ConstValue::Integer(!n))
+            }
+
+            // ── Binary arithmetic ─────────────────────────────────────────────
+            InstData::Add { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                l.checked_add(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+            }
+            InstData::Sub { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                l.checked_sub(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+            }
+            InstData::Mul { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                l.checked_mul(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+            }
+            InstData::Div { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                if r == 0 {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "division by zero in comptime evaluation".into(),
+                        },
+                        inst_span,
+                    ));
+                }
+                l.checked_div(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+            }
+            InstData::Mod { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                if r == 0 {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "modulo by zero in comptime evaluation".into(),
+                        },
+                        inst_span,
+                    ));
+                }
+                l.checked_rem(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+            }
+
+            // ── Comparisons ───────────────────────────────────────────────────
+            InstData::Eq { lhs, rhs } => {
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                        Ok(ConstValue::Bool(a == b))
+                    }
+                    (ConstValue::Bool(a), ConstValue::Bool(b)) => Ok(ConstValue::Bool(a == b)),
+                    _ => Err(not_const(inst_span)),
+                }
+            }
+            InstData::Ne { lhs, rhs } => {
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                        Ok(ConstValue::Bool(a != b))
+                    }
+                    (ConstValue::Bool(a), ConstValue::Bool(b)) => Ok(ConstValue::Bool(a != b)),
+                    _ => Err(not_const(inst_span)),
+                }
+            }
+            InstData::Lt { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                Ok(ConstValue::Bool(l < r))
+            }
+            InstData::Gt { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                Ok(ConstValue::Bool(l > r))
+            }
+            InstData::Le { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                Ok(ConstValue::Bool(l <= r))
+            }
+            InstData::Ge { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                Ok(ConstValue::Bool(l >= r))
+            }
+
+            // ── Logical ───────────────────────────────────────────────────────
+            InstData::And { lhs, rhs } => {
+                let l = bool_val(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = bool_val(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                Ok(ConstValue::Bool(l && r))
+            }
+            InstData::Or { lhs, rhs } => {
+                let l = bool_val(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = bool_val(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                Ok(ConstValue::Bool(l || r))
+            }
+
+            // ── Bitwise ───────────────────────────────────────────────────────
+            InstData::BitAnd { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                Ok(ConstValue::Integer(l & r))
+            }
+            InstData::BitOr { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                Ok(ConstValue::Integer(l | r))
+            }
+            InstData::BitXor { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                Ok(ConstValue::Integer(l ^ r))
+            }
+            InstData::Shl { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                if !(0..64).contains(&r) {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "shift amount out of range in comptime evaluation".into(),
+                        },
+                        inst_span,
+                    ));
+                }
+                Ok(ConstValue::Integer(l << r))
+            }
+            InstData::Shr { lhs, rhs } => {
+                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
+                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                if !(0..64).contains(&r) {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "shift amount out of range in comptime evaluation".into(),
+                        },
+                        inst_span,
+                    ));
+                }
+                Ok(ConstValue::Integer(l >> r))
+            }
+
+            // ── Block: iterate instructions, return last value ─────────────────
+            InstData::Block { extra_start, len } => {
+                // Collect into owned Vec to release the `self.rir` borrow before
+                // the loop body calls `evaluate_comptime_inst` recursively.
+                let raw_refs: Vec<u32> = self.rir.get_extra(extra_start, len).to_vec();
+                let mut last_val = ConstValue::Unit;
+                for raw_ref in raw_refs {
+                    last_val = self.evaluate_comptime_inst(
+                        InstRef::from_raw(raw_ref),
+                        locals,
+                        ctx,
+                        outer_span,
+                    )?;
+                }
+                Ok(last_val)
+            }
+
+            // ── Variable declaration ──────────────────────────────────────────
+            InstData::Alloc { name, init, .. } => {
+                let val = self.evaluate_comptime_inst(init, locals, ctx, outer_span)?;
+                if let Some(name_sym) = name {
+                    locals.insert(name_sym, val);
+                }
+                Ok(ConstValue::Unit)
+            }
+
+            // ── Variable reference ────────────────────────────────────────────
+            InstData::VarRef { name } => {
+                // 1. Locals declared within this comptime block (or seeded from outer captures).
+                if let Some(&val) = locals.get(&name) {
+                    return Ok(val);
+                }
+                // 2. Comptime type variables from the outer analysis context
+                //    (e.g. `let P = make_point()` in the enclosing function).
+                if let Some(&ty) = ctx.comptime_type_vars.get(&name) {
+                    return Ok(ConstValue::Type(ty));
+                }
+                // 3. Built-in type names used as values (e.g. `i32` in `identity(i32, 42)`).
+                let name_str = self.interner.resolve(&name).to_string();
+                let builtin_ty = match name_str.as_str() {
+                    "i8" => Some(Type::I8),
+                    "i16" => Some(Type::I16),
+                    "i32" => Some(Type::I32),
+                    "i64" => Some(Type::I64),
+                    "u8" => Some(Type::U8),
+                    "u16" => Some(Type::U16),
+                    "u32" => Some(Type::U32),
+                    "u64" => Some(Type::U64),
+                    "bool" => Some(Type::BOOL),
+                    "()" => Some(Type::UNIT),
+                    "!" => Some(Type::NEVER),
+                    _ => None,
+                };
+                if let Some(ty) = builtin_ty {
+                    return Ok(ConstValue::Type(ty));
+                }
+                // 4. User-defined struct/enum types used as values.
+                if let Some(&struct_id) = self.structs.get(&name) {
+                    return Ok(ConstValue::Type(Type::new_struct(struct_id)));
+                }
+                if let Some(&enum_id) = self.enums.get(&name) {
+                    return Ok(ConstValue::Type(Type::new_enum(enum_id)));
+                }
+                // 5. Not a known comptime value — must be a runtime variable.
+                Err(not_const(inst_span))
+            }
+
+            // ── Assignment ────────────────────────────────────────────────────
+            InstData::Assign { name, value } => {
+                let val = self.evaluate_comptime_inst(value, locals, ctx, outer_span)?;
+                locals.insert(name, val);
+                Ok(ConstValue::Unit)
+            }
+
+            // ── Branch (if/else) ──────────────────────────────────────────────
+            InstData::Branch {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                let cond_val = self.evaluate_comptime_inst(cond, locals, ctx, outer_span)?;
+                match cond_val {
+                    ConstValue::Bool(true) => {
+                        self.evaluate_comptime_inst(then_block, locals, ctx, outer_span)
+                    }
+                    ConstValue::Bool(false) => {
+                        if let Some(else_ref) = else_block {
+                            self.evaluate_comptime_inst(else_ref, locals, ctx, outer_span)
+                        } else {
+                            Ok(ConstValue::Unit)
+                        }
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
+            }
+
+            // ── Nested comptime ───────────────────────────────────────────────
+            InstData::Comptime { expr } => {
+                self.evaluate_comptime_inst(expr, locals, ctx, outer_span)
+            }
+
+            // ── Declarations are no-ops in comptime context ───────────────────
+            InstData::FnDecl { .. }
+            | InstData::DropFnDecl { .. }
+            | InstData::ConstDecl { .. }
+            | InstData::StructDecl { .. }
+            | InstData::EnumDecl { .. } => Ok(ConstValue::Unit),
+
+            // ── Type-related: delegate to existing evaluator ──────────────────
+            // AnonStructType and TypeConst need the full try_evaluate_const
+            // logic (type registry lookups, structural equality, etc.).
+            InstData::AnonStructType { .. } | InstData::TypeConst { .. } => self
+                .try_evaluate_const(inst_ref)
+                .ok_or_else(|| not_const(inst_span)),
+
+            // ── Not yet supported ─────────────────────────────────────────────
+            // Phase 1b: while, loop, break, continue
+            // Phase 1c: function calls, return
+            // Phase 1d: struct construction, field access, array ops
+            _ => Err(not_const(inst_span)),
         }
     }
 

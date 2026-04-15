@@ -296,3 +296,44 @@ fn C() -> type {
     struct { x: i32, fn get(self) -> i64 { self.x as i64 } }  // Different type (i64 vs i32)
 }
 ```
+
+## Comptime Blocks with Local State
+
+{{ rule(id="4.14:16", cat="normative") }}
+
+A comptime block can contain local variable declarations (`let`) and assignments. Variables declared inside a comptime block are only accessible within that block. The block evaluates all statements in order and returns the value of the final expression.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let a = 20;
+        let b = 22;
+        a + b   // evaluates to 42 at compile time
+    }
+}
+```
+
+Mutable variables may be re-assigned within a comptime block:
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let mut x = 40;
+        x = x + 2;
+        x   // evaluates to 42 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:17", cat="normative") }}
+
+A comptime block can contain `if` and `if`/`else` expressions. The condition must be a compile-time evaluable boolean. Both branches are compile-time evaluable expressions.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let x = 10;
+        if x > 5 { x * 4 + 2 } else { 0 }   // evaluates to 42 at compile time
+    }
+}
+```
