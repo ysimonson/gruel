@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
-use lasso::Spur;
 use gruel_target::Target;
+use lasso::Spur;
 
 use crate::inference::{FunctionSig, MethodSig};
 use crate::sema_context::{InferenceContext as SemaContextInferenceContext, SemaContext};

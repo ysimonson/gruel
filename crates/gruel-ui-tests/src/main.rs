@@ -3,10 +3,10 @@
 //! These tests verify compiler behavior that is not part of the language specification,
 //! such as warnings, diagnostics quality, and compiler flags.
 
-use libtest2_mimic::{Harness, RunContext, RunError, Trial};
 use gruel_test_runner::{
     Case, find_dir, find_gruel_binary, load_test_files, run_test_case, should_skip_for_platform,
 };
+use libtest2_mimic::{Harness, RunContext, RunError, Trial};
 use std::path::Path;
 
 /// Possible paths for the cases directory.

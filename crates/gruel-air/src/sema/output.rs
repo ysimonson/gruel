@@ -6,6 +6,7 @@
 
 use crate::inst::Air;
 use crate::intern_pool::TypeInternPool;
+use crate::types::Type;
 use gruel_error::CompileWarning;
 
 /// Result of analyzing a function.
@@ -23,6 +24,10 @@ pub struct AnalyzedFunction {
     /// Length matches num_param_slots - for struct params, all slots share
     /// the same mode as the original parameter.
     pub param_modes: Vec<bool>,
+    /// Type of each parameter ABI slot, parallel to `param_modes`.
+    /// Preserved here so backends can declare correct function signatures
+    /// even when DCE has removed unused `Param` instructions from the body.
+    pub param_slot_types: Vec<Type>,
 }
 
 /// Output from semantic analysis.

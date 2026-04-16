@@ -297,10 +297,6 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
-    /// Anonymous struct methods (Zig-style).
-    /// Allows method definitions inside anonymous struct type expressions.
-    /// See ADR-0029 for the full design.
-    AnonStructMethods,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -317,26 +313,22 @@ impl std::error::Error for ParsePreviewFeatureError {}
 
 impl PreviewFeature {
     /// Get the CLI name for this feature (used with `--preview`).
-    #[allow(unreachable_code)]
     pub fn name(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
-            PreviewFeature::AnonStructMethods => "anon_struct_methods",
         }
     }
 
     /// Get the ADR number documenting this feature.
-    #[allow(unreachable_code)]
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
-            PreviewFeature::AnonStructMethods => "ADR-0029",
         }
     }
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra, PreviewFeature::AnonStructMethods]
+        &[PreviewFeature::TestInfra]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -359,7 +351,6 @@ impl std::str::FromStr for PreviewFeature {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "test_infra" => Ok(PreviewFeature::TestInfra),
-            "anon_struct_methods" => Ok(PreviewFeature::AnonStructMethods),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -444,7 +435,7 @@ impl std::fmt::Display for Help {
 ///
 /// This follows rustc's conventions for suggestion applicability levels.
 /// IDEs and tools can use this to decide whether to auto-apply suggestions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Applicability {
     /// The suggestion is definitely correct and can be safely auto-applied.
     ///
@@ -467,13 +458,8 @@ pub enum Applicability {
     ///
     /// Use this for illustrative suggestions that show concepts rather
     /// than working code.
+    #[default]
     Unspecified,
-}
-
-impl Default for Applicability {
-    fn default() -> Self {
-        Self::Unspecified
-    }
 }
 
 impl std::fmt::Display for Applicability {
@@ -619,7 +605,7 @@ pub struct DiagnosticWrapper<K> {
     /// The specific kind of diagnostic.
     pub kind: K,
     span: Option<Span>,
-    diagnostic: Diagnostic,
+    diagnostic: Box<Diagnostic>,
 }
 
 impl<K> DiagnosticWrapper<K> {
@@ -629,7 +615,7 @@ impl<K> DiagnosticWrapper<K> {
         Self {
             kind,
             span: Some(span),
-            diagnostic: Diagnostic::new(),
+            diagnostic: Box::new(Diagnostic::new()),
         }
     }
 
@@ -642,7 +628,7 @@ impl<K> DiagnosticWrapper<K> {
         Self {
             kind,
             span: None,
-            diagnostic: Diagnostic::new(),
+            diagnostic: Box::new(Diagnostic::new()),
         }
     }
 
@@ -1190,7 +1176,7 @@ impl CompileError {
         Self {
             kind,
             span: Some(Span::point(pos)),
-            diagnostic: Diagnostic::new(),
+            diagnostic: Box::new(Diagnostic::new()),
         }
     }
 }
@@ -1277,11 +1263,6 @@ impl CompileErrors {
         self.errors.iter()
     }
 
-    /// Convert into an iterator over errors.
-    pub fn into_iter(self) -> impl Iterator<Item = CompileError> {
-        self.errors.into_iter()
-    }
-
     /// Get all errors as a slice.
     pub fn as_slice(&self) -> &[CompileError] {
         &self.errors
@@ -1313,6 +1294,15 @@ impl CompileErrors {
 impl Default for CompileErrors {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl IntoIterator for CompileErrors {
+    type Item = CompileError;
+    type IntoIter = std::vec::IntoIter<CompileError>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.errors.into_iter()
     }
 }
 
@@ -1873,7 +1863,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra, anon_struct_methods");
+        assert_eq!(names, "test_infra");
     }
 
     // ========================================================================

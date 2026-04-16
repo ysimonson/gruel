@@ -12,9 +12,9 @@ use crate::Type;
 use crate::intern_pool::TypeInternPool;
 use crate::scope::ScopedContext;
 use crate::types::{PtrMutability, StructId, parse_array_type_syntax, parse_pointer_type_syntax};
-use lasso::{Spur, ThreadedRodeo};
 use gruel_rir::{InstData, InstRef, Rir};
 use gruel_span::Span;
+use lasso::{Spur, ThreadedRodeo};
 use std::collections::HashMap;
 
 /// Information about a local variable during constraint generation.
@@ -176,27 +176,6 @@ impl<'a> ConstraintGenerator<'a> {
         methods: &'a HashMap<(StructId, Spur), MethodSig>,
         type_pool: &'a TypeInternPool,
     ) -> Self {
-        Self::with_type_subst(
-            rir, interner, functions, structs, enums, methods, type_pool, None,
-        )
-    }
-
-    /// Create a new constraint generator with type substitutions.
-    ///
-    /// The `type_subst` map provides type substitutions for names like "Self"
-    /// that should be resolved to concrete types during constraint generation.
-    /// This is used for method bodies where `Self { ... }` struct literals
-    /// need to know the concrete struct type.
-    pub fn with_type_subst(
-        rir: &'a Rir,
-        interner: &'a ThreadedRodeo,
-        functions: &'a HashMap<Spur, FunctionSig>,
-        structs: &'a HashMap<Spur, Type>,
-        enums: &'a HashMap<Spur, Type>,
-        methods: &'a HashMap<(StructId, Spur), MethodSig>,
-        type_pool: &'a TypeInternPool,
-        type_subst: Option<&'a HashMap<Spur, Type>>,
-    ) -> Self {
         Self {
             rir,
             interner,
@@ -208,9 +187,20 @@ impl<'a> ConstraintGenerator<'a> {
             enums,
             methods,
             int_literal_vars: Vec::new(),
-            type_subst,
+            type_subst: None,
             type_pool,
         }
+    }
+
+    /// Set type substitutions for `Self` and type parameters (builder pattern).
+    ///
+    /// The `type_subst` map provides type substitutions for names like "Self"
+    /// that should be resolved to concrete types during constraint generation.
+    /// This is used for method bodies where `Self { ... }` struct literals
+    /// need to know the concrete struct type.
+    pub fn with_type_subst(mut self, type_subst: Option<&'a HashMap<Spur, Type>>) -> Self {
+        self.type_subst = type_subst;
+        self
     }
 
     /// Get the type variables allocated for integer literals.
@@ -547,19 +537,17 @@ impl<'a> ConstraintGenerator<'a> {
                         }
 
                         // Compute the actual return type by substituting type parameters
-                        let return_type =
-                            if func.return_type == InferType::Concrete(Type::COMPTIME_TYPE) {
-                                // Return type is a type parameter - look it up in substitutions
-                                if let Some(&concrete_ty) = type_subst.get(&func.return_type_sym) {
-                                    InferType::Concrete(concrete_ty)
-                                } else {
-                                    func.return_type.clone()
-                                }
+
+                        if func.return_type == InferType::Concrete(Type::COMPTIME_TYPE) {
+                            // Return type is a type parameter - look it up in substitutions
+                            if let Some(&concrete_ty) = type_subst.get(&func.return_type_sym) {
+                                InferType::Concrete(concrete_ty)
                             } else {
                                 func.return_type.clone()
-                            };
-
-                        return_type
+                            }
+                        } else {
+                            func.return_type.clone()
+                        }
                     } else if args.len() != func.param_types.len() {
                         // Check argument count matches parameter count.
                         // Semantic analysis will emit a proper error; we just need to avoid
@@ -1068,7 +1056,8 @@ impl<'a> ConstraintGenerator<'a> {
                 // Get struct name from receiver type if it's a struct
                 // If we can't determine the struct type, we still generate constraints
                 // for the arguments and return a type variable (actual error is in sema)
-                let result_type = if let InferType::Concrete(ty) = &receiver_info.ty {
+
+                if let InferType::Concrete(ty) = &receiver_info.ty {
                     if let Some(struct_id) = ty.as_struct() {
                         // Use StructId directly for method lookup
                         let method_key = (struct_id, *method);
@@ -1105,9 +1094,7 @@ impl<'a> ConstraintGenerator<'a> {
                         self.generate(arg.value, ctx);
                     }
                     InferType::Concrete(Type::ERROR)
-                };
-
-                result_type
+                }
             }
 
             // Associated function call: Type::function(args)
@@ -1120,7 +1107,8 @@ impl<'a> ConstraintGenerator<'a> {
                 let args = self.rir.get_call_args(*args_start, *args_len);
                 // Get struct ID from type name for method lookup
                 let struct_id = self.structs.get(type_name).and_then(|ty| ty.as_struct());
-                let result_type = if let Some(struct_id) = struct_id {
+
+                if let Some(struct_id) = struct_id {
                     let method_key = (struct_id, *function);
                     if let Some(method_sig) = self.methods.get(&method_key) {
                         // Generate constraints for arguments
@@ -1147,8 +1135,7 @@ impl<'a> ConstraintGenerator<'a> {
                         self.generate(arg.value, ctx);
                     }
                     InferType::Concrete(Type::ERROR)
-                };
-                result_type
+                }
             }
 
             // Comptime block: the type depends on whether evaluation succeeds at compile time.

@@ -103,9 +103,9 @@ pub(crate) fn get_module_identity(path: &Path) -> Option<PathBuf> {
     let file_stem = path.file_stem()?.to_str()?;
 
     // Check if this is a facade file (starts with underscore)
-    if file_stem.starts_with('_') {
+    if let Some(module_name) = file_stem.strip_prefix('_') {
         // Facade file: _utils.gruel -> parent/utils
-        let module_name = &file_stem[1..]; // Strip the leading underscore
+        // Strip the leading underscore
         Some(parent.join(module_name))
     } else {
         // Regular file: the module is just the parent directory

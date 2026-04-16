@@ -24,9 +24,9 @@ use std::fmt;
 const _: () = assert!(std::mem::size_of::<CfgInst>() <= 48);
 const _: () = assert!(std::mem::size_of::<CfgInstData>() <= 32);
 
-use lasso::{Key, Spur};
 use gruel_air::{EnumId, StructId, Type};
 use gruel_span::Span;
+use lasso::{Key, Spur};
 
 // ============================================================================
 // Place Expressions (ADR-0030)
@@ -581,6 +581,10 @@ pub struct Cfg {
     fn_name: String,
     /// Whether each parameter slot is inout (passed by reference)
     param_modes: Vec<bool>,
+    /// Type of each parameter slot (parallel to param_modes).
+    /// Retained here so that backends can declare function signatures even when
+    /// DCE has removed unused `Param { index }` instructions from the body.
+    param_types: Vec<Type>,
 }
 
 impl Cfg {
@@ -591,6 +595,7 @@ impl Cfg {
         num_params: u32,
         fn_name: String,
         param_modes: Vec<bool>,
+        param_types: Vec<Type>,
     ) -> Self {
         Self {
             blocks: Vec::new(),
@@ -605,6 +610,7 @@ impl Cfg {
             num_params,
             fn_name,
             param_modes,
+            param_types,
         }
     }
 
@@ -659,6 +665,14 @@ impl Cfg {
     #[inline]
     pub fn param_modes(&self) -> &[bool] {
         &self.param_modes
+    }
+
+    /// Get the type of a parameter slot.
+    ///
+    /// Returns `None` if the slot index is out of range.
+    #[inline]
+    pub fn param_type(&self, slot: u32) -> Option<Type> {
+        self.param_types.get(slot as usize).copied()
     }
 
     /// Create a new basic block and return its ID.
@@ -1322,7 +1336,7 @@ mod tests {
 
     #[test]
     fn test_create_cfg() {
-        let mut cfg = Cfg::new(Type::I32, 0, 0, "test".to_string(), vec![]);
+        let mut cfg = Cfg::new(Type::I32, 0, 0, "test".to_string(), vec![], vec![]);
         let entry = cfg.new_block();
         cfg.entry = entry;
 

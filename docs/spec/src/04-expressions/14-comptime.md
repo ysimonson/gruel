@@ -43,8 +43,9 @@ fn main() -> i32 {
 It is a compile-time error if an expression inside a comptime block cannot be evaluated at compile time. This includes:
 
 - References to runtime variables
-- Function calls (except to comptime-evaluable functions in future versions)
-- Operations that would panic at runtime
+- Calls to generic functions (functions with `comptime T: type` parameters) in a non-generic comptime context
+- Operations that would overflow or panic at runtime
+- System calls, external functions, or raw pointer dereferences
 
 ```gruel
 fn main() -> i32 {
@@ -294,5 +295,212 @@ fn B() -> type {
 
 fn C() -> type {
     struct { x: i32, fn get(self) -> i64 { self.x as i64 } }  // Different type (i64 vs i32)
+}
+```
+
+## Comptime Blocks with Local State
+
+{{ rule(id="4.14:16", cat="normative") }}
+
+A comptime block can contain local variable declarations (`let`) and assignments. Variables declared inside a comptime block are only accessible within that block. The block evaluates all statements in order and returns the value of the final expression.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let a = 20;
+        let b = 22;
+        a + b   // evaluates to 42 at compile time
+    }
+}
+```
+
+Mutable variables may be re-assigned within a comptime block:
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let mut x = 40;
+        x = x + 2;
+        x   // evaluates to 42 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:17", cat="normative") }}
+
+A comptime block can contain `if` and `if`/`else` expressions. The condition must be a compile-time evaluable boolean. Both branches are compile-time evaluable expressions.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let x = 10;
+        if x > 5 { x * 4 + 2 } else { 0 }   // evaluates to 42 at compile time
+    }
+}
+```
+
+## Comptime Loops
+
+{{ rule(id="4.14:18", cat="normative") }}
+
+A comptime block can contain `while` loops. The condition and body must be compile-time evaluable. The loop is unrolled at compile time.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let mut sum = 0;
+        let mut i = 1;
+        while i <= 9 {
+            sum = sum + i;
+            i = i + 1;
+        }
+        sum   // evaluates to 45 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:19", cat="normative") }}
+
+A comptime block can contain `loop` expressions. The body must be compile-time evaluable. A `break` statement exits the loop.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let mut x = 0;
+        loop {
+            x = x + 1;
+            if x == 42 { break; }
+        }
+        x   // evaluates to 42 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:20", cat="normative") }}
+
+`break` and `continue` are supported within comptime loops and have their usual semantics: `break` exits the innermost loop, `continue` skips to the next iteration.
+
+{{ rule(id="4.14:21", cat="legality-rule") }}
+
+It is a compile-time error if a comptime loop executes more than 1,000,000 iterations. This prevents infinite loops from causing the compiler to hang.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let mut x = 0;
+        while true { x = x + 1; }  // ERROR: exceeds step budget
+        x
+    }
+}
+```
+
+## Comptime Function Calls
+
+{{ rule(id="4.14:22", cat="normative") }}
+
+A comptime block can call non-generic functions. The called function's body is evaluated at compile time. All arguments must be compile-time evaluable.
+
+```gruel
+fn double(x: i32) -> i32 {
+    x * 2
+}
+
+fn main() -> i32 {
+    comptime { double(21) }   // evaluates to 42 at compile time
+}
+```
+
+{{ rule(id="4.14:23", cat="normative") }}
+
+A comptime block can call functions that themselves call other functions, forming a call chain. Each function in the chain is evaluated at compile time.
+
+```gruel
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn sum_of_products(x: i32, y: i32, z: i32) -> i32 {
+    add(x * y, y * z)
+}
+
+fn main() -> i32 {
+    comptime { sum_of_products(2, 3, 7) }   // evaluates to 27 at compile time
+}
+```
+
+{{ rule(id="4.14:24", cat="normative") }}
+
+A comptime function call can use `return` to exit the function early. The returned value becomes the result of the call.
+
+```gruel
+fn clamp(x: i32, lo: i32, hi: i32) -> i32 {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    x
+}
+
+fn main() -> i32 {
+    comptime { clamp(100, 0, 42) }   // evaluates to 42 at compile time
+}
+```
+
+{{ rule(id="4.14:25", cat="legality-rule") }}
+
+It is a compile-time error if the comptime call stack exceeds 64 frames.
+
+{{ rule(id="4.14:29", cat="normative") }}
+
+A comptime parameter may receive the result of a function call, provided the call can be fully evaluated at compile time. The callee must be a non-generic function whose arguments are themselves compile-time known. This prevents infinite recursion from causing the compiler to hang.
+
+```gruel
+fn infinite(x: i32) -> i32 {
+    infinite(x + 1)  // ERROR: call stack depth exceeded
+}
+
+fn main() -> i32 {
+    comptime { infinite(0) }
+}
+```
+
+## Comptime Composite Values
+
+{{ rule(id="4.14:26", cat="normative") }}
+
+A comptime block can create struct instances and access their fields. All field expressions must be compile-time evaluable. The struct type must be statically known.
+
+```gruel
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let p = Point { x: 10, y: 32 };
+        p.x + p.y   // evaluates to 42 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:27", cat="normative") }}
+
+A comptime block can create array instances and read their elements. All element expressions and the index must be compile-time evaluable. The index must be within bounds.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let arr = [10, 20, 12];
+        arr[0] + arr[1] + arr[2]   // evaluates to 42 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:28", cat="legality-rule") }}
+
+It is a compile-time error if an array index is out of bounds in a comptime expression.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let arr = [1, 2, 3];
+        arr[5]   // ERROR: array index 5 out of bounds (length 3)
+    }
 }
 ```

@@ -327,10 +327,10 @@ impl LineIndex {
 
         // Binary search for the line containing this offset.
         // We want the largest line_start <= offset, which is partition_point - 1.
-        let line_idx = self.line_starts.partition_point(|&start| start <= offset);
+
         // partition_point returns the first index where the predicate is false,
         // so line_idx - 1 is the line containing offset (but line_idx is already 1-indexed)
-        line_idx
+        self.line_starts.partition_point(|&start| start <= offset)
     }
 
     /// Get the 1-based line number for a span's start position.

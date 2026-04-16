@@ -167,10 +167,9 @@ impl ModulePath {
             if let Some(file_name) = Path::new(file_path.as_str())
                 .file_stem()
                 .and_then(|s| s.to_str())
+                && file_name == basename
             {
-                if file_name == basename {
-                    return Some((*file_path).clone());
-                }
+                return Some((*file_path).clone());
             }
         }
 
@@ -179,10 +178,9 @@ impl ModulePath {
             if let Some(file_name) = Path::new(file_path.as_str())
                 .file_name()
                 .and_then(|s| s.to_str())
+                && file_name == facade_name
             {
-                if file_name == facade_name {
-                    return Some((*file_path).clone());
-                }
+                return Some((*file_path).clone());
             }
         }
 
@@ -349,7 +347,10 @@ mod tests {
         let module = ModulePath::Simple {
             path: "utils".to_string(),
         };
-        assert_eq!(module.resolve(paths.iter()), Some("_utils.gruel".to_string()));
+        assert_eq!(
+            module.resolve(paths.iter()),
+            Some("_utils.gruel".to_string())
+        );
     }
 
     #[test]

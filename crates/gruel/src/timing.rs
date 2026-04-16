@@ -425,10 +425,10 @@ where
         // Calculate duration and accumulate
         if let Some(span) = ctx.span(id) {
             let mut extensions = span.extensions_mut();
-            if let Some(timing) = extensions.get_mut::<SpanTiming>() {
-                if let Some(entered_at) = timing.entered_at.take() {
-                    timing.accumulated += entered_at.elapsed();
-                }
+            if let Some(timing) = extensions.get_mut::<SpanTiming>()
+                && let Some(entered_at) = timing.entered_at.take()
+            {
+                timing.accumulated += entered_at.elapsed();
             }
         }
     }

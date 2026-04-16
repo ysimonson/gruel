@@ -5,9 +5,9 @@
 
 use std::collections::HashMap;
 
-use lasso::{Spur, ThreadedRodeo};
 use gruel_error::PreviewFeatures;
 use gruel_rir::Rir;
+use lasso::{Spur, ThreadedRodeo};
 
 use crate::intern_pool::TypeInternPool;
 use crate::param_arena::ParamArena;
@@ -99,6 +99,10 @@ impl<'a> GatherOutput<'a> {
             param_arena: self.param_arena,
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
+            comptime_steps_used: 0,
+            comptime_return_value: None,
+            comptime_call_depth: 0,
+            comptime_heap: Vec::new(),
         }
     }
 }

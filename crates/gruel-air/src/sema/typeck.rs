@@ -6,9 +6,9 @@
 //! - ABI slot calculations
 //! - Type conversions between AIR types and inference types
 
-use lasso::Spur;
 use gruel_error::{CompileError, CompileResult, ErrorKind};
 use gruel_span::Span;
+use lasso::Spur;
 
 use super::Sema;
 use crate::inference::InferType;

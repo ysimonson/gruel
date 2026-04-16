@@ -11,11 +11,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lasso::Spur;
 use gruel_builtins::is_reserved_type_name;
 use gruel_error::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_span::Span;
+use lasso::Spur;
 
 use super::{ConstInfo, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::inference::{FunctionSig, MethodSig};
@@ -138,7 +138,7 @@ impl<'a> Sema<'a> {
                     variants_start,
                     variants_len,
                 } => {
-                    let enum_name = self.interner.resolve(&*name).to_string();
+                    let enum_name = self.interner.resolve(name).to_string();
 
                     // Check for collision with built-in type names
                     if is_reserved_type_name(&enum_name) {
@@ -166,8 +166,7 @@ impl<'a> Sema<'a> {
                     let mut seen_variants: HashSet<Spur> = HashSet::new();
                     for variant_name in &variants {
                         if !seen_variants.insert(*variant_name) {
-                            let variant_name_str =
-                                self.interner.resolve(&*variant_name).to_string();
+                            let variant_name_str = self.interner.resolve(variant_name).to_string();
                             return Err(CompileError::new(
                                 ErrorKind::DuplicateVariant {
                                     enum_name: enum_name.clone(),
@@ -181,7 +180,7 @@ impl<'a> Sema<'a> {
                     // Convert variant symbols to strings
                     let variant_names: Vec<String> = variants
                         .iter()
-                        .map(|v| self.interner.resolve(&*v).to_string())
+                        .map(|v| self.interner.resolve(v).to_string())
                         .collect();
 
                     let enum_def = EnumDef {
@@ -205,7 +204,7 @@ impl<'a> Sema<'a> {
                     name,
                     ..
                 } => {
-                    let struct_name = self.interner.resolve(&*name).to_string();
+                    let struct_name = self.interner.resolve(name).to_string();
 
                     // Check for collision with built-in type names
                     if is_reserved_type_name(&struct_name) {
@@ -293,7 +292,7 @@ impl<'a> Sema<'a> {
                 ..
             } = &inst.data
             {
-                let name_str = self.interner.resolve(&*name).to_string();
+                let name_str = self.interner.resolve(name).to_string();
                 // Verify the struct exists in our lookup table
                 if !self.structs.contains_key(name) {
                     return Err(CompileError::new(
@@ -335,7 +334,7 @@ impl<'a> Sema<'a> {
                 let mut seen_fields: HashSet<Spur> = HashSet::new();
                 for (field_name, _) in &fields {
                     if !seen_fields.insert(*field_name) {
-                        let field_name_str = self.interner.resolve(&*field_name).to_string();
+                        let field_name_str = self.interner.resolve(field_name).to_string();
                         return Err(CompileError::new(
                             ErrorKind::DuplicateField {
                                 struct_name,
@@ -351,7 +350,7 @@ impl<'a> Sema<'a> {
                 for (field_name, field_type) in &fields {
                     let field_ty = self.resolve_type(*field_type, inst.span)?;
                     resolved_fields.push(StructField {
-                        name: self.interner.resolve(&*field_name).to_string(),
+                        name: self.interner.resolve(field_name).to_string(),
                         ty: field_ty,
                     });
                 }
@@ -435,8 +434,7 @@ impl<'a> Sema<'a> {
                     }
                     self.collect_function_signature(
                         *name,
-                        *params_start,
-                        *params_len,
+                        (*params_start, *params_len),
                         *return_type,
                         *body,
                         inst.span,
@@ -546,7 +544,7 @@ impl<'a> Sema<'a> {
                     continue;
                 }
 
-                let struct_name = self.interner.resolve(&*name).to_string();
+                let struct_name = self.interner.resolve(name).to_string();
                 let struct_id = *self.structs.get(name).ok_or_else(|| {
                     CompileError::new(
                         ErrorKind::InternalError(
@@ -707,8 +705,7 @@ impl<'a> Sema<'a> {
     fn collect_function_signature(
         &mut self,
         name: Spur,
-        params_start: u32,
-        params_len: u32,
+        (params_start, params_len): (u32, u32),
         return_type_sym: Spur,
         body: InstRef,
         span: Span,
@@ -763,12 +760,9 @@ impl<'a> Sema<'a> {
         };
 
         // Allocate parameter data in the arena
-        let params_range = self.param_arena.alloc(
-            param_names.into_iter(),
-            param_types.into_iter(),
-            param_modes.into_iter(),
-            param_comptime.into_iter(),
-        );
+        let params_range =
+            self.param_arena
+                .alloc(param_names, param_types, param_modes, param_comptime);
 
         self.functions.insert(
             name,
@@ -823,7 +817,7 @@ impl<'a> Sema<'a> {
                 let key = (struct_id, *method_name);
                 if self.methods.contains_key(&key) {
                     let type_name_str = self.interner.resolve(&type_name).to_string();
-                    let method_name_str = self.interner.resolve(&*method_name).to_string();
+                    let method_name_str = self.interner.resolve(method_name).to_string();
                     return Err(CompileError::new(
                         ErrorKind::DuplicateMethod {
                             type_name: type_name_str,

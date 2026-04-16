@@ -5,12 +5,10 @@ members = [
     "crates/gruel-air",
     "crates/gruel-builtins",
     "crates/gruel-cfg",
-    "crates/gruel-codegen",
+    "crates/gruel-codegen-llvm",
     "crates/gruel-compiler",
     "crates/gruel-error",
-    "crates/gruel-fuzz",
     "crates/gruel-lexer",
-    "crates/gruel-linker",
     "crates/gruel-parser",
     "crates/gruel-rir",
     "crates/gruel-runtime",
@@ -20,6 +18,7 @@ members = [
     "crates/gruel-ui-tests",
     "crates/gruel-spec",
 ]
+exclude = ["fuzz"]
 # gruel-runtime is no_std and staticlib-only, so exclude it from cargo test --workspace
 # Run: cargo test --workspace --exclude gruel-runtime
 
@@ -32,11 +31,10 @@ edition = "2024"
 gruel-air = { path = "crates/gruel-air" }
 gruel-builtins = { path = "crates/gruel-builtins" }
 gruel-cfg = { path = "crates/gruel-cfg" }
-gruel-codegen = { path = "crates/gruel-codegen" }
+gruel-codegen-llvm = { path = "crates/gruel-codegen-llvm" }
 gruel-compiler = { path = "crates/gruel-compiler" }
 gruel-error = { path = "crates/gruel-error" }
 gruel-lexer = { path = "crates/gruel-lexer" }
-gruel-linker = { path = "crates/gruel-linker" }
 gruel-parser = { path = "crates/gruel-parser" }
 gruel-rir = { path = "crates/gruel-rir" }
 gruel-span = { path = "crates/gruel-span" }
@@ -52,7 +50,6 @@ lasso = { version = "0.7", features = ["multi-threaded"] }
 libc = "0.2"
 libtest2-mimic = "0.0.4"
 logos = "0.14"
-proptest = "1.5"
 rayon = "1.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"

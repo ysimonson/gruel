@@ -20,7 +20,7 @@ cargo build -p gruel
 cargo build --workspace --exclude gruel-runtime
 
 # Run all tests (unit + spec)
-./test.sh
+make test
 
 # Run unit tests only
 cargo test --workspace --exclude gruel-runtime
@@ -56,8 +56,7 @@ cargo run -p gruel -- --emit ast source.gruel     # Abstract syntax tree
 cargo run -p gruel -- --emit rir source.gruel     # Untyped IR
 cargo run -p gruel -- --emit air source.gruel     # Typed IR
 cargo run -p gruel -- --emit cfg source.gruel     # Control flow graph
-cargo run -p gruel -- --emit mir source.gruel     # Machine IR (virtual registers)
-cargo run -p gruel -- --emit asm source.gruel     # Assembly (physical registers)
+cargo run -p gruel -- --emit asm source.gruel     # LLVM IR (.ll format)
 
 # Chain multiple stages to see the full pipeline
 cargo run -p gruel -- --emit tokens --emit ast --emit rir source.gruel
@@ -69,7 +68,7 @@ The compiler pipeline transforms source through successive IRs:
 
 ```mermaid
 graph LR
-    Source --> Lexer --> Parser --> AstGen --> Sema --> CfgBuilder --> Lower --> RegAlloc --> Emit --> Link
+    Source --> Lexer --> Parser --> AstGen --> Sema --> CfgBuilder --> LLVM --> Link
 ```
 
 | Stage | Pass | IR Produced | `--emit` flag |
@@ -79,10 +78,8 @@ graph LR
 | 3 | AstGen | RIR (untyped) | `rir` |
 | 4 | Sema | AIR (typed) | `air` |
 | 5 | CfgBuilder | CFG | `cfg` |
-| 6 | Lower | MIR (machine) | `mir` |
-| 7 | RegAlloc | MIR (allocated) | `asm` |
-| 8 | Emit | bytes | - |
-| 9 | Link | ELF | - |
+| 6 | LLVM | object file | `asm` (LLVM IR) |
+| 7 | Link | native binary | - |
 
 ### Crate Responsibilities
 
@@ -95,8 +92,7 @@ graph LR
 | `gruel-rir` | Untyped IR (post-parse, pre-typing) |
 | `gruel-cfg` | Control flow graph construction and optimization |
 | `gruel-air` | Typed IR (after semantic analysis) |
-| `gruel-codegen` | x86-64 machine code generation |
-| `gruel-linker` | ELF object file creation and linking |
+| `gruel-codegen-llvm` | LLVM-based code generation (via inkwell) |
 | `gruel-error` | Error types and diagnostics |
 | `gruel-span` | Source location tracking |
 | `gruel-target` | Target platform configuration |
@@ -129,10 +125,9 @@ gruel main.gruel utils.gruel lib.gruel -o program
 
 ### Key Design Decisions
 
-- **Architecture-specific MIR**: Each target gets its own machine IR (currently X86Mir), following Zig's approach
+- **LLVM backend**: Code generation uses LLVM via the `inkwell` crate (`gruel-codegen-llvm`), providing cross-platform support and production-quality optimization
 - **Index-based references**: Instructions stored in vectors, referenced by u32 indices (cache-friendly, no lifetimes)
-- **Direct code emission**: No LLVM dependency; machine code emitted directly
-- **Minimal ELF**: Static executables with direct syscalls (Linux x86-64 only)
+- **System linker**: Links via `cc` or a user-specified system linker (no custom ELF writer)
 - **Built-in types as synthetic structs**: Types like `String` are defined in `gruel-builtins` and injected as synthetic structs, not as hardcoded `Type` enum variants (see [ADR-0020](docs/designs/0020-builtin-types-as-structs.md))
 
 ### Built-in Types Architecture
@@ -167,18 +162,18 @@ The test suite has three layers optimized for different stages of development:
 
 | Test Type | Command | Speed | When to Use |
 |-----------|---------|-------|-------------|
-| Unit tests | `./quick-test.sh` | ~2-5s | During active development |
-| Full suite | `./test.sh` | ~30-60s | Before committing |
+| Unit tests | `make quick-test` | ~2-5s | During active development |
+| Full suite | `make test` | ~30-60s | Before committing |
 | Targeted spec | `cargo run -p gruel-spec -- "pattern"` | Varies | Testing specific features |
 
 **Recommended workflow:**
 
 ```bash
 # During development - fast feedback loop
-./quick-test.sh                # Unit tests only
+make quick-test                # Unit tests only
 
 # Before committing - full verification
-./test.sh                      # Unit + spec + UI + traceability
+make test                      # Unit + spec + UI + traceability
 
 # Debugging specific areas
 cargo run -p gruel-spec -- "arithmetic"  # Specific spec tests
@@ -189,10 +184,10 @@ cargo test -p gruel-codegen              # Specific crate
 
 | If you're... | Use... | Why |
 |--------------|--------|-----|
-| Iterating on a fix | `./quick-test.sh` | Fast feedback, catches most issues |
+| Iterating on a fix | `make quick-test` | Fast feedback, catches most issues |
 | Adding a language feature | Spec tests | Required for traceability |
 | Improving diagnostics | UI tests | Not spec-mandated behavior |
-| About to commit | `./test.sh` | Ensures nothing is broken |
+| About to commit | `make test` | Ensures nothing is broken |
 
 **Rule of thumb:**
 - **Unit tests** catch logic errors quickly during development
@@ -438,60 +433,47 @@ cargo run -p gruel-spec -- --traceability
 cargo run -p gruel-spec -- --traceability --detailed
 ```
 
-The traceability check is run as part of `./test.sh` and fails if:
+The traceability check is run as part of `make test` and fails if:
 - Any spec paragraph has no covering test (coverage < 100%)
 - Any test references a non-existent spec paragraph ID
 
 ### Fuzz Testing
 
-The project has comprehensive fuzz testing infrastructure in `crates/gruel-fuzz` that tests the compiler for crashes, panics, and security issues using both mutation-based and property-based fuzzing.
+Fuzz testing uses [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (libFuzzer). Fuzz targets live in `fuzz/fuzz_targets/`. Requires nightly Rust.
 
 #### Available Fuzz Targets
 
 ```bash
-# List all fuzz targets
-cargo run -p gruel-fuzz -- --list
+# List targets
+cargo +nightly fuzz list
 
-# Available targets:
-# - lexer: Tokenization only (~27,000 exec/s)
-# - parser: Lexing + parsing (~6,500 exec/s)
-# - sema: Semantic analysis (~4,000-8,000 exec/s)
-# - compiler: Full frontend (~4,000-8,000 exec/s)
-# - emitter: x86-64 instruction encoding (~15,000 exec/s)
-# - emitter_sequence: Instruction sequences with labels/jumps (~10,000 exec/s)
+# Targets:
+# - lexer:               Tokenization (raw bytes)
+# - parser:              Lexing + parsing (raw bytes)
+# - compiler:            Full frontend (raw bytes)
+# - emitter:             x86-64 instruction encoding (raw bytes)
+# - emitter_sequence:    Instruction sequences with labels/jumps (raw bytes)
+# - structured_compiler: Valid Gruel programs (arbitrary crate)
+# - structured_invalid:  Semantically invalid programs (arbitrary crate)
+# - structured_emitter:  Structured x86-64 MIR sequences (arbitrary crate)
 ```
 
 #### Running Fuzz Tests
 
 ```bash
-# Initialize corpus from spec tests
-cargo run -p gruel-fuzz -- --init-corpus crates/gruel-fuzz/corpus
+# Run a target indefinitely (Ctrl+C to stop)
+cargo +nightly fuzz run lexer
 
-# Run a fuzz target with mutations
-cargo run -p gruel-fuzz -- --mutate lexer crates/gruel-fuzz/corpus
+# Run for a specific duration (300 seconds)
+cargo +nightly fuzz run parser -- -max_total_time=300
 
-# Run for a specific duration (300 seconds = 5 minutes)
-cargo run -p gruel-fuzz -- --mutate --max-time=300 parser crates/gruel-fuzz/corpus
-
-# Run for a specific number of iterations
-cargo run -p gruel-fuzz -- --max-runs=10000 sema crates/gruel-fuzz/corpus
-
-# Run all fuzz targets for 5 minutes each
-for target in lexer parser sema compiler emitter emitter_sequence; do
-    cargo run -p gruel-fuzz -- --mutate --max-time=300 $target crates/gruel-fuzz/corpus
+# Run all targets for 5 minutes each
+for target in lexer parser compiler emitter emitter_sequence structured_compiler structured_invalid structured_emitter; do
+    cargo +nightly fuzz run $target -- -max_total_time=300
 done
 ```
 
-#### Property-Based Testing
-
-The fuzzer includes proptest-based generators that create syntactically valid Gruel programs:
-
-```bash
-# Run proptest-based fuzz tests
-cargo test -p gruel-fuzz
-```
-
-These generators create valid identifiers, types, expressions, statements, functions, and complete programs. This enables deeper testing than random byte mutation since the inputs exercise semantic analysis and type checking.
+Corpus files are stored in `fuzz/corpus/<target>/` and are persisted across runs.
 
 #### CI Integration
 
@@ -499,17 +481,15 @@ Fuzzing runs automatically in CI via `.github/workflows/fuzz.yml`. Each target r
 
 #### When a Crash is Found
 
-If fuzzing finds a crash, the input is saved to `crates/gruel-fuzz/crashes/`:
+Crash inputs are saved to `fuzz/artifacts/<target>/`:
 
 ```bash
 # Reproduce the crash
-cargo run -p gruel -- crates/gruel-fuzz/crashes/crash-*.txt output
+cargo +nightly fuzz run lexer fuzz/artifacts/lexer/crash-*
 
-# Or just tokenize to see the issue
-cargo run -p gruel -- --emit tokens crates/gruel-fuzz/crashes/crash-*.txt
+# Or compile the crashing input directly
+cargo run -p gruel -- fuzz/artifacts/compiler/crash-*.txt output
 ```
-
-See `crates/gruel-fuzz/README.md` for complete documentation.
 
 ## Modifying the Language
 
@@ -595,30 +575,7 @@ When all tests pass and the feature is complete:
    - Changes to error message formatting
    - New compiler flags or options
 
-9. **Run `./test.sh`** to verify all tests pass and traceability is maintained
-
-## Codegen: Multi-Backend Considerations
-
-**IMPORTANT**: The `gruel-codegen` crate contains multiple architecture backends:
-- `x86_64/` - Linux x86-64
-- `aarch64/` - macOS ARM64
-
-When making changes to codegen, **always check if the same change is needed in all backends**. Common areas that require parallel changes:
-
-- **New MIR instructions**: Add to both `x86_64/mir.rs` and `aarch64/mir.rs`
-- **Instruction emission**: Update both `x86_64/emit.rs` and `aarch64/emit.rs`
-- **Register allocation**: Update both `x86_64/regalloc.rs` and `aarch64/regalloc.rs`
-- **Liveness analysis**: Update both `x86_64/liveness.rs` and `aarch64/liveness.rs`
-- **CFG lowering**: Update both `x86_64/cfg_lower.rs` and `aarch64/cfg_lower.rs`
-
-Example: If adding a new comparison instruction variant (e.g., 64-bit compare):
-1. Add `Cmp64RR` to both MIR definitions
-2. Add emission logic to both emitters
-3. Add register allocation handling to both allocators
-4. Add liveness tracking to both liveness analyzers
-5. Update CFG lowering in both backends to use the new instruction where appropriate
-
-**Testing across backends**: The spec tests run on the host architecture only. If you only have access to one platform, note in your commit message that the other backend may need verification.
+9. **Run `make test`** to verify all tests pass and traceability is maintained
 
 ## Version Control
 

@@ -278,6 +278,12 @@ fn create_struct_drop_glue_function(
 
     // All parameters are passed by value (normal mode)
     let param_modes = vec![false; num_param_slots as usize];
+    // Each field contributes type_slot_count slots of its own type
+    let param_slot_types: Vec<Type> = struct_def
+        .fields
+        .iter()
+        .flat_map(|f| std::iter::repeat(f.ty).take(type_slot_count(f.ty, type_pool) as usize))
+        .collect();
 
     AnalyzedFunction {
         name: fn_name,
@@ -285,6 +291,7 @@ fn create_struct_drop_glue_function(
         num_locals: 0,
         num_param_slots,
         param_modes,
+        param_slot_types,
     }
 }
 
@@ -388,6 +395,9 @@ fn create_array_drop_glue_function(
 
     // All parameters are passed by value (normal mode)
     let param_modes = vec![false; num_param_slots as usize];
+    // Each element contributes element_slot_count slots of element_type
+    let param_slot_types: Vec<Type> =
+        std::iter::repeat(element_type).take(num_param_slots as usize).collect();
 
     AnalyzedFunction {
         name: fn_name,
@@ -395,13 +405,17 @@ fn create_array_drop_glue_function(
         num_locals: 0,
         num_param_slots,
         param_modes,
+        param_slot_types,
     }
 }
 
 /// Generate the drop glue function name for an array type.
 ///
 /// The name encodes the element type and length, e.g., `__gruel_drop_array_String_3`
-pub fn array_drop_glue_name(array_id: gruel_air::ArrayTypeId, type_pool: &TypeInternPool) -> String {
+pub fn array_drop_glue_name(
+    array_id: gruel_air::ArrayTypeId,
+    type_pool: &TypeInternPool,
+) -> String {
     let (element_type, length) = type_pool.array_def(array_id);
     let element_type_name = type_name(element_type, type_pool);
     format!("__gruel_drop_array_{}_{}", element_type_name, length)

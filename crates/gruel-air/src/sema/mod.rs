@@ -57,14 +57,16 @@ pub use output::{AnalyzedFunction, SemaOutput};
 
 use std::collections::HashMap;
 
-use lasso::{Spur, ThreadedRodeo};
 use gruel_error::{CompileErrors, MultiErrorResult, PreviewFeatures};
 use gruel_rir::Rir;
 use gruel_span::FileId;
+use lasso::{Spur, ThreadedRodeo};
 
 use crate::intern_pool::TypeInternPool;
 use crate::param_arena::ParamArena;
 use crate::types::{EnumId, StructId};
+
+use context::ComptimeHeapItem;
 
 /// Semantic analyzer that converts RIR to AIR.
 pub struct Sema<'a> {
@@ -106,6 +108,23 @@ pub struct Sema<'a> {
     /// stored here, keyed by StructId. These values become part of type identity:
     /// FixedBuffer(42) and FixedBuffer(100) are different types.
     pub(crate) anon_struct_captured_values: HashMap<StructId, HashMap<Spur, ConstValue>>,
+    /// Loop iteration counter for the current comptime block evaluation.
+    /// Reset to 0 at the start of each `evaluate_comptime_block` call.
+    /// Incremented once per loop iteration; triggers an error when it exceeds
+    /// `COMPTIME_MAX_STEPS` to prevent infinite loops at compile time.
+    pub(crate) comptime_steps_used: u64,
+    /// Pending return value for the comptime interpreter.
+    /// Set by `Ret` instructions inside comptime function bodies; consumed
+    /// immediately by the enclosing `Call` handler in `evaluate_comptime_inst`.
+    pub(crate) comptime_return_value: Option<ConstValue>,
+    /// Current call stack depth in the comptime interpreter.
+    /// Incremented on each comptime `Call`, decremented on return.
+    /// Triggers an error if it exceeds `COMPTIME_CALL_DEPTH_LIMIT`.
+    pub(crate) comptime_call_depth: u32,
+    /// Comptime heap: stores composite values (structs, arrays) created during
+    /// comptime evaluation. `ConstValue::Struct(idx)` and `ConstValue::Array(idx)`
+    /// index into this vec. Cleared at the start of each `evaluate_comptime_block`.
+    pub(crate) comptime_heap: Vec<ComptimeHeapItem>,
 }
 
 impl<'a> Sema<'a> {
@@ -134,6 +153,10 @@ impl<'a> Sema<'a> {
             param_arena: ParamArena::new(),
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
+            comptime_steps_used: 0,
+            comptime_return_value: None,
+            comptime_call_depth: 0,
+            comptime_heap: Vec::new(),
         }
     }
 

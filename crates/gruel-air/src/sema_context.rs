@@ -31,9 +31,9 @@
 use std::collections::HashMap;
 use std::sync::{PoisonError, RwLock};
 
-use lasso::{Spur, ThreadedRodeo};
 use gruel_error::PreviewFeatures;
 use gruel_rir::Rir;
+use lasso::{Spur, ThreadedRodeo};
 
 use crate::inference::{FunctionSig, InferType, MethodSig};
 use crate::intern_pool::TypeInternPool;
@@ -415,9 +415,9 @@ impl<'a> SemaContext<'a> {
         let file_stem = path.file_stem()?.to_str()?;
 
         // Check if this is a facade file (starts with underscore)
-        if file_stem.starts_with('_') {
+        if let Some(module_name) = file_stem.strip_prefix('_') {
             // Facade file: _utils.gruel -> parent/utils
-            let module_name = &file_stem[1..]; // Strip the leading underscore
+            // Strip the leading underscore
             Some(parent.join(module_name))
         } else {
             // Regular file: the module is just the parent directory
@@ -584,10 +584,10 @@ impl<'a> SemaContext<'a> {
         use gruel_builtins::{BUILTIN_TYPES, ReceiverMode};
 
         for builtin in BUILTIN_TYPES {
-            if let Some(method) = builtin.find_method(method_name) {
-                if method.receiver_mode == ReceiverMode::ByMutRef {
-                    return true;
-                }
+            if let Some(method) = builtin.find_method(method_name)
+                && method.receiver_mode == ReceiverMode::ByMutRef
+            {
+                return true;
             }
         }
         false

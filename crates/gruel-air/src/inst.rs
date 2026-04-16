@@ -24,8 +24,8 @@ const _: () = assert!(std::mem::size_of::<AirInst>() <= 48);
 const _: () = assert!(std::mem::size_of::<AirInstData>() <= 32);
 
 use crate::types::{StructId, Type};
-use lasso::{Key, Spur};
 use gruel_span::Span;
+use lasso::{Key, Spur};
 
 // ============================================================================
 // Place Expressions (ADR-0030 Phase 8)

@@ -6,11 +6,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lasso::Spur;
 use gruel_builtins::BuiltinTypeDef;
 use gruel_error::CompileWarning;
 use gruel_rir::RirParamMode;
 use gruel_span::Span;
+use lasso::Spur;
 
 use crate::scope::ScopedContext;
 use crate::types::{StructId, Type};
@@ -334,6 +334,23 @@ impl AnalysisResult {
     }
 }
 
+/// An item stored on the comptime heap.
+///
+/// The comptime heap stores composite values (structs, arrays) created during
+/// comptime evaluation. These are referenced by index (`u32`) from
+/// `ConstValue::Struct` and `ConstValue::Array` so that `ConstValue` can
+/// remain `Copy`.
+pub enum ComptimeHeapItem {
+    /// A comptime struct instance: the struct's `StructId` and its field values
+    /// in declaration order.
+    Struct {
+        struct_id: StructId,
+        fields: Vec<ConstValue>,
+    },
+    /// A comptime array instance: element values in order.
+    Array(Vec<ConstValue>),
+}
+
 /// A value that can be computed at compile time.
 ///
 /// This is used for constant expression evaluation, primarily for compile-time
@@ -348,10 +365,24 @@ pub enum ConstValue {
     /// This is used when a `comptime T: type` parameter is instantiated
     /// with a specific type like `i32` or `bool`.
     Type(Type),
-    /// Unit value - the value of `()`.
-    // TODO(gruel-c6gi): Remove #[allow] when Unit const evaluation is implemented
-    #[allow(dead_code)]
+    /// Unit value `()` — the result of statements (let bindings, assignments)
+    /// and expressions of unit type within comptime blocks.
     Unit,
+    /// Index into `Sema::comptime_heap` for a comptime struct instance.
+    /// Preserves the `Copy` trait while supporting composite values.
+    Struct(u32),
+    /// Index into `Sema::comptime_heap` for a comptime array instance.
+    Array(u32),
+    /// Internal control-flow signal: produced by `break` inside a comptime loop.
+    /// Never escapes `evaluate_comptime_block` — consumed by Loop/InfiniteLoop cases.
+    BreakSignal,
+    /// Internal control-flow signal: produced by `continue` inside a comptime loop.
+    /// Never escapes `evaluate_comptime_block` — consumed by Loop/InfiniteLoop cases.
+    ContinueSignal,
+    /// Internal control-flow signal: produced by `return` inside a comptime function.
+    /// Never escapes a comptime `Call` handler — the return value is stored in
+    /// `Sema::comptime_return_value` before this signal is returned.
+    ReturnSignal,
 }
 
 impl ConstValue {
@@ -368,35 +399,6 @@ impl ConstValue {
         match self {
             ConstValue::Bool(b) => Some(b),
             _ => None,
-        }
-    }
-
-    /// Try to extract a type value.
-    // TODO(gruel-c6gi): Remove #[allow] when Unit const evaluation is implemented
-    #[allow(dead_code)]
-    pub fn as_type(self) -> Option<Type> {
-        match self {
-            ConstValue::Type(ty) => Some(ty),
-            _ => None,
-        }
-    }
-
-    /// Check if this is a unit value.
-    // TODO(gruel-c6gi): Remove #[allow] when Unit const evaluation is implemented
-    #[allow(dead_code)]
-    pub fn is_unit(self) -> bool {
-        matches!(self, ConstValue::Unit)
-    }
-
-    /// Get the type of this constant value.
-    // TODO(gruel-c6gi): Remove #[allow] when Unit const evaluation is implemented
-    #[allow(dead_code)]
-    pub fn get_type(&self) -> Type {
-        match self {
-            ConstValue::Integer(_) => Type::I64, // Default to i64 for comptime integers
-            ConstValue::Bool(_) => Type::BOOL,
-            ConstValue::Type(_) => Type::COMPTIME_TYPE,
-            ConstValue::Unit => Type::UNIT,
         }
     }
 }
@@ -722,34 +724,6 @@ mod tests {
         assert_eq!(ConstValue::Bool(true), ConstValue::Bool(true));
         assert_ne!(ConstValue::Bool(true), ConstValue::Bool(false));
         assert_ne!(ConstValue::Integer(1), ConstValue::Bool(true));
-    }
-
-    #[test]
-    fn const_value_as_type() {
-        let cv = ConstValue::Type(Type::I32);
-        assert_eq!(cv.as_type(), Some(Type::I32));
-        assert_eq!(cv.as_integer(), None);
-        assert_eq!(cv.as_bool(), None);
-
-        let cv2 = ConstValue::Type(Type::BOOL);
-        assert_eq!(cv2.as_type(), Some(Type::BOOL));
-    }
-
-    #[test]
-    fn const_value_unit() {
-        let cv = ConstValue::Unit;
-        assert!(cv.is_unit());
-        assert_eq!(cv.as_integer(), None);
-        assert_eq!(cv.as_bool(), None);
-        assert_eq!(cv.as_type(), None);
-    }
-
-    #[test]
-    fn const_value_get_type() {
-        assert_eq!(ConstValue::Integer(42).get_type(), Type::I64);
-        assert_eq!(ConstValue::Bool(true).get_type(), Type::BOOL);
-        assert_eq!(ConstValue::Type(Type::I32).get_type(), Type::COMPTIME_TYPE);
-        assert_eq!(ConstValue::Unit.get_type(), Type::UNIT);
     }
 
     #[test]

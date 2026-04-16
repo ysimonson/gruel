@@ -16,9 +16,8 @@ mod timing;
 use gruel_compiler::{
     CompileOptions, FileId, Lexer, LinkerMode, MultiFileFormatter, OptLevel, ParsedProgram,
     PreviewFeature, PreviewFeatures, SourceFile, SourceInfo,
-    compile_frontend_from_ast_with_options, compile_multi_file_with_options, generate_emitted_asm,
-    generate_liveness_info, generate_lowering_info, generate_mir, generate_regalloc_info,
-    generate_stack_frame_info, merge_symbols, parse_all_files,
+    compile_frontend_from_ast_with_options, compile_multi_file_with_options, generate_llvm_ir,
+    merge_symbols, parse_all_files,
 };
 use gruel_rir::RirPrinter;
 use gruel_target::Target;
@@ -36,18 +35,8 @@ enum EmitStage {
     Air,
     /// Emit CFG (control flow graph).
     Cfg,
-    /// Emit lowering (CFG to MIR instruction selection).
-    Lowering,
-    /// Emit MIR (machine intermediate representation).
-    Mir,
-    /// Emit liveness analysis information.
-    Liveness,
-    /// Emit register allocation debug info.
-    RegAlloc,
-    /// Emit assembly text.
+    /// Emit LLVM IR (human-readable `.ll` format).
     Asm,
-    /// Emit stack frame layout per function.
-    StackFrame,
 }
 
 /// Error returned when parsing an emit stage name fails.
@@ -72,12 +61,7 @@ impl std::str::FromStr for EmitStage {
             "rir" => Ok(EmitStage::Rir),
             "air" => Ok(EmitStage::Air),
             "cfg" => Ok(EmitStage::Cfg),
-            "lowering" => Ok(EmitStage::Lowering),
-            "mir" => Ok(EmitStage::Mir),
-            "liveness" => Ok(EmitStage::Liveness),
-            "regalloc" => Ok(EmitStage::RegAlloc),
             "asm" => Ok(EmitStage::Asm),
-            "stackframe" => Ok(EmitStage::StackFrame),
             _ => Err(ParseEmitStageError(s.to_string())),
         }
     }
@@ -85,7 +69,7 @@ impl std::str::FromStr for EmitStage {
 
 impl EmitStage {
     fn all_names() -> &'static str {
-        "tokens, ast, rir, air, cfg, lowering, mir, liveness, regalloc, asm, stackframe"
+        "tokens, ast, rir, air, cfg, asm"
     }
 }
 
@@ -238,7 +222,7 @@ fn print_usage() {
     eprintln!("                       Use -j1 for single-threaded compilation");
     eprintln!("  --emit <stage>       Emit intermediate representation and exit");
     eprintln!("                       Can be specified multiple times for multiple outputs");
-    eprintln!("                       Stages: tokens, ast, rir, air, cfg, mir, asm");
+    eprintln!("                       Stages: tokens, ast, rir, air, cfg, asm");
     eprintln!("  --preview <feature>  Enable a preview feature (can be repeated)");
     eprintln!(
         "                       Features: {}",
@@ -918,12 +902,7 @@ fn handle_emit_multi_file(
             EmitStage::Rir
                 | EmitStage::Air
                 | EmitStage::Cfg
-                | EmitStage::Lowering
-                | EmitStage::Mir
-                | EmitStage::Liveness
-                | EmitStage::RegAlloc
                 | EmitStage::Asm
-                | EmitStage::StackFrame
         )
     });
 
@@ -1057,122 +1036,23 @@ fn handle_emit_multi_file(
                 }
                 println!();
             }
-            EmitStage::Lowering => {
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        let lowering_info = generate_lowering_info(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        );
-                        print!("{}", lowering_info);
-                    }
-                }
-                println!();
-            }
-            EmitStage::Mir => {
-                println!("=== MIR ({}) ===", options.target);
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        let mir = generate_mir(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        );
-                        println!("function {}:", func.analyzed.name);
-                        println!("{}", mir);
-                    }
-                }
-                println!();
-            }
-            EmitStage::Liveness => {
-                println!("=== Liveness Analysis ({}) ===", options.target);
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        println!("function {}:", func.analyzed.name);
-                        let liveness_info = generate_liveness_info(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        );
-                        println!("{}", liveness_info);
-                    }
-                }
-                println!();
-            }
-            EmitStage::RegAlloc => {
-                println!("=== Register Allocation ({}) ===", options.target);
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        println!("function {}:", func.analyzed.name);
-                        let regalloc_info = match generate_regalloc_info(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        ) {
-                            Ok(info) => info,
-                            Err(e) => {
-                                eprintln!("{}", formatter.format_error(&e));
-                                return Err(());
-                            }
-                        };
-                        print!("{}", regalloc_info);
-                    }
-                }
-                println!();
-            }
             EmitStage::Asm => {
-                println!("=== Assembly ({}) ===", options.target);
+                println!("=== LLVM IR ===");
                 if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        println!(".globl {}", func.analyzed.name);
-                        println!("{}:", func.analyzed.name);
-                        let asm = match generate_emitted_asm(
-                            &func.cfg,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        ) {
-                            Ok(asm) => asm,
-                            Err(e) => {
-                                eprintln!("{}", formatter.format_error(&e));
-                                return Err(());
-                            }
-                        };
-                        print!("{}", asm);
+                    match generate_llvm_ir(
+                        &state.functions,
+                        &state.type_pool,
+                        &state.strings,
+                        &state.interner,
+                    ) {
+                        Ok(ir) => print!("{}", ir),
+                        Err(e) => {
+                            eprintln!("{}", formatter.format_error(&e));
+                            return Err(());
+                        }
                     }
                 }
                 println!();
-            }
-            EmitStage::StackFrame => {
-                if let Some(ref state) = frontend_state {
-                    for func in &state.functions {
-                        let frame_info = match generate_stack_frame_info(
-                            &func.cfg,
-                            &func.analyzed.name,
-                            &state.type_pool,
-                            &state.strings,
-                            &state.interner,
-                            options.target,
-                        ) {
-                            Ok(info) => info,
-                            Err(e) => {
-                                eprintln!("{}", formatter.format_error(&e));
-                                return Err(());
-                            }
-                        };
-                        println!("{}", frame_info);
-                    }
-                }
             }
         }
     }
@@ -1243,7 +1123,9 @@ mod tests {
     #[test]
     fn parse_multi_file_without_output_flag_error() {
         // Three positional args without -o should error
-        assert!(is_error(&parse_args_from(&["a.gruel", "b.gruel", "c.gruel"])));
+        assert!(is_error(&parse_args_from(&[
+            "a.gruel", "b.gruel", "c.gruel"
+        ])));
     }
 
     #[test]
@@ -1256,7 +1138,10 @@ mod tests {
             "-o",
             "program",
         ]));
-        assert_eq!(opts.source_paths, vec!["main.gruel", "utils.gruel", "lib.gruel"]);
+        assert_eq!(
+            opts.source_paths,
+            vec!["main.gruel", "utils.gruel", "lib.gruel"]
+        );
         assert_eq!(opts.output_path, "program");
         assert_eq!(opts.opt_level, OptLevel::O2);
     }
@@ -1319,12 +1204,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_emit_mir() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "mir", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Mir]);
-    }
-
-    #[test]
     fn parse_emit_asm() {
         let opts = unwrap_options(parse_args_from(&["--emit", "asm", "source.gruel"]));
         assert_eq!(opts.emit_stages, vec![EmitStage::Asm]);
@@ -1365,7 +1244,11 @@ mod tests {
 
     #[test]
     fn parse_target_x86_64_linux() {
-        let opts = unwrap_options(parse_args_from(&["--target", "x86_64-linux", "source.gruel"]));
+        let opts = unwrap_options(parse_args_from(&[
+            "--target",
+            "x86_64-linux",
+            "source.gruel",
+        ]));
         assert_eq!(opts.target, Target::X86_64Linux);
     }
 
@@ -1453,7 +1336,11 @@ mod tests {
 
     #[test]
     fn parse_preview_valid_feature() {
-        let opts = unwrap_options(parse_args_from(&["--preview", "test_infra", "source.gruel"]));
+        let opts = unwrap_options(parse_args_from(&[
+            "--preview",
+            "test_infra",
+            "source.gruel",
+        ]));
         assert!(opts.preview_features.contains(&PreviewFeature::TestInfra));
     }
 
@@ -1554,7 +1441,10 @@ mod tests {
 
     #[test]
     fn parse_log_format_missing_value() {
-        assert!(is_error(&parse_args_from(&["source.gruel", "--log-format"])));
+        assert!(is_error(&parse_args_from(&[
+            "source.gruel",
+            "--log-format"
+        ])));
     }
 
     #[test]
@@ -1796,13 +1686,21 @@ mod tests {
 
     #[test]
     fn parse_jobs_invalid_value() {
-        assert!(is_error(&parse_args_from(&["--jobs", "abc", "source.gruel"])));
+        assert!(is_error(&parse_args_from(&[
+            "--jobs",
+            "abc",
+            "source.gruel"
+        ])));
     }
 
     #[test]
     fn parse_jobs_negative_value() {
         // Negative values should fail to parse as usize
-        assert!(is_error(&parse_args_from(&["--jobs", "-1", "source.gruel"])));
+        assert!(is_error(&parse_args_from(&[
+            "--jobs",
+            "-1",
+            "source.gruel"
+        ])));
     }
 
     #[test]
@@ -1834,24 +1732,7 @@ mod tests {
         assert_eq!("rir".parse::<EmitStage>().unwrap(), EmitStage::Rir);
         assert_eq!("air".parse::<EmitStage>().unwrap(), EmitStage::Air);
         assert_eq!("cfg".parse::<EmitStage>().unwrap(), EmitStage::Cfg);
-        assert_eq!(
-            "lowering".parse::<EmitStage>().unwrap(),
-            EmitStage::Lowering
-        );
-        assert_eq!("mir".parse::<EmitStage>().unwrap(), EmitStage::Mir);
-        assert_eq!(
-            "liveness".parse::<EmitStage>().unwrap(),
-            EmitStage::Liveness
-        );
-        assert_eq!(
-            "regalloc".parse::<EmitStage>().unwrap(),
-            EmitStage::RegAlloc
-        );
         assert_eq!("asm".parse::<EmitStage>().unwrap(), EmitStage::Asm);
-        assert_eq!(
-            "stackframe".parse::<EmitStage>().unwrap(),
-            EmitStage::StackFrame
-        );
     }
 
     #[test]
@@ -1864,32 +1745,8 @@ mod tests {
     fn emit_stage_all_names() {
         assert_eq!(
             EmitStage::all_names(),
-            "tokens, ast, rir, air, cfg, lowering, mir, liveness, regalloc, asm, stackframe"
+            "tokens, ast, rir, air, cfg, asm"
         );
-    }
-
-    #[test]
-    fn parse_emit_lowering() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "lowering", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Lowering]);
-    }
-
-    #[test]
-    fn parse_emit_regalloc() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "regalloc", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::RegAlloc]);
-    }
-
-    #[test]
-    fn parse_emit_stackframe() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "stackframe", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::StackFrame]);
-    }
-
-    #[test]
-    fn parse_emit_liveness() {
-        let opts = unwrap_options(parse_args_from(&["--emit", "liveness", "source.gruel"]));
-        assert_eq!(opts.emit_stages, vec![EmitStage::Liveness]);
     }
 
     // ========== LogLevel FromStr tests ==========

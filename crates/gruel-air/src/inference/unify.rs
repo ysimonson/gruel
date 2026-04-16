@@ -227,11 +227,11 @@ impl Unifier {
     fn rebind_int_literal_to_concrete(&mut self, original: &InferType, concrete_ty: &Type) {
         if let InferType::Var(var) = original {
             // Check if this variable is directly bound to IntLiteral
-            if let Some(bound) = self.substitution.get(*var) {
-                if bound.is_int_literal() {
-                    self.substitution
-                        .insert(*var, InferType::Concrete(*concrete_ty));
-                }
+            if let Some(bound) = self.substitution.get(*var)
+                && bound.is_int_literal()
+            {
+                self.substitution
+                    .insert(*var, InferType::Concrete(*concrete_ty));
             }
         }
     }
@@ -241,10 +241,10 @@ impl Unifier {
     /// Performs the occurs check to prevent infinite types.
     fn bind(&mut self, var: TypeVarId, ty: &InferType) -> UnifyResult {
         // If binding to itself, it's a no-op
-        if let InferType::Var(id) = ty {
-            if *id == var {
-                return UnifyResult::Ok;
-            }
+        if let InferType::Var(id) = ty
+            && *id == var
+        {
+            return UnifyResult::Ok;
         }
 
         // Occurs check: prevent infinite types

@@ -40,8 +40,6 @@ use gruel_span::FileId;
 struct ParsedFileData {
     /// Path to the source file.
     path: String,
-    /// File identifier for error reporting.
-    file_id: FileId,
     /// The parsed abstract syntax tree.
     ast: Ast,
 }
@@ -172,7 +170,6 @@ impl<'src> CompilationUnit<'src> {
 
             parsed_files.push(ParsedFileData {
                 path: source.path.to_string(),
-                file_id: source.file_id,
                 ast,
             });
         }
@@ -434,7 +431,6 @@ impl<'src> CompilationUnit<'src> {
         functions: Vec<AnalyzedFunction>,
         type_pool: &TypeInternPool,
     ) -> (Vec<FunctionWithCfg>, Vec<CompileWarning>) {
-        let interner = self.interner.as_ref().expect("interner not initialized");
         let opt_level = self.options.opt_level;
 
         let _span = info_span!("cfg_construction").entered();
@@ -449,7 +445,7 @@ impl<'src> CompilationUnit<'src> {
                     &func.name,
                     type_pool,
                     func.param_modes.clone(),
-                    interner,
+                    func.param_slot_types.clone(),
                 );
 
                 // Apply optimizations

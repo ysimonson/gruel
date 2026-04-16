@@ -18,13 +18,13 @@ Before implementing:
 ## Step 1: Load Context
 
 1. **For large features**, read the ADR in `docs/designs/`:
-   - Identify which phase you're implementing
-   - Understand how this phase fits into the whole
-   - Check the Implementation Phases checklist for what's done
+   - List all phases from the Implementation Phases checklist
+   - Identify which phases are already complete (`[x]`) and which remain (`[ ]`)
+   - You will implement **every incomplete phase**, one at a time
 
-2. **Scope check** before starting:
+2. **Scope check** per phase before starting each one:
    - Clear, bounded changes (1-5 files to modify) → proceed
-   - More than 5-7 files or multiple unrelated changes → split into phases
+   - More than 5-7 files or multiple unrelated changes → split into sub-phases
 
 ## Step 2: Implementation Order
 
@@ -87,7 +87,7 @@ Preview tests run but are allowed to fail until the feature is complete.
 ## Step 3: Verify
 
 ```bash
-./test.sh
+make test
 ```
 
 **For stable work**: All tests must pass.
@@ -101,11 +101,19 @@ Check off the completed phase in the ADR:
 - [ ] **Phase 2: Type checking**
 ```
 
-## Step 5: Review and Commit
+## Step 5: Commit This Phase
 
-1. Run `/code-review`
-2. Fix any blocking issues
-3. Run `/commit`
+1. Run `/code-review` and fix any blocking issues
+2. Stage relevant files and create a git commit. The message should name the phase and include a co-author trailer:
+   ```
+   Implement phase 1a: core parsing
+
+   Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+   ```
+
+## Step 6: Repeat for the Next Phase
+
+Go back to **Step 2** and implement the next incomplete phase. Continue until all phases are complete.
 
 ## Stabilizing a Large Feature
 
