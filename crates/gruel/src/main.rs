@@ -968,7 +968,6 @@ fn handle_emit_multi_file(
         let state = match compile_frontend_from_ast_with_options(
             merged.ast,
             merged.interner,
-            options.opt_level,
             &options.preview_features,
         ) {
             Ok(state) => state,
@@ -1041,6 +1040,7 @@ fn handle_emit_multi_file(
                         &state.type_pool,
                         &state.strings,
                         &state.interner,
+                        options.opt_level,
                     ) {
                         Ok(ir) => print!("{}", ir),
                         Err(e) => {

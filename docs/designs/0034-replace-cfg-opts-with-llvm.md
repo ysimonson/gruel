@@ -1,12 +1,12 @@
 ---
 id: 0034
 title: Replace CFG-Level Optimization Passes With LLVM Equivalents
-status: proposal
+status: implemented
 tags: [compiler, codegen, llvm, optimization]
 feature-flag: none
 created: 2026-04-16
-accepted:
-implemented:
+accepted: 2026-04-16
+implemented: 2026-04-16
 spec-sections: []
 superseded-by:
 ---
@@ -17,7 +17,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -168,7 +168,7 @@ schema or file-format changes are made.
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Wire OptLevel into the LLVM backend**
+- [x] **Phase 1: Wire OptLevel into the LLVM backend**
   - Extend `gruel_codegen_llvm::generate` / `generate_ir` signatures with
     `opt_level: OptLevel`.
   - Plumb `opt_level` through `compile_backend` and
@@ -180,7 +180,7 @@ schema or file-format changes are made.
   - Verify: `cargo run -p gruel -- --emit asm -O2 <example>` now shows
     optimized LLVM IR; `-O0` shows the unoptimized IR we get today.
 
-- [ ] **Phase 2: Delete the CFG-level passes**
+- [x] **Phase 2: Delete the CFG-level passes**
   - Remove `gruel_cfg::opt::optimize` calls from
     `gruel-compiler/src/unit.rs` and `gruel-compiler/src/lib.rs` (two
     sites in `lib.rs`).
@@ -191,7 +191,7 @@ schema or file-format changes are made.
   - `cargo test --workspace --exclude gruel-runtime` and `make test` both
     pass.
 
-- [ ] **Phase 3: Update ADR-0012 and docs**
+- [x] **Phase 3: Update ADR-0012 and docs**
   - Mark ADR-0012 as superseded by this ADR (set `superseded-by: 0034` and
     change status).
   - Update any CLAUDE.md / docs references to the CFG opt pipeline.

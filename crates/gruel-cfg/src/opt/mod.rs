@@ -1,33 +1,17 @@
-//! CFG optimization passes.
+//! Optimization level configuration for the Gruel compiler.
 //!
-//! This module provides optimization passes that transform CFG -> CFG,
-//! improving code quality without changing program semantics.
+//! CFG-level optimization passes were removed in ADR-0034. Optimization is now
+//! handled entirely by LLVM's mid-end pipeline (`default<OX>`), which is invoked
+//! when generating object code or LLVM IR at `-O1` and above.
 //!
-//! ## Optimization Levels
-//!
-//! Gruel follows standard compiler conventions for optimization levels:
-//!
-//! - `-O0`: No optimization (default)
-//! - `-O1`: Basic optimizations (constant folding, dead code elimination)
-//! - `-O2`: Standard optimizations (same as -O1 for now)
-//! - `-O3`: Aggressive optimizations (same as -O2 for now)
-//!
-//! ## Pipeline
-//!
-//! Optimizations run after CFG construction and before lowering to MIR:
-//!
-//! ```text
-//! AIR -> CfgBuilder -> CFG -> [optimize] -> CfgLower -> MIR
-//! ```
-
-mod constfold;
-mod dce;
-
-use crate::Cfg;
+//! This module retains the `OptLevel` enum so that the CLI and `CompileOptions`
+//! continue to express the user's requested optimization level.
 
 /// Optimization level, following standard compiler conventions.
 ///
-/// Controls which optimization passes are run during compilation.
+/// Controls the LLVM mid-end optimization pipeline invoked during code
+/// generation. At `-O0` no LLVM passes are run; at `-O1+` the full
+/// `default<OX>` pipeline runs (InstCombine, GVN, SCCP, ADCE, SimplifyCFG, …).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OptLevel {
     /// No optimization (`-O0`).
@@ -39,21 +23,17 @@ pub enum OptLevel {
 
     /// Basic optimizations (`-O1`).
     ///
-    /// Enables fundamental optimizations:
-    /// - Constant folding
-    /// - Dead code elimination
+    /// Runs LLVM's `default<O1>` pipeline.
     O1,
 
     /// Standard optimizations (`-O2`).
     ///
-    /// Currently the same as O1. Future optimization passes will be
-    /// added at this level.
+    /// Runs LLVM's `default<O2>` pipeline.
     O2,
 
     /// Aggressive optimizations (`-O3`).
     ///
-    /// Currently the same as O2. Future aggressive optimizations
-    /// (that may increase compile time significantly) will be added here.
+    /// Runs LLVM's `default<O3>` pipeline.
     O3,
 }
 
@@ -108,38 +88,6 @@ impl std::str::FromStr for OptLevel {
 impl std::fmt::Display for OptLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "-{}", self.name())
-    }
-}
-
-/// Run optimization passes on a CFG at the given level.
-///
-/// This is the main entry point for CFG optimization. It runs the
-/// appropriate passes based on the optimization level.
-///
-/// # Arguments
-///
-/// * `cfg` - The control flow graph to optimize (modified in place)
-/// * `level` - The optimization level to use
-///
-/// # Example
-///
-/// ```ignore
-/// let mut cfg = CfgBuilder::build(...);
-/// optimize(&mut cfg, OptLevel::O1);
-/// // cfg is now optimized
-/// ```
-pub fn optimize(cfg: &mut Cfg, level: OptLevel) {
-    match level {
-        OptLevel::O0 => {
-            // No optimization
-        }
-        OptLevel::O1 | OptLevel::O2 | OptLevel::O3 => {
-            // Constant folding: fold operations on compile-time constants
-            constfold::run(cfg);
-
-            // Dead code elimination: remove unused values and unreachable blocks
-            dce::run(cfg);
-        }
     }
 }
 

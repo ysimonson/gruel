@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use gruel_air::{StructId, Type, TypeInternPool, TypeKind};
-use gruel_cfg::{BlockId, Cfg, CfgInstData, CfgValue, PlaceBase, Projection, Terminator};
+use gruel_cfg::{BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator};
 use gruel_error::{CompileError, CompileResult, ErrorKind};
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
@@ -14,6 +14,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::intrinsics::Intrinsic;
 use inkwell::module::Module;
+use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target as LlvmTarget, TargetMachine,
 };
@@ -100,6 +101,36 @@ fn build_module<'ctx>(
     Ok(module)
 }
 
+/// Map a Gruel `OptLevel` to the corresponding `inkwell::OptimizationLevel`.
+fn to_llvm_opt_level(opt_level: OptLevel) -> OptimizationLevel {
+    match opt_level {
+        OptLevel::O0 => OptimizationLevel::None,
+        OptLevel::O1 => OptimizationLevel::Less,
+        OptLevel::O2 => OptimizationLevel::Default,
+        OptLevel::O3 => OptimizationLevel::Aggressive,
+    }
+}
+
+/// Run LLVM's mid-end optimization pipeline on the module for the given opt level.
+///
+/// For `-O0` this is a no-op. For `-O1+` it runs `default<OX>` which includes
+/// InstCombine, GVN, SCCP, ADCE, SimplifyCFG, and more.
+fn run_llvm_passes(
+    module: &Module<'_>,
+    target_machine: &TargetMachine,
+    opt_level: OptLevel,
+) -> CompileResult<()> {
+    let passes = match opt_level {
+        OptLevel::O0 => return Ok(()),
+        OptLevel::O1 => "default<O1>",
+        OptLevel::O2 => "default<O2>",
+        OptLevel::O3 => "default<O3>",
+    };
+    module
+        .run_passes(passes, target_machine, PassBuilderOptions::create())
+        .map_err(|e| llvm_error(format!("LLVM pass pipeline failed: {}", e)))
+}
+
 /// Generate a native object file from a set of function CFGs.
 ///
 /// All functions are lowered into a single LLVM module. The module is then
@@ -110,6 +141,7 @@ pub fn generate(
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    opt_level: OptLevel,
 ) -> CompileResult<Vec<u8>> {
     LlvmTarget::initialize_native(&InitializationConfig::default())
         .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
@@ -126,11 +158,14 @@ pub fn generate(
             &target_triple,
             "generic",
             "",
-            OptimizationLevel::None,
+            to_llvm_opt_level(opt_level),
             RelocMode::Default,
             CodeModel::Default,
         )
         .ok_or_else(|| llvm_error("failed to create LLVM TargetMachine"))?;
+
+    // Run the mid-end optimization pipeline (no-op at O0).
+    run_llvm_passes(&module, &target_machine, opt_level)?;
 
     let obj_buf = target_machine
         .write_to_memory_buffer(&module, FileType::Object)
@@ -143,14 +178,38 @@ pub fn generate(
 ///
 /// Returns the human-readable LLVM IR as a string. This is used by
 /// `--emit asm` to produce inspectable IR in place of native assembly.
+/// At `-O1+` the IR is the post-optimization form.
 pub fn generate_ir(
     functions: &[&Cfg],
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    opt_level: OptLevel,
 ) -> CompileResult<String> {
     let context = Context::create();
     let module = build_module(&context, functions, type_pool, strings, interner)?;
+
+    if opt_level != OptLevel::O0 {
+        // generate_ir needs a TargetMachine to run passes. We do a lightweight
+        // native-target init just for this purpose.
+        LlvmTarget::initialize_native(&InitializationConfig::default())
+            .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
+        let target_triple = TargetMachine::get_default_triple();
+        let llvm_target = LlvmTarget::from_triple(&target_triple)
+            .map_err(|e| llvm_error(format!("failed to get LLVM target: {}", e)))?;
+        let target_machine = llvm_target
+            .create_target_machine(
+                &target_triple,
+                "generic",
+                "",
+                to_llvm_opt_level(opt_level),
+                RelocMode::Default,
+                CodeModel::Default,
+            )
+            .ok_or_else(|| llvm_error("failed to create LLVM TargetMachine"))?;
+        run_llvm_passes(&module, &target_machine, opt_level)?;
+    }
+
     Ok(module.print_to_string().to_string())
 }
 

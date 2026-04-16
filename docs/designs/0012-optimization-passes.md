@@ -1,14 +1,14 @@
 ---
 id: 0012
 title: Compiler Optimization Passes
-status: implemented
+status: superseded
 tags: [compiler, codegen]
 feature-flag: none
 created: 2025-12-25
 accepted:
 implemented:
 spec-sections: []
-superseded-by:
+superseded-by: 0034
 ---
 
 <!-- Note: Optimizations are compiler internals that don't affect language semantics.
@@ -19,7 +19,7 @@ superseded-by:
 
 ## Status
 
-Implemented
+Superseded by [ADR-0034](0034-replace-cfg-opts-with-llvm.md)
 
 ## Summary
 
