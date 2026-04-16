@@ -54,11 +54,7 @@ Edit files in `docs/spec/src/`:
 
 Follow existing patterns. Key considerations:
 
-**Multi-backend consistency**: If touching `gruel-codegen`, implement in ALL backends:
-- `x86_64/` - Linux x86-64
-- `aarch64/` - macOS ARM64
-
-Check: `mir.rs`, `emit.rs`, `regalloc.rs`, `liveness.rs`, `cfg_lower.rs`
+**LLVM codegen**: Code generation lives in `gruel-codegen-llvm` (via the `inkwell` crate). Key files: `codegen.rs`, `types.rs`.
 
 **Index-based references**: Use u32 indices, not pointers. Check for dangling indices.
 
@@ -75,7 +71,7 @@ source = """..."""
 exit_code = 42
 ```
 
-Add semantic gates in sema:
+Add semantic gates in sema (`gruel-air/src/sema/`):
 ```rust
 if using_preview_syntax {
     self.require_preview(PreviewFeature::MyFeature, "feature description", span)?;
@@ -103,13 +99,7 @@ Check off the completed phase in the ADR:
 
 ## Step 5: Commit This Phase
 
-1. Run `/code-review` and fix any blocking issues
-2. Stage relevant files and create a git commit. The message should name the phase and include a co-author trailer:
-   ```
-   Implement phase 1a: core parsing
-
-   Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-   ```
+1. Run `/commit` to code review and commit the changes.
 
 ## Step 6: Repeat for the Next Phase
 
@@ -134,28 +124,29 @@ When all phases are complete:
 2. Parser: Add parsing in `gruel-parser`
 3. RIR: Add IR node in `gruel-rir`
 4. AIR: Add typed node in `gruel-air`
-5. Sema: Add type checking in `gruel-air/src/sema.rs`
-6. Codegen: Add code generation in both backends
+5. Sema: Add type checking in `gruel-air/src/sema/`
+6. CFG: Update CFG construction/lowering in `gruel-cfg` if needed
+7. Codegen: Add LLVM code generation in `gruel-codegen-llvm`
 
 ### Adding a New Type
 
 1. Add to `Type` enum in `gruel-air/src/types.rs`
-2. Update type checking in sema
-3. Update code generation for the type's operations
+2. Update type checking in `gruel-air/src/sema/`
+3. Update LLVM code generation in `gruel-codegen-llvm` for the type's operations
 4. Add spec chapter and tests
 
 ### Adding a New Statement/Expression
 
-1. Parser: Add syntax handling
-2. RIR/AIR: Add IR representation
-3. Sema: Add semantic analysis
-4. Codegen: Add code generation
-5. Spec: Document the syntax and semantics
+1. Parser: Add syntax handling in `gruel-parser`
+2. RIR/AIR: Add IR representation in `gruel-rir`/`gruel-air`
+3. Sema: Add semantic analysis in `gruel-air/src/sema/`
+4. CFG: Update CFG construction in `gruel-cfg` if needed
+5. Codegen: Add LLVM code generation in `gruel-codegen-llvm`
+6. Spec: Document the syntax and semantics
 
 ## Important
 
-- If touching `gruel-codegen`, implement in ALL backends (x86_64 and aarch64)
 - Each commit should leave tests passing
 - Split work that's too large into phases
-- Use Buck2 (`./buck2`), not Cargo
+- Use Cargo for builds (see `CLAUDE.md` for common commands)
 - Use `git` for version control
