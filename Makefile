@@ -1,6 +1,7 @@
 .PHONY: test quick-test fmt fmt-check check bench website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler fuzz-emitter fuzz-emitter-sequence \
-        fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter
+        fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter \
+        claude
 
 # Detect LLVM 18 on macOS (Homebrew). Set LLVM_SYS_180_PREFIX if not already set.
 # On Linux, llvm-config-18 is usually in PATH and llvm-sys finds it automatically.
@@ -70,6 +71,11 @@ fuzz-structured-invalid:
 
 fuzz-structured-emitter:
 	cargo +nightly fuzz run structured_emitter -- -max_total_time=$(FUZZ_TIME)
+
+# Run Claude in a sandboxed environment.
+claude:
+	vibe --send "ln -fs ~/.claude/dot_claude_dot_json_should_have_been_here.json ~/.claude.json" \
+	     --send "IS_SANDBOX=1 claude --allow-dangerously-skip-permissions --dangerously-skip-permissions --append-system-prompt='You are running in a sandboxed debian environment, so feel free to install and remove packages as needed, etc. DO NOT destructively rewrite git history or do something crazy like sending an email.'"
 
 # Build the website.
 website:
