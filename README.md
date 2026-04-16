@@ -14,6 +14,28 @@ off-the-beaten path infrastructure as possible in favor of more pedestrian
 variants: git instead of jj, just ADRs without beads workflows, cargo instead
 of buck, etc.
 
+## Differences from Rue
+
+### Language
+
+- Stabilized anonymous struct methods
+
+### Language Tooling
+
+- Replaced custom x86-64 and AArch64 backends with LLVM (via inkwell)
+- Removed the custom linker in favor of the system linker (`cc`)
+- Replaced inline syscalls with libc-based platform abstraction
+
+### Infrastructure
+
+- Replaced jj with git
+- Replaced buck2 with cargo and vendored deps with crates.io
+- Removed reindeer (buck2 cargo integration)
+- Migrated fuzz testing from a custom harness to cargo-fuzz
+- Removed beads issue tracking in favor of plain ADRs
+- Shorter mangled symbol names to support macOS's default linker
+- Added a Makefile as the primary build/test entrypoint
+
 ## License
 
 Licensed under either of
