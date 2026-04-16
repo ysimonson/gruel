@@ -1472,91 +1472,72 @@ mod tests {
     }
 
     #[test]
-    fn test_unexpected_character_message() {
-        let error = CompileError::without_span(ErrorKind::UnexpectedCharacter('@'));
-        assert_eq!(error.to_string(), "unexpected character: @");
-    }
-
-    #[test]
-    fn test_unexpected_token_message() {
-        let error = CompileError::without_span(ErrorKind::UnexpectedToken {
-            expected: Cow::Borrowed("identifier"),
-            found: Cow::Borrowed("'+'"),
-        });
-        assert_eq!(error.to_string(), "expected identifier, found '+'");
-    }
-
-    #[test]
-    fn test_unexpected_eof_message() {
-        let error = CompileError::without_span(ErrorKind::UnexpectedEof {
-            expected: Cow::Borrowed("'}'"),
-        });
-        assert_eq!(error.to_string(), "unexpected end of file, expected '}'");
-    }
-
-    #[test]
-    fn test_parse_error_message() {
-        let error =
-            CompileError::without_span(ErrorKind::ParseError("custom parse error".to_string()));
-        assert_eq!(error.to_string(), "custom parse error");
-    }
-
-    #[test]
-    fn test_undefined_variable_message() {
-        let error = CompileError::without_span(ErrorKind::UndefinedVariable("foo".to_string()));
-        assert_eq!(error.to_string(), "undefined variable 'foo'");
-    }
-
-    #[test]
-    fn test_undefined_function_message() {
-        let error = CompileError::without_span(ErrorKind::UndefinedFunction("bar".to_string()));
-        assert_eq!(error.to_string(), "undefined function 'bar'");
-    }
-
-    #[test]
-    fn test_assign_to_immutable_message() {
-        let error = CompileError::without_span(ErrorKind::AssignToImmutable("x".to_string()));
-        assert_eq!(error.to_string(), "cannot assign to immutable variable 'x'");
-    }
-
-    #[test]
-    fn test_unknown_type_message() {
-        let error = CompileError::without_span(ErrorKind::UnknownType("Foo".to_string()));
-        assert_eq!(error.to_string(), "unknown type 'Foo'");
-    }
-
-    #[test]
-    fn test_type_mismatch_message() {
-        let error = CompileError::without_span(ErrorKind::TypeMismatch {
-            expected: "i32".to_string(),
-            found: "bool".to_string(),
-        });
-        assert_eq!(error.to_string(), "type mismatch: expected i32, found bool");
-    }
-
-    #[test]
-    fn test_wrong_argument_count_singular() {
-        let error = CompileError::without_span(ErrorKind::WrongArgumentCount {
-            expected: 1,
-            found: 3,
-        });
-        assert_eq!(error.to_string(), "expected 1 argument, found 3");
-    }
-
-    #[test]
-    fn test_wrong_argument_count_plural() {
-        let error = CompileError::without_span(ErrorKind::WrongArgumentCount {
-            expected: 2,
-            found: 0,
-        });
-        assert_eq!(error.to_string(), "expected 2 arguments, found 0");
-    }
-
-    #[test]
-    fn test_link_error_message() {
-        let error =
-            CompileError::without_span(ErrorKind::LinkError("undefined symbol".to_string()));
-        assert_eq!(error.to_string(), "link error: undefined symbol");
+    fn test_error_messages() {
+        let cases: Vec<(ErrorKind, &str)> = vec![
+            (
+                ErrorKind::UnexpectedCharacter('@'),
+                "unexpected character: @",
+            ),
+            (
+                ErrorKind::UnexpectedToken {
+                    expected: Cow::Borrowed("identifier"),
+                    found: Cow::Borrowed("'+'"),
+                },
+                "expected identifier, found '+'",
+            ),
+            (
+                ErrorKind::UnexpectedEof {
+                    expected: Cow::Borrowed("'}'"),
+                },
+                "unexpected end of file, expected '}'",
+            ),
+            (
+                ErrorKind::ParseError("custom parse error".into()),
+                "custom parse error",
+            ),
+            (
+                ErrorKind::UndefinedVariable("foo".into()),
+                "undefined variable 'foo'",
+            ),
+            (
+                ErrorKind::UndefinedFunction("bar".into()),
+                "undefined function 'bar'",
+            ),
+            (
+                ErrorKind::AssignToImmutable("x".into()),
+                "cannot assign to immutable variable 'x'",
+            ),
+            (ErrorKind::UnknownType("Foo".into()), "unknown type 'Foo'"),
+            (
+                ErrorKind::TypeMismatch {
+                    expected: "i32".into(),
+                    found: "bool".into(),
+                },
+                "type mismatch: expected i32, found bool",
+            ),
+            (
+                ErrorKind::WrongArgumentCount {
+                    expected: 1,
+                    found: 3,
+                },
+                "expected 1 argument, found 3",
+            ),
+            (
+                ErrorKind::WrongArgumentCount {
+                    expected: 2,
+                    found: 0,
+                },
+                "expected 2 arguments, found 0",
+            ),
+            (
+                ErrorKind::LinkError("undefined symbol".into()),
+                "link error: undefined symbol",
+            ),
+        ];
+        for (kind, expected) in cases {
+            let error = CompileError::without_span(kind);
+            assert_eq!(error.to_string(), expected);
+        }
     }
 
     #[test]
@@ -1587,28 +1568,23 @@ mod tests {
     }
 
     #[test]
-    fn test_diagnostic_not_empty_with_label() {
+    fn test_diagnostic_not_empty() {
+        // With label
         let mut diag = Diagnostic::new();
         diag.labels.push(Label::new("test", Span::new(0, 10)));
         assert!(!diag.is_empty());
-    }
 
-    #[test]
-    fn test_diagnostic_not_empty_with_note() {
+        // With note
         let mut diag = Diagnostic::new();
         diag.notes.push(Note::new("test note"));
         assert!(!diag.is_empty());
-    }
 
-    #[test]
-    fn test_diagnostic_not_empty_with_help() {
+        // With help
         let mut diag = Diagnostic::new();
         diag.helps.push(Help::new("test help"));
         assert!(!diag.is_empty());
-    }
 
-    #[test]
-    fn test_diagnostic_not_empty_with_suggestion() {
+        // With suggestion
         let mut diag = Diagnostic::new();
         diag.suggestions
             .push(Suggestion::new("try this", Span::new(0, 10), "replacement"));
@@ -2069,91 +2045,76 @@ mod tests {
     }
 
     #[test]
-    fn test_error_kind_code_lexer() {
-        assert_eq!(
-            ErrorKind::UnexpectedCharacter('@').code(),
-            ErrorCode::UNEXPECTED_CHARACTER
-        );
-        assert_eq!(ErrorKind::InvalidInteger.code(), ErrorCode::INVALID_INTEGER);
-        assert_eq!(
-            ErrorKind::InvalidStringEscape('n').code(),
-            ErrorCode::INVALID_STRING_ESCAPE
-        );
-        assert_eq!(
-            ErrorKind::UnterminatedString.code(),
-            ErrorCode::UNTERMINATED_STRING
-        );
-    }
-
-    #[test]
-    fn test_error_kind_code_parser() {
-        assert_eq!(
-            ErrorKind::UnexpectedToken {
-                expected: "identifier".into(),
-                found: "+".into()
-            }
-            .code(),
-            ErrorCode::UNEXPECTED_TOKEN
-        );
-        assert_eq!(
-            ErrorKind::UnexpectedEof {
-                expected: "}".into()
-            }
-            .code(),
-            ErrorCode::UNEXPECTED_EOF
-        );
-        assert_eq!(
-            ErrorKind::ParseError("custom error".into()).code(),
-            ErrorCode::PARSE_ERROR
-        );
-    }
-
-    #[test]
-    fn test_error_kind_code_semantic() {
-        assert_eq!(
-            ErrorKind::NoMainFunction.code(),
-            ErrorCode::NO_MAIN_FUNCTION
-        );
-        assert_eq!(
-            ErrorKind::UndefinedVariable("x".into()).code(),
-            ErrorCode::UNDEFINED_VARIABLE
-        );
-        assert_eq!(
-            ErrorKind::UndefinedFunction("foo".into()).code(),
-            ErrorCode::UNDEFINED_FUNCTION
-        );
-        assert_eq!(
-            ErrorKind::TypeMismatch {
-                expected: "i32".into(),
-                found: "bool".into()
-            }
-            .code(),
-            ErrorCode::TYPE_MISMATCH
-        );
-    }
-
-    #[test]
-    fn test_error_kind_code_control_flow() {
-        assert_eq!(
-            ErrorKind::BreakOutsideLoop.code(),
-            ErrorCode::BREAK_OUTSIDE_LOOP
-        );
-        assert_eq!(
-            ErrorKind::ContinueOutsideLoop.code(),
-            ErrorCode::CONTINUE_OUTSIDE_LOOP
-        );
-    }
-
-    #[test]
-    fn test_error_kind_code_internal() {
-        assert_eq!(
-            ErrorKind::InternalError("bug".into()).code(),
-            ErrorCode::INTERNAL_ERROR
-        );
-        assert_eq!(
-            ErrorKind::InternalCodegenError("codegen bug".into()).code(),
-            ErrorCode::INTERNAL_CODEGEN_ERROR
-        );
+    fn test_error_kind_codes() {
+        let cases: Vec<(ErrorKind, ErrorCode)> = vec![
+            // Lexer
+            (
+                ErrorKind::UnexpectedCharacter('@'),
+                ErrorCode::UNEXPECTED_CHARACTER,
+            ),
+            (ErrorKind::InvalidInteger, ErrorCode::INVALID_INTEGER),
+            (
+                ErrorKind::InvalidStringEscape('n'),
+                ErrorCode::INVALID_STRING_ESCAPE,
+            ),
+            (
+                ErrorKind::UnterminatedString,
+                ErrorCode::UNTERMINATED_STRING,
+            ),
+            // Parser
+            (
+                ErrorKind::UnexpectedToken {
+                    expected: "identifier".into(),
+                    found: "+".into(),
+                },
+                ErrorCode::UNEXPECTED_TOKEN,
+            ),
+            (
+                ErrorKind::UnexpectedEof {
+                    expected: "}".into(),
+                },
+                ErrorCode::UNEXPECTED_EOF,
+            ),
+            (
+                ErrorKind::ParseError("custom error".into()),
+                ErrorCode::PARSE_ERROR,
+            ),
+            // Semantic
+            (ErrorKind::NoMainFunction, ErrorCode::NO_MAIN_FUNCTION),
+            (
+                ErrorKind::UndefinedVariable("x".into()),
+                ErrorCode::UNDEFINED_VARIABLE,
+            ),
+            (
+                ErrorKind::UndefinedFunction("foo".into()),
+                ErrorCode::UNDEFINED_FUNCTION,
+            ),
+            (
+                ErrorKind::TypeMismatch {
+                    expected: "i32".into(),
+                    found: "bool".into(),
+                },
+                ErrorCode::TYPE_MISMATCH,
+            ),
+            // Control flow
+            (ErrorKind::BreakOutsideLoop, ErrorCode::BREAK_OUTSIDE_LOOP),
+            (
+                ErrorKind::ContinueOutsideLoop,
+                ErrorCode::CONTINUE_OUTSIDE_LOOP,
+            ),
+            // Internal
+            (
+                ErrorKind::InternalError("bug".into()),
+                ErrorCode::INTERNAL_ERROR,
+            ),
+            (
+                ErrorKind::InternalCodegenError("codegen bug".into()),
+                ErrorCode::INTERNAL_CODEGEN_ERROR,
+            ),
+        ];
+        for (kind, expected_code) in cases {
+            assert_eq!(kind.code(), expected_code, "wrong code for: {kind}");
+        }
     }
 
     #[test]

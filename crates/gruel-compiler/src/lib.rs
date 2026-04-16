@@ -7,13 +7,13 @@
 //!
 //! # Diagnostic Formatting
 //!
-//! The [`DiagnosticFormatter`] provides a clean API for formatting errors and warnings:
+//! The [`MultiFileFormatter`] provides a clean API for formatting errors and warnings:
 //!
 //! ```ignore
-//! use gruel_compiler::{DiagnosticFormatter, SourceInfo};
+//! use gruel_compiler::{MultiFileFormatter, SourceInfo, FileId};
 //!
-//! let source_info = SourceInfo::new(&source, "example.gruel");
-//! let formatter = DiagnosticFormatter::new(&source_info);
+//! let sources = vec![(FileId::new(1), SourceInfo::new(&source, "example.gruel"))];
+//! let formatter = MultiFileFormatter::new(sources);
 //!
 //! // Format an error
 //! let error_output = formatter.format_error(&error);
@@ -35,8 +35,8 @@ use rayon::prelude::*;
 use tracing::{info, info_span};
 
 pub use diagnostic::{
-    ColorChoice, DiagnosticFormatter, JsonDiagnostic, JsonDiagnosticFormatter, JsonSpan,
-    JsonSuggestion, MultiFileFormatter, MultiFileJsonFormatter, SourceInfo,
+    ColorChoice, JsonDiagnostic, JsonSpan, JsonSuggestion, MultiFileFormatter,
+    MultiFileJsonFormatter, SourceInfo,
 };
 
 use std::io::Write;

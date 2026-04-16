@@ -6,10 +6,12 @@
 //! # Example
 //!
 //! ```ignore
-//! use gruel_compiler::{DiagnosticFormatter, SourceInfo};
+//! use gruel_compiler::{MultiFileFormatter, SourceInfo, FileId};
 //!
-//! let source_info = SourceInfo::new(&source, "example.gruel");
-//! let formatter = DiagnosticFormatter::new(&source_info);
+//! let sources = vec![
+//!     (FileId::new(1), SourceInfo::new(&source, "example.gruel")),
+//! ];
+//! let formatter = MultiFileFormatter::new(sources);
 //!
 //! // Format an error
 //! let error_output = formatter.format_error(&error);
@@ -61,234 +63,15 @@ pub enum ColorChoice {
     Never,
 }
 
-/// Formatter for compiler diagnostics.
-///
-/// Provides methods to format compilation errors and warnings into
-/// human-readable strings with annotated source snippets.
-pub struct DiagnosticFormatter<'a> {
-    source_info: &'a SourceInfo<'a>,
-    renderer: Renderer,
-}
-
-impl<'a> DiagnosticFormatter<'a> {
-    /// Create a new diagnostic formatter for the given source info.
-    ///
-    /// By default, uses automatic color detection based on whether stderr is a terminal.
-    pub fn new(source_info: &'a SourceInfo<'a>) -> Self {
-        Self::with_color_choice(source_info, ColorChoice::Auto)
-    }
-
-    /// Create a new diagnostic formatter with explicit color choice.
-    pub fn with_color_choice(source_info: &'a SourceInfo<'a>, color_choice: ColorChoice) -> Self {
-        let use_color = match color_choice {
-            ColorChoice::Auto => std::io::stderr().is_terminal(),
-            ColorChoice::Always => true,
-            ColorChoice::Never => false,
-        };
-        let renderer = if use_color {
-            Renderer::styled()
-        } else {
-            Renderer::plain()
-        };
-        Self {
-            source_info,
-            renderer,
-        }
-    }
-
-    /// Format a compilation error into a string.
-    ///
-    /// The error is formatted with its error code, e.g.:
-    /// `error[E0206]: type mismatch: expected i32, found bool`
-    ///
-    /// Internal compiler errors (ICEs) receive special formatting with
-    /// bug report instructions.
-    pub fn format_error(&self, error: &CompileError) -> String {
-        // Format with error code: error[E0XXX]: message
-        let message_with_code = format!("[{}]: {}", error.kind.code(), error.kind);
-
-        // Check if this is an internal compiler error
-        let is_ice = matches!(
-            error.kind.code(),
-            ErrorCode::INTERNAL_ERROR | ErrorCode::INTERNAL_CODEGEN_ERROR
-        );
-
-        let mut output = self.format_diagnostic_impl(
-            Level::Error,
-            &message_with_code,
-            error.span(),
-            error.diagnostic(),
-        );
-
-        // Add ICE-specific notes and helps
-        if is_ice {
-            output.push_str("\nnote: this is a bug in the Gruel compiler\n");
-            output.push_str(
-                "help: please report this issue at https://github.com/gruel-language/gruel/issues\n",
-            );
-        }
-
-        output
-    }
-
-    /// Format multiple compilation errors into a string.
-    ///
-    /// Each error is formatted on its own line(s). A summary line is added at
-    /// the end if there are multiple errors showing the total count.
-    pub fn format_errors(&self, errors: &CompileErrors) -> String {
-        if errors.is_empty() {
-            return String::new();
-        }
-
-        let mut output = String::new();
-        for error in errors.iter() {
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str(&self.format_error(error));
-        }
-
-        // Add summary line if multiple errors
-        if errors.len() > 1 {
-            output.push_str(&format!(
-                "\nerror: aborting due to {} previous errors\n",
-                errors.len()
-            ));
-        }
-
-        output
-    }
-
-    /// Format all warnings, adding line numbers when multiple variables share the same name.
-    ///
-    /// This improves error messages by disambiguating when there are multiple unused
-    /// variables with the same name (e.g., shadowed variables in different scopes).
-    pub fn format_warnings(&self, warnings: &[CompileWarning]) -> String {
-        if warnings.is_empty() {
-            return String::new();
-        }
-
-        // Count occurrences of each unused variable name
-        let mut var_name_counts: HashMap<&str, usize> = HashMap::new();
-        for warning in warnings {
-            if let Some(name) = warning.kind.unused_variable_name() {
-                *var_name_counts.entry(name).or_insert(0) += 1;
-            }
-        }
-
-        // Format each warning, adding line number if there are duplicates
-        let mut output = String::new();
-        for warning in warnings {
-            let needs_line_number = warning
-                .kind
-                .unused_variable_name()
-                .is_some_and(|name| var_name_counts.get(name).copied().unwrap_or(0) > 1);
-
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str(&self.format_warning_internal(warning, needs_line_number));
-        }
-        output
-    }
-
-    /// Format a single warning into a string.
-    pub fn format_warning(&self, warning: &CompileWarning) -> String {
-        self.format_warning_internal(warning, false)
-    }
-
-    fn format_warning_internal(
-        &self,
-        warning: &CompileWarning,
-        include_line_number: bool,
-    ) -> String {
-        // Get the message, optionally with line number for disambiguation
-        let message = if include_line_number {
-            if let Some(span) = warning.span() {
-                let line = span.line_number(self.source_info.source);
-                warning.kind.format_with_line(Some(line))
-            } else {
-                warning.to_string()
-            }
-        } else {
-            warning.to_string()
-        };
-
-        self.format_diagnostic_impl(
-            Level::Warning,
-            &message,
-            warning.span(),
-            warning.diagnostic(),
-        )
-    }
-
-    /// Internal implementation for formatting diagnostics.
-    fn format_diagnostic_impl(
-        &self,
-        level: Level,
-        message: &str,
-        span: Option<Span>,
-        diagnostic: &Diagnostic,
-    ) -> String {
-        // For diagnostics without a span, just format the message with any footers
-        let Some(span) = span else {
-            let mut report = level.title(message);
-            // Add notes and helps as footers
-            for note in &diagnostic.notes {
-                report = report.footer(Level::Note.title(note.0.as_str()));
-            }
-            for help in &diagnostic.helps {
-                report = report.footer(Level::Help.title(help.0.as_str()));
-            }
-            return format!("{}", self.renderer.render(report));
-        };
-
-        // Validate and clamp the span to prevent annotate-snippets panics
-        let source_len = self.source_info.source.len();
-        let start = (span.start as usize).min(source_len);
-        let end = (span.end as usize).min(source_len).max(start);
-
-        // Build snippet with primary annotation
-        let mut snippet = Snippet::source(self.source_info.source)
-            .origin(self.source_info.path)
-            .fold(true)
-            .annotation(level.span(start..end));
-
-        // Add secondary labels as Info annotations
-        for label in &diagnostic.labels {
-            let label_start = (label.span.start as usize).min(source_len);
-            let label_end = (label.span.end as usize).min(source_len).max(label_start);
-            snippet = snippet.annotation(
-                Level::Info
-                    .span(label_start..label_end)
-                    .label(&label.message),
-            );
-        }
-
-        let mut report = level.title(message).snippet(snippet);
-
-        // Add notes and helps as footers
-        for note in &diagnostic.notes {
-            report = report.footer(Level::Note.title(note.0.as_str()));
-        }
-        for help in &diagnostic.helps {
-            report = report.footer(Level::Help.title(help.0.as_str()));
-        }
-
-        format!("{}", self.renderer.render(report))
-    }
-}
-
 // ============================================================================
-// Multi-File Diagnostic Formatter
+// Text Diagnostic Formatter
 // ============================================================================
 
-/// A diagnostic formatter that supports diagnostics spanning multiple source files.
+/// A diagnostic formatter that supports diagnostics spanning one or more source files.
 ///
-/// While [`DiagnosticFormatter`] works with a single source file, this formatter
-/// can render errors that reference multiple files. This is useful for multi-file
-/// compilation where an error might reference a type defined in one file while
-/// being used in another.
+/// Renders errors and warnings as human-readable text with annotated source
+/// snippets. For multi-file compilation, errors that reference multiple files
+/// will show each file's snippet separately.
 ///
 /// # Example
 ///
@@ -747,191 +530,14 @@ impl JsonDiagnostic {
     }
 }
 
+// ============================================================================
+// JSON Diagnostic Formatter
+// ============================================================================
+
 /// Formats diagnostics as JSON for machine consumption.
 ///
-/// Use this formatter when outputting to tools like editors, CI systems,
-/// or any context requiring machine-readable output.
-pub struct JsonDiagnosticFormatter<'a> {
-    source_info: &'a SourceInfo<'a>,
-}
-
-impl<'a> JsonDiagnosticFormatter<'a> {
-    /// Create a new JSON diagnostic formatter.
-    pub fn new(source_info: &'a SourceInfo<'a>) -> Self {
-        Self { source_info }
-    }
-
-    /// Calculate line and column for a byte offset.
-    fn offset_to_line_col(&self, offset: u32) -> (u32, u32) {
-        let offset = offset as usize;
-        let source = self.source_info.source;
-        let mut line = 1u32;
-        let mut col = 1u32;
-        for (i, ch) in source.char_indices() {
-            if i >= offset {
-                break;
-            }
-            if ch == '\n' {
-                line += 1;
-                col = 1;
-            } else {
-                col += 1;
-            }
-        }
-        (line, col)
-    }
-
-    /// Format a compile error as JSON.
-    pub fn format_error(&self, error: &CompileError) -> JsonDiagnostic {
-        let diag = error.diagnostic();
-        let (line, col) = error
-            .span()
-            .map(|s| self.offset_to_line_col(s.start))
-            .unwrap_or((1, 1));
-
-        let primary_span = error.span().map(|span| JsonSpan {
-            file: self.source_info.path.to_string(),
-            start: span.start,
-            end: span.end,
-            line,
-            column: col,
-            label: None,
-            primary: true,
-        });
-
-        let secondary_spans: Vec<JsonSpan> = diag
-            .labels
-            .iter()
-            .map(|label| {
-                let (line, col) = self.offset_to_line_col(label.span.start);
-                JsonSpan {
-                    file: self.source_info.path.to_string(),
-                    start: label.span.start,
-                    end: label.span.end,
-                    line,
-                    column: col,
-                    label: Some(label.message.clone()),
-                    primary: false,
-                }
-            })
-            .collect();
-
-        let mut spans: Vec<JsonSpan> = primary_span.into_iter().collect();
-        spans.extend(secondary_spans);
-
-        let suggestions: Vec<JsonSuggestion> = diag
-            .suggestions
-            .iter()
-            .map(|s| JsonSuggestion {
-                message: s.message.clone(),
-                file: self.source_info.path.to_string(),
-                start: s.span.start,
-                end: s.span.end,
-                replacement: s.replacement.clone(),
-                applicability: s.applicability.to_string(),
-            })
-            .collect();
-
-        JsonDiagnostic {
-            code: format!("{}", error.kind.code()),
-            message: format!("{}", error.kind),
-            severity: "error",
-            spans,
-            suggestions,
-            notes: diag.notes.iter().map(|n| n.0.clone()).collect(),
-            helps: diag.helps.iter().map(|h| h.0.clone()).collect(),
-        }
-    }
-
-    /// Format a compile warning as JSON.
-    pub fn format_warning(&self, warning: &CompileWarning) -> JsonDiagnostic {
-        let diag = warning.diagnostic();
-        let (line, col) = warning
-            .span()
-            .map(|s| self.offset_to_line_col(s.start))
-            .unwrap_or((1, 1));
-
-        let primary_span = warning.span().map(|span| JsonSpan {
-            file: self.source_info.path.to_string(),
-            start: span.start,
-            end: span.end,
-            line,
-            column: col,
-            label: None,
-            primary: true,
-        });
-
-        let secondary_spans: Vec<JsonSpan> = diag
-            .labels
-            .iter()
-            .map(|label| {
-                let (line, col) = self.offset_to_line_col(label.span.start);
-                JsonSpan {
-                    file: self.source_info.path.to_string(),
-                    start: label.span.start,
-                    end: label.span.end,
-                    line,
-                    column: col,
-                    label: Some(label.message.clone()),
-                    primary: false,
-                }
-            })
-            .collect();
-
-        let mut spans: Vec<JsonSpan> = primary_span.into_iter().collect();
-        spans.extend(secondary_spans);
-
-        let suggestions: Vec<JsonSuggestion> = diag
-            .suggestions
-            .iter()
-            .map(|s| JsonSuggestion {
-                message: s.message.clone(),
-                file: self.source_info.path.to_string(),
-                start: s.span.start,
-                end: s.span.end,
-                replacement: s.replacement.clone(),
-                applicability: s.applicability.to_string(),
-            })
-            .collect();
-
-        JsonDiagnostic {
-            code: String::new(), // Warnings don't have codes yet
-            message: format!("{}", warning.kind),
-            severity: "warning",
-            spans,
-            suggestions,
-            notes: diag.notes.iter().map(|n| n.0.clone()).collect(),
-            helps: diag.helps.iter().map(|h| h.0.clone()).collect(),
-        }
-    }
-
-    /// Format multiple errors as a JSON array string.
-    pub fn format_errors(&self, errors: &CompileErrors) -> String {
-        let diagnostics: Vec<String> = errors
-            .iter()
-            .map(|e| self.format_error(e).to_json())
-            .collect();
-        format!("[{}]", diagnostics.join(","))
-    }
-
-    /// Format multiple warnings as a JSON array string.
-    pub fn format_warnings(&self, warnings: &[CompileWarning]) -> String {
-        let diagnostics: Vec<String> = warnings
-            .iter()
-            .map(|w| self.format_warning(w).to_json())
-            .collect();
-        format!("[{}]", diagnostics.join(","))
-    }
-}
-
-// ============================================================================
-// Multi-File JSON Diagnostic Formatter
-// ============================================================================
-
-/// Formats diagnostics as JSON with support for multiple source files.
-///
-/// This formatter maps FileIds to their source information, enabling correct
-/// file path and line/column output for diagnostics spanning multiple files.
+/// Maps FileIds to their source information, enabling correct file path and
+/// line/column output for diagnostics spanning one or more files.
 ///
 /// # Example
 ///
@@ -1161,7 +767,7 @@ mod tests {
     fn test_format_error_with_span() {
         let source = "fn main() -> i32 { 1 + true }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::new(
             ErrorKind::TypeMismatch {
@@ -1184,7 +790,7 @@ mod tests {
     fn test_format_error_without_span() {
         let source = "fn foo() -> i32 { 42 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::without_span(ErrorKind::NoMainFunction);
 
@@ -1198,7 +804,7 @@ mod tests {
     fn test_format_warning() {
         let source = "fn main() -> i32 { let x = 42; 0 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let warning = CompileWarning::new(
             WarningKind::UnusedVariable("x".to_string()),
@@ -1214,7 +820,7 @@ mod tests {
     fn test_format_warnings_with_duplicates() {
         let source = "fn main() -> i32 {\n    let x = 1;\n    let x = 2;\n    0\n}";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let warnings = vec![
             CompileWarning::new(
@@ -1236,7 +842,7 @@ mod tests {
     fn test_format_warnings_empty() {
         let source = "fn main() -> i32 { 42 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let output = formatter.format_warnings(&[]);
         assert!(output.is_empty());
@@ -1246,7 +852,7 @@ mod tests {
     fn test_format_error_with_help() {
         let source = "fn main() -> i32 { x = 1; 0 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::new(
             ErrorKind::AssignToImmutable("x".to_string()),
@@ -1263,7 +869,7 @@ mod tests {
     fn test_format_error_with_label() {
         let source = "fn main() -> i32 { if true { 1 } else { false } }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::new(
             ErrorKind::TypeMismatch {
@@ -1282,7 +888,7 @@ mod tests {
     fn test_format_errors_empty() {
         let source = "fn main() -> i32 { 42 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let errors = CompileErrors::new();
         let output = formatter.format_errors(&errors);
@@ -1293,7 +899,7 @@ mod tests {
     fn test_format_errors_single() {
         let source = "fn main() -> i32 { 1 + true }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let mut errors = CompileErrors::new();
         errors.push(CompileError::new(
@@ -1314,7 +920,7 @@ mod tests {
     fn test_format_errors_multiple() {
         let source = "fn main() -> i32 {\n    let x = 1 + true;\n    let y = false - 1;\n    0\n}";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let mut errors = CompileErrors::new();
         errors.push(CompileError::new(
@@ -1344,7 +950,10 @@ mod tests {
     fn test_color_choice_never() {
         let source = "fn main() -> i32 { 1 + true }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::with_color_choice(&source_info, ColorChoice::Never);
+        let formatter = MultiFileFormatter::with_color_choice(
+            [(FileId::DEFAULT, source_info)],
+            ColorChoice::Never,
+        );
 
         let error = CompileError::new(
             ErrorKind::TypeMismatch {
@@ -1364,7 +973,7 @@ mod tests {
     fn test_format_error_with_invalid_span() {
         let source = "fn main() -> i32 { 42 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         // Span that extends beyond source length
         let error = CompileError::new(
@@ -1385,7 +994,7 @@ mod tests {
     fn test_format_error_with_reversed_span() {
         let source = "fn main() -> i32 { 42 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         // Span with start > end (should be clamped so start == end)
         let error = CompileError::new(
@@ -1406,7 +1015,10 @@ mod tests {
     fn test_color_choice_always() {
         let source = "fn main() -> i32 { 1 + true }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::with_color_choice(&source_info, ColorChoice::Always);
+        let formatter = MultiFileFormatter::with_color_choice(
+            [(FileId::DEFAULT, source_info)],
+            ColorChoice::Always,
+        );
 
         let error = CompileError::new(
             ErrorKind::TypeMismatch {
@@ -1426,7 +1038,7 @@ mod tests {
     fn test_ice_formatting() {
         let source = "fn main() -> i32 { 42 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::without_span(ErrorKind::InternalError(
             "unexpected type in codegen".to_string(),
@@ -1446,7 +1058,7 @@ mod tests {
     fn test_ice_codegen_formatting() {
         let source = "fn main() -> i32 { 42 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::without_span(ErrorKind::InternalCodegenError(
             "failed to emit instruction".to_string(),
@@ -1465,7 +1077,7 @@ mod tests {
     fn test_non_ice_no_extra_formatting() {
         let source = "fn main() -> i32 { 1 + true }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = DiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::new(
             ErrorKind::TypeMismatch {
@@ -1489,7 +1101,7 @@ mod tests {
     fn test_json_format_error() {
         let source = "fn main() -> i32 { 1 + true }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = JsonDiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileJsonFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::new(
             ErrorKind::TypeMismatch {
@@ -1515,7 +1127,7 @@ mod tests {
         let source = "fn main() -> i32 {\n    1 + true\n}";
         //                            ^--- line 2, col 9 (0-indexed: 23)
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = JsonDiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileJsonFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::new(
             ErrorKind::TypeMismatch {
@@ -1534,7 +1146,7 @@ mod tests {
     fn test_json_format_error_with_suggestion() {
         let source = "fn main() -> i32 { x = 1; 0 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = JsonDiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileJsonFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::new(
             ErrorKind::AssignToImmutable("x".to_string()),
@@ -1557,7 +1169,7 @@ mod tests {
     fn test_json_format_warning() {
         let source = "fn main() -> i32 { let x = 42; 0 }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = JsonDiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileJsonFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let warning = CompileWarning::new(
             WarningKind::UnusedVariable("x".to_string()),
@@ -1573,7 +1185,7 @@ mod tests {
     fn test_json_to_string() {
         let source = "fn main() -> i32 { 1 + true }";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = JsonDiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileJsonFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let error = CompileError::new(
             ErrorKind::TypeMismatch {
@@ -1598,7 +1210,7 @@ mod tests {
     fn test_json_format_errors_array() {
         let source = "fn main() -> i32 {\n    1 + true\n}";
         let source_info = SourceInfo::new(source, "test.gruel");
-        let formatter = JsonDiagnosticFormatter::new(&source_info);
+        let formatter = MultiFileJsonFormatter::new([(FileId::DEFAULT, source_info)]);
 
         let mut errors = CompileErrors::new();
         errors.push(CompileError::new(
