@@ -33,8 +33,8 @@ fmt:
 
 # Check formatting without making changes (for CI).
 check:
-	cargo check --workspace --exclude gruel-runtime
-	cargo clippy --workspace --exclude gruel-runtime
+	cargo check --workspace --all-targets --exclude gruel-runtime
+	cargo clippy --workspace --all-targets --exclude gruel-runtime
 	cargo fmt --all -- --check
 
 # Run benchmarks. Pass ARGS="--iterations 10" etc. to forward options.
