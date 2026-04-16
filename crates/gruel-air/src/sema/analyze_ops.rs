@@ -2854,9 +2854,10 @@ impl<'a> Sema<'a> {
                     // Try to evaluate the argument at compile time (using the full
                     // stateful interpreter so function call results qualify as comptime).
                     let arg_span = self.rir.get(arg.value).span;
-                    let is_comptime_known =
-                        self.try_evaluate_comptime_arg(arg.value, ctx, arg_span).is_some()
-                            || self.is_comptime_type_var(arg.value, ctx);
+                    let is_comptime_known = self
+                        .try_evaluate_comptime_arg(arg.value, ctx, arg_span)
+                        .is_some()
+                        || self.is_comptime_type_var(arg.value, ctx);
                     if !is_comptime_known {
                         let param_name = self.interner.resolve(&param_names[i]).to_string();
                         return Err(CompileError::new(

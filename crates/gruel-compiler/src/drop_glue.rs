@@ -396,8 +396,9 @@ fn create_array_drop_glue_function(
     // All parameters are passed by value (normal mode)
     let param_modes = vec![false; num_param_slots as usize];
     // Each element contributes element_slot_count slots of element_type
-    let param_slot_types: Vec<Type> =
-        std::iter::repeat(element_type).take(num_param_slots as usize).collect();
+    let param_slot_types: Vec<Type> = std::iter::repeat(element_type)
+        .take(num_param_slots as usize)
+        .collect();
 
     AnalyzedFunction {
         name: fn_name,

@@ -899,10 +899,7 @@ fn handle_emit_multi_file(
     let needs_later_stages = options.emit_stages.iter().any(|s| {
         matches!(
             s,
-            EmitStage::Rir
-                | EmitStage::Air
-                | EmitStage::Cfg
-                | EmitStage::Asm
+            EmitStage::Rir | EmitStage::Air | EmitStage::Cfg | EmitStage::Asm
         )
     });
 
@@ -1743,10 +1740,7 @@ mod tests {
 
     #[test]
     fn emit_stage_all_names() {
-        assert_eq!(
-            EmitStage::all_names(),
-            "tokens, ast, rir, air, cfg, asm"
-        );
+        assert_eq!(EmitStage::all_names(), "tokens, ast, rir, air, cfg, asm");
     }
 
     // ========== LogLevel FromStr tests ==========

@@ -117,7 +117,10 @@ pub fn abi_slot_count(ty: Type, type_pool: &TypeInternPool) -> u32 {
     match ty.kind() {
         TypeKind::Struct(id) => {
             let def = type_pool.struct_def(id);
-            def.fields.iter().map(|f| abi_slot_count(f.ty, type_pool)).sum()
+            def.fields
+                .iter()
+                .map(|f| abi_slot_count(f.ty, type_pool))
+                .sum()
         }
         TypeKind::Array(id) => {
             let (elem_ty, len) = type_pool.array_def(id);

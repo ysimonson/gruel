@@ -27,8 +27,8 @@ use gruel_target::{Arch, Os};
 use lasso::Spur;
 
 use super::context::{
-    AnalysisContext, AnalysisResult, BuiltinMethodContext, ComptimeHeapItem, ConstValue,
-    ParamInfo, ReceiverInfo, StringReceiverStorage,
+    AnalysisContext, AnalysisResult, BuiltinMethodContext, ComptimeHeapItem, ConstValue, ParamInfo,
+    ReceiverInfo, StringReceiverStorage,
 };
 use super::{AnalyzedFunction, InferenceContext, MethodInfo, Sema, SemaOutput};
 use crate::inference::{
@@ -1272,7 +1272,9 @@ impl<'a> Sema<'a> {
                     | ConstValue::BreakSignal
                     | ConstValue::ContinueSignal
                     | ConstValue::ReturnSignal => {
-                        unreachable!("control-flow signal or composite value in comptime_value_vars")
+                        unreachable!(
+                            "control-flow signal or composite value in comptime_value_vars"
+                        )
                     }
                 };
                 param_vars.insert(
@@ -3431,34 +3433,30 @@ impl<'a> Sema<'a> {
             InstData::BoolConst(value) => Some(ConstValue::Bool(*value)),
 
             // Unary negation: -expr
-            InstData::Neg { operand } => {
-                match self.try_evaluate_const(*operand)? {
-                    ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
-                    ConstValue::Bool(_)
-                    | ConstValue::Type(_)
-                    | ConstValue::Unit
-                    | ConstValue::Struct(_)
-                    | ConstValue::Array(_)
-                    | ConstValue::BreakSignal
-                    | ConstValue::ContinueSignal
-                    | ConstValue::ReturnSignal => None,
-                }
-            }
+            InstData::Neg { operand } => match self.try_evaluate_const(*operand)? {
+                ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
+                ConstValue::Bool(_)
+                | ConstValue::Type(_)
+                | ConstValue::Unit
+                | ConstValue::Struct(_)
+                | ConstValue::Array(_)
+                | ConstValue::BreakSignal
+                | ConstValue::ContinueSignal
+                | ConstValue::ReturnSignal => None,
+            },
 
             // Logical NOT: !expr
-            InstData::Not { operand } => {
-                match self.try_evaluate_const(*operand)? {
-                    ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
-                    ConstValue::Integer(_)
-                    | ConstValue::Type(_)
-                    | ConstValue::Unit
-                    | ConstValue::Struct(_)
-                    | ConstValue::Array(_)
-                    | ConstValue::BreakSignal
-                    | ConstValue::ContinueSignal
-                    | ConstValue::ReturnSignal => None,
-                }
-            }
+            InstData::Not { operand } => match self.try_evaluate_const(*operand)? {
+                ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
+                ConstValue::Integer(_)
+                | ConstValue::Type(_)
+                | ConstValue::Unit
+                | ConstValue::Struct(_)
+                | ConstValue::Array(_)
+                | ConstValue::BreakSignal
+                | ConstValue::ContinueSignal
+                | ConstValue::ReturnSignal => None,
+            },
 
             // Binary arithmetic operations
             InstData::Add { lhs, rhs } => {
@@ -4178,7 +4176,9 @@ impl<'a> Sema<'a> {
         let prev_steps = self.comptime_steps_used;
         self.comptime_steps_used = 0;
         let mut locals = ctx.comptime_value_vars.clone();
-        let result = self.evaluate_comptime_inst(inst_ref, &mut locals, ctx, outer_span).ok();
+        let result = self
+            .evaluate_comptime_inst(inst_ref, &mut locals, ctx, outer_span)
+            .ok();
         self.comptime_steps_used = prev_steps;
         // Filter out control-flow signals — they cannot be meaningful here.
         result.filter(|v| {
@@ -4211,22 +4211,18 @@ impl<'a> Sema<'a> {
         // BreakSignal/ContinueSignal mean break/continue outside a loop.
         // ReturnSignal means return outside a function (comptime block is not a function).
         match result {
-            ConstValue::BreakSignal | ConstValue::ContinueSignal => {
-                Err(CompileError::new(
-                    ErrorKind::ComptimeEvaluationFailed {
-                        reason: "break/continue outside a loop in comptime block".into(),
-                    },
-                    span,
-                ))
-            }
-            ConstValue::ReturnSignal => {
-                Err(CompileError::new(
-                    ErrorKind::ComptimeEvaluationFailed {
-                        reason: "return outside a function in comptime block".into(),
-                    },
-                    span,
-                ))
-            }
+            ConstValue::BreakSignal | ConstValue::ContinueSignal => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "break/continue outside a loop in comptime block".into(),
+                },
+                span,
+            )),
+            ConstValue::ReturnSignal => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "return outside a function in comptime block".into(),
+                },
+                span,
+            )),
             val => Ok(val),
         }
     }
@@ -4287,16 +4283,16 @@ impl<'a> Sema<'a> {
 
         match inst_data {
             // ── Literals ──────────────────────────────────────────────────────
-            InstData::IntConst(value) => i64::try_from(value)
-                .map(ConstValue::Integer)
-                .map_err(|_| {
+            InstData::IntConst(value) => {
+                i64::try_from(value).map(ConstValue::Integer).map_err(|_| {
                     CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
                             reason: "integer constant too large for comptime evaluation".into(),
                         },
                         inst_span,
                     )
-                }),
+                })
+            }
 
             InstData::BoolConst(value) => Ok(ConstValue::Bool(value)),
 
@@ -4331,23 +4327,53 @@ impl<'a> Sema<'a> {
 
             // ── Binary arithmetic ─────────────────────────────────────────────
             InstData::Add { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
-                l.checked_add(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                l.checked_add(r)
+                    .map(ConstValue::Integer)
+                    .ok_or_else(|| overflow(inst_span))
             }
             InstData::Sub { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
-                l.checked_sub(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                l.checked_sub(r)
+                    .map(ConstValue::Integer)
+                    .ok_or_else(|| overflow(inst_span))
             }
             InstData::Mul { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
-                l.checked_mul(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                l.checked_mul(r)
+                    .map(ConstValue::Integer)
+                    .ok_or_else(|| overflow(inst_span))
             }
             InstData::Div { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 if r == 0 {
                     return Err(CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
@@ -4356,11 +4382,19 @@ impl<'a> Sema<'a> {
                         inst_span,
                     ));
                 }
-                l.checked_div(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+                l.checked_div(r)
+                    .map(ConstValue::Integer)
+                    .ok_or_else(|| overflow(inst_span))
             }
             InstData::Mod { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 if r == 0 {
                     return Err(CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
@@ -4369,7 +4403,9 @@ impl<'a> Sema<'a> {
                         inst_span,
                     ));
                 }
-                l.checked_rem(r).map(ConstValue::Integer).ok_or_else(|| overflow(inst_span))
+                l.checked_rem(r)
+                    .map(ConstValue::Integer)
+                    .ok_or_else(|| overflow(inst_span))
             }
 
             // ── Comparisons ───────────────────────────────────────────────────
@@ -4396,57 +4432,117 @@ impl<'a> Sema<'a> {
                 }
             }
             InstData::Lt { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 Ok(ConstValue::Bool(l < r))
             }
             InstData::Gt { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 Ok(ConstValue::Bool(l > r))
             }
             InstData::Le { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 Ok(ConstValue::Bool(l <= r))
             }
             InstData::Ge { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 Ok(ConstValue::Bool(l >= r))
             }
 
             // ── Logical ───────────────────────────────────────────────────────
             InstData::And { lhs, rhs } => {
-                let l = bool_val(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = bool_val(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = bool_val(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = bool_val(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 Ok(ConstValue::Bool(l && r))
             }
             InstData::Or { lhs, rhs } => {
-                let l = bool_val(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = bool_val(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = bool_val(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = bool_val(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 Ok(ConstValue::Bool(l || r))
             }
 
             // ── Bitwise ───────────────────────────────────────────────────────
             InstData::BitAnd { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 Ok(ConstValue::Integer(l & r))
             }
             InstData::BitOr { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 Ok(ConstValue::Integer(l | r))
             }
             InstData::BitXor { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 Ok(ConstValue::Integer(l ^ r))
             }
             InstData::Shl { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 if !(0..64).contains(&r) {
                     return Err(CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
@@ -4458,8 +4554,14 @@ impl<'a> Sema<'a> {
                 Ok(ConstValue::Integer(l << r))
             }
             InstData::Shr { lhs, rhs } => {
-                let l = int(self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?, inst_span)?;
-                let r = int(self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?, inst_span)?;
+                let l = int(
+                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let r = int(
+                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
                 if !(0..64).contains(&r) {
                     return Err(CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
@@ -4601,8 +4703,7 @@ impl<'a> Sema<'a> {
             InstData::Loop { cond, body } => {
                 const COMPTIME_MAX_STEPS: u64 = 1_000_000;
                 loop {
-                    let cond_val =
-                        self.evaluate_comptime_inst(cond, locals, ctx, outer_span)?;
+                    let cond_val = self.evaluate_comptime_inst(cond, locals, ctx, outer_span)?;
                     if !bool_val(cond_val, inst_span)? {
                         break;
                     }
@@ -4806,8 +4907,10 @@ impl<'a> Sema<'a> {
 
                 // Allocate a new heap item and return its index.
                 let heap_idx = self.comptime_heap.len() as u32;
-                self.comptime_heap
-                    .push(ComptimeHeapItem::Struct { struct_id, fields: field_values });
+                self.comptime_heap.push(ComptimeHeapItem::Struct {
+                    struct_id,
+                    fields: field_values,
+                });
                 Ok(ConstValue::Struct(heap_idx))
             }
 
@@ -4821,9 +4924,7 @@ impl<'a> Sema<'a> {
                             ComptimeHeapItem::Struct { struct_id, fields } => {
                                 (*struct_id, fields.clone())
                             }
-                            ComptimeHeapItem::Array(_) => {
-                                return Err(not_const(inst_span))
-                            }
+                            ComptimeHeapItem::Array(_) => return Err(not_const(inst_span)),
                         };
                         let struct_def = self.type_pool.struct_def(struct_id);
                         let field_name = self.interner.resolve(&field);
@@ -4872,9 +4973,7 @@ impl<'a> Sema<'a> {
                         // Clone elements to release heap borrow before error construction.
                         let elems = match &self.comptime_heap[heap_idx as usize] {
                             ComptimeHeapItem::Array(elems) => elems.clone(),
-                            ComptimeHeapItem::Struct { .. } => {
-                                return Err(not_const(inst_span))
-                            }
+                            ComptimeHeapItem::Struct { .. } => return Err(not_const(inst_span)),
                         };
                         if idx < 0 || idx as usize >= elems.len() {
                             return Err(CompileError::new(

@@ -12,13 +12,15 @@ use inkwell::OptimizationLevel;
 use inkwell::basic_block::BasicBlock as LlvmBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
+use inkwell::intrinsics::Intrinsic;
 use inkwell::module::Module;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target as LlvmTarget, TargetMachine,
 };
 use inkwell::types::BasicType;
-use inkwell::intrinsics::Intrinsic;
-use inkwell::values::{AggregateValueEnum, BasicValue, BasicValueEnum, FunctionValue, GlobalValue, PhiValue};
+use inkwell::values::{
+    AggregateValueEnum, BasicValue, BasicValueEnum, FunctionValue, GlobalValue, PhiValue,
+};
 use lasso::ThreadedRodeo;
 
 use crate::types::{abi_slot_count, gruel_type_to_llvm, gruel_type_to_llvm_param};
@@ -76,11 +78,24 @@ fn build_module<'ctx>(
 
     // Define each function body.
     for (cfg, fn_value) in &declared {
-        define_function(cfg, fn_value, context, &builder, &module, type_pool, strings, &string_globals, interner, &fn_map)?;
+        define_function(
+            cfg,
+            fn_value,
+            context,
+            &builder,
+            &module,
+            type_pool,
+            strings,
+            &string_globals,
+            interner,
+            &fn_map,
+        )?;
     }
 
     // Verify the module.
-    module.verify().map_err(|e| llvm_error(format!("LLVM module verification failed: {}", e)))?;
+    module
+        .verify()
+        .map_err(|e| llvm_error(format!("LLVM module verification failed: {}", e)))?;
 
     Ok(module)
 }
@@ -188,7 +203,8 @@ fn collect_param_types<'ctx>(
         } else {
             // Value params: emit one LLVM param per Gruel param, skipping
             // the intermediate ABI slots of multi-slot composites.
-            let ty = cfg.param_type(i as u32)
+            let ty = cfg
+                .param_type(i as u32)
                 .expect("param slot in range must have a type");
             let raw_slot_count = abi_slot_count(ty, type_pool);
             if raw_slot_count > 0 {
@@ -225,7 +241,8 @@ fn build_slot_to_llvm_param(cfg: &Cfg, type_pool: &TypeInternPool) -> Vec<u32> {
             llvm_idx += 1;
             i += 1;
         } else {
-            let ty = cfg.param_type(i as u32)
+            let ty = cfg
+                .param_type(i as u32)
                 .expect("param slot in range must have a type");
             let raw_slot_count = abi_slot_count(ty, type_pool);
             let slot_count = raw_slot_count.max(1) as usize;
@@ -366,7 +383,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
         let llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
             .expect("cannot alloca void-typed local");
-        let ptr = self.builder.build_alloca(llvm_ty, &format!("slot{}", slot))
+        let ptr = self
+            .builder
+            .build_alloca(llvm_ty, &format!("slot{}", slot))
             .expect("build_alloca failed");
 
         // Restore builder position.
@@ -384,7 +403,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         if let Some(f) = self.module.get_function(NAME) {
             return f;
         }
-        let fn_type = self.ctx.void_type().fn_type(&[self.ctx.i32_type().into()], false);
+        let fn_type = self
+            .ctx
+            .void_type()
+            .fn_type(&[self.ctx.i32_type().into()], false);
         let f = self.module.add_function(NAME, fn_type, None);
         f.add_attribute(
             inkwell::attributes::AttributeLoc::Function,
@@ -428,19 +450,27 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
     fn extract_str_ptr_len(
         &mut self,
         str_val: BasicValueEnum<'ctx>,
-    ) -> (inkwell::values::PointerValue<'ctx>, inkwell::values::IntValue<'ctx>) {
+    ) -> (
+        inkwell::values::PointerValue<'ctx>,
+        inkwell::values::IntValue<'ctx>,
+    ) {
         let sv = str_val.into_struct_value();
         // Field 0: ptr stored as i64 — convert to opaque ptr for runtime calls.
         let agg: AggregateValueEnum<'ctx> = sv.into();
-        let ptr_as_int = self.builder
+        let ptr_as_int = self
+            .builder
             .build_extract_value(agg, 0, "str_ptr_i")
             .expect("extract ptr field")
             .into_int_value();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let ptr = self.builder.build_int_to_ptr(ptr_as_int, ptr_ty, "str_ptr").unwrap();
+        let ptr = self
+            .builder
+            .build_int_to_ptr(ptr_as_int, ptr_ty, "str_ptr")
+            .unwrap();
         // Field 1: len as i64.
         let agg: AggregateValueEnum<'ctx> = sv.into();
-        let len = self.builder
+        let len = self
+            .builder
             .build_extract_value(agg, 1, "str_len")
             .expect("extract len field")
             .into_int_value();
@@ -453,16 +483,35 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
     fn extract_str_ptr_len_cap(
         &mut self,
         str_val: BasicValueEnum<'ctx>,
-    ) -> (inkwell::values::PointerValue<'ctx>, inkwell::values::IntValue<'ctx>, inkwell::values::IntValue<'ctx>) {
+    ) -> (
+        inkwell::values::PointerValue<'ctx>,
+        inkwell::values::IntValue<'ctx>,
+        inkwell::values::IntValue<'ctx>,
+    ) {
         let sv = str_val.into_struct_value();
         let agg: AggregateValueEnum<'ctx> = sv.into();
-        let ptr_as_int = self.builder.build_extract_value(agg, 0, "str_ptr_i").unwrap().into_int_value();
+        let ptr_as_int = self
+            .builder
+            .build_extract_value(agg, 0, "str_ptr_i")
+            .unwrap()
+            .into_int_value();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let ptr = self.builder.build_int_to_ptr(ptr_as_int, ptr_ty, "str_ptr").unwrap();
+        let ptr = self
+            .builder
+            .build_int_to_ptr(ptr_as_int, ptr_ty, "str_ptr")
+            .unwrap();
         let agg: AggregateValueEnum<'ctx> = sv.into();
-        let len = self.builder.build_extract_value(agg, 1, "str_len").unwrap().into_int_value();
+        let len = self
+            .builder
+            .build_extract_value(agg, 1, "str_len")
+            .unwrap()
+            .into_int_value();
         let agg: AggregateValueEnum<'ctx> = sv.into();
-        let cap = self.builder.build_extract_value(agg, 2, "str_cap").unwrap().into_int_value();
+        let cap = self
+            .builder
+            .build_extract_value(agg, 2, "str_cap")
+            .unwrap()
+            .into_int_value();
         (ptr, len, cap)
     }
 
@@ -489,10 +538,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         }
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let i64_ty = self.ctx.i64_type();
-        let fn_type = self.ctx.void_type().fn_type(
-            &[ptr_ty.into(), i64_ty.into(), i64_ty.into()],
-            false,
-        );
+        let fn_type = self
+            .ctx
+            .void_type()
+            .fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false);
         self.module.add_function(NAME, fn_type, None)
     }
 
@@ -512,7 +561,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             Some(first) => self.builder.position_before(&first),
             None => self.builder.position_at_end(entry_bb),
         }
-        let ptr = self.builder.build_alloca(ty, name).expect("build_alloca failed");
+        let ptr = self
+            .builder
+            .build_alloca(ty, name)
+            .expect("build_alloca failed");
         if let Some(bb) = current_bb {
             self.builder.position_at_end(bb);
         }
@@ -528,21 +580,33 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         // Extend or truncate the index to i64 for comparison.
         let bits = index.get_type().get_bit_width();
         let idx_i64 = if bits < 64 {
-            self.builder.build_int_z_extend(index, i64_ty, "bidx").unwrap()
+            self.builder
+                .build_int_z_extend(index, i64_ty, "bidx")
+                .unwrap()
         } else if bits > 64 {
-            self.builder.build_int_truncate(index, i64_ty, "bidx").unwrap()
+            self.builder
+                .build_int_truncate(index, i64_ty, "bidx")
+                .unwrap()
         } else {
             index
         };
         let len_val = i64_ty.const_int(length, false);
-        let in_bounds = self.builder
+        let in_bounds = self
+            .builder
             .build_int_compare(IntPredicate::ULT, idx_i64, len_val, "bchk")
             .unwrap();
 
-        let current_fn = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+        let current_fn = self
+            .builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap();
         let ok_bb = self.ctx.append_basic_block(current_fn, "binbounds");
         let oob_bb = self.ctx.append_basic_block(current_fn, "boob");
-        self.builder.build_conditional_branch(in_bounds, ok_bb, oob_bb).unwrap();
+        self.builder
+            .build_conditional_branch(in_bounds, ok_bb, oob_bb)
+            .unwrap();
 
         // Out-of-bounds handler: call __gruel_bounds_check() then unreachable.
         self.builder.position_at_end(oob_bb);
@@ -555,13 +619,20 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
     }
 
     /// Zero-extend or truncate `index` to `i64` for use in GEP instructions.
-    fn index_to_i64(&self, index: inkwell::values::IntValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+    fn index_to_i64(
+        &self,
+        index: inkwell::values::IntValue<'ctx>,
+    ) -> inkwell::values::IntValue<'ctx> {
         let i64_ty = self.ctx.i64_type();
         let bits = index.get_type().get_bit_width();
         if bits < 64 {
-            self.builder.build_int_z_extend(index, i64_ty, "iidx").unwrap()
+            self.builder
+                .build_int_z_extend(index, i64_ty, "iidx")
+                .unwrap()
         } else if bits > 64 {
-            self.builder.build_int_truncate(index, i64_ty, "iidx").unwrap()
+            self.builder
+                .build_int_truncate(index, i64_ty, "iidx")
+                .unwrap()
         } else {
             index
         }
@@ -604,7 +675,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         }
         let llvm_ty = gruel_type_to_llvm(param_ty, self.ctx, self.type_pool)
             .expect("param alloca type must be non-void");
-        let ptr = self.builder
+        let ptr = self
+            .builder
             .build_alloca(llvm_ty, &format!("pslot{}", slot))
             .expect("build_alloca failed");
         if let Some(bb) = current_bb {
@@ -613,7 +685,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
         // Spill the fn param value into the alloca so GEP can address into it.
         let llvm_param_idx = self.slot_to_llvm_param[slot];
-        let param_val = self.fn_value
+        let param_val = self
+            .fn_value
             .get_nth_param(llvm_param_idx)
             .expect("param slot out of range");
         self.builder.build_store(ptr, param_val).unwrap();
@@ -670,11 +743,15 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         let mut current_ty = base_container_ty;
         for proj in &projections {
             match proj {
-                Projection::Field { struct_id, field_index } => {
+                Projection::Field {
+                    struct_id,
+                    field_index,
+                } => {
                     let llvm_idx = self.gruel_to_llvm_field_index(*struct_id, *field_index);
                     let struct_llvm_ty = gruel_type_to_llvm(current_ty, self.ctx, self.type_pool)?
                         .into_struct_type();
-                    current_ptr = self.builder
+                    current_ptr = self
+                        .builder
                         .build_struct_gep(struct_llvm_ty, current_ptr, llvm_idx, "fgep")
                         .expect("build_struct_gep failed");
                     let struct_def = self.type_pool.struct_def(*struct_id);
@@ -723,17 +800,39 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .get_declaration(self.module, &[int_type.into()])
             .unwrap_or_else(|| panic!("failed to declare intrinsic '{}'", intrinsic_name));
 
-        let call = self.builder.build_call(intrinsic_fn, &[l.into(), r.into()], "ovf").unwrap();
-        let struct_val = call.try_as_basic_value().basic().unwrap().into_struct_value();
-        let result = self.builder.build_extract_value(struct_val, 0, "res").unwrap().into_int_value();
-        let overflow = self.builder.build_extract_value(struct_val, 1, "ovf_flag").unwrap().into_int_value();
+        let call = self
+            .builder
+            .build_call(intrinsic_fn, &[l.into(), r.into()], "ovf")
+            .unwrap();
+        let struct_val = call
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_struct_value();
+        let result = self
+            .builder
+            .build_extract_value(struct_val, 0, "res")
+            .unwrap()
+            .into_int_value();
+        let overflow = self
+            .builder
+            .build_extract_value(struct_val, 1, "ovf_flag")
+            .unwrap()
+            .into_int_value();
 
         // Emit conditional branch to overflow handler or continuation.
-        let current_fn = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+        let current_fn = self
+            .builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap();
         let overflow_bb = self.ctx.append_basic_block(current_fn, "ovf_handler");
         let cont_bb = self.ctx.append_basic_block(current_fn, "ovf_cont");
 
-        self.builder.build_conditional_branch(overflow, overflow_bb, cont_bb).unwrap();
+        self.builder
+            .build_conditional_branch(overflow, overflow_bb, cont_bb)
+            .unwrap();
 
         // Overflow handler: call __gruel_overflow() then unreachable.
         self.builder.position_at_end(overflow_bb);
@@ -751,15 +850,23 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
     /// If `divisor` is zero, calls `__gruel_div_by_zero()` (exits with code 101).
     fn build_div_zero_check(&mut self, divisor: inkwell::values::IntValue<'ctx>) {
         let zero = divisor.get_type().const_zero();
-        let is_zero = self.builder
+        let is_zero = self
+            .builder
             .build_int_compare(IntPredicate::EQ, divisor, zero, "divzero_check")
             .unwrap();
 
-        let current_fn = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+        let current_fn = self
+            .builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap();
         let zero_bb = self.ctx.append_basic_block(current_fn, "divzero_handler");
         let cont_bb = self.ctx.append_basic_block(current_fn, "divzero_cont");
 
-        self.builder.build_conditional_branch(is_zero, zero_bb, cont_bb).unwrap();
+        self.builder
+            .build_conditional_branch(is_zero, zero_bb, cont_bb)
+            .unwrap();
 
         // Div-by-zero handler.
         self.builder.position_at_end(zero_bb);
@@ -792,13 +899,25 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let (ptr1, len1) = self.extract_str_ptr_len(l);
                     let (ptr2, len2) = self.extract_str_ptr_len(r);
                     let str_eq_fn = self.get_or_declare_str_eq();
-                    let result = self.builder
-                        .build_call(str_eq_fn, &[ptr1.into(), len1.into(), ptr2.into(), len2.into()], "streq")
+                    let result = self
+                        .builder
+                        .build_call(
+                            str_eq_fn,
+                            &[ptr1.into(), len1.into(), ptr2.into(), len2.into()],
+                            "streq",
+                        )
                         .unwrap();
-                    let byte_val = result.try_as_basic_value().basic().unwrap().into_int_value();
+                    let byte_val = result
+                        .try_as_basic_value()
+                        .basic()
+                        .unwrap()
+                        .into_int_value();
                     // __gruel_str_eq returns i8; convert to i1 for use as a bool.
                     let zero = self.ctx.i8_type().const_zero();
-                    return self.builder.build_int_compare(IntPredicate::NE, byte_val, zero, "streq_b").unwrap();
+                    return self
+                        .builder
+                        .build_int_compare(IntPredicate::NE, byte_val, zero, "streq_b")
+                        .unwrap();
                 }
                 let mut all_eq = self.ctx.bool_type().const_int(1, false); // start true
                 let mut llvm_idx = 0u32;
@@ -808,10 +927,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     }
                     let l_agg: AggregateValueEnum<'ctx> = l.into_struct_value().into();
                     let r_agg: AggregateValueEnum<'ctx> = r.into_struct_value().into();
-                    let l_field = self.builder
+                    let l_field = self
+                        .builder
                         .build_extract_value(l_agg, llvm_idx, "l_f")
                         .expect("build_extract_value failed");
-                    let r_field = self.builder
+                    let r_field = self
+                        .builder
                         .build_extract_value(r_agg, llvm_idx, "r_f")
                         .expect("build_extract_value failed");
                     let field_eq = self.build_value_eq(field.ty, l_field, r_field);
@@ -826,10 +947,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 for i in 0..len as u32 {
                     let l_agg: AggregateValueEnum<'ctx> = l.into_array_value().into();
                     let r_agg: AggregateValueEnum<'ctx> = r.into_array_value().into();
-                    let l_elem = self.builder
+                    let l_elem = self
+                        .builder
                         .build_extract_value(l_agg, i, "l_e")
                         .expect("build_extract_value failed");
-                    let r_elem = self.builder
+                    let r_elem = self
+                        .builder
                         .build_extract_value(r_agg, i, "r_e")
                         .expect("build_extract_value failed");
                     let elem_eq = self.build_value_eq(elem_ty, l_elem, r_elem);
@@ -864,7 +987,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             for &(param_val, param_ty) in &block.params {
                 let llvm_ty = gruel_type_to_llvm(param_ty, self.ctx, self.type_pool)
                     .expect("block param must have non-void type");
-                let phi = self.builder
+                let phi = self
+                    .builder
                     .build_phi(llvm_ty, &format!("p{}", param_val.as_u32()))
                     .expect("build_phi failed");
                 let idx = param_val.as_u32() as usize;
@@ -928,28 +1052,44 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 // String.ptr is stored as u64 (integer), not as ptr type.
                 // Convert the global address to i64 via ptrtoint so it fits in
                 // the String struct's first field.
-                let data_ptr_as_int: inkwell::values::BasicValueEnum<'ctx> = if let Some(g) = global {
+                let data_ptr_as_int: inkwell::values::BasicValueEnum<'ctx> = if let Some(g) = global
+                {
                     let raw_ptr = g.as_pointer_value();
-                    self.builder.build_ptr_to_int(raw_ptr, i64_ty, "str_data_i").unwrap().into()
+                    self.builder
+                        .build_ptr_to_int(raw_ptr, i64_ty, "str_data_i")
+                        .unwrap()
+                        .into()
                 } else {
                     i64_ty.const_zero().into()
                 };
-                let len_val: inkwell::values::BasicValueEnum<'ctx> = i64_ty.const_int(str_len, false).into();
+                let len_val: inkwell::values::BasicValueEnum<'ctx> =
+                    i64_ty.const_int(str_len, false).into();
                 let cap_val: inkwell::values::BasicValueEnum<'ctx> = i64_ty.const_zero().into();
                 // Build String struct { ptr, i64, i64 }
                 let str_llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
                     .expect("String type must have LLVM representation")
                     .into_struct_type();
                 let undef: AggregateValueEnum<'ctx> = str_llvm_ty.get_undef().into();
-                let agg = self.builder.build_insert_value(undef, data_ptr_as_int, 0, "sc_ptr").unwrap();
-                let agg = self.builder.build_insert_value(agg, len_val, 1, "sc_len").unwrap();
-                let agg = self.builder.build_insert_value(agg, cap_val, 2, "sc_cap").unwrap();
+                let agg = self
+                    .builder
+                    .build_insert_value(undef, data_ptr_as_int, 0, "sc_ptr")
+                    .unwrap();
+                let agg = self
+                    .builder
+                    .build_insert_value(agg, len_val, 1, "sc_len")
+                    .unwrap();
+                let agg = self
+                    .builder
+                    .build_insert_value(agg, cap_val, 2, "sc_cap")
+                    .unwrap();
                 Some(agg.as_basic_value_enum())
             }
 
             CfgInstData::Param { index } => {
                 let llvm_idx = self.slot_to_llvm_param[index as usize];
-                let param_val = self.fn_value.get_nth_param(llvm_idx)
+                let param_val = self
+                    .fn_value
+                    .get_nth_param(llvm_idx)
                     .expect("param index out of range");
                 if self.cfg.is_param_inout(index) {
                     // By-ref param (inout or borrow): the LLVM arg is a pointer;
@@ -1060,7 +1200,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let l = self.get_value(lhs).into_int_value();
                 let r = self.get_value(rhs).into_int_value();
                 let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                Some(self.builder.build_int_compare(p, l, r, "lt").unwrap().into())
+                Some(
+                    self.builder
+                        .build_int_compare(p, l, r, "lt")
+                        .unwrap()
+                        .into(),
+                )
             }
             CfgInstData::Gt(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
@@ -1068,7 +1213,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let l = self.get_value(lhs).into_int_value();
                 let r = self.get_value(rhs).into_int_value();
                 let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                Some(self.builder.build_int_compare(p, l, r, "gt").unwrap().into())
+                Some(
+                    self.builder
+                        .build_int_compare(p, l, r, "gt")
+                        .unwrap()
+                        .into(),
+                )
             }
             CfgInstData::Le(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
@@ -1076,7 +1226,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let l = self.get_value(lhs).into_int_value();
                 let r = self.get_value(rhs).into_int_value();
                 let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                Some(self.builder.build_int_compare(p, l, r, "le").unwrap().into())
+                Some(
+                    self.builder
+                        .build_int_compare(p, l, r, "le")
+                        .unwrap()
+                        .into(),
+                )
             }
             CfgInstData::Ge(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
@@ -1084,7 +1239,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let l = self.get_value(lhs).into_int_value();
                 let r = self.get_value(rhs).into_int_value();
                 let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                Some(self.builder.build_int_compare(p, l, r, "ge").unwrap().into())
+                Some(
+                    self.builder
+                        .build_int_compare(p, l, r, "ge")
+                        .unwrap()
+                        .into(),
+                )
             }
 
             // ---- Bitwise ----
@@ -1114,7 +1274,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let r = self.get_value(rhs).into_int_value();
                 // Arithmetic right shift for signed types; logical for unsigned.
                 let signed = is_signed_type(lhs_ty);
-                Some(self.builder.build_right_shift(l, r, signed, "shr").unwrap().into())
+                Some(
+                    self.builder
+                        .build_right_shift(l, r, signed, "shr")
+                        .unwrap()
+                        .into(),
+                )
             }
 
             // ---- Unary ----
@@ -1122,13 +1287,21 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let v = self.get_value(operand).into_int_value();
                 // Negation on signed types: 0 - v, with overflow check.
                 let zero = v.get_type().const_zero();
-                Some(self.build_checked_int_op(zero, v, "llvm.ssub.with.overflow").into())
+                Some(
+                    self.build_checked_int_op(zero, v, "llvm.ssub.with.overflow")
+                        .into(),
+                )
             }
             CfgInstData::Not(operand) => {
                 // Boolean not: compare == 0.
                 let v = self.get_value(operand).into_int_value();
                 let zero = v.get_type().const_zero();
-                Some(self.builder.build_int_compare(IntPredicate::EQ, v, zero, "not").unwrap().into())
+                Some(
+                    self.builder
+                        .build_int_compare(IntPredicate::EQ, v, zero, "not")
+                        .unwrap()
+                        .into(),
+                )
             }
             CfgInstData::BitNot(operand) => {
                 let v = self.get_value(operand).into_int_value();
@@ -1150,8 +1323,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 match gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
                     None => None, // Unit-typed load — no LLVM value.
                     Some(llvm_ty) => {
-                        let ptr = self.locals[slot as usize]
-                            .expect("Load before Alloc — invalid CFG");
+                        let ptr =
+                            self.locals[slot as usize].expect("Load before Alloc — invalid CFG");
                         Some(self.builder.build_load(llvm_ty, ptr, "load").unwrap())
                     }
                 }
@@ -1169,7 +1342,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             CfgInstData::ParamStore { param_slot, value } => {
                 let v = self.get_value(value);
                 let llvm_idx = self.slot_to_llvm_param[param_slot as usize];
-                let ptr_val = self.fn_value.get_nth_param(llvm_idx)
+                let ptr_val = self
+                    .fn_value
+                    .get_nth_param(llvm_idx)
                     .expect("param_slot out of range")
                     .into_pointer_value();
                 self.builder.build_store(ptr_val, v).unwrap();
@@ -1177,7 +1352,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- Function calls ----
-            CfgInstData::Call { name, args_start, args_len } => {
+            CfgInstData::Call {
+                name,
+                args_start,
+                args_len,
+            } => {
                 let fn_name = self.interner.resolve(&name);
 
                 let args = self.cfg.get_call_args(args_start, args_len).to_vec();
@@ -1197,7 +1376,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 CfgInstData::Param { index } if self.cfg.is_param_inout(index) => {
                                     // Forwarding an inout/borrow param: pass the raw pointer.
                                     let llvm_idx = self.slot_to_llvm_param[index as usize];
-                                    let ptr = self.fn_value
+                                    let ptr = self
+                                        .fn_value
                                         .get_nth_param(llvm_idx)
                                         .expect("param slot out of range");
                                     Some(inkwell::values::BasicMetadataValueEnum::from(ptr))
@@ -1225,7 +1405,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 // functions need sret treatment.
                 let is_gruel_fn = self.fn_map.contains_key(fn_name);
                 let ret_llvm = gruel_type_to_llvm(ty, self.ctx, self.type_pool);
-                let ret_is_struct = matches!(ret_llvm, Some(inkwell::types::BasicTypeEnum::StructType(_)));
+                let ret_is_struct =
+                    matches!(ret_llvm, Some(inkwell::types::BasicTypeEnum::StructType(_)));
 
                 if !is_gruel_fn && ret_is_struct {
                     // sret pattern: allocate space in entry block, pass as hidden first arg.
@@ -1256,31 +1437,45 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         vec![sret_ptr.into()];
                     sret_call_args.extend(call_args.iter().copied());
 
-                    self.builder.build_call(callee, &sret_call_args, "").unwrap();
+                    self.builder
+                        .build_call(callee, &sret_call_args, "")
+                        .unwrap();
 
                     // Load the result struct from the sret alloca.
-                    let loaded = self.builder
+                    let loaded = self
+                        .builder
                         .build_load(struct_ty, sret_ptr, "sret_load")
                         .unwrap();
                     Some(loaded)
                 } else {
                     // Normal call: look up in the declared-functions map, then fall back to the
                     // module. If not found anywhere, auto-declare as an external function.
-                    let callee = self.fn_map.get(fn_name).copied()
+                    let callee = self
+                        .fn_map
+                        .get(fn_name)
+                        .copied()
                         .or_else(|| self.module.get_function(fn_name))
                         .unwrap_or_else(|| {
                             // Infer LLVM param types from the Gruel arg types.
-                            let param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = args
-                                .iter()
-                                .filter_map(|arg| {
-                                    if arg.is_inout() || arg.is_borrow() {
-                                        Some(self.ctx.ptr_type(inkwell::AddressSpace::default()).into())
-                                    } else {
-                                        let arg_ty = self.cfg.get_inst(arg.value).ty;
-                                        gruel_type_to_llvm_param(arg_ty, self.ctx, self.type_pool)
-                                    }
-                                })
-                                .collect();
+                            let param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                                args.iter()
+                                    .filter_map(|arg| {
+                                        if arg.is_inout() || arg.is_borrow() {
+                                            Some(
+                                                self.ctx
+                                                    .ptr_type(inkwell::AddressSpace::default())
+                                                    .into(),
+                                            )
+                                        } else {
+                                            let arg_ty = self.cfg.get_inst(arg.value).ty;
+                                            gruel_type_to_llvm_param(
+                                                arg_ty,
+                                                self.ctx,
+                                                self.type_pool,
+                                            )
+                                        }
+                                    })
+                                    .collect();
                             let fn_ty = match ret_llvm {
                                 Some(ret) => ret.fn_type(&param_types, false),
                                 None => self.ctx.void_type().fn_type(&param_types, false),
@@ -1294,7 +1489,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 }
             }
 
-            CfgInstData::Intrinsic { name, args_start, args_len } => {
+            CfgInstData::Intrinsic {
+                name,
+                args_start,
+                args_len,
+            } => {
                 let name_str = self.interner.resolve(&name);
                 let args = self.cfg.get_extra(args_start, args_len).to_vec();
                 self.translate_intrinsic(ty, name_str, &args)
@@ -1321,19 +1520,31 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let src_ty = v.get_type();
                     // Round-trip: extend truncated value back to source width.
                     let extended = if is_signed_type(ty) {
-                        self.builder.build_int_s_extend(truncated, src_ty, "sext_chk").unwrap()
+                        self.builder
+                            .build_int_s_extend(truncated, src_ty, "sext_chk")
+                            .unwrap()
                     } else {
-                        self.builder.build_int_z_extend(truncated, src_ty, "zext_chk").unwrap()
+                        self.builder
+                            .build_int_z_extend(truncated, src_ty, "zext_chk")
+                            .unwrap()
                     };
                     // If extended != original, the value doesn't fit.
-                    let fits = self.builder
+                    let fits = self
+                        .builder
                         .build_int_compare(IntPredicate::EQ, v, extended, "fits")
                         .unwrap();
                     // Emit conditional branch to intcast overflow handler.
-                    let current_fn = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                    let current_fn = self
+                        .builder
+                        .get_insert_block()
+                        .unwrap()
+                        .get_parent()
+                        .unwrap();
                     let overflow_bb = self.ctx.append_basic_block(current_fn, "icast_ovf");
                     let cont_bb = self.ctx.append_basic_block(current_fn, "icast_cont");
-                    self.builder.build_conditional_branch(fits, cont_bb, overflow_bb).unwrap();
+                    self.builder
+                        .build_conditional_branch(fits, cont_bb, overflow_bb)
+                        .unwrap();
                     // Overflow handler.
                     self.builder.position_at_end(overflow_bb);
                     let panic_fn = self.get_or_declare_noreturn_fn("__gruel_intcast_overflow");
@@ -1363,10 +1574,17 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         v.get_type().const_int(1, false)
                     };
                     // Branch to overflow handler if the value is out of range.
-                    let current_fn = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                    let current_fn = self
+                        .builder
+                        .get_insert_block()
+                        .unwrap()
+                        .get_parent()
+                        .unwrap();
                     let overflow_bb = self.ctx.append_basic_block(current_fn, "icast_ovf");
                     let cont_bb = self.ctx.append_basic_block(current_fn, "icast_cont");
-                    self.builder.build_conditional_branch(fits, cont_bb, overflow_bb).unwrap();
+                    self.builder
+                        .build_conditional_branch(fits, cont_bb, overflow_bb)
+                        .unwrap();
                     self.builder.position_at_end(overflow_bb);
                     let panic_fn = self.get_or_declare_noreturn_fn("__gruel_intcast_overflow");
                     self.builder.build_call(panic_fn, &[], "").unwrap();
@@ -1378,7 +1596,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- Drop / storage liveness ----
-            CfgInstData::Drop { value: dropped_value } => {
+            CfgInstData::Drop {
+                value: dropped_value,
+            } => {
                 let dropped_ty = self.cfg.get_inst(dropped_value).ty;
                 if self.is_builtin_string(dropped_ty) {
                     // Only drop heap-allocated strings (cap > 0).
@@ -1387,24 +1607,31 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     if let Some(str_val) = self.values[dropped_value.as_u32() as usize] {
                         let (ptr, len, cap) = self.extract_str_ptr_len_cap(str_val);
                         let drop_fn = self.get_or_declare_drop_string();
-                        self.builder.build_call(drop_fn, &[ptr.into(), len.into(), cap.into()], "").unwrap();
+                        self.builder
+                            .build_call(drop_fn, &[ptr.into(), len.into(), cap.into()], "")
+                            .unwrap();
                     }
                 }
                 None
             }
-            CfgInstData::StorageLive { .. }
-            | CfgInstData::StorageDead { .. } => None,
+            CfgInstData::StorageLive { .. } | CfgInstData::StorageDead { .. } => None,
 
             // ---- Composite ops (Phase 2d) ----
-
             CfgInstData::EnumVariant { variant_index, .. } => {
                 // Enums are stored as their discriminant integer.
                 // The LLVM type comes from the enum's discriminant_type() via gruel_type_to_llvm.
-                gruel_type_to_llvm(ty, self.ctx, self.type_pool)
-                    .map(|t| t.into_int_type().const_int(variant_index as u64, false).into())
+                gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| {
+                    t.into_int_type()
+                        .const_int(variant_index as u64, false)
+                        .into()
+                })
             }
 
-            CfgInstData::StructInit { struct_id, fields_start, fields_len } => {
+            CfgInstData::StructInit {
+                struct_id,
+                fields_start,
+                fields_len,
+            } => {
                 let fields = self.cfg.get_extra(fields_start, fields_len).to_vec();
                 let struct_def = self.type_pool.struct_def(struct_id);
                 let struct_llvm_ty = match gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
@@ -1417,7 +1644,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let field_ty = struct_def.fields[gruel_idx].ty;
                     if gruel_type_to_llvm(field_ty, self.ctx, self.type_pool).is_some() {
                         let fv = self.get_value(field_val);
-                        agg = self.builder
+                        agg = self
+                            .builder
                             .build_insert_value(agg, fv, llvm_idx, "si")
                             .expect("build_insert_value failed");
                         llvm_idx += 1;
@@ -1426,7 +1654,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 Some(agg.as_basic_value_enum())
             }
 
-            CfgInstData::ArrayInit { elements_start, elements_len } => {
+            CfgInstData::ArrayInit {
+                elements_start,
+                elements_len,
+            } => {
                 let elements = self.cfg.get_extra(elements_start, elements_len).to_vec();
                 let arr_llvm_ty = match gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
                     Some(t) => t.into_array_type(),
@@ -1435,7 +1666,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let mut agg: AggregateValueEnum = arr_llvm_ty.get_undef().into();
                 for (i, &elem_val) in elements.iter().enumerate() {
                     let v = self.get_value(elem_val);
-                    agg = self.builder
+                    agg = self
+                        .builder
                         .build_insert_value(agg, v, i as u32, "ai")
                         .expect("build_insert_value failed");
                 }
@@ -1464,7 +1696,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 None
             }
 
-            CfgInstData::FieldSet { slot, struct_id, field_index, value: val } => {
+            CfgInstData::FieldSet {
+                slot,
+                struct_id,
+                field_index,
+                value: val,
+            } => {
                 let val_ty = self.cfg.get_inst(val).ty;
                 if gruel_type_to_llvm(val_ty, self.ctx, self.type_pool).is_some() {
                     let v = self.get_value(val);
@@ -1474,7 +1711,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let struct_llvm_ty = gruel_type_to_llvm(struct_ty, self.ctx, self.type_pool)
                         .expect("struct must have LLVM type")
                         .into_struct_type();
-                    let field_ptr = self.builder
+                    let field_ptr = self
+                        .builder
                         .build_struct_gep(struct_llvm_ty, ptr, llvm_field_idx, "fsgep")
                         .expect("build_struct_gep failed");
                     self.builder.build_store(field_ptr, v).unwrap();
@@ -1482,7 +1720,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 None
             }
 
-            CfgInstData::IndexSet { slot, array_type, index, value: val } => {
+            CfgInstData::IndexSet {
+                slot,
+                array_type,
+                index,
+                value: val,
+            } => {
                 let val_ty = self.cfg.get_inst(val).ty;
                 if gruel_type_to_llvm(val_ty, self.ctx, self.type_pool).is_some() {
                     let v = self.get_value(val);
@@ -1508,14 +1751,21 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
             // ParamFieldSet and ParamIndexSet are legacy instructions that are
             // never generated by sema. Handle them defensively just in case.
-            CfgInstData::ParamFieldSet { param_slot, struct_id, field_index, value: val, .. } => {
+            CfgInstData::ParamFieldSet {
+                param_slot,
+                struct_id,
+                field_index,
+                value: val,
+                ..
+            } => {
                 let val_ty = self.cfg.get_inst(val).ty;
                 if gruel_type_to_llvm(val_ty, self.ctx, self.type_pool).is_some() {
                     let v = self.get_value(val);
                     let struct_ty = Type::new_struct(struct_id);
                     let llvm_idx = self.slot_to_llvm_param[param_slot as usize];
                     let base_ptr = if self.cfg.is_param_inout(param_slot) {
-                        self.fn_value.get_nth_param(llvm_idx)
+                        self.fn_value
+                            .get_nth_param(llvm_idx)
                             .expect("param slot out of range")
                             .into_pointer_value()
                     } else {
@@ -1525,7 +1775,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let struct_llvm_ty = gruel_type_to_llvm(struct_ty, self.ctx, self.type_pool)
                         .expect("struct must have LLVM type")
                         .into_struct_type();
-                    let field_ptr = self.builder
+                    let field_ptr = self
+                        .builder
                         .build_struct_gep(struct_llvm_ty, base_ptr, llvm_field_idx, "pfsgep")
                         .expect("build_struct_gep failed");
                     self.builder.build_store(field_ptr, v).unwrap();
@@ -1533,7 +1784,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 None
             }
 
-            CfgInstData::ParamIndexSet { param_slot, array_type, index, value: val } => {
+            CfgInstData::ParamIndexSet {
+                param_slot,
+                array_type,
+                index,
+                value: val,
+            } => {
                 let val_ty = self.cfg.get_inst(val).ty;
                 if gruel_type_to_llvm(val_ty, self.ctx, self.type_pool).is_some() {
                     let v = self.get_value(val);
@@ -1543,7 +1799,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     self.build_bounds_check(index_val, length);
                     let llvm_idx2 = self.slot_to_llvm_param[param_slot as usize];
                     let base_ptr = if self.cfg.is_param_inout(param_slot) {
-                        self.fn_value.get_nth_param(llvm_idx2)
+                        self.fn_value
+                            .get_nth_param(llvm_idx2)
                             .expect("param slot out of range")
                             .into_pointer_value()
                     } else {
@@ -1584,15 +1841,27 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             // ---- Random number generation ----
             "random_u32" => {
                 let fn_ty = self.ctx.i32_type().fn_type(&[], false);
-                let f = self.module.get_function("__gruel_random_u32")
+                let f = self
+                    .module
+                    .get_function("__gruel_random_u32")
                     .unwrap_or_else(|| self.module.add_function("__gruel_random_u32", fn_ty, None));
-                self.builder.build_call(f, &[], "rand").unwrap().try_as_basic_value().basic()
+                self.builder
+                    .build_call(f, &[], "rand")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .basic()
             }
             "random_u64" => {
                 let fn_ty = self.ctx.i64_type().fn_type(&[], false);
-                let f = self.module.get_function("__gruel_random_u64")
+                let f = self
+                    .module
+                    .get_function("__gruel_random_u64")
                     .unwrap_or_else(|| self.module.add_function("__gruel_random_u64", fn_ty, None));
-                self.builder.build_call(f, &[], "rand").unwrap().try_as_basic_value().basic()
+                self.builder
+                    .build_call(f, &[], "rand")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .basic()
             }
 
             // ---- Debug print ----
@@ -1610,8 +1879,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 v
                             };
                             let fn_ty = self.ctx.void_type().fn_type(&[i64_ty.into()], false);
-                            let f = self.module.get_function("__gruel_dbg_i64")
-                                .unwrap_or_else(|| self.module.add_function("__gruel_dbg_i64", fn_ty, None));
+                            let f =
+                                self.module
+                                    .get_function("__gruel_dbg_i64")
+                                    .unwrap_or_else(|| {
+                                        self.module.add_function("__gruel_dbg_i64", fn_ty, None)
+                                    });
                             self.builder.build_call(f, &[v64.into()], "").unwrap();
                         }
                         TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64 => {
@@ -1622,16 +1895,24 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 v
                             };
                             let fn_ty = self.ctx.void_type().fn_type(&[i64_ty.into()], false);
-                            let f = self.module.get_function("__gruel_dbg_u64")
-                                .unwrap_or_else(|| self.module.add_function("__gruel_dbg_u64", fn_ty, None));
+                            let f =
+                                self.module
+                                    .get_function("__gruel_dbg_u64")
+                                    .unwrap_or_else(|| {
+                                        self.module.add_function("__gruel_dbg_u64", fn_ty, None)
+                                    });
                             self.builder.build_call(f, &[v64.into()], "").unwrap();
                         }
                         TypeKind::Bool => {
                             let v = self.get_value(arg_val).into_int_value();
                             let v64 = self.builder.build_int_z_extend(v, i64_ty, "zext").unwrap();
                             let fn_ty = self.ctx.void_type().fn_type(&[i64_ty.into()], false);
-                            let f = self.module.get_function("__gruel_dbg_bool")
-                                .unwrap_or_else(|| self.module.add_function("__gruel_dbg_bool", fn_ty, None));
+                            let f =
+                                self.module
+                                    .get_function("__gruel_dbg_bool")
+                                    .unwrap_or_else(|| {
+                                        self.module.add_function("__gruel_dbg_bool", fn_ty, None)
+                                    });
                             self.builder.build_call(f, &[v64.into()], "").unwrap();
                         }
                         _ if self.is_builtin_string(arg_ty) => {
@@ -1639,10 +1920,19 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                             let str_val = self.get_value(arg_val);
                             let (ptr, len) = self.extract_str_ptr_len(str_val);
                             let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                            let fn_ty = self.ctx.void_type().fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-                            let f = self.module.get_function("__gruel_dbg_str")
-                                .unwrap_or_else(|| self.module.add_function("__gruel_dbg_str", fn_ty, None));
-                            self.builder.build_call(f, &[ptr.into(), len.into()], "").unwrap();
+                            let fn_ty = self
+                                .ctx
+                                .void_type()
+                                .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+                            let f =
+                                self.module
+                                    .get_function("__gruel_dbg_str")
+                                    .unwrap_or_else(|| {
+                                        self.module.add_function("__gruel_dbg_str", fn_ty, None)
+                                    });
+                            self.builder
+                                .build_call(f, &[ptr.into(), len.into()], "")
+                                .unwrap();
                         }
                         _ => {
                             // Arrays and non-String structs are not supported by @dbg.
@@ -1660,7 +1950,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let ptr = self.get_value(ptr_val).into_pointer_value();
                 let result_llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
                     .expect("ptr_read must return a non-void type");
-                Some(self.builder.build_load(result_llvm_ty, ptr, "ptrrd").unwrap())
+                Some(
+                    self.builder
+                        .build_load(result_llvm_ty, ptr, "ptrrd")
+                        .unwrap(),
+                )
             }
             "ptr_write" => {
                 let ptr_val = args[0];
@@ -1682,9 +1976,15 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     TypeKind::PtrMut(id) => self.type_pool.ptr_mut_def(id),
                     _ => return Some(ptr.into()), // not actually a pointer — no-op
                 };
-                let result_ptr = if let Some(elem_llvm) = gruel_type_to_llvm(pointee_ty, self.ctx, self.type_pool) {
+                let result_ptr = if let Some(elem_llvm) =
+                    gruel_type_to_llvm(pointee_ty, self.ctx, self.type_pool)
+                {
                     // GEP advances by `offset * sizeof(elem)` automatically.
-                    unsafe { self.builder.build_gep(elem_llvm, ptr, &[offset], "gep").unwrap() }
+                    unsafe {
+                        self.builder
+                            .build_gep(elem_llvm, ptr, &[offset], "gep")
+                            .unwrap()
+                    }
                 } else {
                     ptr // zero-sized pointee — offset has no effect
                 };
@@ -1694,13 +1994,23 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let ptr_val = args[0];
                 let ptr = self.get_value(ptr_val).into_pointer_value();
                 let i64_ty = self.ctx.i64_type();
-                Some(self.builder.build_ptr_to_int(ptr, i64_ty, "p2i").unwrap().into())
+                Some(
+                    self.builder
+                        .build_ptr_to_int(ptr, i64_ty, "p2i")
+                        .unwrap()
+                        .into(),
+                )
             }
             "int_to_ptr" => {
                 let addr_val = args[0];
                 let addr = self.get_value(addr_val).into_int_value();
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                Some(self.builder.build_int_to_ptr(addr, ptr_ty, "i2p").unwrap().into())
+                Some(
+                    self.builder
+                        .build_int_to_ptr(addr, ptr_ty, "i2p")
+                        .unwrap()
+                        .into(),
+                )
             }
 
             // ---- Address-of (raw pointer to any lvalue) ----
@@ -1736,21 +2046,30 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let (ptr, len) = self.extract_str_ptr_len(str_val);
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let i64_ty = self.ctx.i64_type();
-                let (runtime_fn, ret_llvm_ty): (&str, inkwell::types::BasicMetadataTypeEnum<'ctx>) = match name_str {
-                    "parse_i32" => ("__gruel_parse_i32", self.ctx.i32_type().into()),
-                    "parse_i64" => ("__gruel_parse_i64", i64_ty.into()),
-                    "parse_u32" => ("__gruel_parse_u32", self.ctx.i32_type().into()),
-                    "parse_u64" => ("__gruel_parse_u64", i64_ty.into()),
-                    _ => unreachable!(),
-                };
+                let (runtime_fn, ret_llvm_ty): (&str, inkwell::types::BasicMetadataTypeEnum<'ctx>) =
+                    match name_str {
+                        "parse_i32" => ("__gruel_parse_i32", self.ctx.i32_type().into()),
+                        "parse_i64" => ("__gruel_parse_i64", i64_ty.into()),
+                        "parse_u32" => ("__gruel_parse_u32", self.ctx.i32_type().into()),
+                        "parse_u64" => ("__gruel_parse_u64", i64_ty.into()),
+                        _ => unreachable!(),
+                    };
                 let fn_ty_ret = match name_str {
-                    "parse_i32" | "parse_u32" => self.ctx.i32_type().fn_type(&[ptr_ty.into(), i64_ty.into()], false),
+                    "parse_i32" | "parse_u32" => self
+                        .ctx
+                        .i32_type()
+                        .fn_type(&[ptr_ty.into(), i64_ty.into()], false),
                     _ => i64_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false),
                 };
                 let _ = ret_llvm_ty; // suppress unused warning
-                let f = self.module.get_function(runtime_fn)
+                let f = self
+                    .module
+                    .get_function(runtime_fn)
                     .unwrap_or_else(|| self.module.add_function(runtime_fn, fn_ty_ret, None));
-                let result = self.builder.build_call(f, &[ptr.into(), len.into()], "parsed").unwrap();
+                let result = self
+                    .builder
+                    .build_call(f, &[ptr.into(), len.into()], "parsed")
+                    .unwrap();
                 result.try_as_basic_value().basic()
             }
 
@@ -1777,18 +2096,22 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let fn_ty = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
-                let f = self.module.get_function("__gruel_read_line")
+                let f = self
+                    .module
+                    .get_function("__gruel_read_line")
                     .unwrap_or_else(|| self.module.add_function("__gruel_read_line", fn_ty, None));
                 self.builder.build_call(f, &[sret_ptr.into()], "").unwrap();
 
                 // Load the String struct from the sret alloca.
-                Some(self.builder.build_load(str_llvm_ty, sret_ptr, "rl_str").unwrap())
+                Some(
+                    self.builder
+                        .build_load(str_llvm_ty, sret_ptr, "rl_str")
+                        .unwrap(),
+                )
             }
 
             // ---- Fallback: return zero value for unimplemented intrinsics ----
-            _ => {
-                gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero())
-            }
+            _ => gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero()),
         }
     }
 
@@ -1805,7 +2128,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     if self.cfg.fn_name() == "main" {
                         let exit_fn = self.get_or_declare_exit_fn();
                         let zero = self.ctx.i32_type().const_zero();
-                        self.builder.build_call(exit_fn, &[zero.into()], "").unwrap();
+                        self.builder
+                            .build_call(exit_fn, &[zero.into()], "")
+                            .unwrap();
                         self.builder.build_unreachable().unwrap();
                     } else {
                         self.builder.build_return(None).unwrap();
@@ -1820,13 +2145,19 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 if self.cfg.fn_name() == "main" {
                     let exit_fn = self.get_or_declare_exit_fn();
                     let zero = self.ctx.i32_type().const_zero();
-                    self.builder.build_call(exit_fn, &[zero.into()], "").unwrap();
+                    self.builder
+                        .build_call(exit_fn, &[zero.into()], "")
+                        .unwrap();
                     self.builder.build_unreachable().unwrap();
                 } else {
                     self.builder.build_return(None).unwrap();
                 }
             }
-            Terminator::Goto { target, args_start, args_len } => {
+            Terminator::Goto {
+                target,
+                args_start,
+                args_len,
+            } => {
                 let current_bb = self.builder.get_insert_block().unwrap();
                 // Wire up phi incoming values for the target block's parameters.
                 let args = self.cfg.get_extra(args_start, args_len).to_vec();
@@ -1842,8 +2173,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
             Terminator::Branch {
                 cond,
-                then_block, then_args_start, then_args_len,
-                else_block, else_args_start, else_args_len,
+                then_block,
+                then_args_start,
+                then_args_len,
+                else_block,
+                else_args_start,
+                else_args_len,
             } => {
                 let current_bb = self.builder.get_insert_block().unwrap();
                 let cond_val = self.get_value(cond).into_int_value();
@@ -1851,7 +2186,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     cond_val
                 } else {
                     let zero = cond_val.get_type().const_zero();
-                    self.builder.build_int_compare(IntPredicate::NE, cond_val, zero, "cond").unwrap()
+                    self.builder
+                        .build_int_compare(IntPredicate::NE, cond_val, zero, "cond")
+                        .unwrap()
                 };
                 // Wire up phi incoming values for then-branch params.
                 let then_args = self.cfg.get_extra(then_args_start, then_args_len).to_vec();
@@ -1873,9 +2210,16 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 }
                 let then_bb = self.llvm_block(then_block);
                 let else_bb = self.llvm_block(else_block);
-                self.builder.build_conditional_branch(cond_i1, then_bb, else_bb).unwrap();
+                self.builder
+                    .build_conditional_branch(cond_i1, then_bb, else_bb)
+                    .unwrap();
             }
-            Terminator::Switch { scrutinee, cases_start, cases_len, default } => {
+            Terminator::Switch {
+                scrutinee,
+                cases_start,
+                cases_len,
+                default,
+            } => {
                 let val = self.get_value(scrutinee).into_int_value();
                 let default_bb = self.llvm_block(default);
                 let cases = self.cfg.get_switch_cases(cases_start, cases_len);
@@ -1890,7 +2234,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         (case_int, self.llvm_block(*case_block))
                     })
                     .collect();
-                self.builder.build_switch(val, default_bb, &llvm_cases).unwrap();
+                self.builder
+                    .build_switch(val, default_bb, &llvm_cases)
+                    .unwrap();
             }
             Terminator::Unreachable | Terminator::None => {
                 self.builder.build_unreachable().unwrap();
@@ -1913,7 +2259,18 @@ fn define_function<'ctx>(
     interner: &ThreadedRodeo,
     fn_map: &HashMap<&str, FunctionValue<'ctx>>,
 ) -> CompileResult<()> {
-    let mut fn_gen = FnCodegen::new(cfg, *fn_value, ctx, builder, module, type_pool, strings, string_globals, interner, fn_map);
+    let mut fn_gen = FnCodegen::new(
+        cfg,
+        *fn_value,
+        ctx,
+        builder,
+        module,
+        type_pool,
+        strings,
+        string_globals,
+        interner,
+        fn_map,
+    );
     fn_gen.translate()
 }
 

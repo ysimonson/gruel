@@ -14,9 +14,9 @@ use crate::ast::{
     StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
-use chumsky::recursive::Direct;
 use chumsky::prelude::*;
 use chumsky::recovery::via_parser;
+use chumsky::recursive::Direct;
 use gruel_error::{CompileError, CompileErrors, ErrorKind, MultiErrorResult};
 use gruel_lexer::TokenKind;
 use gruel_span::{FileId, Span};
@@ -246,105 +246,108 @@ fn type_parser<'src, I>() -> GruelParser<'src, I, TypeExpr>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    recursive(move |ty: Recursive<Direct<'src, 'src, I, TypeExpr, ParserExtras<'src>>>| {
-        // Unit type: ()
-        let unit_type = just(TokenKind::LParen)
-            .then(just(TokenKind::RParen))
-            .map_with(|_, e| TypeExpr::Unit(span_from_extra(e)));
+    recursive(
+        move |ty: Recursive<Direct<'src, 'src, I, TypeExpr, ParserExtras<'src>>>| {
+            // Unit type: ()
+            let unit_type = just(TokenKind::LParen)
+                .then(just(TokenKind::RParen))
+                .map_with(|_, e| TypeExpr::Unit(span_from_extra(e)));
 
-        // Never type: !
-        let never_type = just(TokenKind::Bang).map_with(|_, e| TypeExpr::Never(span_from_extra(e)));
+            // Never type: !
+            let never_type =
+                just(TokenKind::Bang).map_with(|_, e| TypeExpr::Never(span_from_extra(e)));
 
-        // Array type: [T; N]
-        let array_type = just(TokenKind::LBracket)
-            .ignore_then(ty.clone())
-            .then_ignore(just(TokenKind::Semi))
-            .then(select! {
-                TokenKind::Int(n) => n,
-            })
-            .then_ignore(just(TokenKind::RBracket))
-            .map_with(|(element, length), e| TypeExpr::Array {
-                element: Box::new(element),
-                length,
-                span: span_from_extra(e),
+            // Array type: [T; N]
+            let array_type = just(TokenKind::LBracket)
+                .ignore_then(ty.clone())
+                .then_ignore(just(TokenKind::Semi))
+                .then(select! {
+                    TokenKind::Int(n) => n,
+                })
+                .then_ignore(just(TokenKind::RBracket))
+                .map_with(|(element, length), e| TypeExpr::Array {
+                    element: Box::new(element),
+                    length,
+                    span: span_from_extra(e),
+                });
+
+            // Anonymous struct type: struct { field: Type, ... }
+            // Used in comptime type construction
+            let anon_struct_field: GruelParser<'src, I, AnonStructField> = ident_parser()
+                .then_ignore(just(TokenKind::Colon))
+                .then(ty.clone())
+                .map_with(|(name, field_ty), e| AnonStructField {
+                    name,
+                    ty: field_ty,
+                    span: span_from_extra(e),
+                })
+                .boxed();
+
+            let anon_struct_fields: GruelParser<'src, I, Vec<AnonStructField>> = anon_struct_field
+                .separated_by(just(TokenKind::Comma))
+                .allow_trailing()
+                .collect::<Vec<_>>()
+                .boxed();
+
+            let anon_struct_type = just(TokenKind::Struct)
+                .ignore_then(just(TokenKind::LBrace))
+                .ignore_then(anon_struct_fields)
+                .then_ignore(just(TokenKind::RBrace))
+                .map_with(|fields, e| TypeExpr::AnonymousStruct {
+                    fields,
+                    methods: vec![],
+                    span: span_from_extra(e),
+                });
+
+            // Pointer type: ptr const T or ptr mut T
+            let ptr_const_type = just(TokenKind::Ptr)
+                .ignore_then(just(TokenKind::Const))
+                .ignore_then(ty.clone())
+                .map_with(|pointee, e| TypeExpr::PointerConst {
+                    pointee: Box::new(pointee),
+                    span: span_from_extra(e),
+                });
+
+            let ptr_mut_type = just(TokenKind::Ptr)
+                .ignore_then(just(TokenKind::Mut))
+                .ignore_then(ty.clone())
+                .map_with(|pointee, e| TypeExpr::PointerMut {
+                    pointee: Box::new(pointee),
+                    span: span_from_extra(e),
+                });
+
+            // Named type: user-defined types like MyStruct
+            let named_type = ident_parser().map(TypeExpr::Named);
+
+            // Self type: Self keyword used in methods to refer to the containing struct
+            let self_type = just(TokenKind::SelfType).map_with(|_, e| {
+                let span = span_from_extra(e);
+                TypeExpr::Named(Ident {
+                    name: e.state().syms.self_type,
+                    span,
+                })
             });
 
-        // Anonymous struct type: struct { field: Type, ... }
-        // Used in comptime type construction
-        let anon_struct_field: GruelParser<'src, I, AnonStructField> = ident_parser()
-            .then_ignore(just(TokenKind::Colon))
-            .then(ty.clone())
-            .map_with(|(name, field_ty), e| AnonStructField {
-                name,
-                ty: field_ty,
-                span: span_from_extra(e),
-            })
+            // NOTE: Split into sub-groups to keep Choice<tuple> symbol length < 4K.
+            // 9 elements of Boxed<I,TypeExpr,E> in one tuple would produce ~5K symbols on macOS.
+            let types_a: GruelParser<'src, I, TypeExpr> = choice((
+                unit_type.boxed(),
+                never_type.boxed(),
+                array_type.boxed(),
+                anon_struct_type.boxed(),
+                ptr_const_type.boxed(),
+            ))
             .boxed();
-
-        let anon_struct_fields: GruelParser<'src, I, Vec<AnonStructField>> = anon_struct_field
-            .separated_by(just(TokenKind::Comma))
-            .allow_trailing()
-            .collect::<Vec<_>>()
+            let types_b: GruelParser<'src, I, TypeExpr> = choice((
+                ptr_mut_type.boxed(),
+                primitive_type_parser().boxed(),
+                self_type.boxed(),
+                named_type.boxed(),
+            ))
             .boxed();
-
-        let anon_struct_type = just(TokenKind::Struct)
-            .ignore_then(just(TokenKind::LBrace))
-            .ignore_then(anon_struct_fields)
-            .then_ignore(just(TokenKind::RBrace))
-            .map_with(|fields, e| TypeExpr::AnonymousStruct {
-                fields,
-                methods: vec![],
-                span: span_from_extra(e),
-            });
-
-        // Pointer type: ptr const T or ptr mut T
-        let ptr_const_type = just(TokenKind::Ptr)
-            .ignore_then(just(TokenKind::Const))
-            .ignore_then(ty.clone())
-            .map_with(|pointee, e| TypeExpr::PointerConst {
-                pointee: Box::new(pointee),
-                span: span_from_extra(e),
-            });
-
-        let ptr_mut_type = just(TokenKind::Ptr)
-            .ignore_then(just(TokenKind::Mut))
-            .ignore_then(ty.clone())
-            .map_with(|pointee, e| TypeExpr::PointerMut {
-                pointee: Box::new(pointee),
-                span: span_from_extra(e),
-            });
-
-        // Named type: user-defined types like MyStruct
-        let named_type = ident_parser().map(TypeExpr::Named);
-
-        // Self type: Self keyword used in methods to refer to the containing struct
-        let self_type = just(TokenKind::SelfType).map_with(|_, e| {
-            let span = span_from_extra(e);
-            TypeExpr::Named(Ident {
-                name: e.state().syms.self_type,
-                span,
-            })
-        });
-
-        // NOTE: Split into sub-groups to keep Choice<tuple> symbol length < 4K.
-        // 9 elements of Boxed<I,TypeExpr,E> in one tuple would produce ~5K symbols on macOS.
-        let types_a: GruelParser<'src, I, TypeExpr> = choice((
-            unit_type.boxed(),
-            never_type.boxed(),
-            array_type.boxed(),
-            anon_struct_type.boxed(),
-            ptr_const_type.boxed(),
-        ))
-        .boxed();
-        let types_b: GruelParser<'src, I, TypeExpr> = choice((
-            ptr_mut_type.boxed(),
-            primitive_type_parser().boxed(),
-            self_type.boxed(),
-            named_type.boxed(),
-        ))
-        .boxed();
-        choice((types_a, types_b)).boxed()
-    })
+            choice((types_a, types_b)).boxed()
+        },
+    )
     .boxed()
 }
 
@@ -473,9 +476,7 @@ where
 }
 
 /// Parser for a single call argument: [inout|borrow] expr
-fn call_arg_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, CallArg>
+fn call_arg_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, CallArg>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -491,9 +492,7 @@ where
 }
 
 /// Parser for comma-separated call arguments with optional inout
-fn call_args_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, Vec<CallArg>>
+fn call_args_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, Vec<CallArg>>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -504,9 +503,7 @@ where
 }
 
 /// Parser for comma-separated expression arguments (for contexts that don't support inout)
-fn args_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, Vec<Expr>>
+fn args_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, Vec<Expr>>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -516,9 +513,7 @@ where
 }
 
 /// Parser for struct field initializers: name: expr
-fn field_init_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, FieldInit>
+fn field_init_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, FieldInit>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -589,129 +584,130 @@ fn expr_parser<'src, I>() -> GruelParser<'src, I, Expr>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    recursive(|expr: Recursive<Direct<'src, 'src, I, Expr, ParserExtras<'src>>>| {
-        // Atom parser – primary expressions (highest precedence).
-        let atom: GruelParser<I, Expr> = atom_parser(expr.clone().boxed());
+    recursive(
+        |expr: Recursive<Direct<'src, 'src, I, Expr, ParserExtras<'src>>>| {
+            // Atom parser – primary expressions (highest precedence).
+            let atom: GruelParser<I, Expr> = atom_parser(expr.clone().boxed());
 
-        // Unary prefix operators: -, !, ~  (right-associative; stack and apply inside-out)
-        let unary: GruelParser<I, Expr> = {
-            let prefix_op: GruelParser<I, (UnaryOp, SimpleSpan)> = choice((
-                just(TokenKind::Minus)
-                    .map_with(|_, e| (UnaryOp::Neg, e.span()))
-                    .boxed(),
-                just(TokenKind::Bang)
-                    .map_with(|_, e| (UnaryOp::Not, e.span()))
-                    .boxed(),
-                just(TokenKind::Tilde)
-                    .map_with(|_, e| (UnaryOp::BitNot, e.span()))
-                    .boxed(),
-            ))
-            .boxed();
-            prefix_op
-                .repeated()
-                .collect::<Vec<_>>()
-                .then(atom.clone())
-                .map(|(mut ops, mut rhs)| {
-                    // Apply operators from innermost (rightmost) outward.
-                    ops.reverse();
-                    for (op, span) in ops {
-                        rhs = make_unary(op, rhs, span);
-                    }
-                    rhs
-                })
-                .boxed()
-        };
-
-        // Helper macro: build one left-associative binary level.
-        // Each call boxes the result, keeping the drop-glue type short.
-        macro_rules! left_binary {
-            ($prev:expr, $op_parser:expr) => {{
-                let prev: GruelParser<I, Expr> = $prev;
-                let op: GruelParser<I, BinaryOp> = $op_parser;
-                prev.clone()
-                    .foldl(
-                        op.then(prev).repeated(),
-                        |l, (op, r)| make_binary(l, op, r),
-                    )
+            // Unary prefix operators: -, !, ~  (right-associative; stack and apply inside-out)
+            let unary: GruelParser<I, Expr> = {
+                let prefix_op: GruelParser<I, (UnaryOp, SimpleSpan)> = choice((
+                    just(TokenKind::Minus)
+                        .map_with(|_, e| (UnaryOp::Neg, e.span()))
+                        .boxed(),
+                    just(TokenKind::Bang)
+                        .map_with(|_, e| (UnaryOp::Not, e.span()))
+                        .boxed(),
+                    just(TokenKind::Tilde)
+                        .map_with(|_, e| (UnaryOp::BitNot, e.span()))
+                        .boxed(),
+                ))
+                .boxed();
+                prefix_op
+                    .repeated()
+                    .collect::<Vec<_>>()
+                    .then(atom.clone())
+                    .map(|(mut ops, mut rhs)| {
+                        // Apply operators from innermost (rightmost) outward.
+                        ops.reverse();
+                        for (op, span) in ops {
+                            rhs = make_unary(op, rhs, span);
+                        }
+                        rhs
+                    })
                     .boxed()
-            }};
-        }
+            };
 
-        // Multiplicative: *, /, %
-        let multiplicative: GruelParser<I, Expr> = left_binary!(
-            unary,
-            choice((
-                just(TokenKind::Star).to(BinaryOp::Mul).boxed(),
-                just(TokenKind::Slash).to(BinaryOp::Div).boxed(),
-                just(TokenKind::Percent).to(BinaryOp::Mod).boxed(),
-            ))
-            .boxed()
-        );
+            // Helper macro: build one left-associative binary level.
+            // Each call boxes the result, keeping the drop-glue type short.
+            macro_rules! left_binary {
+                ($prev:expr, $op_parser:expr) => {{
+                    let prev: GruelParser<I, Expr> = $prev;
+                    let op: GruelParser<I, BinaryOp> = $op_parser;
+                    prev.clone()
+                        .foldl(op.then(prev).repeated(), |l, (op, r)| make_binary(l, op, r))
+                        .boxed()
+                }};
+            }
 
-        // Additive: +, -
-        let additive: GruelParser<I, Expr> = left_binary!(
-            multiplicative,
-            choice((
-                just(TokenKind::Plus).to(BinaryOp::Add).boxed(),
-                just(TokenKind::Minus).to(BinaryOp::Sub).boxed(),
-            ))
-            .boxed()
-        );
+            // Multiplicative: *, /, %
+            let multiplicative: GruelParser<I, Expr> = left_binary!(
+                unary,
+                choice((
+                    just(TokenKind::Star).to(BinaryOp::Mul).boxed(),
+                    just(TokenKind::Slash).to(BinaryOp::Div).boxed(),
+                    just(TokenKind::Percent).to(BinaryOp::Mod).boxed(),
+                ))
+                .boxed()
+            );
 
-        // Shift: <<, >>
-        let shift: GruelParser<I, Expr> = left_binary!(
-            additive,
-            choice((
-                just(TokenKind::LtLt).to(BinaryOp::Shl).boxed(),
-                just(TokenKind::GtGt).to(BinaryOp::Shr).boxed(),
-            ))
-            .boxed()
-        );
+            // Additive: +, -
+            let additive: GruelParser<I, Expr> = left_binary!(
+                multiplicative,
+                choice((
+                    just(TokenKind::Plus).to(BinaryOp::Add).boxed(),
+                    just(TokenKind::Minus).to(BinaryOp::Sub).boxed(),
+                ))
+                .boxed()
+            );
 
-        // Comparison: ==, !=, <, >, <=, >=
-        let comparison: GruelParser<I, Expr> = left_binary!(
-            shift,
-            choice((
-                just(TokenKind::EqEq).to(BinaryOp::Eq).boxed(),
-                just(TokenKind::BangEq).to(BinaryOp::Ne).boxed(),
-                just(TokenKind::Lt).to(BinaryOp::Lt).boxed(),
-                just(TokenKind::Gt).to(BinaryOp::Gt).boxed(),
-                just(TokenKind::LtEq).to(BinaryOp::Le).boxed(),
-                just(TokenKind::GtEq).to(BinaryOp::Ge).boxed(),
-            ))
-            .boxed()
-        );
+            // Shift: <<, >>
+            let shift: GruelParser<I, Expr> = left_binary!(
+                additive,
+                choice((
+                    just(TokenKind::LtLt).to(BinaryOp::Shl).boxed(),
+                    just(TokenKind::GtGt).to(BinaryOp::Shr).boxed(),
+                ))
+                .boxed()
+            );
 
-        // Bitwise AND: &
-        let bitwise_and: GruelParser<I, Expr> =
-            left_binary!(comparison, just(TokenKind::Amp).to(BinaryOp::BitAnd).boxed());
+            // Comparison: ==, !=, <, >, <=, >=
+            let comparison: GruelParser<I, Expr> = left_binary!(
+                shift,
+                choice((
+                    just(TokenKind::EqEq).to(BinaryOp::Eq).boxed(),
+                    just(TokenKind::BangEq).to(BinaryOp::Ne).boxed(),
+                    just(TokenKind::Lt).to(BinaryOp::Lt).boxed(),
+                    just(TokenKind::Gt).to(BinaryOp::Gt).boxed(),
+                    just(TokenKind::LtEq).to(BinaryOp::Le).boxed(),
+                    just(TokenKind::GtEq).to(BinaryOp::Ge).boxed(),
+                ))
+                .boxed()
+            );
 
-        // Bitwise XOR: ^
-        let bitwise_xor: GruelParser<I, Expr> = left_binary!(
-            bitwise_and,
-            just(TokenKind::Caret).to(BinaryOp::BitXor).boxed()
-        );
+            // Bitwise AND: &
+            let bitwise_and: GruelParser<I, Expr> = left_binary!(
+                comparison,
+                just(TokenKind::Amp).to(BinaryOp::BitAnd).boxed()
+            );
 
-        // Bitwise OR: |
-        let bitwise_or: GruelParser<I, Expr> = left_binary!(
-            bitwise_xor,
-            just(TokenKind::Pipe).to(BinaryOp::BitOr).boxed()
-        );
+            // Bitwise XOR: ^
+            let bitwise_xor: GruelParser<I, Expr> = left_binary!(
+                bitwise_and,
+                just(TokenKind::Caret).to(BinaryOp::BitXor).boxed()
+            );
 
-        // Logical AND: &&
-        let logical_and: GruelParser<I, Expr> = left_binary!(
-            bitwise_or,
-            just(TokenKind::AmpAmp).to(BinaryOp::And).boxed()
-        );
+            // Bitwise OR: |
+            let bitwise_or: GruelParser<I, Expr> = left_binary!(
+                bitwise_xor,
+                just(TokenKind::Pipe).to(BinaryOp::BitOr).boxed()
+            );
 
-        // Logical OR: || (lowest binary precedence)
-        let logical_or: GruelParser<I, Expr> = left_binary!(
-            logical_and,
-            just(TokenKind::PipePipe).to(BinaryOp::Or).boxed()
-        );
+            // Logical AND: &&
+            let logical_and: GruelParser<I, Expr> = left_binary!(
+                bitwise_or,
+                just(TokenKind::AmpAmp).to(BinaryOp::And).boxed()
+            );
 
-        logical_or
-    })
+            // Logical OR: || (lowest binary precedence)
+            let logical_or: GruelParser<I, Expr> = left_binary!(
+                logical_and,
+                just(TokenKind::PipePipe).to(BinaryOp::Or).boxed()
+            );
+
+            logical_or
+        },
+    )
     .boxed()
 }
 
@@ -832,9 +828,7 @@ where
 }
 
 /// Parser for a single match arm: pattern => expr
-fn match_arm_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, MatchArm>
+fn match_arm_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, MatchArm>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -894,14 +888,18 @@ where
             })
         });
 
-    choice((int_lit.boxed(), string_lit.boxed(), bool_true.boxed(), bool_false.boxed(), unit_lit.boxed()))
-        .boxed()
+    choice((
+        int_lit.boxed(),
+        string_lit.boxed(),
+        bool_true.boxed(),
+        bool_false.boxed(),
+        unit_lit.boxed(),
+    ))
+    .boxed()
 }
 
 /// Parser for control flow expressions: break, continue, return, if, while, loop, match
-fn control_flow_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, Expr>
+fn control_flow_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, Expr>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -926,37 +924,41 @@ where
         });
 
     // If expression - defined with recursive reference to allow `else if` chains
-    let if_expr: GruelParser<'src, I, Expr> = recursive(|if_expr_rec: Recursive<Direct<'src, 'src, I, Expr, ParserExtras<'src>>>| {
-        just(TokenKind::If)
-            .ignore_then(expr.clone())
-            .then(maybe_unit_block_parser(expr.clone()))
-            .then(
-                just(TokenKind::Else)
-                    .ignore_then(choice((
-                        // else if: wrap the nested if in a synthetic block
-                        if_expr_rec.map_with(|nested_if, e| {
-                            let span = span_from_extra(e);
-                            BlockExpr {
-                                statements: Vec::new(),
-                                expr: Box::new(nested_if),
-                                span,
-                            }
-                        }).boxed(),
-                        // else { ... }: parse a regular block
-                        maybe_unit_block_parser(expr.clone()),
-                    )))
-                    .or_not(),
-            )
-            .map_with(|((cond, then_block), else_block), e| {
-                Expr::If(IfExpr {
-                    cond: Box::new(cond),
-                    then_block,
-                    else_block,
-                    span: span_from_extra(e),
+    let if_expr: GruelParser<'src, I, Expr> = recursive(
+        |if_expr_rec: Recursive<Direct<'src, 'src, I, Expr, ParserExtras<'src>>>| {
+            just(TokenKind::If)
+                .ignore_then(expr.clone())
+                .then(maybe_unit_block_parser(expr.clone()))
+                .then(
+                    just(TokenKind::Else)
+                        .ignore_then(choice((
+                            // else if: wrap the nested if in a synthetic block
+                            if_expr_rec
+                                .map_with(|nested_if, e| {
+                                    let span = span_from_extra(e);
+                                    BlockExpr {
+                                        statements: Vec::new(),
+                                        expr: Box::new(nested_if),
+                                        span,
+                                    }
+                                })
+                                .boxed(),
+                            // else { ... }: parse a regular block
+                            maybe_unit_block_parser(expr.clone()),
+                        )))
+                        .or_not(),
+                )
+                .map_with(|((cond, then_block), else_block), e| {
+                    Expr::If(IfExpr {
+                        cond: Box::new(cond),
+                        then_block,
+                        else_block,
+                        span: span_from_extra(e),
+                    })
                 })
-            })
-            .boxed()
-    })
+                .boxed()
+        },
+    )
     .boxed();
 
     // While expression
@@ -1025,9 +1027,7 @@ enum IdentSuffix {
 }
 
 /// Parser for identifier-based expressions: identifiers, function calls, struct literals, and paths
-fn call_and_access_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, Expr>
+fn call_and_access_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, Expr>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -1227,86 +1227,85 @@ where
     // NOTE: .boxed() is required here to shorten the monomorphized type name.
     // Without it, macOS's ld64 linker fails with "symbol name too long" because
     // the 6-way choice creates extremely long generic type names.
-    primary.foldl(
-        choice((
-            method_call_suffix.boxed(),
-            qualified_assoc_fn_suffix.boxed(),
-            qualified_struct_lit_suffix,
-            qualified_path_suffix.boxed(),
-            field_suffix.boxed(),
-            index_suffix.boxed(),
-        ))
+    primary
+        .foldl(
+            choice((
+                method_call_suffix.boxed(),
+                qualified_assoc_fn_suffix.boxed(),
+                qualified_struct_lit_suffix,
+                qualified_path_suffix.boxed(),
+                field_suffix.boxed(),
+                index_suffix.boxed(),
+            ))
+            .boxed()
+            .repeated(),
+            |base, suffix| match suffix {
+                Suffix::Field(field) => {
+                    // Extend the base span to include the field, preserving file_id
+                    let span = base.span().extend_to(field.span.end);
+                    Expr::Field(FieldExpr {
+                        base: Box::new(base),
+                        field,
+                        span,
+                    })
+                }
+                Suffix::MethodCall(method, args, end) => {
+                    // Extend the base span to the end of the call, preserving file_id
+                    let span = base.span().extend_to(end);
+                    Expr::MethodCall(MethodCallExpr {
+                        receiver: Box::new(base),
+                        method,
+                        args,
+                        span,
+                    })
+                }
+                Suffix::Index(index, end) => {
+                    // Extend the base span to the end of the index, preserving file_id
+                    let span = base.span().extend_to(end);
+                    Expr::Index(IndexExpr {
+                        base: Box::new(base),
+                        index: Box::new(index),
+                        span,
+                    })
+                }
+                Suffix::QualifiedStructLit(name, fields, end) => {
+                    // module.StructName { ... } → StructLitExpr with base
+                    let span = base.span().extend_to(end);
+                    Expr::StructLit(StructLitExpr {
+                        base: Some(Box::new(base)),
+                        name,
+                        fields,
+                        span,
+                    })
+                }
+                Suffix::QualifiedPath(type_name, variant, end) => {
+                    // module.EnumName::Variant → PathExpr with base
+                    let span = base.span().extend_to(end);
+                    Expr::Path(PathExpr {
+                        base: Some(Box::new(base)),
+                        type_name,
+                        variant,
+                        span,
+                    })
+                }
+                Suffix::QualifiedAssocFnCall(type_name, function, args, end) => {
+                    // module.TypeName::function(args) → AssocFnCallExpr with base
+                    let span = base.span().extend_to(end);
+                    Expr::AssocFnCall(AssocFnCallExpr {
+                        base: Some(Box::new(base)),
+                        type_name,
+                        function,
+                        args,
+                        span,
+                    })
+                }
+            },
+        )
         .boxed()
-        .repeated(),
-        |base, suffix| match suffix {
-            Suffix::Field(field) => {
-                // Extend the base span to include the field, preserving file_id
-                let span = base.span().extend_to(field.span.end);
-                Expr::Field(FieldExpr {
-                    base: Box::new(base),
-                    field,
-                    span,
-                })
-            }
-            Suffix::MethodCall(method, args, end) => {
-                // Extend the base span to the end of the call, preserving file_id
-                let span = base.span().extend_to(end);
-                Expr::MethodCall(MethodCallExpr {
-                    receiver: Box::new(base),
-                    method,
-                    args,
-                    span,
-                })
-            }
-            Suffix::Index(index, end) => {
-                // Extend the base span to the end of the index, preserving file_id
-                let span = base.span().extend_to(end);
-                Expr::Index(IndexExpr {
-                    base: Box::new(base),
-                    index: Box::new(index),
-                    span,
-                })
-            }
-            Suffix::QualifiedStructLit(name, fields, end) => {
-                // module.StructName { ... } → StructLitExpr with base
-                let span = base.span().extend_to(end);
-                Expr::StructLit(StructLitExpr {
-                    base: Some(Box::new(base)),
-                    name,
-                    fields,
-                    span,
-                })
-            }
-            Suffix::QualifiedPath(type_name, variant, end) => {
-                // module.EnumName::Variant → PathExpr with base
-                let span = base.span().extend_to(end);
-                Expr::Path(PathExpr {
-                    base: Some(Box::new(base)),
-                    type_name,
-                    variant,
-                    span,
-                })
-            }
-            Suffix::QualifiedAssocFnCall(type_name, function, args, end) => {
-                // module.TypeName::function(args) → AssocFnCallExpr with base
-                let span = base.span().extend_to(end);
-                Expr::AssocFnCall(AssocFnCallExpr {
-                    base: Some(Box::new(base)),
-                    type_name,
-                    function,
-                    args,
-                    span,
-                })
-            }
-        },
-    )
-    .boxed()
 }
 
 /// Atom parser - primary expressions (literals, identifiers, parens, blocks, control flow)
-fn atom_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, Expr>
+fn atom_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, Expr>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -1382,8 +1381,13 @@ where
         // Primitive type keywords (these can't be variable names)
         let primitive_type = primitive_type_parser().map(IntrinsicArg::Type);
 
-        choice((unit_type.boxed(), never_type.boxed(), array_type.boxed(), primitive_type.boxed()))
-            .boxed()
+        choice((
+            unit_type.boxed(),
+            never_type.boxed(),
+            array_type.boxed(),
+            primitive_type.boxed(),
+        ))
+        .boxed()
     };
 
     // Try unambiguous type syntax first, then fall back to expression.
@@ -1607,11 +1611,12 @@ where
         .map(|((d, m), p)| (d, m, p))
         .boxed();
 
-    let let_tail: GruelParser<I, (Option<TypeExpr>, Expr)> =
-        just(TokenKind::Colon).ignore_then(type_parser()).or_not()
-            .then(just(TokenKind::Eq).ignore_then(expr))
-            .then_ignore(just(TokenKind::Semi))
-            .boxed();
+    let let_tail: GruelParser<I, (Option<TypeExpr>, Expr)> = just(TokenKind::Colon)
+        .ignore_then(type_parser())
+        .or_not()
+        .then(just(TokenKind::Eq).ignore_then(expr))
+        .then_ignore(just(TokenKind::Semi))
+        .boxed();
 
     let_head
         .then(let_tail)
@@ -1820,9 +1825,7 @@ fn is_diverging_expr(e: &Expr) -> bool {
 ///
 /// The assignment parser is tried before general expressions because `x = 5;`
 /// could otherwise be misparsed as expression `x` followed by unexpected `=`.
-fn block_item_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, BlockItem>
+fn block_item_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, BlockItem>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -1846,7 +1849,10 @@ where
         .then(
             choice((
                 just(TokenKind::Semi).to(ExprFollower::Semi).boxed(),
-                just(TokenKind::RBrace).rewind().to(ExprFollower::RBrace).boxed(),
+                just(TokenKind::RBrace)
+                    .rewind()
+                    .to(ExprFollower::RBrace)
+                    .boxed(),
                 any().rewind().to(ExprFollower::Other).boxed(),
             ))
             .or(end().to(ExprFollower::End)),
@@ -1950,9 +1956,7 @@ where
 }
 
 /// Parser for blocks that require a final expression: { statements... expr }
-fn block_parser<'src, I>(
-    expr: GruelParser<'src, I, Expr>,
-) -> GruelParser<'src, I, Expr>
+fn block_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, Expr>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
@@ -2005,16 +2009,17 @@ where
         .then(just(TokenKind::Arrow).ignore_then(type_parser()).or_not())
         .then(block_parser(expr))
         .map_with(
-            |((((directives, visibility, is_unchecked), (name, params)), return_type), body),
-             e| Function {
-                directives,
-                visibility,
-                is_unchecked,
-                name,
-                params,
-                return_type,
-                body,
-                span: span_from_extra(e),
+            |((((directives, visibility, is_unchecked), (name, params)), return_type), body), e| {
+                Function {
+                    directives,
+                    visibility,
+                    is_unchecked,
+                    name,
+                    params,
+                    return_type,
+                    body,
+                    span: span_from_extra(e),
+                }
             },
         )
         .boxed()
@@ -2071,11 +2076,12 @@ fn enum_variant_parser<'src, I>() -> GruelParser<'src, I, EnumVariant>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    ident_parser().map_with(|name, e| EnumVariant {
-        name,
-        span: span_from_extra(e),
-    })
-    .boxed()
+    ident_parser()
+        .map_with(|name, e| EnumVariant {
+            name,
+            span: span_from_extra(e),
+        })
+        .boxed()
 }
 
 /// Parser for comma-separated enum variants
@@ -2172,13 +2178,14 @@ where
         .then(just(TokenKind::Fn).ignore_then(ident_parser()))
         .boxed();
 
-    let method_params: GruelParser<I, (Option<SelfParam>, Vec<Param>)> =
-        params_with_optional_self
-            .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
-            .boxed();
+    let method_params: GruelParser<I, (Option<SelfParam>, Vec<Param>)> = params_with_optional_self
+        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
+        .boxed();
 
-    let method_return: GruelParser<I, Option<TypeExpr>> =
-        just(TokenKind::Arrow).ignore_then(type_parser()).or_not().boxed();
+    let method_return: GruelParser<I, Option<TypeExpr>> = just(TokenKind::Arrow)
+        .ignore_then(type_parser())
+        .or_not()
+        .boxed();
 
     method_head
         .then(method_params)
@@ -2257,11 +2264,12 @@ where
         .map(|((d, v), n)| (d, v, n))
         .boxed();
 
-    let const_tail: GruelParser<I, (Option<TypeExpr>, Expr)> =
-        just(TokenKind::Colon).ignore_then(type_parser()).or_not()
-            .then(just(TokenKind::Eq).ignore_then(expr))
-            .then_ignore(just(TokenKind::Semi))
-            .boxed();
+    let const_tail: GruelParser<I, (Option<TypeExpr>, Expr)> = just(TokenKind::Colon)
+        .ignore_then(type_parser())
+        .or_not()
+        .then(just(TokenKind::Eq).ignore_then(expr))
+        .then_ignore(just(TokenKind::Semi))
+        .boxed();
 
     const_head
         .then(const_tail)
@@ -2352,7 +2360,9 @@ fn item_with_recovery<'src, I>() -> GruelParser<'src, I, Item>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    item_parser().recover_with(via_parser(error_recovery())).boxed()
+    item_parser()
+        .recover_with(via_parser(error_recovery()))
+        .boxed()
 }
 
 /// Main parser that produces an AST
