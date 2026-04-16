@@ -2114,12 +2114,12 @@ mod tests {
         let lexer = Lexer::new(source);
         let (tokens, interner) = lexer.tokenize().unwrap();
         let parser = Parser::new(tokens, interner);
-        let (ast, mut interner) = parser.parse().unwrap();
+        let (ast, interner) = parser.parse().unwrap();
 
-        let astgen = AstGen::new(&ast, &mut interner);
+        let astgen = AstGen::new(&ast, &interner);
         let rir = astgen.generate();
 
-        let mut sema = Sema::new(&rir, &mut interner, PreviewFeatures::new());
+        let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
         let output = sema.analyze_all().unwrap();
 
         let func = &output.functions[0];

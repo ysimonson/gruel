@@ -936,10 +936,10 @@ mod tests {
                 has_self,
                 ..
             } => {
-                assert_eq!(interner.resolve(&*name), "main");
+                assert_eq!(interner.resolve(name), "main");
                 let params = rir.get_params(*params_start, *params_len);
                 assert!(params.is_empty());
-                assert_eq!(interner.resolve(&*return_type), "i32");
+                assert_eq!(interner.resolve(return_type), "i32");
                 assert!(!has_self); // Regular functions don't have self
                 // Body should be the int constant
                 let body_inst = rir.get(*body);
@@ -1136,7 +1136,7 @@ mod tests {
                         let var_ref_inst = rir.get(InstRef::from_raw(inst_refs[1]));
                         match &var_ref_inst.data {
                             InstData::VarRef { name } => {
-                                assert_eq!(interner.resolve(&*name), "x");
+                                assert_eq!(interner.resolve(name), "x");
                             }
                             _ => panic!("expected VarRef"),
                         }
@@ -1161,7 +1161,7 @@ mod tests {
         let (_, inst) = assign_inst.unwrap();
         match &inst.data {
             InstData::Assign { name, value } => {
-                assert_eq!(interner.resolve(&*name), "x");
+                assert_eq!(interner.resolve(name), "x");
                 assert!(matches!(rir.get(*value).data, InstData::IntConst(20)));
             }
             _ => panic!("expected Assign"),
@@ -1229,7 +1229,7 @@ mod tests {
                 methods_len,
                 ..
             } => {
-                assert_eq!(interner.resolve(&*name), "Point");
+                assert_eq!(interner.resolve(name), "Point");
                 let methods = rir.get_inst_refs(*methods_start, *methods_len);
                 assert_eq!(methods.len(), 1);
 
@@ -1237,7 +1237,7 @@ mod tests {
                 let method_inst = rir.get(methods[0]);
                 match &method_inst.data {
                     InstData::FnDecl { name, has_self, .. } => {
-                        assert_eq!(interner.resolve(&*name), "get_x");
+                        assert_eq!(interner.resolve(name), "get_x");
                         assert!(*has_self);
                     }
                     _ => panic!("expected FnDecl"),
@@ -1281,7 +1281,7 @@ mod tests {
                     let method_inst = rir.get(method_ref);
                     match &method_inst.data {
                         InstData::FnDecl { name, has_self, .. } => {
-                            let method_name = interner.resolve(&*name);
+                            let method_name = interner.resolve(name);
                             if method_name == "origin" {
                                 assert!(!has_self, "origin should not have self");
                             } else {
@@ -1324,7 +1324,7 @@ mod tests {
                 args_start,
                 args_len,
             } => {
-                assert_eq!(interner.resolve(&*method), "get_x");
+                assert_eq!(interner.resolve(method), "get_x");
                 let args = rir.get_call_args(*args_start, *args_len);
                 assert!(args.is_empty()); // No explicit args (self is implicit)
             }
@@ -1361,8 +1361,8 @@ mod tests {
                 args_start,
                 args_len,
             } => {
-                assert_eq!(interner.resolve(&*type_name), "Point");
-                assert_eq!(interner.resolve(&*function), "origin");
+                assert_eq!(interner.resolve(type_name), "Point");
+                assert_eq!(interner.resolve(function), "origin");
                 let args = rir.get_call_args(*args_start, *args_len);
                 assert!(args.is_empty());
             }
@@ -1545,8 +1545,8 @@ mod tests {
                     RirPattern::Path {
                         type_name, variant, ..
                     } => {
-                        assert_eq!(interner.resolve(&*type_name), "Color");
-                        assert_eq!(interner.resolve(&*variant), "Red");
+                        assert_eq!(interner.resolve(type_name), "Color");
+                        assert_eq!(interner.resolve(variant), "Red");
                     }
                     _ => panic!("expected Path pattern"),
                 }
@@ -1556,8 +1556,8 @@ mod tests {
                     RirPattern::Path {
                         type_name, variant, ..
                     } => {
-                        assert_eq!(interner.resolve(&*type_name), "Color");
-                        assert_eq!(interner.resolve(&*variant), "Green");
+                        assert_eq!(interner.resolve(type_name), "Color");
+                        assert_eq!(interner.resolve(variant), "Green");
                     }
                     _ => panic!("expected Path pattern"),
                 }
@@ -1567,8 +1567,8 @@ mod tests {
                     RirPattern::Path {
                         type_name, variant, ..
                     } => {
-                        assert_eq!(interner.resolve(&*type_name), "Color");
-                        assert_eq!(interner.resolve(&*variant), "Blue");
+                        assert_eq!(interner.resolve(type_name), "Color");
+                        assert_eq!(interner.resolve(variant), "Blue");
                     }
                     _ => panic!("expected Path pattern"),
                 }
@@ -1590,7 +1590,7 @@ mod tests {
 
         // Find the VarRef instruction for "self"
         let self_ref = rir.iter().find(|(_, inst)| match &inst.data {
-            InstData::VarRef { name } => interner.resolve(&*name) == "self",
+            InstData::VarRef { name } => interner.resolve(name) == "self",
             _ => false,
         });
         assert!(self_ref.is_some(), "Expected self VarRef instruction");
@@ -1614,7 +1614,7 @@ mod tests {
         let (_, inst) = drop_fn.unwrap();
         match &inst.data {
             InstData::DropFnDecl { type_name, body: _ } => {
-                assert_eq!(interner.resolve(&*type_name), "Resource");
+                assert_eq!(interner.resolve(type_name), "Resource");
             }
             _ => panic!("expected DropFnDecl"),
         }
@@ -1642,8 +1642,8 @@ mod tests {
             InstData::EnumVariant {
                 type_name, variant, ..
             } => {
-                assert_eq!(interner.resolve(&*type_name), "Color");
-                assert_eq!(interner.resolve(&*variant), "Red");
+                assert_eq!(interner.resolve(type_name), "Color");
+                assert_eq!(interner.resolve(variant), "Red");
             }
             _ => panic!("expected EnumVariant"),
         }
@@ -1683,7 +1683,7 @@ mod tests {
                         has_self,
                         ..
                     } => {
-                        assert_eq!(interner.resolve(&*name), "add");
+                        assert_eq!(interner.resolve(name), "add");
                         assert!(*has_self);
                         // params should contain 'amount', not 'self'
                         let params = rir.get_params(*params_start, *params_len);
@@ -1823,7 +1823,7 @@ mod tests {
         let fn_decl = view.fn_decl();
         match &fn_decl.data {
             InstData::FnDecl { name, .. } => {
-                assert_eq!(interner.resolve(&*name), "main");
+                assert_eq!(interner.resolve(name), "main");
             }
             _ => panic!("Expected FnDecl"),
         }

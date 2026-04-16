@@ -2438,7 +2438,7 @@ mod tests {
 
     #[test]
     fn test_printer_string_const() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let hello = interner.get_or_intern("hello world");
         rir.add_inst(Inst {
             data: InstData::StringConst(hello),
@@ -2497,7 +2497,7 @@ mod tests {
             (InstData::Shr { lhs, rhs }, "shr"),
         ];
 
-        for (data, op_name) in ops {
+        for (_data, op_name) in ops {
             let mut test_rir = Rir::new();
             let lhs = test_rir.add_inst(Inst {
                 data: InstData::IntConst(1),
@@ -2717,7 +2717,7 @@ mod tests {
 
     #[test]
     fn test_printer_fn_decl() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let body = rir.add_inst(Inst {
             data: InstData::IntConst(42),
             span: Span::new(0, 2),
@@ -2759,7 +2759,7 @@ mod tests {
 
     #[test]
     fn test_printer_fn_decl_with_self() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let body = rir.add_inst(Inst {
             data: InstData::IntConst(0),
             span: Span::new(0, 1),
@@ -2794,7 +2794,7 @@ mod tests {
 
     #[test]
     fn test_printer_fn_decl_param_modes() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let body = rir.add_inst(Inst {
             data: InstData::UnitConst,
             span: Span::new(0, 2),
@@ -2856,7 +2856,7 @@ mod tests {
 
     #[test]
     fn test_printer_call() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let arg = rir.add_inst(Inst {
             data: InstData::IntConst(10),
             span: Span::new(0, 2),
@@ -2885,7 +2885,7 @@ mod tests {
 
     #[test]
     fn test_printer_call_with_arg_modes() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let arg1 = rir.add_inst(Inst {
             data: InstData::IntConst(1),
             span: Span::new(0, 1),
@@ -2932,7 +2932,7 @@ mod tests {
 
     #[test]
     fn test_printer_intrinsic() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let arg = rir.add_inst(Inst {
             data: InstData::IntConst(42),
             span: Span::new(0, 2),
@@ -2961,7 +2961,7 @@ mod tests {
 
     #[test]
     fn test_printer_type_intrinsic() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let name = interner.get_or_intern("size_of");
         let type_arg = interner.get_or_intern("i32");
 
@@ -2977,7 +2977,7 @@ mod tests {
 
     #[test]
     fn test_printer_param_ref() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let name = interner.get_or_intern("x");
 
         rir.add_inst(Inst {
@@ -3008,7 +3008,7 @@ mod tests {
 
     #[test]
     fn test_printer_alloc() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let init = rir.add_inst(Inst {
             data: InstData::IntConst(42),
             span: Span::new(0, 2),
@@ -3039,7 +3039,7 @@ mod tests {
 
     #[test]
     fn test_printer_alloc_mut() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let init = rir.add_inst(Inst {
             data: InstData::IntConst(42),
             span: Span::new(0, 2),
@@ -3095,7 +3095,7 @@ mod tests {
 
     #[test]
     fn test_printer_var_ref() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let name = interner.get_or_intern("x");
 
         rir.add_inst(Inst {
@@ -3110,7 +3110,7 @@ mod tests {
 
     #[test]
     fn test_printer_assign() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let value = rir.add_inst(Inst {
             data: InstData::IntConst(10),
             span: Span::new(0, 2),
@@ -3130,7 +3130,7 @@ mod tests {
 
     #[test]
     fn test_printer_struct_decl() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let name = interner.get_or_intern("Point");
         let x_name = interner.get_or_intern("x");
         let y_name = interner.get_or_intern("y");
@@ -3163,7 +3163,7 @@ mod tests {
 
     #[test]
     fn test_printer_struct_decl_with_directive() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let name = interner.get_or_intern("Point");
         let x_name = interner.get_or_intern("x");
         let i32_type = interner.get_or_intern("i32");
@@ -3199,7 +3199,7 @@ mod tests {
 
     #[test]
     fn test_printer_struct_init() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let x_val = rir.add_inst(Inst {
             data: InstData::IntConst(10),
             span: Span::new(0, 2),
@@ -3232,7 +3232,7 @@ mod tests {
 
     #[test]
     fn test_printer_field_get() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let base = rir.add_inst(Inst {
             data: InstData::IntConst(0), // placeholder for a struct value
             span: Span::new(0, 1),
@@ -3252,7 +3252,7 @@ mod tests {
 
     #[test]
     fn test_printer_field_set() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let base = rir.add_inst(Inst {
             data: InstData::IntConst(0), // placeholder
             span: Span::new(0, 1),
@@ -3276,7 +3276,7 @@ mod tests {
 
     #[test]
     fn test_printer_enum_decl() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let name = interner.get_or_intern("Color");
         let red = interner.get_or_intern("Red");
         let green = interner.get_or_intern("Green");
@@ -3301,7 +3301,7 @@ mod tests {
 
     #[test]
     fn test_printer_enum_variant() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let type_name = interner.get_or_intern("Color");
         let variant = interner.get_or_intern("Red");
 
@@ -3401,7 +3401,7 @@ mod tests {
     // Struct with methods tests
     #[test]
     fn test_printer_struct_decl_with_methods() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
 
         // Create a method first
         let method_body = rir.add_inst(Inst {
@@ -3459,7 +3459,7 @@ mod tests {
 
     #[test]
     fn test_printer_method_call() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let receiver = rir.add_inst(Inst {
             data: InstData::IntConst(0), // placeholder for struct value
             span: Span::new(0, 1),
@@ -3493,7 +3493,7 @@ mod tests {
 
     #[test]
     fn test_printer_method_call_with_arg_modes() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let receiver = rir.add_inst(Inst {
             data: InstData::IntConst(0),
             span: Span::new(0, 1),
@@ -3537,7 +3537,7 @@ mod tests {
 
     #[test]
     fn test_printer_assoc_fn_call() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
 
         let type_name = interner.get_or_intern("Point");
         let function = interner.get_or_intern("origin");
@@ -3561,7 +3561,7 @@ mod tests {
 
     #[test]
     fn test_printer_assoc_fn_call_with_args() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let arg1 = rir.add_inst(Inst {
             data: InstData::IntConst(10),
             span: Span::new(0, 2),
@@ -3602,7 +3602,7 @@ mod tests {
 
     #[test]
     fn test_printer_drop_fn_decl() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let body = rir.add_inst(Inst {
             data: InstData::UnitConst,
             span: Span::new(0, 2),
@@ -3727,7 +3727,7 @@ mod tests {
 
     #[test]
     fn test_printer_match_path_pattern() {
-        let (mut rir, mut interner) = create_printer_test_rir();
+        let (mut rir, interner) = create_printer_test_rir();
         let scrutinee = rir.add_inst(Inst {
             data: InstData::IntConst(0), // placeholder for enum value
             span: Span::new(0, 1),

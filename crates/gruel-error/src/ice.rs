@@ -412,7 +412,7 @@ mod tests {
         assert!(formatted.is_some());
         // The backtrace should either contain actual frames or the disabled message
         let bt_str = formatted.unwrap();
-        assert!(bt_str.contains("backtrace capture disabled") || bt_str.len() > 0);
+        assert!(bt_str.contains("backtrace capture disabled") || !bt_str.is_empty());
     }
 
     #[test]

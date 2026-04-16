@@ -1962,8 +1962,8 @@ mod soa_tests {
             rhs: 0,
         });
 
-        assert_eq!(ast.bool_value(NodeIndex(0)), true);
-        assert_eq!(ast.bool_value(NodeIndex(1)), false);
+        assert!(ast.bool_value(NodeIndex(0)));
+        assert!(!ast.bool_value(NodeIndex(1)));
     }
 
     #[test]

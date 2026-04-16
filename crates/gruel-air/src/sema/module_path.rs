@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_resolve_std_not_supported() {
-        let paths = vec!["main.gruel".to_string()];
+        let paths = ["main.gruel".to_string()];
         let module = ModulePath::Std;
         assert_eq!(module.resolve(paths.iter()), None);
     }
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_resolve_explicit_exact_match() {
-        let paths = vec!["foo.gruel".to_string(), "bar.gruel".to_string()];
+        let paths = ["foo.gruel".to_string(), "bar.gruel".to_string()];
         let module = ModulePath::ExplicitRue {
             path: "foo.gruel".to_string(),
         };
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_resolve_explicit_suffix_match() {
-        let paths = vec!["/project/src/foo.gruel".to_string()];
+        let paths = ["/project/src/foo.gruel".to_string()];
         let module = ModulePath::ExplicitRue {
             path: "foo.gruel".to_string(),
         };
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn test_resolve_explicit_no_false_substring_match() {
         // "foo.gruel" should NOT match "xfoo.gruel" (no path boundary)
-        let paths = vec!["xfoo.gruel".to_string()];
+        let paths = ["xfoo.gruel".to_string()];
         let module = ModulePath::ExplicitRue {
             path: "foo.gruel".to_string(),
         };
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn test_resolve_explicit_nested_path() {
-        let paths = vec!["/project/utils/strings.gruel".to_string()];
+        let paths = ["/project/utils/strings.gruel".to_string()];
         let module = ModulePath::ExplicitRue {
             path: "utils/strings.gruel".to_string(),
         };
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn test_resolve_simple_exact_match() {
-        let paths = vec!["foo.gruel".to_string()];
+        let paths = ["foo.gruel".to_string()];
         let module = ModulePath::Simple {
             path: "foo".to_string(),
         };
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn test_resolve_simple_suffix_match() {
-        let paths = vec!["/project/src/foo.gruel".to_string()];
+        let paths = ["/project/src/foo.gruel".to_string()];
         let module = ModulePath::Simple {
             path: "foo".to_string(),
         };
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn test_resolve_simple_nested_path() {
-        let paths = vec!["/project/utils/strings.gruel".to_string()];
+        let paths = ["/project/utils/strings.gruel".to_string()];
         let module = ModulePath::Simple {
             path: "utils/strings".to_string(),
         };
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn test_resolve_simple_basename_match() {
         // "math" should match "src/math.gruel" by basename
-        let paths = vec!["src/math.gruel".to_string()];
+        let paths = ["src/math.gruel".to_string()];
         let module = ModulePath::Simple {
             path: "math".to_string(),
         };
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_resolve_simple_facade_file() {
-        let paths = vec!["_utils.gruel".to_string()];
+        let paths = ["_utils.gruel".to_string()];
         let module = ModulePath::Simple {
             path: "utils".to_string(),
         };
@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn test_resolve_simple_prefers_regular_over_facade() {
         // When both "foo.gruel" and "_foo.gruel" exist, prefer "foo.gruel"
-        let paths = vec!["_foo.gruel".to_string(), "foo.gruel".to_string()];
+        let paths = ["_foo.gruel".to_string(), "foo.gruel".to_string()];
         let module = ModulePath::Simple {
             path: "foo".to_string(),
         };
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn test_resolve_simple_no_false_substring_match() {
         // "math" should NOT match "mathematics.gruel"
-        let paths = vec!["mathematics.gruel".to_string()];
+        let paths = ["mathematics.gruel".to_string()];
         let module = ModulePath::Simple {
             path: "math".to_string(),
         };
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn test_resolve_not_found() {
-        let paths = vec!["other.gruel".to_string()];
+        let paths = ["other.gruel".to_string()];
         let module = ModulePath::Simple {
             path: "foo".to_string(),
         };

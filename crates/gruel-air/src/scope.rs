@@ -171,7 +171,7 @@ mod tests {
 
         ctx.pop_scope();
         // Variable should be removed after pop
-        assert!(ctx.locals.get(&x).is_none());
+        assert!(!ctx.locals.contains_key(&x));
     }
 
     #[test]
@@ -224,12 +224,12 @@ mod tests {
         ctx.pop_scope();
         assert_eq!(ctx.locals.get(&x), Some(&2));
         assert_eq!(ctx.locals.get(&y), Some(&3));
-        assert!(ctx.locals.get(&z).is_none());
+        assert!(!ctx.locals.contains_key(&z));
 
         // Pop scope 1: x = 1, y removed
         ctx.pop_scope();
         assert_eq!(ctx.locals.get(&x), Some(&1));
-        assert!(ctx.locals.get(&y).is_none());
+        assert!(!ctx.locals.contains_key(&y));
     }
 
     #[test]

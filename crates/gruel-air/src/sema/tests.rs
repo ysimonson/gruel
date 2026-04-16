@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::inst::{AirInstData, AirRef};
     use crate::sema::{Sema, SemaOutput};
@@ -12,12 +13,12 @@ mod tests {
         let lexer = Lexer::new(source);
         let (tokens, interner) = lexer.tokenize().map_err(CompileErrors::from_error)?;
         let parser = Parser::new(tokens, interner);
-        let (ast, mut interner) = parser.parse()?;
+        let (ast, interner) = parser.parse()?;
 
-        let astgen = AstGen::new(&ast, &mut interner);
+        let astgen = AstGen::new(&ast, &interner);
         let rir = astgen.generate();
 
-        let sema = Sema::new(&rir, &mut interner, PreviewFeatures::new());
+        let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
         sema.analyze_all()
     }
 
@@ -836,9 +837,9 @@ mod tests {
         let lexer = Lexer::new(source);
         let (tokens, interner) = lexer.tokenize().unwrap();
         let parser = Parser::new(tokens, interner);
-        let (ast, mut interner) = parser.parse().unwrap();
+        let (ast, interner) = parser.parse().unwrap();
 
-        let astgen = AstGen::new(&ast, &mut interner);
+        let astgen = AstGen::new(&ast, &interner);
         let rir = astgen.generate();
 
         // Leak both to get 'static lifetime for testing

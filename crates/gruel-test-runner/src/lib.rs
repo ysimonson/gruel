@@ -1318,7 +1318,7 @@ mod tests {
             "hello"
         );
         assert_eq!(toml_value_to_string(&toml::Value::Integer(42)), "42");
-        assert_eq!(toml_value_to_string(&toml::Value::Float(3.14)), "3.14");
+        assert_eq!(toml_value_to_string(&toml::Value::Float(2.5)), "2.5");
         assert_eq!(toml_value_to_string(&toml::Value::Boolean(true)), "true");
     }
 
