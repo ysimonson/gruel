@@ -1202,16 +1202,18 @@ fn link_system_with_warnings(
     // Build the linker command
     let mut cmd = Command::new(linker_cmd);
 
-    // Add target-specific linker flags
+    // Add target-specific linker flags.
+    // We use -nostartfiles (not -nostdlib) because the runtime provides its own
+    // _start/_main entry points but relies on libc for syscalls.
     if options.target.is_macho() {
         // macOS-specific flags
-        cmd.arg("-nostdlib");
+        cmd.arg("-nostartfiles");
         cmd.arg("-arch").arg("arm64");
         cmd.arg("-e").arg("__main");
     } else {
         // Linux/ELF-specific flags
         cmd.arg("-static");
-        cmd.arg("-nostdlib");
+        cmd.arg("-nostartfiles");
     }
 
     cmd.arg("-o");
