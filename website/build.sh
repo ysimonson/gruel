@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: ./build.sh [serve|deploy]
 #   (no args) - local build with root-relative URLs
 #   serve     - dev server at http://127.0.0.1:1111
-#   deploy    - production build with absolute URLs (https://gruel-lang.dev)
+#   deploy    - production build with absolute URLs (https://gruel.yusufsimonson.com)
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -154,7 +154,7 @@ if [[ "${1:-}" == "serve" ]]; then
     "$ROOT/zola" serve
 elif [[ "${1:-}" == "deploy" ]]; then
     echo "Building website for production..."
-    "$ROOT/zola" build --base-url https://gruel-lang.dev
+    "$ROOT/zola" build --base-url https://gruel.yusufsimonson.com
     echo "Done! Output in website/public/"
 else
     echo "Building website..."

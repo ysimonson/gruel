@@ -170,7 +170,7 @@ impl<'a> MultiFileFormatter<'a> {
         if is_ice {
             output.push_str("\nnote: this is a bug in the Gruel compiler\n");
             output.push_str(
-                "help: please report this issue at https://github.com/gruel-language/gruel/issues\n",
+                "help: please report this issue at https://github.com/ysimonson/gruel/issues\n",
             );
         }
 
@@ -1051,7 +1051,7 @@ mod tests {
         // Should contain ICE-specific note and help
         assert!(output.contains("note: this is a bug in the Gruel compiler"));
         assert!(output.contains("help: please report this issue"));
-        assert!(output.contains("github.com/gruel-language/gruel/issues"));
+        assert!(output.contains("github.com/ysimonson/gruel/issues"));
     }
 
     #[test]

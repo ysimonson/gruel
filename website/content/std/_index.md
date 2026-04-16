@@ -71,4 +71,4 @@ The Gruel standard library follows several design principles:
 3. **File = module** - Each `.gruel` file is a module; the filesystem is the source of truth
 4. **Simple visibility** - Just `pub` (public) or nothing (private)
 
-For more details on the module system, see [ADR-0026: Module System](https://github.com/gruel-language/gruel/blob/trunk/docs/designs/0026-module-system.md).
+For more details on the module system, see [ADR-0026: Module System](https://github.com/ysimonson/gruel/blob/trunk/docs/designs/0026-module-system.md).

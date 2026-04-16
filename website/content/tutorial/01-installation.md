@@ -6,7 +6,7 @@ template = "tutorial/page.html"
 
 # Installation
 
-Gruel is currently in early development. To try it out, you'll need to build from source. If you do try it out, you'll certainly find bugs, and if you do please [file them](https://github.com/gruel-language/gruel/issues)!
+Gruel is currently in early development. To try it out, you'll need to build from source. If you do try it out, you'll certainly find bugs, and if you do please [file them](https://github.com/ysimonson/gruel/issues)!
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ Gruel is currently in early development. To try it out, you'll need to build fro
 ## Building from Source
 
 ```bash
-git clone https://github.com/gruel-language/gruel
+git clone https://github.com/ysimonson/gruel
 cd gruel
 cargo build -p gruel --release
 ```
