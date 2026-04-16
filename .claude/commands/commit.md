@@ -1,12 +1,11 @@
 ---
 description: Commit staged or unstaged changes with a well-formed message
 allowed-tools: Bash, Read, Glob, Grep
-argument-hint: <commit message or description>
 ---
 
 ## Task
 
-Commit the current changes: $ARGUMENTS
+Commit the current changes.
 
 ## Steps
 
@@ -20,16 +19,9 @@ Commit the current changes: $ARGUMENTS
 
 3. Stage relevant files. Prefer specific file names over `git add -A` to avoid accidentally including unrelated files.
 
-4. Create the commit. The message should be concise and describe *what* was done. Include the co-author trailer:
+4. Create the commit. The message should be concise and describe *what* was done. Include the co-author trailer with the specific model that you are, e.g.:
    ```
    Short description of the change
-
-   Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-   ```
-
-   If an argument was provided, use it to guide the message. For phase-based work from `/implement`, name the phase:
-   ```
-   Implement phase 1a: core parsing
 
    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
    ```
