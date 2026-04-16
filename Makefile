@@ -3,11 +3,11 @@
         fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter \
         claude
 
-# Detect LLVM 18 on macOS (Homebrew). Set LLVM_SYS_180_PREFIX if not already set.
-# On Linux, llvm-config-18 is usually in PATH and llvm-sys finds it automatically.
-LLVM18_BREW := /opt/homebrew/opt/llvm@18
-ifeq ($(shell test -d $(LLVM18_BREW) && echo yes),yes)
-  export LLVM_SYS_180_PREFIX ?= $(LLVM18_BREW)
+# Detect LLVM 22 on macOS (Homebrew). Set LLVM_SYS_221_PREFIX if not already set.
+# On Linux, set LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 or let llvm-sys find it via llvm-config.
+LLVM22_BREW := /opt/homebrew/opt/llvm@22
+ifeq ($(shell test -d $(LLVM22_BREW) && echo yes),yes)
+  export LLVM_SYS_221_PREFIX ?= $(LLVM22_BREW)
 endif
 
 # Run unit tests only (fast feedback during development).
