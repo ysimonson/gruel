@@ -301,6 +301,7 @@ struct FnCodegen<'ctx, 'a> {
 }
 
 impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         cfg: &'a Cfg,
         fn_value: FunctionValue<'ctx>,
@@ -1390,9 +1391,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         }
                         // Skip unit-typed (void) args — they have no LLVM representation.
                         let arg_ty = self.cfg.get_inst(arg.value).ty;
-                        if gruel_type_to_llvm(arg_ty, self.ctx, self.type_pool).is_none() {
-                            return None;
-                        }
+                        gruel_type_to_llvm(arg_ty, self.ctx, self.type_pool)?;
                         Some(self.get_value(arg.value).into())
                     })
                     .collect();
@@ -2027,7 +2026,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     CfgInstData::PlaceRead { ref place } => {
                         // Composite lvalue (struct field or array element):
                         // return the GEP pointer into the storage, not the value.
-                        let place = place.clone();
+                        let place = *place;
                         let elem_ty = lvalue_inst.ty;
                         self.build_place_gep_chain(&place, elem_ty).map(Into::into)
                     }
@@ -2247,6 +2246,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 }
 
 /// Generate the body of a declared LLVM function from its CFG.
+#[allow(clippy::too_many_arguments)]
 fn define_function<'ctx>(
     cfg: &Cfg,
     fn_value: &FunctionValue<'ctx>,

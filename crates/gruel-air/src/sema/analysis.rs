@@ -4232,6 +4232,7 @@ impl<'a> Sema<'a> {
     /// `locals` holds variables declared within the current comptime block.
     /// Returns the evaluated `ConstValue`, or a `CompileError` if the
     /// instruction is not compile-time evaluable.
+    #[allow(clippy::only_used_in_recursion)]
     fn evaluate_comptime_inst(
         &mut self,
         inst_ref: InstRef,
