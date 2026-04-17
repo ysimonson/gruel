@@ -403,7 +403,8 @@ impl<'src> CompilationUnit<'src> {
         };
 
         // Synthesize drop glue functions
-        let drop_glue_functions = crate::drop_glue::synthesize_drop_glue(&sema_output.type_pool);
+        let drop_glue_functions =
+            crate::drop_glue::synthesize_drop_glue(&sema_output.type_pool, interner);
 
         // Combine user functions with drop glue, filtering out comptime-only functions
         let all_functions: Vec<_> = sema_output

@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use gruel_air::{StructId, Type, TypeInternPool, TypeKind};
+use inkwell::values::BasicMetadataValueEnum;
 use gruel_cfg::{BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator};
 use gruel_error::{CompileError, CompileResult, ErrorKind};
 use inkwell::IntPredicate;
@@ -29,6 +30,90 @@ use crate::types::{abi_slot_count, gruel_type_to_llvm, gruel_type_to_llvm_param}
 /// Convert an LLVM-related error string into a [`CompileError`].
 fn llvm_error(msg: impl Into<String>) -> CompileError {
     CompileError::without_span(ErrorKind::InternalError(msg.into()))
+}
+
+// ---- Drop helpers (module-level) ----
+
+/// Check if a type needs a drop call at scope exit.
+///
+/// Mirrors `drop_glue::type_needs_drop` in gruel-compiler — must stay in sync.
+fn codegen_type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
+    match ty.kind() {
+        TypeKind::Struct(id) => {
+            let def = type_pool.struct_def(id);
+            if def.destructor.is_some() {
+                return true;
+            }
+            def.fields
+                .iter()
+                .any(|f| codegen_type_needs_drop(f.ty, type_pool))
+        }
+        TypeKind::Array(id) => {
+            let (elem, _) = type_pool.array_def(id);
+            codegen_type_needs_drop(elem, type_pool)
+        }
+        _ => false,
+    }
+}
+
+/// Return the name of the synthesized drop function for `ty`, or `None` if:
+/// - the type is trivially droppable, or
+/// - the type is a builtin with a runtime drop function (e.g. `String`, handled separately).
+///
+/// The name must match what `drop_glue.rs` in gruel-compiler generates.
+fn codegen_drop_fn_name(ty: Type, type_pool: &TypeInternPool) -> Option<String> {
+    match ty.kind() {
+        TypeKind::Struct(id) => {
+            let def = type_pool.struct_def(id);
+            // Builtins with runtime drop (e.g. String) are handled by is_builtin_string path.
+            if def.is_builtin && def.destructor.is_some() {
+                return None;
+            }
+            if codegen_type_needs_drop(ty, type_pool) {
+                Some(format!("__gruel_drop_{}", def.name))
+            } else {
+                None
+            }
+        }
+        TypeKind::Array(id) => {
+            if codegen_type_needs_drop(ty, type_pool) {
+                let (elem, len) = type_pool.array_def(id);
+                Some(format!(
+                    "__gruel_drop_array_{}_{}",
+                    codegen_type_name(elem, type_pool),
+                    len
+                ))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Return a stable name component for `ty` used in drop-glue symbol names.
+///
+/// Must match `drop_glue::type_name` in gruel-compiler.
+fn codegen_type_name(ty: Type, type_pool: &TypeInternPool) -> String {
+    match ty.kind() {
+        TypeKind::I8 => "i8".to_string(),
+        TypeKind::I16 => "i16".to_string(),
+        TypeKind::I32 => "i32".to_string(),
+        TypeKind::I64 => "i64".to_string(),
+        TypeKind::U8 => "u8".to_string(),
+        TypeKind::U16 => "u16".to_string(),
+        TypeKind::U32 => "u32".to_string(),
+        TypeKind::U64 => "u64".to_string(),
+        TypeKind::Bool => "bool".to_string(),
+        TypeKind::Unit => "unit".to_string(),
+        TypeKind::Never => "never".to_string(),
+        TypeKind::Struct(id) => type_pool.struct_def(id).name.clone(),
+        TypeKind::Array(id) => {
+            let (elem, len) = type_pool.array_def(id);
+            format!("array_{}_{}", codegen_type_name(elem, type_pool), len)
+        }
+        _ => "unknown".to_string(),
+    }
 }
 
 /// Build an LLVM module from a set of function CFGs.
@@ -603,6 +688,52 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .void_type()
             .fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false);
         self.module.add_function(NAME, fn_type, None)
+    }
+
+    /// Extract the LLVM fields of a struct or elements of an array as a flat `Vec`.
+    ///
+    /// Used to build the argument list for synthesized `__gruel_drop_*` functions,
+    /// which take each non-void field / element as a separate LLVM parameter.
+    fn extract_fields_for_drop(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        ty: Type,
+    ) -> Vec<BasicValueEnum<'ctx>> {
+        match ty.kind() {
+            TypeKind::Struct(id) => {
+                let def = self.type_pool.struct_def(id);
+                let sv = val.into_struct_value();
+                let mut args = Vec::new();
+                let mut llvm_idx = 0u32;
+                for field in &def.fields {
+                    if gruel_type_to_llvm(field.ty, self.ctx, self.type_pool).is_some() {
+                        let agg: AggregateValueEnum<'ctx> = sv.into();
+                        let fv = self
+                            .builder
+                            .build_extract_value(agg, llvm_idx, "df")
+                            .expect("extract struct field for drop");
+                        args.push(fv);
+                        llvm_idx += 1;
+                    }
+                }
+                args
+            }
+            TypeKind::Array(id) => {
+                let (_, len) = self.type_pool.array_def(id);
+                let av = val.into_array_value();
+                let mut args = Vec::new();
+                for i in 0..len as u32 {
+                    let agg: AggregateValueEnum<'ctx> = av.into();
+                    let ev = self
+                        .builder
+                        .build_extract_value(agg, i, "de")
+                        .expect("extract array element for drop");
+                    args.push(ev);
+                }
+                args
+            }
+            _ => vec![],
+        }
     }
 
     /// Create an alloca in the function's entry block.
@@ -1659,15 +1790,39 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             } => {
                 let dropped_ty = self.cfg.get_inst(dropped_value).ty;
                 if self.is_builtin_string(dropped_ty) {
-                    // Only drop heap-allocated strings (cap > 0).
-                    // Literals have cap == 0, so __gruel_drop_String is a no-op for them,
-                    // but it's safe to call unconditionally.
+                    // String: call __gruel_drop_String(ptr, len, cap) from the runtime.
+                    // Literals have cap == 0 and are safely treated as no-ops.
                     if let Some(str_val) = self.values[dropped_value.as_u32() as usize] {
                         let (ptr, len, cap) = self.extract_str_ptr_len_cap(str_val);
                         let drop_fn = self.get_or_declare_drop_string();
                         self.builder
                             .build_call(drop_fn, &[ptr.into(), len.into(), cap.into()], "")
                             .unwrap();
+                    }
+                } else if let Some(fn_name) = codegen_drop_fn_name(dropped_ty, self.type_pool) {
+                    // Non-trivial struct or array: call the synthesized __gruel_drop_* function.
+                    //
+                    // Struct drop glue takes the whole struct as a single LLVM parameter,
+                    // so we pass the value directly.
+                    //
+                    // Array drop glue takes each element as a separate LLVM parameter,
+                    // so we extract and pass them individually.
+                    if let Some(val) = self.values[dropped_value.as_u32() as usize] {
+                        let args: Vec<BasicValueEnum<'ctx>> = match dropped_ty.kind() {
+                            TypeKind::Array(_) => self.extract_fields_for_drop(val, dropped_ty),
+                            _ => vec![val],
+                        };
+                        let param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                            args.iter().map(|v| v.get_type().into()).collect();
+                        let meta_args: Vec<BasicMetadataValueEnum<'ctx>> =
+                            args.iter().map(|v| (*v).into()).collect();
+                        let fn_in_map = self.fn_map.get(fn_name.as_str()).copied();
+                        let fn_in_module = self.module.get_function(&fn_name);
+                        let callee = fn_in_map.or(fn_in_module).unwrap_or_else(|| {
+                            let fn_ty = self.ctx.void_type().fn_type(&param_types, false);
+                            self.module.add_function(&fn_name, fn_ty, None)
+                        });
+                        self.builder.build_call(callee, &meta_args, "").unwrap();
                     }
                 }
                 None

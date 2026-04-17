@@ -756,6 +756,27 @@ impl<'a> CfgBuilder<'a> {
                     lowered_fields[decl_idx] = Some(lowered);
                 }
 
+                // Forget moved-out non-Copy locals to prevent double-drop at scope exit.
+                //
+                // When a non-Copy local (e.g., a String or struct containing one) is moved
+                // into a struct field, the containing struct's drop glue handles freeing it.
+                // We must not also drop the original local at scope exit, or we'd get a
+                // double-free. Remove each such slot from the scope tracking list.
+                let struct_id_val = *struct_id; // Copy out before any mutable borrows
+                let mut slots_to_forget: Vec<u32> = Vec::new();
+                for (decl_idx, &field_air_ref) in fields.iter().enumerate() {
+                    let field_ty =
+                        self.type_pool.struct_def(struct_id_val).fields[decl_idx].ty;
+                    if self.type_needs_drop(field_ty) {
+                        if let AirInstData::Load { slot } = self.air.get(field_air_ref).data {
+                            slots_to_forget.push(slot);
+                        }
+                    }
+                }
+                for slot in slots_to_forget {
+                    self.forget_local_slot(slot);
+                }
+
                 // Collect in declaration order for storage layout
                 let field_vals: Vec<CfgValue> = lowered_fields
                     .into_iter()
@@ -1828,6 +1849,17 @@ impl<'a> CfgBuilder<'a> {
         ExprResult {
             value: None,
             continuation: Continuation::Diverged,
+        }
+    }
+
+    /// Remove a local slot from all scope tracking to prevent it from being dropped at scope exit.
+    ///
+    /// Called when a non-Copy value is moved out of a local slot (e.g., into a struct field).
+    /// Without this, the scope-exit drop elaboration would drop the original slot after the
+    /// containing composite (struct/array) has already been dropped, causing a double-free.
+    fn forget_local_slot(&mut self, slot: u32) {
+        for scope in self.scope_stack.iter_mut() {
+            scope.retain(|ls| ls.slot != slot);
         }
     }
 

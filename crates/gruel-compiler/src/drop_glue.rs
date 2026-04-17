@@ -13,17 +13,20 @@
 //! ```
 //!
 //! We generate a function `__gruel_drop_Container` that:
-//! 1. Receives the struct's flattened fields as parameters
-//! 2. Drops each field that needs dropping (in declaration order)
+//! 1. Receives the whole struct as a single parameter (matching the user destructor ABI)
+//! 2. Calls the user-defined destructor first, if any (`Container.__drop`)
+//! 3. Drops each field that needs dropping via `FieldGet` (in declaration order)
 //!
 //! For arrays like `[String; 3]`, we generate a function `__gruel_drop_array_String_3` that:
-//! 1. Receives all element slots as parameters (flattened)
+//! 1. Receives all element slots as parameters (one LLVM param per element)
 //! 2. Drops each element in index order (element 0 first, then 1, etc.)
 
 use gruel_air::{
-    Air, AirInst, AirInstData, AnalyzedFunction, StructDef, Type, TypeInternPool, TypeKind,
+    Air, AirArgMode, AirInst, AirInstData, AnalyzedFunction, StructDef, Type, TypeInternPool,
+    TypeKind,
 };
 use gruel_span::Span;
+use lasso::ThreadedRodeo;
 
 /// Check if a type needs drop.
 fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
@@ -127,7 +130,10 @@ fn type_slot_count(ty: Type, type_pool: &TypeInternPool) -> u32 {
 /// Synthesize drop glue functions for all structs and arrays that need them.
 ///
 /// Returns a list of synthesized functions that should be added to the compilation.
-pub fn synthesize_drop_glue(type_pool: &TypeInternPool) -> Vec<AnalyzedFunction> {
+pub fn synthesize_drop_glue(
+    type_pool: &TypeInternPool,
+    interner: &ThreadedRodeo,
+) -> Vec<AnalyzedFunction> {
     let mut drop_glue_functions = Vec::new();
 
     // Create drop glue for structs
@@ -147,7 +153,7 @@ pub fn synthesize_drop_glue(type_pool: &TypeInternPool) -> Vec<AnalyzedFunction>
         }
 
         // Create drop glue function for struct
-        let func = create_struct_drop_glue_function(&struct_def, struct_id, type_pool);
+        let func = create_struct_drop_glue_function(&struct_def, struct_id, type_pool, interner);
         drop_glue_functions.push(func);
     }
 
@@ -168,77 +174,74 @@ pub fn synthesize_drop_glue(type_pool: &TypeInternPool) -> Vec<AnalyzedFunction>
 }
 
 /// Create a drop glue function for a single struct.
+///
+/// The synthesized function takes the **whole struct** as its single parameter
+/// (same convention as a user-defined `drop fn`), not individual flattened fields.
+/// This allows calling the user destructor directly and using `FieldGet` to
+/// extract individual fields for recursive drops.
 fn create_struct_drop_glue_function(
     struct_def: &StructDef,
-    _struct_id: gruel_air::StructId,
+    struct_id: gruel_air::StructId,
     type_pool: &TypeInternPool,
+    interner: &ThreadedRodeo,
 ) -> AnalyzedFunction {
     let fn_name = format!("__gruel_drop_{}", struct_def.name);
     let span = Span::new(0, 0); // Synthetic span
 
-    // Create AIR for the drop glue function
+    let struct_ty = Type::new_struct(struct_id);
+    // num_param_slots = abi slot count of the struct (sum of field slot counts).
+    let num_param_slots = type_slot_count(struct_ty, type_pool);
+
     let mut air = Air::new(Type::UNIT);
 
-    // Calculate total parameter slots
-    let mut num_param_slots = 0u32;
-    for field in &struct_def.fields {
-        num_param_slots += type_slot_count(field.ty, type_pool);
-    }
+    // Single parameter: the whole struct value.
+    let param_ref = air.add_inst(AirInst {
+        data: AirInstData::Param { index: 0 },
+        ty: struct_ty,
+        span,
+    });
 
-    // Collect drop statements - these are side-effects that must be executed
     let mut drop_statements = Vec::new();
 
-    // For each field that needs drop, emit a Drop instruction.
-    // We need to reconstruct the field values from the flattened parameters.
-    let mut current_param_slot = 0u32;
+    // Call user destructor first (before dropping fields).
+    // Builtins with runtime destructors (e.g. String) are excluded by the caller.
+    if let Some(destructor_name) = &struct_def.destructor {
+        let name_spur = interner.get_or_intern(destructor_name.as_str());
+        // Pass the whole struct as a single arg (matches user destructor ABI).
+        let args_u32s = [param_ref.as_u32(), AirArgMode::Normal.as_u32()];
+        let args_start = air.add_extra(&args_u32s);
+        let call_ref = air.add_inst(AirInst {
+            data: AirInstData::Call {
+                name: name_spur,
+                args_start,
+                args_len: 1,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+        drop_statements.push(call_ref);
+    }
 
-    for field in &struct_def.fields {
-        let field_slot_count = type_slot_count(field.ty, type_pool);
-
+    // Then drop any fields that need it (in declaration order).
+    // Use FieldGet to extract each field from the struct parameter.
+    for (field_idx, field) in struct_def.fields.iter().enumerate() {
         if type_needs_drop(field.ty, type_pool) {
-            // Emit Drop for this field.
-            // Type::Struct handles both user-defined structs and builtin String.
-            match field.ty.kind() {
-                TypeKind::Struct(nested_struct_id) => {
-                    // Nested struct - load it and drop it
-                    // The recursive drop glue will handle its fields
-                    let param_ref = air.add_inst(AirInst {
-                        data: AirInstData::Param {
-                            index: current_param_slot,
-                        },
-                        ty: Type::new_struct(nested_struct_id),
-                        span,
-                    });
-                    let drop_ref = air.add_inst(AirInst {
-                        data: AirInstData::Drop { value: param_ref },
-                        ty: Type::UNIT,
-                        span,
-                    });
-                    drop_statements.push(drop_ref);
-                }
-                TypeKind::Array(array_id) => {
-                    // Array field - load it and drop it
-                    // The array drop glue will handle dropping each element
-                    let param_ref = air.add_inst(AirInst {
-                        data: AirInstData::Param {
-                            index: current_param_slot,
-                        },
-                        ty: Type::new_array(array_id),
-                        span,
-                    });
-                    let drop_ref = air.add_inst(AirInst {
-                        data: AirInstData::Drop { value: param_ref },
-                        ty: Type::UNIT,
-                        span,
-                    });
-                    drop_statements.push(drop_ref);
-                }
-                // Other types don't need drop
-                _ => {}
-            }
+            let field_val = air.add_inst(AirInst {
+                data: AirInstData::FieldGet {
+                    base: param_ref,
+                    struct_id,
+                    field_index: field_idx as u32,
+                },
+                ty: field.ty,
+                span,
+            });
+            let drop_ref = air.add_inst(AirInst {
+                data: AirInstData::Drop { value: field_val },
+                ty: Type::UNIT,
+                span,
+            });
+            drop_statements.push(drop_ref);
         }
-
-        current_param_slot += field_slot_count;
     }
 
     // Create the unit value for return
@@ -248,13 +251,12 @@ fn create_struct_drop_glue_function(
         span,
     });
 
-    // If we have drop statements, wrap them in a Block so they get executed
-    // The CFG builder uses demand-driven lowering, so statements in a Block
-    // are explicitly included as side-effects.
+    // Wrap side-effect statements in a Block so they are executed.
+    // The CFG builder uses demand-driven lowering, so statements must be
+    // explicitly listed as block side-effects.
     let return_value = if drop_statements.is_empty() {
         unit_const
     } else {
-        // Encode statements into extra array
         let stmt_u32s: Vec<u32> = drop_statements.iter().map(|r| r.as_u32()).collect();
         let stmts_start = air.add_extra(&stmt_u32s);
         let stmts_len = drop_statements.len() as u32;
@@ -269,21 +271,17 @@ fn create_struct_drop_glue_function(
         })
     };
 
-    // Add return instruction
     air.add_inst(AirInst {
         data: AirInstData::Ret(Some(return_value)),
         ty: Type::UNIT,
         span,
     });
 
-    // All parameters are passed by value (normal mode)
+    // param_slot_types: the struct type repeated num_param_slots times.
+    // collect_param_types sees type=struct_ty at slot 0, advances by num_param_slots,
+    // and emits exactly one LLVM param of the struct's aggregate type.
     let param_modes = vec![false; num_param_slots as usize];
-    // Each field contributes type_slot_count slots of its own type
-    let param_slot_types: Vec<Type> = struct_def
-        .fields
-        .iter()
-        .flat_map(|f| std::iter::repeat_n(f.ty, type_slot_count(f.ty, type_pool) as usize))
-        .collect();
+    let param_slot_types = vec![struct_ty; num_param_slots as usize];
 
     AnalyzedFunction {
         name: fn_name,

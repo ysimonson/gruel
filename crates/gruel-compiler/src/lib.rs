@@ -871,7 +871,8 @@ pub fn compile_frontend_from_ast_with_options(
     };
 
     // Synthesize drop glue functions for structs that need them
-    let drop_glue_functions = drop_glue::synthesize_drop_glue(&sema_output.type_pool);
+    let drop_glue_functions =
+        drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
 
     // Combine user functions with synthesized drop glue functions
     // Filter out comptime-only functions (those returning `type`) as they don't generate runtime code
@@ -990,7 +991,8 @@ pub fn compile_frontend_from_rir_with_file_paths(
     };
 
     // Synthesize drop glue functions for structs that need them
-    let drop_glue_functions = drop_glue::synthesize_drop_glue(&sema_output.type_pool);
+    let drop_glue_functions =
+        drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
 
     // Combine user functions with synthesized drop glue functions
     // Filter out comptime-only functions (those returning `type`) as they don't generate runtime code
