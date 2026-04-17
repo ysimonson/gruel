@@ -784,19 +784,18 @@ pub struct CompileOutput {
 /// Uses default optimization level (O0) and no preview features. For custom options,
 /// use [`compile_frontend_with_options`].
 pub fn compile_frontend(source: &str) -> MultiErrorResult<CompileState> {
-    compile_frontend_with_options(source, OptLevel::default(), &PreviewFeatures::new())
+    compile_frontend_with_options(source, &PreviewFeatures::new())
 }
 
-/// Compile source code through all frontend phases with optimization.
+/// Compile source code through all frontend phases.
 ///
-/// This runs: lexing → parsing → AST to RIR → semantic analysis → CFG construction → optimization.
+/// This runs: lexing → parsing → AST to RIR → semantic analysis → CFG construction.
 /// Returns the compile state which can be inspected for debugging.
 ///
 /// This function collects errors from multiple functions instead of stopping at the
 /// first error, allowing users to see all issues at once.
 pub fn compile_frontend_with_options(
     source: &str,
-    opt_level: OptLevel,
     preview_features: &PreviewFeatures,
 ) -> MultiErrorResult<CompileState> {
     let _span = info_span!("frontend", source_bytes = source.len()).entered();
@@ -819,7 +818,7 @@ pub fn compile_frontend_with_options(
         (ast, interner)
     };
 
-    compile_frontend_from_ast_with_options(ast, interner, opt_level, preview_features)
+    compile_frontend_from_ast_with_options(ast, interner, preview_features)
 }
 
 /// Compile from an already-parsed AST through all remaining frontend phases.
@@ -828,23 +827,17 @@ pub fn compile_frontend_with_options(
 /// Use this when you already have a parsed AST (e.g., for `--emit` modes that
 /// need both AST output and later stage output without double-parsing).
 ///
-/// Uses default optimization level (O0) and no preview features. For custom options,
-/// use [`compile_frontend_from_ast_with_options`].
+/// Uses no preview features. For custom options, use [`compile_frontend_from_ast_with_options`].
 pub fn compile_frontend_from_ast(
     ast: Ast,
     interner: ThreadedRodeo,
 ) -> MultiErrorResult<CompileState> {
-    compile_frontend_from_ast_with_options(
-        ast,
-        interner,
-        OptLevel::default(),
-        &PreviewFeatures::new(),
-    )
+    compile_frontend_from_ast_with_options(ast, interner, &PreviewFeatures::new())
 }
 
-/// Compile from an already-parsed AST through all remaining frontend phases with optimization.
+/// Compile from an already-parsed AST through all remaining frontend phases.
 ///
-/// This runs: AST to RIR → semantic analysis → CFG construction → optimization.
+/// This runs: AST to RIR → semantic analysis → CFG construction.
 /// Use this when you already have a parsed AST (e.g., for `--emit` modes that
 /// need both AST output and later stage output without double-parsing).
 ///
@@ -853,7 +846,6 @@ pub fn compile_frontend_from_ast(
 pub fn compile_frontend_from_ast_with_options(
     ast: Ast,
     interner: ThreadedRodeo,
-    opt_level: OptLevel,
     preview_features: &PreviewFeatures,
 ) -> MultiErrorResult<CompileState> {
     // AST to RIR (untyped IR)
@@ -908,14 +900,10 @@ pub fn compile_frontend_from_ast_with_options(
                     func.param_slot_types.clone(),
                 );
 
-                // Apply optimizations to the CFG
-                let mut cfg = cfg_output.cfg;
-                gruel_cfg::opt::optimize(&mut cfg, opt_level);
-
                 (
                     FunctionWithCfg {
                         analyzed: func,
-                        cfg,
+                        cfg: cfg_output.cfg,
                     },
                     cfg_output.warnings,
                 )
@@ -967,13 +955,11 @@ pub fn compile_frontend_from_ast_with_options(
 pub fn compile_frontend_from_rir_with_options(
     rir: Rir,
     interner: ThreadedRodeo,
-    opt_level: OptLevel,
     preview_features: &PreviewFeatures,
 ) -> MultiErrorResult<CompileStateFromRir> {
     compile_frontend_from_rir_with_file_paths(
         rir,
         interner,
-        opt_level,
         preview_features,
         std::collections::HashMap::new(),
     )
@@ -986,7 +972,6 @@ pub fn compile_frontend_from_rir_with_options(
 pub fn compile_frontend_from_rir_with_file_paths(
     rir: Rir,
     interner: ThreadedRodeo,
-    opt_level: OptLevel,
     preview_features: &PreviewFeatures,
     file_paths: std::collections::HashMap<FileId, String>,
 ) -> MultiErrorResult<CompileStateFromRir> {
@@ -1034,14 +1019,10 @@ pub fn compile_frontend_from_rir_with_file_paths(
                     func.param_slot_types.clone(),
                 );
 
-                // Apply optimizations to the CFG
-                let mut cfg = cfg_output.cfg;
-                gruel_cfg::opt::optimize(&mut cfg, opt_level);
-
                 (
                     FunctionWithCfg {
                         analyzed: func,
-                        cfg,
+                        cfg: cfg_output.cfg,
                     },
                     cfg_output.warnings,
                 )
@@ -1312,8 +1293,9 @@ fn generate_llvm_objects_and_link(
     let _span = info_span!("codegen", backend = "llvm").entered();
 
     let cfgs: Vec<&Cfg> = functions.iter().map(|f| &f.cfg).collect();
-    let object_bytes = gruel_codegen_llvm::generate(&cfgs, type_pool, strings, interner)
-        .map_err(CompileErrors::from)?;
+    let object_bytes =
+        gruel_codegen_llvm::generate(&cfgs, type_pool, strings, interner, options.opt_level)
+            .map_err(CompileErrors::from)?;
 
     // LLVM produces a single object file; wrap it as a one-element slice.
     let object_files = vec![object_bytes];
@@ -1336,9 +1318,10 @@ pub fn generate_llvm_ir(
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    opt_level: OptLevel,
 ) -> CompileResult<String> {
     let cfgs: Vec<&Cfg> = functions.iter().map(|f| &f.cfg).collect();
-    gruel_codegen_llvm::generate_ir(&cfgs, type_pool, strings, interner)
+    gruel_codegen_llvm::generate_ir(&cfgs, type_pool, strings, interner, opt_level)
 }
 
 // ============================================================================
