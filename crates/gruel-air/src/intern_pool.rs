@@ -1064,6 +1064,63 @@ impl TypeInternPool {
             _ => return None,
         })
     }
+
+    /// Return the number of ABI slots that `ty` occupies when passed as a function argument.
+    ///
+    /// - Scalars (integers, bool, enum, pointer) → 1
+    /// - Struct → sum of field slot counts (flattened)
+    /// - Array → element slot count × length
+    /// - Zero-sized types (unit, never, comptime-only, module) → 0
+    pub fn abi_slot_count(&self, ty: Type) -> u32 {
+        match ty.kind() {
+            TypeKind::Struct(id) => {
+                let def = self.struct_def(id);
+                def.fields.iter().map(|f| self.abi_slot_count(f.ty)).sum()
+            }
+            TypeKind::Array(id) => {
+                let (elem, len) = self.array_def(id);
+                self.abi_slot_count(elem) * len as u32
+            }
+            TypeKind::Unit | TypeKind::Never | TypeKind::ComptimeType | TypeKind::Module(_) => 0,
+            _ => 1,
+        }
+    }
+
+    /// Return the human-readable name of `ty`, suitable for error messages.
+    ///
+    /// Examples: `"i32"`, `"bool"`, `"MyStruct"`, `"[i32; 4]"`, `"ptr const i32"`.
+    pub fn format_type_name(&self, ty: Type) -> String {
+        match ty.kind() {
+            TypeKind::I8 => "i8".to_string(),
+            TypeKind::I16 => "i16".to_string(),
+            TypeKind::I32 => "i32".to_string(),
+            TypeKind::I64 => "i64".to_string(),
+            TypeKind::U8 => "u8".to_string(),
+            TypeKind::U16 => "u16".to_string(),
+            TypeKind::U32 => "u32".to_string(),
+            TypeKind::U64 => "u64".to_string(),
+            TypeKind::Bool => "bool".to_string(),
+            TypeKind::Unit => "()".to_string(),
+            TypeKind::Never => "!".to_string(),
+            TypeKind::Error => "<error>".to_string(),
+            TypeKind::ComptimeType => "type".to_string(),
+            TypeKind::Struct(id) => self.struct_def(id).name.clone(),
+            TypeKind::Enum(id) => self.enum_def(id).name.clone(),
+            TypeKind::Array(id) => {
+                let (elem, len) = self.array_def(id);
+                format!("[{}; {}]", self.format_type_name(elem), len)
+            }
+            TypeKind::PtrConst(id) => {
+                let pointee = self.ptr_const_def(id);
+                format!("ptr const {}", self.format_type_name(pointee))
+            }
+            TypeKind::PtrMut(id) => {
+                let pointee = self.ptr_mut_def(id);
+                format!("ptr mut {}", self.format_type_name(pointee))
+            }
+            TypeKind::Module(_) => "<module>".to_string(),
+        }
+    }
 }
 
 impl Default for TypeInternPool {

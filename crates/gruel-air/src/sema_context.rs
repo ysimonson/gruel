@@ -427,36 +427,7 @@ impl<'a> SemaContext<'a> {
 
     /// Get a human-readable name for a type.
     pub fn format_type_name(&self, ty: Type) -> String {
-        match ty.kind() {
-            TypeKind::I8 => "i8".to_string(),
-            TypeKind::I16 => "i16".to_string(),
-            TypeKind::I32 => "i32".to_string(),
-            TypeKind::I64 => "i64".to_string(),
-            TypeKind::U8 => "u8".to_string(),
-            TypeKind::U16 => "u16".to_string(),
-            TypeKind::U32 => "u32".to_string(),
-            TypeKind::U64 => "u64".to_string(),
-            TypeKind::Bool => "bool".to_string(),
-            TypeKind::Unit => "()".to_string(),
-            TypeKind::Never => "!".to_string(),
-            TypeKind::Error => "<error>".to_string(),
-            TypeKind::Struct(struct_id) => self.type_pool.struct_def(struct_id).name.clone(),
-            TypeKind::Enum(enum_id) => self.type_pool.enum_def(enum_id).name.clone(),
-            TypeKind::Array(array_id) => {
-                let (element_type, length) = self.type_pool.array_def(array_id);
-                format!("[{}; {}]", self.format_type_name(element_type), length)
-            }
-            TypeKind::PtrConst(ptr_id) => {
-                let pointee = self.type_pool.ptr_const_def(ptr_id);
-                format!("ptr const {}", self.format_type_name(pointee))
-            }
-            TypeKind::PtrMut(ptr_id) => {
-                let pointee = self.type_pool.ptr_mut_def(ptr_id);
-                format!("ptr mut {}", self.format_type_name(pointee))
-            }
-            TypeKind::Module(_) => "<module>".to_string(),
-            TypeKind::ComptimeType => "type".to_string(),
-        }
+        self.type_pool.format_type_name(ty)
     }
 
     /// Check if a type is a Copy type.
@@ -496,38 +467,7 @@ impl<'a> SemaContext<'a> {
 
     /// Get the number of ABI slots required for a type.
     pub fn abi_slot_count(&self, ty: Type) -> u32 {
-        match ty.kind() {
-            TypeKind::I8
-            | TypeKind::I16
-            | TypeKind::I32
-            | TypeKind::I64
-            | TypeKind::U8
-            | TypeKind::U16
-            | TypeKind::U32
-            | TypeKind::U64
-            | TypeKind::Bool
-            | TypeKind::Error => 1,
-            // Zero-sized types (including comptime-only)
-            TypeKind::Unit | TypeKind::Never | TypeKind::ComptimeType => 0,
-            TypeKind::Enum(_) => 1,
-            TypeKind::Struct(struct_id) => {
-                let struct_def = self.type_pool.struct_def(struct_id);
-                struct_def
-                    .fields
-                    .iter()
-                    .map(|f| self.abi_slot_count(f.ty))
-                    .sum()
-            }
-            TypeKind::Array(array_type_id) => {
-                let (element_type, length) = self.type_pool.array_def(array_type_id);
-                let element_slots = self.abi_slot_count(element_type);
-                element_slots * length as u32
-            }
-            // Module types don't take ABI slots (they're compile-time only)
-            TypeKind::Module(_) => 0,
-            // Pointer types take 1 slot (64-bit address)
-            TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 1,
-        }
+        self.type_pool.abi_slot_count(ty)
     }
 
     /// Get the slot offset of a field within a struct.

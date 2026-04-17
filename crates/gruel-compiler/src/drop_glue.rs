@@ -34,51 +34,6 @@ fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
     drop_names::type_needs_drop(ty, type_pool)
 }
 
-/// Count the number of ABI slots a type uses (flattened).
-fn type_slot_count(ty: Type, type_pool: &TypeInternPool) -> u32 {
-    match ty.kind() {
-        // Primitives use 1 slot
-        // ComptimeType uses 0 slots (comptime-only, no runtime representation)
-        TypeKind::I8
-        | TypeKind::I16
-        | TypeKind::I32
-        | TypeKind::I64
-        | TypeKind::U8
-        | TypeKind::U16
-        | TypeKind::U32
-        | TypeKind::U64
-        | TypeKind::Bool
-        | TypeKind::Unit
-        | TypeKind::Never
-        | TypeKind::Error
-        | TypeKind::Enum(_) => 1,
-        TypeKind::ComptimeType => 0,
-
-        // Struct uses sum of all field slots (including builtin String with 3 fields)
-        TypeKind::Struct(struct_id) => {
-            let struct_def = type_pool.struct_def(struct_id);
-            struct_def
-                .fields
-                .iter()
-                .map(|f| type_slot_count(f.ty, type_pool))
-                .sum()
-        }
-
-        // Note: String is now Type::Struct with is_builtin=true, handled above
-
-        // Array uses element slots * length
-        TypeKind::Array(array_id) => {
-            let (element_type, length) = type_pool.array_def(array_id);
-            type_slot_count(element_type, type_pool) * length as u32
-        }
-
-        // Pointer types use 1 slot (they're 64-bit addresses)
-        TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 1,
-
-        // Module types don't take ABI slots (compile-time only)
-        TypeKind::Module(_) => 0,
-    }
-}
 
 /// Synthesize drop glue functions for all structs and arrays that need them.
 ///
@@ -143,7 +98,7 @@ fn create_struct_drop_glue_function(
 
     let struct_ty = Type::new_struct(struct_id);
     // num_param_slots = abi slot count of the struct (sum of field slot counts).
-    let num_param_slots = type_slot_count(struct_ty, type_pool);
+    let num_param_slots = type_pool.abi_slot_count(struct_ty);
 
     let mut air = Air::new(Type::UNIT);
 
@@ -266,7 +221,7 @@ fn create_array_drop_glue_function(
     let mut air = Air::new(Type::UNIT);
 
     // Calculate total parameter slots (element slots * length)
-    let element_slot_count = type_slot_count(element_type, type_pool);
+    let element_slot_count = type_pool.abi_slot_count(element_type);
     let num_param_slots = element_slot_count * length as u32;
 
     // Collect drop statements for each element

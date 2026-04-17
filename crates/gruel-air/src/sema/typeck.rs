@@ -17,37 +17,7 @@ use crate::types::{ArrayTypeId, Type, TypeKind, parse_array_type_syntax};
 impl<'a> Sema<'a> {
     /// Get a human-readable name for a type.
     pub(crate) fn format_type_name(&self, ty: Type) -> String {
-        match ty.kind() {
-            TypeKind::I8 => "i8".to_string(),
-            TypeKind::I16 => "i16".to_string(),
-            TypeKind::I32 => "i32".to_string(),
-            TypeKind::I64 => "i64".to_string(),
-            TypeKind::U8 => "u8".to_string(),
-            TypeKind::U16 => "u16".to_string(),
-            TypeKind::U32 => "u32".to_string(),
-            TypeKind::U64 => "u64".to_string(),
-            TypeKind::Bool => "bool".to_string(),
-            TypeKind::Unit => "()".to_string(),
-            TypeKind::Never => "!".to_string(),
-            TypeKind::Error => "<error>".to_string(),
-            // Note: String is now handled via TypeKind::Struct with builtin_string_id
-            TypeKind::Struct(struct_id) => self.type_pool.struct_def(struct_id).name.clone(),
-            TypeKind::Enum(enum_id) => self.type_pool.enum_def(enum_id).name.clone(),
-            TypeKind::Array(array_id) => {
-                let (element_type, length) = self.type_pool.array_def(array_id);
-                format!("[{}; {}]", self.format_type_name(element_type), length)
-            }
-            TypeKind::PtrConst(ptr_id) => {
-                let pointee = self.type_pool.ptr_const_def(ptr_id);
-                format!("ptr const {}", self.format_type_name(pointee))
-            }
-            TypeKind::PtrMut(ptr_id) => {
-                let pointee = self.type_pool.ptr_mut_def(ptr_id);
-                format!("ptr mut {}", self.format_type_name(pointee))
-            }
-            TypeKind::Module(_) => "<module>".to_string(),
-            TypeKind::ComptimeType => "type".to_string(),
-        }
+        self.type_pool.format_type_name(ty)
     }
 
     /// Check if a type is a Copy type.

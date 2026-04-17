@@ -25,7 +25,7 @@ use inkwell::values::{
 };
 use lasso::ThreadedRodeo;
 
-use crate::types::{abi_slot_count, gruel_type_to_llvm, gruel_type_to_llvm_param};
+use crate::types::{gruel_type_to_llvm, gruel_type_to_llvm_param};
 
 /// Convert an LLVM-related error string into a [`CompileError`].
 fn llvm_error(msg: impl Into<String>) -> CompileError {
@@ -267,7 +267,7 @@ fn collect_param_types<'ctx>(
             let ty = cfg
                 .param_type(i as u32)
                 .expect("param slot in range must have a type");
-            let raw_slot_count = abi_slot_count(ty, type_pool);
+            let raw_slot_count = type_pool.abi_slot_count(ty);
             if raw_slot_count > 0 {
                 // Non-zero ABI slot count → type has an LLVM representation.
                 if let Some(llvm_ty) = gruel_type_to_llvm_param(ty, ctx, type_pool) {
@@ -305,7 +305,7 @@ fn build_slot_to_llvm_param(cfg: &Cfg, type_pool: &TypeInternPool) -> Vec<u32> {
             let ty = cfg
                 .param_type(i as u32)
                 .expect("param slot in range must have a type");
-            let raw_slot_count = abi_slot_count(ty, type_pool);
+            let raw_slot_count = type_pool.abi_slot_count(ty);
             let slot_count = raw_slot_count.max(1) as usize;
             // All ABI slots of this Gruel param share the same LLVM param index.
             for k in 0..slot_count {

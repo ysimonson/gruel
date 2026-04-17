@@ -3291,14 +3291,6 @@ impl<'a> Sema<'a> {
     // Helper methods for analysis
     // ========================================================================
 
-    /// Convert RIR argument mode to AIR argument mode.
-    fn convert_arg_mode(mode: RirArgMode) -> AirArgMode {
-        match mode {
-            RirArgMode::Normal => AirArgMode::Normal,
-            RirArgMode::Inout => AirArgMode::Inout,
-            RirArgMode::Borrow => AirArgMode::Borrow,
-        }
-    }
     /// Analyze a binary arithmetic operator (+, -, *, /, %).
     ///
     /// Follows Rust's type inference rules:
@@ -5596,7 +5588,7 @@ impl<'a> Sema<'a> {
 
             air_args.push(AirCallArg {
                 value: arg_result.air_ref,
-                mode: Self::convert_arg_mode(arg.mode),
+                mode: AirArgMode::from(arg.mode),
             });
         }
         Ok(air_args)

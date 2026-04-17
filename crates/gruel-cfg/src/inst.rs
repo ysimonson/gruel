@@ -224,6 +224,16 @@ pub enum CfgArgMode {
     Borrow,
 }
 
+impl From<gruel_air::AirArgMode> for CfgArgMode {
+    fn from(mode: gruel_air::AirArgMode) -> Self {
+        match mode {
+            gruel_air::AirArgMode::Normal => CfgArgMode::Normal,
+            gruel_air::AirArgMode::Inout => CfgArgMode::Inout,
+            gruel_air::AirArgMode::Borrow => CfgArgMode::Borrow,
+        }
+    }
+}
+
 /// An argument in a function call.
 #[derive(Debug, Clone, Copy)]
 pub struct CfgCallArg {

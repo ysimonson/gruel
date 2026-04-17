@@ -4,7 +4,7 @@
 //! into explicit basic blocks with terminators.
 
 use gruel_air::{
-    Air, AirArgMode, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef, AirProjection, AirRef,
+    Air, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef, AirProjection, AirRef,
     Type, TypeInternPool,
 };
 use gruel_error::{CompileWarning, WarningKind};
@@ -683,7 +683,7 @@ impl<'a> CfgBuilder<'a> {
                     };
                     arg_vals.push(CfgCallArg {
                         value,
-                        mode: Self::convert_arg_mode(arg.mode),
+                        mode: CfgArgMode::from(arg.mode),
                     });
                 }
                 // Store args in extra array
@@ -1868,14 +1868,6 @@ impl<'a> CfgBuilder<'a> {
         crate::drop_names::type_needs_drop(ty, self.type_pool)
     }
 
-    /// Convert AIR argument mode to CFG argument mode.
-    fn convert_arg_mode(mode: AirArgMode) -> CfgArgMode {
-        match mode {
-            AirArgMode::Normal => CfgArgMode::Normal,
-            AirArgMode::Inout => CfgArgMode::Inout,
-            AirArgMode::Borrow => CfgArgMode::Borrow,
-        }
-    }
 
     /// Emit drops for all live slots in all scopes (for return).
     /// Drops are emitted in reverse order (LIFO) across all scopes.

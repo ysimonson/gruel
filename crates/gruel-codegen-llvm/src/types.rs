@@ -104,31 +104,3 @@ pub fn gruel_type_to_llvm_param<'ctx>(
     gruel_type_to_llvm(ty, ctx, type_pool).map(Into::into)
 }
 
-/// Return the number of native ABI slots that `ty` occupies.
-///
-/// This mirrors `SemaContext::abi_slot_count` exactly:
-/// - Scalars (integers, bool, enum, pointer) → 1
-/// - Struct → sum of field slot counts
-/// - Array → `len * element_slot_count`
-/// - Zero-sized types (unit, never, comptime-only) → 0
-///
-/// Used by the LLVM backend to map ABI slot indices to LLVM parameter indices.
-pub fn abi_slot_count(ty: Type, type_pool: &TypeInternPool) -> u32 {
-    match ty.kind() {
-        TypeKind::Struct(id) => {
-            let def = type_pool.struct_def(id);
-            def.fields
-                .iter()
-                .map(|f| abi_slot_count(f.ty, type_pool))
-                .sum()
-        }
-        TypeKind::Array(id) => {
-            let (elem_ty, len) = type_pool.array_def(id);
-            abi_slot_count(elem_ty, type_pool) * len as u32
-        }
-        // Zero-sized / comptime-only types.
-        TypeKind::Unit | TypeKind::Never | TypeKind::ComptimeType | TypeKind::Module(_) => 0,
-        // All other scalars: i8/i16/i32/i64, u8/u16/u32/u64, bool, enum, ptr → 1.
-        _ => 1,
-    }
-}

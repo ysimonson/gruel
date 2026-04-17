@@ -210,6 +210,16 @@ impl AirArgMode {
     }
 }
 
+impl From<gruel_rir::RirArgMode> for AirArgMode {
+    fn from(mode: gruel_rir::RirArgMode) -> Self {
+        match mode {
+            gruel_rir::RirArgMode::Normal => AirArgMode::Normal,
+            gruel_rir::RirArgMode::Inout => AirArgMode::Inout,
+            gruel_rir::RirArgMode::Borrow => AirArgMode::Borrow,
+        }
+    }
+}
+
 /// An argument in a function call (AIR level).
 #[derive(Debug, Clone)]
 pub struct AirCallArg {
