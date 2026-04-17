@@ -5,7 +5,7 @@
 
 use gruel_air::{
     Air, AirArgMode, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef, AirProjection, AirRef,
-    Type, TypeInternPool, TypeKind,
+    Type, TypeInternPool,
 };
 use gruel_error::{CompileWarning, WarningKind};
 
@@ -1864,60 +1864,8 @@ impl<'a> CfgBuilder<'a> {
     }
 
     /// Check if a type needs to be dropped (has a destructor).
-    ///
-    /// This method has access to struct and array definitions, allowing it to
-    /// recursively check if struct fields or array elements need drop.
-    ///
-    /// A type needs drop if dropping it requires cleanup actions:
-    /// - Primitives, bool, unit, never, error, enums: trivially droppable (no)
-    /// - String: will need drop when mutable strings land (currently no)
-    /// - Struct: needs drop if any field needs drop
-    /// - Array: needs drop if element type needs drop
     fn type_needs_drop(&self, ty: Type) -> bool {
-        match ty.kind() {
-            // Primitive types are trivially droppable
-            // ComptimeType is a comptime-only type and has no runtime representation
-            TypeKind::I8
-            | TypeKind::I16
-            | TypeKind::I32
-            | TypeKind::I64
-            | TypeKind::U8
-            | TypeKind::U16
-            | TypeKind::U32
-            | TypeKind::U64
-            | TypeKind::Bool
-            | TypeKind::Unit
-            | TypeKind::Never
-            | TypeKind::Error
-            | TypeKind::ComptimeType => false,
-
-            // Enum types are trivially droppable (just discriminant values)
-            TypeKind::Enum(_) => false,
-
-            // Struct types need drop if they have a destructor (e.g., builtin String)
-            // or if any field needs drop
-            TypeKind::Struct(struct_id) => {
-                let struct_def = self.type_pool.struct_def(struct_id);
-                // Builtins with destructors (like String) need drop
-                if struct_def.destructor.is_some() {
-                    return true;
-                }
-                // Otherwise, check if any field needs drop
-                struct_def.fields.iter().any(|f| self.type_needs_drop(f.ty))
-            }
-
-            // Note: String is now Type::Struct with is_builtin=true, handled above
-
-            // Array types need drop if element type needs drop
-            TypeKind::Array(array_id) => {
-                let (element_type, _length) = self.type_pool.array_def(array_id);
-                self.type_needs_drop(element_type)
-            }
-
-            // Pointer types don't need drop (they're just addresses)
-            // Module types don't need drop (compile-time only)
-            TypeKind::PtrConst(_) | TypeKind::PtrMut(_) | TypeKind::Module(_) => false,
-        }
+        crate::drop_names::type_needs_drop(ty, self.type_pool)
     }
 
     /// Convert AIR argument mode to CFG argument mode.

@@ -17,6 +17,7 @@
 //! ```
 
 mod build;
+pub mod drop_names;
 mod inst;
 pub mod opt;
 

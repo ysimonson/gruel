@@ -25,60 +25,13 @@ use gruel_air::{
     Air, AirArgMode, AirInst, AirInstData, AnalyzedFunction, StructDef, Type, TypeInternPool,
     TypeKind,
 };
+use gruel_cfg::drop_names;
 use gruel_span::Span;
 use lasso::ThreadedRodeo;
 
 /// Check if a type needs drop.
 fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
-    match ty.kind() {
-        // Primitive types are trivially droppable
-        // ComptimeType is comptime-only, no runtime representation
-        TypeKind::I8
-        | TypeKind::I16
-        | TypeKind::I32
-        | TypeKind::I64
-        | TypeKind::U8
-        | TypeKind::U16
-        | TypeKind::U32
-        | TypeKind::U64
-        | TypeKind::Bool
-        | TypeKind::Unit
-        | TypeKind::Never
-        | TypeKind::Error
-        | TypeKind::ComptimeType => false,
-
-        // Enum types are trivially droppable (just discriminant values)
-        TypeKind::Enum(_) => false,
-
-        // Struct types need drop if they have a destructor (e.g., builtin String)
-        // or if any field needs drop
-        TypeKind::Struct(struct_id) => {
-            let struct_def = type_pool.struct_def(struct_id);
-            // Builtins with destructors (like String) need drop
-            if struct_def.destructor.is_some() {
-                return true;
-            }
-            // Otherwise, check if any field needs drop
-            struct_def
-                .fields
-                .iter()
-                .any(|f| type_needs_drop(f.ty, type_pool))
-        }
-
-        // Note: String is now Type::Struct with is_builtin=true, handled above
-
-        // Array types need drop if element type needs drop
-        TypeKind::Array(array_id) => {
-            let (element_type, _length) = type_pool.array_def(array_id);
-            type_needs_drop(element_type, type_pool)
-        }
-
-        // Pointer types don't need drop (they're just addresses)
-        TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => false,
-
-        // Module types don't need drop (compile-time only)
-        TypeKind::Module(_) => false,
-    }
+    drop_names::type_needs_drop(ty, type_pool)
 }
 
 /// Count the number of ABI slots a type uses (flattened).
@@ -301,7 +254,9 @@ fn create_array_drop_glue_function(
     array_id: gruel_air::ArrayTypeId,
     type_pool: &TypeInternPool,
 ) -> AnalyzedFunction {
-    let fn_name = array_drop_glue_name(array_id, type_pool);
+    let array_ty = Type::new_array(array_id);
+    let fn_name = drop_names::drop_fn_name(array_ty, type_pool)
+        .expect("array drop glue called for non-droppable array");
     let span = Span::new(0, 0); // Synthetic span
 
     // Get array element type and length
@@ -407,53 +362,3 @@ fn create_array_drop_glue_function(
     }
 }
 
-/// Generate the drop glue function name for an array type.
-///
-/// The name encodes the element type and length, e.g., `__gruel_drop_array_String_3`
-pub fn array_drop_glue_name(
-    array_id: gruel_air::ArrayTypeId,
-    type_pool: &TypeInternPool,
-) -> String {
-    let (element_type, length) = type_pool.array_def(array_id);
-    let element_type_name = type_name(element_type, type_pool);
-    format!("__gruel_drop_array_{}_{}", element_type_name, length)
-}
-
-/// Get a name for a type (used for generating drop glue function names).
-fn type_name(ty: Type, type_pool: &TypeInternPool) -> String {
-    match ty.kind() {
-        TypeKind::I8 => "i8".to_string(),
-        TypeKind::I16 => "i16".to_string(),
-        TypeKind::I32 => "i32".to_string(),
-        TypeKind::I64 => "i64".to_string(),
-        TypeKind::U8 => "u8".to_string(),
-        TypeKind::U16 => "u16".to_string(),
-        TypeKind::U32 => "u32".to_string(),
-        TypeKind::U64 => "u64".to_string(),
-        TypeKind::Bool => "bool".to_string(),
-        TypeKind::Unit => "unit".to_string(),
-        TypeKind::Never => "never".to_string(),
-        TypeKind::Error => "error".to_string(),
-        // ComptimeType only exists at compile time
-        TypeKind::ComptimeType => "comptime_type".to_string(),
-        TypeKind::Enum(enum_id) => format!("enum{}", enum_id.0),
-        // Struct types include builtin types like String
-        TypeKind::Struct(struct_id) => type_pool.struct_def(struct_id).name.clone(),
-        TypeKind::Array(array_id) => {
-            let (element_type, length) = type_pool.array_def(array_id);
-            let elem_name = type_name(element_type, type_pool);
-            format!("array_{}_{}", elem_name, length)
-        }
-        // Module types should never reach drop glue (compile-time only)
-        TypeKind::Module(_) => "module".to_string(),
-        // Pointer types
-        TypeKind::PtrConst(ptr_id) => {
-            let pointee = type_pool.ptr_const_def(ptr_id);
-            format!("ptr_const_{}", type_name(pointee, type_pool))
-        }
-        TypeKind::PtrMut(ptr_id) => {
-            let pointee = type_pool.ptr_mut_def(ptr_id);
-            format!("ptr_mut_{}", type_name(pointee, type_pool))
-        }
-    }
-}
