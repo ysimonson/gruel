@@ -35,6 +35,10 @@ cargo test -p gruel-lexer
 cargo run -p gruel-spec -- "1.1"  # Section 1.1
 cargo run -p gruel-spec -- "zero" # Tests matching "zero"
 
+# Compile and run a one-off program (preferred for quick tests)
+# Write source with the Write tool to $TMPDIR/test.gruel, then:
+cargo run -p gruel -- $TMPDIR/test.gruel $TMPDIR/test_out && $TMPDIR/test_out
+
 # Compile and run a program (single file)
 cargo run -p gruel -- source.gruel output
 ./output
@@ -711,4 +715,3 @@ println!("Lexed {} tokens from {} bytes", tokens.len(), source.len());
 3. **Context in spans**: Include high-level context (file, function count) in span fields
 4. **Metrics in events**: Include computed metrics (instruction counts, sizes) in events
 5. **Zero-cost when off**: Tracing has no overhead when no subscriber is active
-
