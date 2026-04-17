@@ -191,7 +191,7 @@ The feature is now part of stable Gruel.
 
 ## Open Questions
 
-- Should we support multiple `--preview` flags, or a comma-separated list?
+- ~~Should we support multiple `--preview` flags, or a comma-separated list?~~ **Resolved:** Multiple `--preview` flags are supported; each flag enables one feature. A comma-separated form is not supported.
 
 ## Future Work
 

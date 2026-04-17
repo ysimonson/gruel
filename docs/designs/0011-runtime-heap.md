@@ -8,14 +8,14 @@ created: 2025-12-25
 accepted: 2025-12-25
 implemented: 2026-01-04
 spec-sections: []
-superseded-by:
+superseded-by: 0035
 ---
 
 # ADR-0011: Runtime Heap
 
 ## Status
 
-Implemented
+Superseded by [ADR-0035](0035-heap-allocator-libc.md)
 
 ## Summary
 

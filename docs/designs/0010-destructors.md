@@ -376,11 +376,11 @@ This phase is deferred until mutable strings or other heap-allocated types land.
 
 ## Open Questions
 
-1. **Allocator story**: How do we hook into malloc/free? System allocator? Custom?
+1. **Allocator story**: ~~How do we hook into malloc/free? System allocator? Custom?~~ **Resolved:** System libc malloc/free. See ADR-0035.
 
 2. **Generic drops**: When we have generics, how do we call drop on `T`? Monomorphization? vtable?
 
-3. **Drop during assignment**: Does `x = new_value` drop the old value? (Probably yes.)
+3. **Drop during assignment**: Does `x = new_value` drop the old value? **Current state (not yet implemented):** `PlaceWrite` in `gruel-cfg/src/build.rs` does not insert a drop of the old value before overwriting. Field assignment to a non-trivially-droppable type silently leaks the old value.
 
 4. **Partial initialization**: What if struct construction panics mid-way? (All constructed fields should drop.)
 

@@ -156,3 +156,5 @@ See [ADR-0005: Preview Features](0005-preview-features.md) for details on the ga
 | [0007](0007-hindley-milner-inference.md) | Hindley-Milner Type Inference | Implemented | types, compiler |
 | [0008](0008-affine-types-mvs.md) | Affine Types and Mutable Value Semantics | Accepted | types, semantics, ownership |
 | [0009](0009-struct-methods.md) | Struct Methods | Proposal | types, syntax |
+| [0011](0011-runtime-heap.md) | Runtime Heap (bump allocator) | Superseded | runtime, memory |
+| [0035](0035-heap-allocator-libc.md) | Heap Allocator - Use libc malloc | Implemented | runtime, memory |

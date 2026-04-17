@@ -322,7 +322,7 @@ Outside `checked` blocks, all of Gruel's safety guarantees still hold.
 ## Implementation Phases
 
 - [x] **Phase 1: Parser support** (gruel-7qxm) - Add `checked` block syntax, `unchecked` function modifier, `ptr const`/`ptr mut` types
-- [x] **Phase 2: Type system** (gruel-pb4z) - Pointer types in sema, checked block tracking
+- [ ] **Phase 2: Type system** (gruel-pb4z) - Pointer types in sema, checked block tracking — **incomplete:** `AnalysisContext` has no `checked_depth` field; `InstData::Checked` is a transparent no-op in sema. Pointer intrinsics are accepted outside `checked` blocks without error.
 - [x] **Phase 3: Pointer intrinsics** (gruel-u9a4) - `@ptr_read`, `@ptr_write`, `@ptr_offset`, `@addr_of`, `@addr_of_mut`, `@ptr_to_int`, `@int_to_ptr`
 - [x] **Phase 4: Syscall intrinsic** (gruel-pwyw) - `@syscall` for direct OS calls
 - [x] **Phase 5: Codegen** (gruel-bk7s) - Generate correct code for pointer operations in both x86_64 and aarch64 backends
@@ -362,6 +362,10 @@ Outside `checked` blocks, all of Gruel's safety guarantees still hold.
 4. **Should `unchecked fn` require `checked { }` at call site?** Yes.
 
 5. **Sized types only?** Yes. Gruel doesn't have unsized types yet.
+
+## Open Questions
+
+1. **Orphaned intrinsics:** `@null_ptr`, `@is_null`, and `@ptr_copy` have type-inference constraints in `gruel-air/src/inference/generate.rs` but are not dispatched in sema and produce `E0700: unknown intrinsic`. They are not mentioned in this ADR or in the spec. Should they be implemented as part of Phase 2/3, or removed from the inference code?
 
 ## Future Work
 
