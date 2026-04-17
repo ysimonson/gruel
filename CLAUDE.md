@@ -36,8 +36,8 @@ cargo run -p gruel-spec -- "1.1"  # Section 1.1
 cargo run -p gruel-spec -- "zero" # Tests matching "zero"
 
 # Compile and run a one-off program (preferred for quick tests)
-# Write source with the Write tool to $TMPDIR/test.gruel, then:
-cargo run -p gruel -- $TMPDIR/test.gruel $TMPDIR/test_out && $TMPDIR/test_out
+# Write source with the Write tool to scratch/test.gruel, then:
+cargo run -p gruel -- scratch/test.gruel scratch/test_out && ./scratch/test_out
 
 # Compile and run a program (single file)
 cargo run -p gruel -- source.gruel output
