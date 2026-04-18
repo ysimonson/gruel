@@ -171,3 +171,12 @@ fn get(opt: IntOption) -> i32 {
     }
 }
 ```
+
+## Drop Dispatch for Data Enums
+
+{{ rule(id="6.3:19", cat="normative") }}
+
+When a data enum value goes out of scope without being matched, the compiler
+emits a discriminant check and drops the fields of the active variant.
+Only variants whose fields require drop are given a non-trivial drop body;
+unit variants and variants with trivially-droppable fields are no-ops.

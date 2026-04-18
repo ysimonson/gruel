@@ -13,9 +13,10 @@ use gruel_air::{Type, TypeInternPool, TypeKind};
 
 /// Return `true` if `ty` requires a drop call when it goes out of scope.
 ///
-/// Primitive scalars, enums, pointers, and unit/never are trivially droppable.
+/// Primitive scalars, unit-only enums, pointers, and unit/never are trivially droppable.
 /// A struct needs drop if it has a destructor or if any field needs drop.
 /// An array needs drop if its element type needs drop.
+/// A data enum needs drop if any variant has a field that needs drop.
 pub fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
     match ty.kind() {
         TypeKind::Struct(id) => {
@@ -28,6 +29,12 @@ pub fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
         TypeKind::Array(id) => {
             let (elem, _) = type_pool.array_def(id);
             type_needs_drop(elem, type_pool)
+        }
+        TypeKind::Enum(id) => {
+            let def = type_pool.enum_def(id);
+            def.variants
+                .iter()
+                .any(|v| v.fields.iter().any(|f| type_needs_drop(*f, type_pool)))
         }
         _ => false,
     }
@@ -62,6 +69,14 @@ pub fn drop_fn_name(ty: Type, type_pool: &TypeInternPool) -> Option<String> {
                     type_name_component(elem, type_pool),
                     len
                 ))
+            } else {
+                None
+            }
+        }
+        TypeKind::Enum(id) => {
+            if type_needs_drop(ty, type_pool) {
+                let def = type_pool.enum_def(id);
+                Some(format!("__gruel_drop_{}", def.name))
             } else {
                 None
             }

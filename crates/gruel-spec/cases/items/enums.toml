@@ -494,3 +494,51 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "requires preview feature"
+
+# =============================================================================
+# Drop Dispatch for Data Enums (preview: enum_data_variants, Phase 4)
+# =============================================================================
+
+[[case]]
+name = "enum_data_variant_drop_some"
+spec = ["6.3:19"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+struct Tracker { value: i32 }
+
+drop fn Tracker(self) {
+    @dbg(self.value);
+}
+
+enum MaybeTracker { Some(Tracker), None }
+
+fn main() -> i32 {
+    let _t = MaybeTracker::Some(Tracker { value: 42 });
+    0
+}
+"""
+exit_code = 0
+stdout = "42\n"
+
+[[case]]
+name = "enum_data_variant_drop_none_no_destructor"
+spec = ["6.3:19"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+struct Tracker { value: i32 }
+
+drop fn Tracker(self) {
+    @dbg(self.value);
+}
+
+enum MaybeTracker { Some(Tracker), None }
+
+fn main() -> i32 {
+    let _t = MaybeTracker::None;
+    0
+}
+"""
+exit_code = 0
+stdout = ""

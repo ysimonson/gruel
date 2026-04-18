@@ -308,7 +308,7 @@ Epic: TBD
   - Wildcard fields: emit Drop if the field type has a destructor
   - Add `preview_should_pass = true` spec tests for basic binding
 
-- [ ] **Phase 4: Drop dispatch for data enums**
+- [x] **Phase 4: Drop dispatch for data enums**
   - Implement enum destructor dispatch: when a data enum value is dropped, the CFG must emit a match on the discriminant, then drop each live field of the matched variant
   - Update `gruel-cfg` drop logic: when dropping a value of an enum type that `has_data_variants()`, emit a `MatchDrop` sequence (or inline discriminant check + conditional field drops)
   - Add spec tests: non-copy data in enum variant is properly dropped at scope exit
