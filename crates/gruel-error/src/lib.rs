@@ -297,6 +297,10 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// Struct destructuring and partial move ban (ADR-0036).
+    /// Bans partial field moves of non-copy structs and adds
+    /// `let TypeName { field1, field2 } = expr;` syntax.
+    Destructuring,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -316,6 +320,7 @@ impl PreviewFeature {
     pub fn name(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
+            PreviewFeature::Destructuring => "destructuring",
         }
     }
 
@@ -323,12 +328,13 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::Destructuring => "ADR-0036",
         }
     }
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra]
+        &[PreviewFeature::TestInfra, PreviewFeature::Destructuring]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -351,6 +357,7 @@ impl std::str::FromStr for PreviewFeature {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "test_infra" => Ok(PreviewFeature::TestInfra),
+            "destructuring" => Ok(PreviewFeature::Destructuring),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1839,7 +1846,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, destructuring");
     }
 
     // ========================================================================
