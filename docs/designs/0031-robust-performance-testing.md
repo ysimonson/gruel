@@ -1,12 +1,12 @@
 ---
 id: 0031
 title: Robust Performance Testing Infrastructure
-status: proposal
+status: implemented
 tags: [tooling, ci, performance]
 feature-flag: null
 created: 2026-01-11
 accepted:
-implemented:
+implemented: 2026-04-18
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
