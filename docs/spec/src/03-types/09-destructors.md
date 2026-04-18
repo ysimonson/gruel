@@ -144,6 +144,36 @@ fn example(condition: bool) -> i32 {
 }
 ```
 
+## Function Parameter Drops
+
+{{ rule(id="3.9:31", cat="dynamic-semantics") }}
+
+Function parameters that are passed by value (not inout or borrow) are owned by the callee. If such a parameter has a destructor and is not moved within the function body, the parameter is dropped when the function returns.
+
+{{ rule(id="3.9:32", cat="dynamic-semantics") }}
+
+When a by-value argument with a destructor is passed to a function call, ownership transfers to the callee. The caller does not drop the value at its original scope exit.
+
+{{ rule(id="3.9:33", cat="example") }}
+
+```gruel
+struct Data { value: i32 }
+
+drop fn Data(self) {
+    @dbg(self.value);
+}
+
+fn sink(d: Data) -> i32 {
+    0
+}  // d is dropped here (owned by callee, not consumed)
+
+fn main() -> i32 {
+    let d = Data { value: 42 };
+    sink(d);  // ownership transferred to sink, d not dropped in main
+    0
+}
+```
+
 ## Code Generation
 
 {{ rule(id="3.9:21", cat="dynamic-semantics") }}

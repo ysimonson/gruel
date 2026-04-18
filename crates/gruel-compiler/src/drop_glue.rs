@@ -198,6 +198,7 @@ fn create_struct_drop_glue_function(
         num_param_slots,
         param_modes,
         param_slot_types,
+        is_destructor: true,
     }
 }
 
@@ -314,6 +315,7 @@ fn create_array_drop_glue_function(
         num_param_slots,
         param_modes,
         param_slot_types,
+        is_destructor: true,
     }
 }
 

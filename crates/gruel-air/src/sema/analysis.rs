@@ -403,6 +403,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         num_param_slots,
                         param_modes: param_modes_result,
                         param_slot_types,
+                        is_destructor: false,
                     };
                     functions_with_strings.push((analyzed, local_strings));
                     all_warnings.extend(warnings);
@@ -669,6 +670,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                             num_param_slots,
                             param_modes: param_modes_result,
                             param_slot_types,
+                            is_destructor: false,
                         };
                         functions_with_strings.push((analyzed, local_strings));
                         all_warnings.extend(warnings);
@@ -920,6 +922,7 @@ impl<'a> Sema<'a> {
                 num_param_slots,
                 param_modes,
                 param_slot_types,
+                is_destructor: false,
             },
             warnings,
             local_strings,
@@ -977,6 +980,7 @@ impl<'a> Sema<'a> {
                 num_param_slots,
                 param_modes,
                 param_slot_types,
+                is_destructor: false,
             },
             warnings,
             local_strings,
@@ -1023,6 +1027,7 @@ impl<'a> Sema<'a> {
                 num_param_slots,
                 param_modes,
                 param_slot_types,
+                is_destructor: true,
             },
             warnings,
             local_strings,

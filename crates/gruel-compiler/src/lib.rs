@@ -899,6 +899,7 @@ pub fn compile_frontend_from_ast_with_options(
                     &sema_output.type_pool,
                     func.param_modes.clone(),
                     func.param_slot_types.clone(),
+                    func.is_destructor,
                 );
 
                 (
@@ -1019,6 +1020,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
                     &sema_output.type_pool,
                     func.param_modes.clone(),
                     func.param_slot_types.clone(),
+                    func.is_destructor,
                 );
 
                 (

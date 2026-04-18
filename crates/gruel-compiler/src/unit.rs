@@ -445,6 +445,7 @@ impl<'src> CompilationUnit<'src> {
                     type_pool,
                     func.param_modes.clone(),
                     func.param_slot_types.clone(),
+                    func.is_destructor,
                 );
 
                 (

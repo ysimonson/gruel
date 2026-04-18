@@ -288,6 +288,7 @@ fn create_specialized_function(
         num_param_slots,
         param_modes,
         param_slot_types,
+        is_destructor: false,
     })
 }
 

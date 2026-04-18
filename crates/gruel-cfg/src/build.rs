@@ -4,7 +4,7 @@
 //! into explicit basic blocks with terminators.
 
 use gruel_air::{
-    Air, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef, AirProjection, AirRef,
+    Air, AirArgMode, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef, AirProjection, AirRef,
     Type, TypeInternPool,
 };
 use gruel_error::{CompileWarning, WarningKind};
@@ -59,6 +59,15 @@ struct LiveSlot {
     span: gruel_span::Span,
 }
 
+/// A live parameter that needs dropping at function exit.
+#[derive(Debug, Clone)]
+struct LiveParam {
+    /// The parameter slot index
+    param_slot: u32,
+    /// The type of the parameter
+    ty: Type,
+}
+
 /// Builder that converts AIR to CFG.
 pub struct CfgBuilder<'a> {
     air: &'a Air,
@@ -77,6 +86,11 @@ pub struct CfgBuilder<'a> {
     /// Each scope contains the slots that became live in that scope.
     /// Used to emit StorageDead (and Drop if needed) at scope exit.
     scope_stack: Vec<Vec<LiveSlot>>,
+    /// Parameters that are live and need dropping at function exit.
+    /// Non-inout parameters whose types need drop are added here at function entry.
+    /// When a parameter is consumed (passed to another function, moved into a struct, etc.),
+    /// it is removed from this list to prevent double-drop.
+    live_params: Vec<LiveParam>,
 }
 
 impl<'a> CfgBuilder<'a> {
@@ -92,7 +106,29 @@ impl<'a> CfgBuilder<'a> {
         type_pool: &'a TypeInternPool,
         param_modes: Vec<bool>,
         param_slot_types: Vec<Type>,
+        is_destructor: bool,
     ) -> CfgOutput {
+        // Determine which by-value parameters need dropping at function exit.
+        // Inout/borrow parameters are not owned by the callee and must not be dropped.
+        // Destructors must NOT auto-drop their self parameter — the destructor IS the
+        // drop logic for that value.
+        let live_params: Vec<LiveParam> = if is_destructor {
+            Vec::new()
+        } else {
+            param_slot_types
+                .iter()
+                .enumerate()
+                .filter(|(i, ty)| {
+                    !param_modes.get(*i).copied().unwrap_or(false)
+                        && crate::drop_names::type_needs_drop(**ty, type_pool)
+                })
+                .map(|(i, ty)| LiveParam {
+                    param_slot: i as u32,
+                    ty: *ty,
+                })
+                .collect()
+        };
+
         let mut builder = CfgBuilder {
             air,
             cfg: Cfg::new(
@@ -109,6 +145,7 @@ impl<'a> CfgBuilder<'a> {
             value_cache: vec![None; air.len()],
             warnings: Vec::new(),
             scope_stack: vec![Vec::new()], // Start with one scope for the function body
+            live_params,
         };
 
         // Create entry block
@@ -649,6 +686,12 @@ impl<'a> CfgBuilder<'a> {
                     );
                     self.emit(CfgInstData::Drop { value: old_val }, Type::UNIT, span);
                 }
+                // If the old value was not live (reassignment after move), the slot was
+                // removed from scope tracking by forget_local_slot. Re-add it so the new
+                // value gets dropped at scope exit.
+                if !*had_live_value && self.type_needs_drop(value_ty) {
+                    self.re_add_local_slot(*slot, value_ty, span);
+                }
                 self.emit(
                     CfgInstData::Store {
                         slot: *slot,
@@ -686,8 +729,12 @@ impl<'a> CfgBuilder<'a> {
                 args_start,
                 args_len,
             } => {
+                // Collect AIR call args for later use in forget logic
+                let air_call_args: Vec<_> =
+                    self.air.get_call_args(*args_start, *args_len).collect();
+
                 let mut arg_vals = Vec::new();
-                for arg in self.air.get_call_args(*args_start, *args_len) {
+                for arg in &air_call_args {
                     let Some(value) = self.lower_value(arg.value) else {
                         return Self::diverged();
                     };
@@ -696,6 +743,15 @@ impl<'a> CfgBuilder<'a> {
                         mode: CfgArgMode::from(arg.mode),
                     });
                 }
+
+                // Forget consumed values: normal (non-inout/borrow) args transfer ownership
+                // to the callee. Remove them from scope/param tracking to prevent double-drop.
+                for arg in &air_call_args {
+                    if arg.mode == AirArgMode::Normal {
+                        self.forget_consumed_value(arg.value);
+                    }
+                }
+
                 // Store args in extra array
                 let (args_start, args_len) = self.cfg.push_call_args(arg_vals);
                 let value = self.emit(
@@ -766,25 +822,14 @@ impl<'a> CfgBuilder<'a> {
                     lowered_fields[decl_idx] = Some(lowered);
                 }
 
-                // Forget moved-out non-Copy locals to prevent double-drop at scope exit.
+                // Forget consumed values to prevent double-drop at scope exit.
                 //
-                // When a non-Copy local (e.g., a String or struct containing one) is moved
-                // into a struct field, the containing struct's drop glue handles freeing it.
-                // We must not also drop the original local at scope exit, or we'd get a
-                // double-free. Remove each such slot from the scope tracking list.
-                let struct_id_val = *struct_id; // Copy out before any mutable borrows
-                let mut slots_to_forget: Vec<u32> = Vec::new();
-                for (decl_idx, &field_air_ref) in fields.iter().enumerate() {
-                    let field_ty =
-                        self.type_pool.struct_def(struct_id_val).fields[decl_idx].ty;
-                    if self.type_needs_drop(field_ty) {
-                        if let AirInstData::Load { slot } = self.air.get(field_air_ref).data {
-                            slots_to_forget.push(slot);
-                        }
-                    }
-                }
-                for slot in slots_to_forget {
-                    self.forget_local_slot(slot);
+                // When a non-Copy value (local or param) is moved into a struct field,
+                // the containing struct's drop glue handles freeing it.
+                // We must not also drop the original at scope exit, or we'd get a
+                // double-free.
+                for &field_air_ref in &fields {
+                    self.forget_consumed_value(field_air_ref);
                 }
 
                 // Collect in declaration order for storage layout
@@ -1529,6 +1574,11 @@ impl<'a> CfgBuilder<'a> {
                             // by the inner diverging expression, so just propagate divergence.
                             return Self::diverged();
                         }
+
+                        // The returned value transfers ownership to the caller.
+                        // Remove it from scope/param tracking to prevent dropping it.
+                        self.forget_consumed_value(*v);
+
                         // result.value may be None for Unit-typed expressions - that's OK
                         result.value
                     }
@@ -1551,13 +1601,21 @@ impl<'a> CfgBuilder<'a> {
                 elems_start,
                 elems_len,
             } => {
+                let elems: Vec<AirRef> =
+                    self.air.get_air_refs(*elems_start, *elems_len).collect();
                 let mut element_vals = Vec::new();
-                for elem in self.air.get_air_refs(*elems_start, *elems_len) {
+                for &elem in &elems {
                     let Some(val) = self.lower_value(elem) else {
                         return Self::diverged();
                     };
                     element_vals.push(val);
                 }
+
+                // Forget consumed values to prevent double-drop
+                for &elem in &elems {
+                    self.forget_consumed_value(elem);
+                }
+
                 // Store elements in extra array
                 let (elements_start, elements_len) = self.cfg.push_extra(element_vals);
                 let value = self.emit(
@@ -1885,14 +1943,58 @@ impl<'a> CfgBuilder<'a> {
         }
     }
 
+    /// Re-add a local slot to the current scope after it was previously forgotten.
+    /// This handles the case where a variable is moved (forget_local_slot), then
+    /// reassigned — the new value needs to be tracked for drop at scope exit.
+    fn re_add_local_slot(&mut self, slot: u32, ty: Type, span: gruel_span::Span) {
+        // Only add if not already tracked (avoid double-tracking)
+        let already_tracked = self
+            .scope_stack
+            .iter()
+            .any(|scope| scope.iter().any(|ls| ls.slot == slot));
+        if !already_tracked {
+            if let Some(scope) = self.scope_stack.last_mut() {
+                scope.push(LiveSlot { slot, ty, span });
+            }
+        }
+    }
+
+    /// Remove a parameter from live_params to prevent it from being dropped at function exit.
+    ///
+    /// Called when a non-copy parameter is consumed (passed to another function, moved into a
+    /// struct, etc.). Without this, the function-exit drop elaboration would drop the parameter
+    /// after ownership has already been transferred, causing a double-free.
+    fn forget_param(&mut self, param_slot: u32) {
+        self.live_params.retain(|lp| lp.param_slot != param_slot);
+    }
+
     /// Check if a type needs to be dropped (has a destructor).
     fn type_needs_drop(&self, ty: Type) -> bool {
         crate::drop_names::type_needs_drop(ty, self.type_pool)
     }
 
+    /// Forget any local slots or params that are consumed by a value being moved.
+    /// Checks if `air_ref` is a Load (local) or Param instruction, and if its type
+    /// needs drop, removes it from scope/param tracking to prevent double-free.
+    fn forget_consumed_value(&mut self, air_ref: AirRef) {
+        let inst = self.air.get(air_ref);
+        match inst.data {
+            AirInstData::Load { slot } => {
+                if self.type_needs_drop(inst.ty) {
+                    self.forget_local_slot(slot);
+                }
+            }
+            AirInstData::Param { index } => {
+                if self.type_needs_drop(inst.ty) {
+                    self.forget_param(index);
+                }
+            }
+            _ => {}
+        }
+    }
 
-    /// Emit drops for all live slots in all scopes (for return).
-    /// Drops are emitted in reverse order (LIFO) across all scopes.
+    /// Emit drops for all live slots in all scopes, plus live params (for return).
+    /// Drops are emitted in reverse order (LIFO) across all scopes, then params in reverse order.
     fn emit_drops_for_all_scopes(&mut self, span: gruel_span::Span) {
         // Collect all live slots in reverse order across all scopes
         let all_slots: Vec<LiveSlot> = self
@@ -1904,6 +2006,12 @@ impl<'a> CfgBuilder<'a> {
 
         for live_slot in all_slots {
             self.emit_drop_for_slot(&live_slot, span);
+        }
+
+        // Drop live params in reverse order (last param first)
+        let params: Vec<LiveParam> = self.live_params.iter().rev().cloned().collect();
+        for live_param in params {
+            self.emit_drop_for_param(&live_param, span);
         }
     }
 
@@ -1926,7 +2034,7 @@ impl<'a> CfgBuilder<'a> {
         }
     }
 
-    /// Emit Drop and StorageDead for a single slot.
+    /// Emit Drop and StorageDead for a single local slot.
     fn emit_drop_for_slot(&mut self, live_slot: &LiveSlot, span: gruel_span::Span) {
         // Emit Drop if the type needs it
         if self.type_needs_drop(live_slot.ty) {
@@ -1946,6 +2054,20 @@ impl<'a> CfgBuilder<'a> {
             Type::UNIT,
             span,
         );
+    }
+
+    /// Emit Drop for a function parameter.
+    /// Unlike locals, params don't use StorageLive/StorageDead — they are live for the
+    /// entire function. We just need to load and drop the value.
+    fn emit_drop_for_param(&mut self, live_param: &LiveParam, span: gruel_span::Span) {
+        let param_val = self.emit(
+            CfgInstData::Param {
+                index: live_param.param_slot,
+            },
+            live_param.ty,
+            span,
+        );
+        self.emit(CfgInstData::Drop { value: param_val }, Type::UNIT, span);
     }
 
     // ============================================================================
@@ -2125,6 +2247,7 @@ mod tests {
             &output.type_pool,
             func.param_modes.clone(),
             func.param_slot_types.clone(),
+            func.is_destructor,
         )
         .cfg
     }

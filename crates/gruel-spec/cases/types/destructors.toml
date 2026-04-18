@@ -595,6 +595,98 @@ fn main() -> i32 {
 exit_code = 30
 
 # =============================================================================
+# Function Parameter Drops
+# =============================================================================
+
+[[case]]
+name = "param_dropped_at_function_exit"
+spec = ["3.9:31"]
+description = "Unconsumed by-value parameter is dropped at function exit"
+source = """
+struct Counter { value: i32 }
+
+drop fn Counter(self) {
+    @dbg(self.value);
+}
+
+fn ignore(c: Counter) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    ignore(Counter { value: 42 });
+    0
+}
+"""
+exit_code = 0
+stdout = "42\n"
+
+[[case]]
+name = "param_not_double_dropped"
+spec = ["3.9:31", "3.9:32"]
+description = "Consumed parameter is not dropped again at function exit"
+source = """
+struct Counter { value: i32 }
+
+drop fn Counter(self) {
+    @dbg(self.value);
+}
+
+fn consume(c: Counter) -> i32 { c.value }
+
+fn main() -> i32 {
+    consume(Counter { value: 99 });
+    0
+}
+"""
+exit_code = 0
+stdout = "99\n"
+
+[[case]]
+name = "caller_does_not_drop_moved_arg"
+spec = ["3.9:32"]
+description = "Caller does not drop a local that was passed to a function"
+source = """
+struct Counter { value: i32 }
+
+drop fn Counter(self) {
+    @dbg(self.value);
+}
+
+fn ignore(c: Counter) -> i32 { 0 }
+
+fn main() -> i32 {
+    let c = Counter { value: 7 };
+    ignore(c);
+    0
+}
+"""
+exit_code = 0
+stdout = "7\n"
+
+[[case]]
+name = "param_returned_not_dropped_in_callee"
+spec = ["3.9:31"]
+description = "Returned parameter is not dropped in callee - caller drops it"
+source = """
+struct Counter { value: i32 }
+
+drop fn Counter(self) {
+    @dbg(self.value);
+}
+
+fn pass_through(c: Counter) -> Counter { c }
+
+fn main() -> i32 {
+    let c = pass_through(Counter { value: 5 });
+    @dbg(c.value);
+    0
+}
+"""
+exit_code = 0
+stdout = "5\n5\n"
+
+# =============================================================================
 # User-Defined Destructors (Phase 4)
 # =============================================================================
 

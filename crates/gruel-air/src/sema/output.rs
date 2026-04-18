@@ -28,6 +28,10 @@ pub struct AnalyzedFunction {
     /// Preserved here so backends can declare correct function signatures
     /// even when DCE has removed unused `Param` instructions from the body.
     pub param_slot_types: Vec<Type>,
+    /// Whether this function is a destructor (`drop fn`).
+    /// Destructors must not auto-drop their `self` parameter, as the
+    /// destructor IS the drop logic for that value.
+    pub is_destructor: bool,
 }
 
 /// Output from semantic analysis.

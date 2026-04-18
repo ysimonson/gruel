@@ -207,7 +207,7 @@ A struct destructure lowers to:
 
 Epic: gruel-wjha
 
-- [ ] **Phase 1: Fix function parameter drops** — Add params to CFG `scope_stack`, call `forget_local_slot` for non-copy args at call sites. Add spec tests. No preview gate (this is a bug fix).
+- [x] **Phase 1: Fix function parameter drops** — Add params to CFG `scope_stack`, call `forget_local_slot` for non-copy args at call sites. Add spec tests. No preview gate (this is a bug fix).
 
 - [ ] **Phase 2: Add `PreviewFeature::Destructuring`** — Register the preview feature in `gruel-error`. Add spec test placeholders with `preview = "destructuring"`. Behind this gate, emit an error when a non-copy field is used as a move (the partial move path in `analyze_ops.rs`). Error message should suggest destructuring.
 
