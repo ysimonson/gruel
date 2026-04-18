@@ -19,10 +19,11 @@ of buck, etc.
 ### Language
 
 - Stabilized anonymous struct methods
+- Struct destructuring with partial move ban (ADR-0036)
 
 ### Language Tooling
 
-- Replaced custom x86-64 and AArch64 backends with LLVM (via inkwell)
+- Replaced custom x86-64 and AArch64 backends with LLVM
 - Removed the custom linker in favor of the system linker (`cc`)
 - Replaced inline syscalls with libc-based platform abstraction
 

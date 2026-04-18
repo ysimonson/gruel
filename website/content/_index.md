@@ -15,7 +15,7 @@ description = "If you know Rust, Go, or C, you'll feel at home. Gruel aims for a
 
 [[extra.features]]
 title = "Native Compilation"
-description = "Compiles to x86-64 and ARM64 machine code. No VM, no interpreter, no garbage collector."
+description = "Compiles to native machine code via LLVM. No VM, no interpreter, no garbage collector."
 +++
 
 ```gruel

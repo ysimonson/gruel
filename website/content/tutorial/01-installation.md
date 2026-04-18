@@ -11,7 +11,13 @@ Gruel is currently in early development. To try it out, you'll need to build fro
 ## Prerequisites
 
 - [Rust toolchain](https://rustup.rs) - Install via rustup
-- `clang` - Used as the linker on macOS (install via `xcode-select --install`)
+- **LLVM 22** - The compiler backend requires LLVM
+  - **macOS**: `brew install llvm@22` and ensure `llvm-config` is on your `PATH`
+  - **Ubuntu/Debian**: `apt install llvm-22-dev`
+  - **Fedora**: `dnf install llvm22-devel`
+- A system linker
+  - **macOS**: `clang` (install via `xcode-select --install`)
+  - **Linux**: `gcc` or `clang`
 
 ## Building from Source
 
