@@ -84,6 +84,12 @@ pub struct KnownSymbols {
     pub raw: Spur,
     /// The `raw_mut` intrinsic symbol - takes mutable address of lvalue.
     pub raw_mut: Spur,
+    /// The `null_ptr` intrinsic symbol - creates a null pointer.
+    pub null_ptr: Spur,
+    /// The `is_null` intrinsic symbol - checks if pointer is null.
+    pub is_null: Spur,
+    /// The `ptr_copy` intrinsic symbol - copies n elements between pointers.
+    pub ptr_copy: Spur,
     /// The `syscall` intrinsic symbol - direct OS syscall.
     pub syscall: Spur,
 
@@ -136,6 +142,9 @@ impl KnownSymbols {
             int_to_ptr: interner.get_or_intern_static("int_to_ptr"),
             raw: interner.get_or_intern_static("raw"),
             raw_mut: interner.get_or_intern_static("raw_mut"),
+            null_ptr: interner.get_or_intern_static("null_ptr"),
+            is_null: interner.get_or_intern_static("is_null"),
+            ptr_copy: interner.get_or_intern_static("ptr_copy"),
             syscall: interner.get_or_intern_static("syscall"),
 
             // Target platform intrinsics
@@ -204,6 +213,9 @@ mod tests {
         assert_eq!(interner.resolve(&known.int_to_ptr), "int_to_ptr");
         assert_eq!(interner.resolve(&known.raw), "raw");
         assert_eq!(interner.resolve(&known.raw_mut), "raw_mut");
+        assert_eq!(interner.resolve(&known.null_ptr), "null_ptr");
+        assert_eq!(interner.resolve(&known.is_null), "is_null");
+        assert_eq!(interner.resolve(&known.ptr_copy), "ptr_copy");
         assert_eq!(interner.resolve(&known.syscall), "syscall");
         assert_eq!(interner.resolve(&known.target_arch), "target_arch");
         assert_eq!(interner.resolve(&known.target_os), "target_os");

@@ -2585,6 +2585,12 @@ impl<'a> Sema<'a> {
             self.analyze_ptr_to_int_intrinsic(air, name, &args, span, ctx)
         } else if name == known.int_to_ptr {
             self.analyze_int_to_ptr_intrinsic(air, name, inst_ref, &args, span, ctx)
+        } else if name == known.null_ptr {
+            self.analyze_null_ptr_intrinsic(air, name, inst_ref, &args, span, ctx)
+        } else if name == known.is_null {
+            self.analyze_is_null_intrinsic(air, name, &args, span, ctx)
+        } else if name == known.ptr_copy {
+            self.analyze_ptr_copy_intrinsic(air, name, &args, span, ctx)
         } else if name == known.raw {
             self.analyze_addr_of_intrinsic(air, &args, span, ctx, false)
         } else if name == known.raw_mut {
@@ -6044,6 +6050,229 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, result_type))
+    }
+
+    /// Analyze @null_ptr intrinsic: creates a typed null pointer.
+    /// Signature: @null_ptr() -> ptr const T
+    /// The result type T is inferred from context (e.g., `let p: ptr const i32 = @null_ptr()`)
+    fn analyze_null_ptr_intrinsic(
+        &mut self,
+        air: &mut Air,
+        name: Spur,
+        inst_ref: InstRef,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if !args.is_empty() {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicWrongArgCount {
+                    name: "null_ptr".to_string(),
+                    expected: 0,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        // Get the result type from HM inference (must be a pointer type)
+        let result_type = Self::get_resolved_type(ctx, inst_ref, span, "@null_ptr intrinsic")?;
+
+        // Validate that the inferred type is a pointer
+        if !result_type.is_ptr() && !result_type.is_error() && !result_type.is_never() {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                    name: "null_ptr".to_string(),
+                    expected: "ptr const T or ptr mut T".to_string(),
+                    found: self.format_type_name(result_type),
+                })),
+                span,
+            ));
+        }
+
+        // Create the intrinsic call instruction (no args)
+        let args_start = air.add_extra(&[]);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name,
+                args_start,
+                args_len: 0,
+            },
+            ty: result_type,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, result_type))
+    }
+
+    /// Analyze @is_null intrinsic: checks if a pointer is null.
+    /// Signature: @is_null(ptr: ptr T) -> bool
+    fn analyze_is_null_intrinsic(
+        &mut self,
+        air: &mut Air,
+        name: Spur,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicWrongArgCount {
+                    name: "is_null".to_string(),
+                    expected: 1,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        let ptr_result = self.analyze_inst(air, args[0].value, ctx)?;
+        let ptr_type = ptr_result.ty;
+
+        // Validate pointer type
+        if !ptr_type.is_ptr() && !ptr_type.is_error() && !ptr_type.is_never() {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                    name: "is_null".to_string(),
+                    expected: "ptr const T or ptr mut T".to_string(),
+                    found: self.format_type_name(ptr_type),
+                })),
+                span,
+            ));
+        }
+
+        // Create the intrinsic call instruction (returns bool)
+        let args_start = air.add_extra(&[ptr_result.air_ref.as_u32()]);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name,
+                args_start,
+                args_len: 1,
+            },
+            ty: Type::BOOL,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, Type::BOOL))
+    }
+
+    /// Analyze @ptr_copy intrinsic: copies n elements from src to dst.
+    /// Signature: @ptr_copy(dst: ptr mut T, src: ptr const T, count: u64) -> ()
+    fn analyze_ptr_copy_intrinsic(
+        &mut self,
+        air: &mut Air,
+        name: Spur,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if args.len() != 3 {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicWrongArgCount {
+                    name: "ptr_copy".to_string(),
+                    expected: 3,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        let dst_result = self.analyze_inst(air, args[0].value, ctx)?;
+        let src_result = self.analyze_inst(air, args[1].value, ctx)?;
+        let count_result = self.analyze_inst(air, args[2].value, ctx)?;
+        let dst_type = dst_result.ty;
+        let src_type = src_result.ty;
+        let count_type = count_result.ty;
+
+        // dst must be ptr mut T
+        let dst_pointee = match dst_type.kind() {
+            TypeKind::PtrMut(ptr_id) => self.type_pool.ptr_mut_def(ptr_id),
+            TypeKind::PtrConst(_) => {
+                return Err(CompileError::new(
+                    ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                        name: "ptr_copy".to_string(),
+                        expected: "ptr mut T (cannot copy into ptr const)".to_string(),
+                        found: self.format_type_name(dst_type),
+                    })),
+                    span,
+                ));
+            }
+            _ => {
+                if !dst_type.is_error() && !dst_type.is_never() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                            name: "ptr_copy".to_string(),
+                            expected: "ptr mut T".to_string(),
+                            found: self.format_type_name(dst_type),
+                        })),
+                        span,
+                    ));
+                }
+                Type::ERROR
+            }
+        };
+
+        // src must be ptr const T or ptr mut T
+        let src_pointee = match src_type.kind() {
+            TypeKind::PtrConst(ptr_id) => self.type_pool.ptr_const_def(ptr_id),
+            TypeKind::PtrMut(ptr_id) => self.type_pool.ptr_mut_def(ptr_id),
+            _ => {
+                if !src_type.is_error() && !src_type.is_never() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                            name: "ptr_copy".to_string(),
+                            expected: "ptr const T or ptr mut T".to_string(),
+                            found: self.format_type_name(src_type),
+                        })),
+                        span,
+                    ));
+                }
+                Type::ERROR
+            }
+        };
+
+        // Pointee types must match
+        if dst_pointee != src_pointee
+            && !dst_pointee.is_error()
+            && !src_pointee.is_error()
+            && !dst_pointee.is_never()
+            && !src_pointee.is_never()
+        {
+            return Err(CompileError::new(
+                ErrorKind::TypeMismatch {
+                    expected: self.format_type_name(dst_pointee),
+                    found: self.format_type_name(src_pointee),
+                },
+                span,
+            ));
+        }
+
+        // count must be u64
+        if count_type != Type::U64 && !count_type.is_error() && !count_type.is_never() {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                    name: "ptr_copy".to_string(),
+                    expected: "u64".to_string(),
+                    found: self.format_type_name(count_type),
+                })),
+                span,
+            ));
+        }
+
+        // Create the intrinsic call instruction
+        let args_start = air.add_extra(&[
+            dst_result.air_ref.as_u32(),
+            src_result.air_ref.as_u32(),
+            count_result.air_ref.as_u32(),
+        ]);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name,
+                args_start,
+                args_len: 3,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, Type::UNIT))
     }
 
     /// Analyze @addr_of / @addr_of_mut intrinsics: takes address of lvalue.

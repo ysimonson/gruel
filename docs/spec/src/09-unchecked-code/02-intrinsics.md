@@ -48,3 +48,57 @@ fn main() -> i32 {
     0
 }
 ```
+
+## Null Pointer Intrinsic
+
+{{ rule(id="9.2:7", cat="normative") }}
+
+The `@null_ptr()` intrinsic creates a null pointer. It takes no arguments and returns a pointer whose address is zero. The result type is inferred from context and must be a pointer type (`ptr const T` or `ptr mut T`).
+
+{{ rule(id="9.2:8", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    let p: ptr const i32 = checked { @null_ptr() };
+    0
+}
+```
+
+## Null Check Intrinsic
+
+{{ rule(id="9.2:9", cat="normative") }}
+
+The `@is_null(p)` intrinsic checks whether a pointer is null. It takes one argument of any pointer type (`ptr const T` or `ptr mut T`) and returns `bool`. The result is `true` if the pointer address is zero, `false` otherwise.
+
+{{ rule(id="9.2:10", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    let p: ptr const i32 = checked { @null_ptr() };
+    if checked { @is_null(p) } { 1 } else { 0 }
+}
+```
+
+## Pointer Copy Intrinsic
+
+{{ rule(id="9.2:11", cat="normative") }}
+
+The `@ptr_copy(dst, src, count)` intrinsic copies `count` elements from the memory at `src` to the memory at `dst`. The first argument must be `ptr mut T`, the second must be `ptr const T` or `ptr mut T` with the same pointee type, and the third must be `u64`. The intrinsic returns `()`.
+
+{{ rule(id="9.2:12", cat="undefined-behavior") }}
+
+It is undefined behavior if the source and destination memory regions overlap, if either pointer is null, or if either pointer does not point to a valid allocation of at least `count` elements.
+
+{{ rule(id="9.2:13", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    let src: [i32; 3] = [10, 20, 30];
+    let mut dst: [i32; 3] = [0, 0, 0];
+    let count: u64 = 3;
+    let s: ptr const i32 = checked { @raw(src[0]) };
+    let d: ptr mut i32 = checked { @raw_mut(dst[0]) };
+    checked { @ptr_copy(d, s, count) };
+    dst[1]
+}
+```

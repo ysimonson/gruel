@@ -2142,6 +2142,91 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         .into(),
                 )
             }
+            "null_ptr" => {
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                Some(ptr_ty.const_null().into())
+            }
+            "is_null" => {
+                let ptr_val = args[0];
+                let ptr = self.get_value(ptr_val).into_pointer_value();
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let null = ptr_ty.const_null();
+                Some(
+                    self.builder
+                        .build_int_compare(
+                            inkwell::IntPredicate::EQ,
+                            self.builder
+                                .build_ptr_to_int(ptr, self.ctx.i64_type(), "p2i_lhs")
+                                .unwrap(),
+                            self.builder
+                                .build_ptr_to_int(null, self.ctx.i64_type(), "p2i_rhs")
+                                .unwrap(),
+                            "isnull",
+                        )
+                        .unwrap()
+                        .into(),
+                )
+            }
+            "ptr_copy" => {
+                let dst_val = args[0];
+                let src_val = args[1];
+                let count_val = args[2];
+                let dst = self.get_value(dst_val).into_pointer_value();
+                let src = self.get_value(src_val).into_pointer_value();
+                let count = self.get_value(count_val).into_int_value();
+
+                // Determine pointee type to compute byte size
+                let dst_gruel_ty = self.cfg.get_inst(dst_val).ty;
+                let pointee_ty = match dst_gruel_ty.kind() {
+                    TypeKind::PtrMut(id) => self.type_pool.ptr_mut_def(id),
+                    _ => Type::U8, // fallback
+                };
+
+                let i64_ty = self.ctx.i64_type();
+                let byte_count = if let Some(elem_llvm) =
+                    gruel_type_to_llvm(pointee_ty, self.ctx, self.type_pool)
+                {
+                    let elem_size = elem_llvm.size_of().unwrap();
+                    self.builder
+                        .build_int_mul(count, elem_size, "nbytes")
+                        .unwrap()
+                } else {
+                    // Zero-sized type — nothing to copy
+                    i64_ty.const_zero()
+                };
+
+                // Emit llvm.memcpy.p0.p0.i64
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let memcpy_ty = self.ctx.void_type().fn_type(
+                    &[
+                        ptr_ty.into(),
+                        ptr_ty.into(),
+                        i64_ty.into(),
+                        self.ctx.bool_type().into(),
+                    ],
+                    false,
+                );
+                let memcpy_fn = self
+                    .module
+                    .get_function("llvm.memcpy.p0.p0.i64")
+                    .unwrap_or_else(|| {
+                        self.module
+                            .add_function("llvm.memcpy.p0.p0.i64", memcpy_ty, None)
+                    });
+                self.builder
+                    .build_call(
+                        memcpy_fn,
+                        &[
+                            dst.into(),
+                            src.into(),
+                            byte_count.into(),
+                            self.ctx.bool_type().const_zero().into(), // not volatile
+                        ],
+                        "",
+                    )
+                    .unwrap();
+                None
+            }
 
             // ---- Address-of (raw pointer to any lvalue) ----
             "raw" | "raw_mut" => {

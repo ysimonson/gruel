@@ -181,3 +181,120 @@ fn main() -> i32 {
 }
 """
 exit_code = 57  # 12345 % 256 = 57
+
+# =============================================================================
+# @null_ptr creates a typed null pointer
+# =============================================================================
+
+[[case]]
+name = "null_ptr_const"
+spec = ["9.2:7"]
+source = """
+fn main() -> i32 {
+    let p: ptr const i32 = checked { @null_ptr() };
+    if checked { @is_null(p) } { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "null_ptr_mut"
+spec = ["9.2:7"]
+source = """
+fn main() -> i32 {
+    let p: ptr mut i32 = checked { @null_ptr() };
+    if checked { @is_null(p) } { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# =============================================================================
+# @is_null checks whether a pointer is null
+# =============================================================================
+
+[[case]]
+name = "is_null_null_pointer"
+spec = ["9.2:9"]
+source = """
+fn main() -> i32 {
+    let p: ptr const i32 = checked { @null_ptr() };
+    if checked { @is_null(p) } { 42 } else { 0 }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "is_null_non_null_pointer"
+spec = ["9.2:9"]
+source = """
+fn main() -> i32 {
+    let x: i32 = 99;
+    let p: ptr const i32 = checked { @raw(x) };
+    if checked { @is_null(p) } { 0 } else { 42 }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "is_null_mut_pointer"
+spec = ["9.2:9"]
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 5;
+    let p: ptr mut i32 = checked { @raw_mut(x) };
+    if checked { @is_null(p) } { 0 } else { 1 }
+}
+"""
+exit_code = 1
+
+# =============================================================================
+# @ptr_copy copies elements between pointers
+# =============================================================================
+
+[[case]]
+name = "ptr_copy_basic"
+spec = ["9.2:11", "9.2:12"]
+source = """
+fn main() -> i32 {
+    let src: [i32; 3] = [10, 20, 30];
+    let mut dst: [i32; 3] = [0, 0, 0];
+    let count: u64 = 3;
+    let s: ptr const i32 = checked { @raw(src[0]) };
+    let d: ptr mut i32 = checked { @raw_mut(dst[0]) };
+    checked { @ptr_copy(d, s, count) };
+    dst[0] + dst[1] + dst[2]
+}
+"""
+exit_code = 60
+
+[[case]]
+name = "ptr_copy_partial"
+spec = ["9.2:11"]
+source = """
+fn main() -> i32 {
+    let src: [i32; 4] = [5, 10, 15, 20];
+    let mut dst: [i32; 4] = [0, 0, 0, 0];
+    let count: u64 = 2;
+    let s: ptr const i32 = checked { @raw(src[0]) };
+    let d: ptr mut i32 = checked { @raw_mut(dst[0]) };
+    checked { @ptr_copy(d, s, count) };
+    dst[0] + dst[1] + dst[2]
+}
+"""
+exit_code = 15
+
+[[case]]
+name = "ptr_copy_zero_count"
+spec = ["9.2:11"]
+source = """
+fn main() -> i32 {
+    let src: [i32; 2] = [10, 20];
+    let mut dst: [i32; 2] = [1, 2];
+    let count: u64 = 0;
+    let s: ptr const i32 = checked { @raw(src[0]) };
+    let d: ptr mut i32 = checked { @raw_mut(dst[0]) };
+    checked { @ptr_copy(d, s, count) };
+    dst[0] + dst[1]
+}
+"""
+exit_code = 3

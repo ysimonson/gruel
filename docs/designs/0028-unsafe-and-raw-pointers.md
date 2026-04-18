@@ -365,7 +365,7 @@ Outside `checked` blocks, all of Gruel's safety guarantees still hold.
 
 ## Open Questions
 
-1. **Orphaned intrinsics:** `@null_ptr`, `@is_null`, and `@ptr_copy` have type-inference constraints in `gruel-air/src/inference/generate.rs` but are not dispatched in sema and produce `E0700: unknown intrinsic`. They are not mentioned in this ADR or in the spec. Should they be implemented as part of Phase 2/3, or removed from the inference code?
+None — all resolved.
 
 ## Future Work
 
