@@ -209,7 +209,7 @@ Epic: gruel-wjha
 
 - [x] **Phase 1: Fix function parameter drops** — Add params to CFG `scope_stack`, call `forget_local_slot` for non-copy args at call sites. Add spec tests. No preview gate (this is a bug fix).
 
-- [ ] **Phase 2: Add `PreviewFeature::Destructuring`** — Register the preview feature in `gruel-error`. Add spec test placeholders with `preview = "destructuring"`. Behind this gate, emit an error when a non-copy field is used as a move (the partial move path in `analyze_ops.rs`). Error message should suggest destructuring.
+- [x] **Phase 2: Add `PreviewFeature::Destructuring`** — Register the preview feature in `gruel-error`. Add spec test placeholders with `preview = "destructuring"`. Behind this gate, emit an error when a non-copy field is used as a move (the partial move path in `analyze_ops.rs`). Error message should suggest destructuring.
 
 - [ ] **Phase 3: Parse struct destructuring** — Extend `LetPattern` with `Struct` variant. Parse `let TypeName { fields } = expr;`. Validate all fields present, no duplicates. Gate behind `PreviewFeature::Destructuring`.
 

@@ -312,9 +312,9 @@ Function parameters of Copy types receive a copy of the argument. Function param
 
 ## Partial Moves (Field-Level Moves)
 
-{{ rule(id="3.8:22", cat="normative") }}
+{{ rule(id="3.8:22", cat="legality-rule") }}
 
-When a non-Copy field of a struct is accessed (moved out of), only that specific field is moved, not the entire struct. Other fields remain accessible.
+It is a compile-time error to move a non-Copy field out of a struct. To access non-Copy fields individually, the struct must be destructured using a `let` destructuring binding, which consumes the entire struct and binds all fields.
 
 {{ rule(id="3.8:23", cat="example") }}
 
@@ -322,48 +322,28 @@ When a non-Copy field of a struct is accessed (moved out of), only that specific
 struct Inner { x: i32 }
 struct S { a: Inner, b: Inner }
 
+fn consume(i: Inner) -> i32 { i.x }
+
 fn main() -> i32 {
     let s = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
-    let x = s.a;   // Only s.a is moved
-    let y = s.b;   // s.b is still valid
-    x.x + y.x      // 3
+    consume(s.a)   // ERROR: cannot move field `a` out of `S`
 }
 ```
 
-{{ rule(id="3.8:24", cat="legality-rule") }}
+{{ rule(id="3.8:24", cat="informative") }}
 
-It is a compile-time error to access a field that has already been moved.
-
-{{ rule(id="3.8:25", cat="example") }}
+This restriction eliminates partial moves — a value is either fully live or fully consumed. To access individual non-Copy fields, destructure the struct:
 
 ```gruel
 struct Inner { x: i32 }
 struct S { a: Inner, b: Inner }
 
-fn main() -> i32 {
-    let s = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
-    let x = s.a;   // s.a is moved
-    let z = s.a;   // ERROR: use of moved value 's.a'
-    0
-}
-```
-
-{{ rule(id="3.8:26", cat="legality-rule") }}
-
-A struct with any moved fields cannot be used as a whole value. It is a compile-time error to move or pass the struct after any of its non-Copy fields have been moved.
-
-{{ rule(id="3.8:27", cat="example") }}
-
-```gruel
-struct Inner { x: i32 }
-struct S { a: Inner, b: Inner }
-
-fn consume(s: S) -> i32 { s.a.x + s.b.x }
+fn consume(i: Inner) -> i32 { i.x }
 
 fn main() -> i32 {
-    let s = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
-    let x = s.a;   // s.a is moved (partial move)
-    consume(s)     // ERROR: use of moved value 's' (partially moved)
+    let S { a, b } = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
+    consume(a)   // OK: a is now an independent value
+    // b is dropped at scope exit
 }
 ```
 

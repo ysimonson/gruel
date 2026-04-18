@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
-    WarningKind,
+    PreviewFeature, WarningKind,
 };
 use gruel_rir::{InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern};
 use lasso::Spur;
@@ -2041,6 +2041,28 @@ impl<'a> Sema<'a> {
                     .mark_path_moved(&[], span);
             } else if !self.is_type_copy(field_type) {
                 // For non-linear types, check if accessing a non-Copy field
+                if self
+                    .preview_features
+                    .contains(&PreviewFeature::Destructuring)
+                {
+                    // ADR-0036: Ban partial field moves. Must destructure instead.
+                    let type_name = parent_type
+                        .as_struct()
+                        .map(|id| self.type_pool.struct_def(id).name.clone())
+                        .unwrap_or_else(|| parent_type.name().to_string());
+                    let field_name = self.interner.resolve(&field).to_string();
+                    return Err(CompileError::new(
+                        ErrorKind::CannotMoveField {
+                            type_name: type_name.clone(),
+                            field: field_name.clone(),
+                        },
+                        span,
+                    )
+                    .with_help(format!(
+                        "use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`"
+                    )));
+                }
+
                 let field_path = trace.field_path();
 
                 // Check if this field path is already moved (partial moves)

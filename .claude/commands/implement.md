@@ -150,3 +150,4 @@ When all phases are complete:
 - Split work that's too large into phases
 - Use Cargo for builds (see `CLAUDE.md` for common commands)
 - Use `git` for version control
+- **Only the ADR being implemented should change.** Old ADRs may only have their `superseded-by` field and open questions updated. If you find a discrepancy in an old ADR, resolve it in the new ADR rather than rewriting the old one.

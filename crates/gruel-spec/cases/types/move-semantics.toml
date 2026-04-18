@@ -683,26 +683,11 @@ error_contains = "use of moved value"
 # =============================================================================
 
 [[case]]
-name = "partial_move_different_fields"
+name = "cannot_move_non_copy_field"
 spec = ["3.8:22", "3.8:23"]
-description = "Moving one field leaves other fields accessible"
-source = """
-struct Inner { x: i32 }
-struct S { a: Inner, b: Inner }
-
-fn main() -> i32 {
-    let s = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
-    let x = s.a;   // Only s.a is moved
-    let y = s.b;   // s.b is still valid
-    x.x + y.x
-}
-"""
-exit_code = 3
-
-[[case]]
-name = "partial_move_use_after_field_move"
-spec = ["3.8:24", "3.8:25"]
-description = "Accessing a field that has been moved is an error"
+preview = "destructuring"
+preview_should_pass = true
+description = "Moving a non-copy field out of a struct is a compile error"
 source = """
 struct Inner { x: i32 }
 struct S { a: Inner, b: Inner }
@@ -710,31 +695,51 @@ struct S { a: Inner, b: Inner }
 fn main() -> i32 {
     let s = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
     let x = s.a;
-    let z = s.a;
     0
 }
 """
 compile_fail = true
-error_contains = "use of moved value"
+error_contains = "cannot move field"
 
 [[case]]
-name = "partial_move_use_whole_struct"
-spec = ["3.8:26", "3.8:27"]
-description = "Using whole struct after partial move is an error"
+name = "cannot_move_non_copy_field_in_call"
+spec = ["3.8:22"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Passing a non-copy field as an argument is a move error"
 source = """
 struct Inner { x: i32 }
 struct S { a: Inner, b: Inner }
 
-fn consume(s: S) -> i32 { s.a.x + s.b.x }
+fn consume(i: Inner) -> i32 { i.x }
 
 fn main() -> i32 {
     let s = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
-    let x = s.a;
-    consume(s)
+    consume(s.a)
 }
 """
 compile_fail = true
-error_contains = "use of moved value"
+error_contains = "cannot move field"
+
+[[case]]
+name = "cannot_move_nested_non_copy_field"
+spec = ["3.8:22"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Moving a nested non-copy field is also banned"
+source = """
+struct Inner { x: i32 }
+struct Middle { a: Inner, b: Inner }
+struct Outer { m: Middle }
+
+fn main() -> i32 {
+    let o = Outer { m: Middle { a: Inner { x: 1 }, b: Inner { x: 2 } } };
+    let x = o.m.a;
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot move field"
 
 [[case]]
 name = "copy_fields_no_partial_move"
@@ -754,40 +759,27 @@ fn main() -> i32 {
 exit_code = 4
 
 [[case]]
-name = "nested_partial_move"
-spec = ["3.8:22"]
-description = "Partial moves work with nested structs"
+name = "copy_field_access_with_non_copy_sibling"
+spec = ["3.8:28"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Copy fields can be read even when sibling fields are non-copy"
 source = """
 struct Inner { x: i32 }
-struct Middle { a: Inner, b: Inner }
-struct Outer { m: Middle }
+
+drop fn Inner(self) {
+    @dbg(self.x);
+}
+
+struct Tagged { tag: i32, data: Inner }
 
 fn main() -> i32 {
-    let o = Outer { m: Middle { a: Inner { x: 1 }, b: Inner { x: 2 } } };
-    let x = o.m.a;   // Move o.m.a
-    let y = o.m.b;   // o.m.b is still valid
-    x.x + y.x
+    let t = Tagged { tag: 42, data: Inner { x: 99 } };
+    t.tag
 }
 """
-exit_code = 3
-
-[[case]]
-name = "partial_move_assign_after"
-spec = ["3.8:26"]
-description = "Assigning to whole struct after partial move is an error"
-source = """
-struct Inner { x: i32 }
-struct S { a: Inner, b: Inner }
-
-fn main() -> i32 {
-    let mut s = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
-    let x = s.a;
-    let s2 = s;
-    0
-}
-"""
-compile_fail = true
-error_contains = "use of moved value"
+exit_code = 42
+expected_stdout = "99\n"
 
 # =============================================================================
 # Linear Types

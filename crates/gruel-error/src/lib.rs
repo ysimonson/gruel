@@ -816,6 +816,9 @@ pub enum ErrorKind {
     /// Use of a value after it has been moved.
     #[error("use of moved value '{0}'")]
     UseAfterMove(String),
+    /// Attempt to move a non-copy field out of a struct (banned by ADR-0036).
+    #[error("cannot move field `{field}` out of `{type_name}`")]
+    CannotMoveField { type_name: String, field: String },
     #[error("type mismatch: expected {expected}, found {found}")]
     TypeMismatch { expected: String, found: String },
     #[error("{}", format_argument_count(*.expected, *.found))]
@@ -1085,6 +1088,7 @@ impl ErrorKind {
             ErrorKind::AssignToImmutable(_) => ErrorCode::ASSIGN_TO_IMMUTABLE,
             ErrorKind::UnknownType(_) => ErrorCode::UNKNOWN_TYPE,
             ErrorKind::UseAfterMove(_) => ErrorCode::USE_AFTER_MOVE,
+            ErrorKind::CannotMoveField { .. } => ErrorCode::USE_AFTER_MOVE,
             ErrorKind::TypeMismatch { .. } => ErrorCode::TYPE_MISMATCH,
             ErrorKind::WrongArgumentCount { .. } => ErrorCode::WRONG_ARGUMENT_COUNT,
 
