@@ -8,7 +8,7 @@ use lasso::{Spur, ThreadedRodeo};
 /// Known type intrinsics that take a type argument rather than an expression.
 /// These intrinsics operate on types at compile time (e.g., @size_of(i32)).
 const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of"];
-use gruel_parser::ast::{ConstDecl, DropFn};
+use gruel_parser::ast::{ConstDecl, DestructureBinding, DropFn};
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
     Function, IntrinsicArg, Item, LetPattern, Method, ParamMode, Pattern, Statement, StructDecl,
@@ -16,8 +16,8 @@ use gruel_parser::{
 };
 
 use crate::inst::{
-    FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDirective, RirParam,
-    RirParamMode, RirPattern,
+    FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDestructureField,
+    RirDirective, RirParam, RirParamMode, RirPattern,
 };
 
 /// Generates RIR from an AST.
@@ -836,27 +836,65 @@ impl<'a> AstGen<'a> {
 
     fn gen_statement(&mut self, stmt: &Statement) -> InstRef {
         match stmt {
-            Statement::Let(let_stmt) => {
-                let directives = self.convert_directives(&let_stmt.directives);
-                let (directives_start, directives_len) = self.rir.add_directives(&directives);
-                let name = match &let_stmt.pattern {
-                    LetPattern::Ident(ident) => Some(ident.name), // Already a Spur
-                    LetPattern::Wildcard(_) => None,
-                };
-                let ty = let_stmt.ty.as_ref().map(|t| self.intern_type(t));
-                let init = self.gen_expr(&let_stmt.init);
-                self.rir.add_inst(Inst {
-                    data: InstData::Alloc {
-                        directives_start,
-                        directives_len,
-                        name,
-                        is_mut: let_stmt.is_mut,
-                        ty,
-                        init,
-                    },
-                    span: let_stmt.span,
-                })
-            }
+            Statement::Let(let_stmt) => match &let_stmt.pattern {
+                LetPattern::Struct {
+                    type_name, fields, ..
+                } => {
+                    let rir_fields: Vec<RirDestructureField> = fields
+                        .iter()
+                        .map(|f| {
+                            let binding_name = match &f.binding {
+                                DestructureBinding::Shorthand => None,
+                                DestructureBinding::Renamed(ident) => Some(ident.name),
+                                DestructureBinding::Wildcard(_) => None,
+                            };
+                            let is_wildcard =
+                                matches!(&f.binding, DestructureBinding::Wildcard(_));
+                            RirDestructureField {
+                                field_name: f.field_name.name,
+                                binding_name,
+                                is_wildcard,
+                                is_mut: f.is_mut,
+                            }
+                        })
+                        .collect();
+                    let (fields_start, fields_len) =
+                        self.rir.add_destructure_fields(&rir_fields);
+                    let init = self.gen_expr(&let_stmt.init);
+                    self.rir.add_inst(Inst {
+                        data: InstData::StructDestructure {
+                            type_name: type_name.name,
+                            fields_start,
+                            fields_len,
+                            init,
+                        },
+                        span: let_stmt.span,
+                    })
+                }
+                pattern => {
+                    let directives = self.convert_directives(&let_stmt.directives);
+                    let (directives_start, directives_len) =
+                        self.rir.add_directives(&directives);
+                    let name = match pattern {
+                        LetPattern::Ident(ident) => Some(ident.name),
+                        LetPattern::Wildcard(_) => None,
+                        LetPattern::Struct { .. } => unreachable!(),
+                    };
+                    let ty = let_stmt.ty.as_ref().map(|t| self.intern_type(t));
+                    let init = self.gen_expr(&let_stmt.init);
+                    self.rir.add_inst(Inst {
+                        data: InstData::Alloc {
+                            directives_start,
+                            directives_len,
+                            name,
+                            is_mut: let_stmt.is_mut,
+                            ty,
+                            init,
+                        },
+                        span: let_stmt.span,
+                    })
+                }
+            },
             Statement::Assign(assign) => {
                 let value = self.gen_expr(&assign.value);
                 match &assign.target {

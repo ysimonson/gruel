@@ -778,6 +778,34 @@ pub enum LetPattern {
     Ident(Ident),
     /// Wildcard pattern `_` - discards the value without creating a binding
     Wildcard(Span),
+    /// Struct destructuring (e.g., `Point { x, y }`)
+    Struct {
+        type_name: Ident,
+        fields: Vec<DestructureField>,
+        span: Span,
+    },
+}
+
+/// A field binding in a struct destructure pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DestructureField {
+    /// The struct field being bound
+    pub field_name: Ident,
+    /// How the field is bound
+    pub binding: DestructureBinding,
+    /// Whether the binding is mutable
+    pub is_mut: bool,
+}
+
+/// How a field is bound in a struct destructure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DestructureBinding {
+    /// `field` — bind to same name
+    Shorthand,
+    /// `field: new_name`
+    Renamed(Ident),
+    /// `field: _`
+    Wildcard(Span),
 }
 
 impl LetPattern {
@@ -786,6 +814,7 @@ impl LetPattern {
         match self {
             LetPattern::Ident(ident) => ident.span,
             LetPattern::Wildcard(span) => *span,
+            LetPattern::Struct { span, .. } => *span,
         }
     }
 }
@@ -1301,6 +1330,26 @@ fn fmt_stmt(f: &mut fmt::Formatter<'_>, stmt: &Statement, level: usize) -> fmt::
             match &let_stmt.pattern {
                 LetPattern::Ident(ident) => write!(f, " sym:{}", ident.name.into_usize())?,
                 LetPattern::Wildcard(_) => write!(f, " _")?,
+                LetPattern::Struct { type_name, fields, .. } => {
+                    write!(f, " sym:{} {{", type_name.name.into_usize())?;
+                    for (i, field) in fields.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ",")?;
+                        }
+                        if field.is_mut {
+                            write!(f, " mut")?;
+                        }
+                        write!(f, " sym:{}", field.field_name.name.into_usize())?;
+                        match &field.binding {
+                            DestructureBinding::Shorthand => {}
+                            DestructureBinding::Renamed(name) => {
+                                write!(f, ": sym:{}", name.name.into_usize())?;
+                            }
+                            DestructureBinding::Wildcard(_) => write!(f, ": _")?,
+                        }
+                    }
+                    write!(f, " }}")?;
+                }
             }
             if let Some(ref ty) = let_stmt.ty {
                 write!(f, ": {}", ty)?;

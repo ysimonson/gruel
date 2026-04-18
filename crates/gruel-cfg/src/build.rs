@@ -644,6 +644,10 @@ impl<'a> CfgBuilder<'a> {
             }
 
             AirInstData::Alloc { slot, init } => {
+                // If the init is a non-copy value from a local/param,
+                // remove it from scope tracking (ownership transfers to the new slot).
+                self.forget_consumed_value(*init);
+
                 let init_result = self.lower_inst(*init);
                 // If init produces a value, use it; otherwise use a dummy Unit value
                 let init_val = init_result

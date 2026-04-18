@@ -6,12 +6,13 @@
 use crate::ast::{
     AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget, AssocFnCallExpr, Ast,
     BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr, CheckedBlockExpr,
-    ComptimeBlockExpr, ConstDecl, ContinueExpr, Directive, DirectiveArg, Directives, DropFn,
-    EnumDecl, EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, Function, Ident, IfExpr,
-    IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr,
-    MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr,
-    PathPattern, Pattern, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit, StructDecl,
-    StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
+    ComptimeBlockExpr, ConstDecl, ContinueExpr, DestructureBinding, DestructureField, Directive,
+    DirectiveArg, Directives, DropFn, EnumDecl, EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit,
+    Function, Ident, IfExpr, IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern,
+    LetStatement, LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param,
+    ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, ReturnExpr, SelfExpr, SelfParam,
+    Statement, StringLit, StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp,
+    UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -1586,15 +1587,52 @@ enum ExprFollower {
     End,
 }
 
-/// Parser for a let binding pattern: either an identifier or _ (wildcard/discard)
+/// Parser for a let binding pattern: identifier, wildcard, or struct destructure.
 fn let_pattern_parser<'src, I>() -> GruelParser<'src, I, LetPattern>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
     let wildcard =
         just(TokenKind::Underscore).map_with(|_, e| LetPattern::Wildcard(span_from_extra(e)));
+
+    // A single destructure field: [mut] field_name [: binding]
+    let destructure_field = just(TokenKind::Mut)
+        .or_not()
+        .then(ident_parser())
+        .then(
+            just(TokenKind::Colon)
+                .ignore_then(choice((
+                    just(TokenKind::Underscore)
+                        .map_with(|_, e| DestructureBinding::Wildcard(span_from_extra(e))),
+                    ident_parser().map(DestructureBinding::Renamed),
+                )))
+                .or_not(),
+        )
+        .map(|((is_mut, field_name), binding)| DestructureField {
+            field_name,
+            binding: binding.unwrap_or(DestructureBinding::Shorthand),
+            is_mut: is_mut.is_some(),
+        });
+
+    // Struct destructure: TypeName { field1, field2, ... }
+    let struct_destructure = ident_parser()
+        .then(
+            destructure_field
+                .separated_by(just(TokenKind::Comma))
+                .allow_trailing()
+                .collect::<Vec<_>>()
+                .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
+        )
+        .map_with(|(type_name, fields), e| LetPattern::Struct {
+            type_name,
+            fields,
+            span: span_from_extra(e),
+        });
+
     let ident = ident_parser().map(LetPattern::Ident);
-    ident.or(wildcard).boxed()
+
+    // Try struct destructure first (ident followed by {), then plain ident, then wildcard
+    struct_destructure.or(ident).or(wildcard).boxed()
 }
 
 /// Parser for let statements: [@directive]* let [mut] pattern [: type] = expr;
@@ -2648,6 +2686,7 @@ mod tests {
                                     assert_eq!(result.get(ident.name), "x")
                                 }
                                 LetPattern::Wildcard(_) => panic!("expected Ident, got Wildcard"),
+                                LetPattern::Struct { .. } => panic!("expected Ident, got Struct"),
                             }
                         }
                         _ => panic!("expected Let"),

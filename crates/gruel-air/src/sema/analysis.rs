@@ -1717,6 +1717,7 @@ impl<'a> Sema<'a> {
 
             // Variable operations
             InstData::Alloc { .. }
+            | InstData::StructDestructure { .. }
             | InstData::VarRef { .. }
             | InstData::ParamRef { .. }
             | InstData::Assign { .. } => self.analyze_variable_ops(air, inst_ref, ctx),

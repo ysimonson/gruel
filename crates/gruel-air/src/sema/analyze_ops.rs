@@ -1257,6 +1257,10 @@ impl<'a> Sema<'a> {
         match &inst.data {
             InstData::Alloc { .. } => self.analyze_alloc(air, inst_ref, ctx),
 
+            InstData::StructDestructure { .. } => {
+                self.analyze_struct_destructure(air, inst_ref, ctx)
+            }
+
             InstData::VarRef { name } => self.analyze_var_ref(air, *name, inst.span, ctx),
 
             InstData::ParamRef { index: _, name } => {
@@ -1394,6 +1398,232 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(block_ref, Type::UNIT))
+    }
+
+    /// Analyze a struct destructuring pattern.
+    fn analyze_struct_destructure(
+        &mut self,
+        air: &mut Air,
+        inst_ref: InstRef,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        let inst = self.rir.get(inst_ref);
+        let span = inst.span;
+
+        // Struct destructuring requires the preview feature
+        self.require_preview(
+            PreviewFeature::Destructuring,
+            "struct destructuring",
+            span,
+        )?;
+
+        let (type_name, fields_start, fields_len, init) = match inst.data {
+            InstData::StructDestructure {
+                type_name,
+                fields_start,
+                fields_len,
+                init,
+            } => (type_name, fields_start, fields_len, init),
+            _ => unreachable!(),
+        };
+
+        // Analyze the initializer expression
+        let init_result = self.analyze_inst(air, init, ctx)?;
+        let init_type = init_result.ty;
+
+        // Resolve the struct type
+        let type_name_str = self.interner.resolve(&type_name).to_string();
+        let struct_id = init_type.as_struct().ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::TypeMismatch {
+                    expected: type_name_str.clone(),
+                    found: init_type.name().to_string(),
+                },
+                span,
+            )
+        })?;
+
+        let struct_def = self.type_pool.struct_def(struct_id);
+
+        // Validate the type name matches
+        if struct_def.name != type_name_str {
+            return Err(CompileError::new(
+                ErrorKind::TypeMismatch {
+                    expected: type_name_str,
+                    found: struct_def.name.clone(),
+                },
+                span,
+            ));
+        }
+
+        // Get the destructure fields from the RIR
+        let rir_fields = self.rir.get_destructure_fields(fields_start, fields_len);
+
+        // Validate: no duplicate fields
+        let mut seen_fields = std::collections::HashSet::new();
+        for field in &rir_fields {
+            let field_name = self.interner.resolve(&field.field_name).to_string();
+            if !seen_fields.insert(field_name.clone()) {
+                return Err(CompileError::new(
+                    ErrorKind::DuplicateField {
+                        struct_name: type_name_str.clone(),
+                        field_name,
+                    },
+                    span,
+                ));
+            }
+        }
+
+        // Validate: all struct fields are mentioned
+        let struct_field_names: Vec<String> = struct_def
+            .fields
+            .iter()
+            .map(|f| f.name.clone())
+            .collect();
+        for struct_field_name in &struct_field_names {
+            if !seen_fields.contains(struct_field_name) {
+                return Err(CompileError::new(
+                    ErrorKind::MissingFieldInDestructure {
+                        struct_name: type_name_str.clone(),
+                        field: struct_field_name.clone(),
+                    },
+                    span,
+                ));
+            }
+        }
+
+        // Validate: no unknown fields
+        for field in &rir_fields {
+            let field_name = self.interner.resolve(&field.field_name).to_string();
+            if struct_def.find_field(&field_name).is_none() {
+                return Err(CompileError::new(
+                    ErrorKind::UnknownField {
+                        struct_name: type_name_str.clone(),
+                        field_name,
+                    },
+                    span,
+                ));
+            }
+        }
+
+        // Emit AIR: store init into a temp, then extract each field into its own slot.
+        // The temp struct slot is NOT registered with StorageLive —
+        // field ownership is transferred to individual bindings.
+        //
+        // Structure: Block { stmts: [StorageLive...], value: inner_block }
+        // The outer block is a "StorageLive wrapper" so no scope is pushed.
+        // The inner block contains the allocs (no StorageLive, so its scope is empty).
+
+        let temp_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+        let temp_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: temp_slot,
+                init: init_result.air_ref,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        let mut storage_lives = Vec::new();
+        let mut allocs = vec![temp_alloc];
+
+        for field in &rir_fields {
+            let field_name = self.interner.resolve(&field.field_name).to_string();
+            let (field_index, struct_field) = struct_def.find_field(&field_name).unwrap();
+            let field_type = struct_field.ty;
+
+            // Load the struct from temp
+            let temp_load = air.add_inst(AirInst {
+                data: AirInstData::Load { slot: temp_slot },
+                ty: init_type,
+                span,
+            });
+
+            // Read the field
+            let field_get = air.add_inst(AirInst {
+                data: AirInstData::FieldGet {
+                    base: temp_load,
+                    struct_id,
+                    field_index: field_index as u32,
+                },
+                ty: field_type,
+                span,
+            });
+
+            // Allocate a slot for this field binding
+            let field_slot = ctx.next_slot;
+            ctx.next_slot += 1;
+
+            let storage_live = air.add_inst(AirInst {
+                data: AirInstData::StorageLive { slot: field_slot },
+                ty: field_type,
+                span,
+            });
+            storage_lives.push(storage_live);
+
+            let field_alloc = air.add_inst(AirInst {
+                data: AirInstData::Alloc {
+                    slot: field_slot,
+                    init: field_get,
+                },
+                ty: Type::UNIT,
+                span,
+            });
+            allocs.push(field_alloc);
+
+            // Register named bindings in the analysis context
+            if !field.is_wildcard {
+                let binding_name = field.binding_name.unwrap_or(field.field_name);
+                ctx.insert_local(
+                    binding_name,
+                    LocalVar {
+                        slot: field_slot,
+                        ty: field_type,
+                        is_mut: field.is_mut,
+                        span,
+                        allow_unused: false,
+                    },
+                );
+            }
+            // Wildcard fields: StorageLive is emitted at the outer scope, so the
+            // CFG builder will drop them at scope exit. They're not in ctx.locals,
+            // so the user can't reference them.
+        }
+
+        // Inner block: contains allocs (no StorageLive, so scope will be empty)
+        let unit = air.add_inst(AirInst {
+            data: AirInstData::UnitConst,
+            ty: Type::UNIT,
+            span,
+        });
+        let allocs_start = air.add_extra(
+            &allocs.iter().map(|r| r.as_u32()).collect::<Vec<_>>(),
+        );
+        let inner_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: allocs_start,
+                stmts_len: allocs.len() as u32,
+                value: unit,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Outer block: stmts are all StorageLive (wrapper block, no scope push)
+        let sl_start = air.add_extra(
+            &storage_lives.iter().map(|r| r.as_u32()).collect::<Vec<_>>(),
+        );
+        let outer_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: sl_start,
+                stmts_len: storage_lives.len() as u32,
+                value: inner_block,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+        Ok(AnalysisResult::new(outer_block, Type::UNIT))
     }
 
     /// Analyze a variable reference.

@@ -837,6 +837,9 @@ pub enum ErrorKind {
         struct_name: String,
         field_name: String,
     },
+    /// Missing field in struct destructuring pattern
+    #[error("missing field `{field}` in destructuring of `{struct_name}`")]
+    MissingFieldInDestructure { struct_name: String, field: String },
     /// Anonymous struct with no fields is not allowed
     #[error("empty struct is not allowed")]
     EmptyStruct,
@@ -1094,6 +1097,7 @@ impl ErrorKind {
 
             // Struct/enum errors (E0400-E0499)
             ErrorKind::MissingFields(_) => ErrorCode::MISSING_FIELDS,
+            ErrorKind::MissingFieldInDestructure { .. } => ErrorCode::MISSING_FIELDS,
             ErrorKind::UnknownField { .. } => ErrorCode::UNKNOWN_FIELD,
             ErrorKind::DuplicateField { .. } => ErrorCode::DUPLICATE_FIELD,
             ErrorKind::EmptyStruct => ErrorCode::EMPTY_STRUCT,

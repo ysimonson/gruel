@@ -91,3 +91,53 @@ fn main() -> i32 {
     x  // 15
 }
 ```
+
+## Struct Destructuring
+
+{{ rule(id="5.1:14", cat="normative") }}
+
+A let statement may destructure a struct value, binding each field to a new variable. The struct type name must be specified, and all fields must be listed.
+
+{{ rule(id="5.1:15", cat="syntax") }}
+
+```ebnf
+let_destructure = "let" type_name "{" field_bindings "}" "=" expression ";" ;
+field_bindings  = field_binding { "," field_binding } [ "," ] ;
+field_binding   = [ "mut" ] IDENT [ ":" ( IDENT | "_" ) ] ;
+```
+
+{{ rule(id="5.1:16", cat="normative") }}
+
+The expression must evaluate to the named struct type. The struct value is consumed by the destructuring — it is no longer accessible after destructuring.
+
+{{ rule(id="5.1:17", cat="legality-rule") }}
+
+All fields of the struct **MUST** be listed in the destructuring pattern. Omitting a field is a compile-time error.
+
+{{ rule(id="5.1:18", cat="normative") }}
+
+A field binding of the form `field` (shorthand) binds the field value to a new variable with the same name. A binding of the form `field: name` binds the field value to a variable named `name`. A binding of the form `field: _` discards the field value, dropping it immediately if the type has a destructor.
+
+{{ rule(id="5.1:19", cat="example") }}
+
+```gruel
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    let Point { x, y } = p;    // p is consumed
+    x + y                       // 42
+}
+```
+
+{{ rule(id="5.1:20", cat="example") }}
+
+```gruel
+struct Pair { a: i32, b: i32 }
+
+fn main() -> i32 {
+    let p = Pair { a: 1, b: 2 };
+    let Pair { a: first, b: _ } = p;   // rename a to first, discard b
+    first                                // 1
+}
+```

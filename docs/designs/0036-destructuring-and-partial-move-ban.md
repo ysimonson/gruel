@@ -211,9 +211,9 @@ Epic: gruel-wjha
 
 - [x] **Phase 2: Add `PreviewFeature::Destructuring`** — Register the preview feature in `gruel-error`. Add spec test placeholders with `preview = "destructuring"`. Behind this gate, emit an error when a non-copy field is used as a move (the partial move path in `analyze_ops.rs`). Error message should suggest destructuring.
 
-- [ ] **Phase 3: Parse struct destructuring** — Extend `LetPattern` with `Struct` variant. Parse `let TypeName { fields } = expr;`. Validate all fields present, no duplicates. Gate behind `PreviewFeature::Destructuring`.
+- [x] **Phase 3: Parse struct destructuring** — Extend `LetPattern` with `Struct` variant. Parse `let TypeName { fields } = expr;`. Validate all fields present, no duplicates. Gate behind `PreviewFeature::Destructuring`.
 
-- [ ] **Phase 4: Lower struct destructuring** — RIR and AIR lowering: decompose into field reads + local bindings. Handle `_` fields (immediate drop). Handle rename bindings. Remove struct temporary from scope tracking.
+- [x] **Phase 4: Lower struct destructuring** — RIR and AIR lowering: decompose into field reads + local bindings. Handle `_` fields (immediate drop). Handle rename bindings. Remove struct temporary from scope tracking.
 
 - [ ] **Phase 5: Spec, tests, stabilization** — Write spec paragraphs for destructuring syntax and semantics. Full test coverage for all cases (happy path, errors, copy types, linear types, nested structs, wildcard drops). Run traceability. When stable, remove preview gate.
 

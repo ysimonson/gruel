@@ -397,3 +397,160 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# =============================================================================
+# Struct Destructuring
+# =============================================================================
+
+[[case]]
+name = "destructure_basic"
+spec = ["5.1:14", "5.1:16", "5.1:19"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Basic struct destructuring binds fields"
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    let Point { x, y } = p;
+    x + y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "destructure_rename"
+spec = ["5.1:14", "5.1:18", "5.1:20"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Struct destructuring with renamed bindings"
+source = """
+struct Pair { a: i32, b: i32 }
+
+fn main() -> i32 {
+    let p = Pair { a: 10, b: 32 };
+    let Pair { a: first, b: second } = p;
+    first + second
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "destructure_wildcard"
+spec = ["5.1:14", "5.1:18"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Struct destructuring with wildcard drops the field"
+source = """
+struct Inner { value: i32 }
+
+drop fn Inner(self) {
+    @dbg(self.value);
+}
+
+struct Pair { a: Inner, b: Inner }
+
+fn consume(i: Inner) -> i32 { i.value }
+
+fn main() -> i32 {
+    let p = Pair { a: Inner { value: 10 }, b: Inner { value: 32 } };
+    let Pair { a, b: _ } = p;
+    consume(a)
+}
+"""
+exit_code = 10
+expected_stdout = "10\n32\n"
+
+[[case]]
+name = "destructure_missing_field"
+spec = ["5.1:17"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Omitting a field in destructuring is an error"
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    let Point { x } = p;
+    x
+}
+"""
+compile_fail = true
+error_contains = "missing field"
+
+[[case]]
+name = "destructure_consumes_struct"
+spec = ["5.1:16"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Destructured struct cannot be used afterwards"
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    let Point { x, y } = p;
+    p.x
+}
+"""
+compile_fail = true
+error_contains = "moved value"
+
+[[case]]
+name = "destructure_no_double_drop"
+spec = ["5.1:14", "5.1:16"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Destructured struct fields are dropped exactly once"
+source = """
+struct Inner { value: i32 }
+
+drop fn Inner(self) {
+    @dbg(self.value);
+}
+
+struct Pair { a: Inner, b: Inner }
+
+fn main() -> i32 {
+    let p = Pair { a: Inner { value: 1 }, b: Inner { value: 2 } };
+    let Pair { a, b } = p;
+    a.value + b.value
+}
+"""
+exit_code = 3
+expected_stdout = "2\n1\n"
+
+[[case]]
+name = "destructure_requires_preview"
+spec = ["5.1:15"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Struct destructuring syntax parses with preview"
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let Point { x, y } = Point { x: 1, y: 2 };
+    x + y
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "destructure_mut_binding"
+spec = ["5.1:14", "5.1:18"]
+preview = "destructuring"
+preview_should_pass = true
+description = "Individual fields in destructuring can be mutable"
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let Point { mut x, y } = Point { x: 10, y: 32 };
+    x = x + 1;
+    x + y
+}
+"""
+exit_code = 43

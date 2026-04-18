@@ -168,6 +168,23 @@ const PATTERN_INT_SIZE: u32 = 6; // kind, span_start, span_len, value_lo, value_
 const PATTERN_BOOL_SIZE: u32 = 5; // kind, span_start, span_len, value, body
 const PATTERN_PATH_SIZE: u32 = 7; // kind, span_start, span_len, module, type_name, variant, body
 
+/// Stored representation of a destructure field in the extra array.
+/// Layout: [field_name: u32, binding_name: u32 (0 = shorthand), is_wildcard: u32, is_mut: u32]
+const DESTRUCTURE_FIELD_SIZE: u32 = 4;
+
+/// A decoded destructure field from the extra array.
+#[derive(Debug, Clone)]
+pub struct RirDestructureField {
+    /// The struct field being bound
+    pub field_name: Spur,
+    /// Binding name (None for shorthand or wildcard)
+    pub binding_name: Option<Spur>,
+    /// Whether this is a wildcard binding (`field: _`)
+    pub is_wildcard: bool,
+    /// Whether the binding is mutable
+    pub is_mut: bool,
+}
+
 /// Stored representation of struct field initializer.
 /// Layout: [field_name: u32, value: u32] = 2 u32s per field
 const FIELD_INIT_SIZE: u32 = 2;
@@ -663,6 +680,43 @@ impl Rir {
         directives
     }
 
+    /// Store destructure fields and return (start, field_count).
+    pub fn add_destructure_fields(&mut self, fields: &[RirDestructureField]) -> (u32, u32) {
+        let start = self.extra.len() as u32;
+        for field in fields {
+            self.extra.push(field.field_name.into_usize() as u32);
+            self.extra
+                .push(field.binding_name.map_or(0, |s| s.into_usize() as u32));
+            self.extra.push(field.is_wildcard as u32);
+            self.extra.push(field.is_mut as u32);
+        }
+        (start, fields.len() as u32)
+    }
+
+    /// Retrieve destructure fields from the extra array.
+    pub fn get_destructure_fields(&self, start: u32, count: u32) -> Vec<RirDestructureField> {
+        let mut fields = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            let pos = (start + i * DESTRUCTURE_FIELD_SIZE) as usize;
+            let field_name = Spur::try_from_usize(self.extra[pos] as usize).unwrap();
+            let binding_raw = self.extra[pos + 1];
+            let binding_name = if binding_raw == 0 {
+                None
+            } else {
+                Some(Spur::try_from_usize(binding_raw as usize).unwrap())
+            };
+            let is_wildcard = self.extra[pos + 2] != 0;
+            let is_mut = self.extra[pos + 3] != 0;
+            fields.push(RirDestructureField {
+                field_name,
+                binding_name,
+                is_wildcard,
+                is_mut,
+            });
+        }
+        fields
+    }
+
     // ===== Function span methods =====
 
     /// Add a function span to track function boundaries.
@@ -949,6 +1003,17 @@ impl Rir {
                 name: *name,
                 is_mut: *is_mut,
                 ty: *ty,
+                init: renumber(*init),
+            },
+            InstData::StructDestructure {
+                type_name,
+                fields_start,
+                fields_len,
+                init,
+            } => InstData::StructDestructure {
+                type_name: *type_name,
+                fields_start: *fields_start + extra_offset,
+                fields_len: *fields_len,
                 init: renumber(*init),
             },
             InstData::Assign { name, value } => InstData::Assign {
@@ -1330,7 +1395,8 @@ impl Rir {
                 | InstData::DropFnDecl { .. }
                 | InstData::Comptime { .. }
                 | InstData::Checked { .. }
-                | InstData::TypeConst { .. } => {}
+                | InstData::TypeConst { .. }
+                | InstData::StructDestructure { .. } => {}
             }
         }
     }
@@ -1551,6 +1617,20 @@ pub enum InstData {
         /// Optional type annotation
         ty: Option<Spur>,
         /// Initial value instruction
+        init: InstRef,
+    },
+
+    /// Struct destructuring: `let TypeName { fields } = expr;`
+    /// Fields are stored in the extra array as groups of 4 u32s:
+    /// [field_name, binding_name (0 = shorthand), is_wildcard, is_mut]
+    StructDestructure {
+        /// Struct type name
+        type_name: Spur,
+        /// Index into extra data where field data starts
+        fields_start: u32,
+        /// Number of fields
+        fields_len: u32,
+        /// Initializer expression
         init: InstRef,
     },
 
@@ -2002,6 +2082,37 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         .map(|t| format!(": {}", self.interner.resolve(&t)))
                         .unwrap_or_default();
                     writeln!(out, "alloc {}{}{}= {}", mut_str, name_str, ty_str, init).unwrap();
+                }
+                InstData::StructDestructure {
+                    type_name,
+                    fields_start,
+                    fields_len,
+                    init,
+                } => {
+                    let type_str = self.interner.resolve(type_name);
+                    let fields = self.rir.get_destructure_fields(*fields_start, *fields_len);
+                    let field_strs: Vec<String> = fields
+                        .iter()
+                        .map(|f| {
+                            let name = self.interner.resolve(&f.field_name);
+                            if f.is_wildcard {
+                                format!("{}: _", name)
+                            } else if let Some(binding) = f.binding_name {
+                                let binding_str = self.interner.resolve(&binding);
+                                format!("{}: {}", name, binding_str)
+                            } else {
+                                name.to_string()
+                            }
+                        })
+                        .collect();
+                    writeln!(
+                        out,
+                        "destructure {} {{ {} }} = {}",
+                        type_str,
+                        field_strs.join(", "),
+                        init
+                    )
+                    .unwrap();
                 }
                 InstData::VarRef { name } => {
                     writeln!(out, "var_ref {}", self.interner.resolve(name)).unwrap();
