@@ -2946,6 +2946,14 @@ impl<'a> Sema<'a> {
             .get(&name)
             .ok_or_compile_error(ErrorKind::UndefinedFunction(fn_name_str.clone()), span)?;
 
+        // Check if calling an unchecked function requires a checked block
+        if fn_info.is_unchecked && ctx.checked_depth == 0 {
+            return Err(CompileError::new(
+                ErrorKind::UncheckedCallRequiresChecked(fn_name_str),
+                span,
+            ));
+        }
+
         // Track this function as referenced (for lazy analysis)
         ctx.referenced_functions.insert(name);
 

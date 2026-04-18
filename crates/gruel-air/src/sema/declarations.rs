@@ -412,7 +412,7 @@ impl<'a> Sema<'a> {
 
                 InstData::FnDecl {
                     is_pub,
-                    is_unchecked: _,
+                    is_unchecked,
                     name,
                     params_start,
                     params_len,
@@ -439,6 +439,7 @@ impl<'a> Sema<'a> {
                         *body,
                         inst.span,
                         *is_pub,
+                        *is_unchecked,
                     )?;
                 }
 
@@ -702,6 +703,7 @@ impl<'a> Sema<'a> {
     }
 
     /// Collect a function signature for forward reference.
+    #[allow(clippy::too_many_arguments)]
     fn collect_function_signature(
         &mut self,
         name: Spur,
@@ -710,6 +712,7 @@ impl<'a> Sema<'a> {
         body: InstRef,
         span: Span,
         is_pub: bool,
+        is_unchecked: bool,
     ) -> CompileResult<()> {
         let params = self.rir.get_params(params_start, params_len);
 
@@ -774,6 +777,7 @@ impl<'a> Sema<'a> {
                 span,
                 is_generic,
                 is_pub,
+                is_unchecked,
                 file_id: span.file_id,
             },
         );
@@ -805,6 +809,7 @@ impl<'a> Sema<'a> {
             let method_inst = self.rir.get(method_ref);
             if let InstData::FnDecl {
                 name: method_name,
+                is_unchecked,
                 params_start,
                 params_len,
                 return_type,
@@ -849,6 +854,7 @@ impl<'a> Sema<'a> {
                         return_type: ret_type,
                         body: *body,
                         span: method_inst.span,
+                        is_unchecked: *is_unchecked,
                     },
                 );
             }

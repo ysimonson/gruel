@@ -28,6 +28,8 @@ pub struct FunctionInfo {
     pub is_generic: bool,
     /// Whether this function is public (visible outside its directory)
     pub is_pub: bool,
+    /// Whether this function is marked `unchecked` (can only be called from checked blocks)
+    pub is_unchecked: bool,
     /// File ID this function was declared in (for visibility checking)
     pub file_id: FileId,
 }
@@ -53,6 +55,8 @@ pub struct MethodInfo {
     pub body: gruel_rir::InstRef,
     /// Span of the method declaration
     pub span: Span,
+    /// Whether this method is marked `unchecked` (can only be called from checked blocks)
+    pub is_unchecked: bool,
 }
 
 /// Method signature for anonymous struct structural equality comparison.

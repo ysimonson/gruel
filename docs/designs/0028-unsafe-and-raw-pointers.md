@@ -322,7 +322,7 @@ Outside `checked` blocks, all of Gruel's safety guarantees still hold.
 ## Implementation Phases
 
 - [x] **Phase 1: Parser support** (gruel-7qxm) - Add `checked` block syntax, `unchecked` function modifier, `ptr const`/`ptr mut` types
-- [ ] **Phase 2: Type system** (gruel-pb4z) - Pointer types in sema, checked block tracking — **incomplete:** `AnalysisContext` has no `checked_depth` field; `InstData::Checked` is a transparent no-op in sema. Pointer intrinsics are accepted outside `checked` blocks without error.
+- [x] **Phase 2: Type system** (gruel-pb4z) - Pointer types in sema, checked block tracking, enforcement of `checked` blocks for pointer intrinsics and unchecked function calls
 - [x] **Phase 3: Pointer intrinsics** (gruel-u9a4) - `@ptr_read`, `@ptr_write`, `@ptr_offset`, `@addr_of`, `@addr_of_mut`, `@ptr_to_int`, `@int_to_ptr`
 - [x] **Phase 4: Syscall intrinsic** (gruel-pwyw) - `@syscall` for direct OS calls
 - [x] **Phase 5: Codegen** (gruel-bk7s) - Generate correct code for pointer operations in both x86_64 and aarch64 backends

@@ -882,6 +882,23 @@ impl<'a> Sema<'a> {
         }
     }
 
+    /// Check that we are inside a `checked` block.
+    /// Returns an error if `checked_depth` is zero.
+    fn require_checked_for_intrinsic(
+        ctx: &AnalysisContext,
+        intrinsic_name: &str,
+        span: Span,
+    ) -> CompileResult<()> {
+        if ctx.checked_depth > 0 {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                ErrorKind::IntrinsicRequiresChecked(intrinsic_name.to_string()),
+                span,
+            ))
+        }
+    }
+
     fn analyze_single_function(
         &mut self,
         infer_ctx: &InferenceContext,
@@ -1124,6 +1141,7 @@ impl<'a> Sema<'a> {
             params: &param_vec,
             next_slot: 0,
             loop_depth: 0,
+            checked_depth: 0,
             used_locals: HashSet::new(),
             return_type,
             scope_stack: Vec::new(),
@@ -1909,9 +1927,13 @@ impl<'a> Sema<'a> {
                 Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE))
             }
 
-            // Checked block: evaluate the inner expression
-            // The actual checking of unchecked operations happens in Phase 2
-            InstData::Checked { expr } => self.analyze_inst(air, *expr, ctx),
+            // Checked block: enter checked context, evaluate inner expression, then exit
+            InstData::Checked { expr } => {
+                ctx.checked_depth += 1;
+                let result = self.analyze_inst(air, *expr, ctx);
+                ctx.checked_depth -= 1;
+                result
+            }
         }
     }
 
@@ -2263,6 +2285,17 @@ impl<'a> Sema<'a> {
             ));
         }
 
+        // Check if calling an unchecked method requires a checked block
+        if method_info.is_unchecked && ctx.checked_depth == 0 {
+            return Err(CompileError::new(
+                ErrorKind::UncheckedCallRequiresChecked(format!(
+                    "{}.{}",
+                    struct_name_str, method_name_str
+                )),
+                span,
+            ));
+        }
+
         // Check argument count (method_info.params excludes self)
         let method_param_types = self.param_arena.types(method_info.params);
         if args.len() != method_param_types.len() {
@@ -2490,6 +2523,17 @@ impl<'a> Sema<'a> {
             ));
         }
 
+        // Check if calling an unchecked associated function requires a checked block
+        if method_info.is_unchecked && ctx.checked_depth == 0 {
+            return Err(CompileError::new(
+                ErrorKind::UncheckedCallRequiresChecked(format!(
+                    "{}::{}",
+                    type_name_str, function_name_str
+                )),
+                span,
+            ));
+        }
+
         // Check argument count
         let method_param_types = self.param_arena.types(method_info.params);
         if args.len() != method_param_types.len() {
@@ -2576,26 +2620,37 @@ impl<'a> Sema<'a> {
         } else if name == known.random_u64 {
             self.analyze_random_u64_intrinsic(air, name, &args, span)
         } else if name == known.ptr_read {
+            Self::require_checked_for_intrinsic(ctx, "ptr_read", span)?;
             self.analyze_ptr_read_intrinsic(air, name, &args, span, ctx)
         } else if name == known.ptr_write {
+            Self::require_checked_for_intrinsic(ctx, "ptr_write", span)?;
             self.analyze_ptr_write_intrinsic(air, name, &args, span, ctx)
         } else if name == known.ptr_offset {
+            Self::require_checked_for_intrinsic(ctx, "ptr_offset", span)?;
             self.analyze_ptr_offset_intrinsic(air, name, &args, span, ctx)
         } else if name == known.ptr_to_int {
+            Self::require_checked_for_intrinsic(ctx, "ptr_to_int", span)?;
             self.analyze_ptr_to_int_intrinsic(air, name, &args, span, ctx)
         } else if name == known.int_to_ptr {
+            Self::require_checked_for_intrinsic(ctx, "int_to_ptr", span)?;
             self.analyze_int_to_ptr_intrinsic(air, name, inst_ref, &args, span, ctx)
         } else if name == known.null_ptr {
+            Self::require_checked_for_intrinsic(ctx, "null_ptr", span)?;
             self.analyze_null_ptr_intrinsic(air, name, inst_ref, &args, span, ctx)
         } else if name == known.is_null {
+            Self::require_checked_for_intrinsic(ctx, "is_null", span)?;
             self.analyze_is_null_intrinsic(air, name, &args, span, ctx)
         } else if name == known.ptr_copy {
+            Self::require_checked_for_intrinsic(ctx, "ptr_copy", span)?;
             self.analyze_ptr_copy_intrinsic(air, name, &args, span, ctx)
         } else if name == known.raw {
+            Self::require_checked_for_intrinsic(ctx, "raw", span)?;
             self.analyze_addr_of_intrinsic(air, &args, span, ctx, false)
         } else if name == known.raw_mut {
+            Self::require_checked_for_intrinsic(ctx, "raw_mut", span)?;
             self.analyze_addr_of_intrinsic(air, &args, span, ctx, true)
         } else if name == known.syscall {
+            Self::require_checked_for_intrinsic(ctx, "syscall", span)?;
             self.analyze_syscall_intrinsic(air, name, &args, span, ctx)
         } else if name == known.target_arch {
             self.analyze_target_arch_intrinsic(air, &args, span)
@@ -5635,6 +5690,7 @@ impl<'a> Sema<'a> {
             let method_inst = self.rir.get(method_ref);
             if let InstData::FnDecl {
                 name: method_name,
+                is_unchecked,
                 params_start,
                 params_len,
                 return_type,
@@ -5688,6 +5744,7 @@ impl<'a> Sema<'a> {
                         return_type: ret_type,
                         body: *body,
                         span: method_inst.span,
+                        is_unchecked: *is_unchecked,
                     },
                 );
             }

@@ -148,6 +148,8 @@ pub(crate) struct AnalysisContext<'a> {
     pub next_slot: u32,
     /// How many loops we're nested inside (for break/continue validation)
     pub loop_depth: u32,
+    /// How many `checked` blocks we're nested inside (for unchecked operation validation)
+    pub checked_depth: u32,
     /// Local variables that have been read (for unused variable detection)
     pub used_locals: HashSet<Spur>,
     /// Return type of the current function (for explicit return validation)

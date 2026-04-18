@@ -45,12 +45,53 @@ fn main() -> i32 { 0 }
 exit_code = 0
 
 # =============================================================================
+# Unchecked function call requires checked block (9.1:3)
+# =============================================================================
+
+[[case]]
+name = "unchecked_fn_call_in_checked"
+spec = ["9.1:3", "9.1:5"]
+source = """
+unchecked fn dangerous_op() -> i32 { 42 }
+fn main() -> i32 {
+    checked { dangerous_op() }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "unchecked_fn_call_outside_checked"
+spec = ["9.1:3"]
+source = """
+unchecked fn dangerous_op() -> i32 { 42 }
+fn main() -> i32 {
+    dangerous_op()
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+[[case]]
+name = "unchecked_fn_call_nested_checked"
+spec = ["9.1:3", "9.1:5"]
+source = """
+unchecked fn inner() -> i32 { 10 }
+unchecked fn outer() -> i32 {
+    checked { inner() }
+}
+fn main() -> i32 {
+    checked { outer() }
+}
+"""
+exit_code = 10
+
+# =============================================================================
 # Checked block expressions
 # =============================================================================
 
 [[case]]
 name = "checked_block_basic"
-spec = ["9.1:4", "9.1:5", "9.1:6"]
+spec = ["9.1:5", "9.1:6", "9.1:7"]
 source = """
 fn main() -> i32 {
     let x = checked { 42 };
@@ -61,7 +102,7 @@ exit_code = 42
 
 [[case]]
 name = "checked_block_nested"
-spec = ["9.1:4"]
+spec = ["9.1:5"]
 source = """
 fn main() -> i32 {
     checked {
@@ -75,7 +116,7 @@ exit_code = 42
 
 [[case]]
 name = "checked_block_with_statements"
-spec = ["9.1:4"]
+spec = ["9.1:5"]
 source = """
 fn main() -> i32 {
     let result = checked {
@@ -89,15 +130,55 @@ fn main() -> i32 {
 exit_code = 42
 
 # =============================================================================
-# Pointer type syntax - Phase 2 adds semantic analysis
+# Pointer intrinsics require checked block (9.1:8)
 # =============================================================================
 
-# These tests verify pointer types are recognized in the type system.
-# Phase 2 implemented pointer types (PtrConst, PtrMut).
+[[case]]
+name = "raw_outside_checked_block"
+spec = ["9.1:8"]
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    let p: ptr const i32 = @raw(x);
+    0
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+[[case]]
+name = "ptr_read_outside_checked_block"
+spec = ["9.1:8"]
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    let p: ptr const i32 = checked { @raw(x) };
+    @ptr_read(p)
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+[[case]]
+name = "syscall_outside_checked_block"
+spec = ["9.1:8"]
+source = """
+fn main() -> i32 {
+    let n: u64 = 0;
+    let result: i64 = @syscall(n);
+    0
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+# =============================================================================
+# Pointer type syntax
+# =============================================================================
 
 [[case]]
 name = "ptr_const_type_in_param"
-spec = ["9.1:8", "9.1:9"]
+spec = ["9.1:10", "9.1:11"]
 source = """
 fn takes_ptr(p: ptr const i32) -> i32 { 0 }
 fn main() -> i32 { 0 }
@@ -106,7 +187,7 @@ exit_code = 0
 
 [[case]]
 name = "ptr_mut_type_in_param"
-spec = ["9.1:8"]
+spec = ["9.1:10"]
 source = """
 fn takes_mut_ptr(p: ptr mut i32) -> i32 { 0 }
 fn main() -> i32 { 0 }
@@ -115,7 +196,7 @@ exit_code = 0
 
 [[case]]
 name = "ptr_const_return_type"
-spec = ["9.1:8"]
+spec = ["9.1:10"]
 source = """
 // Test that ptr const T can be used as a return type
 // Pass the pointer through to verify the return type is recognized
@@ -126,7 +207,7 @@ exit_code = 0
 
 [[case]]
 name = "ptr_to_struct_type"
-spec = ["9.1:8"]
+spec = ["9.1:10"]
 source = """
 struct Point { x: i32, y: i32 }
 fn takes_point_ptr(p: ptr const Point) -> i32 { 0 }

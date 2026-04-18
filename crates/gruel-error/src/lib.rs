@@ -128,6 +128,8 @@ impl ErrorCode {
     // ========================================================================
     pub const BREAK_OUTSIDE_LOOP: Self = Self(500);
     pub const CONTINUE_OUTSIDE_LOOP: Self = Self(501);
+    pub const INTRINSIC_REQUIRES_CHECKED: Self = Self(502);
+    pub const UNCHECKED_CALL_REQUIRES_CHECKED: Self = Self(503);
 
     // ========================================================================
     // Match errors (E0600-E0699)
@@ -966,6 +968,12 @@ pub enum ErrorKind {
     #[error("'continue' outside of loop")]
     ContinueOutsideLoop,
 
+    // Checked block errors
+    #[error("intrinsic '@{0}' can only be used inside a `checked` block")]
+    IntrinsicRequiresChecked(String),
+    #[error("call to unchecked function '{0}' can only be used inside a `checked` block")]
+    UncheckedCallRequiresChecked(String),
+
     // Match errors
     #[error("match is not exhaustive")]
     NonExhaustiveMatch,
@@ -1131,6 +1139,10 @@ impl ErrorKind {
             // Control flow errors (E0500-E0599)
             ErrorKind::BreakOutsideLoop => ErrorCode::BREAK_OUTSIDE_LOOP,
             ErrorKind::ContinueOutsideLoop => ErrorCode::CONTINUE_OUTSIDE_LOOP,
+            ErrorKind::IntrinsicRequiresChecked(_) => ErrorCode::INTRINSIC_REQUIRES_CHECKED,
+            ErrorKind::UncheckedCallRequiresChecked(_) => {
+                ErrorCode::UNCHECKED_CALL_REQUIRES_CHECKED
+            }
 
             // Match errors (E0600-E0699)
             ErrorKind::NonExhaustiveMatch => ErrorCode::NON_EXHAUSTIVE_MATCH,
