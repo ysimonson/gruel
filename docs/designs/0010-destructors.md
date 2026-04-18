@@ -380,7 +380,7 @@ This phase is deferred until mutable strings or other heap-allocated types land.
 
 2. **Generic drops**: When we have generics, how do we call drop on `T`? Monomorphization? vtable?
 
-3. **Drop during assignment**: Does `x = new_value` drop the old value? **Current state (not yet implemented):** `PlaceWrite` in `gruel-cfg/src/build.rs` does not insert a drop of the old value before overwriting. Field assignment to a non-trivially-droppable type silently leaks the old value.
+3. **Drop during assignment**: Does `x = new_value` drop the old value? **Resolved:** Yes. Both `Store` (variable reassignment) and `PlaceWrite` (field/index assignment) emit a drop of the old value when the type has a destructor. For `Store`, sema tracks whether the old value was moved (via `moved_vars`) and encodes this as `had_live_value: bool` in the AIR instruction; the CFG builder only drops if the value was live. For `PlaceWrite`, the old value is always live (you cannot write to a field of a moved value), so the drop is unconditional. See spec rules 5.2:14–15.
 
 4. **Partial initialization**: What if struct construction panics mid-way? (All constructed fields should drop.)
 
