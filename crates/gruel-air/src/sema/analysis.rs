@@ -2472,13 +2472,6 @@ impl<'a> Sema<'a> {
             if let Some(variant_index) = enum_def.find_variant(&function_name_str) {
                 let field_types: Vec<Type> = enum_def.variants[variant_index].fields.clone();
                 if !field_types.is_empty() {
-                    // Gate behind preview feature
-                    self.require_preview(
-                        PreviewFeature::EnumDataVariants,
-                        "enum variant construction with data",
-                        span,
-                    )?;
-
                     // Check argument count
                     if args.len() != field_types.len() {
                         return Err(CompileError::new(

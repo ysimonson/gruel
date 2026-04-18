@@ -985,13 +985,6 @@ impl<'a> Sema<'a> {
                     bindings,
                     ..
                 } => {
-                    // Gate behind preview feature
-                    self.require_preview(
-                        gruel_error::PreviewFeature::EnumDataVariants,
-                        "enum data variant pattern binding",
-                        pattern_span,
-                    )?;
-
                     // Look up the enum type
                     let enum_id = if let Some(module_ref) = module {
                         self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?

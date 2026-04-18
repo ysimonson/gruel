@@ -299,9 +299,6 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
-    /// Enum variants with associated tuple data (ADR-0037).
-    /// Enables `enum Option { Some(i32), None }` and matching with binding.
-    EnumDataVariants,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -321,7 +318,6 @@ impl PreviewFeature {
     pub fn name(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
-            PreviewFeature::EnumDataVariants => "enum_data_variants",
         }
     }
 
@@ -329,13 +325,12 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
-            PreviewFeature::EnumDataVariants => "ADR-0037",
         }
     }
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra, PreviewFeature::EnumDataVariants]
+        &[PreviewFeature::TestInfra]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -358,7 +353,6 @@ impl std::str::FromStr for PreviewFeature {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "test_infra" => Ok(PreviewFeature::TestInfra),
-            "enum_data_variants" => Ok(PreviewFeature::EnumDataVariants),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1860,21 +1854,12 @@ mod tests {
     fn test_preview_feature_all_contains_test_infra() {
         let all = PreviewFeature::all();
         assert!(all.contains(&PreviewFeature::TestInfra));
-        assert!(all.contains(&PreviewFeature::EnumDataVariants));
-    }
-
-    #[test]
-    fn test_preview_feature_enum_data_variants() {
-        let feature: PreviewFeature = "enum_data_variants".parse().unwrap();
-        assert_eq!(feature, PreviewFeature::EnumDataVariants);
-        assert_eq!(feature.name(), "enum_data_variants");
-        assert_eq!(feature.adr(), "ADR-0037");
     }
 
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra, enum_data_variants");
+        assert_eq!(names, "test_infra");
     }
 
     // ========================================================================

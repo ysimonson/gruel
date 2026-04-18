@@ -257,13 +257,12 @@ fn main() -> i32 {
 exit_code = 42
 
 # =============================================================================
-# Enum Data Variants (preview: enum_data_variants)
+# Enum Data Variants
 # =============================================================================
 
 [[case]]
 name = "enum_data_variant_declaration"
 spec = ["6.3:13"]
-preview = "enum_data_variants"
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -275,8 +274,6 @@ exit_code = 0
 [[case]]
 name = "enum_data_variant_unit_still_works"
 spec = ["6.3:13"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum Mixed { Unit, Data(i32) }
 fn main() -> i32 {
@@ -285,27 +282,13 @@ fn main() -> i32 {
 """
 exit_code = 0
 
-[[case]]
-name = "enum_data_variant_gate"
-spec = ["6.3:13"]
-source = """
-enum IntOption { Some(i32), None }
-fn main() -> i32 {
-    0
-}
-"""
-compile_fail = true
-error_contains = "requires preview feature"
-
 # =============================================================================
-# Enum Data Variant Construction (preview: enum_data_variants, Phase 2)
+# Enum Data Variant Construction
 # =============================================================================
 
 [[case]]
 name = "enum_data_variant_construct_basic"
 spec = ["6.3:14", "6.3:15"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -318,8 +301,6 @@ exit_code = 0
 [[case]]
 name = "enum_data_variant_construct_none"
 spec = ["6.3:14"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -332,8 +313,6 @@ exit_code = 0
 [[case]]
 name = "enum_data_variant_construct_and_match"
 spec = ["6.3:14"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -349,8 +328,6 @@ exit_code = 42
 [[case]]
 name = "enum_data_variant_wrong_arg_count_error"
 spec = ["6.3:14"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -364,8 +341,6 @@ error_contains = "expected 1 argument"
 [[case]]
 name = "enum_data_variant_type_mismatch_error"
 spec = ["6.3:14"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -376,28 +351,13 @@ fn main() -> i32 {
 compile_fail = true
 error_contains = "type mismatch"
 
-[[case]]
-name = "enum_data_variant_construct_gate"
-spec = ["6.3:14"]
-source = """
-enum IntOption { Some(i32), None }
-fn main() -> i32 {
-    let _x = IntOption::Some(42);
-    0
-}
-"""
-compile_fail = true
-error_contains = "requires preview feature"
-
 # =============================================================================
-# Data Variant Pattern Matching (preview: enum_data_variants, Phase 3)
+# Data Variant Pattern Matching
 # =============================================================================
 
 [[case]]
 name = "enum_data_variant_pattern_basic"
 spec = ["6.3:16", "6.3:17", "6.3:18"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -413,8 +373,6 @@ exit_code = 42
 [[case]]
 name = "enum_data_variant_pattern_none_arm"
 spec = ["6.3:16", "6.3:18"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -430,8 +388,6 @@ exit_code = 99
 [[case]]
 name = "enum_data_variant_pattern_multi_field"
 spec = ["6.3:16", "6.3:17"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum Pair { Data(i32, i32), Empty }
 fn main() -> i32 {
@@ -447,8 +403,6 @@ exit_code = 42
 [[case]]
 name = "enum_data_variant_pattern_wildcard_binding"
 spec = ["6.3:16"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum Pair { Data(i32, i32), Empty }
 fn main() -> i32 {
@@ -464,8 +418,6 @@ exit_code = 42
 [[case]]
 name = "enum_data_variant_pattern_wrong_count_error"
 spec = ["6.3:17"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -479,31 +431,13 @@ fn main() -> i32 {
 compile_fail = true
 error_contains = "expected 1 argument"
 
-[[case]]
-name = "enum_data_variant_pattern_gate"
-spec = ["6.3:16"]
-source = """
-enum IntOption { Some(i32), None }
-fn main() -> i32 {
-    let x = IntOption::Some(42);
-    match x {
-        IntOption::Some(v) => v,
-        IntOption::None => 0,
-    }
-}
-"""
-compile_fail = true
-error_contains = "requires preview feature"
-
 # =============================================================================
-# Drop Dispatch for Data Enums (preview: enum_data_variants, Phase 4)
+# Drop Dispatch for Data Enums
 # =============================================================================
 
 [[case]]
 name = "enum_data_variant_drop_some"
 spec = ["6.3:19"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 struct Tracker { value: i32 }
 
@@ -524,8 +458,6 @@ stdout = "42\n"
 [[case]]
 name = "enum_data_variant_drop_none_no_destructor"
 spec = ["6.3:19"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 struct Tracker { value: i32 }
 
@@ -544,14 +476,12 @@ exit_code = 0
 stdout = ""
 
 # =============================================================================
-# Layout Correctness (preview: enum_data_variants, Phase 5)
+# Layout Correctness
 # =============================================================================
 
 [[case]]
 name = "enum_data_variant_i64_field"
 spec = ["6.3:20"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum BigOption { Some(i64), None }
 fn get(x: BigOption) -> i32 {
@@ -570,8 +500,6 @@ exit_code = 42
 [[case]]
 name = "enum_data_variant_mixed_i8_i32_fields"
 spec = ["6.3:20"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum Tagged { AB(i8, i32), C }
 fn get(x: Tagged) -> i32 {
@@ -590,8 +518,6 @@ exit_code = 42
 [[case]]
 name = "enum_data_variant_i64_then_i8_offsets"
 spec = ["6.3:20"]
-preview = "enum_data_variants"
-preview_should_pass = true
 source = """
 enum Pair { Data(i64, i8), Empty }
 fn get(x: Pair) -> i32 {

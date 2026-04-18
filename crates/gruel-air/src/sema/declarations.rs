@@ -179,16 +179,6 @@ impl<'a> Sema<'a> {
                         }
                     }
 
-                    // Gate enum data variants behind the preview feature.
-                    let has_data = raw_variants.iter().any(|(_, fields)| !fields.is_empty());
-                    if has_data {
-                        self.require_preview(
-                            gruel_error::PreviewFeature::EnumDataVariants,
-                            "enum variants with associated data",
-                            inst.span,
-                        )?;
-                    }
-
                     // Build EnumVariantDef list. Field types are stored as unit for now;
                     // full type resolution will be added in later phases when we
                     // lower them through the type checker.

@@ -1,12 +1,12 @@
 ---
 id: 0037
 title: Enum Data Variants and Full Pattern Matching
-status: proposal
+status: implemented
 tags: [types, syntax, pattern-matching, ownership]
 feature-flag: enum_data_variants
 created: 2026-04-18
-accepted:
-implemented:
+accepted: 2026-04-18
+implemented: 2026-04-18
 spec-sections: ["4.7", "6.3"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -319,7 +319,7 @@ Epic: TBD
   - Ensure that LLVM does not incorrectly alias the payload accesses (use `!noalias` if needed)
   - Add spec tests for multi-field variants, alignment-sensitive types
 
-- [ ] **Phase 6: Spec, tests, stabilization**
+- [x] **Phase 6: Spec, tests, stabilization**
   - Write spec paragraphs in `docs/spec/src/06-items/03-enums.md` for data variant declarations
   - Write spec paragraphs in `docs/spec/src/04-expressions/07-match-expressions.md` for binding patterns
   - Full test coverage: unit variants still work, data variants construct and match, ownership is correct, wildcards drop, mutability works
