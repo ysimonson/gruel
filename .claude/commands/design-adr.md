@@ -127,3 +127,4 @@ Next: `/implement <feature>`
 - Planning only - do not write implementation code
 - Do NOT start implementing until user approves the plan
 - For large features, each phase should fit in one context window
+- **Old ADRs should not be changed**, except to update their `superseded-by` field and open questions. If you find a discrepancy in an old ADR, resolve it in the new ADR rather than rewriting the old one.

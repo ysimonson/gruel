@@ -95,6 +95,16 @@ If changes touch `gruel-codegen`, verify equivalent changes in ALL backends:
 | Liveness analysis | `x86_64/liveness.rs` | `aarch64/liveness.rs` |
 | CFG lowering | `x86_64/cfg_lower.rs` | `aarch64/cfg_lower.rs` |
 
+### 7. Lint and Format
+
+Run `make check` to catch compiler warnings, clippy lints, and formatting issues:
+
+```
+!make check
+```
+
+Report any findings as blocking issues.
+
 ## Output Format
 
 Provide specific, actionable feedback with file:line references.
