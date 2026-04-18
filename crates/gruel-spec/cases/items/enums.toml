@@ -255,3 +255,44 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# =============================================================================
+# Enum Data Variants (preview: enum_data_variants)
+# =============================================================================
+
+[[case]]
+name = "enum_data_variant_declaration"
+spec = ["6.3:13"]
+preview = "enum_data_variants"
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_data_variant_unit_still_works"
+spec = ["6.3:13"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum Mixed { Unit, Data(i32) }
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_data_variant_gate"
+spec = ["6.3:13"]
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "requires preview feature"

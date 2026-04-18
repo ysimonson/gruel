@@ -412,6 +412,49 @@ impl Rir {
             .collect()
     }
 
+    /// Store enum variant declarations (name + field types) and return (start, variant_count).
+    ///
+    /// Each variant is encoded as variable-length data in the extra array:
+    ///   `[name_spur: u32, field_count: u32, field_type_0: u32, ..., field_type_n: u32]`
+    ///
+    /// Unit variants have `field_count = 0`.
+    pub fn add_enum_variant_decls(
+        &mut self,
+        variants: &[(Spur, Vec<Spur>)],
+    ) -> (u32, u32) {
+        let start = self.extra.len() as u32;
+        for (name, fields) in variants {
+            self.extra.push(name.into_usize() as u32);
+            self.extra.push(fields.len() as u32);
+            for field_ty in fields {
+                self.extra.push(field_ty.into_usize() as u32);
+            }
+        }
+        (start, variants.len() as u32)
+    }
+
+    /// Retrieve enum variant declarations from the extra array.
+    /// Returns a vec of `(variant_name, field_types)` pairs.
+    pub fn get_enum_variant_decls(
+        &self,
+        start: u32,
+        variant_count: u32,
+    ) -> Vec<(Spur, Vec<Spur>)> {
+        let mut result = Vec::with_capacity(variant_count as usize);
+        let mut pos = start as usize;
+        for _ in 0..variant_count {
+            let name = Spur::try_from_usize(self.extra[pos] as usize).unwrap();
+            let field_count = self.extra[pos + 1] as usize;
+            pos += 2;
+            let fields: Vec<Spur> = (0..field_count)
+                .map(|i| Spur::try_from_usize(self.extra[pos + i] as usize).unwrap())
+                .collect();
+            pos += field_count;
+            result.push((name, fields));
+        }
+        result
+    }
+
     /// Store RirCallArgs and return (start, len).
     /// Layout: [value: u32, mode: u32] per arg
     pub fn add_call_args(&mut self, args: &[RirCallArg]) -> (u32, u32) {
@@ -1706,7 +1749,8 @@ pub enum InstData {
 
     // Enum operations
     /// Enum type declaration
-    /// Variants are stored in the extra array using add_symbols/get_symbols.
+    /// Variants are stored in the extra array using add_enum_variant_decls/get_enum_variant_decls.
+    /// Each variant encodes: [name_spur, field_count, field_type_0, ..., field_type_n].
     EnumDecl {
         /// Whether this enum is public (requires --preview modules)
         is_pub: bool,
@@ -2224,10 +2268,22 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(name);
-                    let variants = self.rir.get_symbols(*variants_start, *variants_len);
+                    let variants =
+                        self.rir.get_enum_variant_decls(*variants_start, *variants_len);
                     let variants_str: Vec<String> = variants
                         .iter()
-                        .map(|v| self.interner.resolve(v).to_string())
+                        .map(|(v, fields)| {
+                            let vname = self.interner.resolve(v).to_string();
+                            if fields.is_empty() {
+                                vname
+                            } else {
+                                let field_strs: Vec<&str> = fields
+                                    .iter()
+                                    .map(|f| self.interner.resolve(f))
+                                    .collect();
+                                format!("{}({})", vname, field_strs.join(", "))
+                            }
+                        })
                         .collect();
                     writeln!(
                         out,
@@ -3393,7 +3449,9 @@ mod tests {
         let green = interner.get_or_intern("Green");
         let blue = interner.get_or_intern("Blue");
 
-        let (variants_start, variants_len) = rir.add_symbols(&[red, green, blue]);
+        // Unit variants: no fields
+        let (variants_start, variants_len) =
+            rir.add_enum_variant_decls(&[(red, vec![]), (green, vec![]), (blue, vec![])]);
 
         rir.add_inst(Inst {
             data: InstData::EnumDecl {
@@ -3408,6 +3466,32 @@ mod tests {
         let printer = RirPrinter::new(&rir, &interner);
         let output = printer.to_string();
         assert!(output.contains("enum Color { Red, Green, Blue }"));
+    }
+
+    #[test]
+    fn test_printer_enum_decl_with_data() {
+        let (mut rir, interner) = create_printer_test_rir();
+        let name = interner.get_or_intern("IntOption");
+        let none = interner.get_or_intern("None");
+        let some = interner.get_or_intern("Some");
+        let i32_ty = interner.get_or_intern("i32");
+
+        let (variants_start, variants_len) =
+            rir.add_enum_variant_decls(&[(none, vec![]), (some, vec![i32_ty])]);
+
+        rir.add_inst(Inst {
+            data: InstData::EnumDecl {
+                is_pub: false,
+                name,
+                variants_start,
+                variants_len,
+            },
+            span: Span::new(0, 35),
+        });
+
+        let printer = RirPrinter::new(&rir, &interner);
+        let output = printer.to_string();
+        assert!(output.contains("enum IntOption { None, Some(i32) }"));
     }
 
     #[test]

@@ -19,7 +19,7 @@ use lasso::Spur;
 
 use super::{ConstInfo, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::inference::{FunctionSig, MethodSig};
-use crate::types::{EnumDef, StructDef, StructField, StructId, Type};
+use crate::types::{EnumDef, EnumVariantDef, StructDef, StructField, StructId, Type};
 
 impl<'a> Sema<'a> {
     /// Build an `InferenceContext` from the collected type information.
@@ -160,13 +160,15 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    let variants = self.rir.get_symbols(*variants_start, *variants_len);
+                    let raw_variants =
+                        self.rir.get_enum_variant_decls(*variants_start, *variants_len);
 
                     // Check for duplicate variant names
                     let mut seen_variants: HashSet<Spur> = HashSet::new();
-                    for variant_name in &variants {
+                    for (variant_name, _) in &raw_variants {
                         if !seen_variants.insert(*variant_name) {
-                            let variant_name_str = self.interner.resolve(variant_name).to_string();
+                            let variant_name_str =
+                                self.interner.resolve(variant_name).to_string();
                             return Err(CompileError::new(
                                 ErrorKind::DuplicateVariant {
                                     enum_name: enum_name.clone(),
@@ -177,15 +179,30 @@ impl<'a> Sema<'a> {
                         }
                     }
 
-                    // Convert variant symbols to strings
-                    let variant_names: Vec<String> = variants
+                    // Gate enum data variants behind the preview feature.
+                    let has_data = raw_variants.iter().any(|(_, fields)| !fields.is_empty());
+                    if has_data {
+                        self.require_preview(
+                            gruel_error::PreviewFeature::EnumDataVariants,
+                            "enum variants with associated data",
+                            inst.span,
+                        )?;
+                    }
+
+                    // Build EnumVariantDef list. Field types are stored as unit for now;
+                    // full type resolution will be added in later phases when we
+                    // lower them through the type checker.
+                    let variants: Vec<EnumVariantDef> = raw_variants
                         .iter()
-                        .map(|v| self.interner.resolve(v).to_string())
+                        .map(|(vname, _fields)| EnumVariantDef {
+                            name: self.interner.resolve(vname).to_string(),
+                            fields: Vec::new(), // Field types resolved in later phases
+                        })
                         .collect();
 
                     let enum_def = EnumDef {
                         name: enum_name,
-                        variants: variant_names,
+                        variants,
                         is_pub: *is_pub,
                         file_id: inst.span.file_id,
                     };

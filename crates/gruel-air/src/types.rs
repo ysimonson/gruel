@@ -383,13 +383,38 @@ impl StructDef {
     }
 }
 
+/// A single variant in an enum definition.
+#[derive(Debug, Clone)]
+pub struct EnumVariantDef {
+    /// Variant name
+    pub name: String,
+    /// Field types for tuple-style data variants. Empty for unit variants.
+    /// E.g., `Some(i32)` has `fields = [Type::I32]`.
+    pub fields: Vec<Type>,
+}
+
+impl EnumVariantDef {
+    /// Create a unit variant (no associated data).
+    pub fn unit(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            fields: Vec::new(),
+        }
+    }
+
+    /// Whether this is a data variant (has associated fields).
+    pub fn has_data(&self) -> bool {
+        !self.fields.is_empty()
+    }
+}
+
 /// Definition of an enum type.
 #[derive(Debug, Clone)]
 pub struct EnumDef {
     /// Enum name
     pub name: String,
-    /// Variant names in declaration order
-    pub variants: Vec<String>,
+    /// Variants in declaration order
+    pub variants: Vec<EnumVariantDef>,
     /// Whether this enum is public (visible outside its directory)
     pub is_pub: bool,
     /// File ID this enum was declared in (for visibility checking)
@@ -404,7 +429,17 @@ impl EnumDef {
 
     /// Find a variant by name and return its index.
     pub fn find_variant(&self, name: &str) -> Option<usize> {
-        self.variants.iter().position(|v| v == name)
+        self.variants.iter().position(|v| v.name == name)
+    }
+
+    /// Whether any variant carries associated data.
+    pub fn has_data_variants(&self) -> bool {
+        self.variants.iter().any(|v| v.has_data())
+    }
+
+    /// Whether all variants are unit variants (no data).
+    pub fn is_unit_only(&self) -> bool {
+        !self.has_data_variants()
     }
 
     /// Get the discriminant type for this enum.
@@ -1473,7 +1508,11 @@ mod tests {
 
         let color = EnumDef {
             name: "Color".to_string(),
-            variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
+            variants: vec![
+                EnumVariantDef::unit("Red"),
+                EnumVariantDef::unit("Green"),
+                EnumVariantDef::unit("Blue"),
+            ],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };
@@ -1484,7 +1523,11 @@ mod tests {
     fn test_enum_def_find_variant() {
         let color = EnumDef {
             name: "Color".to_string(),
-            variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
+            variants: vec![
+                EnumVariantDef::unit("Red"),
+                EnumVariantDef::unit("Green"),
+                EnumVariantDef::unit("Blue"),
+            ],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };
@@ -1511,7 +1554,7 @@ mod tests {
         // 1-256 variants -> U8
         let small = EnumDef {
             name: "Small".to_string(),
-            variants: vec!["A".to_string()],
+            variants: vec![EnumVariantDef::unit("A")],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };
@@ -1519,7 +1562,7 @@ mod tests {
 
         let max_u8 = EnumDef {
             name: "MaxU8".to_string(),
-            variants: (0..256).map(|i| format!("V{}", i)).collect(),
+            variants: (0..256).map(|i| EnumVariantDef::unit(format!("V{}", i))).collect(),
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };
@@ -1531,7 +1574,7 @@ mod tests {
         // 257-65536 variants -> U16
         let medium = EnumDef {
             name: "Medium".to_string(),
-            variants: (0..257).map(|i| format!("V{}", i)).collect(),
+            variants: (0..257).map(|i| EnumVariantDef::unit(format!("V{}", i))).collect(),
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };

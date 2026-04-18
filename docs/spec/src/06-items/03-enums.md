@@ -98,3 +98,19 @@ fn get_value(c: Color) -> i32 {
     }
 }
 ```
+
+## Enum Data Variants
+
+{{ rule(id="6.3:13", cat="normative") }}
+
+Enum variants may optionally carry tuple-style associated data, declared as a
+parenthesized list of types after the variant name. This feature requires the
+`enum_data_variants` preview feature (`--preview enum_data_variants`).
+
+```ebnf
+enum_variant = IDENT [ "(" type_list ")" ] ;
+type_list    = type { "," type } ;
+```
+
+Variants without a parenthesized type list are *unit variants* and carry no data.
+Variants with a type list are *data variants* and carry one value per listed type.

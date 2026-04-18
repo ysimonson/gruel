@@ -162,12 +162,17 @@ impl<'a> AstGen<'a> {
 
     fn gen_enum(&mut self, enum_decl: &EnumDecl) -> InstRef {
         let name = enum_decl.name.name; // Already a Spur
-        let variants: Vec<_> = enum_decl
+        let variants: Vec<(Spur, Vec<Spur>)> = enum_decl
             .variants
             .iter()
-            .map(|v| v.name.name) // Already a Spur
+            .map(|v| {
+                let variant_name = v.name.name;
+                let field_types: Vec<Spur> =
+                    v.fields.iter().map(|ty| self.intern_type(ty)).collect();
+                (variant_name, field_types)
+            })
             .collect();
-        let (variants_start, variants_len) = self.rir.add_symbols(&variants);
+        let (variants_start, variants_len) = self.rir.add_enum_variant_decls(&variants);
 
         self.rir.add_inst(Inst {
             data: InstData::EnumDecl {

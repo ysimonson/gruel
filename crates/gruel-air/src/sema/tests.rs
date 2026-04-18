@@ -937,9 +937,9 @@ mod tests {
 
         assert_eq!(pool_def.name, "Color");
         assert_eq!(pool_def.variants.len(), 3);
-        assert_eq!(pool_def.variants[0], "Red");
-        assert_eq!(pool_def.variants[1], "Green");
-        assert_eq!(pool_def.variants[2], "Blue");
+        assert_eq!(pool_def.variants[0].name, "Red");
+        assert_eq!(pool_def.variants[1].name, "Green");
+        assert_eq!(pool_def.variants[2].name, "Blue");
     }
 
     #[test]

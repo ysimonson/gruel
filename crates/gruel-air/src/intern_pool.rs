@@ -41,7 +41,8 @@ use std::sync::{PoisonError, RwLock};
 use lasso::Spur;
 
 use crate::types::{
-    ArrayTypeId, EnumDef, EnumId, PtrConstTypeId, PtrMutTypeId, StructDef, StructId, Type, TypeKind,
+    ArrayTypeId, EnumDef, EnumId, PtrConstTypeId, PtrMutTypeId, StructDef, StructId, Type,
+    TypeKind,
 };
 
 /// Interned type index - 32 bits, Copy, cheap comparison.
@@ -1161,6 +1162,7 @@ pub struct TypeInternPoolStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::EnumVariantDef;
     use lasso::ThreadedRodeo;
 
     // ========================================================================
@@ -1274,7 +1276,11 @@ mod tests {
 
         let def = EnumDef {
             name: "Color".to_string(),
-            variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
+            variants: vec![
+                EnumVariantDef::unit("Red"),
+                EnumVariantDef::unit("Green"),
+                EnumVariantDef::unit("Blue"),
+            ],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };
@@ -1351,7 +1357,7 @@ mod tests {
 
         let def = EnumDef {
             name: "Status".to_string(),
-            variants: vec!["Active".to_string(), "Inactive".to_string()],
+            variants: vec![EnumVariantDef::unit("Active"), EnumVariantDef::unit("Inactive")],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };
@@ -1436,7 +1442,7 @@ mod tests {
         let enum_name = interner.get_or_intern("Color");
         let enum_def = EnumDef {
             name: "Color".to_string(),
-            variants: vec!["Red".to_string()],
+            variants: vec![EnumVariantDef::unit("Red")],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };
@@ -1509,7 +1515,7 @@ mod tests {
         let name = interner.get_or_intern("Status");
         let def = EnumDef {
             name: "Status".to_string(),
-            variants: vec!["A".to_string(), "B".to_string()],
+            variants: vec![EnumVariantDef::unit("A"), EnumVariantDef::unit("B")],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };

@@ -282,7 +282,7 @@ pub enum AirPattern {
 
 Epic: TBD
 
-- [ ] **Phase 1: Enum variant data declarations (parsing + type system)**
+- [x] **Phase 1: Enum variant data declarations (parsing + type system)**
   - Parser: parse `Variant(Type, ...)` in enum definitions; add `fields: Vec<TypeExpr>` to AST enum variant
   - RIR: extend `InstData::EnumDecl` to store per-variant field types
   - AIR type system: replace `Vec<String>` with `Vec<EnumVariantDef>` in `EnumDef`; update all `EnumDef` construction sites

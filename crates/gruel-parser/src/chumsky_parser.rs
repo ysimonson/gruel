@@ -2109,14 +2109,24 @@ where
         .boxed()
 }
 
-/// Parser for enum variant: just an identifier
+/// Parser for enum variant: identifier with optional tuple data `(Type, Type, ...)`
 fn enum_variant_parser<'src, I>() -> GruelParser<'src, I, EnumVariant>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
+    let fields = type_parser()
+        .separated_by(just(TokenKind::Comma))
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
+        .or_not()
+        .map(|opt| opt.unwrap_or_default());
+
     ident_parser()
-        .map_with(|name, e| EnumVariant {
+        .then(fields)
+        .map_with(|(name, fields), e| EnumVariant {
             name,
+            fields,
             span: span_from_extra(e),
         })
         .boxed()

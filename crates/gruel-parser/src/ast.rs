@@ -162,6 +162,9 @@ pub struct EnumDecl {
 pub struct EnumVariant {
     /// Variant name
     pub name: Ident,
+    /// Tuple-style associated data field types (empty for unit variants).
+    /// E.g., `Some(i32)` has one field of type `i32`.
+    pub fields: Vec<TypeExpr>,
     /// Span covering the variant
     pub span: Span,
 }

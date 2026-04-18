@@ -8,7 +8,7 @@
 use gruel_builtins::{BUILTIN_ENUMS, BUILTIN_TYPES, BuiltinFieldType, BuiltinTypeDef};
 
 use super::Sema;
-use crate::types::{EnumDef, StructDef, StructField, StructId, Type, TypeKind};
+use crate::types::{EnumDef, EnumVariantDef, StructDef, StructField, StructId, Type, TypeKind};
 
 impl<'a> Sema<'a> {
     /// Phase 0: Inject built-in types as synthetic structs and enums.
@@ -71,10 +71,11 @@ impl<'a> Sema<'a> {
 
         // Inject built-in enum types (Arch, Os)
         for builtin_enum in BUILTIN_ENUMS {
-            let variants: Vec<String> = builtin_enum
+            // Built-in enums only have unit variants (no associated data).
+            let variants: Vec<EnumVariantDef> = builtin_enum
                 .variants
                 .iter()
-                .map(|v| v.to_string())
+                .map(|v| EnumVariantDef::unit(*v))
                 .collect();
 
             // Create the synthetic enum definition
