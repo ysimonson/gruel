@@ -5,6 +5,36 @@ use inkwell::AddressSpace;
 use inkwell::context::Context;
 use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
 
+/// Compute the size of a Gruel type in bytes.
+///
+/// This is used to calculate payload sizes for data enum tagged unions.
+/// For structs, fields are laid out sequentially without padding (matching
+/// what the unaligned-store approach needs for correct byte offsets).
+///
+/// Returns 0 for zero-sized types (unit, never, etc.).
+pub fn type_byte_size(ty: Type, type_pool: &TypeInternPool) -> u64 {
+    match ty.kind() {
+        TypeKind::I8 | TypeKind::U8 | TypeKind::Bool => 1,
+        TypeKind::I16 | TypeKind::U16 => 2,
+        TypeKind::I32 | TypeKind::U32 => 4,
+        TypeKind::I64 | TypeKind::U64 => 8,
+        TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 8, // 64-bit target
+        TypeKind::Struct(id) => {
+            let def = type_pool.struct_def(id);
+            def.fields.iter().map(|f| type_byte_size(f.ty, type_pool)).sum()
+        }
+        TypeKind::Array(id) => {
+            let (elem_ty, len) = type_pool.array_def(id);
+            type_byte_size(elem_ty, type_pool) * len as u64
+        }
+        TypeKind::Enum(id) => {
+            let def = type_pool.enum_def(id);
+            type_byte_size(def.discriminant_type(), type_pool)
+        }
+        _ => 0, // Unit, Never, ComptimeType, Module, Error
+    }
+}
+
 /// Convert a Gruel [`Type`] to an inkwell [`BasicTypeEnum`].
 ///
 /// Returns `None` for types that map to LLVM `void`:
@@ -80,10 +110,32 @@ pub fn gruel_type_to_llvm<'ctx>(
             Some(ctx.ptr_type(AddressSpace::default()).into())
         }
 
-        // Enums are represented as their discriminant integer type.
+        // Enums:
+        // - Unit-only enums: represented as their discriminant integer type (backward compat).
+        // - Data enums: tagged union `{ discriminant_type, [max_payload_bytes x i8] }`.
         TypeKind::Enum(id) => {
             let def = type_pool.enum_def(id);
-            gruel_type_to_llvm(def.discriminant_type(), ctx, type_pool)
+            if def.is_unit_only() {
+                // C-style enum: just the discriminant integer.
+                gruel_type_to_llvm(def.discriminant_type(), ctx, type_pool)
+            } else {
+                // Data enum: tagged union struct.
+                let discrim_llvm = gruel_type_to_llvm(def.discriminant_type(), ctx, type_pool)?;
+                let max_payload: u64 = def
+                    .variants
+                    .iter()
+                    .map(|v| v.fields.iter().map(|f| type_byte_size(*f, type_pool)).sum::<u64>())
+                    .max()
+                    .unwrap_or(0);
+                if max_payload == 0 {
+                    // All variants happen to have empty payloads (shouldn't happen for
+                    // has_data_variants() == true, but handle gracefully).
+                    Some(discrim_llvm)
+                } else {
+                    let byte_arr = ctx.i8_type().array_type(max_payload as u32);
+                    Some(ctx.struct_type(&[discrim_llvm, byte_arr.into()], false).into())
+                }
+            }
         }
 
         // Non-code-gen types — not representable in LLVM IR.

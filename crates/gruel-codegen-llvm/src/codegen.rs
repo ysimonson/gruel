@@ -1748,14 +1748,128 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             CfgInstData::StorageLive { .. } | CfgInstData::StorageDead { .. } => None,
 
             // ---- Composite ops (Phase 2d) ----
-            CfgInstData::EnumVariant { variant_index, .. } => {
-                // Enums are stored as their discriminant integer.
-                // The LLVM type comes from the enum's discriminant_type() via gruel_type_to_llvm.
-                gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| {
-                    t.into_int_type()
-                        .const_int(variant_index as u64, false)
-                        .into()
-                })
+            CfgInstData::EnumVariant { enum_id, variant_index } => {
+                let enum_def = self.type_pool.enum_def(enum_id);
+                if enum_def.is_unit_only() {
+                    // Unit-only enum: represented as its discriminant integer.
+                    gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| {
+                        t.into_int_type()
+                            .const_int(variant_index as u64, false)
+                            .into()
+                    })
+                } else {
+                    // Data enum: unit variant produces a tagged union value
+                    // with the discriminant set and the payload zeroed.
+                    let struct_ty = match gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
+                        Some(t) => t.into_struct_type(),
+                        None => return Ok(()),
+                    };
+                    let discrim_ty = gruel_type_to_llvm(
+                        enum_def.discriminant_type(),
+                        self.ctx,
+                        self.type_pool,
+                    )
+                    .unwrap()
+                    .into_int_type();
+                    let discrim_val = discrim_ty.const_int(variant_index as u64, false);
+                    let mut agg: AggregateValueEnum = struct_ty.get_undef().into();
+                    agg = self
+                        .builder
+                        .build_insert_value(agg, discrim_val, 0, "ev_d")
+                        .expect("build_insert_value failed")
+                        .into();
+                    // Payload (field 1) is zeroed for unit variants.
+                    let payload_ty = struct_ty.get_field_type_at_index(1).unwrap();
+                    let payload_zero = payload_ty.const_zero();
+                    agg = self
+                        .builder
+                        .build_insert_value(agg, payload_zero, 1, "ev_p")
+                        .expect("build_insert_value failed")
+                        .into();
+                    Some(agg.as_basic_value_enum())
+                }
+            }
+
+            CfgInstData::EnumCreate {
+                enum_id,
+                variant_index,
+                fields_start,
+                fields_len,
+            } => {
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let variant_def = &enum_def.variants[variant_index as usize];
+                let field_types: Vec<Type> = variant_def.fields.clone();
+
+                let struct_ty = match gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
+                    Some(t) => t.into_struct_type(),
+                    None => return Ok(()),
+                };
+
+                // Alloca the tagged union on the stack (in entry block for mem2reg).
+                let slot = self.build_entry_alloca(struct_ty.into(), "enum_slot");
+
+                // Store discriminant at struct field 0.
+                let discrim_ty = gruel_type_to_llvm(
+                    enum_def.discriminant_type(),
+                    self.ctx,
+                    self.type_pool,
+                )
+                .unwrap()
+                .into_int_type();
+                let discrim_val = discrim_ty.const_int(variant_index as u64, false);
+                let discrim_ptr = self
+                    .builder
+                    .build_struct_gep(struct_ty, slot, 0, "discrim_ptr")
+                    .expect("build_struct_gep failed");
+                self.builder.build_store(discrim_ptr, discrim_val).unwrap();
+
+                // Store each field value into the payload (struct field 1) at its byte offset.
+                let fields = self.cfg.get_extra(fields_start, fields_len).to_vec();
+                if !fields.is_empty() {
+                    let max_payload = field_types
+                        .iter()
+                        .map(|f| crate::types::type_byte_size(*f, self.type_pool))
+                        .sum::<u64>();
+                    let byte_arr_ty = self.ctx.i8_type().array_type(max_payload as u32);
+                    let payload_ptr = self
+                        .builder
+                        .build_struct_gep(struct_ty, slot, 1, "payload_ptr")
+                        .expect("build_struct_gep failed");
+
+                    let mut byte_offset = 0u64;
+                    for (i, field_val) in fields.iter().enumerate() {
+                        let field_ty = field_types[i];
+                        if gruel_type_to_llvm(field_ty, self.ctx, self.type_pool).is_none() {
+                            // Zero-sized type — skip (no bytes to store).
+                            continue;
+                        }
+                        let field_llvm_val = self.get_value(*field_val);
+                        let offset_const = self.ctx.i64_type().const_int(byte_offset, false);
+                        let zero = self.ctx.i64_type().const_zero();
+                        // GEP into the byte array to find the write pointer.
+                        let field_ptr = unsafe {
+                            self.builder
+                                .build_gep(
+                                    byte_arr_ty,
+                                    payload_ptr,
+                                    &[zero, offset_const],
+                                    "field_ptr",
+                                )
+                                .expect("build_gep failed")
+                        };
+                        // Use alignment 1 (unaligned store): the byte array payload may not
+                        // satisfy the natural alignment of the field type.
+                        let store =
+                            self.builder.build_store(field_ptr, field_llvm_val).unwrap();
+                        store.set_alignment(1).unwrap();
+
+                        byte_offset += crate::types::type_byte_size(field_ty, self.type_pool);
+                    }
+                }
+
+                // Load and return the completed tagged union value.
+                let result = self.builder.build_load(struct_ty, slot, "enum_val").unwrap();
+                Some(result)
             }
 
             CfgInstData::StructInit {
@@ -2436,7 +2550,26 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 cases_len,
                 default,
             } => {
-                let val = self.get_value(scrutinee).into_int_value();
+                let raw_val = self.get_value(scrutinee);
+                // For data enums (tagged union structs), extract the discriminant from field 0.
+                // Unit-only enums are already plain integers and don't need extraction.
+                let val = {
+                    let scrutinee_ty = self.cfg.get_inst(scrutinee).ty;
+                    if let TypeKind::Enum(id) = scrutinee_ty.kind() {
+                        let enum_def = self.type_pool.enum_def(id);
+                        if enum_def.has_data_variants() {
+                            let struct_val = raw_val.into_struct_value();
+                            self.builder
+                                .build_extract_value(struct_val, 0, "discrim")
+                                .expect("extract_value failed")
+                                .into_int_value()
+                        } else {
+                            raw_val.into_int_value()
+                        }
+                    } else {
+                        raw_val.into_int_value()
+                    }
+                };
                 let default_bb = self.llvm_block(default);
                 let cases = self.cfg.get_switch_cases(cases_start, cases_len);
                 // Deduplicate case values: LLVM forbids duplicate case values.

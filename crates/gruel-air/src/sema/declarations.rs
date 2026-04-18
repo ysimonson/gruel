@@ -295,7 +295,52 @@ impl<'a> Sema<'a> {
     /// body analysis.
     pub(crate) fn resolve_declarations(&mut self) -> CompileResult<()> {
         self.resolve_struct_fields()?;
+        self.resolve_enum_variant_fields()?;
         self.resolve_remaining_declarations()?;
+        Ok(())
+    }
+
+    /// Resolve enum variant field types. Must run after all type names are registered
+    /// so that field types can reference other enums/structs.
+    pub(crate) fn resolve_enum_variant_fields(&mut self) -> CompileResult<()> {
+        for (_, inst) in self.rir.iter() {
+            if let InstData::EnumDecl {
+                name,
+                variants_start,
+                variants_len,
+                ..
+            } = &inst.data
+            {
+                let enum_id = match self.enums.get(name) {
+                    Some(id) => *id,
+                    None => continue, // not registered (shouldn't happen)
+                };
+
+                let raw_variants =
+                    self.rir.get_enum_variant_decls(*variants_start, *variants_len);
+                let has_data = raw_variants.iter().any(|(_, fields)| !fields.is_empty());
+                if !has_data {
+                    continue; // unit-only enum, no field types to resolve
+                }
+
+                let mut resolved_variants = Vec::with_capacity(raw_variants.len());
+                for (vname, field_type_spurs) in &raw_variants {
+                    let mut resolved_fields = Vec::with_capacity(field_type_spurs.len());
+                    for field_ty_spur in field_type_spurs {
+                        let field_ty = self.resolve_type(*field_ty_spur, inst.span)?;
+                        resolved_fields.push(field_ty);
+                    }
+                    resolved_variants.push(EnumVariantDef {
+                        name: self.interner.resolve(vname).to_string(),
+                        fields: resolved_fields,
+                    });
+                }
+
+                let mut enum_def = self.type_pool.enum_def(enum_id);
+                enum_def.variants = resolved_variants;
+                self.type_pool.update_enum_def(enum_id, enum_def);
+            }
+        }
         Ok(())
     }
 

@@ -956,12 +956,26 @@ pub enum AirInstData {
     },
 
     // Enum operations
-    /// Create an enum variant value
+    /// Create an enum variant value (unit variant or any variant of a unit-only enum)
     EnumVariant {
         /// The enum type ID
         enum_id: crate::types::EnumId,
         /// The variant index (0-based)
         variant_index: u32,
+    },
+
+    /// Create a data enum variant value with associated field values.
+    /// Used when the enum has at least one data variant.
+    /// Field AirRefs are stored in the extra array at [fields_start..fields_start+fields_len].
+    EnumCreate {
+        /// The enum type ID
+        enum_id: crate::types::EnumId,
+        /// The variant index (0-based)
+        variant_index: u32,
+        /// Start index into extra array for field values
+        fields_start: u32,
+        /// Number of field values
+        fields_len: u32,
     },
 
     // Type conversion operations
@@ -1286,6 +1300,24 @@ impl fmt::Display for Air {
                     variant_index,
                 } => {
                     writeln!(f, "enum_variant #{}::{}", enum_id.0, variant_index)?;
+                }
+                AirInstData::EnumCreate {
+                    enum_id,
+                    variant_index,
+                    fields_start,
+                    fields_len,
+                } => {
+                    let field_strs: Vec<String> = self
+                        .get_air_refs(*fields_start, *fields_len)
+                        .map(|r| format!("{}", r))
+                        .collect();
+                    writeln!(
+                        f,
+                        "enum_create #{}::{}({})",
+                        enum_id.0,
+                        variant_index,
+                        field_strs.join(", ")
+                    )?;
                 }
                 AirInstData::IntCast { value, from_ty } => {
                     writeln!(f, "intcast {} from {}", value, from_ty.name())?;

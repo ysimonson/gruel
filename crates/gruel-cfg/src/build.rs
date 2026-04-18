@@ -1817,6 +1817,42 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
+            AirInstData::EnumCreate {
+                enum_id,
+                variant_index,
+                fields_start,
+                fields_len,
+            } => {
+                // Lower each field value
+                let field_air_refs = self.air.get_air_refs(*fields_start, *fields_len).collect::<Vec<_>>();
+                let mut field_vals = Vec::with_capacity(field_air_refs.len());
+                for field_ref in field_air_refs {
+                    let Some(val) = self.lower_value(field_ref) else {
+                        return Self::diverged();
+                    };
+                    field_vals.push(val);
+                }
+
+                // Store field CfgValues in the extra array
+                let (fields_start_cfg, fields_len_cfg) = self.cfg.push_extra(field_vals);
+
+                let value = self.emit(
+                    CfgInstData::EnumCreate {
+                        enum_id: *enum_id,
+                        variant_index: *variant_index,
+                        fields_start: fields_start_cfg,
+                        fields_len: fields_len_cfg,
+                    },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
             AirInstData::IntCast { value, from_ty } => {
                 // Lower the value to cast
                 let Some(val) = self.lower_value(*value) else {

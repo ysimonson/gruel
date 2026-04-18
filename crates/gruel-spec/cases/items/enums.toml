@@ -296,3 +296,95 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "requires preview feature"
+
+# =============================================================================
+# Enum Data Variant Construction (preview: enum_data_variants, Phase 2)
+# =============================================================================
+
+[[case]]
+name = "enum_data_variant_construct_basic"
+spec = ["6.3:14", "6.3:15"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let _x = IntOption::Some(42);
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_data_variant_construct_none"
+spec = ["6.3:14"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let _x = IntOption::None;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_data_variant_construct_and_match"
+spec = ["6.3:14"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let x = IntOption::Some(42);
+    match x {
+        IntOption::Some => 42,
+        IntOption::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_data_variant_wrong_arg_count_error"
+spec = ["6.3:14"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let _x = IntOption::Some(1, 2);
+    0
+}
+"""
+compile_fail = true
+error_contains = "expected 1 argument"
+
+[[case]]
+name = "enum_data_variant_type_mismatch_error"
+spec = ["6.3:14"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let _x = IntOption::Some(true);
+    0
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "enum_data_variant_construct_gate"
+spec = ["6.3:14"]
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let _x = IntOption::Some(42);
+    0
+}
+"""
+compile_fail = true
+error_contains = "requires preview feature"

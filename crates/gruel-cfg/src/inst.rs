@@ -433,10 +433,22 @@ pub enum CfgInstData {
     },
 
     // Enum operations
-    /// Create an enum variant (discriminant value)
+    /// Create an enum variant (discriminant value) for unit-only enums.
     EnumVariant {
         enum_id: EnumId,
         variant_index: u32,
+    },
+
+    /// Create a data enum variant with associated field values.
+    /// Used when the enum has at least one data variant.
+    /// Field values are stored in the Cfg's extra array.
+    EnumCreate {
+        enum_id: EnumId,
+        variant_index: u32,
+        /// Start index into Cfg's extra array for field CfgValues
+        fields_start: u32,
+        /// Number of field values
+        fields_len: u32,
     },
 
     // Type conversion operations
@@ -1256,6 +1268,22 @@ impl Cfg {
                 variant_index,
             } => {
                 write!(f, "enum_variant #{}::{}", enum_id.0, variant_index)
+            }
+            CfgInstData::EnumCreate {
+                enum_id,
+                variant_index,
+                fields_start,
+                fields_len,
+            } => {
+                let fields = self.get_extra(*fields_start, *fields_len);
+                let field_strs: Vec<String> = fields.iter().map(|v| format!("{}", v)).collect();
+                write!(
+                    f,
+                    "enum_create #{}::{}({})",
+                    enum_id.0,
+                    variant_index,
+                    field_strs.join(", ")
+                )
             }
             CfgInstData::IntCast { value, from_ty } => {
                 write!(f, "intcast {} from {}", value, from_ty.name())

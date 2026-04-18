@@ -291,7 +291,7 @@ Epic: TBD
   - Gate the entire data-variant path behind this preview feature
   - No codegen yet — just ensure C-style enums still compile
 
-- [ ] **Phase 2: Variant construction with data**
+- [x] **Phase 2: Variant construction with data**
   - Parser: parse `Enum::Variant(expr, ...)` as a variant construction call
   - RIR: `InstData::EnumVariantConstruct { type_name, variant, args: Vec<InstRef> }` (distinct from the existing unit `EnumVariant`)
   - AIR: new instruction `AirInstData::EnumCreate { enum_id, variant_index, fields: Vec<AirRef> }` (or extend existing)

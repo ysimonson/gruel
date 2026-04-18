@@ -114,3 +114,26 @@ type_list    = type { "," type } ;
 
 Variants without a parenthesized type list are *unit variants* and carry no data.
 Variants with a type list are *data variants* and carry one value per listed type.
+
+{{ rule(id="6.3:14", cat="normative") }}
+
+A data enum variant is constructed using the same path syntax as unit variants, but
+followed by a parenthesized, comma-separated list of field value expressions:
+
+```ebnf
+enum_variant_expr = IDENT "::" IDENT "(" [ expr { "," expr } ] ")" ;
+```
+
+The number of arguments **MUST** equal the number of field types declared for that variant.
+Each argument **MUST** match the corresponding declared field type.
+
+{{ rule(id="6.3:15", cat="example") }}
+
+```gruel
+enum IntOption { Some(i32), None }
+
+fn main() -> i32 {
+    let x = IntOption::Some(42);
+    0
+}
+```
