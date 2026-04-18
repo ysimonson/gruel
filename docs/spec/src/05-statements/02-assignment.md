@@ -96,6 +96,32 @@ fn main() -> i32 {
 }
 ```
 
+## Drop Semantics on Assignment
+
+{{ rule(id="5.2:14", cat="dynamic-semantics") }}
+
+When a mutable variable is reassigned, if the previous value has not been moved, the previous value is dropped before the new value is written.
+
+{{ rule(id="5.2:15", cat="dynamic-semantics") }}
+
+When a struct field or array element is assigned, the previous value at that location is dropped before the new value is written.
+
+{{ rule(id="5.2:16", cat="example") }}
+
+```gruel
+struct Data { value: i32 }
+
+drop fn Data(self) {
+    @dbg(self.value);
+}
+
+fn main() -> i32 {
+    let mut x = Data { value: 1 };
+    x = Data { value: 2 };  // Data { value: 1 } is dropped here, prints "1"
+    0
+}  // Data { value: 2 } is dropped here, prints "2"
+```
+
 ## Assignment is Not an Expression
 
 {{ rule(id="5.2:10", cat="legality-rule") }}

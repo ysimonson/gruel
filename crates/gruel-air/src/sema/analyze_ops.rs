@@ -1732,6 +1732,11 @@ impl<'a> Sema<'a> {
         // Analyze the value
         let value_result = self.analyze_inst(air, value, ctx)?;
 
+        // Determine if the slot had a live value before this assignment.
+        // If the variable is not in moved_vars, the slot contains a value that has
+        // not been moved away, so it needs to be dropped before the new value is written.
+        let had_live_value = !ctx.moved_vars.contains_key(&name);
+
         // Assignment to a mutable variable resets its move state.
         ctx.moved_vars.remove(&name);
 
@@ -1740,6 +1745,7 @@ impl<'a> Sema<'a> {
             data: AirInstData::Store {
                 slot,
                 value: value_result.air_ref,
+                had_live_value,
             },
             ty: Type::UNIT,
             span,

@@ -200,6 +200,94 @@ fn main() -> i32 {
 exit_code = 45
 
 # =============================================================================
+# Drop Semantics on Assignment
+# =============================================================================
+
+[[case]]
+name = "drop_on_variable_reassignment"
+spec = ["5.2:14"]
+description = "Reassigning a variable drops the old value before writing the new one"
+source = """
+struct Counter { value: i32 }
+
+drop fn Counter(self) {
+    @dbg(self.value);
+}
+
+fn main() -> i32 {
+    let mut c = Counter { value: 1 };
+    c = Counter { value: 2 };
+    0
+}
+"""
+exit_code = 0
+stdout = "1\n2\n"
+
+[[case]]
+name = "drop_on_field_assignment"
+spec = ["5.2:15"]
+description = "Assigning to a struct field drops the old field value first"
+source = """
+struct Inner { value: i32 }
+struct Outer { inner: Inner }
+
+drop fn Inner(self) {
+    @dbg(self.value);
+}
+
+fn main() -> i32 {
+    let mut o = Outer { inner: Inner { value: 1 } };
+    o.inner = Inner { value: 2 };
+    0
+}
+"""
+exit_code = 0
+stdout = "1\n2\n"
+
+[[case]]
+name = "drop_on_array_element_assignment"
+spec = ["5.2:15"]
+description = "Assigning to an array element drops the old element value first"
+source = """
+struct Data { value: i32 }
+
+drop fn Data(self) {
+    @dbg(self.value);
+}
+
+fn main() -> i32 {
+    let mut arr: [Data; 2] = [Data { value: 10 }, Data { value: 20 }];
+    arr[0] = Data { value: 99 };
+    0
+}
+"""
+exit_code = 0
+stdout = "10\n99\n20\n"
+
+[[case]]
+name = "no_drop_on_reassignment_after_move"
+spec = ["5.2:14"]
+description = "Reassigning after a move does not drop the already-moved value"
+source = """
+struct Counter { value: i32 }
+
+drop fn Counter(self) {
+    @dbg(self.value);
+}
+
+fn consume(c: Counter) -> i32 { c.value }
+
+fn main() -> i32 {
+    let mut c = Counter { value: 1 };
+    consume(c);
+    c = Counter { value: 2 };
+    0
+}
+"""
+exit_code = 0
+stdout = "2\n"
+
+# =============================================================================
 # Assignment Is Statement, Not Expression
 # =============================================================================
 

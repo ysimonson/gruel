@@ -5345,6 +5345,9 @@ impl<'a> Sema<'a> {
                 data: AirInstData::Store {
                     slot,
                     value: call_ref,
+                    // The old string value was consumed by the mutation function call
+                    // (passed as an argument). No drop is needed here.
+                    had_live_value: false,
                 },
                 ty: Type::UNIT,
                 span,

@@ -759,6 +759,10 @@ pub enum AirInstData {
         slot: u32,
         /// Value to store
         value: AirRef,
+        /// True if the slot held a live (non-moved) value before this assignment.
+        /// When true, the old value must be dropped before the new value is written.
+        /// When false (value was moved or this is initial allocation), no drop is needed.
+        had_live_value: bool,
     },
 
     /// Store value to a parameter (for inout params)
@@ -1079,7 +1083,7 @@ impl fmt::Display for Air {
                 AirInstData::Continue => writeln!(f, "continue")?,
                 AirInstData::Alloc { slot, init } => writeln!(f, "alloc ${} = {}", slot, init)?,
                 AirInstData::Load { slot } => writeln!(f, "load ${}", slot)?,
-                AirInstData::Store { slot, value } => writeln!(f, "store ${} = {}", slot, value)?,
+                AirInstData::Store { slot, value, .. } => writeln!(f, "store ${} = {}", slot, value)?,
                 AirInstData::ParamStore { param_slot, value } => {
                     writeln!(f, "param_store %{} = {}", param_slot, value)?
                 }

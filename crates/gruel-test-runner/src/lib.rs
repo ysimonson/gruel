@@ -161,7 +161,7 @@ pub struct Case {
     #[serde(default)]
     pub spec: Vec<String>,
     /// Expected stdout output after successful execution (e.g., from @dbg calls)
-    #[serde(default)]
+    #[serde(default, alias = "stdout")]
     pub expected_stdout: Option<String>,
     /// Preview feature required to run this test (e.g., "mutable_strings").
     /// Tests with this field are compiled with `--preview <feature>` and

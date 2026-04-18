@@ -635,10 +635,20 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
-            AirInstData::Store { slot, value } => {
+            AirInstData::Store { slot, value, had_live_value } => {
                 let Some(val) = self.lower_value(*value) else {
                     return Self::diverged();
                 };
+                let value_ty = self.air.get(*value).ty;
+                // Drop the old value if it was live (not moved) and the type has a destructor.
+                if *had_live_value && self.type_needs_drop(value_ty) {
+                    let old_val = self.emit(
+                        CfgInstData::Load { slot: *slot },
+                        value_ty,
+                        span,
+                    );
+                    self.emit(CfgInstData::Drop { value: old_val }, Type::UNIT, span);
+                }
                 self.emit(
                     CfgInstData::Store {
                         slot: *slot,
@@ -1704,14 +1714,26 @@ impl<'a> CfgBuilder<'a> {
             }
 
             AirInstData::PlaceWrite { place, value } => {
-                // Lower the value first
+                // Lower the value first (RHS evaluated before drop of old value)
                 let Some(val) = self.lower_value(*value) else {
                     return Self::diverged();
                 };
+                let value_ty = self.air.get(*value).ty;
                 // Convert AIR place to CFG place
                 let Some(cfg_place) = self.lower_air_place(*place) else {
                     return Self::diverged();
                 };
+                // Drop the old value at this place if the type has a destructor.
+                // For PlaceWrite (field/index assignment), the base is always live
+                // (you cannot write to a field of a moved value), so no liveness check needed.
+                if self.type_needs_drop(value_ty) {
+                    let old_val = self.emit(
+                        CfgInstData::PlaceRead { place: cfg_place },
+                        value_ty,
+                        span,
+                    );
+                    self.emit(CfgInstData::Drop { value: old_val }, Type::UNIT, span);
+                }
                 self.emit(
                     CfgInstData::PlaceWrite {
                         place: cfg_place,
