@@ -1872,6 +1872,84 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 Some(result)
             }
 
+            CfgInstData::EnumPayloadGet {
+                base,
+                variant_index,
+                field_index,
+            } => {
+                // Extract field `field_index` from variant `variant_index`'s payload.
+                // The base value is { discriminant, [N x i8] }.
+                // We alloca it, GEP to the payload byte array, GEP to the field offset, load.
+                let base_val = self.get_value(base);
+                let scrutinee_inst = self.cfg.get_inst(base);
+                let enum_ty = scrutinee_inst.ty;
+                let TypeKind::Enum(enum_id) = enum_ty.kind() else {
+                    panic!("EnumPayloadGet: base is not an enum type");
+                };
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let variant_def = &enum_def.variants[variant_index as usize];
+                let field_types = &variant_def.fields;
+
+                // Compute byte offset of the target field within the payload.
+                let byte_offset: u64 = field_types[..field_index as usize]
+                    .iter()
+                    .map(|f| crate::types::type_byte_size(*f, self.type_pool))
+                    .sum();
+
+                let field_ty_gruel = field_types[field_index as usize];
+                let field_llvm_ty = match gruel_type_to_llvm(field_ty_gruel, self.ctx, self.type_pool) {
+                    Some(t) => t,
+                    None => return Ok(()), // zero-sized field
+                };
+
+                // Get the LLVM struct type for the enum tagged union.
+                let enum_llvm_ty = gruel_type_to_llvm(enum_ty, self.ctx, self.type_pool)
+                    .expect("data enum must have LLVM type")
+                    .into_struct_type();
+
+                // Alloca the base value to get a pointer.
+                let slot = self.build_entry_alloca(enum_llvm_ty.into(), "enum_payload_slot");
+                self.builder.build_store(slot, base_val).unwrap();
+
+                // GEP to field 1 of the struct (the payload byte array).
+                let payload_ptr = self
+                    .builder
+                    .build_struct_gep(enum_llvm_ty, slot, 1, "payload_ptr")
+                    .expect("build_struct_gep failed");
+
+                // GEP into the payload byte array at the field's byte offset.
+                let max_payload: u64 = enum_def
+                    .variants
+                    .iter()
+                    .map(|v| v.fields.iter().map(|f| crate::types::type_byte_size(*f, self.type_pool)).sum::<u64>())
+                    .max()
+                    .unwrap_or(0);
+                let byte_arr_ty = self.ctx.i8_type().array_type(max_payload as u32);
+                let zero = self.ctx.i64_type().const_zero();
+                let offset_const = self.ctx.i64_type().const_int(byte_offset, false);
+                let field_ptr = unsafe {
+                    self.builder
+                        .build_gep(
+                            byte_arr_ty,
+                            payload_ptr,
+                            &[zero, offset_const],
+                            "field_ptr",
+                        )
+                        .expect("build_gep failed")
+                };
+
+                // Load the field value with alignment 1 (unaligned; payload is a byte array).
+                let load = self
+                    .builder
+                    .build_load(field_llvm_ty, field_ptr, "field_val")
+                    .unwrap();
+                load.as_instruction_value()
+                    .unwrap()
+                    .set_alignment(1)
+                    .unwrap();
+                Some(load)
+            }
+
             CfgInstData::StructInit {
                 struct_id,
                 fields_start,

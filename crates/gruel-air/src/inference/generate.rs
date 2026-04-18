@@ -911,9 +911,61 @@ impl<'a> ConstraintGenerator<'a> {
                         pattern.span(),
                     ));
 
+                    // For DataVariant patterns, add bound variables to scope before
+                    // generating body constraints, so VarRef lookups resolve correctly.
+                    let bindings_to_remove = if let gruel_rir::RirPattern::DataVariant {
+                        type_name,
+                        variant,
+                        bindings,
+                        ..
+                    } = pattern
+                    {
+                        let mut added_bindings = Vec::new();
+                        if let Some(&enum_ty) = self.enums.get(type_name)
+                            && let Some(enum_id) = enum_ty.as_enum()
+                        {
+                            let enum_def = self.type_pool.enum_def(enum_id);
+                            let variant_name = self.interner.resolve(variant);
+                            if let Some(variant_idx) = enum_def.find_variant(variant_name) {
+                                let field_types = &enum_def.variants[variant_idx].fields;
+                                for (i, binding) in bindings.iter().enumerate() {
+                                    if !binding.is_wildcard {
+                                        if let Some(name) = binding.name {
+                                            let field_ty = if i < field_types.len() {
+                                                InferType::Concrete(field_types[i])
+                                            } else {
+                                                InferType::Concrete(Type::ERROR)
+                                            };
+                                            let old = ctx.locals.insert(
+                                                name,
+                                                LocalVarInfo {
+                                                    ty: field_ty,
+                                                    is_mut: binding.is_mut,
+                                                    span: pattern.span(),
+                                                },
+                                            );
+                                            added_bindings.push((name, old));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        added_bindings
+                    } else {
+                        Vec::new()
+                    };
+
                     // Generate body and collect its type
                     let body_info = self.generate(*body, ctx);
                     arm_types.push(body_info);
+
+                    // Remove DataVariant bindings from scope after body generation
+                    for (name, old_val) in bindings_to_remove {
+                        match old_val {
+                            Some(prev) => { ctx.locals.insert(name, prev); }
+                            None => { ctx.locals.remove(&name); }
+                        }
+                    }
                 }
 
                 // Handle Never type coercion:
@@ -1256,7 +1308,8 @@ impl<'a> ConstraintGenerator<'a> {
             }
             gruel_rir::RirPattern::Int(_, _) => InferType::IntLiteral,
             gruel_rir::RirPattern::Bool(_, _) => InferType::Concrete(Type::BOOL),
-            gruel_rir::RirPattern::Path { type_name, .. } => {
+            gruel_rir::RirPattern::Path { type_name, .. }
+            | gruel_rir::RirPattern::DataVariant { type_name, .. } => {
                 if let Some(&enum_ty) = self.enums.get(type_name) {
                     InferType::Concrete(enum_ty)
                 } else {

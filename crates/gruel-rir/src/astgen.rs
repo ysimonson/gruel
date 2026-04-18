@@ -8,7 +8,7 @@ use lasso::{Spur, ThreadedRodeo};
 /// Known type intrinsics that take a type argument rather than an expression.
 /// These intrinsics operate on types at compile time (e.g., @size_of(i32)).
 const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of"];
-use gruel_parser::ast::{ConstDecl, DestructureBinding, DropFn};
+use gruel_parser::ast::{ConstDecl, DestructureBinding, DropFn, PatternBinding};
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
     Function, IntrinsicArg, Item, LetPattern, Method, ParamMode, Pattern, Statement, StructDecl,
@@ -17,7 +17,7 @@ use gruel_parser::{
 
 use crate::inst::{
     FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDestructureField,
-    RirDirective, RirParam, RirParamMode, RirPattern,
+    RirDirective, RirParam, RirParamMode, RirPattern, RirPatternBinding,
 };
 
 /// Generates RIR from an AST.
@@ -804,6 +804,37 @@ impl<'a> AstGen<'a> {
                     type_name: path.type_name.name, // Already a Spur
                     variant: path.variant.name,     // Already a Spur
                     span: path.span,
+                }
+            }
+            Pattern::DataVariant {
+                base,
+                type_name,
+                variant,
+                bindings,
+                span,
+            } => {
+                let module = base.as_ref().map(|b| self.gen_expr(b));
+                let rir_bindings = bindings
+                    .iter()
+                    .map(|b| match b {
+                        PatternBinding::Wildcard(_) => RirPatternBinding {
+                            is_wildcard: true,
+                            is_mut: false,
+                            name: None,
+                        },
+                        PatternBinding::Ident { is_mut, name } => RirPatternBinding {
+                            is_wildcard: false,
+                            is_mut: *is_mut,
+                            name: Some(name.name),
+                        },
+                    })
+                    .collect();
+                RirPattern::DataVariant {
+                    module,
+                    type_name: type_name.name,
+                    variant: variant.name,
+                    bindings: rir_bindings,
+                    span: *span,
                 }
             }
         }

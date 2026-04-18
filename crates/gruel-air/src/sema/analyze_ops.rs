@@ -842,6 +842,9 @@ impl<'a> Sema<'a> {
                     RirPattern::Bool(b, _) => b.to_string(),
                     RirPattern::Path {
                         type_name, variant, ..
+                    }
+                    | RirPattern::DataVariant {
+                        type_name, variant, ..
                     } => {
                         format!(
                             "{}::{}",
@@ -975,13 +978,207 @@ impl<'a> Sema<'a> {
                     covered_variants.insert(variant_index as u32);
                     pattern_enum_id = Some(enum_id);
                 }
+                RirPattern::DataVariant {
+                    module,
+                    type_name,
+                    variant,
+                    bindings,
+                    ..
+                } => {
+                    // Gate behind preview feature
+                    self.require_preview(
+                        gruel_error::PreviewFeature::EnumDataVariants,
+                        "enum data variant pattern binding",
+                        pattern_span,
+                    )?;
+
+                    // Look up the enum type
+                    let enum_id = if let Some(module_ref) = module {
+                        self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
+                    } else {
+                        *self.enums.get(type_name).ok_or_compile_error(
+                            ErrorKind::UnknownEnumType(
+                                self.interner.resolve(type_name).to_string(),
+                            ),
+                            pattern_span,
+                        )?
+                    };
+                    let enum_def = self.type_pool.enum_def(enum_id);
+
+                    // Check that scrutinee type matches
+                    if scrutinee_type != Type::new_enum(enum_id) {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: scrutinee_type.name().to_string(),
+                                found: enum_def.name.clone(),
+                            },
+                            pattern_span,
+                        ));
+                    }
+
+                    // Find the variant
+                    let variant_name = self.interner.resolve(variant);
+                    let variant_index = enum_def.find_variant(variant_name).ok_or_compile_error(
+                        ErrorKind::UnknownVariant {
+                            enum_name: enum_def.name.clone(),
+                            variant_name: variant_name.to_string(),
+                        },
+                        pattern_span,
+                    )?;
+
+                    // Check binding count matches field count
+                    let field_count = enum_def.variants[variant_index].fields.len();
+                    if bindings.len() != field_count {
+                        return Err(CompileError::new(
+                            ErrorKind::WrongArgumentCount {
+                                expected: field_count,
+                                found: bindings.len(),
+                            },
+                            pattern_span,
+                        ));
+                    }
+
+                    covered_variants.insert(variant_index as u32);
+                    pattern_enum_id = Some(enum_id);
+                }
             }
 
             // Each arm gets its own scope
             ctx.push_scope();
 
-            // Analyze arm body
-            let body_result = self.analyze_inst(air, *body, ctx)?;
+            // For DataVariant patterns, emit field extractions into the arm scope
+            // before analyzing the body. Named bindings become local variables.
+            let body_result = if let RirPattern::DataVariant {
+                type_name,
+                variant,
+                bindings,
+                module,
+                ..
+            } = pattern
+            {
+                let enum_id = if let Some(module_ref) = module {
+                    self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
+                } else {
+                    *self.enums.get(type_name).unwrap()
+                };
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let variant_name = self.interner.resolve(variant);
+                let variant_index = enum_def.find_variant(variant_name).unwrap() as u32;
+                let field_types: Vec<Type> =
+                    enum_def.variants[variant_index as usize].fields.clone();
+
+                let mut storage_lives = Vec::new();
+                let mut allocs = Vec::new();
+
+                for (field_index, binding) in bindings.iter().enumerate() {
+                    let field_ty = field_types[field_index];
+
+                    // Extract field value from enum payload
+                    let field_val = air.add_inst(AirInst {
+                        data: AirInstData::EnumPayloadGet {
+                            base: scrutinee_result.air_ref,
+                            variant_index,
+                            field_index: field_index as u32,
+                        },
+                        ty: field_ty,
+                        span: pattern_span,
+                    });
+
+                    // Allocate a slot for this binding
+                    let slot = ctx.next_slot;
+                    ctx.next_slot += 1;
+
+                    let storage_live = air.add_inst(AirInst {
+                        data: AirInstData::StorageLive { slot },
+                        ty: field_ty,
+                        span: pattern_span,
+                    });
+                    storage_lives.push(storage_live);
+
+                    let alloc = air.add_inst(AirInst {
+                        data: AirInstData::Alloc {
+                            slot,
+                            init: field_val,
+                        },
+                        ty: Type::UNIT,
+                        span: pattern_span,
+                    });
+                    allocs.push(alloc);
+
+                    // Register named bindings in the arm scope
+                    if !binding.is_wildcard {
+                        if let Some(name_spur) = binding.name {
+                            ctx.insert_local(
+                                name_spur,
+                                LocalVar {
+                                    slot,
+                                    ty: field_ty,
+                                    is_mut: binding.is_mut,
+                                    span: pattern_span,
+                                    allow_unused: false,
+                                },
+                            );
+                        }
+                    }
+                }
+
+                // Analyze the arm body (can reference the bound variables)
+                let inner_result = self.analyze_inst(air, *body, ctx)?;
+                let body_type = inner_result.ty;
+
+                // Wrap storage_lives + allocs + body in a Block
+                let unit = air.add_inst(AirInst {
+                    data: AirInstData::UnitConst,
+                    ty: Type::UNIT,
+                    span: pattern_span,
+                });
+                let allocs_start =
+                    air.add_extra(&allocs.iter().map(|r: &AirRef| r.as_u32()).collect::<Vec<_>>());
+                let inner_block = air.add_inst(AirInst {
+                    data: AirInstData::Block {
+                        stmts_start: allocs_start,
+                        stmts_len: allocs.len() as u32,
+                        value: unit,
+                    },
+                    ty: Type::UNIT,
+                    span: pattern_span,
+                });
+
+                let sl_start = air.add_extra(
+                    &storage_lives
+                        .iter()
+                        .map(|r: &AirRef| r.as_u32())
+                        .collect::<Vec<_>>(),
+                );
+                let setup_block = air.add_inst(AirInst {
+                    data: AirInstData::Block {
+                        stmts_start: sl_start,
+                        stmts_len: storage_lives.len() as u32,
+                        value: inner_block,
+                    },
+                    ty: Type::UNIT,
+                    span: pattern_span,
+                });
+
+                // The actual body ref is the setup_block followed by the user body.
+                // We wrap them together as: block { stmts: [setup_block], value: inner_result }
+                let stmts_start = air.add_extra(&[setup_block.as_u32()]);
+                let combined = air.add_inst(AirInst {
+                    data: AirInstData::Block {
+                        stmts_start,
+                        stmts_len: 1,
+                        value: inner_result.air_ref,
+                    },
+                    ty: body_type,
+                    span: pattern_span,
+                });
+
+                AnalysisResult::new(combined, body_type)
+            } else {
+                // Non-DataVariant: analyze body normally
+                self.analyze_inst(air, *body, ctx)?
+            };
+
             let body_type = body_result.ty;
 
             ctx.pop_scope();
@@ -1019,6 +1216,44 @@ impl<'a> Sema<'a> {
                     variant,
                     ..
                 } => {
+                    let type_name_str = self.interner.resolve(type_name).to_string();
+                    let enum_id = if let Some(module_ref) = module {
+                        self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
+                    } else {
+                        *self.enums.get(type_name).ok_or_else(|| {
+                            CompileError::new(
+                                ErrorKind::InternalError(format!(
+                                    "enum type '{}' not found during pattern conversion",
+                                    type_name_str
+                                )),
+                                pattern_span,
+                            )
+                        })?
+                    };
+                    let enum_def = self.type_pool.enum_def(enum_id);
+                    let variant_name = self.interner.resolve(variant);
+                    let variant_index = enum_def.find_variant(variant_name).ok_or_else(|| {
+                        CompileError::new(
+                            ErrorKind::InternalError(format!(
+                                "enum variant '{}::{}' not found during pattern conversion",
+                                type_name_str, variant_name
+                            )),
+                            pattern_span,
+                        )
+                    })?;
+                    AirPattern::EnumVariant {
+                        enum_id,
+                        variant_index: variant_index as u32,
+                    }
+                }
+                RirPattern::DataVariant {
+                    module,
+                    type_name,
+                    variant,
+                    ..
+                } => {
+                    // DataVariant uses the same discriminant-based switch as Path.
+                    // The field extractions are already embedded in body_result.air_ref.
                     let type_name_str = self.interner.resolve(type_name).to_string();
                     let enum_id = if let Some(module_ref) = module {
                         self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?

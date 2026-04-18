@@ -120,6 +120,30 @@ pub enum RirPattern {
         /// Span of the pattern
         span: Span,
     },
+    /// Data variant pattern with field bindings (e.g., `Option::Some(x)`)
+    DataVariant {
+        /// Optional module reference for qualified paths
+        module: Option<InstRef>,
+        /// The enum type name
+        type_name: Spur,
+        /// The variant name
+        variant: Spur,
+        /// Bindings for each field
+        bindings: Vec<RirPatternBinding>,
+        /// Span of the pattern
+        span: Span,
+    },
+}
+
+/// A binding in a data variant pattern.
+#[derive(Debug, Clone)]
+pub struct RirPatternBinding {
+    /// Whether this is a wildcard binding (`_`)
+    pub is_wildcard: bool,
+    /// Whether this is a mutable binding (only meaningful if not wildcard)
+    pub is_mut: bool,
+    /// The binding name (None for wildcard bindings)
+    pub name: Option<Spur>,
 }
 
 impl RirPattern {
@@ -130,6 +154,7 @@ impl RirPattern {
             RirPattern::Int(_, span) => *span,
             RirPattern::Bool(_, span) => *span,
             RirPattern::Path { span, .. } => *span,
+            RirPattern::DataVariant { span, .. } => *span,
         }
     }
 }
@@ -160,6 +185,9 @@ pub enum PatternKind {
     /// Path pattern: [kind, span_start, span_len, module, type_name, variant]
     /// module is u32::MAX for None, otherwise an InstRef
     Path = 3,
+    /// Data variant pattern: [kind, span_start, span_len, module, type_name, variant, body, bindings_len, (flags, name)...]
+    /// Each binding is 2 u32s: flags (bit0=is_wildcard, bit1=is_mut), name (Spur, u32::MAX if wildcard)
+    DataVariant = 4,
 }
 
 /// Size of each pattern kind in the extra array (including body InstRef)
@@ -167,6 +195,7 @@ const PATTERN_WILDCARD_SIZE: u32 = 4; // kind, span_start, span_len, body
 const PATTERN_INT_SIZE: u32 = 6; // kind, span_start, span_len, value_lo, value_hi, body
 const PATTERN_BOOL_SIZE: u32 = 5; // kind, span_start, span_len, value, body
 const PATTERN_PATH_SIZE: u32 = 7; // kind, span_start, span_len, module, type_name, variant, body
+// DataVariant size: 8 + 2 * bindings_len (variable)
 
 /// Stored representation of a destructure field in the extra array.
 /// Layout: [field_name: u32, binding_name: u32 (0 = shorthand), is_wildcard: u32, is_mut: u32]
@@ -566,6 +595,30 @@ impl Rir {
                     self.extra.push(variant.into_usize() as u32);
                     self.extra.push(body.as_u32());
                 }
+                RirPattern::DataVariant {
+                    module,
+                    type_name,
+                    variant,
+                    bindings,
+                    span,
+                } => {
+                    self.extra.push(PatternKind::DataVariant as u32);
+                    self.extra.push(span.start());
+                    self.extra.push(span.len());
+                    self.extra.push(module.map_or(u32::MAX, |r| r.as_u32()));
+                    self.extra.push(type_name.into_usize() as u32);
+                    self.extra.push(variant.into_usize() as u32);
+                    self.extra.push(body.as_u32());
+                    self.extra.push(bindings.len() as u32);
+                    for binding in bindings {
+                        let flags = if binding.is_wildcard { 1u32 } else { 0 }
+                            | if binding.is_mut { 2 } else { 0 };
+                        self.extra.push(flags);
+                        self.extra.push(
+                            binding.name.map_or(u32::MAX, |s| s.into_usize() as u32),
+                        );
+                    }
+                }
             }
         }
         (start, arms.len() as u32)
@@ -631,6 +684,45 @@ impl Rir {
                         body,
                     ));
                     pos += PATTERN_PATH_SIZE as usize;
+                }
+                k if k == PatternKind::DataVariant as u32 => {
+                    let span_start = self.extra[pos + 1];
+                    let span_len = self.extra[pos + 2];
+                    let span = Span::new(span_start, span_start + span_len);
+                    let module_raw = self.extra[pos + 3];
+                    let module = if module_raw == u32::MAX {
+                        None
+                    } else {
+                        Some(InstRef::from_raw(module_raw))
+                    };
+                    let type_name = Spur::try_from_usize(self.extra[pos + 4] as usize).unwrap();
+                    let variant = Spur::try_from_usize(self.extra[pos + 5] as usize).unwrap();
+                    let body = InstRef::from_raw(self.extra[pos + 6]);
+                    let bindings_len = self.extra[pos + 7] as usize;
+                    let mut bindings = Vec::with_capacity(bindings_len);
+                    for i in 0..bindings_len {
+                        let flags = self.extra[pos + 8 + i * 2];
+                        let name_raw = self.extra[pos + 9 + i * 2];
+                        let is_wildcard = flags & 1 != 0;
+                        let is_mut = flags & 2 != 0;
+                        let name = if name_raw == u32::MAX {
+                            None
+                        } else {
+                            Some(Spur::try_from_usize(name_raw as usize).unwrap())
+                        };
+                        bindings.push(RirPatternBinding { is_wildcard, is_mut, name });
+                    }
+                    arms.push((
+                        RirPattern::DataVariant {
+                            module,
+                            type_name,
+                            variant,
+                            bindings,
+                            span,
+                        },
+                        body,
+                    ));
+                    pos += 8 + 2 * bindings_len;
                 }
                 _ => panic!("Unknown pattern kind: {}", kind),
             }
@@ -1931,6 +2023,44 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     prefix,
                     self.interner.resolve(type_name),
                     self.interner.resolve(variant)
+                )
+            }
+            RirPattern::DataVariant {
+                module,
+                type_name,
+                variant,
+                bindings,
+                ..
+            } => {
+                let prefix = if let Some(module_ref) = module {
+                    format!("%{}..", module_ref.as_u32())
+                } else {
+                    String::new()
+                };
+                let binding_strs: Vec<String> = bindings
+                    .iter()
+                    .map(|b| {
+                        if b.is_wildcard {
+                            "_".to_string()
+                        } else {
+                            let name = b
+                                .name
+                                .map(|s| self.interner.resolve(&s).to_string())
+                                .unwrap_or_else(|| "_".to_string());
+                            if b.is_mut {
+                                format!("mut {}", name)
+                            } else {
+                                name
+                            }
+                        }
+                    })
+                    .collect();
+                format!(
+                    "{}{}::{}({})",
+                    prefix,
+                    self.interner.resolve(type_name),
+                    self.interner.resolve(variant),
+                    binding_strs.join(", ")
                 )
             }
         }

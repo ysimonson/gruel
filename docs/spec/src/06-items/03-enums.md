@@ -137,3 +137,37 @@ fn main() -> i32 {
     0
 }
 ```
+
+## Data Variant Pattern Matching
+
+{{ rule(id="6.3:16", cat="normative") }}
+
+A data enum variant can be matched with a binding pattern in a `match` expression.
+The binding pattern uses the same path syntax as the variant expression, followed
+by a parenthesized list of bindings — one per field:
+
+```ebnf
+data_variant_pattern = IDENT "::" IDENT "(" [ binding { "," binding } ] ")" ;
+binding = "_" | [ "mut" ] IDENT ;
+```
+
+Each named binding is introduced as a local variable in the match arm body,
+with the type of the corresponding variant field.
+Wildcard bindings (`_`) discard the field value.
+
+{{ rule(id="6.3:17", cat="normative") }}
+
+The number of bindings **MUST** equal the number of fields declared for that variant.
+
+{{ rule(id="6.3:18", cat="example") }}
+
+```gruel
+enum IntOption { Some(i32), None }
+
+fn get(opt: IntOption) -> i32 {
+    match opt {
+        IntOption::Some(v) => v,
+        IntOption::None => 0,
+    }
+}
+```

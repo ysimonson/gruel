@@ -978,6 +978,17 @@ pub enum AirInstData {
         fields_len: u32,
     },
 
+    /// Extract a field value from an enum variant's payload.
+    /// Used in data variant match arm bodies to bind pattern variables.
+    EnumPayloadGet {
+        /// The enum value to extract from
+        base: AirRef,
+        /// The variant index (must match the enclosing arm's pattern)
+        variant_index: u32,
+        /// The field index within the variant
+        field_index: u32,
+    },
+
     // Type conversion operations
     /// Integer cast: convert between integer types with runtime range check.
     /// Panics if the value cannot be represented in the target type.
@@ -1317,6 +1328,17 @@ impl fmt::Display for Air {
                         enum_id.0,
                         variant_index,
                         field_strs.join(", ")
+                    )?;
+                }
+                AirInstData::EnumPayloadGet {
+                    base,
+                    variant_index,
+                    field_index,
+                } => {
+                    writeln!(
+                        f,
+                        "enum_payload_get {} variant={} field={}",
+                        base, variant_index, field_index
                     )?;
                 }
                 AirInstData::IntCast { value, from_ty } => {

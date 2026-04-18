@@ -574,6 +574,27 @@ pub enum Pattern {
     Bool(BoolLit),
     /// Path pattern (e.g., `Color::Red` for enum variant)
     Path(PathPattern),
+    /// Data variant pattern with bindings (e.g., `Option::Some(x)`)
+    DataVariant {
+        /// Optional module prefix
+        base: Option<Box<Expr>>,
+        /// Enum type name
+        type_name: Ident,
+        /// Variant name
+        variant: Ident,
+        /// Bindings for each field
+        bindings: Vec<PatternBinding>,
+        span: Span,
+    },
+}
+
+/// A binding in a data variant pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatternBinding {
+    /// Wildcard binding (`_`)
+    Wildcard(Span),
+    /// Named binding (`x` or `mut x`)
+    Ident { is_mut: bool, name: Ident },
 }
 
 /// A negative integer literal pattern.
@@ -606,6 +627,7 @@ impl Pattern {
             Pattern::NegInt(lit) => lit.span,
             Pattern::Bool(lit) => lit.span,
             Pattern::Path(path) => path.span,
+            Pattern::DataVariant { span, .. } => *span,
         }
     }
 }

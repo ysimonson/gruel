@@ -451,6 +451,17 @@ pub enum CfgInstData {
         fields_len: u32,
     },
 
+    /// Extract a field value from an enum variant's payload.
+    /// Used in data variant match arm bodies to bind pattern variables.
+    EnumPayloadGet {
+        /// The enum value to extract from
+        base: CfgValue,
+        /// The variant index (must match the arm's pattern)
+        variant_index: u32,
+        /// The field index within the variant
+        field_index: u32,
+    },
+
     // Type conversion operations
     /// Integer cast: convert between integer types with runtime range check.
     /// Panics if the value cannot be represented in the target type.
@@ -1283,6 +1294,17 @@ impl Cfg {
                     enum_id.0,
                     variant_index,
                     field_strs.join(", ")
+                )
+            }
+            CfgInstData::EnumPayloadGet {
+                base,
+                variant_index,
+                field_index,
+            } => {
+                write!(
+                    f,
+                    "enum_payload_get {} variant={} field={}",
+                    base, variant_index, field_index
                 )
             }
             CfgInstData::IntCast { value, from_ty } => {

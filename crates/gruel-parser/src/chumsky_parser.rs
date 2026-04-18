@@ -10,9 +10,9 @@ use crate::ast::{
     DirectiveArg, Directives, DropFn, EnumDecl, EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit,
     Function, Ident, IfExpr, IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern,
     LetStatement, LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param,
-    ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, ReturnExpr, SelfExpr, SelfParam,
-    Statement, StringLit, StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp,
-    UnitLit, Visibility, WhileExpr,
+    ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, PatternBinding, ReturnExpr, SelfExpr,
+    SelfParam, Statement, StringLit, StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr,
+    UnaryOp, UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -754,20 +754,48 @@ where
         }),
     };
 
-    // Simple path pattern: Enum::Variant (no module prefix)
+    // Parser for a single binding in a data variant pattern: `_`, `x`, or `mut x`
+    let pattern_binding = choice((
+        just(TokenKind::Underscore)
+            .map_with(|_, e| PatternBinding::Wildcard(span_from_extra(e))),
+        just(TokenKind::Mut)
+            .ignore_then(ident_parser())
+            .map(|name| PatternBinding::Ident { is_mut: true, name }),
+        ident_parser().map(|name| PatternBinding::Ident { is_mut: false, name }),
+    ));
+
+    // Parser for optional `(binding, binding, ...)` suffix on a path pattern
+    let bindings_suffix = pattern_binding
+        .separated_by(just(TokenKind::Comma))
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen));
+
+    // Simple path pattern: Enum::Variant or Enum::Variant(binding, ...)
     let simple_path_pat = ident_parser()
         .then_ignore(just(TokenKind::ColonColon))
         .then(ident_parser())
+        .then(bindings_suffix.clone().or_not())
         // Negative lookahead to ensure we're not at the start of a qualified path
         // (i.e., ensure there's no `.` before this pattern that would make it
         // part of a module.Enum::Variant pattern)
-        .map_with(|(type_name, variant), e| {
-            Pattern::Path(PathPattern {
-                base: None,
-                type_name,
-                variant,
-                span: span_from_extra(e),
-            })
+        .map_with(|((type_name, variant), bindings_opt), e| {
+            if let Some(bindings) = bindings_opt {
+                Pattern::DataVariant {
+                    base: None,
+                    type_name,
+                    variant,
+                    bindings,
+                    span: span_from_extra(e),
+                }
+            } else {
+                Pattern::Path(PathPattern {
+                    base: None,
+                    type_name,
+                    variant,
+                    span: span_from_extra(e),
+                })
+            }
         });
 
     // Qualified path pattern: module.Enum::Variant or module.sub.Enum::Variant
@@ -783,7 +811,8 @@ where
         )
         .then_ignore(just(TokenKind::ColonColon))
         .then(ident_parser())
-        .map_with(|((first, mut rest), variant), e| {
+        .then(bindings_suffix.or_not())
+        .map_with(|(((first, mut rest), variant), bindings_opt), e| {
             // first is the first module identifier
             // rest contains all subsequent identifiers up to and including type_name
             // The last element of rest is the type_name
@@ -807,12 +836,22 @@ where
                 base
             };
 
-            Pattern::Path(PathPattern {
-                base: Some(Box::new(base_expr)),
-                type_name,
-                variant,
-                span: span_from_extra(e),
-            })
+            if let Some(bindings) = bindings_opt {
+                Pattern::DataVariant {
+                    base: Some(Box::new(base_expr)),
+                    type_name,
+                    variant,
+                    bindings,
+                    span: span_from_extra(e),
+                }
+            } else {
+                Pattern::Path(PathPattern {
+                    base: Some(Box::new(base_expr)),
+                    type_name,
+                    variant,
+                    span: span_from_extra(e),
+                })
+            }
         });
 
     choice((

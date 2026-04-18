@@ -299,7 +299,7 @@ Epic: TBD
   - Unit-only enums retain integer representation
   - Add preview-gated spec tests: `Option::Some(42)` compiles but `exit_code` tests are not yet meaningful (no way to extract the value)
 
-- [ ] **Phase 3: Match patterns with binding**
+- [x] **Phase 3: Match patterns with binding**
   - Parser: parse `Enum::Variant(x, y)` and `Enum::Variant(mut z, _)` as patterns
   - RIR: `RirPattern::DataVariant { type_name, variant, bindings }` where each binding is `Option<(bool, Spur)>` (is_mut, name)
   - Sema: resolve pattern bindings; add bound variables to arm body scope; type-check each binding against the variant's field type

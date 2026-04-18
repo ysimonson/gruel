@@ -1853,6 +1853,30 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
+            AirInstData::EnumPayloadGet {
+                base,
+                variant_index,
+                field_index,
+            } => {
+                let Some(base_val) = self.lower_value(*base) else {
+                    return Self::diverged();
+                };
+                let value = self.emit(
+                    CfgInstData::EnumPayloadGet {
+                        base: base_val,
+                        variant_index: *variant_index,
+                        field_index: *field_index,
+                    },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
             AirInstData::IntCast { value, from_ty } => {
                 // Lower the value to cast
                 let Some(val) = self.lower_value(*value) else {

@@ -388,3 +388,109 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "requires preview feature"
+
+# =============================================================================
+# Data Variant Pattern Matching (preview: enum_data_variants, Phase 3)
+# =============================================================================
+
+[[case]]
+name = "enum_data_variant_pattern_basic"
+spec = ["6.3:16", "6.3:17", "6.3:18"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let x = IntOption::Some(42);
+    match x {
+        IntOption::Some(v) => v,
+        IntOption::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_data_variant_pattern_none_arm"
+spec = ["6.3:16", "6.3:18"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let x = IntOption::None;
+    match x {
+        IntOption::Some(v) => v,
+        IntOption::None => 99,
+    }
+}
+"""
+exit_code = 99
+
+[[case]]
+name = "enum_data_variant_pattern_multi_field"
+spec = ["6.3:16", "6.3:17"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum Pair { Data(i32, i32), Empty }
+fn main() -> i32 {
+    let x = Pair::Data(10, 32);
+    match x {
+        Pair::Data(a, b) => a + b,
+        Pair::Empty => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_data_variant_pattern_wildcard_binding"
+spec = ["6.3:16"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum Pair { Data(i32, i32), Empty }
+fn main() -> i32 {
+    let x = Pair::Data(42, 99);
+    match x {
+        Pair::Data(v, _) => v,
+        Pair::Empty => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_data_variant_pattern_wrong_count_error"
+spec = ["6.3:17"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let x = IntOption::Some(42);
+    match x {
+        IntOption::Some(a, b) => a + b,
+        IntOption::None => 0,
+    }
+}
+"""
+compile_fail = true
+error_contains = "expected 1 argument"
+
+[[case]]
+name = "enum_data_variant_pattern_gate"
+spec = ["6.3:16"]
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let x = IntOption::Some(42);
+    match x {
+        IntOption::Some(v) => v,
+        IntOption::None => 0,
+    }
+}
+"""
+compile_fail = true
+error_contains = "requires preview feature"
