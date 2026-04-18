@@ -142,6 +142,16 @@ fn main() {
         return;
     }
 
+    // Build the gruel compiler before running tests
+    let status = std::process::Command::new("cargo")
+        .args(["build", "-p", "gruel"])
+        .status()
+        .expect("failed to run cargo build");
+    if !status.success() {
+        eprintln!("Error: cargo build -p gruel failed");
+        std::process::exit(1);
+    }
+
     // Find the gruel binary
     let gruel_binary = find_gruel_binary();
 
