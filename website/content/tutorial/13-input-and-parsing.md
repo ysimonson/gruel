@@ -1,6 +1,6 @@
 +++
 title = "Input and Parsing"
-weight = 13
+weight = 14
 template = "tutorial/page.html"
 +++
 

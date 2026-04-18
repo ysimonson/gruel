@@ -1,6 +1,6 @@
 +++
 title = "Comptime and Generics"
-weight = 14
+weight = 15
 template = "tutorial/page.html"
 +++
 

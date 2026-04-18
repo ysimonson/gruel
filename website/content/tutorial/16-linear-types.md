@@ -1,6 +1,6 @@
 +++
 title = "Linear Types"
-weight = 16
+weight = 17
 template = "tutorial/page.html"
 +++
 
@@ -51,7 +51,8 @@ A linear value is consumed by any of these:
 
 - Passing it to a function (by value)
 - Returning it from a function
-- Accessing a field (field access counts as a move)
+- Accessing a field (the linear value is consumed by the access)
+- Destructuring it with a `let` binding (all fields are transferred)
 
 ```gruel
 linear struct Ticket { id: i32 }

@@ -133,29 +133,7 @@ fn main() -> i32 {
 
 ## Custom Destructors
 
-If your struct holds a resource that needs cleanup, define a destructor with `drop fn`:
-
-```gruel
-struct Buffer {
-    data: String,
-    size: i32,
-}
-
-drop fn Buffer(self) {
-    // self.data is dropped automatically (String has its own destructor)
-    // Any additional cleanup logic goes here
-    @dbg(0);  // just to show this runs
-}
-
-fn main() -> i32 {
-    let buf = Buffer { data: "some data", size: 9 };
-    // When buf goes out of scope, the destructor runs,
-    // which then drops data (freeing the String's memory)
-    0
-}
-```
-
-The destructor runs automatically at the end of the scope. Drop order is reverse declaration order: the last declared variable is dropped first.
+If your struct holds a String or other resource that needs cleanup, you can define a custom destructor with `drop fn`. See [Destructors](/tutorial/destructors/) for details on drop semantics, drop order, and how to write your own.
 
 ## Pre-allocating Capacity
 

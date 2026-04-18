@@ -130,6 +130,8 @@ fn main() -> i32 {
 }
 ```
 
+You cannot move a non-copy field out of a struct individually. To access individual fields as independent values, use destructuring (see below).
+
 If you want a type to be copyable instead, mark it with `@copy`:
 
 ```gruel
@@ -147,6 +149,79 @@ fn main() -> i32 {
 
     @dbg(p1.x);  // prints: 1 (unchanged)
     @dbg(p2.x);  // prints: 100
+
+    0
+}
+```
+
+## Struct Destructuring
+
+To break a struct into its individual fields, use a destructuring let binding. This consumes the struct and binds each field to a new variable:
+
+```gruel
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    let Point { x, y } = p;  // p is consumed
+
+    x + y  // 42
+}
+```
+
+All fields must be listed. Use `_` to discard a field you don't need:
+
+```gruel
+struct Pair {
+    first: i32,
+    second: i32,
+}
+
+fn main() -> i32 {
+    let p = Pair { first: 42, second: 0 };
+    let Pair { first, second: _ } = p;  // discard second
+
+    first
+}
+```
+
+You can rename fields during destructuring with `field: new_name`:
+
+```gruel
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p = Point { x: 3, y: 4 };
+    let Point { x: px, y: py } = p;
+
+    px * px + py * py  // 25
+}
+```
+
+Destructuring is especially important for structs with non-copy fields, since you can't move individual fields out directly:
+
+```gruel
+struct Names {
+    first: String,
+    last: String,
+}
+
+fn greet(name: String) {
+    @dbg(name);
+}
+
+fn main() -> i32 {
+    let n = Names { first: "Ada", last: "Lovelace" };
+    // greet(n.first);  // ERROR: cannot move field `first` out of `Names`
+
+    let Names { first, last: _ } = n;  // destructure instead
+    greet(first);  // OK
 
     0
 }
