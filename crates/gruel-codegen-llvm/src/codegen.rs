@@ -5,8 +5,9 @@
 use std::collections::HashMap;
 
 use gruel_air::{StructId, Type, TypeInternPool, TypeKind};
-use inkwell::values::BasicMetadataValueEnum;
-use gruel_cfg::{drop_names, BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator};
+use gruel_cfg::{
+    BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator, drop_names,
+};
 use gruel_error::{CompileError, CompileResult, ErrorKind};
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
@@ -20,6 +21,7 @@ use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target as LlvmTarget, TargetMachine,
 };
 use inkwell::types::BasicType;
+use inkwell::values::BasicMetadataValueEnum;
 use inkwell::values::{
     AggregateValueEnum, BasicValue, BasicValueEnum, FunctionValue, GlobalValue, PhiValue,
 };
@@ -31,7 +33,6 @@ use crate::types::{gruel_type_to_llvm, gruel_type_to_llvm_param};
 fn llvm_error(msg: impl Into<String>) -> CompileError {
     CompileError::without_span(ErrorKind::InternalError(msg.into()))
 }
-
 
 /// Build an LLVM module from a set of function CFGs.
 ///

@@ -89,7 +89,6 @@ impl PlaceTrace {
             .map(|p| p.result_type)
             .unwrap_or(self.base_type)
     }
-
 }
 
 impl<'a> Sema<'a> {
@@ -1449,11 +1448,8 @@ impl<'a> Sema<'a> {
         }
 
         // Validate: all struct fields are mentioned
-        let struct_field_names: Vec<String> = struct_def
-            .fields
-            .iter()
-            .map(|f| f.name.clone())
-            .collect();
+        let struct_field_names: Vec<String> =
+            struct_def.fields.iter().map(|f| f.name.clone()).collect();
         for struct_field_name in &struct_field_names {
             if !seen_fields.contains(struct_field_name) {
                 return Err(CompileError::new(
@@ -1571,9 +1567,7 @@ impl<'a> Sema<'a> {
             ty: Type::UNIT,
             span,
         });
-        let allocs_start = air.add_extra(
-            &allocs.iter().map(|r| r.as_u32()).collect::<Vec<_>>(),
-        );
+        let allocs_start = air.add_extra(&allocs.iter().map(|r| r.as_u32()).collect::<Vec<_>>());
         let inner_block = air.add_inst(AirInst {
             data: AirInstData::Block {
                 stmts_start: allocs_start,
@@ -1585,9 +1579,7 @@ impl<'a> Sema<'a> {
         });
 
         // Outer block: stmts are all StorageLive (wrapper block, no scope push)
-        let sl_start = air.add_extra(
-            &storage_lives.iter().map(|r| r.as_u32()).collect::<Vec<_>>(),
-        );
+        let sl_start = air.add_extra(&storage_lives.iter().map(|r| r.as_u32()).collect::<Vec<_>>());
         let outer_block = air.add_inst(AirInst {
             data: AirInstData::Block {
                 stmts_start: sl_start,

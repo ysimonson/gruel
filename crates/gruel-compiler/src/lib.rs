@@ -871,8 +871,7 @@ pub fn compile_frontend_from_ast_with_options(
     };
 
     // Synthesize drop glue functions for structs that need them
-    let drop_glue_functions =
-        drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
+    let drop_glue_functions = drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
 
     // Combine user functions with synthesized drop glue functions
     // Filter out comptime-only functions (those returning `type`) as they don't generate runtime code
@@ -891,16 +890,7 @@ pub fn compile_frontend_from_ast_with_options(
         let results: Vec<(FunctionWithCfg, Vec<CompileWarning>)> = all_functions
             .into_par_iter()
             .map(|func| {
-                let cfg_output = CfgBuilder::build(
-                    &func.air,
-                    func.num_locals,
-                    func.num_param_slots,
-                    &func.name,
-                    &sema_output.type_pool,
-                    func.param_modes.clone(),
-                    func.param_slot_types.clone(),
-                    func.is_destructor,
-                );
+                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool);
 
                 (
                     FunctionWithCfg {
@@ -992,8 +982,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
     };
 
     // Synthesize drop glue functions for structs that need them
-    let drop_glue_functions =
-        drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
+    let drop_glue_functions = drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
 
     // Combine user functions with synthesized drop glue functions
     // Filter out comptime-only functions (those returning `type`) as they don't generate runtime code
@@ -1012,16 +1001,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
         let results: Vec<(FunctionWithCfg, Vec<CompileWarning>)> = all_functions
             .into_par_iter()
             .map(|func| {
-                let cfg_output = CfgBuilder::build(
-                    &func.air,
-                    func.num_locals,
-                    func.num_param_slots,
-                    &func.name,
-                    &sema_output.type_pool,
-                    func.param_modes.clone(),
-                    func.param_slot_types.clone(),
-                    func.is_destructor,
-                );
+                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool);
 
                 (
                     FunctionWithCfg {

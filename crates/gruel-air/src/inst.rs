@@ -1083,7 +1083,9 @@ impl fmt::Display for Air {
                 AirInstData::Continue => writeln!(f, "continue")?,
                 AirInstData::Alloc { slot, init } => writeln!(f, "alloc ${} = {}", slot, init)?,
                 AirInstData::Load { slot } => writeln!(f, "load ${}", slot)?,
-                AirInstData::Store { slot, value, .. } => writeln!(f, "store ${} = {}", slot, value)?,
+                AirInstData::Store { slot, value, .. } => {
+                    writeln!(f, "store ${} = {}", slot, value)?
+                }
                 AirInstData::ParamStore { param_slot, value } => {
                     writeln!(f, "param_store %{} = {}", param_slot, value)?
                 }

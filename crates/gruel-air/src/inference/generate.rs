@@ -462,28 +462,26 @@ impl<'a> ConstraintGenerator<'a> {
                 self.generate(*init, ctx);
 
                 // Look up the struct type to get field types
-                if let Some(&struct_ty) = self.structs.get(type_name) {
-                    if let Some(struct_id) = struct_ty.as_struct() {
-                        let struct_def = self.type_pool.struct_def(struct_id);
-                        let rir_fields =
-                            self.rir.get_destructure_fields(*fields_start, *fields_len);
-                        for field in &rir_fields {
-                            if field.is_wildcard {
-                                continue;
-                            }
-                            let field_name = self.interner.resolve(&field.field_name);
-                            if let Some((_, struct_field)) = struct_def.find_field(field_name) {
-                                let binding_name =
-                                    field.binding_name.unwrap_or(field.field_name);
-                                ctx.insert_local(
-                                    binding_name,
-                                    LocalVarInfo {
-                                        ty: InferType::Concrete(struct_field.ty),
-                                        is_mut: field.is_mut,
-                                        span,
-                                    },
-                                );
-                            }
+                if let Some(&struct_ty) = self.structs.get(type_name)
+                    && let Some(struct_id) = struct_ty.as_struct()
+                {
+                    let struct_def = self.type_pool.struct_def(struct_id);
+                    let rir_fields = self.rir.get_destructure_fields(*fields_start, *fields_len);
+                    for field in &rir_fields {
+                        if field.is_wildcard {
+                            continue;
+                        }
+                        let field_name = self.interner.resolve(&field.field_name);
+                        if let Some((_, struct_field)) = struct_def.find_field(field_name) {
+                            let binding_name = field.binding_name.unwrap_or(field.field_name);
+                            ctx.insert_local(
+                                binding_name,
+                                LocalVarInfo {
+                                    ty: InferType::Concrete(struct_field.ty),
+                                    is_mut: field.is_mut,
+                                    span,
+                                },
+                            );
                         }
                     }
                 }

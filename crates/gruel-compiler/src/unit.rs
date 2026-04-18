@@ -437,16 +437,7 @@ impl<'src> CompilationUnit<'src> {
         let results: Vec<(FunctionWithCfg, Vec<CompileWarning>)> = functions
             .into_par_iter()
             .map(|func| {
-                let cfg_output = CfgBuilder::build(
-                    &func.air,
-                    func.num_locals,
-                    func.num_param_slots,
-                    &func.name,
-                    type_pool,
-                    func.param_modes.clone(),
-                    func.param_slot_types.clone(),
-                    func.is_destructor,
-                );
+                let cfg_output = CfgBuilder::build(&func, type_pool);
 
                 (
                     FunctionWithCfg {

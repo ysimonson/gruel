@@ -848,8 +848,7 @@ impl<'a> AstGen<'a> {
                                 DestructureBinding::Renamed(ident) => Some(ident.name),
                                 DestructureBinding::Wildcard(_) => None,
                             };
-                            let is_wildcard =
-                                matches!(&f.binding, DestructureBinding::Wildcard(_));
+                            let is_wildcard = matches!(&f.binding, DestructureBinding::Wildcard(_));
                             RirDestructureField {
                                 field_name: f.field_name.name,
                                 binding_name,
@@ -858,8 +857,7 @@ impl<'a> AstGen<'a> {
                             }
                         })
                         .collect();
-                    let (fields_start, fields_len) =
-                        self.rir.add_destructure_fields(&rir_fields);
+                    let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
                     let init = self.gen_expr(&let_stmt.init);
                     self.rir.add_inst(Inst {
                         data: InstData::StructDestructure {
@@ -873,8 +871,7 @@ impl<'a> AstGen<'a> {
                 }
                 pattern => {
                     let directives = self.convert_directives(&let_stmt.directives);
-                    let (directives_start, directives_len) =
-                        self.rir.add_directives(&directives);
+                    let (directives_start, directives_len) = self.rir.add_directives(&directives);
                     let name = match pattern {
                         LetPattern::Ident(ident) => Some(ident.name),
                         LetPattern::Wildcard(_) => None,

@@ -1330,7 +1330,9 @@ fn fmt_stmt(f: &mut fmt::Formatter<'_>, stmt: &Statement, level: usize) -> fmt::
             match &let_stmt.pattern {
                 LetPattern::Ident(ident) => write!(f, " sym:{}", ident.name.into_usize())?,
                 LetPattern::Wildcard(_) => write!(f, " _")?,
-                LetPattern::Struct { type_name, fields, .. } => {
+                LetPattern::Struct {
+                    type_name, fields, ..
+                } => {
                     write!(f, " sym:{} {{", type_name.name.into_usize())?;
                     for (i, field) in fields.iter().enumerate() {
                         if i > 0 {

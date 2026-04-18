@@ -34,7 +34,6 @@ fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
     drop_names::type_needs_drop(ty, type_pool)
 }
 
-
 /// Synthesize drop glue functions for all structs and arrays that need them.
 ///
 /// Returns a list of synthesized functions that should be added to the compilation.
@@ -318,4 +317,3 @@ fn create_array_drop_glue_function(
         is_destructor: true,
     }
 }
-

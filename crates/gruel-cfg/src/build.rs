@@ -5,7 +5,7 @@
 
 use gruel_air::{
     Air, AirArgMode, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef, AirProjection, AirRef,
-    Type, TypeInternPool,
+    AnalyzedFunction, Type, TypeInternPool,
 };
 use gruel_error::{CompileWarning, WarningKind};
 
@@ -98,28 +98,19 @@ impl<'a> CfgBuilder<'a> {
     ///
     /// The `type_pool` provides struct/enum/array definitions needed for queries like
     /// `type_needs_drop`.
-    pub fn build(
-        air: &'a Air,
-        num_locals: u32,
-        num_params: u32,
-        fn_name: &str,
-        type_pool: &'a TypeInternPool,
-        param_modes: Vec<bool>,
-        param_slot_types: Vec<Type>,
-        is_destructor: bool,
-    ) -> CfgOutput {
+    pub fn build(func: &'a AnalyzedFunction, type_pool: &'a TypeInternPool) -> CfgOutput {
         // Determine which by-value parameters need dropping at function exit.
         // Inout/borrow parameters are not owned by the callee and must not be dropped.
         // Destructors must NOT auto-drop their self parameter — the destructor IS the
         // drop logic for that value.
-        let live_params: Vec<LiveParam> = if is_destructor {
+        let live_params: Vec<LiveParam> = if func.is_destructor {
             Vec::new()
         } else {
-            param_slot_types
+            func.param_slot_types
                 .iter()
                 .enumerate()
                 .filter(|(i, ty)| {
-                    !param_modes.get(*i).copied().unwrap_or(false)
+                    !func.param_modes.get(*i).copied().unwrap_or(false)
                         && crate::drop_names::type_needs_drop(**ty, type_pool)
                 })
                 .map(|(i, ty)| LiveParam {
@@ -130,19 +121,19 @@ impl<'a> CfgBuilder<'a> {
         };
 
         let mut builder = CfgBuilder {
-            air,
+            air: &func.air,
             cfg: Cfg::new(
-                air.return_type(),
-                num_locals,
-                num_params,
-                fn_name.to_string(),
-                param_modes,
-                param_slot_types,
+                func.air.return_type(),
+                func.num_locals,
+                func.num_param_slots,
+                func.name.to_string(),
+                func.param_modes.clone(),
+                func.param_slot_types.clone(),
             ),
             type_pool,
             current_block: BlockId(0),
             loop_stack: Vec::new(),
-            value_cache: vec![None; air.len()],
+            value_cache: vec![None; func.air.len()],
             warnings: Vec::new(),
             scope_stack: vec![Vec::new()], // Start with one scope for the function body
             live_params,
@@ -153,8 +144,8 @@ impl<'a> CfgBuilder<'a> {
         builder.cfg.entry = builder.current_block;
 
         // Find the root (should be Ret as last instruction)
-        if !air.is_empty() {
-            let root = AirRef::from_raw((air.len() - 1) as u32);
+        if !func.air.is_empty() {
+            let root = AirRef::from_raw((func.air.len() - 1) as u32);
             builder.lower_inst(root);
         }
 
@@ -676,18 +667,18 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
-            AirInstData::Store { slot, value, had_live_value } => {
+            AirInstData::Store {
+                slot,
+                value,
+                had_live_value,
+            } => {
                 let Some(val) = self.lower_value(*value) else {
                     return Self::diverged();
                 };
                 let value_ty = self.air.get(*value).ty;
                 // Drop the old value if it was live (not moved) and the type has a destructor.
                 if *had_live_value && self.type_needs_drop(value_ty) {
-                    let old_val = self.emit(
-                        CfgInstData::Load { slot: *slot },
-                        value_ty,
-                        span,
-                    );
+                    let old_val = self.emit(CfgInstData::Load { slot: *slot }, value_ty, span);
                     self.emit(CfgInstData::Drop { value: old_val }, Type::UNIT, span);
                 }
                 // If the old value was not live (reassignment after move), the slot was
@@ -1605,8 +1596,7 @@ impl<'a> CfgBuilder<'a> {
                 elems_start,
                 elems_len,
             } => {
-                let elems: Vec<AirRef> =
-                    self.air.get_air_refs(*elems_start, *elems_len).collect();
+                let elems: Vec<AirRef> = self.air.get_air_refs(*elems_start, *elems_len).collect();
                 let mut element_vals = Vec::new();
                 for &elem in &elems {
                     let Some(val) = self.lower_value(elem) else {
@@ -1789,11 +1779,8 @@ impl<'a> CfgBuilder<'a> {
                 // For PlaceWrite (field/index assignment), the base is always live
                 // (you cannot write to a field of a moved value), so no liveness check needed.
                 if self.type_needs_drop(value_ty) {
-                    let old_val = self.emit(
-                        CfgInstData::PlaceRead { place: cfg_place },
-                        value_ty,
-                        span,
-                    );
+                    let old_val =
+                        self.emit(CfgInstData::PlaceRead { place: cfg_place }, value_ty, span);
                     self.emit(CfgInstData::Drop { value: old_val }, Type::UNIT, span);
                 }
                 self.emit(
@@ -1956,10 +1943,8 @@ impl<'a> CfgBuilder<'a> {
             .scope_stack
             .iter()
             .any(|scope| scope.iter().any(|ls| ls.slot == slot));
-        if !already_tracked {
-            if let Some(scope) = self.scope_stack.last_mut() {
-                scope.push(LiveSlot { slot, ty, span });
-            }
+        if !already_tracked && let Some(scope) = self.scope_stack.last_mut() {
+            scope.push(LiveSlot { slot, ty, span });
         }
     }
 
@@ -2243,17 +2228,7 @@ mod tests {
         let output = sema.analyze_all().unwrap();
 
         let func = &output.functions[0];
-        CfgBuilder::build(
-            &func.air,
-            func.num_locals,
-            func.num_param_slots,
-            &func.name,
-            &output.type_pool,
-            func.param_modes.clone(),
-            func.param_slot_types.clone(),
-            func.is_destructor,
-        )
-        .cfg
+        CfgBuilder::build(func, &output.type_pool).cfg
     }
 
     #[test]

@@ -103,4 +103,3 @@ pub fn gruel_type_to_llvm_param<'ctx>(
 ) -> Option<BasicMetadataTypeEnum<'ctx>> {
     gruel_type_to_llvm(ty, ctx, type_pool).map(Into::into)
 }
-
