@@ -180,3 +180,13 @@ When a data enum value goes out of scope without being matched, the compiler
 emits a discriminant check and drops the fields of the active variant.
 Only variants whose fields require drop are given a non-trivial drop body;
 unit variants and variants with trivially-droppable fields are no-ops.
+
+## Data Variant Layout
+
+{{ rule(id="6.3:20", cat="normative") }}
+
+A data enum is represented in memory as a tagged union: a discriminant integer
+followed by a byte array large enough to hold the payload of the largest variant.
+Fields within a variant are stored sequentially at consecutive byte offsets
+(packed layout, no inter-field padding). Field accesses use unaligned loads and
+stores, which are correct on all supported targets.

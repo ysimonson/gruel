@@ -542,3 +542,68 @@ fn main() -> i32 {
 """
 exit_code = 0
 stdout = ""
+
+# =============================================================================
+# Layout Correctness (preview: enum_data_variants, Phase 5)
+# =============================================================================
+
+[[case]]
+name = "enum_data_variant_i64_field"
+spec = ["6.3:20"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum BigOption { Some(i64), None }
+fn get(x: BigOption) -> i32 {
+    match x {
+        BigOption::Some(v) => @intCast(v),
+        BigOption::None => 0,
+    }
+}
+fn main() -> i32 {
+    let v: i64 = 42;
+    get(BigOption::Some(v))
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_data_variant_mixed_i8_i32_fields"
+spec = ["6.3:20"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum Tagged { AB(i8, i32), C }
+fn get(x: Tagged) -> i32 {
+    match x {
+        Tagged::AB(a, b) => @intCast(a) + b,
+        Tagged::C => 0,
+    }
+}
+fn main() -> i32 {
+    let a: i8 = 1;
+    get(Tagged::AB(a, 41))
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_data_variant_i64_then_i8_offsets"
+spec = ["6.3:20"]
+preview = "enum_data_variants"
+preview_should_pass = true
+source = """
+enum Pair { Data(i64, i8), Empty }
+fn get(x: Pair) -> i32 {
+    match x {
+        Pair::Data(a, b) => @intCast(a) + @intCast(b),
+        Pair::Empty => 0,
+    }
+}
+fn main() -> i32 {
+    let a: i64 = 38;
+    let b: i8 = 4;
+    get(Pair::Data(a, b))
+}
+"""
+exit_code = 42

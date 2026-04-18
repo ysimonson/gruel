@@ -313,7 +313,7 @@ Epic: TBD
   - Update `gruel-cfg` drop logic: when dropping a value of an enum type that `has_data_variants()`, emit a `MatchDrop` sequence (or inline discriminant check + conditional field drops)
   - Add spec tests: non-copy data in enum variant is properly dropped at scope exit
 
-- [ ] **Phase 5: LLVM layout correctness and ABI**
+- [x] **Phase 5: LLVM layout correctness and ABI**
   - Verify that the `[N x i8]` payload is correctly sized and aligned for all field type combinations
   - Use LLVM `getelementptr` + appropriate pointer types for field access
   - Ensure that LLVM does not incorrectly alias the payload accesses (use `!noalias` if needed)
