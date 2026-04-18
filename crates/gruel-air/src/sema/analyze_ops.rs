@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
-    PreviewFeature, WarningKind,
+    WarningKind,
 };
 use gruel_rir::{InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern};
 use lasso::Spur;
@@ -55,8 +55,9 @@ pub(crate) struct ProjectionInfo {
     pub proj: AirProjection,
     /// The type resulting from this projection
     pub result_type: Type,
-    /// For field projections: the field name (for move checking)
+    /// For field projections: the field name (for error messages)
     /// For index projections: None
+    #[allow(dead_code)]
     pub field_name: Option<Spur>,
 }
 
@@ -89,26 +90,6 @@ impl PlaceTrace {
             .unwrap_or(self.base_type)
     }
 
-    /// Build the field path for move checking (list of field name symbols).
-    ///
-    /// Returns the field names in the projection chain. Index projections
-    /// break the field path (you can't partially move out of arrays), so
-    /// this returns field names from the last index projection to the end.
-    pub fn field_path(&self) -> Vec<Spur> {
-        // Find the last index projection (if any)
-        let start_from = self
-            .projections
-            .iter()
-            .rposition(|p| matches!(p.proj, AirProjection::Index { .. }))
-            .map(|i| i + 1)
-            .unwrap_or(0);
-
-        // Collect field names from that point to the end
-        self.projections[start_from..]
-            .iter()
-            .filter_map(|p| p.field_name)
-            .collect()
-    }
 }
 
 impl<'a> Sema<'a> {
@@ -1410,13 +1391,6 @@ impl<'a> Sema<'a> {
         let inst = self.rir.get(inst_ref);
         let span = inst.span;
 
-        // Struct destructuring requires the preview feature
-        self.require_preview(
-            PreviewFeature::Destructuring,
-            "struct destructuring",
-            span,
-        )?;
-
         let (type_name, fields_start, fields_len, init) = match inst.data {
             InstData::StructDestructure {
                 type_name,
@@ -2270,54 +2244,22 @@ impl<'a> Sema<'a> {
                     .or_default()
                     .mark_path_moved(&[], span);
             } else if !self.is_type_copy(field_type) {
-                // For non-linear types, check if accessing a non-Copy field
-                if self
-                    .preview_features
-                    .contains(&PreviewFeature::Destructuring)
-                {
-                    // ADR-0036: Ban partial field moves. Must destructure instead.
-                    let type_name = parent_type
-                        .as_struct()
-                        .map(|id| self.type_pool.struct_def(id).name.clone())
-                        .unwrap_or_else(|| parent_type.name().to_string());
-                    let field_name = self.interner.resolve(&field).to_string();
-                    return Err(CompileError::new(
-                        ErrorKind::CannotMoveField {
-                            type_name: type_name.clone(),
-                            field: field_name.clone(),
-                        },
-                        span,
-                    )
-                    .with_help(format!(
-                        "use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`"
-                    )));
-                }
-
-                let field_path = trace.field_path();
-
-                // Check if this field path is already moved (partial moves)
-                if let Some(state) = ctx.moved_vars.get(&trace.root_var)
-                    && let Some(moved_span) = state.is_path_moved(&field_path)
-                {
-                    let root_name = self.interner.resolve(&trace.root_var);
-                    let path_str = if field_path.is_empty() {
-                        root_name.to_string()
-                    } else {
-                        let field_names: Vec<_> = field_path
-                            .iter()
-                            .map(|s| self.interner.resolve(s).to_string())
-                            .collect();
-                        format!("{}.{}", root_name, field_names.join("."))
-                    };
-                    return Err(CompileError::new(ErrorKind::UseAfterMove(path_str), span)
-                        .with_label("value moved here", moved_span));
-                }
-
-                // Mark this field path as moved
-                ctx.moved_vars
-                    .entry(trace.root_var)
-                    .or_default()
-                    .mark_path_moved(&field_path, span);
+                // ADR-0036: Ban partial field moves. Must destructure instead.
+                let type_name = parent_type
+                    .as_struct()
+                    .map(|id| self.type_pool.struct_def(id).name.clone())
+                    .unwrap_or_else(|| parent_type.name().to_string());
+                let field_name = self.interner.resolve(&field).to_string();
+                return Err(CompileError::new(
+                    ErrorKind::CannotMoveField {
+                        type_name: type_name.clone(),
+                        field: field_name.clone(),
+                    },
+                    span,
+                )
+                .with_help(format!(
+                    "use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`"
+                )));
             }
 
             // Emit PlaceRead instruction

@@ -673,22 +673,26 @@ mod tests {
     }
 
     #[test]
-    fn test_partial_move_sibling_still_valid() {
-        // After moving one field, sibling fields should still be usable
-        // Note: Inner is non-copy, Outer is also non-copy (can't be @copy with non-copy field)
-        let output = compile_to_air(
+    fn test_partial_move_banned() {
+        // ADR-0036: Moving a non-copy field out of a struct is always an error.
+        // Users must destructure the entire struct instead.
+        let result = compile_to_air(
             "struct Inner { x: i32 }
              struct Outer { a: Inner, b: i32 }
              fn consume(i: Inner) -> i32 { i.x }
              fn main() -> i32 {
                  let o = Outer { a: Inner { x: 1 }, b: 2 };
-                 let x = consume(o.a);  // Move o.a
-                 o.b  // OK: o.b is still valid (it's Copy)
+                 let x = consume(o.a);  // Error: cannot move field
+                 o.b
              }",
-        )
-        .unwrap();
+        );
 
-        assert_eq!(output.functions[0].air.return_type(), Type::I32);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(matches!(
+            errors.iter().next().unwrap().kind,
+            ErrorKind::CannotMoveField { .. }
+        ));
     }
 
     #[test]

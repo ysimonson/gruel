@@ -1,12 +1,11 @@
 ---
 id: 0036
 title: Struct Destructuring and Partial Move Ban
-status: proposal
+status: implemented
 tags: [types, semantics, ownership, destructors]
-feature-flag: destructuring
 created: 2026-04-18
-accepted:
-implemented:
+accepted: 2026-04-18
+implemented: 2026-04-18
 spec-sections: ["5.1", "3.9"]
 superseded-by:
 ---
@@ -15,7 +14,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -215,7 +214,7 @@ Epic: gruel-wjha
 
 - [x] **Phase 4: Lower struct destructuring** — RIR and AIR lowering: decompose into field reads + local bindings. Handle `_` fields (immediate drop). Handle rename bindings. Remove struct temporary from scope tracking.
 
-- [ ] **Phase 5: Spec, tests, stabilization** — Write spec paragraphs for destructuring syntax and semantics. Full test coverage for all cases (happy path, errors, copy types, linear types, nested structs, wildcard drops). Run traceability. When stable, remove preview gate.
+- [x] **Phase 5: Spec, tests, stabilization** — Write spec paragraphs for destructuring syntax and semantics. Full test coverage for all cases (happy path, errors, copy types, linear types, nested structs, wildcard drops). Run traceability. When stable, remove preview gate.
 
 ## Consequences
 

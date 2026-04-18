@@ -685,8 +685,6 @@ error_contains = "use of moved value"
 [[case]]
 name = "cannot_move_non_copy_field"
 spec = ["3.8:22", "3.8:23"]
-preview = "destructuring"
-preview_should_pass = true
 description = "Moving a non-copy field out of a struct is a compile error"
 source = """
 struct Inner { x: i32 }
@@ -704,8 +702,6 @@ error_contains = "cannot move field"
 [[case]]
 name = "cannot_move_non_copy_field_in_call"
 spec = ["3.8:22"]
-preview = "destructuring"
-preview_should_pass = true
 description = "Passing a non-copy field as an argument is a move error"
 source = """
 struct Inner { x: i32 }
@@ -724,8 +720,6 @@ error_contains = "cannot move field"
 [[case]]
 name = "cannot_move_nested_non_copy_field"
 spec = ["3.8:22"]
-preview = "destructuring"
-preview_should_pass = true
 description = "Moving a nested non-copy field is also banned"
 source = """
 struct Inner { x: i32 }
@@ -761,8 +755,6 @@ exit_code = 4
 [[case]]
 name = "copy_field_access_with_non_copy_sibling"
 spec = ["3.8:28"]
-preview = "destructuring"
-preview_should_pass = true
 description = "Copy fields can be read even when sibling fields are non-copy"
 source = """
 struct Inner { x: i32 }
