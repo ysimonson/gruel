@@ -1186,7 +1186,9 @@ impl CacheStore {
         let result = if content.trim_end() == "ok" {
             Some(Ok(()))
         } else {
-            content.strip_prefix("err\n").map(|msg| Err(msg.to_string())) // None = corrupted entry, treat as miss
+            content
+                .strip_prefix("err\n")
+                .map(|msg| Err(msg.to_string())) // None = corrupted entry, treat as miss
         };
         if result.is_some() {
             self.hits.fetch_add(1, Ordering::Relaxed);
