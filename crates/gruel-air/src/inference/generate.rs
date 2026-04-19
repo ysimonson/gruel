@@ -1323,6 +1323,10 @@ impl<'a> ConstraintGenerator<'a> {
             // Anonymous struct type: a struct type used as a comptime value
             // This also has the ComptimeType type.
             InstData::AnonStructType { .. } => InferType::Concrete(Type::COMPTIME_TYPE),
+
+            // Anonymous enum type: an enum type used as a comptime value
+            // This also has the ComptimeType type.
+            InstData::AnonEnumType { .. } => InferType::Concrete(Type::COMPTIME_TYPE),
         };
 
         // Record the type for this expression

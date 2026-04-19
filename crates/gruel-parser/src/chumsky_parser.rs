@@ -1666,6 +1666,31 @@ where
             })
         });
 
+    // Anonymous enum type as expression: enum { Variant, Variant(T), ... fn method(...) { ... } ... }
+    // This enables comptime type construction like:
+    //   fn Option(comptime T: type) -> type { enum { Some(T), None } }
+    let anon_enum_method = anon_struct_method_parser(expr.clone());
+
+    let anon_enum_type_expr = just(TokenKind::Enum)
+        .ignore_then(just(TokenKind::LBrace))
+        .ignore_then(enum_variants_parser())
+        .then(
+            // Then parse methods (not comma-separated, each ends with })
+            anon_enum_method.repeated().collect::<Vec<_>>(),
+        )
+        .then_ignore(just(TokenKind::RBrace))
+        .map_with(|(variants, methods), e| {
+            let span = span_from_extra(e);
+            Expr::TypeLit(TypeLitExpr {
+                type_expr: TypeExpr::AnonymousEnum {
+                    variants,
+                    methods,
+                    span,
+                },
+                span,
+            })
+        });
+
     // Self type expression: Self { field: value } (struct literal with Self as type)
     // This enables constructing instances of anonymous struct types from methods
     let self_type_expr = just(TokenKind::SelfType)
@@ -1708,6 +1733,7 @@ where
     let primary_b: GruelParser<'src, I, Expr> = choice((
         array_lit.boxed(),
         anon_struct_type_expr.boxed(),
+        anon_enum_type_expr.boxed(),
         type_lit_expr.boxed(),
         call_and_access_parser(expr.clone()),
         paren_expr.boxed(),

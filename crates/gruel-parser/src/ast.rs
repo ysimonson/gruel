@@ -323,6 +323,16 @@ pub enum TypeExpr {
         methods: Vec<Method>,
         span: Span,
     },
+    /// Anonymous enum type: enum { Variant, Variant(T), Variant { field: T }, fn method(...) { ... }, ... }
+    /// Used in comptime type construction (e.g., `fn Option(comptime T: type) -> type { enum { Some(T), None } }`)
+    /// Methods can be included inside the enum definition (Zig-style).
+    AnonymousEnum {
+        /// Enum variants
+        variants: Vec<EnumVariant>,
+        /// Method definitions inside the anonymous enum
+        methods: Vec<Method>,
+        span: Span,
+    },
     /// Raw pointer to immutable data: ptr const T
     PointerConst { pointee: Box<TypeExpr>, span: Span },
     /// Raw pointer to mutable data: ptr mut T
@@ -349,6 +359,7 @@ impl TypeExpr {
             TypeExpr::Never(span) => *span,
             TypeExpr::Array { span, .. } => *span,
             TypeExpr::AnonymousStruct { span, .. } => *span,
+            TypeExpr::AnonymousEnum { span, .. } => *span,
             TypeExpr::PointerConst { span, .. } => *span,
             TypeExpr::PointerMut { span, .. } => *span,
         }
@@ -376,6 +387,24 @@ impl fmt::Display for TypeExpr {
                 }
                 for (i, method) in methods.iter().enumerate() {
                     if !fields.is_empty() || i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "fn sym:{}", method.name.name.into_usize())?;
+                }
+                write!(f, " }}")
+            }
+            TypeExpr::AnonymousEnum {
+                variants, methods, ..
+            } => {
+                write!(f, "enum {{ ")?;
+                for (i, variant) in variants.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "sym:{}", variant.name.name.into_usize())?;
+                }
+                for (i, method) in methods.iter().enumerate() {
+                    if !variants.is_empty() || i > 0 {
                         write!(f, ", ")?;
                     }
                     write!(f, "fn sym:{}", method.name.name.into_usize())?;

@@ -20,6 +20,7 @@
 //! - [`visibility`] - Module visibility checking
 //! - [`imports`] - Import resolution and const evaluation
 //! - [`anon_structs`] - Anonymous struct structural equality
+//! - [`anon_enums`] - Anonymous enum structural equality
 //! - [`sema_ctx_builder`] - SemaContext builder for parallel analysis
 //! - [`file_paths`] - File path management for multi-file compilation
 //!
@@ -31,6 +32,7 @@
 mod airgen;
 mod analysis;
 mod analyze_ops;
+mod anon_enums;
 mod anon_structs;
 mod builtins;
 mod context;
@@ -108,6 +110,10 @@ pub struct Sema<'a> {
     /// stored here, keyed by StructId. These values become part of type identity:
     /// FixedBuffer(42) and FixedBuffer(100) are different types.
     pub(crate) anon_struct_captured_values: HashMap<StructId, HashMap<Spur, ConstValue>>,
+    /// Method signatures for anonymous enums, used for structural equality comparison.
+    pub(crate) anon_enum_method_sigs: HashMap<EnumId, Vec<AnonMethodSig>>,
+    /// Captured comptime values for anonymous enums (same semantics as anonymous structs).
+    pub(crate) anon_enum_captured_values: HashMap<EnumId, HashMap<Spur, ConstValue>>,
     /// Loop iteration counter for the current comptime block evaluation.
     /// Reset to 0 at the start of each `evaluate_comptime_block` call.
     /// Incremented once per loop iteration; triggers an error when it exceeds
@@ -153,6 +159,8 @@ impl<'a> Sema<'a> {
             param_arena: ParamArena::new(),
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
+            anon_enum_method_sigs: HashMap::new(),
+            anon_enum_captured_values: HashMap::new(),
             comptime_steps_used: 0,
             comptime_return_value: None,
             comptime_call_depth: 0,

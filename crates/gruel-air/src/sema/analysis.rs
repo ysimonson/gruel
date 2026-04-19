@@ -37,7 +37,7 @@ use crate::inference::{
 use crate::inst::{
     Air, AirArgMode, AirCallArg, AirInst, AirInstData, AirPlaceBase, AirProjection, AirRef,
 };
-use crate::types::{StructField, StructId, Type, TypeKind};
+use crate::types::{EnumVariantDef, StructField, StructId, Type, TypeKind};
 
 /// Data describing a method body for analysis.
 struct MethodBodySpec<'a> {
@@ -129,8 +129,13 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     method_refs.insert(method_ref);
                 }
             }
-            // Also collect methods from anonymous structs (inside comptime functions like Vec<T>)
+            // Also collect methods from anonymous structs/enums (inside comptime functions)
             InstData::AnonStructType {
+                methods_start,
+                methods_len,
+                ..
+            }
+            | InstData::AnonEnumType {
                 methods_start,
                 methods_len,
                 ..
@@ -1921,6 +1926,67 @@ impl<'a> Sema<'a> {
 
                 let air_ref = air.add_inst(AirInst {
                     data: AirInstData::TypeConst(struct_ty),
+                    ty: Type::COMPTIME_TYPE,
+                    span: inst.span,
+                });
+                Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE))
+            }
+
+            // Anonymous enum type: an enum type constructed at comptime
+            // (e.g., `enum { Some(T), None, fn method(self) -> bool { ... } }` in a comptime function)
+            InstData::AnonEnumType {
+                variants_start,
+                variants_len,
+                methods_start,
+                methods_len,
+            } => {
+                self.require_preview(
+                    PreviewFeature::AnonEnumTypes,
+                    "anonymous enum types",
+                    inst.span,
+                )?;
+
+                // Get the variant declarations from the RIR
+                let variant_decls =
+                    self.rir.get_enum_variant_decls(*variants_start, *variants_len);
+
+                // Empty enums are not allowed
+                if variant_decls.is_empty() {
+                    return Err(CompileError::new(ErrorKind::EmptyAnonEnum, inst.span));
+                }
+
+                // Resolve each variant and build the enum variants
+                let mut enum_variants = Vec::with_capacity(variant_decls.len());
+                for (name_sym, field_type_syms, field_name_syms) in &variant_decls {
+                    let name_str = self.interner.resolve(name_sym).to_string();
+                    let mut fields = Vec::with_capacity(field_type_syms.len());
+                    for ty_sym in field_type_syms {
+                        let field_ty = self.resolve_type(*ty_sym, inst.span)?;
+                        fields.push(field_ty);
+                    }
+                    let field_names: Vec<String> = field_name_syms
+                        .iter()
+                        .map(|s| self.interner.resolve(s).to_string())
+                        .collect();
+                    enum_variants.push(EnumVariantDef {
+                        name: name_str,
+                        fields,
+                        field_names,
+                    });
+                }
+
+                // Extract method signatures for structural equality comparison
+                let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
+
+                // Check if an equivalent anonymous enum already exists (structural equality)
+                let (enum_ty, _is_new) = self.find_or_create_anon_enum(
+                    &enum_variants,
+                    &method_sigs,
+                    &HashMap::new(),
+                );
+
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::TypeConst(enum_ty),
                     ty: Type::COMPTIME_TYPE,
                     span: inst.span,
                 });
@@ -3794,6 +3860,46 @@ impl<'a> Sema<'a> {
                 Some(ConstValue::Type(struct_ty))
             }
 
+            // Anonymous enum type: evaluate to a comptime type value
+            InstData::AnonEnumType {
+                variants_start,
+                variants_len,
+                methods_start,
+                methods_len,
+            } => {
+                let variant_decls =
+                    self.rir.get_enum_variant_decls(*variants_start, *variants_len);
+
+                let mut enum_variants = Vec::with_capacity(variant_decls.len());
+                for (name_sym, field_type_syms, field_name_syms) in &variant_decls {
+                    let name_str = self.interner.resolve(name_sym).to_string();
+                    let mut fields = Vec::with_capacity(field_type_syms.len());
+                    for ty_sym in field_type_syms {
+                        let field_ty = self.resolve_type_for_comptime(*ty_sym)?;
+                        fields.push(field_ty);
+                    }
+                    let field_names: Vec<String> = field_name_syms
+                        .iter()
+                        .map(|s| self.interner.resolve(s).to_string())
+                        .collect();
+                    enum_variants.push(EnumVariantDef {
+                        name: name_str,
+                        fields,
+                        field_names,
+                    });
+                }
+
+                let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
+
+                let (enum_ty, _is_new) =
+                    self.find_or_create_anon_enum(&enum_variants, &method_sigs, &HashMap::new());
+
+                // TODO (Phase 3): Register methods for anonymous enums
+                let _ = methods_len;
+
+                Some(ConstValue::Type(enum_ty))
+            }
+
             // TypeConst: a type used as a value (e.g., `i32` in `identity(i32, 42)`)
             InstData::TypeConst { type_name } => {
                 let type_name_str = self.interner.resolve(type_name);
@@ -4189,6 +4295,47 @@ impl<'a> Sema<'a> {
                     }
                 }
                 Some(ConstValue::Type(struct_ty))
+            }
+
+            // Anonymous enum type: evaluate to a comptime type value with substitution
+            InstData::AnonEnumType {
+                variants_start,
+                variants_len,
+                methods_start,
+                methods_len,
+            } => {
+                let variant_decls =
+                    self.rir.get_enum_variant_decls(*variants_start, *variants_len);
+
+                let mut enum_variants = Vec::with_capacity(variant_decls.len());
+                for (name_sym, field_type_syms, field_name_syms) in &variant_decls {
+                    let name_str = self.interner.resolve(name_sym).to_string();
+                    let mut fields = Vec::with_capacity(field_type_syms.len());
+                    for ty_sym in field_type_syms {
+                        let field_ty =
+                            self.resolve_type_for_comptime_with_subst(*ty_sym, type_subst)?;
+                        fields.push(field_ty);
+                    }
+                    let field_names: Vec<String> = field_name_syms
+                        .iter()
+                        .map(|s| self.interner.resolve(s).to_string())
+                        .collect();
+                    enum_variants.push(EnumVariantDef {
+                        name: name_str,
+                        fields,
+                        field_names,
+                    });
+                }
+
+                let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
+
+                let (enum_ty, _is_new) =
+                    self.find_or_create_anon_enum(&enum_variants, &method_sigs, value_subst);
+
+                // TODO (Phase 3): Register methods for anonymous enums with captured values
+                let _ = methods_len;
+
+                Some(ConstValue::Type(enum_ty))
             }
 
             // TypeConst: a type used as a value
@@ -4828,7 +4975,9 @@ impl<'a> Sema<'a> {
             // ── Type-related: delegate to existing evaluator ──────────────────
             // AnonStructType and TypeConst need the full try_evaluate_const
             // logic (type registry lookups, structural equality, etc.).
-            InstData::AnonStructType { .. } | InstData::TypeConst { .. } => self
+            InstData::AnonStructType { .. }
+            | InstData::AnonEnumType { .. }
+            | InstData::TypeConst { .. } => self
                 .try_evaluate_const(inst_ref)
                 .ok_or_else(|| not_const(inst_span)),
 

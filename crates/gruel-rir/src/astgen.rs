@@ -104,6 +104,48 @@ impl<'a> AstGen<'a> {
                 s.push_str(" }");
                 self.interner.get_or_intern(&s)
             }
+            TypeExpr::AnonymousEnum { variants, .. } => {
+                // For anonymous enums, generate a canonical name representation
+                use gruel_parser::ast::EnumVariantKind;
+                let mut s = String::from("enum { ");
+                for (i, v) in variants.iter().enumerate() {
+                    if i > 0 {
+                        s.push_str(", ");
+                    }
+                    let name = self.interner.resolve(&v.name.name);
+                    s.push_str(name);
+                    match &v.kind {
+                        EnumVariantKind::Unit => {}
+                        EnumVariantKind::Tuple(types) => {
+                            s.push('(');
+                            for (j, ty) in types.iter().enumerate() {
+                                if j > 0 {
+                                    s.push_str(", ");
+                                }
+                                let ty_sym = self.intern_type(ty);
+                                s.push_str(self.interner.resolve(&ty_sym));
+                            }
+                            s.push(')');
+                        }
+                        EnumVariantKind::Struct(fields) => {
+                            s.push_str(" { ");
+                            for (j, f) in fields.iter().enumerate() {
+                                if j > 0 {
+                                    s.push_str(", ");
+                                }
+                                let fname = self.interner.resolve(&f.name.name);
+                                let ty_sym = self.intern_type(&f.ty);
+                                s.push_str(fname);
+                                s.push_str(": ");
+                                s.push_str(self.interner.resolve(&ty_sym));
+                            }
+                            s.push_str(" }");
+                        }
+                    }
+                }
+                s.push_str(" }");
+                self.interner.get_or_intern(&s)
+            }
             TypeExpr::PointerConst { pointee, .. } => {
                 // ptr const T
                 let pointee_sym = self.intern_type(pointee);
@@ -791,6 +833,50 @@ impl<'a> AstGen<'a> {
                             span: type_lit.span,
                         })
                     }
+                    TypeExpr::AnonymousEnum {
+                        variants, methods, ..
+                    } => {
+                        // Generate an anonymous enum type instruction with methods
+                        use gruel_parser::ast::EnumVariantKind;
+                        let variant_decls: Vec<(Spur, Vec<Spur>, Vec<Spur>)> = variants
+                            .iter()
+                            .map(|v| {
+                                let variant_name = v.name.name;
+                                match &v.kind {
+                                    EnumVariantKind::Unit => (variant_name, vec![], vec![]),
+                                    EnumVariantKind::Tuple(types) => {
+                                        let field_types: Vec<Spur> =
+                                            types.iter().map(|ty| self.intern_type(ty)).collect();
+                                        (variant_name, field_types, vec![])
+                                    }
+                                    EnumVariantKind::Struct(fields) => {
+                                        let field_types: Vec<Spur> =
+                                            fields.iter().map(|f| self.intern_type(&f.ty)).collect();
+                                        let field_names: Vec<Spur> =
+                                            fields.iter().map(|f| f.name.name).collect();
+                                        (variant_name, field_types, field_names)
+                                    }
+                                }
+                            })
+                            .collect();
+                        let (variants_start, variants_len) =
+                            self.rir.add_enum_variant_decls(&variant_decls);
+
+                        // Generate each method inside the anonymous enum
+                        let method_refs: Vec<InstRef> =
+                            methods.iter().map(|m| self.gen_method(m)).collect();
+                        let (methods_start, methods_len) = self.rir.add_inst_refs(&method_refs);
+
+                        self.rir.add_inst(Inst {
+                            data: InstData::AnonEnumType {
+                                variants_start,
+                                variants_len,
+                                methods_start,
+                                methods_len,
+                            },
+                            span: type_lit.span,
+                        })
+                    }
                     _ => {
                         // For named types, unit, never, arrays, and pointers, generate TypeConst
                         let type_name = match &type_lit.type_expr {
@@ -802,7 +888,8 @@ impl<'a> AstGen<'a> {
                                 // For now, use a placeholder
                                 self.interner.get_or_intern_static("array")
                             }
-                            TypeExpr::AnonymousStruct { .. } => {
+                            TypeExpr::AnonymousStruct { .. }
+                            | TypeExpr::AnonymousEnum { .. } => {
                                 unreachable!("handled above")
                             }
                             TypeExpr::PointerConst { .. } | TypeExpr::PointerMut { .. } => {

@@ -1473,6 +1473,17 @@ impl Rir {
                 methods_start: *methods_start + extra_offset,
                 methods_len: *methods_len,
             },
+            InstData::AnonEnumType {
+                variants_start,
+                variants_len,
+                methods_start,
+                methods_len,
+            } => InstData::AnonEnumType {
+                variants_start: *variants_start + extra_offset,
+                variants_len: *variants_len,
+                methods_start: *methods_start + extra_offset,
+                methods_len: *methods_len,
+            },
         };
 
         Inst {
@@ -1544,6 +1555,18 @@ impl Rir {
 
                 // Anonymous struct type - contains InstRef array for methods
                 InstData::AnonStructType {
+                    methods_start,
+                    methods_len,
+                    ..
+                } => {
+                    let start = (*methods_start + extra_offset) as usize;
+                    for i in 0..*methods_len as usize {
+                        extra[start + i] += inst_offset;
+                    }
+                }
+
+                // Anonymous enum type - contains InstRef array for methods
+                InstData::AnonEnumType {
                     methods_start,
                     methods_len,
                     ..
@@ -2111,6 +2134,21 @@ pub enum InstData {
         fields_start: u32,
         /// Number of fields
         fields_len: u32,
+        /// Index into extra data where method InstRefs start
+        methods_start: u32,
+        /// Number of methods (InstRefs to FnDecl instructions)
+        methods_len: u32,
+    },
+
+    /// Anonymous enum type: an enum type used as a value expression
+    /// (e.g., `enum { Some(T), None, fn method(self) -> T { ... } }` in comptime type construction)
+    /// Variants are stored in the extra array using add_enum_variant_decls/get_enum_variant_decls.
+    /// Methods are stored as InstRefs to FnDecl instructions in the extra array.
+    AnonEnumType {
+        /// Index into extra data where variants start
+        variants_start: u32,
+        /// Number of variants
+        variants_len: u32,
         /// Index into extra data where method InstRefs start
         methods_start: u32,
         /// Number of methods (InstRefs to FnDecl instructions)
@@ -2770,6 +2808,58 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         let methods_str: Vec<String> =
                             methods.iter().map(|m| format!("{}", m)).collect();
                         if !fields.is_empty() {
+                            write!(out, ", ").unwrap();
+                        }
+                        write!(out, "methods: [{}]", methods_str.join(", ")).unwrap();
+                    }
+                    writeln!(out, " }}").unwrap();
+                }
+
+                // Anonymous enum type
+                InstData::AnonEnumType {
+                    variants_start,
+                    variants_len,
+                    methods_start,
+                    methods_len,
+                } => {
+                    write!(out, "enum {{ ").unwrap();
+                    let variants =
+                        self.rir
+                            .get_enum_variant_decls(*variants_start, *variants_len);
+                    let variants_str: Vec<String> = variants
+                        .iter()
+                        .map(|(v, field_types, field_names)| {
+                            let vname = self.interner.resolve(v).to_string();
+                            if field_types.is_empty() {
+                                vname
+                            } else if field_names.is_empty() {
+                                let field_strs: Vec<&str> = field_types
+                                    .iter()
+                                    .map(|f| self.interner.resolve(f))
+                                    .collect();
+                                format!("{}({})", vname, field_strs.join(", "))
+                            } else {
+                                let field_strs: Vec<String> = field_names
+                                    .iter()
+                                    .zip(field_types.iter())
+                                    .map(|(n, t)| {
+                                        format!(
+                                            "{}: {}",
+                                            self.interner.resolve(n),
+                                            self.interner.resolve(t)
+                                        )
+                                    })
+                                    .collect();
+                                format!("{} {{ {} }}", vname, field_strs.join(", "))
+                            }
+                        })
+                        .collect();
+                    write!(out, "{}", variants_str.join(", ")).unwrap();
+                    if *methods_len > 0 {
+                        let methods = self.rir.get_inst_refs(*methods_start, *methods_len);
+                        let methods_str: Vec<String> =
+                            methods.iter().map(|m| format!("{}", m)).collect();
+                        if !variants_str.is_empty() {
                             write!(out, ", ").unwrap();
                         }
                         write!(out, "methods: [{}]", methods_str.join(", ")).unwrap();
