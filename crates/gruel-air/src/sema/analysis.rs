@@ -5342,12 +5342,16 @@ impl<'a> Sema<'a> {
                 if let Some(&val) = locals.get(&name) {
                     return Ok(val);
                 }
-                // 2. Comptime type variables from the outer analysis context
+                // 2. Comptime type overrides (type params bound during generic function calls).
+                if let Some(&ty) = self.comptime_type_overrides.get(&name) {
+                    return Ok(ConstValue::Type(ty));
+                }
+                // 3. Comptime type variables from the outer analysis context
                 //    (e.g. `let P = make_point()` in the enclosing function).
                 if let Some(&ty) = ctx.comptime_type_vars.get(&name) {
                     return Ok(ConstValue::Type(ty));
                 }
-                // 3. Built-in type names used as values (e.g. `i32` in `identity(i32, 42)`).
+                // 4. Built-in type names used as values (e.g. `i32` in `identity(i32, 42)`).
                 let name_str = self.interner.resolve(&name).to_string();
                 let builtin_ty = match name_str.as_str() {
                     "i8" => Some(Type::I8),
@@ -5366,14 +5370,14 @@ impl<'a> Sema<'a> {
                 if let Some(ty) = builtin_ty {
                     return Ok(ConstValue::Type(ty));
                 }
-                // 4. User-defined struct/enum types used as values.
+                // 5. User-defined struct/enum types used as values.
                 if let Some(&struct_id) = self.structs.get(&name) {
                     return Ok(ConstValue::Type(Type::new_struct(struct_id)));
                 }
                 if let Some(&enum_id) = self.enums.get(&name) {
                     return Ok(ConstValue::Type(Type::new_enum(enum_id)));
                 }
-                // 5. Not a known comptime value — must be a runtime variable.
+                // 6. Not a known comptime value — must be a runtime variable.
                 Err(not_const(inst_span))
             }
 
@@ -5516,12 +5520,6 @@ impl<'a> Sema<'a> {
                     None => return Err(not_const(inst_span)),
                 };
 
-                // Generic functions (with comptime T: type parameters) require type
-                // substitution — not supported in Phase 1c.
-                if fn_info.is_generic {
-                    return Err(not_const(inst_span));
-                }
-
                 // Evaluate all arguments before entering the callee frame.
                 let call_args = self.rir.get_call_args(args_start, args_len);
                 let mut arg_values = Vec::with_capacity(call_args.len());
@@ -5529,6 +5527,20 @@ impl<'a> Sema<'a> {
                     let val =
                         self.evaluate_comptime_inst(call_arg.value, locals, ctx, outer_span)?;
                     arg_values.push(val);
+                }
+
+                // For generic functions, extract type parameter bindings from
+                // comptime arguments and set them as type overrides so that
+                // struct/enum resolution inside the callee body can find them.
+                let param_comptime = self.param_arena.comptime(fn_info.params).to_vec();
+                let param_names = self.param_arena.names(fn_info.params).to_vec();
+                let mut type_overrides: HashMap<Spur, Type> = HashMap::new();
+                if fn_info.is_generic {
+                    for (i, is_comptime) in param_comptime.iter().enumerate() {
+                        if *is_comptime && let Some(ConstValue::Type(ty)) = arg_values.get(i) {
+                            type_overrides.insert(param_names[i], *ty);
+                        }
+                    }
                 }
 
                 // Enforce call stack depth limit to prevent infinite recursion.
@@ -5544,19 +5556,32 @@ impl<'a> Sema<'a> {
                     ));
                 }
 
-                // Bind parameters to argument values in a fresh call frame.
-                let param_names = self.param_arena.names(fn_info.params).to_vec();
+                // Bind non-comptime parameters to argument values in a fresh call frame.
+                // Comptime (type) parameters are not bound as locals — they are
+                // available through comptime_type_overrides.
                 let mut call_locals: HashMap<Spur, ConstValue> =
                     HashMap::with_capacity(param_names.len());
-                for (param_name, arg_val) in param_names.iter().zip(arg_values.iter()) {
-                    call_locals.insert(*param_name, *arg_val);
+                for (i, (param_name, arg_val)) in
+                    param_names.iter().zip(arg_values.iter()).enumerate()
+                {
+                    if !param_comptime.get(i).copied().unwrap_or(false) {
+                        call_locals.insert(*param_name, *arg_val);
+                    }
                 }
+
+                // Push type overrides for the duration of this call.
+                let saved_overrides =
+                    std::mem::replace(&mut self.comptime_type_overrides, type_overrides);
 
                 // Execute the callee body.
                 self.comptime_call_depth += 1;
                 let body_result =
                     self.evaluate_comptime_inst(fn_info.body, &mut call_locals, ctx, outer_span);
                 self.comptime_call_depth -= 1;
+
+                // Restore previous type overrides.
+                self.comptime_type_overrides = saved_overrides;
+
                 let body_result = body_result?;
 
                 // Consume any return signal; fall through on plain values.
@@ -5597,13 +5622,10 @@ impl<'a> Sema<'a> {
                     return Err(not_const(inst_span));
                 }
 
-                // Resolve the struct type by name.
-                let struct_id = match self.structs.get(&type_name) {
-                    Some(&id) => id,
-                    None => {
-                        // Also check comptime_type_vars (e.g. `let P = Point(); P { ... }`)
-                        return Err(not_const(inst_span));
-                    }
+                // Resolve the struct type by name (also checks comptime type overrides).
+                let struct_id = match self.resolve_comptime_struct(type_name, ctx) {
+                    Some(id) => id,
+                    None => return Err(not_const(inst_span)),
                 };
 
                 // Get the struct definition to know field declaration order.
@@ -6135,9 +6157,34 @@ impl<'a> Sema<'a> {
     fn resolve_comptime_enum(&self, type_name: Spur, ctx: &AnalysisContext) -> Option<EnumId> {
         if let Some(&id) = self.enums.get(&type_name) {
             Some(id)
+        } else if let Some(&ty) = self.comptime_type_overrides.get(&type_name) {
+            match ty.kind() {
+                TypeKind::Enum(id) => Some(id),
+                _ => None,
+            }
         } else if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {
             match ty.kind() {
                 TypeKind::Enum(id) => Some(id),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Resolve a struct type by name during comptime evaluation.
+    /// Checks direct structs first, then comptime type overrides, then comptime type variables.
+    fn resolve_comptime_struct(&self, type_name: Spur, ctx: &AnalysisContext) -> Option<StructId> {
+        if let Some(&id) = self.structs.get(&type_name) {
+            Some(id)
+        } else if let Some(&ty) = self.comptime_type_overrides.get(&type_name) {
+            match ty.kind() {
+                TypeKind::Struct(id) => Some(id),
+                _ => None,
+            }
+        } else if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {
+            match ty.kind() {
+                TypeKind::Struct(id) => Some(id),
                 _ => None,
             }
         } else {

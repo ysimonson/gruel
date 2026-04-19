@@ -2047,3 +2047,73 @@ fn main() -> i32 {
 }
 """
 exit_code = 32
+
+[[case]]
+name = "comptime_generic_identity"
+spec = ["4.14:42"]
+source = """
+fn identity(comptime T: type, x: T) -> T {
+    x
+}
+
+fn main() -> i32 {
+    comptime {
+        identity(i32, 42)
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_generic_add"
+spec = ["4.14:42"]
+source = """
+fn add(comptime T: type, a: T, b: T) -> T {
+    a + b
+}
+
+fn main() -> i32 {
+    comptime {
+        add(i32, 15, 27)
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_generic_nested_calls"
+spec = ["4.14:42"]
+source = """
+fn double(comptime T: type, x: T) -> T {
+    x + x
+}
+
+fn quadruple(comptime T: type, x: T) -> T {
+    double(T, double(T, x))
+}
+
+fn main() -> i32 {
+    comptime {
+        quadruple(i32, 10)
+    }
+}
+"""
+exit_code = 40
+
+[[case]]
+name = "comptime_generic_with_struct"
+spec = ["4.14:42"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn make_point(comptime T: type, x: T, y: T) -> T {
+    x + y
+}
+
+fn main() -> i32 {
+    comptime {
+        make_point(i32, 20, 22)
+    }
+}
+"""
+exit_code = 42

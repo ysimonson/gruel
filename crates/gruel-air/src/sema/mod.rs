@@ -66,7 +66,7 @@ use lasso::{Spur, ThreadedRodeo};
 
 use crate::intern_pool::TypeInternPool;
 use crate::param_arena::ParamArena;
-use crate::types::{EnumId, StructId};
+use crate::types::{EnumId, StructId, Type};
 
 use context::ComptimeHeapItem;
 
@@ -133,6 +133,10 @@ pub struct Sema<'a> {
     /// comptime evaluation. `ConstValue::Struct(idx)` and `ConstValue::Array(idx)`
     /// index into this vec. Cleared at the start of each `evaluate_comptime_block`.
     pub(crate) comptime_heap: Vec<ComptimeHeapItem>,
+    /// Type overrides for the comptime interpreter during generic function calls.
+    /// When a comptime generic call is executing, type parameters are stored here
+    /// so that enum/struct resolution can find them. Checked before `ctx.comptime_type_vars`.
+    pub(crate) comptime_type_overrides: HashMap<Spur, Type>,
 }
 
 impl<'a> Sema<'a> {
@@ -168,6 +172,7 @@ impl<'a> Sema<'a> {
             comptime_return_value: None,
             comptime_call_depth: 0,
             comptime_heap: Vec::new(),
+            comptime_type_overrides: HashMap::new(),
         }
     }
 

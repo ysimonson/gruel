@@ -688,3 +688,21 @@ fn main() -> i32 {
     }
 }
 ```
+
+## Comptime Generic Function Calls
+
+{{ rule(id="4.14:42", cat="normative") }}
+
+A comptime block can call generic functions. Type parameters are resolved at compile time and made available for struct and enum resolution within the callee body. The callee's body is interpreted with the concrete types substituted for the type parameters.
+
+```gruel
+fn identity(comptime T: type, x: T) -> T {
+    x
+}
+
+fn main() -> i32 {
+    comptime {
+        identity(i32, 42)
+    }
+}
+```
