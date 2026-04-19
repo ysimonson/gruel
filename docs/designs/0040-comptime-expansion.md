@@ -294,7 +294,7 @@ The `compile_and_run` helper compiles to a temporary binary and executes it, cap
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Mutation operations** — Add `FieldSet` and `IndexSet` to the comptime interpreter. Add spec tests for comptime struct field mutation and array element mutation.
+- [x] **Phase 1: Mutation operations** — Add `FieldSet` and `IndexSet` to the comptime interpreter. Add spec tests for comptime struct field mutation and array element mutation.
 - [ ] **Phase 2: Enum support** — Add `ConstValue::EnumVariant/EnumData/EnumStruct` variants, `ComptimeHeapItem::EnumData/EnumStruct`, and interpret `EnumVariant`/`EnumStructVariant` instructions. Add spec tests for comptime enum construction.
 - [ ] **Phase 3: Pattern matching** — Add `Match` support to the interpreter with all pattern types (Wildcard, Int, Bool, Path, DataVariant, StructVariant). Add spec tests for comptime pattern matching.
 - [ ] **Phase 4: Generic function calls** — Extend comptime `Call` handling to support generic functions by invoking the specialization infrastructure on-demand. Add spec tests for comptime calls to generic functions.

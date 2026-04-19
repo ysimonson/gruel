@@ -1680,3 +1680,164 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "duplicate method"
+
+# =============================================================================
+# Comptime Struct Field Mutation (4.14:36)
+# =============================================================================
+
+[[case]]
+name = "comptime_struct_field_set_basic"
+spec = ["4.14:36"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let mut p = Point { x: 0, y: 0 };
+        p.x = 10;
+        p.y = 32;
+        p.x + p.y
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_struct_field_set_partial"
+spec = ["4.14:36"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let mut p = Point { x: 1, y: 2 };
+        p.x = 40;
+        p.x + p.y
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_struct_field_set_in_loop"
+spec = ["4.14:36", "4.14:18"]
+source = """
+struct Acc { total: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let mut a = Acc { total: 0 };
+        let mut i = 1;
+        while i <= 9 {
+            a.total = a.total + i;
+            i = i + 1;
+        }
+        a.total
+    }
+}
+"""
+exit_code = 45
+
+[[case]]
+name = "comptime_struct_field_set_computed_value"
+spec = ["4.14:36"]
+source = """
+struct Pair { a: i32, b: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let mut p = Pair { a: 10, b: 20 };
+        p.a = p.a + p.b;
+        p.a + 12
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Comptime Array Element Mutation (4.14:37)
+# =============================================================================
+
+[[case]]
+name = "comptime_array_index_set_basic"
+spec = ["4.14:37"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut arr = [0, 0, 0];
+        arr[0] = 10;
+        arr[1] = 20;
+        arr[2] = 12;
+        arr[0] + arr[1] + arr[2]
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_array_index_set_partial"
+spec = ["4.14:37"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut arr = [1, 2, 3];
+        arr[1] = 42;
+        arr[1]
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_array_index_set_in_loop"
+spec = ["4.14:37", "4.14:18"]
+source = """
+struct Acc { total: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let mut arr = [10, 20, 30];
+        arr[0] = 1;
+        arr[1] = 2;
+        arr[2] = 3;
+        let mut sum = 0;
+        let mut i = 0;
+        while i < 3 {
+            sum = sum + arr[i];
+            i = i + 1;
+        }
+        sum
+    }
+}
+"""
+exit_code = 6
+
+[[case]]
+name = "comptime_array_index_set_out_of_bounds"
+spec = ["4.14:37", "4.14:28"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut arr = [1, 2, 3];
+        arr[5] = 42;
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "out of bounds"
+
+[[case]]
+name = "comptime_array_index_set_computed_index"
+spec = ["4.14:37"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let mut arr = [0, 0, 0];
+        let idx = 2;
+        arr[idx] = 42;
+        arr[2]
+    }
+}
+"""
+exit_code = 42

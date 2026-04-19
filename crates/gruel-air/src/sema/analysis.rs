@@ -5741,6 +5741,87 @@ impl<'a> Sema<'a> {
                 }
             }
 
+            // ── Field mutation ────────────────────────────────────────────────
+            InstData::FieldSet { base, field, value } => {
+                // base must be a VarRef to a local holding a ConstValue::Struct(heap_idx).
+                let var_name = match &self.rir.get(base).data {
+                    InstData::VarRef { name } => *name,
+                    _ => return Err(not_const(inst_span)),
+                };
+                let heap_idx = match locals.get(&var_name) {
+                    Some(ConstValue::Struct(idx)) => *idx,
+                    _ => return Err(not_const(inst_span)),
+                };
+                let val = self.evaluate_comptime_inst(value, locals, ctx, outer_span)?;
+                // Resolve field index from struct definition.
+                let struct_id = match &self.comptime_heap[heap_idx as usize] {
+                    ComptimeHeapItem::Struct { struct_id, .. } => *struct_id,
+                    _ => return Err(not_const(inst_span)),
+                };
+                let struct_def = self.type_pool.struct_def(struct_id);
+                let field_name = self.interner.resolve(&field);
+                let (field_idx, _) = struct_def.find_field(field_name).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "unknown field '{}' in comptime struct",
+                                field_name
+                            ),
+                        },
+                        inst_span,
+                    )
+                })?;
+                // Mutate the heap item in place.
+                match &mut self.comptime_heap[heap_idx as usize] {
+                    ComptimeHeapItem::Struct { fields, .. } => {
+                        fields[field_idx] = val;
+                    }
+                    _ => return Err(not_const(inst_span)),
+                }
+                Ok(ConstValue::Unit)
+            }
+
+            // ── Array element mutation ───────────────────────────────────────────
+            InstData::IndexSet { base, index, value } => {
+                // base must be a VarRef to a local holding a ConstValue::Array(heap_idx).
+                let var_name = match &self.rir.get(base).data {
+                    InstData::VarRef { name } => *name,
+                    _ => return Err(not_const(inst_span)),
+                };
+                let heap_idx = match locals.get(&var_name) {
+                    Some(ConstValue::Array(idx)) => *idx,
+                    _ => return Err(not_const(inst_span)),
+                };
+                let idx = int(
+                    self.evaluate_comptime_inst(index, locals, ctx, outer_span)?,
+                    inst_span,
+                )?;
+                let val = self.evaluate_comptime_inst(value, locals, ctx, outer_span)?;
+                // Bounds check and mutate.
+                let len = match &self.comptime_heap[heap_idx as usize] {
+                    ComptimeHeapItem::Array(elems) => elems.len(),
+                    _ => return Err(not_const(inst_span)),
+                };
+                if idx < 0 || idx as usize >= len {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "array index {} out of bounds (length {})",
+                                idx, len
+                            ),
+                        },
+                        inst_span,
+                    ));
+                }
+                match &mut self.comptime_heap[heap_idx as usize] {
+                    ComptimeHeapItem::Array(elems) => {
+                        elems[idx as usize] = val;
+                    }
+                    _ => return Err(not_const(inst_span)),
+                }
+                Ok(ConstValue::Unit)
+            }
+
             // ── Not yet supported ─────────────────────────────────────────────
             _ => Err(not_const(inst_span)),
         }

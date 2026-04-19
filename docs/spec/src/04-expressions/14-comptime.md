@@ -575,3 +575,36 @@ fn main() -> i32 {
     }
 }
 ```
+
+{{ rule(id="4.14:36", cat="normative") }}
+
+A comptime block can mutate struct fields via assignment. The base expression must refer to a mutable local variable holding a comptime struct, and the assigned value must be compile-time evaluable. The mutation modifies the struct in place on the comptime heap.
+
+```gruel
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let mut p = Point { x: 0, y: 0 };
+        p.x = 10;
+        p.y = 32;
+        p.x + p.y   // evaluates to 42 at compile time
+    }
+}
+```
+
+{{ rule(id="4.14:37", cat="normative") }}
+
+A comptime block can mutate array elements via index assignment. The base expression must refer to a mutable local variable holding a comptime array, and the index and value must be compile-time evaluable. The index must be within bounds. The mutation modifies the array in place on the comptime heap.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let mut arr = [0, 0, 0];
+        arr[0] = 10;
+        arr[1] = 20;
+        arr[2] = 12;
+        arr[0] + arr[1] + arr[2]   // evaluates to 42 at compile time
+    }
+}
+```
