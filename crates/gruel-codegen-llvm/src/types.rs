@@ -5,11 +5,51 @@ use inkwell::AddressSpace;
 use inkwell::context::Context;
 use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
 
-/// Compute the size of a Gruel type in bytes.
+/// Return the ABI alignment of a Gruel type in bytes.
 ///
-/// This is used to calculate payload sizes for data enum tagged unions.
-/// For structs, fields are laid out sequentially without padding (matching
-/// what the unaligned-store approach needs for correct byte offsets).
+/// This mirrors LLVM's alignment rules for non-packed struct layout on a
+/// 64-bit target. Used by [`type_byte_size`] to compute struct sizes with
+/// correct inter-field and tail padding.
+pub fn type_alignment(ty: Type, type_pool: &TypeInternPool) -> u64 {
+    match ty.kind() {
+        TypeKind::I8 | TypeKind::U8 | TypeKind::Bool => 1,
+        TypeKind::I16 | TypeKind::U16 => 2,
+        TypeKind::I32 | TypeKind::U32 => 4,
+        TypeKind::I64 | TypeKind::U64 => 8,
+        TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 8,
+        TypeKind::Struct(id) => {
+            let def = type_pool.struct_def(id);
+            def.fields
+                .iter()
+                .map(|f| type_alignment(f.ty, type_pool))
+                .max()
+                .unwrap_or(1)
+        }
+        TypeKind::Array(id) => {
+            let (elem_ty, _) = type_pool.array_def(id);
+            type_alignment(elem_ty, type_pool)
+        }
+        TypeKind::Enum(id) => {
+            let def = type_pool.enum_def(id);
+            if def.is_unit_only() {
+                type_alignment(def.discriminant_type(), type_pool)
+            } else {
+                // Tagged union struct { discrim, [N x i8] }:
+                // [N x i8] has alignment 1, so struct alignment = discrim alignment.
+                type_alignment(def.discriminant_type(), type_pool)
+            }
+        }
+        _ => 1,
+    }
+}
+
+/// Compute the ABI size of a Gruel type in bytes.
+///
+/// Returns the number of bytes that an LLVM `store` of this type writes.
+/// For structs, this includes inter-field alignment padding and tail padding
+/// (matching LLVM's non-packed struct layout). This is critical for computing
+/// enum variant payload sizes — a struct field in an enum variant occupies its
+/// full ABI size, not just the sum of its scalar fields.
 ///
 /// Returns 0 for zero-sized types (unit, never, etc.).
 pub fn type_byte_size(ty: Type, type_pool: &TypeInternPool) -> u64 {
@@ -20,8 +60,27 @@ pub fn type_byte_size(ty: Type, type_pool: &TypeInternPool) -> u64 {
         TypeKind::I64 | TypeKind::U64 => 8,
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 8, // 64-bit target
         TypeKind::Struct(id) => {
+            // Compute LLVM non-packed struct layout: fields are placed at
+            // aligned offsets, and the struct is tail-padded to its alignment.
             let def = type_pool.struct_def(id);
-            def.fields.iter().map(|f| type_byte_size(f.ty, type_pool)).sum()
+            let mut offset = 0u64;
+            let mut max_align = 1u64;
+            for f in &def.fields {
+                let field_align = type_alignment(f.ty, type_pool);
+                let field_size = type_byte_size(f.ty, type_pool);
+                if field_size == 0 {
+                    continue; // zero-sized fields don't participate
+                }
+                max_align = max_align.max(field_align);
+                // Pad to field alignment
+                offset = (offset + field_align - 1) & !(field_align - 1);
+                offset += field_size;
+            }
+            // Tail padding to struct alignment
+            if max_align > 1 {
+                offset = (offset + max_align - 1) & !(max_align - 1);
+            }
+            offset
         }
         TypeKind::Array(id) => {
             let (elem_ty, len) = type_pool.array_def(id);
@@ -29,7 +88,34 @@ pub fn type_byte_size(ty: Type, type_pool: &TypeInternPool) -> u64 {
         }
         TypeKind::Enum(id) => {
             let def = type_pool.enum_def(id);
-            type_byte_size(def.discriminant_type(), type_pool)
+            if def.is_unit_only() {
+                type_byte_size(def.discriminant_type(), type_pool)
+            } else {
+                // Tagged union: { discrim_type, [max_payload x i8] }
+                // Since [N x i8] has alignment 1, there is no padding between
+                // discriminant and payload. Tail padding may apply if discrim
+                // alignment > 1.
+                let discrim_size = type_byte_size(def.discriminant_type(), type_pool);
+                let discrim_align = type_alignment(def.discriminant_type(), type_pool);
+                let max_payload: u64 = def
+                    .variants
+                    .iter()
+                    .map(|v| {
+                        v.fields
+                            .iter()
+                            .map(|f| type_byte_size(*f, type_pool))
+                            .sum::<u64>()
+                    })
+                    .max()
+                    .unwrap_or(0);
+                if max_payload == 0 {
+                    discrim_size
+                } else {
+                    let total = discrim_size + max_payload;
+                    // Tail padding to struct alignment
+                    (total + discrim_align - 1) & !(discrim_align - 1)
+                }
+            }
         }
         _ => 0, // Unit, Never, ComptimeType, Module, Error
     }

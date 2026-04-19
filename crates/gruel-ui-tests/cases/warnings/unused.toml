@@ -197,6 +197,71 @@ warning_contains = ["unused variable 'x' (line", "line 2)", "line 4)"]
 expected_warning_count = 2
 
 # =============================================================================
+# Unused Pattern Bindings
+# =============================================================================
+
+[[case]]
+name = "unused_pattern_binding_warning"
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let x = IntOption::Some(42);
+    match x {
+        IntOption::Some(v) => 0,
+        IntOption::None => 0,
+    }
+}
+"""
+exit_code = 0
+warning_contains = ["unused variable", "'v'"]
+expected_warning_count = 1
+
+[[case]]
+name = "used_pattern_binding_no_warning"
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let x = IntOption::Some(42);
+    match x {
+        IntOption::Some(v) => v,
+        IntOption::None => 0,
+    }
+}
+"""
+exit_code = 42
+no_warnings = true
+
+[[case]]
+name = "underscore_prefix_pattern_binding_no_warning"
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let x = IntOption::Some(42);
+    match x {
+        IntOption::Some(_v) => 0,
+        IntOption::None => 0,
+    }
+}
+"""
+exit_code = 0
+no_warnings = true
+
+[[case]]
+name = "wildcard_pattern_binding_no_warning"
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let x = IntOption::Some(42);
+    match x {
+        IntOption::Some(_) => 0,
+        IntOption::None => 0,
+    }
+}
+"""
+exit_code = 0
+no_warnings = true
+
+# =============================================================================
 # Unused Functions
 # =============================================================================
 

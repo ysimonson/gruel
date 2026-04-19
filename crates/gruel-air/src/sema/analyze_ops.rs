@@ -834,6 +834,10 @@ impl<'a> Sema<'a> {
         for (pattern, body) in arms.iter() {
             let pattern_span = pattern.span();
 
+            // Cached resolution for enum patterns (set during validation, reused
+            // in body analysis and AIR pattern conversion to avoid repeated lookups).
+            let mut resolved_enum: Option<(crate::types::EnumId, u32)> = None;
+
             // If we've seen a wildcard, everything after is unreachable
             if let Some(first_wildcard_span) = wildcard_span {
                 let pat_str = match pattern {
@@ -977,6 +981,7 @@ impl<'a> Sema<'a> {
 
                     covered_variants.insert(variant_index as u32);
                     pattern_enum_id = Some(enum_id);
+                    resolved_enum = Some((enum_id, variant_index as u32));
                 }
                 RirPattern::DataVariant {
                     module,
@@ -1033,6 +1038,7 @@ impl<'a> Sema<'a> {
 
                     covered_variants.insert(variant_index as u32);
                     pattern_enum_id = Some(enum_id);
+                    resolved_enum = Some((enum_id, variant_index as u32));
                 }
             }
 
@@ -1042,21 +1048,14 @@ impl<'a> Sema<'a> {
             // For DataVariant patterns, emit field extractions into the arm scope
             // before analyzing the body. Named bindings become local variables.
             let body_result = if let RirPattern::DataVariant {
-                type_name,
-                variant,
                 bindings,
-                module,
                 ..
             } = pattern
             {
-                let enum_id = if let Some(module_ref) = module {
-                    self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
-                } else {
-                    *self.enums.get(type_name).unwrap()
-                };
+                // Reuse the enum_id and variant_index resolved during validation.
+                let (enum_id, variant_index) = resolved_enum
+                    .expect("resolved_enum must be set for DataVariant patterns");
                 let enum_def = self.type_pool.enum_def(enum_id);
-                let variant_name = self.interner.resolve(variant);
-                let variant_index = enum_def.find_variant(variant_name).unwrap() as u32;
                 let field_types: Vec<Type> =
                     enum_def.variants[variant_index as usize].fields.clone();
 
@@ -1174,6 +1173,9 @@ impl<'a> Sema<'a> {
 
             let body_type = body_result.ty;
 
+            // Check for unused pattern bindings before popping the arm scope
+            self.check_unused_locals_in_current_scope(ctx);
+
             ctx.pop_scope();
 
             // Update result type (handle Never type coercion)
@@ -1198,83 +1200,18 @@ impl<'a> Sema<'a> {
                 }
             });
 
-            // Convert pattern to AIR pattern
+            // Convert pattern to AIR pattern. For enum patterns (Path and DataVariant),
+            // reuse the enum_id and variant_index resolved during validation.
             let air_pattern = match pattern {
                 RirPattern::Wildcard(_) => AirPattern::Wildcard,
                 RirPattern::Int(n, _) => AirPattern::Int(*n),
                 RirPattern::Bool(b, _) => AirPattern::Bool(*b),
-                RirPattern::Path {
-                    module,
-                    type_name,
-                    variant,
-                    ..
-                } => {
-                    let type_name_str = self.interner.resolve(type_name).to_string();
-                    let enum_id = if let Some(module_ref) = module {
-                        self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
-                    } else {
-                        *self.enums.get(type_name).ok_or_else(|| {
-                            CompileError::new(
-                                ErrorKind::InternalError(format!(
-                                    "enum type '{}' not found during pattern conversion",
-                                    type_name_str
-                                )),
-                                pattern_span,
-                            )
-                        })?
-                    };
-                    let enum_def = self.type_pool.enum_def(enum_id);
-                    let variant_name = self.interner.resolve(variant);
-                    let variant_index = enum_def.find_variant(variant_name).ok_or_else(|| {
-                        CompileError::new(
-                            ErrorKind::InternalError(format!(
-                                "enum variant '{}::{}' not found during pattern conversion",
-                                type_name_str, variant_name
-                            )),
-                            pattern_span,
-                        )
-                    })?;
+                RirPattern::Path { .. } | RirPattern::DataVariant { .. } => {
+                    let (enum_id, variant_index) = resolved_enum
+                        .expect("resolved_enum must be set for enum patterns");
                     AirPattern::EnumVariant {
                         enum_id,
-                        variant_index: variant_index as u32,
-                    }
-                }
-                RirPattern::DataVariant {
-                    module,
-                    type_name,
-                    variant,
-                    ..
-                } => {
-                    // DataVariant uses the same discriminant-based switch as Path.
-                    // The field extractions are already embedded in body_result.air_ref.
-                    let type_name_str = self.interner.resolve(type_name).to_string();
-                    let enum_id = if let Some(module_ref) = module {
-                        self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
-                    } else {
-                        *self.enums.get(type_name).ok_or_else(|| {
-                            CompileError::new(
-                                ErrorKind::InternalError(format!(
-                                    "enum type '{}' not found during pattern conversion",
-                                    type_name_str
-                                )),
-                                pattern_span,
-                            )
-                        })?
-                    };
-                    let enum_def = self.type_pool.enum_def(enum_id);
-                    let variant_name = self.interner.resolve(variant);
-                    let variant_index = enum_def.find_variant(variant_name).ok_or_else(|| {
-                        CompileError::new(
-                            ErrorKind::InternalError(format!(
-                                "enum variant '{}::{}' not found during pattern conversion",
-                                type_name_str, variant_name
-                            )),
-                            pattern_span,
-                        )
-                    })?;
-                    AirPattern::EnumVariant {
-                        enum_id,
-                        variant_index: variant_index as u32,
+                        variant_index,
                     }
                 }
             };

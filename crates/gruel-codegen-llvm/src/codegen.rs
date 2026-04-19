@@ -1826,11 +1826,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 // Store each field value into the payload (struct field 1) at its byte offset.
                 let fields = self.cfg.get_extra(fields_start, fields_len).to_vec();
                 if !fields.is_empty() {
-                    let max_payload = field_types
+                    let variant_payload_size: u64 = field_types
                         .iter()
                         .map(|f| crate::types::type_byte_size(*f, self.type_pool))
-                        .sum::<u64>();
-                    let byte_arr_ty = self.ctx.i8_type().array_type(max_payload as u32);
+                        .sum();
+                    let byte_arr_ty = self.ctx.i8_type().array_type(variant_payload_size as u32);
                     let payload_ptr = self
                         .builder
                         .build_struct_gep(struct_ty, slot, 1, "payload_ptr")
