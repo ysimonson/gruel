@@ -315,7 +315,7 @@ For move-type elements, the compiler tracks that each element is moved exactly o
 - [x] **Phase 2: `@range` intrinsic and range for-loops** — Implement `@range(...)` intrinsic that constructs `Range(T)` values (1-, 2-, and 3-argument forms, `inclusive = false` by default). Desugar `for x in range_val { body }` to while-loop patterns in AstGen, selecting `<`/`<=`/`>`/`>=` based on stride sign and `inclusive` flag. Validate integer types, stride constraints. Support `break`/`continue`. Add comptime evaluation support for `@range`. Add spec tests for both exclusive and inclusive ranges.
 - [x] **Phase 3: Array for-loops (copy types)** — Desugar `for x in arr { body }` to indexed while-loop in AstGen. Support `break`/`continue`. Array remains valid after the loop. Add spec tests.
 - [x] **Phase 4: Array for-loops (move types)** — Handle move semantics: array is consumed by the loop. Forbid `break` when iterating over move-type arrays. Add spec tests.
-- [ ] **Phase 5: Spec, warnings, and polish** — Write the spec section for for-each loops (likely §4.8 extension or new §4.9). Add `@range` and `Range(T)` to the intrinsics/types spec sections. Add unused loop variable warnings. Update grammar appendix. Run full test suite.
+- [x] **Phase 5: Spec, warnings, and polish** — Write the spec section for for-each loops (likely §4.8 extension or new §4.9). Add `@range` and `Range(T)` to the intrinsics/types spec sections. Add unused loop variable warnings. Update grammar appendix. Run full test suite.
 
 ## Consequences
 

@@ -368,6 +368,56 @@ no_warnings = true
 # Mixed unused warnings
 # =============================================================================
 
+# =============================================================================
+# Unused For-Loop Variables
+# =============================================================================
+
+[[case]]
+name = "unused_for_loop_variable_warning"
+preview = "for_loops"
+source = """
+fn main() -> i32 {
+    let mut count = 0;
+    for x in @range(5) {
+        count = count + 1;
+    }
+    count
+}
+"""
+exit_code = 5
+warning_contains = ["unused variable", "'x'"]
+expected_warning_count = 1
+
+[[case]]
+name = "unused_for_loop_variable_underscore_suppressed"
+preview = "for_loops"
+source = """
+fn main() -> i32 {
+    let mut count = 0;
+    for _x in @range(5) {
+        count = count + 1;
+    }
+    count
+}
+"""
+exit_code = 5
+no_warnings = true
+
+[[case]]
+name = "used_for_loop_variable_no_warning"
+preview = "for_loops"
+source = """
+fn main() -> i32 {
+    let mut sum = 0;
+    for i in @range(5) {
+        sum = sum + i;
+    }
+    sum
+}
+"""
+exit_code = 10
+no_warnings = true
+
 # TODO: Unused function warnings are defined but not yet implemented
 # Once implemented, this test should produce 2 warnings (function + variable)
 [[case]]

@@ -54,6 +54,7 @@ The following table provides a quick reference to all available intrinsics:
 | `@random_u64` | Generate random u64 | none | `u64` |
 | `@target_arch` | Get target architecture | none | `Arch` |
 | `@target_os` | Get target OS | none | `Os` |
+| `@range` | Construct integer range | 1-3 expressions (integers) | `Range(T)` |
 | `@import` | Import module | 1 expression (string literal) | module type |
 
 ## `@dbg`
@@ -571,6 +572,54 @@ fn main() -> i32 {
             }
         },
     }
+}
+```
+
+## `@range`
+
+{{ rule(id="4.13:89", cat="normative") }}
+
+The `@range` intrinsic constructs a `Range(T)` value representing an integer range, for use with for-in loops.
+
+{{ rule(id="4.13:90", cat="normative") }}
+
+`@range` accepts 1, 2, or 3 integer arguments:
+
+| Form | Meaning |
+|------|---------|
+| `@range(end)` | `0` to `end`, exclusive, stride 1 |
+| `@range(start, end)` | `start` to `end`, exclusive, stride 1 |
+| `@range(start, end, stride)` | `start` to `end`, exclusive, step by `stride` |
+
+{{ rule(id="4.13:91", cat="legality-rule") }}
+
+All arguments to `@range` **MUST** be the same integer type `T`. The result has type `Range(T)`.
+
+{{ rule(id="4.13:92", cat="normative") }}
+
+`Range(T)` is a builtin comptime type constructor parameterized by an integer type. It has fields `start`, `end`, `stride` of type `T`, and `inclusive` of type `bool`. The `.inclusive()` method returns a new range with `inclusive` set to `true`.
+
+{{ rule(id="4.13:93") }}
+
+```gruel
+fn main() -> i32 {
+    let mut sum = 0;
+    for i in @range(10) {
+        sum = sum + i;
+    }
+    sum  // 45
+}
+```
+
+{{ rule(id="4.13:94") }}
+
+```gruel
+fn main() -> i32 {
+    let mut sum = 0;
+    for i in @range(0, 10, 2) {
+        sum = sum + i;
+    }
+    sum  // 20 (0+2+4+6+8)
 }
 ```
 

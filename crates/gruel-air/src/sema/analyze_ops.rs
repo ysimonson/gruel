@@ -1039,6 +1039,7 @@ impl<'a> Sema<'a> {
         let body_result = self.analyze_inst(air, body, ctx)?;
 
         ctx.loop_depth -= 1;
+        self.check_unused_locals_in_current_scope(ctx);
         ctx.pop_scope();
 
         // Build the body block: [binding_storage_live, binding_alloc, counter_store, body]
@@ -1261,6 +1262,7 @@ impl<'a> Sema<'a> {
 
         ctx.loop_depth -= 1;
         ctx.forbid_break = old_forbid_break;
+        self.check_unused_locals_in_current_scope(ctx);
         ctx.pop_scope();
 
         // Build body block: [binding_storage_live, binding_alloc, counter_store, body]
