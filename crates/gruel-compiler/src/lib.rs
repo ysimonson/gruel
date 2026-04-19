@@ -1187,9 +1187,13 @@ fn link_system_with_warnings(
         // -static is used, which pulls in dl-reloc-static-pie.o (needing
         // _DYNAMIC) and libc-start.o (needing _init/_fini from crti.o/crtn.o
         // that -nostartfiles excludes).
+        // _init/_fini stubs are provided by the runtime (entry.rs).
+        // _DYNAMIC is defined as 0 (null) so dl-reloc-static-pie.o's
+        // _dl_relocate_static_pie sees no relocations and returns immediately.
         cmd.arg("-static");
         cmd.arg("-no-pie");
         cmd.arg("-nostartfiles");
+        cmd.arg("-Wl,--defsym=_DYNAMIC=0");
     }
 
     cmd.arg("-o");
