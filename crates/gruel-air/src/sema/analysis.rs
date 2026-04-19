@@ -2604,6 +2604,75 @@ impl<'a> Sema<'a> {
             }
         }
 
+        // Check if this is an enum data variant construction via a comptime type variable
+        // (e.g., `let Opt = Option(i32); Opt::Some(42)`)
+        if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {
+            if let TypeKind::Enum(enum_id) = ty.kind() {
+                let enum_def = self.type_pool.enum_def(enum_id);
+                if let Some(variant_index) = enum_def.find_variant(&function_name_str) {
+                    let variant_def = &enum_def.variants[variant_index];
+                    let field_types: Vec<Type> = variant_def.fields.clone();
+                    if !field_types.is_empty() {
+                        if variant_def.is_struct_variant() {
+                            return Err(CompileError::new(
+                                ErrorKind::TypeMismatch {
+                                    expected: format!(
+                                        "struct-style construction `{}::{} {{ ... }}`",
+                                        type_name_str, function_name_str
+                                    ),
+                                    found: format!(
+                                        "tuple-style construction `{}::{}(...)`",
+                                        type_name_str, function_name_str
+                                    ),
+                                },
+                                span,
+                            ));
+                        }
+                        if args.len() != field_types.len() {
+                            return Err(CompileError::new(
+                                ErrorKind::WrongArgumentCount {
+                                    expected: field_types.len(),
+                                    found: args.len(),
+                                },
+                                span,
+                            ));
+                        }
+                        let mut field_air_refs = Vec::with_capacity(args.len());
+                        for (i, arg) in args.iter().enumerate() {
+                            let result = self.analyze_inst(air, arg.value, ctx)?;
+                            if result.ty != field_types[i] {
+                                return Err(CompileError::new(
+                                    ErrorKind::TypeMismatch {
+                                        expected: field_types[i].name().to_string(),
+                                        found: result.ty.name().to_string(),
+                                    },
+                                    span,
+                                ));
+                            }
+                            field_air_refs.push(result.air_ref.as_u32());
+                        }
+                        let fields_len = field_air_refs.len() as u32;
+                        let fields_start = air.add_extra(&field_air_refs);
+                        let enum_type = Type::new_enum(enum_id);
+                        let air_ref = air.add_inst(AirInst {
+                            data: AirInstData::EnumCreate {
+                                enum_id,
+                                variant_index: variant_index as u32,
+                                fields_start,
+                                fields_len,
+                            },
+                            ty: enum_type,
+                            span,
+                        });
+                        return Ok(AnalysisResult::new(air_ref, enum_type));
+                    }
+                    // Unit variant called as function — fall through to error
+                }
+                // Not a variant — could be an associated function (future)
+                // For now, fall through to error
+            }
+        }
+
         // Check that the type exists and is a struct
         // First check if it's a comptime type variable (e.g., `let P = Point(); P::origin()`)
         let struct_id = if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {

@@ -949,6 +949,26 @@ impl<'a> ConstraintGenerator<'a> {
                                         }
                                     }
                                 }
+                            } else {
+                                // Enum not found — likely a comptime type variable.
+                                // Register bindings with fresh type variables so body
+                                // constraint generation can still resolve variable references.
+                                for binding in bindings.iter() {
+                                    if !binding.is_wildcard
+                                        && let Some(name) = binding.name
+                                    {
+                                        let var = self.fresh_var();
+                                        let old = ctx.locals.insert(
+                                            name,
+                                            LocalVarInfo {
+                                                ty: InferType::Var(var),
+                                                is_mut: binding.is_mut,
+                                                span: pattern.span(),
+                                            },
+                                        );
+                                        added_bindings.push((name, old));
+                                    }
+                                }
                             }
                             added_bindings
                         }
@@ -988,6 +1008,25 @@ impl<'a> ConstraintGenerator<'a> {
                                             );
                                             added_bindings.push((name, old));
                                         }
+                                    }
+                                }
+                            } else {
+                                // Enum not found — likely a comptime type variable.
+                                // Register bindings with fresh type variables.
+                                for fb in field_bindings {
+                                    if !fb.binding.is_wildcard
+                                        && let Some(name) = fb.binding.name
+                                    {
+                                        let var = self.fresh_var();
+                                        let old = ctx.locals.insert(
+                                            name,
+                                            LocalVarInfo {
+                                                ty: InferType::Var(var),
+                                                is_mut: fb.binding.is_mut,
+                                                span: pattern.span(),
+                                            },
+                                        );
+                                        added_bindings.push((name, old));
                                     }
                                 }
                             }
@@ -1090,7 +1129,9 @@ impl<'a> ConstraintGenerator<'a> {
                 if let Some(&enum_ty) = self.enums.get(type_name) {
                     InferType::Concrete(enum_ty)
                 } else {
-                    InferType::Concrete(Type::ERROR)
+                    // May be a comptime type variable — use fresh var
+                    let var = self.fresh_var();
+                    InferType::Var(var)
                 }
             }
 
@@ -1109,7 +1150,9 @@ impl<'a> ConstraintGenerator<'a> {
                 if let Some(&enum_ty) = self.enums.get(type_name) {
                     InferType::Concrete(enum_ty)
                 } else {
-                    InferType::Concrete(Type::ERROR)
+                    // May be a comptime type variable — use fresh var
+                    let var = self.fresh_var();
+                    InferType::Var(var)
                 }
             }
 
@@ -1382,7 +1425,11 @@ impl<'a> ConstraintGenerator<'a> {
                 if let Some(&enum_ty) = self.enums.get(type_name) {
                     InferType::Concrete(enum_ty)
                 } else {
-                    InferType::Concrete(Type::ERROR)
+                    // Enum type not found — may be a comptime type variable
+                    // (e.g., `let Opt = Option(i32); match x { Opt::Some(v) => ... }`).
+                    // Use a fresh type variable so arm bodies can still infer types.
+                    let var = self.fresh_var();
+                    InferType::Var(var)
                 }
             }
         }

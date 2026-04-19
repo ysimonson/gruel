@@ -948,18 +948,30 @@ impl<'a> Sema<'a> {
                     variant,
                     ..
                 } => {
-                    // Look up the enum type, potentially through a module
+                    // Look up the enum type, potentially through a module or comptime type variable
                     let enum_id = if let Some(module_ref) = module {
-                        // Qualified access: module.EnumName::Variant
                         self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
+                    } else if let Some(&enum_id) = self.enums.get(type_name) {
+                        enum_id
+                    } else if let Some(&ty) = ctx.comptime_type_vars.get(type_name) {
+                        match ty.kind() {
+                            TypeKind::Enum(id) => id,
+                            _ => {
+                                return Err(CompileError::new(
+                                    ErrorKind::UnknownEnumType(
+                                        self.interner.resolve(type_name).to_string(),
+                                    ),
+                                    pattern_span,
+                                ));
+                            }
+                        }
                     } else {
-                        // Unqualified access: EnumName::Variant
-                        *self.enums.get(type_name).ok_or_compile_error(
+                        return Err(CompileError::new(
                             ErrorKind::UnknownEnumType(
                                 self.interner.resolve(type_name).to_string(),
                             ),
                             pattern_span,
-                        )?
+                        ));
                     };
                     let enum_def = self.type_pool.enum_def(enum_id);
 
@@ -995,16 +1007,30 @@ impl<'a> Sema<'a> {
                     bindings,
                     ..
                 } => {
-                    // Look up the enum type
+                    // Look up the enum type, including comptime type variable resolution
                     let enum_id = if let Some(module_ref) = module {
                         self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
+                    } else if let Some(&enum_id) = self.enums.get(type_name) {
+                        enum_id
+                    } else if let Some(&ty) = ctx.comptime_type_vars.get(type_name) {
+                        match ty.kind() {
+                            TypeKind::Enum(id) => id,
+                            _ => {
+                                return Err(CompileError::new(
+                                    ErrorKind::UnknownEnumType(
+                                        self.interner.resolve(type_name).to_string(),
+                                    ),
+                                    pattern_span,
+                                ));
+                            }
+                        }
                     } else {
-                        *self.enums.get(type_name).ok_or_compile_error(
+                        return Err(CompileError::new(
                             ErrorKind::UnknownEnumType(
                                 self.interner.resolve(type_name).to_string(),
                             ),
                             pattern_span,
-                        )?
+                        ));
                     };
                     let enum_def = self.type_pool.enum_def(enum_id);
 
@@ -1052,16 +1078,30 @@ impl<'a> Sema<'a> {
                     field_bindings,
                     ..
                 } => {
-                    // Look up the enum type
+                    // Look up the enum type, including comptime type variable resolution
                     let enum_id = if let Some(module_ref) = module {
                         self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
+                    } else if let Some(&enum_id) = self.enums.get(type_name) {
+                        enum_id
+                    } else if let Some(&ty) = ctx.comptime_type_vars.get(type_name) {
+                        match ty.kind() {
+                            TypeKind::Enum(id) => id,
+                            _ => {
+                                return Err(CompileError::new(
+                                    ErrorKind::UnknownEnumType(
+                                        self.interner.resolve(type_name).to_string(),
+                                    ),
+                                    pattern_span,
+                                ));
+                            }
+                        }
                     } else {
-                        *self.enums.get(type_name).ok_or_compile_error(
+                        return Err(CompileError::new(
                             ErrorKind::UnknownEnumType(
                                 self.interner.resolve(type_name).to_string(),
                             ),
                             pattern_span,
-                        )?
+                        ));
                     };
                     let enum_def = self.type_pool.enum_def(enum_id);
 
@@ -3117,7 +3157,7 @@ impl<'a> Sema<'a> {
         &mut self,
         air: &mut Air,
         inst_ref: InstRef,
-        _ctx: &mut AnalysisContext,
+        ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
         let inst = self.rir.get(inst_ref);
 
@@ -3137,16 +3177,33 @@ impl<'a> Sema<'a> {
                 type_name,
                 variant,
             } => {
-                // Look up the enum type, potentially through a module
+                // Look up the enum type, potentially through a module or comptime type variable
                 let enum_id = if let Some(module_ref) = module {
                     // Qualified access: module.EnumName::Variant
                     self.resolve_enum_through_module(*module_ref, *type_name, inst.span)?
+                } else if let Some(&enum_id) = self.enums.get(type_name) {
+                    // Direct enum lookup
+                    enum_id
+                } else if let Some(&ty) = ctx.comptime_type_vars.get(type_name) {
+                    // Comptime type variable (e.g., `let Opt = Option(i32); Opt::None`)
+                    match ty.kind() {
+                        TypeKind::Enum(id) => id,
+                        _ => {
+                            return Err(CompileError::new(
+                                ErrorKind::UnknownEnumType(
+                                    self.interner.resolve(type_name).to_string(),
+                                ),
+                                inst.span,
+                            ));
+                        }
+                    }
                 } else {
-                    // Unqualified access: EnumName::Variant
-                    *self.enums.get(type_name).ok_or_compile_error(
-                        ErrorKind::UnknownEnumType(self.interner.resolve(type_name).to_string()),
+                    return Err(CompileError::new(
+                        ErrorKind::UnknownEnumType(
+                            self.interner.resolve(type_name).to_string(),
+                        ),
                         inst.span,
-                    )?
+                    ));
                 };
                 let enum_def = self.type_pool.enum_def(enum_id);
 
@@ -3187,7 +3244,7 @@ impl<'a> Sema<'a> {
                 *fields_start,
                 *fields_len,
                 inst.span,
-                _ctx,
+                ctx,
             ),
 
             _ => Err(CompileError::new(
@@ -3212,14 +3269,30 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        // Look up the enum type
+        // Look up the enum type, including comptime type variable resolution
         let enum_id = if let Some(module_ref) = module {
             self.resolve_enum_through_module(module_ref, type_name, span)?
+        } else if let Some(&enum_id) = self.enums.get(&type_name) {
+            enum_id
+        } else if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {
+            match ty.kind() {
+                TypeKind::Enum(id) => id,
+                _ => {
+                    return Err(CompileError::new(
+                        ErrorKind::UnknownEnumType(
+                            self.interner.resolve(&type_name).to_string(),
+                        ),
+                        span,
+                    ));
+                }
+            }
         } else {
-            *self.enums.get(&type_name).ok_or_compile_error(
-                ErrorKind::UnknownEnumType(self.interner.resolve(&type_name).to_string()),
+            return Err(CompileError::new(
+                ErrorKind::UnknownEnumType(
+                    self.interner.resolve(&type_name).to_string(),
+                ),
                 span,
-            )?
+            ));
         };
         let enum_def = self.type_pool.enum_def(enum_id);
         let enum_name = enum_def.name.clone();

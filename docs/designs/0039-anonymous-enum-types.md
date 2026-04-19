@@ -189,7 +189,7 @@ It is a compile-time error to define an anonymous enum with zero variants.
 
 - [x] **Phase 1: Parser and RIR** — Add `TypeExpr::AnonymousEnum` to the parser AST. Add `InstData::AnonEnumType` to RIR. Implement parsing of `enum { Variant, Variant(T), Variant { field: T } }` as a type expression. Add RIR generation in `astgen.rs`.
 
-- [ ] **Phase 2: Sema (non-comptime path)** — Handle `AnonEnumType` in `analysis.rs` for direct anonymous enum type expressions (no comptime substitution). Implement `find_or_create_anon_enum()` in a new `anon_enums.rs` module with structural equality. Register anonymous enum in the type pool. Variant construction and pattern matching reuse existing named-enum code paths since the anonymous enum gets a real `EnumId`.
+- [x] **Phase 2: Sema (non-comptime path)** — Handle `AnonEnumType` in `analysis.rs` for direct anonymous enum type expressions (no comptime substitution). Implement `find_or_create_anon_enum()` in a new `anon_enums.rs` module with structural equality. Register anonymous enum in the type pool. Variant construction and pattern matching reuse existing named-enum code paths since the anonymous enum gets a real `EnumId`.
 
 - [ ] **Phase 3: Sema (comptime path)** — Handle `AnonEnumType` in `try_evaluate_const_with_subst()` with type/value substitution. Support comptime type parameters in variant fields. Register methods with `Self` resolution (similar to `register_anon_struct_methods_for_comptime_with_subst`).
 
