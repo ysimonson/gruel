@@ -20,8 +20,8 @@ of buck, etc.
 
 - Stabilized anonymous struct methods
 - Struct destructuring with partial move ban (ADR-0036)
-- Enums with data variants, struct variants, and pattern matching (ADR-0004, ADR-0037, ADR-0038)
-- Anonymous enum types for generic sum types via comptime (ADR-0039)
+- Enums with struct variants (ADR-0037), pattern matching (ADR-0038), and anonymous types with comptime generics support (ADR-0039)
+- Significantly expanded comptime capabilities (ADR-0040)
 
 ### Language Tooling
 
@@ -35,6 +35,7 @@ of buck, etc.
 - Replaced buck2 with cargo and vendored deps with crates.io
 - Removed reindeer (buck2 cargo integration)
 - Migrated fuzz testing from a custom harness to cargo-fuzz
+- Reworked fuzzer to work with the new LLVM backend and take advantage of expanded comptime capabilities
 - Removed beads issue tracking in favor of plain ADRs
 - Shorter mangled symbol names to support macOS's default linker
 - Added a Makefile as the primary build/test entrypoint
