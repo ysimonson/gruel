@@ -2167,12 +2167,6 @@ impl<'a> Sema<'a> {
                 methods_start,
                 methods_len,
             } => {
-                self.require_preview(
-                    PreviewFeature::AnonEnumTypes,
-                    "anonymous enum types",
-                    inst.span,
-                )?;
-
                 // Get the variant declarations from the RIR
                 let variant_decls =
                     self.rir.get_enum_variant_decls(*variants_start, *variants_len);

@@ -1424,8 +1424,6 @@ exit_code = 42
 [[case]]
 name = "anon_enum_basic"
 spec = ["4.14:30"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn Option(comptime T: type) -> type {
     enum {
@@ -1448,8 +1446,6 @@ exit_code = 42
 [[case]]
 name = "anon_enum_unit_variant"
 spec = ["4.14:30"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn Option(comptime T: type) -> type {
     enum {
@@ -1472,8 +1468,6 @@ exit_code = 99
 [[case]]
 name = "anon_enum_multiple_data_variants"
 spec = ["4.14:30"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn Either(comptime L: type, comptime R: type) -> type {
     enum {
@@ -1502,8 +1496,6 @@ exit_code = 42
 [[case]]
 name = "anon_enum_structural_equality"
 spec = ["4.14:31"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn MakeOpt1(comptime T: type) -> type {
     enum { Some(T), None }
@@ -1529,8 +1521,6 @@ exit_code = 42
 [[case]]
 name = "anon_enum_empty_error"
 spec = ["4.14:32"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn Empty() -> type {
     enum { }
@@ -1547,8 +1537,6 @@ error_contains = "must have at least one variant"
 [[case]]
 name = "anon_enum_method_self_match"
 spec = ["4.14:33"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn Option(comptime T: type) -> type {
     enum {
@@ -1576,8 +1564,6 @@ exit_code = 52
 [[case]]
 name = "anon_enum_static_method"
 spec = ["4.14:33"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn Option(comptime T: type) -> type {
     enum {
@@ -1612,8 +1598,6 @@ exit_code = 42
 [[case]]
 name = "anon_enum_comptime_param_capture"
 spec = ["4.14:34"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn Capped(comptime max: i32) -> type {
     enum {
@@ -1649,8 +1633,6 @@ exit_code = 42
 [[case]]
 name = "anon_enum_is_some_method"
 spec = ["4.14:33"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn Option(comptime T: type) -> type {
     enum {
@@ -1680,8 +1662,6 @@ exit_code = 42
 [[case]]
 name = "anon_enum_duplicate_method_error"
 spec = ["4.14:35"]
-preview = "anon_enum_types"
-preview_should_pass = true
 source = """
 fn Bad() -> type {
     enum {

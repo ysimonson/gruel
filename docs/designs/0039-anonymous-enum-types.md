@@ -1,12 +1,12 @@
 ---
 id: 0039
 title: Anonymous Enum Types
-status: proposal
+status: implemented
 tags: [comptime, enums, generics]
-feature-flag: anon_enum_types
+feature-flag:
 created: 2026-04-18
 accepted:
-implemented:
+implemented: 2026-04-19
 spec-sections: ["4.14"]
 superseded-by:
 ---
@@ -195,7 +195,7 @@ It is a compile-time error to define an anonymous enum with zero variants.
 
 - [x] **Phase 4: Spec and tests** — Add spec section 4.14 paragraphs for anonymous enum types. Add spec tests covering: basic construction, pattern matching, structural equality, methods, comptime parameterization, `Self` usage, error cases (empty enum, duplicate variants). Ensure traceability.
 
-- [ ] **Phase 5: Stabilization** — Remove preview gate. Remove `preview` field from spec tests. Update ADR status.
+- [x] **Phase 5: Stabilization** — Remove preview gate. Remove `preview` field from spec tests. Update ADR status.
 
 ## Consequences
 
