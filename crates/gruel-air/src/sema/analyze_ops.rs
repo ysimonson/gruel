@@ -564,6 +564,16 @@ impl<'a> Sema<'a> {
                     return Err(CompileError::new(ErrorKind::BreakOutsideLoop, inst.span));
                 }
 
+                // Check if break is forbidden (e.g., consuming for-in loop)
+                if let Some(ref elem_type_name) = ctx.forbid_break {
+                    return Err(CompileError::new(
+                        ErrorKind::BreakInConsumingForLoop {
+                            element_type: elem_type_name.clone(),
+                        },
+                        inst.span,
+                    ));
+                }
+
                 // Break has the never type - it diverges
                 let air_ref = air.add_inst(AirInst {
                     data: AirInstData::Break,
@@ -818,20 +828,11 @@ impl<'a> Sema<'a> {
 
                 if let Some(array_type_id) = iterable_type.as_array() {
                     let (elem_type, array_len) = self.type_pool.array_def(array_type_id);
-
-                    if !self.is_type_copy(elem_type) {
-                        return Err(CompileError::new(
-                            ErrorKind::MoveOutOfIndex {
-                                element_type: elem_type.name().to_string(),
-                            },
-                            iterable_span,
-                        )
-                        .with_help("for-in loops over arrays with non-Copy element types are not yet supported"));
-                    }
+                    let is_copy = self.is_type_copy(elem_type);
 
                     self.analyze_array_for_loop(
                         air, binding, is_mut, iterable_result.air_ref, iterable_type,
-                        elem_type, array_len, body, span, ctx,
+                        elem_type, array_len, is_copy, body, span, ctx,
                     )
                 } else {
                     Err(CompileError::new(
@@ -1089,8 +1090,9 @@ impl<'a> Sema<'a> {
 
     /// Desugar `for x in arr { body }` into a while loop with array indexing.
     ///
-    /// Only supports Copy element types (Phase 3). The array is spilled to a
-    /// temporary slot and indexed with a counter variable.
+    /// For Copy element types, elements are copied out and the array remains valid.
+    /// For non-Copy element types, elements are moved out and the array is consumed;
+    /// `break` is forbidden because it would leave un-dropped elements.
     fn analyze_array_for_loop(
         &mut self,
         air: &mut Air,
@@ -1100,6 +1102,7 @@ impl<'a> Sema<'a> {
         arr_type: Type,
         elem_type: Type,
         array_len: u64,
+        is_copy: bool,
         body: InstRef,
         span: Span,
         ctx: &mut AnalysisContext,
@@ -1169,6 +1172,12 @@ impl<'a> Sema<'a> {
         // Build loop body
         ctx.push_scope();
         ctx.loop_depth += 1;
+
+        // For non-copy element types, forbid break (would leave elements unconsumed)
+        let old_forbid_break = ctx.forbid_break.take();
+        if !is_copy {
+            ctx.forbid_break = Some(elem_type.name().to_string());
+        }
 
         // let x = arr[__i]
         let binding_slot = ctx.next_slot;
@@ -1251,6 +1260,7 @@ impl<'a> Sema<'a> {
         let body_result = self.analyze_inst(air, body, ctx)?;
 
         ctx.loop_depth -= 1;
+        ctx.forbid_break = old_forbid_break;
         ctx.pop_scope();
 
         // Build body block: [binding_storage_live, binding_alloc, counter_store, body]

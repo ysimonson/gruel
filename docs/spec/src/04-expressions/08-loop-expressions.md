@@ -242,11 +242,19 @@ fn main() -> i32 {
 
 A for-in loop can iterate over a fixed-size array. Each element is bound to the loop variable in order.
 
-{{ rule(id="4.8:34", cat="legality-rule") }}
+{{ rule(id="4.8:34", cat="normative") }}
 
-The array's element type **MUST** be a Copy type. Iterating over arrays with non-Copy element types is a compile-time error.
+When the array's element type is a Copy type, each element is copied into the loop variable. The array remains valid after the loop.
 
-{{ rule(id="4.8:35", cat="dynamic-semantics") }}
+{{ rule(id="4.8:35", cat="normative") }}
+
+When the array's element type is a non-Copy (move) type, each element is moved out of the array. The array is consumed by the loop and is no longer valid after the loop completes.
+
+{{ rule(id="4.8:37", cat="legality-rule") }}
+
+`break` inside a for-in loop over an array with non-Copy element type is a compile-time error. Breaking would leave un-iterated elements unconsumed, putting the array in a partially-moved state.
+
+{{ rule(id="4.8:38", cat="dynamic-semantics") }}
 
 Iterating over an array is equivalent to indexing each element in order:
 
@@ -260,8 +268,6 @@ while __i < LENGTH {
     body;
 }
 ```
-
-The array remains valid after the loop.
 
 {{ rule(id="4.8:36") }}
 

@@ -1331,6 +1331,7 @@ impl<'a> Sema<'a> {
             params: &param_vec,
             next_slot: 0,
             loop_depth: 0,
+            forbid_break: None,
             checked_depth: 0,
             used_locals: HashSet::new(),
             return_type,

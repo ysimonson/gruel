@@ -394,3 +394,131 @@ fn main() -> i32 {
 }
 """
 exit_code = 3
+
+# =============================================================================
+# Array For-In Loop (Move Types)
+# =============================================================================
+
+[[case]]
+name = "for_array_move_type_basic"
+spec = ["4.8:33", "4.8:35", "4.8:38"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+struct Data { value: i32 }
+
+fn main() -> i32 {
+    let arr: [Data; 3] = [Data { value: 10 }, Data { value: 20 }, Data { value: 30 }];
+    let mut sum = 0;
+    for d in arr {
+        sum = sum + d.value;
+    }
+    sum
+}
+"""
+exit_code = 60
+
+[[case]]
+name = "for_array_move_type_consumed"
+spec = ["4.8:35"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+struct Data { value: i32 }
+
+fn consume(arr: [Data; 2]) -> i32 { 0 }
+
+fn main() -> i32 {
+    let arr: [Data; 2] = [Data { value: 1 }, Data { value: 2 }];
+    for d in arr {
+        let _x = d.value;
+    }
+    consume(arr)
+}
+"""
+compile_fail = true
+error_contains = "use of moved value"
+
+[[case]]
+name = "for_array_move_type_break_forbidden"
+spec = ["4.8:37"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+struct Data { value: i32 }
+
+fn main() -> i32 {
+    let arr: [Data; 3] = [Data { value: 1 }, Data { value: 2 }, Data { value: 3 }];
+    let mut sum = 0;
+    for d in arr {
+        if d.value == 2 {
+            break;
+        }
+        sum = sum + d.value;
+    }
+    sum
+}
+"""
+compile_fail = true
+error_contains = "break"
+
+[[case]]
+name = "for_array_move_type_continue_allowed"
+spec = ["4.8:32", "4.8:35"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+struct Data { value: i32 }
+
+fn main() -> i32 {
+    let arr: [Data; 3] = [Data { value: 1 }, Data { value: 2 }, Data { value: 3 }];
+    let mut sum = 0;
+    for d in arr {
+        if d.value == 2 {
+            continue;
+        }
+        sum = sum + d.value;
+    }
+    sum
+}
+"""
+exit_code = 4
+
+[[case]]
+name = "for_array_move_type_single"
+spec = ["4.8:33", "4.8:35"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+struct Data { value: i32 }
+
+fn main() -> i32 {
+    let arr: [Data; 1] = [Data { value: 42 }];
+    let mut result = 0;
+    for d in arr {
+        result = d.value;
+    }
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "for_array_copy_type_break_still_allowed"
+spec = ["4.8:32", "4.8:34"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for x in arr {
+        if x == 4 {
+            break;
+        }
+        sum = sum + x;
+    }
+    sum
+}
+"""
+exit_code = 6

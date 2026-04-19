@@ -973,6 +973,8 @@ pub enum ErrorKind {
     // Control flow errors
     #[error("'break' outside of loop")]
     BreakOutsideLoop,
+    #[error("'break' in for-in loop over array with non-Copy element type '{element_type}' would leak un-iterated elements")]
+    BreakInConsumingForLoop { element_type: String },
     #[error("'continue' outside of loop")]
     ContinueOutsideLoop,
 
@@ -1147,6 +1149,7 @@ impl ErrorKind {
 
             // Control flow errors (E0500-E0599)
             ErrorKind::BreakOutsideLoop => ErrorCode::BREAK_OUTSIDE_LOOP,
+            ErrorKind::BreakInConsumingForLoop { .. } => ErrorCode::BREAK_OUTSIDE_LOOP,
             ErrorKind::ContinueOutsideLoop => ErrorCode::CONTINUE_OUTSIDE_LOOP,
             ErrorKind::IntrinsicRequiresChecked(_) => ErrorCode::INTRINSIC_REQUIRES_CHECKED,
             ErrorKind::UncheckedCallRequiresChecked(_) => {
