@@ -53,8 +53,8 @@ impl<'a> Sema<'a> {
             }
             // Module types are Copy (they're just compile-time namespace references)
             TypeKind::Module(_) => true,
-            // ComptimeType is Copy (only exists at comptime anyway)
-            TypeKind::ComptimeType => true,
+            // ComptimeType and ComptimeStr are Copy (only exist at comptime anyway)
+            TypeKind::ComptimeType | TypeKind::ComptimeStr => true,
             // Pointer types are Copy (they're just addresses)
             TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => true,
         }
@@ -304,8 +304,8 @@ impl<'a> Sema<'a> {
             | TypeKind::Bool
             | TypeKind::Error => 1,
             // Zero-sized types use 0 slots
-            // ComptimeType is comptime-only and uses 0 runtime slots
-            TypeKind::Unit | TypeKind::Never | TypeKind::ComptimeType => 0,
+            // ComptimeType/ComptimeStr are comptime-only and use 0 runtime slots
+            TypeKind::Unit | TypeKind::Never | TypeKind::ComptimeType | TypeKind::ComptimeStr => 0,
             // Enums are represented as their discriminant type (a scalar), so 1 slot
             TypeKind::Enum(_) => 1,
             // Struct uses sum of all field slots (includes builtin String with 3 fields)

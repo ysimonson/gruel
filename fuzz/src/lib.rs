@@ -29,10 +29,8 @@ impl<'a> Arbitrary<'a> for GruelProgram {
         for i in 0..num_helpers {
             let name = format!("helper_{}", i);
             let num_params: u8 = u.int_in_range(0..=2)?;
-            let params: Vec<String> =
-                (0..num_params).map(|j| format!("p{}", j)).collect();
-            let param_list: Vec<String> =
-                params.iter().map(|p| format!("{}: i32", p)).collect();
+            let params: Vec<String> = (0..num_params).map(|j| format!("p{}", j)).collect();
+            let param_list: Vec<String> = params.iter().map(|p| format!("{}: i32", p)).collect();
             let body = gen_i32_expr(u, &params, 2)?;
             src.push_str(&format!(
                 "fn {}({}) -> i32 {{ {} }}\n\n",
@@ -49,10 +47,7 @@ impl<'a> Arbitrary<'a> for GruelProgram {
             let fields: Vec<String> = (0..num_fields)
                 .map(|i| format!("    f{}: i32", i))
                 .collect();
-            src.push_str(&format!(
-                "struct Data {{\n{}\n}}\n\n",
-                fields.join(",\n"),
-            ));
+            src.push_str(&format!("struct Data {{\n{}\n}}\n\n", fields.join(",\n"),));
         }
 
         // main function
@@ -127,11 +122,7 @@ fn gen_body(
 
 /// Generate an i32-typed expression. Only uses constructs that are guaranteed
 /// to type-check when all referenced variables are `i32`.
-fn gen_i32_expr(
-    u: &mut Unstructured<'_>,
-    vars: &[String],
-    depth: u8,
-) -> arbitrary::Result<String> {
+fn gen_i32_expr(u: &mut Unstructured<'_>, vars: &[String], depth: u8) -> arbitrary::Result<String> {
     gen_i32_expr_with_calls(u, vars, &[], depth)
 }
 
@@ -175,12 +166,10 @@ fn gen_i32_expr_with_calls(
         // Block with inner let
         5 => {
             let inner_name = format!("blk{}", u.int_in_range(0u16..=999)?);
-            let val =
-                gen_i32_expr_with_calls(u, vars, helpers, depth - 1)?;
+            let val = gen_i32_expr_with_calls(u, vars, helpers, depth - 1)?;
             let mut inner_vars = vars.to_vec();
             inner_vars.push(inner_name.clone());
-            let ret =
-                gen_i32_expr_with_calls(u, &inner_vars, helpers, depth - 1)?;
+            let ret = gen_i32_expr_with_calls(u, &inner_vars, helpers, depth - 1)?;
             Ok(format!("{{ let {}: i32 = {}; {} }}", inner_name, val, ret))
         }
         // Helper call
@@ -268,59 +257,201 @@ fn gen_bool_expr(
 ///
 /// Generates programs using only constructs supported by both the comptime
 /// interpreter and the runtime: i32 arithmetic, booleans, control flow,
-/// function calls, and `@dbg` for observable output. No I/O, strings,
-/// or non-deterministic operations.
+/// `comptime_unroll for` with `@range`, `@typeInfo`/`@field`, and `@dbg`
+/// for observable output. No I/O, strings, or non-deterministic operations.
+///
+/// The comptime path wraps the body in `comptime { ... }` with loops
+/// pre-expanded into plain statements (since the comptime interpreter
+/// doesn't handle `comptime_unroll for`). The runtime path uses the actual
+/// `comptime_unroll for` syntax. Both should produce identical `@dbg` output.
 #[derive(Debug)]
 pub struct ComptimeProgram {
-    /// The generated function body (without fn main wrapper).
-    body: String,
+    /// Optional struct definition (top-level, emitted before fn main).
+    struct_def: Option<ComptimeStructDef>,
+    /// Body for the comptime path (loops manually expanded).
+    comptime_body: String,
+    /// Body for the runtime path (uses comptime_unroll for).
+    runtime_body: String,
+}
+
+/// A simple struct with i32 fields, used for `@typeInfo`/`@field` fuzzing.
+#[derive(Debug)]
+struct ComptimeStructDef {
+    name: String,
+    fields: Vec<(String, i32)>,
 }
 
 impl ComptimeProgram {
-    /// Get the raw body (statements + final expression).
+    /// Get the comptime body for diagnostic output.
     pub fn body(&self) -> &str {
-        &self.body
+        &self.runtime_body
+    }
+
+    /// Generate the struct definition preamble, if any.
+    fn struct_preamble(&self) -> String {
+        match &self.struct_def {
+            Some(sd) => {
+                let fields: Vec<String> = sd
+                    .fields
+                    .iter()
+                    .map(|(name, _)| format!("    {}: i32", name))
+                    .collect();
+                format!("struct {} {{\n{}\n}}\n\n", sd.name, fields.join(",\n"))
+            }
+            None => String::new(),
+        }
     }
 
     /// Wrap the body for comptime evaluation.
-    /// The `@dbg` output is collected in the compiler's buffer.
+    /// Loops are pre-expanded; `@dbg` output goes to the compiler buffer.
     pub fn comptime_source(&self) -> String {
         format!(
-            "const _: () = comptime {{\n{}\n}};\nfn main() -> i32 {{ 0 }}",
-            self.body
+            "{}fn main() -> i32 {{\n    comptime {{\n{}\n    }};\n    0\n}}",
+            self.struct_preamble(),
+            self.comptime_body
         )
     }
 
     /// Wrap the body for runtime execution.
-    /// The `@dbg` output goes to stdout.
+    /// Uses `comptime_unroll for`; `@dbg` output goes to stdout.
     pub fn runtime_source(&self) -> String {
-        format!("fn main() -> i32 {{\n{}\n0\n}}", self.body)
+        format!(
+            "{}fn main() -> i32 {{\n{}\n    0\n}}",
+            self.struct_preamble(),
+            self.runtime_body
+        )
     }
 }
 
 impl<'a> Arbitrary<'a> for ComptimeProgram {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut body = String::new();
+        let mut comptime_body = String::new();
+        let mut runtime_body = String::new();
         let mut vars: Vec<String> = Vec::new();
 
-        // Generate 1-8 statements, each with a @dbg call
+        // Optionally generate a struct for @typeInfo/@field testing
+        let struct_def = if u.ratio(1, 3)? {
+            let num_fields: u8 = u.int_in_range(1..=4)?;
+            let fields: Result<Vec<(String, i32)>, _> = (0..num_fields)
+                .map(|i| {
+                    let val = *u.choose(&[0i32, 1, -1, 5, 10, 42, -100])?;
+                    Ok((format!("f{}", i), val))
+                })
+                .collect();
+            let fields = fields?;
+            Some(ComptimeStructDef {
+                name: "FuzzStruct".to_string(),
+                fields,
+            })
+        } else {
+            None
+        };
+
+        // Generate 1-8 statements, mixing let+@dbg and comptime_unroll
         let num_stmts: u8 = u.int_in_range(1..=8)?;
         for i in 0..num_stmts {
-            let name = format!("ct{}", i);
-            let expr = gen_comptime_i32_expr(u, &vars, 2)?;
-            body.push_str(&format!("    let {}: i32 = {};\n", name, expr));
-            // Emit @dbg for this variable so we can compare output
-            body.push_str(&format!("    @dbg({});\n", name));
-            vars.push(name);
+            match u.int_in_range(0u8..=2)? {
+                // Regular let + @dbg (same in both paths)
+                0 => {
+                    let name = format!("ct{}", i);
+                    let expr = gen_comptime_i32_expr(u, &vars, 2)?;
+                    let let_stmt = format!("    let {}: i32 = {};\n", name, expr);
+                    let dbg_stmt = format!("    @dbg({});\n", name);
+                    comptime_body.push_str(&let_stmt);
+                    comptime_body.push_str(&dbg_stmt);
+                    runtime_body.push_str(&let_stmt);
+                    runtime_body.push_str(&dbg_stmt);
+                    vars.push(name);
+                }
+                // comptime_unroll for with @range
+                1 => {
+                    let range_end: u8 = u.int_in_range(0..=4)?;
+                    let loop_var = format!("idx{}", i);
+
+                    // Build the inner expression template (uses loop_var placeholder)
+                    let inner_template = if vars.is_empty() {
+                        "{}".to_string()
+                    } else {
+                        let var = u.choose(&vars)?;
+                        format!("({} + {{}})", var)
+                    };
+
+                    // Runtime: actual comptime_unroll for
+                    runtime_body.push_str(&format!(
+                        "    comptime_unroll for {} in comptime {{ @range({}) }} {{\n",
+                        loop_var, range_end
+                    ));
+                    let runtime_expr = inner_template.replace("{}", &loop_var);
+                    runtime_body.push_str(&format!("        @dbg({});\n", runtime_expr));
+                    runtime_body.push_str("    }\n");
+
+                    // Comptime: manually expanded iterations
+                    for idx in 0..range_end {
+                        let expanded_expr = inner_template.replace("{}", &idx.to_string());
+                        comptime_body.push_str(&format!("    @dbg({});\n", expanded_expr));
+                    }
+                }
+                // comptime_unroll for with @typeInfo/@field (if struct exists)
+                _ => {
+                    if let Some(ref sd) = struct_def {
+                        let inst_name = format!("s{}", i);
+                        let field_inits: Vec<String> = sd
+                            .fields
+                            .iter()
+                            .map(|(name, val)| format!("{}: {}", name, val))
+                            .collect();
+                        let let_stmt = format!(
+                            "    let {} = {} {{ {} }};\n",
+                            inst_name,
+                            sd.name,
+                            field_inits.join(", ")
+                        );
+
+                        // Runtime: comptime_unroll for with @typeInfo/@field
+                        runtime_body.push_str(&let_stmt);
+                        runtime_body.push_str(&format!(
+                            "    comptime_unroll for fld in comptime {{ @typeInfo({}).fields }} {{\n",
+                            sd.name
+                        ));
+                        runtime_body
+                            .push_str(&format!("        @dbg(@field({}, fld.name));\n", inst_name));
+                        runtime_body.push_str("    }\n");
+
+                        // Comptime: manually expanded field accesses
+                        comptime_body.push_str(&let_stmt);
+                        for (field_name, _) in &sd.fields {
+                            comptime_body
+                                .push_str(&format!("    @dbg({}.{});\n", inst_name, field_name));
+                        }
+                    } else {
+                        // No struct available — fall back to let + @dbg
+                        let name = format!("ct{}", i);
+                        let expr = gen_comptime_i32_expr(u, &vars, 2)?;
+                        let let_stmt = format!("    let {}: i32 = {};\n", name, expr);
+                        let dbg_stmt = format!("    @dbg({});\n", name);
+                        comptime_body.push_str(&let_stmt);
+                        comptime_body.push_str(&dbg_stmt);
+                        runtime_body.push_str(&let_stmt);
+                        runtime_body.push_str(&dbg_stmt);
+                        vars.push(name);
+                    }
+                }
+            }
         }
 
-        // Optionally dbg a boolean expression
+        // Optionally dbg a boolean expression (same in both paths)
         if u.ratio(1, 3)? {
             let bool_expr = gen_bool_expr(u, &vars, 1)?;
-            body.push_str(&format!("    @dbg({});\n", bool_expr));
+            let dbg_stmt = format!("    @dbg({});\n", bool_expr);
+            comptime_body.push_str(&dbg_stmt);
+            runtime_body.push_str(&dbg_stmt);
         }
 
-        Ok(ComptimeProgram { body })
+        Ok(ComptimeProgram {
+            struct_def,
+            comptime_body,
+            runtime_body,
+        })
     }
 }
 
@@ -375,10 +506,7 @@ fn gen_comptime_i32_expr(
     }
 }
 
-fn gen_comptime_i32_leaf(
-    u: &mut Unstructured<'_>,
-    vars: &[String],
-) -> arbitrary::Result<String> {
+fn gen_comptime_i32_leaf(u: &mut Unstructured<'_>, vars: &[String]) -> arbitrary::Result<String> {
     if !vars.is_empty() && u.ratio(1, 2)? {
         let v = u.choose(vars)?;
         Ok(v.clone())
@@ -392,6 +520,3 @@ fn gen_comptime_i32_literal(u: &mut Unstructured<'_>) -> arbitrary::Result<Strin
     let small = u.choose(&[0i32, 1, -1, 2, -2, 3, 5, 7, 10, 42, 100, -100])?;
     Ok(small.to_string())
 }
-
-
-

@@ -94,6 +94,8 @@ pub struct Sema<'a> {
     pub(crate) builtin_arch_id: Option<EnumId>,
     /// EnumId of the synthetic Os enum (for @target_os intrinsic).
     pub(crate) builtin_os_id: Option<EnumId>,
+    /// EnumId of the synthetic TypeKind enum (for @typeInfo intrinsic).
+    pub(crate) builtin_typekind_id: Option<EnumId>,
     /// Pre-interned known symbols for fast comparison.
     pub(crate) known: KnownSymbols,
     /// Type intern pool for unified type representation (ADR-0024 Phase 1).
@@ -141,6 +143,9 @@ pub struct Sema<'a> {
     /// Each entry is one formatted line (without trailing newline), matching
     /// the format of the runtime `__gruel_dbg_*` functions.
     pub(crate) comptime_dbg_output: Vec<String>,
+    /// Buffer for `@compileLog` output collected during comptime evaluation.
+    /// Each entry is (message, span) for warning generation after sema completes.
+    pub(crate) comptime_log_output: Vec<(String, gruel_span::Span)>,
 }
 
 impl<'a> Sema<'a> {
@@ -163,6 +168,7 @@ impl<'a> Sema<'a> {
             builtin_string_id: None,
             builtin_arch_id: None,
             builtin_os_id: None,
+            builtin_typekind_id: None,
             known: KnownSymbols::new(interner),
             type_pool: TypeInternPool::new(),
             module_registry: crate::sema_context::ModuleRegistry::new(),
@@ -178,6 +184,7 @@ impl<'a> Sema<'a> {
             comptime_heap: Vec::new(),
             comptime_type_overrides: HashMap::new(),
             comptime_dbg_output: Vec::new(),
+            comptime_log_output: Vec::new(),
         }
     }
 

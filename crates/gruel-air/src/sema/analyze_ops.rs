@@ -2655,16 +2655,38 @@ impl<'a> Sema<'a> {
                     });
                     return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
                 }
-                ConstValue::Unit
-                | ConstValue::Struct(_)
+                ConstValue::ComptimeStr(_) => {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "comptime_str values cannot be used in runtime expressions"
+                                .to_string(),
+                        },
+                        span,
+                    ));
+                }
+                ConstValue::Unit => {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "comptime unit values cannot be used in runtime expressions"
+                                .to_string(),
+                        },
+                        span,
+                    ));
+                }
+                ConstValue::Struct(_)
                 | ConstValue::Array(_)
                 | ConstValue::EnumVariant { .. }
                 | ConstValue::EnumData { .. }
-                | ConstValue::EnumStruct { .. }
-                | ConstValue::BreakSignal
-                | ConstValue::ContinueSignal
-                | ConstValue::ReturnSignal => {
-                    unreachable!("control-flow signal or composite value in comptime_value_vars")
+                | ConstValue::EnumStruct { .. } => {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "comptime composite values cannot be used in runtime expressions; use @field to access fields".to_string(),
+                        },
+                        span,
+                    ));
+                }
+                ConstValue::BreakSignal | ConstValue::ContinueSignal | ConstValue::ReturnSignal => {
+                    unreachable!("control-flow signal in comptime_value_vars")
                 }
             }
         }
@@ -4398,7 +4420,7 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Analyze a type intrinsic (@size_of, @align_of).
+    /// Analyze a type intrinsic (@size_of, @align_of, @typeName, @typeInfo).
     fn analyze_type_intrinsic(
         &mut self,
         air: &mut Air,
@@ -4407,6 +4429,17 @@ impl<'a> Sema<'a> {
         span: Span,
     ) -> CompileResult<AnalysisResult> {
         let intrinsic_name = self.interner.resolve(&name);
+
+        // @typeName and @typeInfo are comptime-only — reject in runtime context
+        if intrinsic_name == "typeName" || intrinsic_name == "typeInfo" {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("@{intrinsic_name} can only be used inside a comptime block"),
+                },
+                span,
+            ));
+        }
+
         let ty = self.resolve_type(type_arg, span)?;
 
         // Calculate the value based on which intrinsic

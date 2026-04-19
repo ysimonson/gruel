@@ -532,6 +532,14 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         functions.push(analyzed);
     }
 
+    // Emit warnings for any @compileLog calls that occurred during comptime evaluation.
+    for (msg, span) in std::mem::take(&mut sema.comptime_log_output) {
+        all_warnings.push(CompileWarning::new(
+            WarningKind::ComptimeLogPresent(msg),
+            span,
+        ));
+    }
+
     all_warnings.sort_by_key(|w| w.span().map(|s| s.start));
 
     let mut output = SemaOutput {
@@ -1011,6 +1019,14 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
         functions.push(analyzed);
     }
 
+    // Emit warnings for any @compileLog calls that occurred during comptime evaluation.
+    for (msg, span) in std::mem::take(&mut sema.comptime_log_output) {
+        all_warnings.push(CompileWarning::new(
+            WarningKind::ComptimeLogPresent(msg),
+            span,
+        ));
+    }
+
     all_warnings.sort_by_key(|w| w.span().map(|s| s.start));
 
     let mut output = SemaOutput {
@@ -1482,6 +1498,7 @@ impl<'a> Sema<'a> {
                     ConstValue::Bool(_) => Type::BOOL,
                     ConstValue::Type(t) => *t,
                     ConstValue::Unit => Type::UNIT,
+                    ConstValue::ComptimeStr(_) => Type::COMPTIME_STR,
                     ConstValue::Struct(_)
                     | ConstValue::Array(_)
                     | ConstValue::EnumVariant { .. }
@@ -1713,7 +1730,34 @@ impl<'a> Sema<'a> {
                         });
                         return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
                     }
-                    _ => {}
+                    ConstValue::ComptimeStr(_)
+                    | ConstValue::Struct(_)
+                    | ConstValue::Array(_)
+                    | ConstValue::EnumVariant { .. }
+                    | ConstValue::EnumData { .. }
+                    | ConstValue::EnumStruct { .. } => {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: "comptime composite values cannot be used in runtime expressions; use @field to access fields".to_string(),
+                            },
+                            inst.span,
+                        ));
+                    }
+                    ConstValue::Unit => {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason:
+                                    "comptime unit values cannot be used in runtime expressions"
+                                        .to_string(),
+                            },
+                            inst.span,
+                        ));
+                    }
+                    ConstValue::BreakSignal
+                    | ConstValue::ContinueSignal
+                    | ConstValue::ReturnSignal => {
+                        unreachable!("control-flow signal in comptime_value_vars")
+                    }
                 }
             }
 
@@ -2064,6 +2108,12 @@ impl<'a> Sema<'a> {
                         },
                         span,
                     )),
+                    ConstValue::ComptimeStr(_) => Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "comptime_str values cannot exist at runtime".to_string(),
+                        },
+                        span,
+                    )),
                     ConstValue::Unit => {
                         let air_ref = air.add_inst(AirInst {
                             data: AirInstData::UnitConst,
@@ -2094,6 +2144,102 @@ impl<'a> Sema<'a> {
                     | ConstValue::ReturnSignal => {
                         unreachable!("control-flow signal escaped evaluate_comptime_block")
                     }
+                }
+            }
+
+            // Comptime unroll for: evaluate iterable at comptime, unroll body N times
+            InstData::ComptimeUnrollFor {
+                binding,
+                iterable,
+                body,
+            } => {
+                let span = inst.span;
+                let binding = *binding;
+                let iterable = *iterable;
+                let body = *body;
+
+                self.require_preview(PreviewFeature::ComptimeMeta, "comptime_unroll for", span)?;
+
+                // Step 1: Evaluate the iterable expression at comptime.
+                // We use evaluate_comptime_block which clears and rebuilds the heap.
+                let iterable_val = self.evaluate_comptime_block(iterable, ctx, span)?;
+
+                // Step 2: Extract array elements from the comptime heap.
+                // We clone the elements AND preserve the heap so that composite
+                // ConstValues (e.g., Struct(heap_idx)) remain valid during iteration.
+                let elements = match iterable_val {
+                    ConstValue::Array(heap_idx) => match &self.comptime_heap[heap_idx as usize] {
+                        ComptimeHeapItem::Array(elems) => elems.clone(),
+                        _ => {
+                            return Err(CompileError::new(
+                                ErrorKind::ComptimeEvaluationFailed {
+                                    reason: "comptime_unroll iterable is not an array".to_string(),
+                                },
+                                span,
+                            ));
+                        }
+                    },
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: "comptime_unroll for requires an array iterable"
+                                    .to_string(),
+                            },
+                            span,
+                        ));
+                    }
+                };
+
+                // Step 3: For each element, bind the loop variable and analyze the body.
+                // The loop variable is stored in comptime_value_vars so that @field
+                // and other comptime expressions in the body can access it.
+                let mut body_air_refs = Vec::with_capacity(elements.len());
+                for element in &elements {
+                    // Insert the loop variable as a comptime value
+                    let prev_value = ctx.comptime_value_vars.insert(binding, *element);
+
+                    // Analyze the body block
+                    let body_result = self.analyze_inst(air, body, ctx)?;
+                    body_air_refs.push(body_result.air_ref);
+
+                    // Restore the previous value (or remove if there was none)
+                    match prev_value {
+                        Some(v) => {
+                            ctx.comptime_value_vars.insert(binding, v);
+                        }
+                        None => {
+                            ctx.comptime_value_vars.remove(&binding);
+                        }
+                    }
+                }
+
+                // Step 4: Emit all unrolled body instructions.
+                if body_air_refs.is_empty() {
+                    // Empty loop — emit unit constant
+                    let air_ref = air.add_inst(AirInst {
+                        data: AirInstData::UnitConst,
+                        ty: Type::UNIT,
+                        span,
+                    });
+                    Ok(AnalysisResult::new(air_ref, Type::UNIT))
+                } else if body_air_refs.len() == 1 {
+                    Ok(AnalysisResult::new(body_air_refs[0], Type::UNIT))
+                } else {
+                    // Emit a block containing all unrolled body results.
+                    // The last body is the block's "value"; the rest are statements.
+                    let last = body_air_refs.pop().unwrap();
+                    let stmts: Vec<u32> = body_air_refs.iter().map(|r| r.as_u32()).collect();
+                    let stmts_start = air.add_extra(&stmts);
+                    let block_ref = air.add_inst(AirInst {
+                        data: AirInstData::Block {
+                            stmts_start,
+                            stmts_len: stmts.len() as u32,
+                            value: last,
+                        },
+                        ty: Type::UNIT,
+                        span,
+                    });
+                    Ok(AnalysisResult::new(block_ref, Type::UNIT))
                 }
             }
 
@@ -3250,6 +3396,12 @@ impl<'a> Sema<'a> {
             self.analyze_target_arch_intrinsic(air, &args, span)
         } else if name == known.target_os {
             self.analyze_target_os_intrinsic(air, &args, span)
+        } else if name == known.compile_error {
+            self.analyze_compile_error_intrinsic(air, &args, span)
+        } else if name == known.compile_log {
+            self.analyze_compile_log_intrinsic(air, &args, span, ctx)
+        } else if name == known.field {
+            self.analyze_field_intrinsic(air, &args, span, ctx)
         } else {
             // Unknown intrinsic - resolve name for error message
             let intrinsic_name_str = self.interner.resolve(&name);
@@ -3572,6 +3724,175 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, Type::UNIT))
+    }
+
+    /// Analyze @compileError intrinsic.
+    ///
+    /// In the runtime analysis path, @compileError is a comptime-only intrinsic
+    /// that has type `!` (never). It takes exactly one string literal argument.
+    /// The actual error emission happens in the comptime interpreter.
+    fn analyze_compile_error_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+    ) -> CompileResult<AnalysisResult> {
+        self.require_preview(
+            PreviewFeature::ComptimeMeta,
+            "@compileError intrinsic",
+            span,
+        )?;
+
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicWrongArgCount {
+                    name: "compileError".to_string(),
+                    expected: 1,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        // Verify the argument is a string literal
+        let arg_inst = self.rir.get(args[0].value);
+        if !matches!(&arg_inst.data, gruel_rir::InstData::StringConst(_)) {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "@compileError requires a string literal argument".into(),
+                },
+                arg_inst.span,
+            ));
+        }
+
+        // Type is `!` (never) — @compileError always terminates compilation
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::UnitConst,
+            ty: Type::NEVER,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, Type::NEVER))
+    }
+
+    /// Analyze @compileLog intrinsic.
+    ///
+    /// In the runtime analysis path, @compileLog is a comptime-only intrinsic
+    /// that has type `()`. It accepts any number of arguments.
+    /// The actual log emission happens in the comptime interpreter.
+    fn analyze_compile_log_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        self.require_preview(PreviewFeature::ComptimeMeta, "@compileLog intrinsic", span)?;
+
+        // Analyze all arguments for type checking (but discard results)
+        for arg in args {
+            self.analyze_inst(air, arg.value, ctx)?;
+        }
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::UnitConst,
+            ty: Type::UNIT,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, Type::UNIT))
+    }
+
+    /// Analyze @field(value, field_name) intrinsic.
+    ///
+    /// Accesses a struct field by comptime-known name. The first argument is a
+    /// runtime value of struct type, the second is a comptime_str naming the field.
+    /// Resolves at compile time to a FieldGet instruction.
+    fn analyze_field_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        self.require_preview(PreviewFeature::ComptimeMeta, "@field intrinsic", span)?;
+
+        if args.len() != 2 {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicWrongArgCount {
+                    name: "field".to_string(),
+                    expected: 2,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        // Arg 1: runtime value of struct type — analyze as a projection base
+        // (does not mark the variable as moved, like regular field access)
+        let value_result = self.analyze_inst_for_projection(air, args[0].value, ctx)?;
+        let struct_ty = value_result.ty;
+
+        // Verify the value is a struct type
+        let struct_id = match struct_ty.kind() {
+            TypeKind::Struct(id) => id,
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: format!("@field requires a struct value, got {}", struct_ty.name()),
+                    },
+                    span,
+                ));
+            }
+        };
+
+        // Arg 2: field name — evaluate at comptime to get a comptime_str.
+        // Uses evaluate_comptime_expr (not evaluate_comptime_block) to preserve
+        // the heap, which may contain data from a comptime_unroll iteration.
+        let field_name_val = self.evaluate_comptime_expr(args[1].value, ctx, span)?;
+        let field_name = match field_name_val {
+            ConstValue::ComptimeStr(str_idx) => match &self.comptime_heap[str_idx as usize] {
+                ComptimeHeapItem::String(s) => s.clone(),
+                _ => {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "@field second argument must be a comptime_str".to_string(),
+                        },
+                        span,
+                    ));
+                }
+            },
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "@field second argument must be a comptime_str".to_string(),
+                    },
+                    span,
+                ));
+            }
+        };
+
+        // Resolve the field name to a field index
+        let struct_def = self.type_pool.struct_def(struct_id);
+        let (field_idx, field_def) = struct_def.find_field(&field_name).ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("struct '{}' has no field '{}'", struct_def.name, field_name),
+                },
+                span,
+            )
+        })?;
+        let field_ty = field_def.ty;
+
+        // Emit a FieldGet instruction
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::FieldGet {
+                base: value_result.air_ref,
+                struct_id,
+                field_index: field_idx as u32,
+            },
+            ty: field_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, field_ty))
     }
 
     /// Analyze @read_line intrinsic.
@@ -4919,6 +5240,665 @@ impl<'a> Sema<'a> {
         })
     }
 
+    /// Format a comptime value as a human-readable string.
+    ///
+    /// Used by `@dbg` and `@compileLog` to render comptime values during
+    /// compile-time evaluation.
+    fn format_const_value(&self, val: ConstValue, span: Span) -> CompileResult<String> {
+        match val {
+            ConstValue::Bool(b) => Ok(if b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }),
+            ConstValue::Integer(v) => Ok(format!("{v}")),
+            ConstValue::Unit => Ok("()".to_string()),
+            ConstValue::ComptimeStr(idx) => match &self.comptime_heap[idx as usize] {
+                ComptimeHeapItem::String(s) => Ok(s.clone()),
+                _ => Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "invalid comptime_str heap reference".into(),
+                    },
+                    span,
+                )),
+            },
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "expression contains values that cannot be known at compile time"
+                        .into(),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Resolve a `ConstValue::ComptimeStr` to its Rust string content.
+    fn resolve_comptime_str(&self, idx: u32, span: Span) -> CompileResult<&str> {
+        match &self.comptime_heap[idx as usize] {
+            ComptimeHeapItem::String(s) => Ok(s.as_str()),
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "invalid comptime_str heap reference".into(),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Evaluate a `comptime_str` method call in the comptime interpreter.
+    ///
+    /// Dispatches methods like `len`, `is_empty`, `contains`, `starts_with`,
+    /// `ends_with`, `eq`, `ne`, `lt`, `le`, `gt`, `ge`, and `concat`.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_comptime_str_method(
+        &mut self,
+        str_idx: u32,
+        method_name: &str,
+        call_args: &[gruel_rir::RirCallArg],
+        locals: &mut HashMap<Spur, ConstValue>,
+        ctx: &AnalysisContext,
+        outer_span: Span,
+        inst_span: Span,
+    ) -> CompileResult<ConstValue> {
+        let s = self.resolve_comptime_str(str_idx, inst_span)?.to_string();
+
+        match method_name {
+            "len" => {
+                if !call_args.is_empty() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: "len".to_string(),
+                            expected: 0,
+                            found: call_args.len(),
+                        },
+                        inst_span,
+                    ));
+                }
+                Ok(ConstValue::Integer(s.len() as i64))
+            }
+            "is_empty" => {
+                if !call_args.is_empty() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: "is_empty".to_string(),
+                            expected: 0,
+                            found: call_args.len(),
+                        },
+                        inst_span,
+                    ));
+                }
+                Ok(ConstValue::Bool(s.is_empty()))
+            }
+            "contains" | "starts_with" | "ends_with" | "eq" | "ne" | "lt" | "le" | "gt" | "ge" => {
+                if call_args.len() != 1 {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: method_name.to_string(),
+                            expected: 1,
+                            found: call_args.len(),
+                        },
+                        inst_span,
+                    ));
+                }
+                let arg_val =
+                    self.evaluate_comptime_inst(call_args[0].value, locals, ctx, outer_span)?;
+                let other_idx = match arg_val {
+                    ConstValue::ComptimeStr(idx) => idx,
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: format!(
+                                    "comptime_str.{method_name} expects a comptime_str argument"
+                                ),
+                            },
+                            inst_span,
+                        ));
+                    }
+                };
+                let other = self.resolve_comptime_str(other_idx, inst_span)?.to_string();
+                let result = match method_name {
+                    "contains" => s.contains(other.as_str()),
+                    "starts_with" => s.starts_with(other.as_str()),
+                    "ends_with" => s.ends_with(other.as_str()),
+                    "eq" => s == other,
+                    "ne" => s != other,
+                    "lt" => s < other,
+                    "le" => s <= other,
+                    "gt" => s > other,
+                    "ge" => s >= other,
+                    _ => unreachable!(),
+                };
+                Ok(ConstValue::Bool(result))
+            }
+            "concat" => {
+                if call_args.len() != 1 {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: "concat".to_string(),
+                            expected: 1,
+                            found: call_args.len(),
+                        },
+                        inst_span,
+                    ));
+                }
+                let arg_val =
+                    self.evaluate_comptime_inst(call_args[0].value, locals, ctx, outer_span)?;
+                let other_idx = match arg_val {
+                    ConstValue::ComptimeStr(idx) => idx,
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: "comptime_str.concat expects a comptime_str argument"
+                                    .into(),
+                            },
+                            inst_span,
+                        ));
+                    }
+                };
+                let other = self.resolve_comptime_str(other_idx, inst_span)?.to_string();
+                let result = format!("{s}{other}");
+                let idx = self.comptime_heap.len() as u32;
+                self.comptime_heap.push(ComptimeHeapItem::String(result));
+                Ok(ConstValue::ComptimeStr(idx))
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("unknown comptime_str method '{method_name}'"),
+                },
+                inst_span,
+            )),
+        }
+    }
+
+    /// Evaluate a comptime intrinsic argument as a string.
+    ///
+    /// Accepts both `StringConst` instructions (string literals) and
+    /// `ConstValue::ComptimeStr` values from comptime evaluation.
+    fn evaluate_comptime_string_arg(
+        &mut self,
+        arg_ref: InstRef,
+        locals: &mut HashMap<Spur, ConstValue>,
+        ctx: &AnalysisContext,
+        outer_span: Span,
+    ) -> CompileResult<String> {
+        let arg_inst = self.rir.get(arg_ref);
+        // Try string literal first
+        if let gruel_rir::InstData::StringConst(spur) = &arg_inst.data {
+            return Ok(self.interner.resolve(spur).to_string());
+        }
+        // Otherwise evaluate as a comptime expression
+        let val = self.evaluate_comptime_inst(arg_ref, locals, ctx, outer_span)?;
+        match val {
+            ConstValue::ComptimeStr(idx) => self
+                .resolve_comptime_str(idx, arg_inst.span)
+                .map(|s| s.to_string()),
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "@compileError requires a string literal or comptime_str argument"
+                        .into(),
+                },
+                arg_inst.span,
+            )),
+        }
+    }
+
+    /// Allocate a `comptime_str` on the comptime heap and return a `ConstValue::ComptimeStr`.
+    fn alloc_comptime_str(&mut self, s: String) -> ConstValue {
+        let idx = self.comptime_heap.len() as u32;
+        self.comptime_heap.push(ComptimeHeapItem::String(s));
+        ConstValue::ComptimeStr(idx)
+    }
+
+    /// Allocate a comptime struct on the heap and return a `ConstValue::Struct`.
+    fn alloc_comptime_struct(
+        &mut self,
+        struct_id: StructId,
+        fields: Vec<ConstValue>,
+    ) -> ConstValue {
+        let idx = self.comptime_heap.len() as u32;
+        self.comptime_heap
+            .push(ComptimeHeapItem::Struct { struct_id, fields });
+        ConstValue::Struct(idx)
+    }
+
+    /// Allocate a comptime array on the heap and return a `ConstValue::Array`.
+    fn alloc_comptime_array(&mut self, elements: Vec<ConstValue>) -> ConstValue {
+        let idx = self.comptime_heap.len() as u32;
+        self.comptime_heap.push(ComptimeHeapItem::Array(elements));
+        ConstValue::Array(idx)
+    }
+
+    /// Resolve a `TypeKind` variant name to its discriminant index.
+    fn typekind_variant_idx(&self, variant_name: &str) -> u32 {
+        let enum_id = self
+            .builtin_typekind_id
+            .expect("TypeKind enum not injected");
+        let enum_def = self.type_pool.enum_def(enum_id);
+        enum_def
+            .find_variant(variant_name)
+            .unwrap_or_else(|| panic!("TypeKind variant '{variant_name}' not found")) as u32
+    }
+
+    /// Evaluate `@typeName(T)` — returns the type's name as a `comptime_str`.
+    fn evaluate_comptime_type_name(&mut self, ty: Type, _span: Span) -> CompileResult<ConstValue> {
+        let name = self.type_pool.format_type_name(ty);
+        Ok(self.alloc_comptime_str(name))
+    }
+
+    /// Evaluate `@typeInfo(T)` — returns a comptime struct describing the type.
+    fn evaluate_comptime_type_info(&mut self, ty: Type, span: Span) -> CompileResult<ConstValue> {
+        let typekind_enum_id = self
+            .builtin_typekind_id
+            .expect("TypeKind enum not injected");
+        let typekind_type = Type::new_enum(typekind_enum_id);
+
+        match ty.kind() {
+            TypeKind::Struct(struct_id) => {
+                self.build_struct_type_info(struct_id, typekind_enum_id, typekind_type)
+            }
+            TypeKind::Enum(enum_id) => {
+                self.build_enum_type_info(enum_id, typekind_enum_id, typekind_type)
+            }
+            TypeKind::I8 => {
+                self.build_int_type_info("i8", 8, true, typekind_enum_id, typekind_type)
+            }
+            TypeKind::I16 => {
+                self.build_int_type_info("i16", 16, true, typekind_enum_id, typekind_type)
+            }
+            TypeKind::I32 => {
+                self.build_int_type_info("i32", 32, true, typekind_enum_id, typekind_type)
+            }
+            TypeKind::I64 => {
+                self.build_int_type_info("i64", 64, true, typekind_enum_id, typekind_type)
+            }
+            TypeKind::U8 => {
+                self.build_int_type_info("u8", 8, false, typekind_enum_id, typekind_type)
+            }
+            TypeKind::U16 => {
+                self.build_int_type_info("u16", 16, false, typekind_enum_id, typekind_type)
+            }
+            TypeKind::U32 => {
+                self.build_int_type_info("u32", 32, false, typekind_enum_id, typekind_type)
+            }
+            TypeKind::U64 => {
+                self.build_int_type_info("u64", 64, false, typekind_enum_id, typekind_type)
+            }
+            TypeKind::Bool => {
+                self.build_simple_type_info("bool", "Bool", typekind_enum_id, typekind_type)
+            }
+            TypeKind::Unit => {
+                self.build_simple_type_info("()", "Unit", typekind_enum_id, typekind_type)
+            }
+            TypeKind::Never => {
+                self.build_simple_type_info("!", "Never", typekind_enum_id, typekind_type)
+            }
+            TypeKind::Array(array_type_id) => {
+                let (elem_ty, len) = self.type_pool.array_def(array_type_id);
+                let elem_name = self.type_pool.format_type_name(elem_ty);
+                let name = format!("[{elem_name}; {len}]");
+                self.build_simple_type_info(&name, "Array", typekind_enum_id, typekind_type)
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("@typeInfo not supported for type '{}'", ty.name()),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Build a simple type info struct with just `kind` and `name` fields.
+    fn build_simple_type_info(
+        &mut self,
+        type_name: &str,
+        kind_variant_name: &str,
+        typekind_enum_id: EnumId,
+        typekind_type: Type,
+    ) -> CompileResult<ConstValue> {
+        let kind_val = ConstValue::EnumVariant {
+            enum_id: typekind_enum_id,
+            variant_idx: self.typekind_variant_idx(kind_variant_name),
+        };
+        let name_val = self.alloc_comptime_str(type_name.to_string());
+
+        let fields = vec![
+            StructField {
+                name: "kind".to_string(),
+                ty: typekind_type,
+            },
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+        ];
+        let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::new());
+        let info_struct_id = match info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        Ok(self.alloc_comptime_struct(info_struct_id, vec![kind_val, name_val]))
+    }
+
+    /// Build type info for an integer type (includes `bits` and `is_signed`).
+    #[allow(clippy::too_many_arguments)]
+    fn build_int_type_info(
+        &mut self,
+        type_name: &str,
+        bits: i32,
+        is_signed: bool,
+        typekind_enum_id: EnumId,
+        typekind_type: Type,
+    ) -> CompileResult<ConstValue> {
+        let kind_val = ConstValue::EnumVariant {
+            enum_id: typekind_enum_id,
+            variant_idx: self.typekind_variant_idx("Int"),
+        };
+        let name_val = self.alloc_comptime_str(type_name.to_string());
+
+        let fields = vec![
+            StructField {
+                name: "kind".to_string(),
+                ty: typekind_type,
+            },
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "bits".to_string(),
+                ty: Type::I32,
+            },
+            StructField {
+                name: "is_signed".to_string(),
+                ty: Type::BOOL,
+            },
+        ];
+        let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::new());
+        let info_struct_id = match info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        Ok(self.alloc_comptime_struct(
+            info_struct_id,
+            vec![
+                kind_val,
+                name_val,
+                ConstValue::Integer(bits as i64),
+                ConstValue::Bool(is_signed),
+            ],
+        ))
+    }
+
+    /// Build type info for a struct type (includes `field_count` and `fields` array).
+    fn build_struct_type_info(
+        &mut self,
+        struct_id: StructId,
+        typekind_enum_id: EnumId,
+        typekind_type: Type,
+    ) -> CompileResult<ConstValue> {
+        let kind_val = ConstValue::EnumVariant {
+            enum_id: typekind_enum_id,
+            variant_idx: self.typekind_variant_idx("Struct"),
+        };
+
+        // Get struct info
+        let struct_def = self.type_pool.struct_def(struct_id);
+        let struct_name = struct_def.name.clone();
+        let field_defs: Vec<(String, Type)> = struct_def
+            .fields
+            .iter()
+            .map(|f| (f.name.clone(), f.ty))
+            .collect();
+        let field_count = field_defs.len() as i32;
+
+        let name_val = self.alloc_comptime_str(struct_name);
+
+        // Create FieldInfo struct type
+        let field_info_fields = vec![
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "field_type".to_string(),
+                ty: Type::COMPTIME_TYPE,
+            },
+        ];
+        let (field_info_type, _) =
+            self.find_or_create_anon_struct(&field_info_fields, &[], &HashMap::new());
+        let field_info_struct_id = match field_info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        // Create FieldInfo instances for each field
+        let mut field_values = Vec::with_capacity(field_defs.len());
+        for (fname, ftype) in &field_defs {
+            let fname_val = self.alloc_comptime_str(fname.clone());
+            let ftype_val = ConstValue::Type(*ftype);
+            let field_info =
+                self.alloc_comptime_struct(field_info_struct_id, vec![fname_val, ftype_val]);
+            field_values.push(field_info);
+        }
+
+        // Create the fields array
+        let fields_array = self.alloc_comptime_array(field_values);
+
+        // Create the array type for fields: [FieldInfo; N]
+        let fields_array_type =
+            Type::new_array(self.get_or_create_array_type(field_info_type, field_count as u64));
+
+        // Create the info struct type
+        let info_fields = vec![
+            StructField {
+                name: "kind".to_string(),
+                ty: typekind_type,
+            },
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "field_count".to_string(),
+                ty: Type::I32,
+            },
+            StructField {
+                name: "fields".to_string(),
+                ty: fields_array_type,
+            },
+        ];
+        let (info_type, _) = self.find_or_create_anon_struct(&info_fields, &[], &HashMap::new());
+        let info_struct_id = match info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        Ok(self.alloc_comptime_struct(
+            info_struct_id,
+            vec![
+                kind_val,
+                name_val,
+                ConstValue::Integer(field_count as i64),
+                fields_array,
+            ],
+        ))
+    }
+
+    /// Build type info for an enum type (includes `variant_count` and `variants` array).
+    fn build_enum_type_info(
+        &mut self,
+        enum_id: EnumId,
+        typekind_enum_id: EnumId,
+        typekind_type: Type,
+    ) -> CompileResult<ConstValue> {
+        let kind_val = ConstValue::EnumVariant {
+            enum_id: typekind_enum_id,
+            variant_idx: self.typekind_variant_idx("Enum"),
+        };
+
+        // Get enum info
+        let enum_def = self.type_pool.enum_def(enum_id);
+        let enum_name = enum_def.name.clone();
+        let variant_defs: Vec<(String, Vec<(String, Type)>)> = enum_def
+            .variants
+            .iter()
+            .map(|v| {
+                let vfields: Vec<(String, Type)> = if v.is_struct_variant() {
+                    // Struct variant: field names + types
+                    v.field_names
+                        .iter()
+                        .zip(v.fields.iter())
+                        .map(|(name, ty)| (name.clone(), *ty))
+                        .collect()
+                } else {
+                    // Unit or tuple variant: just types with positional names
+                    v.fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, ty)| (format!("{i}"), *ty))
+                        .collect()
+                };
+                (v.name.clone(), vfields)
+            })
+            .collect();
+        let variant_count = variant_defs.len() as i32;
+
+        let name_val = self.alloc_comptime_str(enum_name);
+
+        // Create FieldInfo struct type (reuse if already exists)
+        let field_info_fields = vec![
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "field_type".to_string(),
+                ty: Type::COMPTIME_TYPE,
+            },
+        ];
+        let (field_info_type, _) =
+            self.find_or_create_anon_struct(&field_info_fields, &[], &HashMap::new());
+        let field_info_struct_id = match field_info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        // Create VariantInfo instances
+        let mut variant_values = Vec::with_capacity(variant_defs.len());
+        for (vname, vfields) in &variant_defs {
+            let vname_val = self.alloc_comptime_str(vname.clone());
+
+            // Create FieldInfo array for this variant's fields
+            let mut vfield_values = Vec::new();
+            for (fname, ftype) in vfields {
+                let fname_val = self.alloc_comptime_str(fname.clone());
+                let ftype_val = ConstValue::Type(*ftype);
+                let field_info =
+                    self.alloc_comptime_struct(field_info_struct_id, vec![fname_val, ftype_val]);
+                vfield_values.push(field_info);
+            }
+            let vfields_array = self.alloc_comptime_array(vfield_values);
+            let vfield_count = vfields.len() as i32;
+
+            // Create VariantInfo struct type with fields array
+            let vfields_array_type = Type::new_array(
+                self.get_or_create_array_type(field_info_type, vfields.len() as u64),
+            );
+            let variant_info_fields = vec![
+                StructField {
+                    name: "name".to_string(),
+                    ty: Type::COMPTIME_STR,
+                },
+                StructField {
+                    name: "field_count".to_string(),
+                    ty: Type::I32,
+                },
+                StructField {
+                    name: "fields".to_string(),
+                    ty: vfields_array_type,
+                },
+            ];
+            let (variant_info_type, _) =
+                self.find_or_create_anon_struct(&variant_info_fields, &[], &HashMap::new());
+            let variant_info_struct_id = match variant_info_type.kind() {
+                TypeKind::Struct(id) => id,
+                _ => unreachable!(),
+            };
+
+            let variant_info = self.alloc_comptime_struct(
+                variant_info_struct_id,
+                vec![
+                    vname_val,
+                    ConstValue::Integer(vfield_count as i64),
+                    vfields_array,
+                ],
+            );
+            variant_values.push(variant_info);
+        }
+
+        // Create the variants array
+        let variants_array = self.alloc_comptime_array(variant_values);
+
+        // For the array type, we need a VariantInfo type — use one for unit variants (0 fields)
+        let empty_fields_array_type =
+            Type::new_array(self.get_or_create_array_type(field_info_type, 0));
+        let variant_info_fields = vec![
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "field_count".to_string(),
+                ty: Type::I32,
+            },
+            StructField {
+                name: "fields".to_string(),
+                ty: empty_fields_array_type,
+            },
+        ];
+        let (variant_info_type, _) =
+            self.find_or_create_anon_struct(&variant_info_fields, &[], &HashMap::new());
+        let variants_array_type =
+            Type::new_array(self.get_or_create_array_type(variant_info_type, variant_count as u64));
+
+        // Create the info struct type
+        let info_fields = vec![
+            StructField {
+                name: "kind".to_string(),
+                ty: typekind_type,
+            },
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "variant_count".to_string(),
+                ty: Type::I32,
+            },
+            StructField {
+                name: "variants".to_string(),
+                ty: variants_array_type,
+            },
+        ];
+        let (info_type, _) = self.find_or_create_anon_struct(&info_fields, &[], &HashMap::new());
+        let info_struct_id = match info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        Ok(self.alloc_comptime_struct(
+            info_struct_id,
+            vec![
+                kind_val,
+                name_val,
+                ConstValue::Integer(variant_count as i64),
+                variants_array,
+            ],
+        ))
+    }
+
     /// Evaluate a comptime block expression using the stateful interpreter.
     ///
     /// Seeds the local scope from `ctx.comptime_value_vars` (captured comptime
@@ -4950,6 +5930,38 @@ impl<'a> Sema<'a> {
             ConstValue::ReturnSignal => Err(CompileError::new(
                 ErrorKind::ComptimeEvaluationFailed {
                     reason: "return outside a function in comptime block".into(),
+                },
+                span,
+            )),
+            val => Ok(val),
+        }
+    }
+
+    /// Evaluate a comptime expression without clearing the heap.
+    ///
+    /// This is used by `@field` and other intrinsics inside `comptime_unroll for` bodies
+    /// where the heap contains data from the iterable evaluation that must be preserved.
+    fn evaluate_comptime_expr(
+        &mut self,
+        inst_ref: InstRef,
+        ctx: &AnalysisContext,
+        span: Span,
+    ) -> CompileResult<ConstValue> {
+        let prev_steps = self.comptime_steps_used;
+        self.comptime_steps_used = 0;
+        let mut locals = ctx.comptime_value_vars.clone();
+        let result = self.evaluate_comptime_inst(inst_ref, &mut locals, ctx, span)?;
+        self.comptime_steps_used = prev_steps;
+        match result {
+            ConstValue::BreakSignal | ConstValue::ContinueSignal => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "break/continue outside a loop in comptime expression".into(),
+                },
+                span,
+            )),
+            ConstValue::ReturnSignal => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "return outside a function in comptime expression".into(),
                 },
                 span,
             )),
@@ -5028,6 +6040,14 @@ impl<'a> Sema<'a> {
             InstData::BoolConst(value) => Ok(ConstValue::Bool(value)),
 
             InstData::UnitConst => Ok(ConstValue::Unit),
+
+            InstData::StringConst(spur) => {
+                self.require_preview(PreviewFeature::ComptimeMeta, "comptime_str type", inst_span)?;
+                let s = self.interner.resolve(&spur).to_string();
+                let idx = self.comptime_heap.len() as u32;
+                self.comptime_heap.push(ComptimeHeapItem::String(s));
+                Ok(ConstValue::ComptimeStr(idx))
+            }
 
             // ── Unary operations ─────────────────────────────────────────────
             InstData::Neg { operand } => {
@@ -5148,6 +6168,11 @@ impl<'a> Sema<'a> {
                         Ok(ConstValue::Bool(a == b))
                     }
                     (ConstValue::Bool(a), ConstValue::Bool(b)) => Ok(ConstValue::Bool(a == b)),
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa == sb))
+                    }
                     _ => Err(not_const(inst_span)),
                 }
             }
@@ -5159,52 +6184,69 @@ impl<'a> Sema<'a> {
                         Ok(ConstValue::Bool(a != b))
                     }
                     (ConstValue::Bool(a), ConstValue::Bool(b)) => Ok(ConstValue::Bool(a != b)),
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa != sb))
+                    }
                     _ => Err(not_const(inst_span)),
                 }
             }
             InstData::Lt { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l < r))
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => Ok(ConstValue::Bool(a < b)),
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa < sb))
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
             InstData::Gt { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l > r))
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => Ok(ConstValue::Bool(a > b)),
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa > sb))
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
             InstData::Le { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l <= r))
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                        Ok(ConstValue::Bool(a <= b))
+                    }
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa <= sb))
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
             InstData::Ge { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l >= r))
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                        Ok(ConstValue::Bool(a >= b))
+                    }
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa >= sb))
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
 
             // ── Logical ───────────────────────────────────────────────────────
@@ -6204,9 +7246,24 @@ impl<'a> Sema<'a> {
             } => {
                 const COMPTIME_CALL_DEPTH_LIMIT: u32 = 64;
 
-                // Evaluate the receiver to get the struct value.
+                // Evaluate the receiver to get the value.
                 let receiver_val =
                     self.evaluate_comptime_inst(receiver, locals, ctx, outer_span)?;
+
+                // Handle comptime_str method dispatch.
+                if let ConstValue::ComptimeStr(str_idx) = receiver_val {
+                    let method_name = self.interner.resolve(&method).to_string();
+                    let call_args = self.rir.get_call_args(args_start, args_len);
+                    return self.evaluate_comptime_str_method(
+                        str_idx,
+                        &method_name,
+                        &call_args,
+                        locals,
+                        ctx,
+                        outer_span,
+                        inst_span,
+                    );
+                }
 
                 // Determine the struct type from the receiver value.
                 let struct_id = match receiver_val {
@@ -6310,42 +7367,207 @@ impl<'a> Sema<'a> {
                         return Err(not_const(inst_span));
                     }
                     let val = self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span)?;
-                    let formatted = match val {
-                        ConstValue::Bool(b) => {
-                            if b {
-                                "true".to_string()
-                            } else {
-                                "false".to_string()
-                            }
-                        }
-                        ConstValue::Integer(v) => format!("{v}"),
-                        _ => return Err(not_const(inst_span)),
-                    };
+                    let formatted = self.format_const_value(val, inst_span)?;
                     self.comptime_dbg_output.push(formatted);
                     return Ok(ConstValue::Unit);
+                }
+                // @compileError emits a user-defined compile error.
+                if name == self.known.compile_error {
+                    self.require_preview(
+                        PreviewFeature::ComptimeMeta,
+                        "@compileError intrinsic",
+                        inst_span,
+                    )?;
+                    let arg_refs = self.rir.get_inst_refs(args_start, args_len);
+                    if arg_refs.len() != 1 {
+                        return Err(CompileError::new(
+                            ErrorKind::IntrinsicWrongArgCount {
+                                name: "compileError".to_string(),
+                                expected: 1,
+                                found: arg_refs.len(),
+                            },
+                            inst_span,
+                        ));
+                    }
+                    let msg =
+                        self.evaluate_comptime_string_arg(arg_refs[0], locals, ctx, outer_span)?;
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeUserError(msg),
+                        inst_span,
+                    ));
+                }
+                // @compileLog emits compile-time debug messages.
+                if name == self.known.compile_log {
+                    self.require_preview(
+                        PreviewFeature::ComptimeMeta,
+                        "@compileLog intrinsic",
+                        inst_span,
+                    )?;
+                    let arg_refs = self.rir.get_inst_refs(args_start, args_len);
+                    let mut parts = Vec::new();
+                    for &arg_ref in &arg_refs {
+                        let val = self.evaluate_comptime_inst(arg_ref, locals, ctx, outer_span)?;
+                        parts.push(self.format_const_value(val, inst_span)?);
+                    }
+                    let msg = parts.join(" ");
+                    eprintln!("comptime log: {msg}");
+                    self.comptime_log_output.push((msg, inst_span));
+                    return Ok(ConstValue::Unit);
+                }
+                // @range produces a comptime array of integers.
+                if name == self.known.range {
+                    let arg_refs = self.rir.get_inst_refs(args_start, args_len);
+                    let (start, end, stride) = match arg_refs.len() {
+                        1 => {
+                            let end = int(
+                                self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span)?,
+                                inst_span,
+                            )?;
+                            (0i64, end, 1i64)
+                        }
+                        2 => {
+                            let s = int(
+                                self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span)?,
+                                inst_span,
+                            )?;
+                            let e = int(
+                                self.evaluate_comptime_inst(arg_refs[1], locals, ctx, outer_span)?,
+                                inst_span,
+                            )?;
+                            (s, e, 1i64)
+                        }
+                        3 => {
+                            let s = int(
+                                self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span)?,
+                                inst_span,
+                            )?;
+                            let e = int(
+                                self.evaluate_comptime_inst(arg_refs[1], locals, ctx, outer_span)?,
+                                inst_span,
+                            )?;
+                            let st = int(
+                                self.evaluate_comptime_inst(arg_refs[2], locals, ctx, outer_span)?,
+                                inst_span,
+                            )?;
+                            (s, e, st)
+                        }
+                        _ => {
+                            return Err(CompileError::new(
+                                ErrorKind::IntrinsicWrongArgCount {
+                                    name: "range".to_string(),
+                                    expected: 1,
+                                    found: arg_refs.len(),
+                                },
+                                inst_span,
+                            ));
+                        }
+                    };
+                    if stride == 0 {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: "@range stride must not be zero".into(),
+                            },
+                            inst_span,
+                        ));
+                    }
+                    // Cap the element count to prevent OOM from e.g. @range(i64::MAX)
+                    const MAX_RANGE_ELEMENTS: usize = 1_000_000;
+                    let mut elements = Vec::new();
+                    let mut i = start;
+                    if stride > 0 {
+                        while i < end {
+                            if elements.len() >= MAX_RANGE_ELEMENTS {
+                                return Err(CompileError::new(
+                                    ErrorKind::ComptimeEvaluationFailed {
+                                        reason: format!(
+                                            "@range produces too many elements (limit is {})",
+                                            MAX_RANGE_ELEMENTS
+                                        ),
+                                    },
+                                    inst_span,
+                                ));
+                            }
+                            elements.push(ConstValue::Integer(i));
+                            i = i.checked_add(stride).ok_or_else(|| overflow(inst_span))?;
+                        }
+                    } else {
+                        while i > end {
+                            if elements.len() >= MAX_RANGE_ELEMENTS {
+                                return Err(CompileError::new(
+                                    ErrorKind::ComptimeEvaluationFailed {
+                                        reason: format!(
+                                            "@range produces too many elements (limit is {})",
+                                            MAX_RANGE_ELEMENTS
+                                        ),
+                                    },
+                                    inst_span,
+                                ));
+                            }
+                            elements.push(ConstValue::Integer(i));
+                            i = i.checked_add(stride).ok_or_else(|| overflow(inst_span))?;
+                        }
+                    }
+                    let idx = self.comptime_heap.len() as u32;
+                    self.comptime_heap.push(ComptimeHeapItem::Array(elements));
+                    return Ok(ConstValue::Array(idx));
                 }
                 Err(not_const(inst_span))
             }
 
-            // ── Type intrinsic (@size_of, @align_of) ────────────────────────────
+            // ── Type intrinsic (@size_of, @align_of, @typeName, @typeInfo) ──────
             InstData::TypeIntrinsic { name, type_arg } => {
                 let intrinsic_name = self.interner.resolve(&name).to_string();
                 // Resolve the type argument.
-                let ty = self
-                    .resolve_type(type_arg, inst_span)
-                    .map_err(|_| not_const(inst_span))?;
-                let value = match intrinsic_name.as_str() {
+                // Check comptime_type_overrides first (for generic type params like T),
+                // then comptime_type_vars from the analysis context, then fall back
+                // to the normal type resolver.
+                let ty = if let Some(&override_ty) = self.comptime_type_overrides.get(&type_arg) {
+                    override_ty
+                } else if let Some(&ctx_ty) = ctx.comptime_type_vars.get(&type_arg) {
+                    ctx_ty
+                } else if let Some(&var_ty) = locals.iter().find_map(|(k, v)| {
+                    if *k == type_arg {
+                        if let ConstValue::Type(t) = v {
+                            Some(t)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }) {
+                    var_ty
+                } else {
+                    self.resolve_type(type_arg, inst_span)
+                        .map_err(|_| not_const(inst_span))?
+                };
+                match intrinsic_name.as_str() {
                     "size_of" => {
                         let slot_count = self.abi_slot_count(ty);
-                        (slot_count as i64) * 8
+                        Ok(ConstValue::Integer((slot_count as i64) * 8))
                     }
                     "align_of" => {
                         let slot_count = self.abi_slot_count(ty);
-                        if slot_count == 0 { 1 } else { 8 }
+                        Ok(ConstValue::Integer(if slot_count == 0 { 1 } else { 8 }))
                     }
-                    _ => return Err(not_const(inst_span)),
-                };
-                Ok(ConstValue::Integer(value))
+                    "typeName" => {
+                        self.require_preview(
+                            PreviewFeature::ComptimeMeta,
+                            "@typeName intrinsic",
+                            inst_span,
+                        )?;
+                        self.evaluate_comptime_type_name(ty, inst_span)
+                    }
+                    "typeInfo" => {
+                        self.require_preview(
+                            PreviewFeature::ComptimeMeta,
+                            "@typeInfo intrinsic",
+                            inst_span,
+                        )?;
+                        self.evaluate_comptime_type_info(ty, inst_span)
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
 
             // ── Not yet supported ─────────────────────────────────────────────

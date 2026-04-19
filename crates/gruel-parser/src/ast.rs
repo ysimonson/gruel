@@ -484,6 +484,8 @@ pub enum Expr {
     SelfExpr(SelfExpr),
     /// Comptime block expression (e.g., `comptime { 1 + 2 }`)
     Comptime(ComptimeBlockExpr),
+    /// Comptime unroll for expression (e.g., `comptime_unroll for field in info.fields { ... }`)
+    ComptimeUnrollFor(ComptimeUnrollForExpr),
     /// Checked block expression (e.g., `checked { @ptr_read(p) }`)
     Checked(CheckedBlockExpr),
     /// Type literal expression (e.g., `i32` used as a value in generic function calls)
@@ -1038,6 +1040,19 @@ pub struct ComptimeBlockExpr {
     pub span: Span,
 }
 
+/// A comptime_unroll for expression.
+/// The collection is evaluated at compile time, then the body is unrolled once per element.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComptimeUnrollForExpr {
+    /// Loop variable name
+    pub binding: Ident,
+    /// The iterable expression (must be comptime-known)
+    pub iterable: Box<Expr>,
+    /// Loop body
+    pub body: BlockExpr,
+    pub span: Span,
+}
+
 /// A checked block expression (e.g., `checked { @ptr_read(p) }`).
 /// Unchecked operations (raw pointer manipulation, calling unchecked functions)
 /// are only allowed inside checked blocks.
@@ -1091,6 +1106,7 @@ impl Expr {
             Expr::AssocFnCall(assoc_fn_call) => assoc_fn_call.span,
             Expr::SelfExpr(self_expr) => self_expr.span,
             Expr::Comptime(comptime_expr) => comptime_expr.span,
+            Expr::ComptimeUnrollFor(e) => e.span,
             Expr::Checked(checked_expr) => checked_expr.span,
             Expr::TypeLit(type_lit) => type_lit.span,
             Expr::Error(span) => *span,
@@ -1457,6 +1473,19 @@ fn fmt_expr(f: &mut fmt::Formatter<'_>, expr: &Expr, level: usize) -> fmt::Resul
         Expr::Comptime(comptime) => {
             writeln!(f, "Comptime")?;
             fmt_expr(f, &comptime.expr, level + 1)
+        }
+        Expr::ComptimeUnrollFor(unroll) => {
+            writeln!(
+                f,
+                "ComptimeUnrollFor sym:{}",
+                unroll.binding.name.into_usize()
+            )?;
+            indent(f, level + 1)?;
+            writeln!(f, "Iterable:")?;
+            fmt_expr(f, &unroll.iterable, level + 2)?;
+            indent(f, level + 1)?;
+            writeln!(f, "Body:")?;
+            fmt_block_expr(f, &unroll.body, level + 2)
         }
         Expr::Checked(checked) => {
             writeln!(f, "Checked")?;

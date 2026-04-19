@@ -186,6 +186,8 @@ pub enum TypeKind {
     Never,
     /// The comptime type - the type of types themselves
     ComptimeType,
+    /// The comptime string type - compile-time only string values
+    ComptimeStr,
 }
 
 /// A type in the Gruel type system.
@@ -196,8 +198,8 @@ pub enum TypeKind {
 /// # Encoding
 ///
 /// The u32 value uses a tag-based encoding:
-/// - Primitives (0-12): I8=0, I16=1, I32=2, I64=3, U8=4, U16=5, U32=6, U64=7,
-///   Bool=8, Unit=9, Error=10, Never=11, ComptimeType=12
+/// - Primitives (0-13): I8=0, I16=1, I32=2, I64=3, U8=4, U16=5, U32=6, U64=7,
+///   Bool=8, Unit=9, Error=10, Never=11, ComptimeType=12, ComptimeStr=13
 /// - Composites: low byte is tag (TAG_STRUCT, TAG_ENUM, TAG_ARRAY, TAG_MODULE),
 ///   high 24 bits are the ID
 ///
@@ -247,6 +249,7 @@ impl std::fmt::Debug for Type {
             TypeKind::Error => write!(f, "Type::ERROR"),
             TypeKind::Never => write!(f, "Type::NEVER"),
             TypeKind::ComptimeType => write!(f, "Type::COMPTIME_TYPE"),
+            TypeKind::ComptimeStr => write!(f, "Type::COMPTIME_STR"),
             TypeKind::Struct(id) => write!(f, "Type::new_struct(StructId({}))", id.0),
             TypeKind::Enum(id) => write!(f, "Type::new_enum(EnumId({}))", id.0),
             TypeKind::Array(id) => write!(f, "Type::new_array(ArrayTypeId({}))", id.0),
@@ -295,6 +298,8 @@ impl Type {
     pub const NEVER: Type = Type(11);
     /// The comptime type - the type of types themselves
     pub const COMPTIME_TYPE: Type = Type(12);
+    /// The comptime string type - compile-time only string values
+    pub const COMPTIME_STR: Type = Type(13);
 }
 
 // Composite type constructors
@@ -582,6 +587,7 @@ impl Type {
             10 => Some(TypeKind::Error),
             11 => Some(TypeKind::Never),
             12 => Some(TypeKind::ComptimeType),
+            13 => Some(TypeKind::ComptimeStr),
             TAG_STRUCT => Some(TypeKind::Struct(StructId(self.0 >> 8))),
             TAG_ENUM => Some(TypeKind::Enum(EnumId(self.0 >> 8))),
             TAG_ARRAY => Some(TypeKind::Array(ArrayTypeId(self.0 >> 8))),
@@ -616,6 +622,7 @@ impl Type {
             TypeKind::Error => "<error>",
             TypeKind::Never => "!",
             TypeKind::ComptimeType => "type",
+            TypeKind::ComptimeStr => "comptime_str",
         }
     }
 
@@ -675,6 +682,12 @@ impl Type {
     #[inline]
     pub fn is_comptime_type(&self) -> bool {
         *self == Type::COMPTIME_TYPE
+    }
+
+    /// Check if this is the comptime string type.
+    #[inline]
+    pub fn is_comptime_str(&self) -> bool {
+        *self == Type::COMPTIME_STR
     }
 
     /// Check if this is a struct type.
@@ -808,8 +821,8 @@ impl Type {
         match tag {
             // Primitive Copy types (I8..Unit = 0..9)
             0..=9 => true,
-            // Error, Never, ComptimeType are Copy for convenience
-            10..=12 => true,
+            // Error, Never, ComptimeType, ComptimeStr are Copy for convenience
+            10..=13 => true,
             // Enum types are Copy (they're small discriminant values)
             TAG_ENUM => true,
             // Module types are Copy (they're just compile-time namespace references)
@@ -949,8 +962,8 @@ impl Type {
     pub fn is_valid_encoding(v: u32) -> bool {
         let tag = v & 0xFF;
         match tag {
-            // Primitive types: I8=0 through ComptimeType=12
-            0..=12 => true,
+            // Primitive types: I8=0 through ComptimeStr=13
+            0..=13 => true,
             // Composite types with valid tags
             TAG_STRUCT | TAG_ENUM | TAG_ARRAY | TAG_PTR_CONST | TAG_PTR_MUT | TAG_MODULE => true,
             // Everything else is invalid
@@ -1649,7 +1662,7 @@ mod tests {
     #[test]
     fn test_is_valid_encoding_primitives() {
         // All primitive types (0-12) are valid
-        for i in 0..=12u32 {
+        for i in 0..=13u32 {
             assert!(
                 Type::is_valid_encoding(i),
                 "primitive tag {} should be valid",
@@ -1675,8 +1688,8 @@ mod tests {
 
     #[test]
     fn test_is_valid_encoding_invalid() {
-        // Tags between primitives and composites are invalid (13-99)
-        for tag in 13..100u32 {
+        // Tags between primitives and composites are invalid (14-99)
+        for tag in 14..100u32 {
             assert!(
                 !Type::is_valid_encoding(tag),
                 "tag {} should be invalid",
@@ -1769,6 +1782,7 @@ mod tests {
             Type::ERROR,
             Type::NEVER,
             Type::COMPTIME_TYPE,
+            Type::COMPTIME_STR,
             Type::new_struct(StructId(0)),
             Type::new_struct(StructId(1000)),
             Type::new_enum(EnumId(5)),

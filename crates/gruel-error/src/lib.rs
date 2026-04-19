@@ -182,6 +182,7 @@ impl ErrorCode {
     // ========================================================================
     pub const COMPTIME_EVALUATION_FAILED: Self = Self(1200);
     pub const COMPTIME_ARG_NOT_CONST: Self = Self(1201);
+    pub const COMPTIME_USER_ERROR: Self = Self(1202);
 
     // ========================================================================
     // Internal compiler errors (E9000-E9999)
@@ -301,6 +302,9 @@ pub enum PreviewFeature {
     TestInfra,
     /// For-each loops over arrays and integer ranges.
     ForLoops,
+    /// Comptime metaprogramming: @compileError, @compileLog, comptime_str,
+    /// @typeInfo, @typeName, comptime_unroll for, @field (ADR-0042).
+    ComptimeMeta,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -321,6 +325,7 @@ impl PreviewFeature {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
             PreviewFeature::ForLoops => "for_loops",
+            PreviewFeature::ComptimeMeta => "comptime_meta",
         }
     }
 
@@ -329,12 +334,17 @@ impl PreviewFeature {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
             PreviewFeature::ForLoops => "ADR-0041",
+            PreviewFeature::ComptimeMeta => "ADR-0042",
         }
     }
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra, PreviewFeature::ForLoops]
+        &[
+            PreviewFeature::TestInfra,
+            PreviewFeature::ForLoops,
+            PreviewFeature::ComptimeMeta,
+        ]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -358,6 +368,7 @@ impl std::str::FromStr for PreviewFeature {
         match s {
             "test_infra" => Ok(PreviewFeature::TestInfra),
             "for_loops" => Ok(PreviewFeature::ForLoops),
+            "comptime_meta" => Ok(PreviewFeature::ComptimeMeta),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1070,6 +1081,9 @@ pub enum ErrorKind {
     #[error("comptime parameter requires a compile-time known value")]
     ComptimeArgNotConst { param_name: String },
 
+    #[error("{0}")]
+    ComptimeUserError(String),
+
     // Internal compiler errors (bugs in the compiler itself)
     #[error("internal compiler error: {0}")]
     InternalError(String),
@@ -1195,6 +1209,7 @@ impl ErrorKind {
             // Comptime errors (E1200-E1299)
             ErrorKind::ComptimeEvaluationFailed { .. } => ErrorCode::COMPTIME_EVALUATION_FAILED,
             ErrorKind::ComptimeArgNotConst { .. } => ErrorCode::COMPTIME_ARG_NOT_CONST,
+            ErrorKind::ComptimeUserError(_) => ErrorCode::COMPTIME_USER_ERROR,
 
             // Internal compiler errors (E9000-E9999)
             ErrorKind::InternalError(_) => ErrorCode::INTERNAL_ERROR,
@@ -1434,6 +1449,9 @@ pub enum WarningKind {
     /// A pattern that will never be matched because a previous pattern already covers it.
     #[error("unreachable pattern '{0}'")]
     UnreachablePattern(String),
+    /// A `@compileLog` call was present during compilation.
+    #[error("comptime log present — remove before release")]
+    ComptimeLogPresent(String),
 }
 
 /// A compilation warning with optional source location information.
@@ -1873,7 +1891,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra, for_loops");
+        assert_eq!(names, "test_infra, for_loops, comptime_meta");
     }
 
     // ========================================================================

@@ -900,6 +900,7 @@ impl TypeInternPool {
             TypeKind::PtrMut(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::Module(_) => panic!("Cannot intern module types"),
             TypeKind::ComptimeType => panic!("Cannot intern comptime types"),
+            TypeKind::ComptimeStr => panic!("Cannot intern comptime_str types"),
         }
     }
 
@@ -1034,8 +1035,8 @@ impl TypeInternPool {
             | TypeKind::PtrConst(_)
             | TypeKind::PtrMut(_)
             | TypeKind::Module(_) => None,
-            // ComptimeType is a comptime-only type, cannot be interned for runtime
-            TypeKind::ComptimeType => None,
+            // ComptimeType/ComptimeStr are comptime-only types, cannot be interned for runtime
+            TypeKind::ComptimeType | TypeKind::ComptimeStr => None,
         }
     }
 
@@ -1081,7 +1082,11 @@ impl TypeInternPool {
                 let (elem, len) = self.array_def(id);
                 self.abi_slot_count(elem) * len as u32
             }
-            TypeKind::Unit | TypeKind::Never | TypeKind::ComptimeType | TypeKind::Module(_) => 0,
+            TypeKind::Unit
+            | TypeKind::Never
+            | TypeKind::ComptimeType
+            | TypeKind::ComptimeStr
+            | TypeKind::Module(_) => 0,
             _ => 1,
         }
     }
@@ -1104,6 +1109,7 @@ impl TypeInternPool {
             TypeKind::Never => "!".to_string(),
             TypeKind::Error => "<error>".to_string(),
             TypeKind::ComptimeType => "type".to_string(),
+            TypeKind::ComptimeStr => "comptime_str".to_string(),
             TypeKind::Struct(id) => self.struct_def(id).name.clone(),
             TypeKind::Enum(id) => self.enum_def(id).name.clone(),
             TypeKind::Array(id) => {

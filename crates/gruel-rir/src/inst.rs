@@ -1467,6 +1467,15 @@ impl Rir {
             InstData::Comptime { expr } => InstData::Comptime {
                 expr: renumber(*expr),
             },
+            InstData::ComptimeUnrollFor {
+                binding,
+                iterable,
+                body,
+            } => InstData::ComptimeUnrollFor {
+                binding: *binding,
+                iterable: renumber(*iterable),
+                body: renumber(*body),
+            },
             InstData::Checked { expr } => InstData::Checked {
                 expr: renumber(*expr),
             },
@@ -1701,6 +1710,7 @@ impl Rir {
                 | InstData::TypeIntrinsic { .. }
                 | InstData::DropFnDecl { .. }
                 | InstData::Comptime { .. }
+                | InstData::ComptimeUnrollFor { .. }
                 | InstData::Checked { .. }
                 | InstData::TypeConst { .. }
                 | InstData::StructDestructure { .. } => {}
@@ -2132,6 +2142,18 @@ pub enum InstData {
     Comptime {
         /// The expression to evaluate at compile time
         expr: InstRef,
+    },
+
+    /// Comptime unroll for loop: comptime_unroll for binding in iterable { body }
+    /// The iterable must be evaluable at compile time. The body is duplicated
+    /// once per iteration with the binding replaced by each element's value.
+    ComptimeUnrollFor {
+        /// The loop variable name
+        binding: Spur,
+        /// The iterable expression (must be comptime-evaluable, e.g. @typeInfo fields)
+        iterable: InstRef,
+        /// The loop body (will be unrolled at compile time)
+        body: InstRef,
     },
 
     /// Checked block expression: checked { expr }
@@ -2814,6 +2836,20 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::Comptime { expr } => {
                     writeln!(out, "comptime {{ {} }}", expr).unwrap();
                 }
+
+                // Comptime unroll for
+                InstData::ComptimeUnrollFor {
+                    binding,
+                    iterable,
+                    body,
+                } => writeln!(
+                    out,
+                    "comptime_unroll for {} in {}, {}",
+                    self.interner.resolve(binding),
+                    iterable,
+                    body
+                )
+                .unwrap(),
 
                 // Checked block
                 InstData::Checked { expr } => {

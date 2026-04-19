@@ -468,11 +468,28 @@ pub static OS_ENUM: BuiltinEnumDef = BuiltinEnumDef {
     variants: &["Linux", "Macos"],
 };
 
+/// The built-in TypeKind enum for compile-time type reflection.
+///
+/// Variants represent different type classifications, used by `@typeInfo`.
+///
+/// Variants:
+/// - `Struct` (index 0): Struct types
+/// - `Enum` (index 1): Enum types
+/// - `Int` (index 2): Integer types (i8..i64, u8..u64)
+/// - `Bool` (index 3): Boolean type
+/// - `Unit` (index 4): Unit type
+/// - `Never` (index 5): Never type
+/// - `Array` (index 6): Fixed-size array types
+pub static TYPEKIND_ENUM: BuiltinEnumDef = BuiltinEnumDef {
+    name: "TypeKind",
+    variants: &["Struct", "Enum", "Int", "Bool", "Unit", "Never", "Array"],
+};
+
 /// All built-in enums.
 ///
 /// The compiler iterates over this to inject synthetic enums before
 /// processing user code.
-pub static BUILTIN_ENUMS: &[&BuiltinEnumDef] = &[&ARCH_ENUM, &OS_ENUM];
+pub static BUILTIN_ENUMS: &[&BuiltinEnumDef] = &[&ARCH_ENUM, &OS_ENUM, &TYPEKIND_ENUM];
 
 /// Look up a built-in enum by name.
 pub fn get_builtin_enum(name: &str) -> Option<&'static BuiltinEnumDef> {
@@ -640,11 +657,12 @@ mod tests {
     fn test_is_reserved_enum_name() {
         assert!(is_reserved_enum_name("Arch"));
         assert!(is_reserved_enum_name("Os"));
+        assert!(is_reserved_enum_name("TypeKind"));
         assert!(!is_reserved_enum_name("MyEnum"));
     }
 
     #[test]
     fn test_builtin_enums_count() {
-        assert_eq!(BUILTIN_ENUMS.len(), 2);
+        assert_eq!(BUILTIN_ENUMS.len(), 3);
     }
 }

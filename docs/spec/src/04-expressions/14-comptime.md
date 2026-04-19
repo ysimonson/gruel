@@ -791,3 +791,200 @@ fn main() -> i32 {
     }
 }
 ```
+
+## Comptime Diagnostics
+
+{{ rule(id="4.14:48", cat="normative") }}
+
+The `@compileError` intrinsic emits a user-defined compile error during comptime evaluation. It takes a single string literal or `comptime_str` argument and has type `!` (never), terminating compilation of the current comptime block.
+
+{{ rule(id="4.14:49", cat="legality-rule") }}
+
+It is a compile-time error if `@compileError` is called with an argument that is not a string literal or `comptime_str` value, or with a number of arguments other than one.
+
+{{ rule(id="4.14:50", cat="normative") }}
+
+Unreachable `@compileError` calls are never evaluated. Only `@compileError` calls on taken branches produce errors.
+
+{{ rule(id="4.14:51") }}
+
+```gruel
+fn Matrix(comptime rows: i32, comptime cols: i32) -> type {
+    if rows <= 0 {
+        @compileError("Matrix rows must be positive");
+    }
+    struct { data: [i32; rows * cols] }
+}
+```
+
+{{ rule(id="4.14:52", cat="normative") }}
+
+The `@compileLog` intrinsic emits a compile-time log message during comptime evaluation. It accepts any number of arguments of any comptime-evaluable type. Each argument is formatted as a string and the results are joined with spaces. The result type is `()`.
+
+{{ rule(id="4.14:53", cat="normative") }}
+
+A program that compiles successfully but contains evaluated `@compileLog` calls emits a warning for each call.
+
+{{ rule(id="4.14:54") }}
+
+```gruel
+fn compute(comptime n: i32) -> i32 {
+    @compileLog("computing with n =", n);
+    n * 2
+}
+
+fn main() -> i32 {
+    compute(21)  // compiles with warning: comptime log present
+}
+```
+
+## Comptime Strings
+
+{{ rule(id="4.14:55", cat="normative") }}
+
+The `comptime_str` type represents a string value that exists only at compile time. String literals inside `comptime` blocks are promoted to `comptime_str` values.
+
+{{ rule(id="4.14:56", cat="legality-rule") }}
+
+It is a compile-time error to use a `comptime_str` value in a runtime position. `comptime_str` values cannot be stored in variables, passed as arguments, or returned from functions that execute at runtime.
+
+{{ rule(id="4.14:57", cat="normative") }}
+
+The `comptime_str` type supports the comparison operators `==`, `!=`, `<`, `<=`, `>`, `>=`. Comparisons use lexicographic byte ordering.
+
+{{ rule(id="4.14:58", cat="normative") }}
+
+The `comptime_str` type provides the following methods: `len() -> i32` returns the byte length, `is_empty() -> bool` returns whether the string is empty, `contains(needle: comptime_str) -> bool` checks for substring presence, `starts_with(prefix: comptime_str) -> bool` checks for a prefix, `ends_with(suffix: comptime_str) -> bool` checks for a suffix, and `concat(other: comptime_str) -> comptime_str` concatenates two strings.
+
+{{ rule(id="4.14:59") }}
+
+```gruel
+fn check_name(comptime name: comptime_str) -> i32 {
+    if name.len() == 0 {
+        @compileError("name must not be empty");
+    }
+    name.len()
+}
+```
+
+## Type Reflection
+
+{{ rule(id="4.14:60", cat="normative") }}
+
+The `@typeName(T)` intrinsic accepts a type argument and returns a `comptime_str` containing the type's name. For primitive types, this is the type keyword (e.g., `"i32"`, `"bool"`). For struct and enum types, this is the declared name.
+
+{{ rule(id="4.14:61", cat="legality-rule") }}
+
+`@typeName` requires the `comptime_meta` preview feature. It **MUST** be called with exactly one type argument using the `@typeName(T)` syntax.
+
+{{ rule(id="4.14:62", cat="normative") }}
+
+The `@typeInfo(T)` intrinsic accepts a type argument and returns a comptime struct describing the type's structure. The returned struct always contains a `kind` field of type `TypeKind` and a `name` field of type `comptime_str`.
+
+{{ rule(id="4.14:63", cat="legality-rule") }}
+
+`@typeInfo` requires the `comptime_meta` preview feature. It **MUST** be called with exactly one type argument using the `@typeInfo(T)` syntax.
+
+{{ rule(id="4.14:64", cat="normative") }}
+
+The `TypeKind` enum is a built-in enum with the following variants: `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array`. It is used to discriminate type kinds in `@typeInfo` results.
+
+{{ rule(id="4.14:65", cat="normative") }}
+
+For struct types, `@typeInfo` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Struct`), `name: comptime_str`, `field_count: i32`, and `fields: [FieldInfo; N]` where N is the number of fields. Each `FieldInfo` is a struct with fields `name: comptime_str` and `field_type: type`.
+
+{{ rule(id="4.14:66", cat="normative") }}
+
+For enum types, `@typeInfo` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Enum`), `name: comptime_str`, `variant_count: i32`, and `variants: [VariantInfo; N]` where N is the number of variants. Each `VariantInfo` is a struct with fields `name: comptime_str` and `fields: [FieldInfo; M]` where M is the number of fields for that variant (0 for unit variants).
+
+{{ rule(id="4.14:67", cat="normative") }}
+
+For integer types, `@typeInfo` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Int`), `name: comptime_str`, `bits: i32` (the bit width), and `is_signed: bool`.
+
+{{ rule(id="4.14:68", cat="normative") }}
+
+For other primitive types (`bool`, `unit`, `!`), `@typeInfo` returns a struct with fields: `kind: TypeKind` and `name: comptime_str`.
+
+{{ rule(id="4.14:69") }}
+
+```gruel
+fn describe(comptime T: type) -> i32 {
+    let info = @typeInfo(T);
+    match info.kind {
+        TypeKind::Struct => info.field_count,
+        TypeKind::Int => info.bits,
+        _ => 0,
+    }
+}
+```
+
+## Compile-Time Loop Unrolling
+
+{{ rule(id="4.14:70", cat="normative") }}
+
+The `comptime_unroll for` expression evaluates a compile-time iterable and unrolls the loop body once for each element. The iterable must be a `comptime` block that evaluates to a comptime array. The loop variable is bound to a comptime value for each iteration and is accessible within the body.
+
+```ebnf
+comptime_unroll_for = "comptime_unroll" "for" IDENT "in" comptime_expr block ;
+```
+
+{{ rule(id="4.14:71", cat="normative") }}
+
+The body of a `comptime_unroll for` is runtime code, not comptime code. Each unrolled iteration generates independent runtime instructions. The loop variable holds a comptime value that can be used in comptime intrinsics within the body (such as `@field`).
+
+{{ rule(id="4.14:72", cat="normative") }}
+
+`@range` can be used as the iterable in a `comptime_unroll for`. When evaluated at compile time, `@range(end)`, `@range(start, end)`, or `@range(start, end, stride)` produces a comptime array of integers.
+
+{{ rule(id="4.14:73") }}
+
+```gruel
+fn main() -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for i in comptime { @range(5) } {
+        total = total + 1;
+    }
+    total
+}
+```
+
+{{ rule(id="4.14:74", cat="legality-rule") }}
+
+It is a compile-time error if the iterable expression in a `comptime_unroll for` does not evaluate to a comptime array.
+
+{{ rule(id="4.14:75", cat="legality-rule") }}
+
+`comptime_unroll for` requires the `comptime_meta` preview feature.
+
+## Dynamic Field Access
+
+{{ rule(id="4.14:76", cat="normative") }}
+
+The `@field(value, field_name)` intrinsic accesses a field of a struct value using a compile-time known field name. The first argument is a runtime struct value. The second argument is a `comptime_str` that names a field on that struct. The field name is resolved at compile time to a concrete field index, and the result type is the type of the named field.
+
+{{ rule(id="4.14:77", cat="legality-rule") }}
+
+`@field` requires the `comptime_meta` preview feature. It **MUST** be called with exactly two arguments. The first argument **MUST** be a struct value. The second argument **MUST** evaluate to a `comptime_str` at compile time.
+
+{{ rule(id="4.14:78", cat="legality-rule") }}
+
+It is a compile-time error if the second argument to `@field` names a field that does not exist on the struct type of the first argument.
+
+{{ rule(id="4.14:79") }}
+
+```gruel
+struct Point { x: i32, y: i32 }
+
+fn sum_fields(comptime T: type, val: T) -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for field in comptime { @typeInfo(T).fields } {
+        total = total + @field(val, field.name);
+    }
+    total
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    sum_fields(Point, p)
+}
+```

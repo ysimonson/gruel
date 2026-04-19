@@ -361,6 +361,8 @@ pub enum ComptimeHeapItem {
     EnumData(Vec<ConstValue>),
     /// Struct enum variant fields (in declaration order).
     EnumStruct(Vec<ConstValue>),
+    /// A comptime string value.
+    String(String),
 }
 
 /// A value that can be computed at compile time.
@@ -385,6 +387,8 @@ pub enum ConstValue {
     Struct(u32),
     /// Index into `Sema::comptime_heap` for a comptime array instance.
     Array(u32),
+    /// Index into `Sema::comptime_heap` for a comptime string value.
+    ComptimeStr(u32),
     /// Enum variant with no data (e.g., `Color::Red`).
     /// Stores the enum id and variant index.
     EnumVariant { enum_id: EnumId, variant_idx: u32 },

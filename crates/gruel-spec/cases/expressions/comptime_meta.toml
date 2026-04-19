@@ -1,0 +1,985 @@
+# Comptime Metaprogramming Tests (ADR-0042)
+#
+# Tests for @compileError and @compileLog intrinsics (Phase 1).
+
+[section]
+id = "expressions.comptime_meta"
+spec_chapter = "4.14"
+name = "Comptime Metaprogramming"
+description = "Comptime diagnostics: @compileError and @compileLog."
+
+# =============================================================================
+# @compileError
+# =============================================================================
+
+[[case]]
+name = "compile_error_basic"
+spec = ["4.14:48"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileError("something went wrong");
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "something went wrong"
+
+[[case]]
+name = "compile_error_unreachable_not_evaluated"
+spec = ["4.14:50"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 5;
+        if x <= 0 {
+            @compileError("x must be positive");
+        }
+        x + 37
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_error_has_never_type"
+spec = ["4.14:48"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 5;
+        if x < 0 {
+            @compileError("negative");
+        }
+        x + 37
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_error_wrong_arg_count"
+spec = ["4.14:49"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileError("a", "b");
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "expects 1 argument"
+
+[[case]]
+name = "compile_error_requires_string_literal"
+spec = ["4.14:49"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileError(42);
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "string literal"
+
+# =============================================================================
+# @compileLog
+# =============================================================================
+
+[[case]]
+name = "compile_log_basic"
+spec = ["4.14:52", "4.14:53"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog("hello", 42);
+        42
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_log_no_args"
+spec = ["4.14:52"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog();
+        42
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_log_multiple_args"
+spec = ["4.14:52"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog("a", 1, true, false);
+        42
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_log_returns_unit"
+spec = ["4.14:52"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog("hello");
+        42
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# comptime_str
+# =============================================================================
+
+[[case]]
+name = "comptime_str_promotion"
+spec = ["4.14:55"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        if s.len() == 5 { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_is_empty"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        let e = "";
+        if !s.is_empty() && e.is_empty() { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_contains"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello world";
+        if s.contains("world") && !s.contains("xyz") { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_starts_ends_with"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello world";
+        if s.starts_with("hello") && s.ends_with("world") { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_eq_ne"
+spec = ["4.14:57"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = "hello";
+        let b = "hello";
+        let c = "world";
+        if a == b && a != c { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_ordering"
+spec = ["4.14:57"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = "abc";
+        let b = "abd";
+        if a < b && b > a && a <= a && a >= a { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_concat"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = "hello";
+        let b = " world";
+        let c = a.concat(b);
+        if c.len() == 11 { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_method_eq"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = "test";
+        let b = "test";
+        if a.eq(b) && !a.ne(b) { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_runtime_rejected"
+spec = ["4.14:56"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s
+    }
+}
+"""
+compile_fail = true
+error_contains = "comptime_str values cannot exist at runtime"
+
+[[case]]
+name = "comptime_str_compile_error_accepts"
+spec = ["4.14:48", "4.14:55"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let msg = "custom error";
+        @compileError(msg);
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "custom error"
+
+[[case]]
+name = "comptime_str_compile_log_accepts"
+spec = ["4.14:52", "4.14:55"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let msg = "hello";
+        @compileLog(msg);
+        42
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_requires_preview"
+spec = ["4.14:55"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s.len()
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+# =============================================================================
+# Preview Feature Gate
+# =============================================================================
+
+[[case]]
+name = "compile_error_requires_preview"
+spec = ["4.14:48"]
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileError("test");
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+[[case]]
+name = "compile_log_requires_preview"
+spec = ["4.14:52"]
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog("test");
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+# =============================================================================
+# @typeName
+# =============================================================================
+
+[[case]]
+name = "type_name_primitive_i32"
+spec = ["4.14:60"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(i32);
+        if name == "i32" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_name_primitive_bool"
+spec = ["4.14:60"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(bool);
+        if name == "bool" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_name_struct"
+spec = ["4.14:60"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(Point);
+        if name == "Point" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_name_enum"
+spec = ["4.14:60"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(Color);
+        if name == "Color" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_name_requires_preview"
+spec = ["4.14:61"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(i32);
+        42
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+# =============================================================================
+# @typeInfo
+# =============================================================================
+
+[[case]]
+name = "type_info_struct_kind"
+spec = ["4.14:62", "4.14:64", "4.14:65"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Point);
+        match info.kind {
+            TypeKind::Struct => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_struct_name"
+spec = ["4.14:62", "4.14:65"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Foo { x: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Foo);
+        if info.name == "Foo" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_struct_field_count"
+spec = ["4.14:65"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Trio { a: i32, b: i32, c: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Trio);
+        info.field_count
+    }
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "type_info_struct_field_name"
+spec = ["4.14:65"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Pair { first: i32, second: bool }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Pair);
+        if info.fields[0].name == "first" && info.fields[1].name == "second" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_enum_kind"
+spec = ["4.14:62", "4.14:64", "4.14:66"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+enum Dir { Up, Down, Left, Right }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Dir);
+        match info.kind {
+            TypeKind::Enum => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_enum_variant_count"
+spec = ["4.14:66"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Color);
+        info.variant_count
+    }
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "type_info_enum_variant_name"
+spec = ["4.14:66"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Color);
+        if info.variants[0].name == "Red" && info.variants[2].name == "Blue" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_int_kind"
+spec = ["4.14:64", "4.14:67"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(i32);
+        match info.kind {
+            TypeKind::Int => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_int_bits"
+spec = ["4.14:67"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(i64);
+        info.bits
+    }
+}
+"""
+exit_code = 64
+
+[[case]]
+name = "type_info_int_signed"
+spec = ["4.14:67"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let si = @typeInfo(i32);
+        let ui = @typeInfo(u32);
+        if si.is_signed && !ui.is_signed { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_bool_kind"
+spec = ["4.14:64", "4.14:68"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(bool);
+        match info.kind {
+            TypeKind::Bool => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_unit_kind"
+spec = ["4.14:68"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(());
+        match info.kind {
+            TypeKind::Unit => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_requires_preview"
+spec = ["4.14:63"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(i32);
+        42
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+[[case]]
+name = "type_info_with_type_name"
+spec = ["4.14:60", "4.14:62"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Widget { val: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Widget);
+        let name = @typeName(Widget);
+        if info.name == name { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# comptime_unroll for (Phase 4)
+# =============================================================================
+
+[[case]]
+name = "comptime_unroll_range_basic"
+spec = ["4.14:70", "4.14:72", "4.14:73"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for i in comptime { @range(5) } {
+        total = total + 1;
+    }
+    total
+}
+"""
+exit_code = 5
+
+[[case]]
+name = "comptime_unroll_range_start_end"
+spec = ["4.14:70", "4.14:72"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for i in comptime { @range(2, 5) } {
+        total = total + 1;
+    }
+    total
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "comptime_unroll_empty"
+spec = ["4.14:70", "4.14:72"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut total: i32 = 42;
+    comptime_unroll for i in comptime { @range(0) } {
+        total = total + 1;
+    }
+    total
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_unroll_single_iteration"
+spec = ["4.14:70", "4.14:72"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for i in comptime { @range(1) } {
+        total = total + 42;
+    }
+    total
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_unroll_non_array_iterable"
+spec = ["4.14:74"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime_unroll for i in comptime { 42 } {
+    }
+    0
+}
+"""
+compile_fail = true
+error_contains = "requires an array iterable"
+
+[[case]]
+name = "comptime_unroll_preview_gate"
+spec = ["4.14:75"]
+source = """
+fn main() -> i32 {
+    comptime_unroll for i in comptime { @range(3) } {
+    }
+    0
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+[[case]]
+name = "comptime_unroll_typeinfo_fields"
+spec = ["4.14:70", "4.14:71"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 20 };
+    let mut total: i32 = 0;
+    comptime_unroll for field in comptime { @typeInfo(Point).fields } {
+        total = total + @field(p, field.name);
+    }
+    total
+}
+"""
+exit_code = 30
+
+[[case]]
+name = "comptime_unroll_runtime_body"
+spec = ["4.14:71"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut a: i32 = 1;
+    let mut b: i32 = 1;
+    comptime_unroll for i in comptime { @range(3) } {
+        let temp = a + b;
+        a = b;
+        b = temp;
+    }
+    b
+}
+"""
+exit_code = 5
+
+# =============================================================================
+# @field intrinsic (Phase 4)
+# =============================================================================
+
+[[case]]
+name = "field_intrinsic_basic"
+spec = ["4.14:76"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 42, y: 0 };
+    @field(p, "x")
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "field_intrinsic_second_field"
+spec = ["4.14:76"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 0, y: 42 };
+    @field(p, "y")
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "field_intrinsic_wrong_arg_count"
+spec = ["4.14:77"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 42, y: 0 };
+    @field(p)
+}
+"""
+compile_fail = true
+error_contains = "expects 2 arguments"
+
+[[case]]
+name = "field_intrinsic_non_struct"
+spec = ["4.14:77"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    @field(x, "foo")
+}
+"""
+compile_fail = true
+error_contains = "requires a struct value"
+
+[[case]]
+name = "field_intrinsic_unknown_field"
+spec = ["4.14:78"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 42, y: 0 };
+    @field(p, "z")
+}
+"""
+compile_fail = true
+error_contains = "has no field 'z'"
+
+[[case]]
+name = "field_intrinsic_preview_gate"
+spec = ["4.14:77"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 42, y: 0 };
+    @field(p, "x")
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+[[case]]
+name = "comptime_unroll_generic_sum_fields"
+spec = ["4.14:70", "4.14:76", "4.14:79"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn sum_fields(comptime T: type, val: T) -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for field in comptime { @typeInfo(T).fields } {
+        total = total + @field(val, field.name);
+    }
+    total
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    sum_fields(Point, p)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_unroll_three_field_struct"
+spec = ["4.14:70", "4.14:76"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Vec3 { x: i32, y: i32, z: i32 }
+
+fn main() -> i32 {
+    let v = Vec3 { x: 10, y: 20, z: 12 };
+    let mut total: i32 = 0;
+    comptime_unroll for field in comptime { @typeInfo(Vec3).fields } {
+        total = total + @field(v, field.name);
+    }
+    total
+}
+"""
+exit_code = 42

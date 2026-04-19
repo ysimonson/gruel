@@ -209,6 +209,8 @@ pub struct SemaContext<'a> {
     pub builtin_arch_id: Option<EnumId>,
     /// EnumId of the synthetic Os enum (for @target_os intrinsic).
     pub builtin_os_id: Option<EnumId>,
+    /// EnumId of the synthetic TypeKind enum (for @typeInfo intrinsic).
+    pub builtin_typekind_id: Option<EnumId>,
     /// Compilation target (architecture + OS).
     pub target: gruel_target::Target,
     /// Pre-computed inference context for HM type inference.
@@ -446,8 +448,10 @@ impl<'a> SemaContext<'a> {
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values)
             TypeKind::Enum(_) => true,
-            // Never, Error, and ComptimeType are Copy for convenience
-            TypeKind::Never | TypeKind::Error | TypeKind::ComptimeType => true,
+            // Never, Error, ComptimeType, and ComptimeStr are Copy for convenience
+            TypeKind::Never | TypeKind::Error | TypeKind::ComptimeType | TypeKind::ComptimeStr => {
+                true
+            }
             // Struct types: check if marked with @copy
             TypeKind::Struct(struct_id) => {
                 let struct_def = self.type_pool.struct_def(struct_id);

@@ -8,28 +8,44 @@
 //! Any divergence indicates a bug in the comptime interpreter.
 
 #![no_main]
+use gruel_compiler::CompileOptions;
+use gruel_error::PreviewFeature;
 use gruel_fuzz::ComptimeProgram;
 use libfuzzer_sys::fuzz_target;
 use std::io::Write;
 
+fn preview_features() -> gruel_error::PreviewFeatures {
+    let mut features = gruel_error::PreviewFeatures::new();
+    features.insert(PreviewFeature::ComptimeMeta);
+    features
+}
+
 fuzz_target!(|prog: ComptimeProgram| {
+    let preview = preview_features();
+
     // Path A: comptime evaluation — @dbg output collected in compiler buffer
     let comptime_source = prog.comptime_source();
-    let comptime_dbg = match gruel_compiler::compile_frontend(&comptime_source) {
-        Ok(state) => state.comptime_dbg_output.join("\n"),
-        Err(_) => return, // Skip programs that don't compile
-    };
+    let comptime_dbg =
+        match gruel_compiler::compile_frontend_with_options(&comptime_source, &preview) {
+            Ok(state) => state.comptime_dbg_output.join("\n"),
+            Err(_) => return, // Skip programs that don't compile
+        };
 
     // Path B: runtime execution — @dbg output captured from stdout
     let runtime_source = prog.runtime_source();
-    let runtime_dbg = match compile_and_run(&runtime_source) {
+    let options = CompileOptions {
+        preview_features: preview,
+        ..Default::default()
+    };
+    let runtime_dbg = match compile_and_run(&runtime_source, &options) {
         Some(stdout) => stdout,
         None => return, // Skip if compilation or execution fails
     };
 
     // Compare @dbg output line by line
     assert_eq!(
-        comptime_dbg, runtime_dbg,
+        comptime_dbg,
+        runtime_dbg,
         "comptime/runtime divergence!\n\nBody:\n{}\n\nComptime source:\n{}\n\nRuntime source:\n{}",
         prog.body(),
         comptime_source,
@@ -38,8 +54,8 @@ fuzz_target!(|prog: ComptimeProgram| {
 });
 
 /// Compile source to a binary, execute it, and return captured stdout.
-fn compile_and_run(source: &str) -> Option<String> {
-    let output = gruel_compiler::compile(source).ok()?;
+fn compile_and_run(source: &str, options: &CompileOptions) -> Option<String> {
+    let output = gruel_compiler::compile_with_options(source, options).ok()?;
 
     let dir = tempfile::tempdir().ok()?;
     let binary_path = dir.path().join("test_bin");

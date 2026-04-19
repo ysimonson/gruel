@@ -7,7 +7,7 @@ use lasso::{Spur, ThreadedRodeo};
 
 /// Known type intrinsics that take a type argument rather than an expression.
 /// These intrinsics operate on types at compile time (e.g., @size_of(i32)).
-const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of"];
+const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of", "typeName", "typeInfo"];
 use gruel_parser::ast::{ConstDecl, DestructureBinding, DropFn, PatternBinding};
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
@@ -802,6 +802,18 @@ impl<'a> AstGen<'a> {
                 self.rir.add_inst(Inst {
                     data: InstData::Comptime { expr: inner_expr },
                     span: comptime_block.span,
+                })
+            }
+            Expr::ComptimeUnrollFor(unroll) => {
+                let iterable = self.gen_expr(&unroll.iterable);
+                let body = self.gen_block(&unroll.body);
+                self.rir.add_inst(Inst {
+                    data: InstData::ComptimeUnrollFor {
+                        binding: unroll.binding.name,
+                        iterable,
+                        body,
+                    },
+                    span: unroll.span,
                 })
             }
             Expr::Checked(checked_block) => {
