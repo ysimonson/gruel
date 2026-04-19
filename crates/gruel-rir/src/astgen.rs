@@ -161,15 +161,28 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_enum(&mut self, enum_decl: &EnumDecl) -> InstRef {
+        use gruel_parser::ast::EnumVariantKind;
+
         let name = enum_decl.name.name; // Already a Spur
-        let variants: Vec<(Spur, Vec<Spur>)> = enum_decl
+        let variants: Vec<(Spur, Vec<Spur>, Vec<Spur>)> = enum_decl
             .variants
             .iter()
             .map(|v| {
                 let variant_name = v.name.name;
-                let field_types: Vec<Spur> =
-                    v.fields.iter().map(|ty| self.intern_type(ty)).collect();
-                (variant_name, field_types)
+                match &v.kind {
+                    EnumVariantKind::Unit => (variant_name, vec![], vec![]),
+                    EnumVariantKind::Tuple(types) => {
+                        let field_types: Vec<Spur> =
+                            types.iter().map(|ty| self.intern_type(ty)).collect();
+                        (variant_name, field_types, vec![])
+                    }
+                    EnumVariantKind::Struct(fields) => {
+                        let field_types: Vec<Spur> =
+                            fields.iter().map(|f| self.intern_type(&f.ty)).collect();
+                        let field_names: Vec<Spur> = fields.iter().map(|f| f.name.name).collect();
+                        (variant_name, field_types, field_names)
+                    }
+                }
             })
             .collect();
         let (variants_start, variants_len) = self.rir.add_enum_variant_decls(&variants);

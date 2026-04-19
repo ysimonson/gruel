@@ -41,8 +41,7 @@ use std::sync::{PoisonError, RwLock};
 use lasso::Spur;
 
 use crate::types::{
-    ArrayTypeId, EnumDef, EnumId, PtrConstTypeId, PtrMutTypeId, StructDef, StructId, Type,
-    TypeKind,
+    ArrayTypeId, EnumDef, EnumId, PtrConstTypeId, PtrMutTypeId, StructDef, StructId, Type, TypeKind,
 };
 
 /// Interned type index - 32 bits, Copy, cheap comparison.
@@ -1357,7 +1356,10 @@ mod tests {
 
         let def = EnumDef {
             name: "Status".to_string(),
-            variants: vec![EnumVariantDef::unit("Active"), EnumVariantDef::unit("Inactive")],
+            variants: vec![
+                EnumVariantDef::unit("Active"),
+                EnumVariantDef::unit("Inactive"),
+            ],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };

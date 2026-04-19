@@ -388,9 +388,12 @@ impl StructDef {
 pub struct EnumVariantDef {
     /// Variant name
     pub name: String,
-    /// Field types for tuple-style data variants. Empty for unit variants.
+    /// Field types for data variants. Empty for unit variants.
     /// E.g., `Some(i32)` has `fields = [Type::I32]`.
     pub fields: Vec<Type>,
+    /// Field names for struct-style variants. Empty for unit and tuple variants.
+    /// When non-empty, `field_names.len() == fields.len()`.
+    pub field_names: Vec<String>,
 }
 
 impl EnumVariantDef {
@@ -399,12 +402,23 @@ impl EnumVariantDef {
         Self {
             name: name.into(),
             fields: Vec::new(),
+            field_names: Vec::new(),
         }
     }
 
     /// Whether this is a data variant (has associated fields).
     pub fn has_data(&self) -> bool {
         !self.fields.is_empty()
+    }
+
+    /// Whether this is a struct-style variant (has named fields).
+    pub fn is_struct_variant(&self) -> bool {
+        !self.field_names.is_empty()
+    }
+
+    /// Find a field by name (for struct variants). Returns the field index.
+    pub fn find_field(&self, name: &str) -> Option<usize> {
+        self.field_names.iter().position(|n| n == name)
     }
 }
 
@@ -1562,7 +1576,9 @@ mod tests {
 
         let max_u8 = EnumDef {
             name: "MaxU8".to_string(),
-            variants: (0..256).map(|i| EnumVariantDef::unit(format!("V{}", i))).collect(),
+            variants: (0..256)
+                .map(|i| EnumVariantDef::unit(format!("V{}", i)))
+                .collect(),
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };
@@ -1574,7 +1590,9 @@ mod tests {
         // 257-65536 variants -> U16
         let medium = EnumDef {
             name: "Medium".to_string(),
-            variants: (0..257).map(|i| EnumVariantDef::unit(format!("V{}", i))).collect(),
+            variants: (0..257)
+                .map(|i| EnumVariantDef::unit(format!("V{}", i)))
+                .collect(),
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
         };

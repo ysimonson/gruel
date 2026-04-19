@@ -162,10 +162,31 @@ pub struct EnumDecl {
 pub struct EnumVariant {
     /// Variant name
     pub name: Ident,
-    /// Tuple-style associated data field types (empty for unit variants).
-    /// E.g., `Some(i32)` has one field of type `i32`.
-    pub fields: Vec<TypeExpr>,
+    /// The kind of variant (unit, tuple, or struct).
+    pub kind: EnumVariantKind,
     /// Span covering the variant
+    pub span: Span,
+}
+
+/// The kind of an enum variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnumVariantKind {
+    /// Unit variant: `Red`
+    Unit,
+    /// Tuple variant: `Some(i32, i32)`
+    Tuple(Vec<TypeExpr>),
+    /// Struct variant: `Circle { radius: i32 }`
+    Struct(Vec<EnumVariantField>),
+}
+
+/// A named field in a struct-style enum variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumVariantField {
+    /// Field name
+    pub name: Ident,
+    /// Field type
+    pub ty: TypeExpr,
+    /// Span covering the field
     pub span: Span,
 }
 

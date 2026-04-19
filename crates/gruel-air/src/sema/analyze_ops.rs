@@ -1047,14 +1047,10 @@ impl<'a> Sema<'a> {
 
             // For DataVariant patterns, emit field extractions into the arm scope
             // before analyzing the body. Named bindings become local variables.
-            let body_result = if let RirPattern::DataVariant {
-                bindings,
-                ..
-            } = pattern
-            {
+            let body_result = if let RirPattern::DataVariant { bindings, .. } = pattern {
                 // Reuse the enum_id and variant_index resolved during validation.
-                let (enum_id, variant_index) = resolved_enum
-                    .expect("resolved_enum must be set for DataVariant patterns");
+                let (enum_id, variant_index) =
+                    resolved_enum.expect("resolved_enum must be set for DataVariant patterns");
                 let enum_def = self.type_pool.enum_def(enum_id);
                 let field_types: Vec<Type> =
                     enum_def.variants[variant_index as usize].fields.clone();
@@ -1124,8 +1120,12 @@ impl<'a> Sema<'a> {
                     ty: Type::UNIT,
                     span: pattern_span,
                 });
-                let allocs_start =
-                    air.add_extra(&allocs.iter().map(|r: &AirRef| r.as_u32()).collect::<Vec<_>>());
+                let allocs_start = air.add_extra(
+                    &allocs
+                        .iter()
+                        .map(|r: &AirRef| r.as_u32())
+                        .collect::<Vec<_>>(),
+                );
                 let inner_block = air.add_inst(AirInst {
                     data: AirInstData::Block {
                         stmts_start: allocs_start,
@@ -1207,8 +1207,8 @@ impl<'a> Sema<'a> {
                 RirPattern::Int(n, _) => AirPattern::Int(*n),
                 RirPattern::Bool(b, _) => AirPattern::Bool(*b),
                 RirPattern::Path { .. } | RirPattern::DataVariant { .. } => {
-                    let (enum_id, variant_index) = resolved_enum
-                        .expect("resolved_enum must be set for enum patterns");
+                    let (enum_id, variant_index) =
+                        resolved_enum.expect("resolved_enum must be set for enum patterns");
                     AirPattern::EnumVariant {
                         enum_id,
                         variant_index,

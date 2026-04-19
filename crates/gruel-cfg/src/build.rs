@@ -1824,7 +1824,10 @@ impl<'a> CfgBuilder<'a> {
                 fields_len,
             } => {
                 // Lower each field value
-                let field_air_refs = self.air.get_air_refs(*fields_start, *fields_len).collect::<Vec<_>>();
+                let field_air_refs = self
+                    .air
+                    .get_air_refs(*fields_start, *fields_len)
+                    .collect::<Vec<_>>();
                 let mut field_vals = Vec::with_capacity(field_air_refs.len());
                 for field_ref in field_air_refs {
                     let Some(val) = self.lower_value(field_ref) else {

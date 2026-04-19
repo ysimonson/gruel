@@ -756,12 +756,14 @@ where
 
     // Parser for a single binding in a data variant pattern: `_`, `x`, or `mut x`
     let pattern_binding = choice((
-        just(TokenKind::Underscore)
-            .map_with(|_, e| PatternBinding::Wildcard(span_from_extra(e))),
+        just(TokenKind::Underscore).map_with(|_, e| PatternBinding::Wildcard(span_from_extra(e))),
         just(TokenKind::Mut)
             .ignore_then(ident_parser())
             .map(|name| PatternBinding::Ident { is_mut: true, name }),
-        ident_parser().map(|name| PatternBinding::Ident { is_mut: false, name }),
+        ident_parser().map(|name| PatternBinding::Ident {
+            is_mut: false,
+            name,
+        }),
     ));
 
     // Parser for optional `(binding, binding, ...)` suffix on a path pattern
@@ -2148,24 +2150,48 @@ where
         .boxed()
 }
 
-/// Parser for enum variant: identifier with optional tuple data `(Type, Type, ...)`
+/// Parser for enum variant: unit, tuple `(Type, ...)`, or struct `{ field: Type, ... }`
 fn enum_variant_parser<'src, I>() -> GruelParser<'src, I, EnumVariant>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    let fields = type_parser()
+    use crate::ast::{EnumVariantField, EnumVariantKind};
+
+    // Tuple-style fields: (Type, Type, ...)
+    let tuple_fields = type_parser()
         .separated_by(just(TokenKind::Comma))
         .allow_trailing()
         .collect::<Vec<_>>()
-        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
-        .or_not()
-        .map(|opt| opt.unwrap_or_default());
+        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen));
+
+    // Struct-style fields: { name: Type, name: Type, ... }
+    let struct_field = ident_parser()
+        .then_ignore(just(TokenKind::Colon))
+        .then(type_parser())
+        .map_with(|(name, ty), e| EnumVariantField {
+            name,
+            ty,
+            span: span_from_extra(e),
+        });
+    let struct_fields = struct_field
+        .separated_by(just(TokenKind::Comma))
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace));
+
+    // Combine: name + optional (tuple | struct) fields
+    let variant_kind = choice((
+        tuple_fields.map(EnumVariantKind::Tuple),
+        struct_fields.map(EnumVariantKind::Struct),
+    ))
+    .or_not()
+    .map(|opt| opt.unwrap_or(EnumVariantKind::Unit));
 
     ident_parser()
-        .then(fields)
-        .map_with(|(name, fields), e| EnumVariant {
+        .then(variant_kind)
+        .map_with(|(name, kind), e| EnumVariant {
             name,
-            fields,
+            kind,
             span: span_from_extra(e),
         })
         .boxed()

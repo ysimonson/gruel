@@ -533,3 +533,114 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# =============================================================================
+# Struct Variants (Preview: enum_struct_variants)
+# =============================================================================
+
+[[case]]
+name = "enum_struct_variant_declaration_basic"
+spec = ["6.3:21"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_struct_variant_multi_field"
+spec = ["6.3:21"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Rectangle { width: i32, height: i32 },
+    Point,
+}
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_struct_variant_mixed_kinds"
+spec = ["6.3:21"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Message {
+    Quit,
+    Echo(i32),
+    Move { x: i32, y: i32 },
+}
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_struct_variant_duplicate_field_error"
+spec = ["6.3:22"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Bad {
+    Variant { x: i32, x: i32 },
+}
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "duplicate"
+
+[[case]]
+name = "enum_struct_variant_trailing_comma"
+spec = ["6.3:21"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Circle { radius: i32, },
+    Point,
+}
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_struct_variant_same_layout_as_tuple"
+spec = ["6.3:23"]
+preview = "enum_struct_variants"
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_struct_variant_requires_preview"
+spec = ["6.3:21"]
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "preview"

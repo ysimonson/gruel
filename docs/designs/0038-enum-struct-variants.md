@@ -308,7 +308,7 @@ The last two catch attempts to use the wrong construction syntax for a variant's
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Struct variant declarations (parsing + type system)**
+- [x] **Phase 1: Struct variant declarations (parsing + type system)**
   - Extend AST `EnumVariant` with `EnumVariantKind` (unit/tuple/struct)
   - Parser: parse `Variant { field: Type, ... }` in enum definitions
   - RIR: extend enum variant encoding to store field names

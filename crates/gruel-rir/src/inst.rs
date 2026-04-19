@@ -441,45 +441,63 @@ impl Rir {
             .collect()
     }
 
-    /// Store enum variant declarations (name + field types) and return (start, variant_count).
+    /// Store enum variant declarations and return (start, variant_count).
     ///
     /// Each variant is encoded as variable-length data in the extra array:
-    ///   `[name_spur: u32, field_count: u32, field_type_0: u32, ..., field_type_n: u32]`
+    ///   `[name_spur, field_count, is_struct, field_type_0, ..., field_type_n, field_name_0?, ..., field_name_n?]`
     ///
-    /// Unit variants have `field_count = 0`.
+    /// - `is_struct`: 0 for unit/tuple variants, 1 for struct variants.
+    /// - For struct variants, field names follow field types.
+    /// - Unit variants have `field_count = 0`.
     pub fn add_enum_variant_decls(
         &mut self,
-        variants: &[(Spur, Vec<Spur>)],
+        variants: &[(Spur, Vec<Spur>, Vec<Spur>)],
     ) -> (u32, u32) {
         let start = self.extra.len() as u32;
-        for (name, fields) in variants {
+        for (name, field_types, field_names) in variants {
             self.extra.push(name.into_usize() as u32);
-            self.extra.push(fields.len() as u32);
-            for field_ty in fields {
+            self.extra.push(field_types.len() as u32);
+            let is_struct = if field_names.is_empty() { 0u32 } else { 1u32 };
+            self.extra.push(is_struct);
+            for field_ty in field_types {
                 self.extra.push(field_ty.into_usize() as u32);
+            }
+            for field_name in field_names {
+                self.extra.push(field_name.into_usize() as u32);
             }
         }
         (start, variants.len() as u32)
     }
 
     /// Retrieve enum variant declarations from the extra array.
-    /// Returns a vec of `(variant_name, field_types)` pairs.
+    /// Returns a vec of `(variant_name, field_types, field_names)` triples.
+    /// `field_names` is empty for unit/tuple variants.
     pub fn get_enum_variant_decls(
         &self,
         start: u32,
         variant_count: u32,
-    ) -> Vec<(Spur, Vec<Spur>)> {
+    ) -> Vec<(Spur, Vec<Spur>, Vec<Spur>)> {
         let mut result = Vec::with_capacity(variant_count as usize);
         let mut pos = start as usize;
         for _ in 0..variant_count {
             let name = Spur::try_from_usize(self.extra[pos] as usize).unwrap();
             let field_count = self.extra[pos + 1] as usize;
-            pos += 2;
-            let fields: Vec<Spur> = (0..field_count)
+            let is_struct = self.extra[pos + 2] != 0;
+            pos += 3;
+            let field_types: Vec<Spur> = (0..field_count)
                 .map(|i| Spur::try_from_usize(self.extra[pos + i] as usize).unwrap())
                 .collect();
             pos += field_count;
-            result.push((name, fields));
+            let field_names = if is_struct {
+                let names: Vec<Spur> = (0..field_count)
+                    .map(|i| Spur::try_from_usize(self.extra[pos + i] as usize).unwrap())
+                    .collect();
+                pos += field_count;
+                names
+            } else {
+                Vec::new()
+            };
+            result.push((name, field_types, field_names));
         }
         result
     }
@@ -614,9 +632,8 @@ impl Rir {
                         let flags = if binding.is_wildcard { 1u32 } else { 0 }
                             | if binding.is_mut { 2 } else { 0 };
                         self.extra.push(flags);
-                        self.extra.push(
-                            binding.name.map_or(u32::MAX, |s| s.into_usize() as u32),
-                        );
+                        self.extra
+                            .push(binding.name.map_or(u32::MAX, |s| s.into_usize() as u32));
                     }
                 }
             }
@@ -710,7 +727,11 @@ impl Rir {
                         } else {
                             Some(Spur::try_from_usize(name_raw as usize).unwrap())
                         };
-                        bindings.push(RirPatternBinding { is_wildcard, is_mut, name });
+                        bindings.push(RirPatternBinding {
+                            is_wildcard,
+                            is_mut,
+                            name,
+                        });
                     }
                     arms.push((
                         RirPattern::DataVariant {
@@ -2398,20 +2419,36 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(name);
-                    let variants =
-                        self.rir.get_enum_variant_decls(*variants_start, *variants_len);
+                    let variants = self
+                        .rir
+                        .get_enum_variant_decls(*variants_start, *variants_len);
                     let variants_str: Vec<String> = variants
                         .iter()
-                        .map(|(v, fields)| {
+                        .map(|(v, field_types, field_names)| {
                             let vname = self.interner.resolve(v).to_string();
-                            if fields.is_empty() {
+                            if field_types.is_empty() {
                                 vname
-                            } else {
-                                let field_strs: Vec<&str> = fields
+                            } else if field_names.is_empty() {
+                                // Tuple variant
+                                let field_strs: Vec<&str> = field_types
                                     .iter()
                                     .map(|f| self.interner.resolve(f))
                                     .collect();
                                 format!("{}({})", vname, field_strs.join(", "))
+                            } else {
+                                // Struct variant
+                                let field_strs: Vec<String> = field_names
+                                    .iter()
+                                    .zip(field_types.iter())
+                                    .map(|(n, t)| {
+                                        format!(
+                                            "{}: {}",
+                                            self.interner.resolve(n),
+                                            self.interner.resolve(t)
+                                        )
+                                    })
+                                    .collect();
+                                format!("{} {{ {} }}", vname, field_strs.join(", "))
                             }
                         })
                         .collect();
@@ -3580,8 +3617,11 @@ mod tests {
         let blue = interner.get_or_intern("Blue");
 
         // Unit variants: no fields
-        let (variants_start, variants_len) =
-            rir.add_enum_variant_decls(&[(red, vec![]), (green, vec![]), (blue, vec![])]);
+        let (variants_start, variants_len) = rir.add_enum_variant_decls(&[
+            (red, vec![], vec![]),
+            (green, vec![], vec![]),
+            (blue, vec![], vec![]),
+        ]);
 
         rir.add_inst(Inst {
             data: InstData::EnumDecl {
@@ -3607,7 +3647,7 @@ mod tests {
         let i32_ty = interner.get_or_intern("i32");
 
         let (variants_start, variants_len) =
-            rir.add_enum_variant_decls(&[(none, vec![]), (some, vec![i32_ty])]);
+            rir.add_enum_variant_decls(&[(none, vec![], vec![]), (some, vec![i32_ty], vec![])]);
 
         rir.add_inst(Inst {
             data: InstData::EnumDecl {

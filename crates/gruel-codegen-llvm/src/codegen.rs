@@ -1748,7 +1748,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             CfgInstData::StorageLive { .. } | CfgInstData::StorageDead { .. } => None,
 
             // ---- Composite ops (Phase 2d) ----
-            CfgInstData::EnumVariant { enum_id, variant_index } => {
+            CfgInstData::EnumVariant {
+                enum_id,
+                variant_index,
+            } => {
                 let enum_def = self.type_pool.enum_def(enum_id);
                 if enum_def.is_unit_only() {
                     // Unit-only enum: represented as its discriminant integer.
@@ -1764,13 +1767,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         Some(t) => t.into_struct_type(),
                         None => return Ok(()),
                     };
-                    let discrim_ty = gruel_type_to_llvm(
-                        enum_def.discriminant_type(),
-                        self.ctx,
-                        self.type_pool,
-                    )
-                    .unwrap()
-                    .into_int_type();
+                    let discrim_ty =
+                        gruel_type_to_llvm(enum_def.discriminant_type(), self.ctx, self.type_pool)
+                            .unwrap()
+                            .into_int_type();
                     let discrim_val = discrim_ty.const_int(variant_index as u64, false);
                     let mut agg: AggregateValueEnum = struct_ty.get_undef().into();
                     agg = self
@@ -1809,13 +1809,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let slot = self.build_entry_alloca(struct_ty.into(), "enum_slot");
 
                 // Store discriminant at struct field 0.
-                let discrim_ty = gruel_type_to_llvm(
-                    enum_def.discriminant_type(),
-                    self.ctx,
-                    self.type_pool,
-                )
-                .unwrap()
-                .into_int_type();
+                let discrim_ty =
+                    gruel_type_to_llvm(enum_def.discriminant_type(), self.ctx, self.type_pool)
+                        .unwrap()
+                        .into_int_type();
                 let discrim_val = discrim_ty.const_int(variant_index as u64, false);
                 let discrim_ptr = self
                     .builder
@@ -1859,8 +1856,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         };
                         // Use alignment 1 (unaligned store): the byte array payload may not
                         // satisfy the natural alignment of the field type.
-                        let store =
-                            self.builder.build_store(field_ptr, field_llvm_val).unwrap();
+                        let store = self.builder.build_store(field_ptr, field_llvm_val).unwrap();
                         store.set_alignment(1).unwrap();
 
                         byte_offset += crate::types::type_byte_size(field_ty, self.type_pool);
@@ -1868,7 +1864,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 }
 
                 // Load and return the completed tagged union value.
-                let result = self.builder.build_load(struct_ty, slot, "enum_val").unwrap();
+                let result = self
+                    .builder
+                    .build_load(struct_ty, slot, "enum_val")
+                    .unwrap();
                 Some(result)
             }
 
@@ -1897,10 +1896,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     .sum();
 
                 let field_ty_gruel = field_types[field_index as usize];
-                let field_llvm_ty = match gruel_type_to_llvm(field_ty_gruel, self.ctx, self.type_pool) {
-                    Some(t) => t,
-                    None => return Ok(()), // zero-sized field
-                };
+                let field_llvm_ty =
+                    match gruel_type_to_llvm(field_ty_gruel, self.ctx, self.type_pool) {
+                        Some(t) => t,
+                        None => return Ok(()), // zero-sized field
+                    };
 
                 // Get the LLVM struct type for the enum tagged union.
                 let enum_llvm_ty = gruel_type_to_llvm(enum_ty, self.ctx, self.type_pool)
@@ -1921,7 +1921,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let max_payload: u64 = enum_def
                     .variants
                     .iter()
-                    .map(|v| v.fields.iter().map(|f| crate::types::type_byte_size(*f, self.type_pool)).sum::<u64>())
+                    .map(|v| {
+                        v.fields
+                            .iter()
+                            .map(|f| crate::types::type_byte_size(*f, self.type_pool))
+                            .sum::<u64>()
+                    })
                     .max()
                     .unwrap_or(0);
                 let byte_arr_ty = self.ctx.i8_type().array_type(max_payload as u32);
@@ -1929,12 +1934,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let offset_const = self.ctx.i64_type().const_int(byte_offset, false);
                 let field_ptr = unsafe {
                     self.builder
-                        .build_gep(
-                            byte_arr_ty,
-                            payload_ptr,
-                            &[zero, offset_const],
-                            "field_ptr",
-                        )
+                        .build_gep(byte_arr_ty, payload_ptr, &[zero, offset_const], "field_ptr")
                         .expect("build_gep failed")
                 };
 

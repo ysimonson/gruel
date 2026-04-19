@@ -962,8 +962,12 @@ impl<'a> ConstraintGenerator<'a> {
                     // Remove DataVariant bindings from scope after body generation
                     for (name, old_val) in bindings_to_remove {
                         match old_val {
-                            Some(prev) => { ctx.locals.insert(name, prev); }
-                            None => { ctx.locals.remove(&name); }
+                            Some(prev) => {
+                                ctx.locals.insert(name, prev);
+                            }
+                            None => {
+                                ctx.locals.remove(&name);
+                            }
                         }
                     }
                 }

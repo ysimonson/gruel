@@ -299,6 +299,8 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// Enum struct variants (named-field variants). ADR-0038.
+    EnumStructVariants,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -318,6 +320,7 @@ impl PreviewFeature {
     pub fn name(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
+            PreviewFeature::EnumStructVariants => "enum_struct_variants",
         }
     }
 
@@ -325,12 +328,16 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::EnumStructVariants => "ADR-0038",
         }
     }
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra]
+        &[
+            PreviewFeature::TestInfra,
+            PreviewFeature::EnumStructVariants,
+        ]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -353,6 +360,7 @@ impl std::str::FromStr for PreviewFeature {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "test_infra" => Ok(PreviewFeature::TestInfra),
+            "enum_struct_variants" => Ok(PreviewFeature::EnumStructVariants),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1859,7 +1867,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, enum_struct_variants");
     }
 
     // ========================================================================

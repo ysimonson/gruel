@@ -210,7 +210,12 @@ pub fn gruel_type_to_llvm<'ctx>(
                 let max_payload: u64 = def
                     .variants
                     .iter()
-                    .map(|v| v.fields.iter().map(|f| type_byte_size(*f, type_pool)).sum::<u64>())
+                    .map(|v| {
+                        v.fields
+                            .iter()
+                            .map(|f| type_byte_size(*f, type_pool))
+                            .sum::<u64>()
+                    })
                     .max()
                     .unwrap_or(0);
                 if max_payload == 0 {
@@ -219,7 +224,10 @@ pub fn gruel_type_to_llvm<'ctx>(
                     Some(discrim_llvm)
                 } else {
                     let byte_arr = ctx.i8_type().array_type(max_payload as u32);
-                    Some(ctx.struct_type(&[discrim_llvm, byte_arr.into()], false).into())
+                    Some(
+                        ctx.struct_type(&[discrim_llvm, byte_arr.into()], false)
+                            .into(),
+                    )
                 }
             }
         }

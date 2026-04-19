@@ -12,7 +12,9 @@
 use std::collections::{HashMap, HashSet};
 
 use gruel_builtins::is_reserved_type_name;
-use gruel_error::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
+use gruel_error::{
+    CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, PreviewFeature, ice,
+};
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_span::Span;
 use lasso::Spur;
@@ -160,15 +162,15 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    let raw_variants =
-                        self.rir.get_enum_variant_decls(*variants_start, *variants_len);
+                    let raw_variants = self
+                        .rir
+                        .get_enum_variant_decls(*variants_start, *variants_len);
 
                     // Check for duplicate variant names
                     let mut seen_variants: HashSet<Spur> = HashSet::new();
-                    for (variant_name, _) in &raw_variants {
+                    for (variant_name, _, field_names) in &raw_variants {
                         if !seen_variants.insert(*variant_name) {
-                            let variant_name_str =
-                                self.interner.resolve(variant_name).to_string();
+                            let variant_name_str = self.interner.resolve(variant_name).to_string();
                             return Err(CompileError::new(
                                 ErrorKind::DuplicateVariant {
                                     enum_name: enum_name.clone(),
@@ -177,6 +179,31 @@ impl<'a> Sema<'a> {
                                 inst.span,
                             ));
                         }
+
+                        // Gate struct variants behind preview feature
+                        if !field_names.is_empty() {
+                            self.require_preview(
+                                PreviewFeature::EnumStructVariants,
+                                "enum struct variants",
+                                inst.span,
+                            )?;
+
+                            // Check for duplicate field names within the struct variant
+                            let variant_str = self.interner.resolve(variant_name).to_string();
+                            let mut seen_fields: HashSet<Spur> = HashSet::new();
+                            for field_name in field_names {
+                                if !seen_fields.insert(*field_name) {
+                                    let field_str = self.interner.resolve(field_name).to_string();
+                                    return Err(CompileError::new(
+                                        ErrorKind::DuplicateField {
+                                            struct_name: format!("{}::{}", enum_name, variant_str),
+                                            field_name: field_str,
+                                        },
+                                        inst.span,
+                                    ));
+                                }
+                            }
+                        }
                     }
 
                     // Build EnumVariantDef list. Field types are stored as unit for now;
@@ -184,9 +211,13 @@ impl<'a> Sema<'a> {
                     // lower them through the type checker.
                     let variants: Vec<EnumVariantDef> = raw_variants
                         .iter()
-                        .map(|(vname, _fields)| EnumVariantDef {
+                        .map(|(vname, _fields, field_names)| EnumVariantDef {
                             name: self.interner.resolve(vname).to_string(),
                             fields: Vec::new(), // Field types resolved in later phases
+                            field_names: field_names
+                                .iter()
+                                .map(|n| self.interner.resolve(n).to_string())
+                                .collect(),
                         })
                         .collect();
 
@@ -306,23 +337,29 @@ impl<'a> Sema<'a> {
                     None => continue, // not registered (shouldn't happen)
                 };
 
-                let raw_variants =
-                    self.rir.get_enum_variant_decls(*variants_start, *variants_len);
-                let has_data = raw_variants.iter().any(|(_, fields)| !fields.is_empty());
+                let raw_variants = self
+                    .rir
+                    .get_enum_variant_decls(*variants_start, *variants_len);
+                let has_data = raw_variants.iter().any(|(_, fields, _)| !fields.is_empty());
                 if !has_data {
                     continue; // unit-only enum, no field types to resolve
                 }
 
                 let mut resolved_variants = Vec::with_capacity(raw_variants.len());
-                for (vname, field_type_spurs) in &raw_variants {
+                for (vname, field_type_spurs, field_name_spurs) in &raw_variants {
                     let mut resolved_fields = Vec::with_capacity(field_type_spurs.len());
                     for field_ty_spur in field_type_spurs {
                         let field_ty = self.resolve_type(*field_ty_spur, inst.span)?;
                         resolved_fields.push(field_ty);
                     }
+                    let field_names: Vec<String> = field_name_spurs
+                        .iter()
+                        .map(|n| self.interner.resolve(n).to_string())
+                        .collect();
                     resolved_variants.push(EnumVariantDef {
                         name: self.interner.resolve(vname).to_string(),
                         fields: resolved_fields,
+                        field_names,
                     });
                 }
 

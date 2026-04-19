@@ -190,3 +190,46 @@ followed by a byte array large enough to hold the payload of the largest variant
 Fields within a variant are stored sequentially at consecutive byte offsets
 (packed layout, no inter-field padding). Field accesses use unaligned loads and
 stores, which are correct on all supported targets.
+
+## Struct Variants
+
+{{ rule(id="6.3:21", cat="normative") }}
+
+Enum variants may carry struct-style associated data with named fields, declared
+as a brace-enclosed list of `name: type` pairs after the variant name. This
+feature requires the `enum_struct_variants` preview feature
+(`--preview enum_struct_variants`).
+
+```ebnf
+enum_variant        = IDENT [ variant_fields ] ;
+variant_fields      = "(" type_list ")"                    (* tuple variant *)
+                    | "{" struct_variant_fields "}" ;       (* struct variant *)
+struct_variant_fields = struct_variant_field { "," struct_variant_field } [ "," ] ;
+struct_variant_field  = IDENT ":" type ;
+```
+
+A variant with `( ... )` is a tuple variant. A variant with `{ ... }` is a
+struct variant. A variant with neither is a unit variant. An enum may freely
+mix all three kinds.
+
+{{ rule(id="6.3:22", cat="legality-rule") }}
+
+Field names within a struct variant **MUST** be unique. A compile-time error
+is raised if a struct variant contains duplicate field names.
+
+{{ rule(id="6.3:23", cat="normative") }}
+
+Struct variants use the same memory layout as tuple variants — fields are stored
+sequentially in declaration order. Name-to-index resolution happens entirely at
+compile time; there is no runtime difference between a struct variant and a
+tuple variant with the same field types in the same order.
+
+{{ rule(id="6.3:24", cat="example") }}
+
+```gruel
+enum Shape {
+    Circle { radius: i32 },
+    Rectangle { width: i32, height: i32 },
+    Point,
+}
+```
