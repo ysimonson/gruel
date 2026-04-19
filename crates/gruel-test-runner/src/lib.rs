@@ -19,7 +19,8 @@ use std::fs;
 use std::io::{Read as IoRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 /// A section header in a test file.
 #[derive(Debug, Deserialize)]
@@ -220,6 +221,10 @@ pub struct Case {
     /// If not specified, the test runs on all platforms.
     #[serde(default)]
     pub only_on: Vec<String>,
+    /// Absolute path to the TOML file this case was loaded from.
+    /// Set by `load_test_files`; not present in TOML.
+    #[serde(skip, default)]
+    pub toml_path: PathBuf,
 }
 
 /// A test file containing a section and its cases.
@@ -374,6 +379,7 @@ pub fn expand_case(case: Case) -> Vec<Case> {
 
                 // Clear params on expanded case
                 params: vec![],
+                toml_path: case.toml_path.clone(),
             };
 
             // Apply field overrides from params
@@ -562,7 +568,12 @@ pub fn load_test_files(cases_dir: &Path) -> Vec<(String, TestFile)> {
         };
 
         match toml::from_str::<TestFile>(&content) {
-            Ok(spec) => {
+            Ok(mut spec) => {
+                // Stamp the TOML file path onto every case before expansion
+                for case in &mut spec.case {
+                    case.toml_path = path.clone();
+                }
+
                 // Expand any parameterized test cases
                 let spec = expand_test_file(spec);
 
@@ -785,8 +796,27 @@ fn run_with_timeout(
     }
 }
 
-/// Run a single test case.
-pub fn run_test_case(case: &Case, gruel_binary: &Path) -> TestResult {
+/// Run a single test case, optionally consulting a [`CacheStore`].
+///
+/// On a cache hit the cached result is returned immediately without invoking the compiler.
+/// On a miss the test is run normally and the result is stored in the cache before returning.
+pub fn run_test_case(case: &Case, gruel_binary: &Path, cache: Option<&CacheStore>) -> TestResult {
+    if let Some(store) = cache
+        && let Some(cached) = store.lookup(case)
+    {
+        return cached;
+    }
+
+    let result = run_test_case_inner(case, gruel_binary);
+
+    if let Some(store) = cache {
+        store.store(case, &result);
+    }
+
+    result
+}
+
+fn run_test_case_inner(case: &Case, gruel_binary: &Path) -> TestResult {
     // Create a temporary directory for this test
     let temp_dir = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let source_path = temp_dir.path().join("test.gruel");
@@ -1035,6 +1065,160 @@ pub fn run_test_case(case: &Case, gruel_binary: &Path) -> TestResult {
     Ok(())
 }
 
+/// A file-based cache for test results, keyed on binary mtime+size and TOML file mtime+size.
+///
+/// Cache entries live under `{target}/gruel-spec-cache/{bin_key}/` and are tiny text files,
+/// one per test case. Thread-safe: each entry is an independent file, so concurrent reads and
+/// writes from the parallel test harness are safe.
+pub struct CacheStore {
+    /// Root directory for this binary version's cache entries.
+    /// e.g. `target/gruel-spec-cache/1700000000-8388608/`
+    cache_dir: PathBuf,
+    hits: AtomicU64,
+    misses: AtomicU64,
+}
+
+impl CacheStore {
+    /// Create a new `CacheStore` keyed on the mtime+size of `binary`.
+    pub fn new(binary: &Path) -> Self {
+        // Derive the target/ directory from the binary path (target/debug/gruel -> target/)
+        let target_dir = binary
+            .parent() // target/debug/ or target/release/
+            .and_then(|p| p.parent()) // target/
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("target"));
+
+        let bin_key = fs::metadata(binary)
+            .ok()
+            .map(|m| {
+                let mtime = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                format!("{}-{}", mtime, m.len())
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let cache_root = target_dir.join("gruel-spec-cache");
+        let cache_dir = cache_root.join(&bin_key);
+
+        // Prune old binary-version directories, keeping only the 5 most recent.
+        if let Ok(entries) = fs::read_dir(&cache_root) {
+            let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = entries
+                .flatten()
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .filter_map(|e| {
+                    let mtime = e.metadata().ok()?.modified().ok()?;
+                    Some((mtime, e.path()))
+                })
+                .collect();
+            // Newest first; delete everything past the 5th slot.
+            dirs.sort_by(|a, b| b.0.cmp(&a.0));
+            for (_, path) in dirs.into_iter().skip(5) {
+                let _ = fs::remove_dir_all(&path);
+            }
+        }
+
+        CacheStore {
+            cache_dir,
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+        }
+    }
+
+    /// Compute the filesystem path for a cache entry.
+    ///
+    /// Returns `None` if the case has no `toml_path` (e.g. in unit tests).
+    fn entry_path(&self, case: &Case) -> Option<PathBuf> {
+        let toml_path = &case.toml_path;
+        if toml_path.as_os_str().is_empty() {
+            return None;
+        }
+
+        let meta = fs::metadata(toml_path).ok()?;
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let toml_key = format!("{}-{}", mtime, meta.len());
+
+        // Use the TOML file's parent dir name + stem to form a 2-level subdirectory.
+        // This is sufficient to disambiguate files within any realistic project layout.
+        let parent = toml_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "root".to_string());
+        let stem = toml_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Sanitize case name: keep alphanumeric, hyphen, underscore, dot.
+        let safe_name: String = case
+            .name
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+
+        Some(
+            self.cache_dir
+                .join(parent)
+                .join(stem)
+                .join(format!("{}--{}", toml_key, safe_name)),
+        )
+    }
+
+    /// Look up a cached test result. Returns `None` on cache miss.
+    pub fn lookup(&self, case: &Case) -> Option<TestResult> {
+        let path = self.entry_path(case)?;
+        let content = fs::read_to_string(&path).ok()?;
+        let result = if content.trim_end() == "ok" {
+            Some(Ok(()))
+        } else {
+            content.strip_prefix("err\n").map(|msg| Err(msg.to_string())) // None = corrupted entry, treat as miss
+        };
+        if result.is_some() {
+            self.hits.fetch_add(1, Ordering::Relaxed);
+        }
+        result
+    }
+
+    /// Store a test result in the cache.
+    pub fn store(&self, case: &Case, result: &TestResult) {
+        let Some(path) = self.entry_path(case) else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let content = match result {
+            Ok(()) => "ok\n".to_string(),
+            Err(msg) => format!("err\n{}", msg),
+        };
+        let _ = fs::write(&path, content);
+        self.misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Return (hits, misses) counters accumulated since creation.
+    pub fn stats(&self) -> (u64, u64) {
+        (
+            self.hits.load(Ordering::Relaxed),
+            self.misses.load(Ordering::Relaxed),
+        )
+    }
+}
+
 /// Find a directory by checking an environment variable, then a list of possible paths.
 ///
 /// This function provides a consistent way to locate directories across different
@@ -1145,6 +1329,7 @@ mod tests {
             aux_files: HashMap::new(),
             pass_aux_files: false,
             only_on: vec![],
+            toml_path: PathBuf::new(),
         };
 
         let expanded = expand_case(case);
@@ -1194,6 +1379,7 @@ mod tests {
             aux_files: HashMap::new(),
             pass_aux_files: false,
             only_on: vec![],
+            toml_path: PathBuf::new(),
         };
 
         let expanded = expand_case(case);
@@ -1251,6 +1437,7 @@ mod tests {
             aux_files: HashMap::new(),
             pass_aux_files: false,
             only_on: vec![],
+            toml_path: PathBuf::new(),
         };
 
         let expanded = expand_case(case);
@@ -1300,6 +1487,7 @@ mod tests {
             aux_files: HashMap::new(),
             pass_aux_files: false,
             only_on: vec![],
+            toml_path: PathBuf::new(),
         };
 
         let expanded = expand_case(case);
@@ -1607,6 +1795,7 @@ mod tests {
             aux_files: HashMap::new(),
             pass_aux_files: false,
             only_on: vec![],
+            toml_path: PathBuf::new(),
         }
     }
 

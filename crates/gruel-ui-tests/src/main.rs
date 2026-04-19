@@ -4,10 +4,12 @@
 //! such as warnings, diagnostics quality, and compiler flags.
 
 use gruel_test_runner::{
-    Case, find_dir, find_gruel_binary, load_test_files, run_test_case, should_skip_for_platform,
+    CacheStore, Case, find_dir, find_gruel_binary, load_test_files, run_test_case,
+    should_skip_for_platform,
 };
 use libtest2_mimic::{Harness, RunContext, RunError, Trial};
 use std::path::Path;
+use std::sync::Arc;
 
 /// Possible paths for the cases directory.
 const CASES_DIR_PATHS: &[&str] = &[
@@ -20,6 +22,7 @@ const CASES_DIR_PATHS: &[&str] = &[
 fn run_case_wrapper(
     case: &Case,
     gruel_binary: &Path,
+    cache: &Arc<CacheStore>,
     skip: bool,
     ctx: RunContext<'_>,
 ) -> Result<(), RunError> {
@@ -29,12 +32,15 @@ fn run_case_wrapper(
     if let Some(reason) = should_skip_for_platform(&case.only_on) {
         return ctx.ignore_for(reason);
     }
-    run_test_case(case, gruel_binary).map_err(|e| RunError::fail(e.to_string()))
+    run_test_case(case, gruel_binary, Some(cache)).map_err(|e| RunError::fail(e.to_string()))
 }
 
 fn main() {
     // Find the gruel binary
     let gruel_binary = find_gruel_binary();
+
+    // Set up a result cache keyed on the binary's mtime+size and each test's TOML mtime+size.
+    let cache = Arc::new(CacheStore::new(&gruel_binary));
 
     // Find the cases directory
     let cases_dir = find_dir("GRUEL_UI_CASES", CASES_DIR_PATHS, "cases");
@@ -48,14 +54,16 @@ fn main() {
         .flat_map(|(_, test_file)| {
             let section_id = test_file.section.id.clone();
             let gruel_binary = gruel_binary.clone();
+            let cache = Arc::clone(&cache);
 
             test_file.case.into_iter().map(move |case| {
                 let test_name = format!("{}::{}", section_id, case.name);
                 let skip = case.skip;
                 let gruel_binary = gruel_binary.clone();
+                let cache = Arc::clone(&cache);
 
                 Trial::test(test_name, move |ctx| {
-                    run_case_wrapper(&case, &gruel_binary, skip, ctx)
+                    run_case_wrapper(&case, &gruel_binary, &cache, skip, ctx)
                 })
             })
         })

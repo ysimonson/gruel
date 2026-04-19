@@ -35,10 +35,12 @@
 //! - `GRUEL_BINARY` - Path to the gruel compiler binary
 
 use gruel_test_runner::{
-    Case, find_dir, find_gruel_binary, load_test_files, run_test_case, should_skip_for_platform,
+    CacheStore, Case, find_dir, find_gruel_binary, load_test_files, run_test_case,
+    should_skip_for_platform,
 };
 use libtest2_mimic::{Harness, RunContext, RunError, Trial};
 use std::path::Path;
+use std::sync::Arc;
 
 mod traceability;
 
@@ -84,6 +86,7 @@ fn run_traceability(detailed: bool) {
 fn run_case_wrapper(
     case: &Case,
     gruel_binary: &Path,
+    cache: &Arc<CacheStore>,
     skip: bool,
     ctx: RunContext<'_>,
 ) -> Result<(), RunError> {
@@ -93,13 +96,14 @@ fn run_case_wrapper(
     if let Some(reason) = should_skip_for_platform(&case.only_on) {
         return ctx.ignore_for(reason);
     }
-    run_test_case(case, gruel_binary).map_err(|e| RunError::fail(e.to_string()))
+    run_test_case(case, gruel_binary, Some(cache)).map_err(|e| RunError::fail(e.to_string()))
 }
 
 /// Wrapper for preview tests - reports failures but marks them as ignored to avoid failing the build.
 fn run_preview_case_wrapper(
     case: &Case,
     gruel_binary: &Path,
+    cache: &Arc<CacheStore>,
     skip: bool,
     ctx: RunContext<'_>,
 ) -> Result<(), RunError> {
@@ -109,7 +113,7 @@ fn run_preview_case_wrapper(
     if let Some(reason) = should_skip_for_platform(&case.only_on) {
         return ctx.ignore_for(reason);
     }
-    match run_test_case(case, gruel_binary) {
+    match run_test_case(case, gruel_binary, Some(cache)) {
         Ok(()) => Ok(()),
         Err(e) => {
             // Report the failure but mark as ignored so it doesn't fail the suite
@@ -155,6 +159,9 @@ fn main() {
     // Find the gruel binary
     let gruel_binary = find_gruel_binary();
 
+    // Set up a result cache keyed on the binary's mtime+size and each test's TOML mtime+size.
+    let cache = Arc::new(CacheStore::new(&gruel_binary));
+
     // Find the cases directory
     let cases_dir = find_dir("GRUEL_SPEC_CASES", CASES_DIR_PATHS, "cases");
 
@@ -175,6 +182,7 @@ fn main() {
             let is_preview = case.preview.is_some();
             let preview_should_pass = case.preview_should_pass;
             let gruel_binary = gruel_binary.clone();
+            let cache = Arc::clone(&cache);
 
             // Preview tests that should pass use the normal wrapper (fail on error).
             // Preview tests without preview_should_pass use the lenient wrapper (allow failure).
@@ -182,12 +190,12 @@ fn main() {
             let trial = if is_preview && !preview_should_pass {
                 // Preview tests that are allowed to fail
                 Trial::test(test_name, move |ctx| {
-                    run_preview_case_wrapper(&case, &gruel_binary, skip, ctx)
+                    run_preview_case_wrapper(&case, &gruel_binary, &cache, skip, ctx)
                 })
             } else {
                 // Stable tests and preview tests that should pass fail normally
                 Trial::test(test_name, move |ctx| {
-                    run_case_wrapper(&case, &gruel_binary, skip, ctx)
+                    run_case_wrapper(&case, &gruel_binary, &cache, skip, ctx)
                 })
             };
 
