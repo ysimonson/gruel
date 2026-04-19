@@ -148,6 +148,11 @@ pub(crate) struct AnalysisContext<'a> {
     pub next_slot: u32,
     /// How many loops we're nested inside (for break/continue validation)
     pub loop_depth: u32,
+    /// If set, `break` is forbidden in the current innermost loop.
+    /// Contains the element type name for the error message.
+    /// Set when iterating over arrays with non-Copy element types, because
+    /// breaking would leave un-dropped elements.
+    pub forbid_break: Option<String>,
     /// How many `checked` blocks we're nested inside (for unchecked operation validation)
     pub checked_depth: u32,
     /// Local variables that have been read (for unused variable detection)

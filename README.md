@@ -18,6 +18,7 @@ of buck, etc.
 
 ### Language
 
+- Added for loops and first class `Range`s
 - Stabilized anonymous struct methods
 - Struct destructuring with partial move ban (ADR-0036)
 - Enums with struct variants (ADR-0037), pattern matching (ADR-0038), and anonymous types with comptime generics support (ADR-0039)

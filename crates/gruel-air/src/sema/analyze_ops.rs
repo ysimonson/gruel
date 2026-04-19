@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
-    WarningKind,
+    PreviewFeature, WarningKind,
 };
 use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern, RirPatternBinding,
@@ -541,6 +541,13 @@ impl<'a> Sema<'a> {
                 self.analyze_while_loop(air, *cond, *body, inst.span, ctx)
             }
 
+            InstData::For {
+                binding,
+                is_mut,
+                iterable,
+                body,
+            } => self.analyze_for_loop(air, *binding, *is_mut, *iterable, *body, inst.span, ctx),
+
             InstData::InfiniteLoop { body } => {
                 self.analyze_infinite_loop(air, *body, inst.span, ctx)
             }
@@ -555,6 +562,16 @@ impl<'a> Sema<'a> {
                 // Validate that we're inside a loop
                 if ctx.loop_depth == 0 {
                     return Err(CompileError::new(ErrorKind::BreakOutsideLoop, inst.span));
+                }
+
+                // Check if break is forbidden (e.g., consuming for-in loop)
+                if let Some(ref elem_type_name) = ctx.forbid_break {
+                    return Err(CompileError::new(
+                        ErrorKind::BreakInConsumingForLoop {
+                            element_type: elem_type_name.clone(),
+                        },
+                        inst.span,
+                    ));
                 }
 
                 // Break has the never type - it diverges
@@ -764,6 +781,536 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, Type::UNIT))
+    }
+
+    /// Analyze a for-in loop.
+    ///
+    /// Desugars `for x in @range(...) { body }` into a while loop:
+    /// ```text
+    /// {
+    ///     let __counter = start;
+    ///     while __counter < end {
+    ///         let x = __counter;
+    ///         body;
+    ///         __counter = __counter + stride;
+    ///     }
+    /// }
+    /// ```
+    fn analyze_for_loop(
+        &mut self,
+        air: &mut Air,
+        binding: Spur,
+        is_mut: bool,
+        iterable: InstRef,
+        body: InstRef,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // Gate behind preview feature
+        self.require_preview(PreviewFeature::ForLoops, "for-in loops", span)?;
+
+        // Check if the iterable is a @range(...) intrinsic
+        let iterable_inst = self.rir.get(iterable);
+        match &iterable_inst.data {
+            InstData::Intrinsic {
+                name,
+                args_start,
+                args_len,
+            } if *name == self.known.range => {
+                let args = self.rir.get_inst_refs(*args_start, *args_len);
+                self.analyze_range_for_loop(air, binding, is_mut, &args, body, span, iterable_inst.span, ctx)
+            }
+            _ => {
+                // Not @range — analyze the iterable expression and check if it's an array
+                let iterable_span = iterable_inst.span;
+                let iterable_result = self.analyze_inst(air, iterable, ctx)?;
+                let iterable_type = iterable_result.ty;
+
+                if let Some(array_type_id) = iterable_type.as_array() {
+                    let (elem_type, array_len) = self.type_pool.array_def(array_type_id);
+                    let is_copy = self.is_type_copy(elem_type);
+
+                    self.analyze_array_for_loop(
+                        air, binding, is_mut, iterable_result.air_ref, iterable_type,
+                        elem_type, array_len, is_copy, body, span, ctx,
+                    )
+                } else {
+                    Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: "array or @range(...)".to_string(),
+                            found: iterable_type.name().to_string(),
+                        },
+                        iterable_span,
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Desugar `for x in @range(...) { body }` into a while loop in AIR.
+    fn analyze_range_for_loop(
+        &mut self,
+        air: &mut Air,
+        binding: Spur,
+        is_mut: bool,
+        range_args: &[InstRef],
+        body: InstRef,
+        span: Span,
+        range_span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // Parse @range arguments: @range(end), @range(start, end), @range(start, end, stride)
+        let (start_ref, end_ref, stride_ref) = match range_args.len() {
+            1 => (None, range_args[0], None),
+            2 => (Some(range_args[0]), range_args[1], None),
+            3 => (Some(range_args[0]), range_args[1], Some(range_args[2])),
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::WrongArgumentCount {
+                        expected: 1, // @range takes 1-3 args
+                        found: range_args.len(),
+                    },
+                    range_span,
+                ));
+            }
+        };
+
+        // Analyze the end bound — this determines the loop variable type
+        let end_result = self.analyze_inst(air, end_ref, ctx)?;
+        let iter_type = end_result.ty;
+
+        // Validate that the type is an integer type
+        if !iter_type.is_integer() {
+            return Err(CompileError::new(
+                ErrorKind::TypeMismatch {
+                    expected: "integer type".to_string(),
+                    found: format!("{}", iter_type),
+                },
+                range_span,
+            ));
+        }
+
+        // Analyze start (default: 0)
+        let start_air = if let Some(start_ref) = start_ref {
+            let result = self.analyze_inst(air, start_ref, ctx)?;
+            if result.ty != iter_type {
+                return Err(CompileError::new(
+                    ErrorKind::TypeMismatch {
+                        expected: format!("{}", iter_type),
+                        found: format!("{}", result.ty),
+                    },
+                    range_span,
+                ));
+            }
+            result.air_ref
+        } else {
+            // Default start: 0
+            air.add_inst(AirInst {
+                data: AirInstData::Const(0),
+                ty: iter_type,
+                span,
+            })
+        };
+
+        // Analyze stride (default: 1)
+        let stride_air = if let Some(stride_ref) = stride_ref {
+            let result = self.analyze_inst(air, stride_ref, ctx)?;
+            if result.ty != iter_type {
+                return Err(CompileError::new(
+                    ErrorKind::TypeMismatch {
+                        expected: format!("{}", iter_type),
+                        found: format!("{}", result.ty),
+                    },
+                    range_span,
+                ));
+            }
+            result.air_ref
+        } else {
+            // Default stride: 1
+            air.add_inst(AirInst {
+                data: AirInstData::Const(1),
+                ty: iter_type,
+                span,
+            })
+        };
+
+        // Open a scope for the entire for-loop (counter variable lives here)
+        ctx.push_scope();
+
+        // Allocate a slot for the hidden counter variable
+        let counter_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+
+        // Emit StorageLive + Alloc for counter
+        let counter_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: counter_slot },
+            ty: iter_type,
+            span,
+        });
+        let counter_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: counter_slot,
+                init: start_air,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Build the condition: __counter < end
+        let counter_load_for_cond = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: iter_type,
+            span,
+        });
+        let cond_ref = air.add_inst(AirInst {
+            data: AirInstData::Lt(counter_load_for_cond, end_result.air_ref),
+            ty: Type::BOOL,
+            span,
+        });
+
+        // Build the loop body:
+        // 1. let binding = __counter  (or let mut binding = __counter)
+        // 2. user body
+        // 3. __counter = __counter + stride
+
+        // Open body scope
+        ctx.push_scope();
+        ctx.loop_depth += 1;
+
+        // Allocate slot for the user binding variable
+        let binding_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+
+        // Register the user's loop variable
+        ctx.insert_local(
+            binding,
+            LocalVar {
+                slot: binding_slot,
+                ty: iter_type,
+                is_mut,
+                span,
+                allow_unused: false,
+            },
+        );
+
+        // Emit StorageLive + Alloc for binding: let x = __counter
+        let counter_load_for_binding = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: iter_type,
+            span,
+        });
+        let binding_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: binding_slot },
+            ty: iter_type,
+            span,
+        });
+        let binding_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: binding_slot,
+                init: counter_load_for_binding,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Increment counter BEFORE user body so `continue` doesn't skip the increment.
+        // Desugaring: let x = __counter; __counter += stride; <body>
+        let counter_load_for_inc = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: iter_type,
+            span,
+        });
+        let incremented = air.add_inst(AirInst {
+            data: AirInstData::Add(counter_load_for_inc, stride_air),
+            ty: iter_type,
+            span,
+        });
+        let counter_store = air.add_inst(AirInst {
+            data: AirInstData::Store {
+                slot: counter_slot,
+                value: incremented,
+                had_live_value: true,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Analyze the user's body
+        let body_result = self.analyze_inst(air, body, ctx)?;
+
+        ctx.loop_depth -= 1;
+        self.check_unused_locals_in_current_scope(ctx);
+        ctx.pop_scope();
+
+        // Build the body block: [binding_storage_live, binding_alloc, counter_store, body]
+        // The counter increment is before the user body so `continue` doesn't skip it.
+        let body_stmts_start = air.add_extra(&[
+            binding_storage_live.as_u32(),
+            binding_alloc.as_u32(),
+            counter_store.as_u32(),
+        ]);
+        let body_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: body_stmts_start,
+                stmts_len: 3,
+                value: body_result.air_ref,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Build the while loop
+        let loop_ref = air.add_inst(AirInst {
+            data: AirInstData::Loop {
+                cond: cond_ref,
+                body: body_block,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        ctx.pop_scope();
+
+        // Build the outer block: [counter_storage_live, counter_alloc, loop]
+        let outer_stmts_start = air.add_extra(&[
+            counter_storage_live.as_u32(),
+            counter_alloc.as_u32(),
+        ]);
+        let outer_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: outer_stmts_start,
+                stmts_len: 2,
+                value: loop_ref,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        Ok(AnalysisResult::new(outer_block, Type::UNIT))
+    }
+
+    /// Desugar `for x in arr { body }` into a while loop with array indexing.
+    ///
+    /// For Copy element types, elements are copied out and the array remains valid.
+    /// For non-Copy element types, elements are moved out and the array is consumed;
+    /// `break` is forbidden because it would leave un-dropped elements.
+    fn analyze_array_for_loop(
+        &mut self,
+        air: &mut Air,
+        binding: Spur,
+        is_mut: bool,
+        arr_air: AirRef,
+        arr_type: Type,
+        elem_type: Type,
+        array_len: u64,
+        is_copy: bool,
+        body: InstRef,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // Open outer scope for temp variables
+        ctx.push_scope();
+
+        // Spill array to a temporary slot
+        let arr_slot = ctx.next_slot;
+        let num_arr_slots = self.abi_slot_count(arr_type);
+        ctx.next_slot += num_arr_slots;
+
+        let arr_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: arr_slot },
+            ty: arr_type,
+            span,
+        });
+        let arr_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: arr_slot,
+                init: arr_air,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Allocate counter: let mut __i: i32 = 0
+        let counter_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+
+        let counter_start = air.add_inst(AirInst {
+            data: AirInstData::Const(0),
+            ty: Type::I32,
+            span,
+        });
+        let counter_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: counter_slot },
+            ty: Type::I32,
+            span,
+        });
+        let counter_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: counter_slot,
+                init: counter_start,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Build condition: __i < array_len
+        let counter_load_for_cond = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: Type::I32,
+            span,
+        });
+        let len_const = air.add_inst(AirInst {
+            data: AirInstData::Const(array_len),
+            ty: Type::I32,
+            span,
+        });
+        let cond_ref = air.add_inst(AirInst {
+            data: AirInstData::Lt(counter_load_for_cond, len_const),
+            ty: Type::BOOL,
+            span,
+        });
+
+        // Build loop body
+        ctx.push_scope();
+        ctx.loop_depth += 1;
+
+        // For non-copy element types, forbid break (would leave elements unconsumed)
+        let old_forbid_break = ctx.forbid_break.take();
+        if !is_copy {
+            ctx.forbid_break = Some(elem_type.name().to_string());
+        }
+
+        // let x = arr[__i]
+        let binding_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+
+        ctx.insert_local(
+            binding,
+            LocalVar {
+                slot: binding_slot,
+                ty: elem_type,
+                is_mut,
+                span,
+                allow_unused: false,
+            },
+        );
+
+        // Load index for element access
+        let counter_load_for_idx = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: Type::I32,
+            span,
+        });
+
+        // Read arr[__i] via PlaceRead
+        let place_ref = air.make_place(
+            AirPlaceBase::Local(arr_slot),
+            std::iter::once(AirProjection::Index {
+                array_type: arr_type,
+                index: counter_load_for_idx,
+            }),
+        );
+        let elem_read = air.add_inst(AirInst {
+            data: AirInstData::PlaceRead { place: place_ref },
+            ty: elem_type,
+            span,
+        });
+
+        // StorageLive + Alloc for binding
+        let binding_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: binding_slot },
+            ty: elem_type,
+            span,
+        });
+        let binding_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: binding_slot,
+                init: elem_read,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Increment counter before body (so continue doesn't skip it)
+        let counter_load_for_inc = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: Type::I32,
+            span,
+        });
+        let one_const = air.add_inst(AirInst {
+            data: AirInstData::Const(1),
+            ty: Type::I32,
+            span,
+        });
+        let incremented = air.add_inst(AirInst {
+            data: AirInstData::Add(counter_load_for_inc, one_const),
+            ty: Type::I32,
+            span,
+        });
+        let counter_store = air.add_inst(AirInst {
+            data: AirInstData::Store {
+                slot: counter_slot,
+                value: incremented,
+                had_live_value: true,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Analyze user body
+        let body_result = self.analyze_inst(air, body, ctx)?;
+
+        ctx.loop_depth -= 1;
+        ctx.forbid_break = old_forbid_break;
+        self.check_unused_locals_in_current_scope(ctx);
+        ctx.pop_scope();
+
+        // Build body block: [binding_storage_live, binding_alloc, counter_store, body]
+        let body_stmts_start = air.add_extra(&[
+            binding_storage_live.as_u32(),
+            binding_alloc.as_u32(),
+            counter_store.as_u32(),
+        ]);
+        let body_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: body_stmts_start,
+                stmts_len: 3,
+                value: body_result.air_ref,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Build while loop
+        let loop_ref = air.add_inst(AirInst {
+            data: AirInstData::Loop {
+                cond: cond_ref,
+                body: body_block,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        ctx.pop_scope();
+
+        // Build outer block: [arr_storage_live, arr_alloc, counter_storage_live, counter_alloc, loop]
+        let outer_stmts_start = air.add_extra(&[
+            arr_storage_live.as_u32(),
+            arr_alloc.as_u32(),
+            counter_storage_live.as_u32(),
+            counter_alloc.as_u32(),
+        ]);
+        let outer_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: outer_stmts_start,
+                stmts_len: 4,
+                value: loop_ref,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        Ok(AnalysisResult::new(outer_block, Type::UNIT))
     }
 
     /// Analyze an infinite loop.

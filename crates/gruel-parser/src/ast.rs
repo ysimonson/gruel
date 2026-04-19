@@ -450,6 +450,8 @@ pub enum Expr {
     Match(MatchExpr),
     /// While expression (e.g., `while cond { body }`)
     While(WhileExpr),
+    /// For-in expression (e.g., `for x in arr { body }`)
+    For(ForExpr),
     /// Loop expression - infinite loop (e.g., `loop { body }`)
     Loop(LoopExpr),
     /// Function call (e.g., `foo(1, 2)`)
@@ -979,6 +981,20 @@ pub struct WhileExpr {
     pub span: Span,
 }
 
+/// A for-in loop expression (e.g., `for x in expr { body }`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForExpr {
+    /// Loop variable name
+    pub binding: Ident,
+    /// Whether the loop variable is mutable (`for mut x in ...`)
+    pub is_mut: bool,
+    /// The iterable expression (array or Range)
+    pub iterable: Box<Expr>,
+    /// Loop body
+    pub body: BlockExpr,
+    pub span: Span,
+}
+
 /// An infinite loop expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopExpr {
@@ -1058,6 +1074,7 @@ impl Expr {
             Expr::If(if_expr) => if_expr.span,
             Expr::Match(match_expr) => match_expr.span,
             Expr::While(while_expr) => while_expr.span,
+            Expr::For(for_expr) => for_expr.span,
             Expr::Loop(loop_expr) => loop_expr.span,
             Expr::Call(call) => call.span,
             Expr::Break(break_expr) => break_expr.span,
@@ -1306,6 +1323,20 @@ fn fmt_expr(f: &mut fmt::Formatter<'_>, expr: &Expr, level: usize) -> fmt::Resul
             indent(f, level + 1)?;
             writeln!(f, "Body:")?;
             fmt_block_expr(f, &while_expr.body, level + 2)
+        }
+        Expr::For(for_expr) => {
+            writeln!(
+                f,
+                "For {}sym:{}",
+                if for_expr.is_mut { "mut " } else { "" },
+                for_expr.binding.name.into_usize()
+            )?;
+            indent(f, level + 1)?;
+            writeln!(f, "Iterable:")?;
+            fmt_expr(f, &for_expr.iterable, level + 2)?;
+            indent(f, level + 1)?;
+            writeln!(f, "Body:")?;
+            fmt_block_expr(f, &for_expr.body, level + 2)
         }
         Expr::Loop(loop_expr) => {
             writeln!(f, "Loop")?;
@@ -1664,6 +1695,12 @@ pub enum NodeTag {
     /// - lhs: condition expression node
     /// - rhs: body block expression node
     WhileExpr,
+
+    /// For-in loop: for [mut] x in expr { body }
+    /// - lhs: iterable expression node
+    /// - rhs: body block expression node
+    /// - extra: binding name (Spur index), is_mut flag
+    ForExpr,
 
     /// Infinite loop: loop { body }
     /// - lhs: body block expression node

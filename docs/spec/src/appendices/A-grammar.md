@@ -87,6 +87,7 @@ primary        = INTEGER | BOOL | IDENT | enum_variant_expr
                | match_expr
                | while_expr
                | loop_expr
+               | for_expr
                | "break" | "continue"
                | return_expr
                | array_literal
@@ -109,6 +110,7 @@ field_pattern  = IDENT ":" binding
                | IDENT ;
 while_expr     = "while" expression "{" block "}" ;
 loop_expr      = "loop" "{" block "}" ;
+for_expr       = "for" [ "mut" ] IDENT "in" expression "{" block "}" ;
 return_expr    = "return" expression ;
 array_literal  = "[" [ expression { "," expression } ] "]" ;
 struct_literal = IDENT "{" [ field_inits ] "}" ;

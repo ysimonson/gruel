@@ -1331,6 +1331,7 @@ impl<'a> Sema<'a> {
             params: &param_vec,
             next_slot: 0,
             loop_depth: 0,
+            forbid_break: None,
             checked_depth: 0,
             used_locals: HashSet::new(),
             return_type,
@@ -1965,6 +1966,7 @@ impl<'a> Sema<'a> {
             // Control flow
             InstData::Branch { .. }
             | InstData::Loop { .. }
+            | InstData::For { .. }
             | InstData::InfiniteLoop { .. }
             | InstData::Match { .. }
             | InstData::Break
@@ -5462,6 +5464,10 @@ impl<'a> Sema<'a> {
                 }
                 Ok(ConstValue::Unit)
             }
+
+            // ── For-in loop ──────────────────────────────────────────────────
+            // Not supported in comptime context (desugared to while at runtime).
+            InstData::For { .. } => Err(not_const(inst_span)),
 
             // ── Infinite loop ─────────────────────────────────────────────────
             // `loop { body }` — runs until a break (or step budget exceeded).

@@ -27,6 +27,8 @@ The following words are keywords and cannot be used as identifiers:
 | `if` | Conditional expression |
 | `else` | Alternative branch |
 | `while` | While loop expression |
+| `for` | For-in loop expression |
+| `in` | For-in loop iterable |
 | `loop` | Infinite loop expression |
 | `match` | Pattern matching expression |
 | `return` | Return from function |

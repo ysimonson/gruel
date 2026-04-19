@@ -299,6 +299,8 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// For-each loops over arrays and integer ranges.
+    ForLoops,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -318,6 +320,7 @@ impl PreviewFeature {
     pub fn name(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
+            PreviewFeature::ForLoops => "for_loops",
         }
     }
 
@@ -325,12 +328,13 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::ForLoops => "ADR-0041",
         }
     }
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra]
+        &[PreviewFeature::TestInfra, PreviewFeature::ForLoops]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -353,6 +357,7 @@ impl std::str::FromStr for PreviewFeature {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "test_infra" => Ok(PreviewFeature::TestInfra),
+            "for_loops" => Ok(PreviewFeature::ForLoops),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -968,6 +973,8 @@ pub enum ErrorKind {
     // Control flow errors
     #[error("'break' outside of loop")]
     BreakOutsideLoop,
+    #[error("'break' in for-in loop over array with non-Copy element type '{element_type}' would leak un-iterated elements")]
+    BreakInConsumingForLoop { element_type: String },
     #[error("'continue' outside of loop")]
     ContinueOutsideLoop,
 
@@ -1142,6 +1149,7 @@ impl ErrorKind {
 
             // Control flow errors (E0500-E0599)
             ErrorKind::BreakOutsideLoop => ErrorCode::BREAK_OUTSIDE_LOOP,
+            ErrorKind::BreakInConsumingForLoop { .. } => ErrorCode::BREAK_OUTSIDE_LOOP,
             ErrorKind::ContinueOutsideLoop => ErrorCode::CONTINUE_OUTSIDE_LOOP,
             ErrorKind::IntrinsicRequiresChecked(_) => ErrorCode::INTRINSIC_REQUIRES_CHECKED,
             ErrorKind::UncheckedCallRequiresChecked(_) => {
@@ -1863,7 +1871,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, for_loops");
     }
 
     // ========================================================================

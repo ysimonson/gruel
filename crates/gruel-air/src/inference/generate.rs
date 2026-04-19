@@ -773,6 +773,23 @@ impl<'a> ConstraintGenerator<'a> {
                     } else {
                         InferType::Concrete(Type::ERROR)
                     }
+                } else if intrinsic_name == "range" {
+                    // @range: takes 1-3 integer args, returns the same integer type
+                    // (used as iterable in for-in loops)
+                    if !args.is_empty() {
+                        let first = self.generate(args[0], ctx);
+                        for arg_ref in args.iter().skip(1) {
+                            let arg_info = self.generate(*arg_ref, ctx);
+                            self.add_constraint(Constraint::equal(
+                                first.ty.clone(),
+                                arg_info.ty,
+                                span,
+                            ));
+                        }
+                        first.ty
+                    } else {
+                        InferType::Concrete(Type::ERROR)
+                    }
                 } else {
                     // Generate constraints for arguments (they need to be processed)
                     for arg_ref in args.iter() {
@@ -882,6 +899,42 @@ impl<'a> ConstraintGenerator<'a> {
                 ctx.loop_depth -= 1;
 
                 // Loops produce unit
+                InferType::Concrete(Type::UNIT)
+            }
+
+            // For-in loop (desugared to while in sema, but inference still sees it)
+            InstData::For {
+                binding,
+                is_mut,
+                iterable,
+                body,
+            } => {
+                // Generate constraints for the iterable to determine the element type
+                let iterable_info = self.generate(*iterable, ctx);
+
+                // Determine the binding type from the iterable:
+                // - For @range: the iterable returns the integer type directly
+                // - For arrays: extract the element type from InferType::Array
+                let binding_ty = match &iterable_info.ty {
+                    InferType::Array { element, .. } => *element.clone(),
+                    other => other.clone(),
+                };
+
+                // Register the binding so the body can reference it
+                ctx.insert_local(
+                    *binding,
+                    LocalVarInfo {
+                        ty: binding_ty,
+                        is_mut: *is_mut,
+                        span,
+                    },
+                );
+
+                ctx.loop_depth += 1;
+                self.generate(*body, ctx);
+                ctx.loop_depth -= 1;
+
+                // For loops produce unit
                 InferType::Concrete(Type::UNIT)
             }
 

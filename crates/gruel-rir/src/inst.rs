@@ -1234,6 +1234,12 @@ impl Rir {
                 cond: renumber(*cond),
                 body: renumber(*body),
             },
+            InstData::For { binding, is_mut, iterable, body } => InstData::For {
+                binding: *binding,
+                is_mut: *is_mut,
+                iterable: renumber(*iterable),
+                body: renumber(*body),
+            },
             InstData::InfiniteLoop { body } => InstData::InfiniteLoop {
                 body: renumber(*body),
             },
@@ -1670,6 +1676,7 @@ impl Rir {
                 | InstData::BitNot { .. }
                 | InstData::Branch { .. }
                 | InstData::Loop { .. }
+                | InstData::For { .. }
                 | InstData::InfiniteLoop { .. }
                 | InstData::Break
                 | InstData::Continue
@@ -1781,6 +1788,18 @@ pub enum InstData {
 
     /// While loop: while cond { body }
     Loop { cond: InstRef, body: InstRef },
+
+    /// For-in loop: for [mut] binding in iterable { body }
+    For {
+        /// The loop variable name
+        binding: Spur,
+        /// Whether the loop variable is mutable
+        is_mut: bool,
+        /// The iterable expression (array or @range result)
+        iterable: InstRef,
+        /// The loop body
+        body: InstRef,
+    },
 
     /// Infinite loop: loop { body }
     InfiniteLoop { body: InstRef },
@@ -2352,6 +2371,10 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     }
                 }
                 InstData::Loop { cond, body } => writeln!(out, "loop {}, {}", cond, body).unwrap(),
+                InstData::For { binding, is_mut, iterable, body } => {
+                    let mut_str = if *is_mut { "mut " } else { "" };
+                    writeln!(out, "for {}{} in {}, {}", mut_str, self.interner.resolve(binding), iterable, body).unwrap()
+                }
                 InstData::InfiniteLoop { body } => writeln!(out, "infinite_loop {}", body).unwrap(),
                 InstData::Match {
                     scrutinee,
