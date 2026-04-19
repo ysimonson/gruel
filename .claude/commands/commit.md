@@ -31,5 +31,6 @@ Commit the current changes.
 ## Rules
 
 - Each commit must leave tests passing (`make test` or at minimum `make quick-test`)
+  - **Exception**: Skip `make check` and tests if all changes are documentation or website files only (e.g. `docs/`, `website/`, `*.md` files at the repo root). These changes cannot break the build.
 - Do not skip hooks (`--no-verify`)
 - Do not force-push or amend published commits
