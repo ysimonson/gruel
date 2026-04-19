@@ -1,7 +1,7 @@
 ---
 id: 0040
 title: Comptime Interpreter Expansion and Differential Fuzzing
-status: proposal
+status: implemented
 tags: [compiler, comptime, fuzzing, testing]
 feature-flag: comptime-expansion
 created: 2026-04-19
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 

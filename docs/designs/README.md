@@ -151,10 +151,10 @@ See [ADR-0005: Preview Features](0005-preview-features.md) for details on the ga
 | [0002](0002-single-pass-bidirectional-types.md) | Single-Pass Bidirectional Type Checking | Implemented | compiler |
 | [0003](0003-constant-evaluation.md) | Constant Expression Evaluation | Implemented | compiler |
 | [0004](0004-enum-types.md) | Enum Types | Implemented | types, syntax |
-| [0005](0005-preview-features.md) | Preview Features | Accepted | process |
+| [0005](0005-preview-features.md) | Preview Features | Implemented | process |
 | [0006](0006-zola-unified-website.md) | Unified Zola Website | Implemented | tooling, documentation |
 | [0007](0007-hindley-milner-inference.md) | Hindley-Milner Type Inference | Implemented | types, compiler |
-| [0008](0008-affine-types-mvs.md) | Affine Types and Mutable Value Semantics | Accepted | types, semantics, ownership |
-| [0009](0009-struct-methods.md) | Struct Methods | Proposal | types, syntax |
+| [0008](0008-affine-types-mvs.md) | Affine Types and Mutable Value Semantics | Implemented | types, semantics, ownership |
+| [0009](0009-struct-methods.md) | Struct Methods | Implemented | types, syntax |
 | [0011](0011-runtime-heap.md) | Runtime Heap (bump allocator) | Superseded | runtime, memory |
 | [0035](0035-heap-allocator-libc.md) | Heap Allocator - Use libc malloc | Implemented | runtime, memory |

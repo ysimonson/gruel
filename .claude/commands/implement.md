@@ -112,9 +112,10 @@ When all phases are complete:
 1. Remove `preview = "..."` from spec tests
 2. Remove `require_preview()` calls from semantic analysis
 3. Remove the feature from `PreviewFeature` enum
-4. Update ADR status to "Implemented"
-5. Fill in `implemented:` date in ADR frontmatter
-6. Create stabilization commit
+4. Update ADR frontmatter: set `status: implemented` and fill in `implemented:` date
+5. Update ADR body: change `## Status` section to `Implemented`
+6. Update the index table in `docs/designs/README.md` to reflect the new status
+7. Create stabilization commit
 
 ## Common Patterns
 
