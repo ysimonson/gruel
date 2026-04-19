@@ -800,13 +800,21 @@ impl<'a> ConstraintGenerator<'a> {
                 }
             }
 
-            // Type intrinsic (@size_of, @align_of)
-            InstData::TypeIntrinsic {
-                name: _,
-                type_arg: _,
-            } => {
-                // Type intrinsics return i32 (the size or alignment value)
-                InferType::Concrete(Type::I32)
+            // Type intrinsic (@size_of, @align_of, @typeName, @typeInfo)
+            InstData::TypeIntrinsic { name, type_arg: _ } => {
+                let intrinsic_name = self.interner.resolve(name);
+                match intrinsic_name {
+                    "typeName" => InferType::Concrete(Type::COMPTIME_STR),
+                    "typeInfo" => {
+                        // @typeInfo returns a comptime struct — use a fresh var
+                        // since the actual type is determined by the comptime evaluator.
+                        InferType::Var(self.fresh_var())
+                    }
+                    _ => {
+                        // @size_of, @align_of return i32
+                        InferType::Concrete(Type::I32)
+                    }
+                }
             }
 
             // Block
@@ -1422,16 +1430,15 @@ impl<'a> ConstraintGenerator<'a> {
             // For type inference, we use a fresh type variable that can unify with
             // whatever type is expected from the context (e.g., a let binding's type annotation).
             // Similar to integer literals, comptime blocks can adapt to their context.
-            InstData::Comptime { expr } => {
-                // Generate constraints for the inner expression
-                let inner_info = self.generate(*expr, ctx);
-
-                // Use a fresh variable so comptime can unify with expected type from context.
-                // The actual evaluation happens in sema where we know the final type.
+            InstData::Comptime { expr: _ } => {
+                // Comptime blocks are fully evaluated by the comptime interpreter in sema,
+                // which handles its own type checking (comptime_str, TypeInfo structs, etc.).
+                // We don't generate constraints for the inner expression because comptime
+                // has types (comptime_str, anonymous structs from @typeInfo) that don't
+                // exist in the regular type system and would cause false unification errors.
+                // Use a fresh variable so comptime can unify with whatever the context expects.
                 let var = self.fresh_var();
                 self.int_literal_vars.push(var);
-                // Add constraint that this var equals the inner expression's type
-                self.add_constraint(Constraint::equal(InferType::Var(var), inner_info.ty, span));
                 InferType::Var(var)
             }
 

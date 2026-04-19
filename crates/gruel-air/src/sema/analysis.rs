@@ -5223,6 +5223,463 @@ impl<'a> Sema<'a> {
         }
     }
 
+    /// Allocate a `comptime_str` on the comptime heap and return a `ConstValue::ComptimeStr`.
+    fn alloc_comptime_str(&mut self, s: String) -> ConstValue {
+        let idx = self.comptime_heap.len() as u32;
+        self.comptime_heap.push(ComptimeHeapItem::String(s));
+        ConstValue::ComptimeStr(idx)
+    }
+
+    /// Allocate a comptime struct on the heap and return a `ConstValue::Struct`.
+    fn alloc_comptime_struct(
+        &mut self,
+        struct_id: StructId,
+        fields: Vec<ConstValue>,
+    ) -> ConstValue {
+        let idx = self.comptime_heap.len() as u32;
+        self.comptime_heap
+            .push(ComptimeHeapItem::Struct { struct_id, fields });
+        ConstValue::Struct(idx)
+    }
+
+    /// Allocate a comptime array on the heap and return a `ConstValue::Array`.
+    fn alloc_comptime_array(&mut self, elements: Vec<ConstValue>) -> ConstValue {
+        let idx = self.comptime_heap.len() as u32;
+        self.comptime_heap.push(ComptimeHeapItem::Array(elements));
+        ConstValue::Array(idx)
+    }
+
+    /// Resolve a `TypeKind` variant name to its discriminant index.
+    fn typekind_variant_idx(&self, variant_name: &str) -> u32 {
+        let enum_id = self
+            .builtin_typekind_id
+            .expect("TypeKind enum not injected");
+        let enum_def = self.type_pool.enum_def(enum_id);
+        enum_def
+            .find_variant(variant_name)
+            .unwrap_or_else(|| panic!("TypeKind variant '{variant_name}' not found")) as u32
+    }
+
+    /// Evaluate `@typeName(T)` — returns the type's name as a `comptime_str`.
+    fn evaluate_comptime_type_name(&mut self, ty: Type, _span: Span) -> CompileResult<ConstValue> {
+        let name = self.type_pool.format_type_name(ty);
+        Ok(self.alloc_comptime_str(name))
+    }
+
+    /// Evaluate `@typeInfo(T)` — returns a comptime struct describing the type.
+    fn evaluate_comptime_type_info(&mut self, ty: Type, span: Span) -> CompileResult<ConstValue> {
+        let typekind_enum_id = self
+            .builtin_typekind_id
+            .expect("TypeKind enum not injected");
+        let typekind_type = Type::new_enum(typekind_enum_id);
+
+        match ty.kind() {
+            TypeKind::Struct(struct_id) => {
+                self.build_struct_type_info(struct_id, typekind_enum_id, typekind_type)
+            }
+            TypeKind::Enum(enum_id) => {
+                self.build_enum_type_info(enum_id, typekind_enum_id, typekind_type)
+            }
+            TypeKind::I8 => {
+                self.build_int_type_info("i8", 8, true, typekind_enum_id, typekind_type)
+            }
+            TypeKind::I16 => {
+                self.build_int_type_info("i16", 16, true, typekind_enum_id, typekind_type)
+            }
+            TypeKind::I32 => {
+                self.build_int_type_info("i32", 32, true, typekind_enum_id, typekind_type)
+            }
+            TypeKind::I64 => {
+                self.build_int_type_info("i64", 64, true, typekind_enum_id, typekind_type)
+            }
+            TypeKind::U8 => {
+                self.build_int_type_info("u8", 8, false, typekind_enum_id, typekind_type)
+            }
+            TypeKind::U16 => {
+                self.build_int_type_info("u16", 16, false, typekind_enum_id, typekind_type)
+            }
+            TypeKind::U32 => {
+                self.build_int_type_info("u32", 32, false, typekind_enum_id, typekind_type)
+            }
+            TypeKind::U64 => {
+                self.build_int_type_info("u64", 64, false, typekind_enum_id, typekind_type)
+            }
+            TypeKind::Bool => {
+                self.build_simple_type_info("bool", "Bool", typekind_enum_id, typekind_type)
+            }
+            TypeKind::Unit => {
+                self.build_simple_type_info("()", "Unit", typekind_enum_id, typekind_type)
+            }
+            TypeKind::Never => {
+                self.build_simple_type_info("!", "Never", typekind_enum_id, typekind_type)
+            }
+            TypeKind::Array(array_type_id) => {
+                let (elem_ty, len) = self.type_pool.array_def(array_type_id);
+                let elem_name = self.type_pool.format_type_name(elem_ty);
+                let name = format!("[{elem_name}; {len}]");
+                self.build_simple_type_info(&name, "Array", typekind_enum_id, typekind_type)
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("@typeInfo not supported for type '{}'", ty.name()),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Build a simple type info struct with just `kind` and `name` fields.
+    fn build_simple_type_info(
+        &mut self,
+        type_name: &str,
+        kind_variant_name: &str,
+        typekind_enum_id: EnumId,
+        typekind_type: Type,
+    ) -> CompileResult<ConstValue> {
+        let kind_val = ConstValue::EnumVariant {
+            enum_id: typekind_enum_id,
+            variant_idx: self.typekind_variant_idx(kind_variant_name),
+        };
+        let name_val = self.alloc_comptime_str(type_name.to_string());
+
+        let fields = vec![
+            StructField {
+                name: "kind".to_string(),
+                ty: typekind_type,
+            },
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+        ];
+        let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::new());
+        let info_struct_id = match info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        Ok(self.alloc_comptime_struct(info_struct_id, vec![kind_val, name_val]))
+    }
+
+    /// Build type info for an integer type (includes `bits` and `is_signed`).
+    #[allow(clippy::too_many_arguments)]
+    fn build_int_type_info(
+        &mut self,
+        type_name: &str,
+        bits: i32,
+        is_signed: bool,
+        typekind_enum_id: EnumId,
+        typekind_type: Type,
+    ) -> CompileResult<ConstValue> {
+        let kind_val = ConstValue::EnumVariant {
+            enum_id: typekind_enum_id,
+            variant_idx: self.typekind_variant_idx("Int"),
+        };
+        let name_val = self.alloc_comptime_str(type_name.to_string());
+
+        let fields = vec![
+            StructField {
+                name: "kind".to_string(),
+                ty: typekind_type,
+            },
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "bits".to_string(),
+                ty: Type::I32,
+            },
+            StructField {
+                name: "is_signed".to_string(),
+                ty: Type::BOOL,
+            },
+        ];
+        let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::new());
+        let info_struct_id = match info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        Ok(self.alloc_comptime_struct(
+            info_struct_id,
+            vec![
+                kind_val,
+                name_val,
+                ConstValue::Integer(bits as i64),
+                ConstValue::Bool(is_signed),
+            ],
+        ))
+    }
+
+    /// Build type info for a struct type (includes `field_count` and `fields` array).
+    fn build_struct_type_info(
+        &mut self,
+        struct_id: StructId,
+        typekind_enum_id: EnumId,
+        typekind_type: Type,
+    ) -> CompileResult<ConstValue> {
+        let kind_val = ConstValue::EnumVariant {
+            enum_id: typekind_enum_id,
+            variant_idx: self.typekind_variant_idx("Struct"),
+        };
+
+        // Get struct info
+        let struct_def = self.type_pool.struct_def(struct_id);
+        let struct_name = struct_def.name.clone();
+        let field_defs: Vec<(String, Type)> = struct_def
+            .fields
+            .iter()
+            .map(|f| (f.name.clone(), f.ty))
+            .collect();
+        let field_count = field_defs.len() as i32;
+
+        let name_val = self.alloc_comptime_str(struct_name);
+
+        // Create FieldInfo struct type
+        let field_info_fields = vec![
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "field_type".to_string(),
+                ty: Type::COMPTIME_TYPE,
+            },
+        ];
+        let (field_info_type, _) =
+            self.find_or_create_anon_struct(&field_info_fields, &[], &HashMap::new());
+        let field_info_struct_id = match field_info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        // Create FieldInfo instances for each field
+        let mut field_values = Vec::with_capacity(field_defs.len());
+        for (fname, ftype) in &field_defs {
+            let fname_val = self.alloc_comptime_str(fname.clone());
+            let ftype_val = ConstValue::Type(*ftype);
+            let field_info =
+                self.alloc_comptime_struct(field_info_struct_id, vec![fname_val, ftype_val]);
+            field_values.push(field_info);
+        }
+
+        // Create the fields array
+        let fields_array = self.alloc_comptime_array(field_values);
+
+        // Create the array type for fields: [FieldInfo; N]
+        let fields_array_type =
+            Type::new_array(self.get_or_create_array_type(field_info_type, field_count as u64));
+
+        // Create the info struct type
+        let info_fields = vec![
+            StructField {
+                name: "kind".to_string(),
+                ty: typekind_type,
+            },
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "field_count".to_string(),
+                ty: Type::I32,
+            },
+            StructField {
+                name: "fields".to_string(),
+                ty: fields_array_type,
+            },
+        ];
+        let (info_type, _) = self.find_or_create_anon_struct(&info_fields, &[], &HashMap::new());
+        let info_struct_id = match info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        Ok(self.alloc_comptime_struct(
+            info_struct_id,
+            vec![
+                kind_val,
+                name_val,
+                ConstValue::Integer(field_count as i64),
+                fields_array,
+            ],
+        ))
+    }
+
+    /// Build type info for an enum type (includes `variant_count` and `variants` array).
+    fn build_enum_type_info(
+        &mut self,
+        enum_id: EnumId,
+        typekind_enum_id: EnumId,
+        typekind_type: Type,
+    ) -> CompileResult<ConstValue> {
+        let kind_val = ConstValue::EnumVariant {
+            enum_id: typekind_enum_id,
+            variant_idx: self.typekind_variant_idx("Enum"),
+        };
+
+        // Get enum info
+        let enum_def = self.type_pool.enum_def(enum_id);
+        let enum_name = enum_def.name.clone();
+        let variant_defs: Vec<(String, Vec<(String, Type)>)> = enum_def
+            .variants
+            .iter()
+            .map(|v| {
+                let vfields: Vec<(String, Type)> = if v.is_struct_variant() {
+                    // Struct variant: field names + types
+                    v.field_names
+                        .iter()
+                        .zip(v.fields.iter())
+                        .map(|(name, ty)| (name.clone(), *ty))
+                        .collect()
+                } else {
+                    // Unit or tuple variant: just types with positional names
+                    v.fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, ty)| (format!("{i}"), *ty))
+                        .collect()
+                };
+                (v.name.clone(), vfields)
+            })
+            .collect();
+        let variant_count = variant_defs.len() as i32;
+
+        let name_val = self.alloc_comptime_str(enum_name);
+
+        // Create FieldInfo struct type (reuse if already exists)
+        let field_info_fields = vec![
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "field_type".to_string(),
+                ty: Type::COMPTIME_TYPE,
+            },
+        ];
+        let (field_info_type, _) =
+            self.find_or_create_anon_struct(&field_info_fields, &[], &HashMap::new());
+        let field_info_struct_id = match field_info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        // Create VariantInfo instances
+        let mut variant_values = Vec::with_capacity(variant_defs.len());
+        for (vname, vfields) in &variant_defs {
+            let vname_val = self.alloc_comptime_str(vname.clone());
+
+            // Create FieldInfo array for this variant's fields
+            let mut vfield_values = Vec::new();
+            for (fname, ftype) in vfields {
+                let fname_val = self.alloc_comptime_str(fname.clone());
+                let ftype_val = ConstValue::Type(*ftype);
+                let field_info =
+                    self.alloc_comptime_struct(field_info_struct_id, vec![fname_val, ftype_val]);
+                vfield_values.push(field_info);
+            }
+            let vfields_array = self.alloc_comptime_array(vfield_values);
+            let vfield_count = vfields.len() as i32;
+
+            // Create VariantInfo struct type with fields array
+            let vfields_array_type = Type::new_array(
+                self.get_or_create_array_type(field_info_type, vfields.len() as u64),
+            );
+            let variant_info_fields = vec![
+                StructField {
+                    name: "name".to_string(),
+                    ty: Type::COMPTIME_STR,
+                },
+                StructField {
+                    name: "field_count".to_string(),
+                    ty: Type::I32,
+                },
+                StructField {
+                    name: "fields".to_string(),
+                    ty: vfields_array_type,
+                },
+            ];
+            let (variant_info_type, _) =
+                self.find_or_create_anon_struct(&variant_info_fields, &[], &HashMap::new());
+            let variant_info_struct_id = match variant_info_type.kind() {
+                TypeKind::Struct(id) => id,
+                _ => unreachable!(),
+            };
+
+            let variant_info = self.alloc_comptime_struct(
+                variant_info_struct_id,
+                vec![
+                    vname_val,
+                    ConstValue::Integer(vfield_count as i64),
+                    vfields_array,
+                ],
+            );
+            variant_values.push(variant_info);
+        }
+
+        // Create the variants array
+        let variants_array = self.alloc_comptime_array(variant_values);
+
+        // For the array type, we need a VariantInfo type — use one for unit variants (0 fields)
+        let empty_fields_array_type =
+            Type::new_array(self.get_or_create_array_type(field_info_type, 0));
+        let variant_info_fields = vec![
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "field_count".to_string(),
+                ty: Type::I32,
+            },
+            StructField {
+                name: "fields".to_string(),
+                ty: empty_fields_array_type,
+            },
+        ];
+        let (variant_info_type, _) =
+            self.find_or_create_anon_struct(&variant_info_fields, &[], &HashMap::new());
+        let variants_array_type =
+            Type::new_array(self.get_or_create_array_type(variant_info_type, variant_count as u64));
+
+        // Create the info struct type
+        let info_fields = vec![
+            StructField {
+                name: "kind".to_string(),
+                ty: typekind_type,
+            },
+            StructField {
+                name: "name".to_string(),
+                ty: Type::COMPTIME_STR,
+            },
+            StructField {
+                name: "variant_count".to_string(),
+                ty: Type::I32,
+            },
+            StructField {
+                name: "variants".to_string(),
+                ty: variants_array_type,
+            },
+        ];
+        let (info_type, _) = self.find_or_create_anon_struct(&info_fields, &[], &HashMap::new());
+        let info_struct_id = match info_type.kind() {
+            TypeKind::Struct(id) => id,
+            _ => unreachable!(),
+        };
+
+        Ok(self.alloc_comptime_struct(
+            info_struct_id,
+            vec![
+                kind_val,
+                name_val,
+                ConstValue::Integer(variant_count as i64),
+                variants_array,
+            ],
+        ))
+    }
+
     /// Evaluate a comptime block expression using the stateful interpreter.
     ///
     /// Seeds the local scope from `ctx.comptime_value_vars` (captured comptime
@@ -6709,25 +7166,40 @@ impl<'a> Sema<'a> {
                 Err(not_const(inst_span))
             }
 
-            // ── Type intrinsic (@size_of, @align_of) ────────────────────────────
+            // ── Type intrinsic (@size_of, @align_of, @typeName, @typeInfo) ──────
             InstData::TypeIntrinsic { name, type_arg } => {
                 let intrinsic_name = self.interner.resolve(&name).to_string();
                 // Resolve the type argument.
                 let ty = self
                     .resolve_type(type_arg, inst_span)
                     .map_err(|_| not_const(inst_span))?;
-                let value = match intrinsic_name.as_str() {
+                match intrinsic_name.as_str() {
                     "size_of" => {
                         let slot_count = self.abi_slot_count(ty);
-                        (slot_count as i64) * 8
+                        Ok(ConstValue::Integer((slot_count as i64) * 8))
                     }
                     "align_of" => {
                         let slot_count = self.abi_slot_count(ty);
-                        if slot_count == 0 { 1 } else { 8 }
+                        Ok(ConstValue::Integer(if slot_count == 0 { 1 } else { 8 }))
                     }
-                    _ => return Err(not_const(inst_span)),
-                };
-                Ok(ConstValue::Integer(value))
+                    "typeName" => {
+                        self.require_preview(
+                            PreviewFeature::ComptimeMeta,
+                            "@typeName intrinsic",
+                            inst_span,
+                        )?;
+                        self.evaluate_comptime_type_name(ty, inst_span)
+                    }
+                    "typeInfo" => {
+                        self.require_preview(
+                            PreviewFeature::ComptimeMeta,
+                            "@typeInfo intrinsic",
+                            inst_span,
+                        )?;
+                        self.evaluate_comptime_type_info(ty, inst_span)
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
 
             // ── Not yet supported ─────────────────────────────────────────────

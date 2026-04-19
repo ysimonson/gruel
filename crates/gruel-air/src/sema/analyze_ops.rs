@@ -4396,7 +4396,7 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Analyze a type intrinsic (@size_of, @align_of).
+    /// Analyze a type intrinsic (@size_of, @align_of, @typeName, @typeInfo).
     fn analyze_type_intrinsic(
         &mut self,
         air: &mut Air,
@@ -4405,6 +4405,17 @@ impl<'a> Sema<'a> {
         span: Span,
     ) -> CompileResult<AnalysisResult> {
         let intrinsic_name = self.interner.resolve(&name);
+
+        // @typeName and @typeInfo are comptime-only — reject in runtime context
+        if intrinsic_name == "typeName" || intrinsic_name == "typeInfo" {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("@{intrinsic_name} can only be used inside a comptime block"),
+                },
+                span,
+            ));
+        }
+
         let ty = self.resolve_type(type_arg, span)?;
 
         // Calculate the value based on which intrinsic

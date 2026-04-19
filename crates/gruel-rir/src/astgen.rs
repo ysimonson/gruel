@@ -7,7 +7,7 @@ use lasso::{Spur, ThreadedRodeo};
 
 /// Known type intrinsics that take a type argument rather than an expression.
 /// These intrinsics operate on types at compile time (e.g., @size_of(i32)).
-const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of"];
+const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of", "typeName", "typeInfo"];
 use gruel_parser::ast::{ConstDecl, DestructureBinding, DropFn, PatternBinding};
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,

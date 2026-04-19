@@ -305,7 +305,7 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
-error_contains = "type mismatch"
+error_contains = "comptime_str values cannot exist at runtime"
 
 [[case]]
 name = "comptime_str_compile_error_accepts"
@@ -385,3 +385,331 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "preview feature"
+
+# =============================================================================
+# @typeName
+# =============================================================================
+
+[[case]]
+name = "type_name_primitive_i32"
+spec = ["4.14:60"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(i32);
+        if name == "i32" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_name_primitive_bool"
+spec = ["4.14:60"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(bool);
+        if name == "bool" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_name_struct"
+spec = ["4.14:60"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(Point);
+        if name == "Point" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_name_enum"
+spec = ["4.14:60"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(Color);
+        if name == "Color" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_name_requires_preview"
+spec = ["4.14:61"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let name = @typeName(i32);
+        42
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+# =============================================================================
+# @typeInfo
+# =============================================================================
+
+[[case]]
+name = "type_info_struct_kind"
+spec = ["4.14:62", "4.14:64", "4.14:65"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Point);
+        match info.kind {
+            TypeKind::Struct => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_struct_name"
+spec = ["4.14:62", "4.14:65"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Foo { x: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Foo);
+        if info.name == "Foo" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_struct_field_count"
+spec = ["4.14:65"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Trio { a: i32, b: i32, c: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Trio);
+        info.field_count
+    }
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "type_info_struct_field_name"
+spec = ["4.14:65"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Pair { first: i32, second: bool }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Pair);
+        if info.fields[0].name == "first" && info.fields[1].name == "second" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_enum_kind"
+spec = ["4.14:62", "4.14:64", "4.14:66"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+enum Dir { Up, Down, Left, Right }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Dir);
+        match info.kind {
+            TypeKind::Enum => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_enum_variant_count"
+spec = ["4.14:66"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Color);
+        info.variant_count
+    }
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "type_info_enum_variant_name"
+spec = ["4.14:66"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Color);
+        if info.variants[0].name == "Red" && info.variants[2].name == "Blue" { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_int_kind"
+spec = ["4.14:64", "4.14:67"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(i32);
+        match info.kind {
+            TypeKind::Int => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_int_bits"
+spec = ["4.14:67"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(i64);
+        info.bits
+    }
+}
+"""
+exit_code = 64
+
+[[case]]
+name = "type_info_int_signed"
+spec = ["4.14:67"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let si = @typeInfo(i32);
+        let ui = @typeInfo(u32);
+        if si.is_signed && !ui.is_signed { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_bool_kind"
+spec = ["4.14:64", "4.14:68"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(bool);
+        match info.kind {
+            TypeKind::Bool => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_unit_kind"
+spec = ["4.14:68"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(());
+        match info.kind {
+            TypeKind::Unit => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "type_info_requires_preview"
+spec = ["4.14:63"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(i32);
+        42
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+[[case]]
+name = "type_info_with_type_name"
+spec = ["4.14:60", "4.14:62"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Widget { val: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let info = @typeInfo(Widget);
+        let name = @typeName(Widget);
+        if info.name == name { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42

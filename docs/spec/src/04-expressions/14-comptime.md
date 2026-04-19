@@ -866,3 +866,54 @@ fn check_name(comptime name: comptime_str) -> i32 {
     name.len()
 }
 ```
+
+## Type Reflection
+
+{{ rule(id="4.14:60", cat="normative") }}
+
+The `@typeName(T)` intrinsic accepts a type argument and returns a `comptime_str` containing the type's name. For primitive types, this is the type keyword (e.g., `"i32"`, `"bool"`). For struct and enum types, this is the declared name.
+
+{{ rule(id="4.14:61", cat="legality-rule") }}
+
+`@typeName` requires the `comptime_meta` preview feature. It **MUST** be called with exactly one type argument using the `@typeName(T)` syntax.
+
+{{ rule(id="4.14:62", cat="normative") }}
+
+The `@typeInfo(T)` intrinsic accepts a type argument and returns a comptime struct describing the type's structure. The returned struct always contains a `kind` field of type `TypeKind` and a `name` field of type `comptime_str`.
+
+{{ rule(id="4.14:63", cat="legality-rule") }}
+
+`@typeInfo` requires the `comptime_meta` preview feature. It **MUST** be called with exactly one type argument using the `@typeInfo(T)` syntax.
+
+{{ rule(id="4.14:64", cat="normative") }}
+
+The `TypeKind` enum is a built-in enum with the following variants: `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array`. It is used to discriminate type kinds in `@typeInfo` results.
+
+{{ rule(id="4.14:65", cat="normative") }}
+
+For struct types, `@typeInfo` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Struct`), `name: comptime_str`, `field_count: i32`, and `fields: [FieldInfo; N]` where N is the number of fields. Each `FieldInfo` is a struct with fields `name: comptime_str` and `field_type: type`.
+
+{{ rule(id="4.14:66", cat="normative") }}
+
+For enum types, `@typeInfo` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Enum`), `name: comptime_str`, `variant_count: i32`, and `variants: [VariantInfo; N]` where N is the number of variants. Each `VariantInfo` is a struct with fields `name: comptime_str` and `fields: [FieldInfo; M]` where M is the number of fields for that variant (0 for unit variants).
+
+{{ rule(id="4.14:67", cat="normative") }}
+
+For integer types, `@typeInfo` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Int`), `name: comptime_str`, `bits: i32` (the bit width), and `is_signed: bool`.
+
+{{ rule(id="4.14:68", cat="normative") }}
+
+For other primitive types (`bool`, `unit`, `!`), `@typeInfo` returns a struct with fields: `kind: TypeKind` and `name: comptime_str`.
+
+{{ rule(id="4.14:69") }}
+
+```gruel
+fn describe(comptime T: type) -> i32 {
+    let info = @typeInfo(T);
+    match info.kind {
+        TypeKind::Struct => info.field_count,
+        TypeKind::Int => info.bits,
+        _ => 0,
+    }
+}
+```

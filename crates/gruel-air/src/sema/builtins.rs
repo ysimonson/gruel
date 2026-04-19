@@ -98,6 +98,8 @@ impl<'a> Sema<'a> {
                 self.builtin_arch_id = Some(enum_id);
             } else if builtin_enum.name == "Os" {
                 self.builtin_os_id = Some(enum_id);
+            } else if builtin_enum.name == "TypeKind" {
+                self.builtin_typekind_id = Some(enum_id);
             }
         }
     }
