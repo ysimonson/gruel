@@ -21,7 +21,9 @@ use gruel_error::{
     CompileError, CompileErrors, CompileResult, CompileWarning, ErrorKind,
     IntrinsicTypeMismatchError, MultiErrorResult, OptionExt, PreviewFeature, WarningKind,
 };
-use gruel_rir::{InstData, InstRef, RirArgMode, RirCallArg, RirDirective, RirParamMode};
+use gruel_rir::{
+    InstData, InstRef, RirArgMode, RirCallArg, RirDirective, RirParamMode, RirPattern,
+};
 use gruel_span::Span;
 use gruel_target::{Arch, Os};
 use lasso::Spur;
@@ -1479,6 +1481,9 @@ impl<'a> Sema<'a> {
                     ConstValue::Unit => Type::UNIT,
                     ConstValue::Struct(_)
                     | ConstValue::Array(_)
+                    | ConstValue::EnumVariant { .. }
+                    | ConstValue::EnumData { .. }
+                    | ConstValue::EnumStruct { .. }
                     | ConstValue::BreakSignal
                     | ConstValue::ContinueSignal
                     | ConstValue::ReturnSignal => {
@@ -2063,12 +2068,16 @@ impl<'a> Sema<'a> {
                         });
                         Ok(AnalysisResult::new(air_ref, Type::UNIT))
                     }
-                    // Composite comptime values (structs, arrays) cannot be placed at
+                    // Composite comptime values (structs, arrays, enums) cannot be placed at
                     // runtime directly. The user must access individual fields/elements.
-                    ConstValue::Struct(_) | ConstValue::Array(_) => {
+                    ConstValue::Struct(_)
+                    | ConstValue::Array(_)
+                    | ConstValue::EnumVariant { .. }
+                    | ConstValue::EnumData { .. }
+                    | ConstValue::EnumStruct { .. } => {
                         Err(CompileError::new(
                             ErrorKind::ComptimeEvaluationFailed {
-                                reason: "comptime struct/array values cannot be used at runtime; access individual fields or elements instead".into(),
+                                reason: "comptime composite values cannot be used at runtime; access individual fields or elements instead".into(),
                             },
                             span,
                         ))
@@ -4075,27 +4084,13 @@ impl<'a> Sema<'a> {
             // Unary negation: -expr
             InstData::Neg { operand } => match self.try_evaluate_const(*operand)? {
                 ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
-                ConstValue::Bool(_)
-                | ConstValue::Type(_)
-                | ConstValue::Unit
-                | ConstValue::Struct(_)
-                | ConstValue::Array(_)
-                | ConstValue::BreakSignal
-                | ConstValue::ContinueSignal
-                | ConstValue::ReturnSignal => None,
+                _ => None,
             },
 
             // Logical NOT: !expr
             InstData::Not { operand } => match self.try_evaluate_const(*operand)? {
                 ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
-                ConstValue::Integer(_)
-                | ConstValue::Type(_)
-                | ConstValue::Unit
-                | ConstValue::Struct(_)
-                | ConstValue::Array(_)
-                | ConstValue::BreakSignal
-                | ConstValue::ContinueSignal
-                | ConstValue::ReturnSignal => None,
+                _ => None,
             },
 
             // Binary arithmetic operations
@@ -4450,14 +4445,7 @@ impl<'a> Sema<'a> {
             InstData::Neg { operand } => {
                 match self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)? {
                     ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
-                    ConstValue::Bool(_)
-                    | ConstValue::Type(_)
-                    | ConstValue::Unit
-                    | ConstValue::Struct(_)
-                    | ConstValue::Array(_)
-                    | ConstValue::BreakSignal
-                    | ConstValue::ContinueSignal
-                    | ConstValue::ReturnSignal => None,
+                    _ => None,
                 }
             }
 
@@ -4465,14 +4453,7 @@ impl<'a> Sema<'a> {
             InstData::Not { operand } => {
                 match self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)? {
                     ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
-                    ConstValue::Integer(_)
-                    | ConstValue::Type(_)
-                    | ConstValue::Unit
-                    | ConstValue::Struct(_)
-                    | ConstValue::Array(_)
-                    | ConstValue::BreakSignal
-                    | ConstValue::ContinueSignal
-                    | ConstValue::ReturnSignal => None,
+                    _ => None,
                 }
             }
 
@@ -5672,7 +5653,7 @@ impl<'a> Sema<'a> {
                             ComptimeHeapItem::Struct { struct_id, fields } => {
                                 (*struct_id, fields.clone())
                             }
-                            ComptimeHeapItem::Array(_) => return Err(not_const(inst_span)),
+                            _ => return Err(not_const(inst_span)),
                         };
                         let struct_def = self.type_pool.struct_def(struct_id);
                         let field_name = self.interner.resolve(&field);
@@ -5721,7 +5702,7 @@ impl<'a> Sema<'a> {
                         // Clone elements to release heap borrow before error construction.
                         let elems = match &self.comptime_heap[heap_idx as usize] {
                             ComptimeHeapItem::Array(elems) => elems.clone(),
-                            ComptimeHeapItem::Struct { .. } => return Err(not_const(inst_span)),
+                            _ => return Err(not_const(inst_span)),
                         };
                         if idx < 0 || idx as usize >= elems.len() {
                             return Err(CompileError::new(
@@ -5763,10 +5744,7 @@ impl<'a> Sema<'a> {
                 let (field_idx, _) = struct_def.find_field(field_name).ok_or_else(|| {
                     CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
-                            reason: format!(
-                                "unknown field '{}' in comptime struct",
-                                field_name
-                            ),
+                            reason: format!("unknown field '{}' in comptime struct", field_name),
                         },
                         inst_span,
                     )
@@ -5805,10 +5783,7 @@ impl<'a> Sema<'a> {
                 if idx < 0 || idx as usize >= len {
                     return Err(CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
-                            reason: format!(
-                                "array index {} out of bounds (length {})",
-                                idx, len
-                            ),
+                            reason: format!("array index {} out of bounds (length {})", idx, len),
                         },
                         inst_span,
                     ));
@@ -5820,6 +5795,322 @@ impl<'a> Sema<'a> {
                     _ => return Err(not_const(inst_span)),
                 }
                 Ok(ConstValue::Unit)
+            }
+
+            // ── Unit enum variant ──────────────────────────────────────────────
+            InstData::EnumVariant {
+                module: _,
+                type_name,
+                variant,
+            } => {
+                // Resolve enum ID — check direct enums, then comptime type vars.
+                let enum_id = if let Some(&id) = self.enums.get(&type_name) {
+                    id
+                } else if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {
+                    match ty.kind() {
+                        TypeKind::Enum(id) => id,
+                        _ => return Err(not_const(inst_span)),
+                    }
+                } else {
+                    return Err(not_const(inst_span));
+                };
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let variant_name = self.interner.resolve(&variant);
+                let variant_idx = enum_def
+                    .find_variant(variant_name)
+                    .ok_or_else(|| not_const(inst_span))? as u32;
+                Ok(ConstValue::EnumVariant {
+                    enum_id,
+                    variant_idx,
+                })
+            }
+
+            // ── Struct-style enum variant ─────────────────────────────────────────
+            InstData::EnumStructVariant {
+                module: _,
+                type_name,
+                variant,
+                fields_start,
+                fields_len,
+            } => {
+                // Resolve enum ID.
+                let enum_id = if let Some(&id) = self.enums.get(&type_name) {
+                    id
+                } else if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {
+                    match ty.kind() {
+                        TypeKind::Enum(id) => id,
+                        _ => return Err(not_const(inst_span)),
+                    }
+                } else {
+                    return Err(not_const(inst_span));
+                };
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let variant_name = self.interner.resolve(&variant);
+                let variant_idx = enum_def
+                    .find_variant(variant_name)
+                    .ok_or_else(|| not_const(inst_span))? as u32;
+                let variant_def = &enum_def.variants[variant_idx as usize];
+
+                // Get field initializers and resolve to declaration order.
+                let field_inits = self.rir.get_field_inits(fields_start, fields_len);
+                let mut field_values = vec![ConstValue::Unit; variant_def.fields.len()];
+                for (init_field_name, field_value_ref) in &field_inits {
+                    let field_name_str = self.interner.resolve(init_field_name);
+                    let field_idx = variant_def
+                        .find_field(field_name_str)
+                        .ok_or_else(|| not_const(inst_span))?;
+                    let val =
+                        self.evaluate_comptime_inst(*field_value_ref, locals, ctx, outer_span)?;
+                    field_values[field_idx] = val;
+                }
+
+                let heap_idx = self.comptime_heap.len() as u32;
+                self.comptime_heap
+                    .push(ComptimeHeapItem::EnumStruct(field_values));
+                Ok(ConstValue::EnumStruct {
+                    enum_id,
+                    variant_idx,
+                    heap_idx,
+                })
+            }
+
+            // ── Tuple data enum variant (via AssocFnCall) ─────────────────────────
+            InstData::AssocFnCall {
+                type_name,
+                function,
+                args_start,
+                args_len,
+            } => {
+                // Check if this is an enum data variant construction.
+                let enum_id = if let Some(&id) = self.enums.get(&type_name) {
+                    Some(id)
+                } else if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {
+                    match ty.kind() {
+                        TypeKind::Enum(id) => Some(id),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(enum_id) = enum_id {
+                    let enum_def = self.type_pool.enum_def(enum_id);
+                    let variant_name = self.interner.resolve(&function);
+                    if let Some(variant_idx) = enum_def.find_variant(variant_name) {
+                        let variant_def = &enum_def.variants[variant_idx];
+                        if variant_def.has_data() && !variant_def.is_struct_variant() {
+                            // Tuple data variant: evaluate arguments.
+                            let call_args = self.rir.get_call_args(args_start, args_len);
+                            let mut field_values = Vec::with_capacity(variant_def.fields.len());
+                            for arg in &call_args {
+                                let val = self
+                                    .evaluate_comptime_inst(arg.value, locals, ctx, outer_span)?;
+                                field_values.push(val);
+                            }
+                            let heap_idx = self.comptime_heap.len() as u32;
+                            self.comptime_heap
+                                .push(ComptimeHeapItem::EnumData(field_values));
+                            return Ok(ConstValue::EnumData {
+                                enum_id,
+                                variant_idx: variant_idx as u32,
+                                heap_idx,
+                            });
+                        }
+                    }
+                }
+
+                // Not an enum data variant — unsupported in comptime.
+                Err(not_const(inst_span))
+            }
+
+            // ── Pattern matching ───────────────────────────────────────────────
+            InstData::Match {
+                scrutinee,
+                arms_start,
+                arms_len,
+            } => {
+                let scrut_val = self.evaluate_comptime_inst(scrutinee, locals, ctx, outer_span)?;
+                let arms = self.rir.get_match_arms(arms_start, arms_len);
+
+                for (pattern, body) in &arms {
+                    match pattern {
+                        RirPattern::Wildcard(_) => {
+                            // Always matches — evaluate body directly.
+                            return self.evaluate_comptime_inst(*body, locals, ctx, outer_span);
+                        }
+                        RirPattern::Int(n, _) => {
+                            if let ConstValue::Integer(val) = scrut_val
+                                && val == *n
+                            {
+                                return self.evaluate_comptime_inst(*body, locals, ctx, outer_span);
+                            }
+                        }
+                        RirPattern::Bool(b, _) => {
+                            if let ConstValue::Bool(val) = scrut_val
+                                && val == *b
+                            {
+                                return self.evaluate_comptime_inst(*body, locals, ctx, outer_span);
+                            }
+                        }
+                        RirPattern::Path {
+                            type_name, variant, ..
+                        } => {
+                            // Match unit enum variant by name.
+                            let pat_enum_id = self.resolve_comptime_enum(*type_name, ctx);
+                            if let Some(pat_enum_id) = pat_enum_id {
+                                let enum_def = self.type_pool.enum_def(pat_enum_id);
+                                let variant_name = self.interner.resolve(variant);
+                                if let Some(pat_variant_idx) = enum_def.find_variant(variant_name) {
+                                    let matches = match scrut_val {
+                                        ConstValue::EnumVariant {
+                                            enum_id,
+                                            variant_idx,
+                                        } => {
+                                            enum_id == pat_enum_id
+                                                && variant_idx == pat_variant_idx as u32
+                                        }
+                                        ConstValue::EnumData {
+                                            enum_id,
+                                            variant_idx,
+                                            ..
+                                        } => {
+                                            enum_id == pat_enum_id
+                                                && variant_idx == pat_variant_idx as u32
+                                        }
+                                        ConstValue::EnumStruct {
+                                            enum_id,
+                                            variant_idx,
+                                            ..
+                                        } => {
+                                            enum_id == pat_enum_id
+                                                && variant_idx == pat_variant_idx as u32
+                                        }
+                                        _ => false,
+                                    };
+                                    if matches {
+                                        return self.evaluate_comptime_inst(
+                                            *body, locals, ctx, outer_span,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        RirPattern::DataVariant {
+                            type_name,
+                            variant,
+                            bindings,
+                            ..
+                        } => {
+                            // Match tuple data variant and bind fields.
+                            let pat_enum_id = self.resolve_comptime_enum(*type_name, ctx);
+                            if let Some(pat_enum_id) = pat_enum_id {
+                                let enum_def = self.type_pool.enum_def(pat_enum_id);
+                                let variant_name = self.interner.resolve(variant);
+                                if let Some(pat_variant_idx) = enum_def.find_variant(variant_name) {
+                                    let (matches, heap_idx_opt) = match scrut_val {
+                                        ConstValue::EnumData {
+                                            enum_id,
+                                            variant_idx,
+                                            heap_idx,
+                                        } if enum_id == pat_enum_id
+                                            && variant_idx == pat_variant_idx as u32 =>
+                                        {
+                                            (true, Some(heap_idx))
+                                        }
+                                        _ => (false, None),
+                                    };
+                                    if matches {
+                                        // Bind fields into locals.
+                                        if let Some(heap_idx) = heap_idx_opt {
+                                            let field_values =
+                                                match &self.comptime_heap[heap_idx as usize] {
+                                                    ComptimeHeapItem::EnumData(fields) => {
+                                                        fields.clone()
+                                                    }
+                                                    _ => return Err(not_const(inst_span)),
+                                                };
+                                            for (i, binding) in bindings.iter().enumerate() {
+                                                if !binding.is_wildcard
+                                                    && let Some(name) = binding.name
+                                                {
+                                                    locals.insert(name, field_values[i]);
+                                                }
+                                            }
+                                        }
+                                        return self.evaluate_comptime_inst(
+                                            *body, locals, ctx, outer_span,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        RirPattern::StructVariant {
+                            type_name,
+                            variant,
+                            field_bindings,
+                            ..
+                        } => {
+                            // Match struct variant and bind named fields.
+                            let pat_enum_id = self.resolve_comptime_enum(*type_name, ctx);
+                            if let Some(pat_enum_id) = pat_enum_id {
+                                let enum_def = self.type_pool.enum_def(pat_enum_id);
+                                let variant_name = self.interner.resolve(variant);
+                                if let Some(pat_variant_idx) = enum_def.find_variant(variant_name) {
+                                    let (matches, heap_idx_opt) = match scrut_val {
+                                        ConstValue::EnumStruct {
+                                            enum_id,
+                                            variant_idx,
+                                            heap_idx,
+                                        } if enum_id == pat_enum_id
+                                            && variant_idx == pat_variant_idx as u32 =>
+                                        {
+                                            (true, Some(heap_idx))
+                                        }
+                                        _ => (false, None),
+                                    };
+                                    if matches {
+                                        if let Some(heap_idx) = heap_idx_opt {
+                                            let field_values =
+                                                match &self.comptime_heap[heap_idx as usize] {
+                                                    ComptimeHeapItem::EnumStruct(fields) => {
+                                                        fields.clone()
+                                                    }
+                                                    _ => return Err(not_const(inst_span)),
+                                                };
+                                            let variant_def = &enum_def.variants[pat_variant_idx];
+                                            for fb in field_bindings {
+                                                if !fb.binding.is_wildcard
+                                                    && let Some(name) = fb.binding.name
+                                                {
+                                                    let field_name_str =
+                                                        self.interner.resolve(&fb.field_name);
+                                                    let field_idx = match variant_def
+                                                        .find_field(field_name_str)
+                                                    {
+                                                        Some(idx) => idx,
+                                                        None => return Err(not_const(inst_span)),
+                                                    };
+                                                    locals.insert(name, field_values[field_idx]);
+                                                }
+                                            }
+                                        }
+                                        return self.evaluate_comptime_inst(
+                                            *body, locals, ctx, outer_span,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // No arm matched — should not happen after exhaustiveness checking.
+                Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "no match arm matched in comptime evaluation".into(),
+                    },
+                    inst_span,
+                ))
             }
 
             // ── Not yet supported ─────────────────────────────────────────────
@@ -5836,6 +6127,21 @@ impl<'a> Sema<'a> {
             ctx.comptime_type_vars.contains_key(name)
         } else {
             false
+        }
+    }
+
+    /// Resolve an enum type by name during comptime evaluation.
+    /// Checks direct enums first, then comptime type variables.
+    fn resolve_comptime_enum(&self, type_name: Spur, ctx: &AnalysisContext) -> Option<EnumId> {
+        if let Some(&id) = self.enums.get(&type_name) {
+            Some(id)
+        } else if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {
+            match ty.kind() {
+                TypeKind::Enum(id) => Some(id),
+                _ => None,
+            }
+        } else {
+            None
         }
     }
 

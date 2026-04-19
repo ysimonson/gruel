@@ -13,7 +13,7 @@ use gruel_span::Span;
 use lasso::Spur;
 
 use crate::scope::ScopedContext;
-use crate::types::{StructId, Type};
+use crate::types::{EnumId, StructId, Type};
 
 /// Information about a local variable.
 #[derive(Debug, Clone)]
@@ -352,6 +352,10 @@ pub enum ComptimeHeapItem {
     },
     /// A comptime array instance: element values in order.
     Array(Vec<ConstValue>),
+    /// Tuple enum variant fields (positional).
+    EnumData(Vec<ConstValue>),
+    /// Struct enum variant fields (in declaration order).
+    EnumStruct(Vec<ConstValue>),
 }
 
 /// A value that can be computed at compile time.
@@ -376,6 +380,23 @@ pub enum ConstValue {
     Struct(u32),
     /// Index into `Sema::comptime_heap` for a comptime array instance.
     Array(u32),
+    /// Enum variant with no data (e.g., `Color::Red`).
+    /// Stores the enum id and variant index.
+    EnumVariant { enum_id: EnumId, variant_idx: u32 },
+    /// Enum variant with tuple data (e.g., `Option::Some(42)`).
+    /// Data fields are stored on the comptime heap.
+    EnumData {
+        enum_id: EnumId,
+        variant_idx: u32,
+        heap_idx: u32,
+    },
+    /// Enum variant with struct data (e.g., `Shape::Rect { w: 10, h: 20 }`).
+    /// Fields are stored on the comptime heap in declaration order.
+    EnumStruct {
+        enum_id: EnumId,
+        variant_idx: u32,
+        heap_idx: u32,
+    },
     /// Internal control-flow signal: produced by `break` inside a comptime loop.
     /// Never escapes `evaluate_comptime_block` — consumed by Loop/InfiniteLoop cases.
     BreakSignal,

@@ -2092,6 +2092,9 @@ impl<'a> Sema<'a> {
                 ConstValue::Unit
                 | ConstValue::Struct(_)
                 | ConstValue::Array(_)
+                | ConstValue::EnumVariant { .. }
+                | ConstValue::EnumData { .. }
+                | ConstValue::EnumStruct { .. }
                 | ConstValue::BreakSignal
                 | ConstValue::ContinueSignal
                 | ConstValue::ReturnSignal => {

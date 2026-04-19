@@ -1841,3 +1841,209 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# ── Comptime enum support ────────────────────────────────────────────
+
+[[case]]
+name = "comptime_enum_unit_variant"
+spec = ["4.14:38"]
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    comptime {
+        let c = Color::Green;
+        match c {
+            Color::Red => 1,
+            Color::Green => 42,
+            Color::Blue => 3,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_enum_unit_variant_in_comptime_if"
+spec = ["4.14:38"]
+source = """
+enum Toggle { On, Off }
+
+fn main() -> i32 {
+    comptime {
+        let on = true;
+        let t = if on { Toggle::On } else { Toggle::Off };
+        match t {
+            Toggle::On => 42,
+            Toggle::Off => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_enum_tuple_variant"
+spec = ["4.14:39"]
+source = """
+enum IntOption { Some(i32), None }
+
+fn main() -> i32 {
+    comptime {
+        let x = IntOption::Some(42);
+        match x {
+            IntOption::Some(v) => v,
+            IntOption::None => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_enum_tuple_variant_none"
+spec = ["4.14:39"]
+source = """
+enum IntOption { Some(i32), None }
+
+fn main() -> i32 {
+    comptime {
+        let x = IntOption::None;
+        match x {
+            IntOption::Some(v) => v,
+            IntOption::None => 42,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_enum_struct_variant"
+spec = ["4.14:40"]
+source = """
+enum Shape {
+    Rect { w: i32, h: i32 },
+    Circle { r: i32 },
+}
+
+fn main() -> i32 {
+    comptime {
+        let s = Shape::Rect { w: 6, h: 7 };
+        match s {
+            Shape::Rect { w, h } => w * h,
+            Shape::Circle { r } => r * r,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_enum_struct_variant_circle"
+spec = ["4.14:40"]
+source = """
+enum Shape {
+    Rect { w: i32, h: i32 },
+    Circle { r: i32 },
+}
+
+fn main() -> i32 {
+    comptime {
+        let s = Shape::Circle { r: 7 };
+        match s {
+            Shape::Rect { w, h } => w + h,
+            Shape::Circle { r } => r * 6,
+        }
+    }
+}
+"""
+exit_code = 42
+
+# ── Comptime pattern matching ────────────────────────────────────────
+
+[[case]]
+name = "comptime_match_integer"
+spec = ["4.14:41"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 3;
+        match x {
+            1 => 10,
+            2 => 20,
+            3 => 42,
+            _ => 0,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_match_wildcard"
+spec = ["4.14:41"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 99;
+        match x {
+            1 => 10,
+            2 => 20,
+            _ => 42,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_match_bool"
+spec = ["4.14:41"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = false;
+        match x {
+            true => 1,
+            false => 42,
+        }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_match_in_loop"
+spec = ["4.14:41"]
+source = """
+enum IntOption { Some(i32), None }
+
+fn unwrap_or(opt: IntOption, default: i32) -> i32 {
+    match opt {
+        IntOption::Some(v) => v,
+        IntOption::None => default,
+    }
+}
+
+fn main() -> i32 {
+    comptime {
+        let mut total = 0;
+        let mut i = 0;
+        while i < 5 {
+            let opt = if i < 3 {
+                IntOption::Some(10)
+            } else {
+                IntOption::None
+            };
+            total = total + match opt {
+                IntOption::Some(n) => n,
+                IntOption::None => 1,
+            };
+            i = i + 1;
+        }
+        total
+    }
+}
+"""
+exit_code = 32

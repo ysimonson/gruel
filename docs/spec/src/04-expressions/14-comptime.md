@@ -608,3 +608,83 @@ fn main() -> i32 {
     }
 }
 ```
+
+## Comptime Enum Support
+
+{{ rule(id="4.14:38", cat="normative") }}
+
+A comptime block can construct unit enum variants. The enum type must be defined and the variant must exist. The resulting value is a compile-time enum value.
+
+```gruel
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    comptime {
+        let c = Color::Green;
+        match c {
+            Color::Red => 1,
+            Color::Green => 2,
+            Color::Blue => 3,
+        }
+    }
+}
+```
+
+{{ rule(id="4.14:39", cat="normative") }}
+
+A comptime block can construct tuple-style enum variants with associated data. The arguments must be compile-time evaluable and their types must match the variant's field types.
+
+```gruel
+enum IntOption { Some(i32), None }
+
+fn main() -> i32 {
+    comptime {
+        let x = IntOption::Some(42);
+        match x {
+            IntOption::Some(v) => v,
+            IntOption::None => 0,
+        }
+    }
+}
+```
+
+{{ rule(id="4.14:40", cat="normative") }}
+
+A comptime block can construct struct-style enum variants with named fields. All fields must be provided and their values must be compile-time evaluable.
+
+```gruel
+enum Shape {
+    Rect { w: i32, h: i32 },
+    Circle { r: i32 },
+}
+
+fn main() -> i32 {
+    comptime {
+        let s = Shape::Rect { w: 6, h: 7 };
+        match s {
+            Shape::Rect { w, h } => w * h,
+            Shape::Circle { r } => r * r,
+        }
+    }
+}
+```
+
+## Comptime Pattern Matching
+
+{{ rule(id="4.14:41", cat="normative") }}
+
+A comptime block can use `match` expressions to branch on compile-time values. The scrutinee must be compile-time evaluable. Each arm's pattern is tested in order, and the first matching arm's body is evaluated. All pattern types supported in runtime `match` are also supported in comptime: wildcards, integer literals, boolean literals, enum variant paths, tuple data variant destructuring, and struct variant destructuring.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let x = 3;
+        match x {
+            1 => 10,
+            2 => 20,
+            3 => 42,
+            _ => 0,
+        }
+    }
+}
+```
