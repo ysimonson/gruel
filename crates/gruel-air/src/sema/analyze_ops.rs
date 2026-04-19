@@ -3256,6 +3256,7 @@ impl<'a> Sema<'a> {
     }
 
     /// Analyze an enum struct variant construction: `Enum::Variant { field: value, ... }`
+    #[allow(clippy::too_many_arguments)]
     fn analyze_enum_struct_variant(
         &mut self,
         air: &mut Air,

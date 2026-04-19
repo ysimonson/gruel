@@ -171,6 +171,7 @@ pub struct ConstraintGenerator<'a> {
 
 impl<'a> ConstraintGenerator<'a> {
     /// Create a new constraint generator.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rir: &'a Rir,
         interner: &'a ThreadedRodeo,

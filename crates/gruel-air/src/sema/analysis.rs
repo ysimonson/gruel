@@ -2207,18 +2207,16 @@ impl<'a> Sema<'a> {
                         if let InstData::FnDecl {
                             name: method_name, ..
                         } = &minst.data
+                            && !seen_method_names.insert(*method_name)
                         {
-                            if !seen_method_names.insert(*method_name) {
-                                let method_name_str =
-                                    self.interner.resolve(method_name).to_string();
-                                return Err(CompileError::new(
-                                    ErrorKind::DuplicateMethod {
-                                        type_name: "anonymous enum".to_string(),
-                                        method_name: method_name_str,
-                                    },
-                                    minst.span,
-                                ));
-                            }
+                            let method_name_str = self.interner.resolve(method_name).to_string();
+                            return Err(CompileError::new(
+                                ErrorKind::DuplicateMethod {
+                                    type_name: "anonymous enum".to_string(),
+                                    method_name: method_name_str,
+                                },
+                                minst.span,
+                            ));
                         }
                     }
                 }
@@ -2919,131 +2917,131 @@ impl<'a> Sema<'a> {
 
         // Check if this is an enum data variant construction via a comptime type variable
         // (e.g., `let Opt = Option(i32); Opt::Some(42)`)
-        if let Some(&ty) = ctx.comptime_type_vars.get(&type_name) {
-            if let TypeKind::Enum(enum_id) = ty.kind() {
-                let enum_def = self.type_pool.enum_def(enum_id);
-                if let Some(variant_index) = enum_def.find_variant(&function_name_str) {
-                    let variant_def = &enum_def.variants[variant_index];
-                    let field_types: Vec<Type> = variant_def.fields.clone();
-                    if !field_types.is_empty() {
-                        if variant_def.is_struct_variant() {
-                            return Err(CompileError::new(
-                                ErrorKind::TypeMismatch {
-                                    expected: format!(
-                                        "struct-style construction `{}::{} {{ ... }}`",
-                                        type_name_str, function_name_str
-                                    ),
-                                    found: format!(
-                                        "tuple-style construction `{}::{}(...)`",
-                                        type_name_str, function_name_str
-                                    ),
-                                },
-                                span,
-                            ));
-                        }
-                        if args.len() != field_types.len() {
-                            return Err(CompileError::new(
-                                ErrorKind::WrongArgumentCount {
-                                    expected: field_types.len(),
-                                    found: args.len(),
-                                },
-                                span,
-                            ));
-                        }
-                        let mut field_air_refs = Vec::with_capacity(args.len());
-                        for (i, arg) in args.iter().enumerate() {
-                            let result = self.analyze_inst(air, arg.value, ctx)?;
-                            if result.ty != field_types[i] {
-                                return Err(CompileError::new(
-                                    ErrorKind::TypeMismatch {
-                                        expected: field_types[i].name().to_string(),
-                                        found: result.ty.name().to_string(),
-                                    },
-                                    span,
-                                ));
-                            }
-                            field_air_refs.push(result.air_ref.as_u32());
-                        }
-                        let fields_len = field_air_refs.len() as u32;
-                        let fields_start = air.add_extra(&field_air_refs);
-                        let enum_type = Type::new_enum(enum_id);
-                        let air_ref = air.add_inst(AirInst {
-                            data: AirInstData::EnumCreate {
-                                enum_id,
-                                variant_index: variant_index as u32,
-                                fields_start,
-                                fields_len,
-                            },
-                            ty: enum_type,
-                            span,
-                        });
-                        return Ok(AnalysisResult::new(air_ref, enum_type));
-                    }
-                    // Unit variant called as function — fall through to error
-                }
-
-                // Not a variant — check for associated function on the enum
-                let method_key = (enum_id, function);
-                if let Some(method_info) = self.enum_methods.get(&method_key).copied() {
-                    ctx.referenced_methods
-                        .insert((StructId(enum_id.0), function));
-
-                    if method_info.has_self {
+        if let Some(&ty) = ctx.comptime_type_vars.get(&type_name)
+            && let TypeKind::Enum(enum_id) = ty.kind()
+        {
+            let enum_def = self.type_pool.enum_def(enum_id);
+            if let Some(variant_index) = enum_def.find_variant(&function_name_str) {
+                let variant_def = &enum_def.variants[variant_index];
+                let field_types: Vec<Type> = variant_def.fields.clone();
+                if !field_types.is_empty() {
+                    if variant_def.is_struct_variant() {
                         return Err(CompileError::new(
-                            ErrorKind::MethodCalledAsAssocFn {
-                                type_name: type_name_str,
-                                method_name: function_name_str,
+                            ErrorKind::TypeMismatch {
+                                expected: format!(
+                                    "struct-style construction `{}::{} {{ ... }}`",
+                                    type_name_str, function_name_str
+                                ),
+                                found: format!(
+                                    "tuple-style construction `{}::{}(...)`",
+                                    type_name_str, function_name_str
+                                ),
                             },
                             span,
                         ));
                     }
-
-                    let method_param_types: Vec<Type> =
-                        self.param_arena.types(method_info.params).to_vec();
-                    if args.len() != method_param_types.len() {
+                    if args.len() != field_types.len() {
                         return Err(CompileError::new(
                             ErrorKind::WrongArgumentCount {
-                                expected: method_param_types.len(),
+                                expected: field_types.len(),
                                 found: args.len(),
                             },
                             span,
                         ));
                     }
-
-                    let mut extra_data = Vec::with_capacity(args.len() * 2);
+                    let mut field_air_refs = Vec::with_capacity(args.len());
                     for (i, arg) in args.iter().enumerate() {
                         let result = self.analyze_inst(air, arg.value, ctx)?;
-                        if result.ty != method_param_types[i] {
+                        if result.ty != field_types[i] {
                             return Err(CompileError::new(
                                 ErrorKind::TypeMismatch {
-                                    expected: method_param_types[i].name().to_string(),
+                                    expected: field_types[i].name().to_string(),
                                     found: result.ty.name().to_string(),
                                 },
                                 span,
                             ));
                         }
-                        extra_data.push(result.air_ref.as_u32());
-                        extra_data.push(AirArgMode::Normal.as_u32());
+                        field_air_refs.push(result.air_ref.as_u32());
                     }
-
-                    let enum_def = self.type_pool.enum_def(enum_id);
-                    let type_name_str2 = enum_def.name.clone();
-                    let full_name = format!("{}::{}", type_name_str2, function_name_str);
-                    let callee_sym = self.interner.get_or_intern(&full_name);
-
-                    let args_start = air.add_extra(&extra_data);
-                    let args_len = args.len() as u32;
+                    let fields_len = field_air_refs.len() as u32;
+                    let fields_start = air.add_extra(&field_air_refs);
+                    let enum_type = Type::new_enum(enum_id);
                     let air_ref = air.add_inst(AirInst {
-                        data: AirInstData::Call {
-                            name: callee_sym,
-                            args_start,
-                            args_len,
+                        data: AirInstData::EnumCreate {
+                            enum_id,
+                            variant_index: variant_index as u32,
+                            fields_start,
+                            fields_len,
                         },
-                        ty: method_info.return_type,
+                        ty: enum_type,
                         span,
                     });
-                    return Ok(AnalysisResult::new(air_ref, method_info.return_type));
+                    return Ok(AnalysisResult::new(air_ref, enum_type));
                 }
+                // Unit variant called as function — fall through to error
+            }
+
+            // Not a variant — check for associated function on the enum
+            let method_key = (enum_id, function);
+            if let Some(method_info) = self.enum_methods.get(&method_key).copied() {
+                ctx.referenced_methods
+                    .insert((StructId(enum_id.0), function));
+
+                if method_info.has_self {
+                    return Err(CompileError::new(
+                        ErrorKind::MethodCalledAsAssocFn {
+                            type_name: type_name_str,
+                            method_name: function_name_str,
+                        },
+                        span,
+                    ));
+                }
+
+                let method_param_types: Vec<Type> =
+                    self.param_arena.types(method_info.params).to_vec();
+                if args.len() != method_param_types.len() {
+                    return Err(CompileError::new(
+                        ErrorKind::WrongArgumentCount {
+                            expected: method_param_types.len(),
+                            found: args.len(),
+                        },
+                        span,
+                    ));
+                }
+
+                let mut extra_data = Vec::with_capacity(args.len() * 2);
+                for (i, arg) in args.iter().enumerate() {
+                    let result = self.analyze_inst(air, arg.value, ctx)?;
+                    if result.ty != method_param_types[i] {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: method_param_types[i].name().to_string(),
+                                found: result.ty.name().to_string(),
+                            },
+                            span,
+                        ));
+                    }
+                    extra_data.push(result.air_ref.as_u32());
+                    extra_data.push(AirArgMode::Normal.as_u32());
+                }
+
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let type_name_str2 = enum_def.name.clone();
+                let full_name = format!("{}::{}", type_name_str2, function_name_str);
+                let callee_sym = self.interner.get_or_intern(&full_name);
+
+                let args_start = air.add_extra(&extra_data);
+                let args_len = args.len() as u32;
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Call {
+                        name: callee_sym,
+                        args_start,
+                        args_len,
+                    },
+                    ty: method_info.return_type,
+                    span,
+                });
+                return Ok(AnalysisResult::new(air_ref, method_info.return_type));
             }
         }
 
@@ -4339,16 +4337,17 @@ impl<'a> Sema<'a> {
                     self.find_or_create_anon_enum(&enum_variants, &method_sigs, &HashMap::new());
 
                 // Register methods for newly created anonymous enums
-                if is_new && *methods_len > 0 {
-                    if let TypeKind::Enum(enum_id) = enum_ty.kind() {
-                        self.register_anon_enum_methods_for_comptime_with_subst(
-                            enum_id,
-                            enum_ty,
-                            *methods_start,
-                            *methods_len,
-                            &HashMap::new(),
-                        );
-                    }
+                if is_new
+                    && *methods_len > 0
+                    && let TypeKind::Enum(enum_id) = enum_ty.kind()
+                {
+                    self.register_anon_enum_methods_for_comptime_with_subst(
+                        enum_id,
+                        enum_ty,
+                        *methods_start,
+                        *methods_len,
+                        &HashMap::new(),
+                    );
                 }
 
                 Some(ConstValue::Type(enum_ty))
@@ -4788,16 +4787,17 @@ impl<'a> Sema<'a> {
                     self.find_or_create_anon_enum(&enum_variants, &method_sigs, value_subst);
 
                 // Register methods for newly created anonymous enums with captured values
-                if is_new && *methods_len > 0 {
-                    if let TypeKind::Enum(enum_id) = enum_ty.kind() {
-                        self.register_anon_enum_methods_for_comptime_with_subst(
-                            enum_id,
-                            enum_ty,
-                            *methods_start,
-                            *methods_len,
-                            type_subst,
-                        );
-                    }
+                if is_new
+                    && *methods_len > 0
+                    && let TypeKind::Enum(enum_id) = enum_ty.kind()
+                {
+                    self.register_anon_enum_methods_for_comptime_with_subst(
+                        enum_id,
+                        enum_ty,
+                        *methods_start,
+                        *methods_len,
+                        type_subst,
+                    );
                 }
 
                 Some(ConstValue::Type(enum_ty))

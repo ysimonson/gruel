@@ -84,7 +84,7 @@ pub fn type_byte_size(ty: Type, type_pool: &TypeInternPool) -> u64 {
         }
         TypeKind::Array(id) => {
             let (elem_ty, len) = type_pool.array_def(id);
-            type_byte_size(elem_ty, type_pool) * len as u64
+            type_byte_size(elem_ty, type_pool) * len
         }
         TypeKind::Enum(id) => {
             let def = type_pool.enum_def(id);

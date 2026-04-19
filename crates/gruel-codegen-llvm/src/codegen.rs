@@ -1776,16 +1776,14 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     agg = self
                         .builder
                         .build_insert_value(agg, discrim_val, 0, "ev_d")
-                        .expect("build_insert_value failed")
-                        .into();
+                        .expect("build_insert_value failed");
                     // Payload (field 1) is zeroed for unit variants.
                     let payload_ty = struct_ty.get_field_type_at_index(1).unwrap();
                     let payload_zero = payload_ty.const_zero();
                     agg = self
                         .builder
                         .build_insert_value(agg, payload_zero, 1, "ev_p")
-                        .expect("build_insert_value failed")
-                        .into();
+                        .expect("build_insert_value failed");
                     Some(agg.as_basic_value_enum())
                 }
             }

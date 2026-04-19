@@ -531,7 +531,7 @@ where
 
     // Field init shorthand: `name` means `name: name`
     let shorthand = ident_parser().map_with(|name, e| FieldInit {
-        value: Box::new(Expr::Ident(name.clone())),
+        value: Box::new(Expr::Ident(name)),
         name,
         span: span_from_extra(e),
     });
