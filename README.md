@@ -20,6 +20,8 @@ of buck, etc.
 
 - Stabilized anonymous struct methods
 - Struct destructuring with partial move ban (ADR-0036)
+- Enums with data variants, struct variants, and pattern matching (ADR-0004, ADR-0037, ADR-0038)
+- Anonymous enum types for generic sum types via comptime (ADR-0039)
 
 ### Language Tooling
 
