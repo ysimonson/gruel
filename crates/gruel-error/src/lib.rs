@@ -182,6 +182,7 @@ impl ErrorCode {
     // ========================================================================
     pub const COMPTIME_EVALUATION_FAILED: Self = Self(1200);
     pub const COMPTIME_ARG_NOT_CONST: Self = Self(1201);
+    pub const COMPTIME_USER_ERROR: Self = Self(1202);
 
     // ========================================================================
     // Internal compiler errors (E9000-E9999)
@@ -339,7 +340,11 @@ impl PreviewFeature {
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra, PreviewFeature::ForLoops, PreviewFeature::ComptimeMeta]
+        &[
+            PreviewFeature::TestInfra,
+            PreviewFeature::ForLoops,
+            PreviewFeature::ComptimeMeta,
+        ]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -979,7 +984,9 @@ pub enum ErrorKind {
     // Control flow errors
     #[error("'break' outside of loop")]
     BreakOutsideLoop,
-    #[error("'break' in for-in loop over array with non-Copy element type '{element_type}' would leak un-iterated elements")]
+    #[error(
+        "'break' in for-in loop over array with non-Copy element type '{element_type}' would leak un-iterated elements"
+    )]
     BreakInConsumingForLoop { element_type: String },
     #[error("'continue' outside of loop")]
     ContinueOutsideLoop,
@@ -1073,6 +1080,9 @@ pub enum ErrorKind {
 
     #[error("comptime parameter requires a compile-time known value")]
     ComptimeArgNotConst { param_name: String },
+
+    #[error("{0}")]
+    ComptimeUserError(String),
 
     // Internal compiler errors (bugs in the compiler itself)
     #[error("internal compiler error: {0}")]
@@ -1199,6 +1209,7 @@ impl ErrorKind {
             // Comptime errors (E1200-E1299)
             ErrorKind::ComptimeEvaluationFailed { .. } => ErrorCode::COMPTIME_EVALUATION_FAILED,
             ErrorKind::ComptimeArgNotConst { .. } => ErrorCode::COMPTIME_ARG_NOT_CONST,
+            ErrorKind::ComptimeUserError(_) => ErrorCode::COMPTIME_USER_ERROR,
 
             // Internal compiler errors (E9000-E9999)
             ErrorKind::InternalError(_) => ErrorCode::INTERNAL_ERROR,
@@ -1438,6 +1449,9 @@ pub enum WarningKind {
     /// A pattern that will never be matched because a previous pattern already covers it.
     #[error("unreachable pattern '{0}'")]
     UnreachablePattern(String),
+    /// A `@compileLog` call was present during compilation.
+    #[error("comptime log present — remove before release")]
+    ComptimeLogPresent(String),
 }
 
 /// A compilation warning with optional source location information.

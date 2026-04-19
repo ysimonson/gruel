@@ -108,6 +108,7 @@ impl<'a> GatherOutput<'a> {
             comptime_heap: Vec::new(),
             comptime_type_overrides: HashMap::new(),
             comptime_dbg_output: Vec::new(),
+            comptime_log_output: Vec::new(),
         }
     }
 }

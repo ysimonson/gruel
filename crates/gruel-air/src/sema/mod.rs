@@ -141,6 +141,9 @@ pub struct Sema<'a> {
     /// Each entry is one formatted line (without trailing newline), matching
     /// the format of the runtime `__gruel_dbg_*` functions.
     pub(crate) comptime_dbg_output: Vec<String>,
+    /// Buffer for `@compileLog` output collected during comptime evaluation.
+    /// Each entry is (message, span) for warning generation after sema completes.
+    pub(crate) comptime_log_output: Vec<(String, gruel_span::Span)>,
 }
 
 impl<'a> Sema<'a> {
@@ -178,6 +181,7 @@ impl<'a> Sema<'a> {
             comptime_heap: Vec::new(),
             comptime_type_overrides: HashMap::new(),
             comptime_dbg_output: Vec::new(),
+            comptime_log_output: Vec::new(),
         }
     }
 

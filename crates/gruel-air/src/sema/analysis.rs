@@ -532,6 +532,14 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         functions.push(analyzed);
     }
 
+    // Emit warnings for any @compileLog calls that occurred during comptime evaluation.
+    for (msg, span) in std::mem::take(&mut sema.comptime_log_output) {
+        all_warnings.push(CompileWarning::new(
+            WarningKind::ComptimeLogPresent(msg),
+            span,
+        ));
+    }
+
     all_warnings.sort_by_key(|w| w.span().map(|s| s.start));
 
     let mut output = SemaOutput {
@@ -1009,6 +1017,14 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 .remap_string_ids(|local_id| local_to_global[local_id as usize]);
         }
         functions.push(analyzed);
+    }
+
+    // Emit warnings for any @compileLog calls that occurred during comptime evaluation.
+    for (msg, span) in std::mem::take(&mut sema.comptime_log_output) {
+        all_warnings.push(CompileWarning::new(
+            WarningKind::ComptimeLogPresent(msg),
+            span,
+        ));
     }
 
     all_warnings.sort_by_key(|w| w.span().map(|s| s.start));
@@ -3250,6 +3266,10 @@ impl<'a> Sema<'a> {
             self.analyze_target_arch_intrinsic(air, &args, span)
         } else if name == known.target_os {
             self.analyze_target_os_intrinsic(air, &args, span)
+        } else if name == known.compile_error {
+            self.analyze_compile_error_intrinsic(air, &args, span)
+        } else if name == known.compile_log {
+            self.analyze_compile_log_intrinsic(air, &args, span, ctx)
         } else {
             // Unknown intrinsic - resolve name for error message
             let intrinsic_name_str = self.interner.resolve(&name);
@@ -3566,6 +3586,81 @@ impl<'a> Sema<'a> {
         }
 
         // No-op: just return a unit constant
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::UnitConst,
+            ty: Type::UNIT,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, Type::UNIT))
+    }
+
+    /// Analyze @compileError intrinsic.
+    ///
+    /// In the runtime analysis path, @compileError is a comptime-only intrinsic
+    /// that has type `!` (never). It takes exactly one string literal argument.
+    /// The actual error emission happens in the comptime interpreter.
+    fn analyze_compile_error_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+    ) -> CompileResult<AnalysisResult> {
+        self.require_preview(
+            PreviewFeature::ComptimeMeta,
+            "@compileError intrinsic",
+            span,
+        )?;
+
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicWrongArgCount {
+                    name: "compileError".to_string(),
+                    expected: 1,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        // Verify the argument is a string literal
+        let arg_inst = self.rir.get(args[0].value);
+        if !matches!(&arg_inst.data, gruel_rir::InstData::StringConst(_)) {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "@compileError requires a string literal argument".into(),
+                },
+                arg_inst.span,
+            ));
+        }
+
+        // Type is `!` (never) — @compileError always terminates compilation
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::UnitConst,
+            ty: Type::NEVER,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, Type::NEVER))
+    }
+
+    /// Analyze @compileLog intrinsic.
+    ///
+    /// In the runtime analysis path, @compileLog is a comptime-only intrinsic
+    /// that has type `()`. It accepts any number of arguments.
+    /// The actual log emission happens in the comptime interpreter.
+    fn analyze_compile_log_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        self.require_preview(PreviewFeature::ComptimeMeta, "@compileLog intrinsic", span)?;
+
+        // Analyze all arguments for type checking (but discard results)
+        for arg in args {
+            self.analyze_inst(air, arg.value, ctx)?;
+        }
+
         let air_ref = air.add_inst(AirInst {
             data: AirInstData::UnitConst,
             ty: Type::UNIT,
@@ -4917,6 +5012,52 @@ impl<'a> Sema<'a> {
                 ConstValue::BreakSignal | ConstValue::ContinueSignal | ConstValue::ReturnSignal
             )
         })
+    }
+
+    /// Format a comptime value as a human-readable string.
+    ///
+    /// Used by `@dbg` and `@compileLog` to render comptime values during
+    /// compile-time evaluation.
+    fn format_const_value(&self, val: ConstValue, span: Span) -> CompileResult<String> {
+        match val {
+            ConstValue::Bool(b) => Ok(if b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }),
+            ConstValue::Integer(v) => Ok(format!("{v}")),
+            ConstValue::Unit => Ok("()".to_string()),
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "expression contains values that cannot be known at compile time"
+                        .into(),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Evaluate a comptime intrinsic argument as a string.
+    ///
+    /// In Phase 1, this only accepts `StringConst` instructions (string literals).
+    /// Later phases will extend this to accept `ConstValue::ComptimeStr` values.
+    fn evaluate_comptime_string_arg(
+        &self,
+        arg_ref: InstRef,
+        _locals: &mut HashMap<Spur, ConstValue>,
+        _ctx: &AnalysisContext,
+        _outer_span: Span,
+    ) -> CompileResult<String> {
+        let arg_inst = self.rir.get(arg_ref);
+        match &arg_inst.data {
+            gruel_rir::InstData::StringConst(spur) => Ok(self.interner.resolve(spur).to_string()),
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "@compileError requires a string literal argument".into(),
+                },
+                arg_inst.span,
+            )),
+        }
     }
 
     /// Evaluate a comptime block expression using the stateful interpreter.
@@ -6310,18 +6451,59 @@ impl<'a> Sema<'a> {
                         return Err(not_const(inst_span));
                     }
                     let val = self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span)?;
-                    let formatted = match val {
-                        ConstValue::Bool(b) => {
-                            if b {
-                                "true".to_string()
-                            } else {
-                                "false".to_string()
-                            }
-                        }
-                        ConstValue::Integer(v) => format!("{v}"),
-                        _ => return Err(not_const(inst_span)),
-                    };
+                    let formatted = self.format_const_value(val, inst_span)?;
                     self.comptime_dbg_output.push(formatted);
+                    return Ok(ConstValue::Unit);
+                }
+                // @compileError emits a user-defined compile error.
+                if name == self.known.compile_error {
+                    self.require_preview(
+                        PreviewFeature::ComptimeMeta,
+                        "@compileError intrinsic",
+                        inst_span,
+                    )?;
+                    let arg_refs = self.rir.get_inst_refs(args_start, args_len);
+                    if arg_refs.len() != 1 {
+                        return Err(CompileError::new(
+                            ErrorKind::IntrinsicWrongArgCount {
+                                name: "compileError".to_string(),
+                                expected: 1,
+                                found: arg_refs.len(),
+                            },
+                            inst_span,
+                        ));
+                    }
+                    let msg =
+                        self.evaluate_comptime_string_arg(arg_refs[0], locals, ctx, outer_span)?;
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeUserError(msg),
+                        inst_span,
+                    ));
+                }
+                // @compileLog emits compile-time debug messages.
+                if name == self.known.compile_log {
+                    self.require_preview(
+                        PreviewFeature::ComptimeMeta,
+                        "@compileLog intrinsic",
+                        inst_span,
+                    )?;
+                    let arg_refs = self.rir.get_inst_refs(args_start, args_len);
+                    let mut parts = Vec::new();
+                    for &arg_ref in &arg_refs {
+                        // String literals need special handling since StringConst
+                        // isn't a comptime-evaluable instruction (no ConstValue for strings yet).
+                        let arg_inst = self.rir.get(arg_ref);
+                        if let gruel_rir::InstData::StringConst(spur) = &arg_inst.data {
+                            parts.push(format!("\"{}\"", self.interner.resolve(spur)));
+                        } else {
+                            let val =
+                                self.evaluate_comptime_inst(arg_ref, locals, ctx, outer_span)?;
+                            parts.push(self.format_const_value(val, inst_span)?);
+                        }
+                    }
+                    let msg = parts.join(" ");
+                    eprintln!("comptime log: {msg}");
+                    self.comptime_log_output.push((msg, inst_span));
                     return Ok(ConstValue::Unit);
                 }
                 Err(not_const(inst_span))

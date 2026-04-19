@@ -791,3 +791,49 @@ fn main() -> i32 {
     }
 }
 ```
+
+## Comptime Diagnostics
+
+{{ rule(id="4.14:48", cat="normative") }}
+
+The `@compileError` intrinsic emits a user-defined compile error during comptime evaluation. It takes a single string literal argument and has type `!` (never), terminating compilation of the current comptime block.
+
+{{ rule(id="4.14:49", cat="legality-rule") }}
+
+It is a compile-time error if `@compileError` is called with a non-string-literal argument, or with a number of arguments other than one.
+
+{{ rule(id="4.14:50", cat="normative") }}
+
+Unreachable `@compileError` calls are never evaluated. Only `@compileError` calls on taken branches produce errors.
+
+{{ rule(id="4.14:51") }}
+
+```gruel
+fn Matrix(comptime rows: i32, comptime cols: i32) -> type {
+    if rows <= 0 {
+        @compileError("Matrix rows must be positive");
+    }
+    struct { data: [i32; rows * cols] }
+}
+```
+
+{{ rule(id="4.14:52", cat="normative") }}
+
+The `@compileLog` intrinsic emits a compile-time log message during comptime evaluation. It accepts any number of arguments of any comptime-evaluable type. Each argument is formatted as a string and the results are joined with spaces. The result type is `()`.
+
+{{ rule(id="4.14:53", cat="normative") }}
+
+A program that compiles successfully but contains evaluated `@compileLog` calls emits a warning for each call.
+
+{{ rule(id="4.14:54") }}
+
+```gruel
+fn compute(comptime n: i32) -> i32 {
+    @compileLog("computing with n =", n);
+    n * 2
+}
+
+fn main() -> i32 {
+    compute(21)  // compiles with warning: comptime log present
+}
+```

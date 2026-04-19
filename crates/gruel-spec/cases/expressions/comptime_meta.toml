@@ -1,0 +1,193 @@
+# Comptime Metaprogramming Tests (ADR-0042)
+#
+# Tests for @compileError and @compileLog intrinsics (Phase 1).
+
+[section]
+id = "expressions.comptime_meta"
+spec_chapter = "4.14"
+name = "Comptime Metaprogramming"
+description = "Comptime diagnostics: @compileError and @compileLog."
+
+# =============================================================================
+# @compileError
+# =============================================================================
+
+[[case]]
+name = "compile_error_basic"
+spec = ["4.14:48"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileError("something went wrong");
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "something went wrong"
+
+[[case]]
+name = "compile_error_unreachable_not_evaluated"
+spec = ["4.14:50"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 5;
+        if x <= 0 {
+            @compileError("x must be positive");
+        }
+        x + 37
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_error_has_never_type"
+spec = ["4.14:48"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 5;
+        if x < 0 {
+            @compileError("negative");
+        }
+        x + 37
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_error_wrong_arg_count"
+spec = ["4.14:49"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileError("a", "b");
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "expects 1 argument"
+
+[[case]]
+name = "compile_error_requires_string_literal"
+spec = ["4.14:49"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileError(42);
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "string literal"
+
+# =============================================================================
+# @compileLog
+# =============================================================================
+
+[[case]]
+name = "compile_log_basic"
+spec = ["4.14:52", "4.14:53"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog("hello", 42);
+        42
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_log_no_args"
+spec = ["4.14:52"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog();
+        42
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_log_multiple_args"
+spec = ["4.14:52"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog("a", 1, true, false);
+        42
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "compile_log_returns_unit"
+spec = ["4.14:52"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog("hello");
+        42
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Preview Feature Gate
+# =============================================================================
+
+[[case]]
+name = "compile_error_requires_preview"
+spec = ["4.14:48"]
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileError("test");
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+[[case]]
+name = "compile_log_requires_preview"
+spec = ["4.14:52"]
+source = """
+fn main() -> i32 {
+    comptime {
+        @compileLog("test");
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
