@@ -811,14 +811,37 @@ impl<'a> Sema<'a> {
                 self.analyze_range_for_loop(air, binding, is_mut, &args, body, span, iterable_inst.span, ctx)
             }
             _ => {
-                // For now, only @range is supported as iterable
-                Err(CompileError::new(
-                    ErrorKind::TypeMismatch {
-                        expected: "@range(...)".to_string(),
-                        found: "non-range expression".to_string(),
-                    },
-                    iterable_inst.span,
-                ))
+                // Not @range — analyze the iterable expression and check if it's an array
+                let iterable_span = iterable_inst.span;
+                let iterable_result = self.analyze_inst(air, iterable, ctx)?;
+                let iterable_type = iterable_result.ty;
+
+                if let Some(array_type_id) = iterable_type.as_array() {
+                    let (elem_type, array_len) = self.type_pool.array_def(array_type_id);
+
+                    if !self.is_type_copy(elem_type) {
+                        return Err(CompileError::new(
+                            ErrorKind::MoveOutOfIndex {
+                                element_type: elem_type.name().to_string(),
+                            },
+                            iterable_span,
+                        )
+                        .with_help("for-in loops over arrays with non-Copy element types are not yet supported"));
+                    }
+
+                    self.analyze_array_for_loop(
+                        air, binding, is_mut, iterable_result.air_ref, iterable_type,
+                        elem_type, array_len, body, span, ctx,
+                    )
+                } else {
+                    Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: "array or @range(...)".to_string(),
+                            found: iterable_type.name().to_string(),
+                        },
+                        iterable_span,
+                    ))
+                }
             }
         }
     }
@@ -1055,6 +1078,220 @@ impl<'a> Sema<'a> {
             data: AirInstData::Block {
                 stmts_start: outer_stmts_start,
                 stmts_len: 2,
+                value: loop_ref,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        Ok(AnalysisResult::new(outer_block, Type::UNIT))
+    }
+
+    /// Desugar `for x in arr { body }` into a while loop with array indexing.
+    ///
+    /// Only supports Copy element types (Phase 3). The array is spilled to a
+    /// temporary slot and indexed with a counter variable.
+    fn analyze_array_for_loop(
+        &mut self,
+        air: &mut Air,
+        binding: Spur,
+        is_mut: bool,
+        arr_air: AirRef,
+        arr_type: Type,
+        elem_type: Type,
+        array_len: u64,
+        body: InstRef,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // Open outer scope for temp variables
+        ctx.push_scope();
+
+        // Spill array to a temporary slot
+        let arr_slot = ctx.next_slot;
+        let num_arr_slots = self.abi_slot_count(arr_type);
+        ctx.next_slot += num_arr_slots;
+
+        let arr_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: arr_slot },
+            ty: arr_type,
+            span,
+        });
+        let arr_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: arr_slot,
+                init: arr_air,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Allocate counter: let mut __i: i32 = 0
+        let counter_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+
+        let counter_start = air.add_inst(AirInst {
+            data: AirInstData::Const(0),
+            ty: Type::I32,
+            span,
+        });
+        let counter_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: counter_slot },
+            ty: Type::I32,
+            span,
+        });
+        let counter_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: counter_slot,
+                init: counter_start,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Build condition: __i < array_len
+        let counter_load_for_cond = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: Type::I32,
+            span,
+        });
+        let len_const = air.add_inst(AirInst {
+            data: AirInstData::Const(array_len),
+            ty: Type::I32,
+            span,
+        });
+        let cond_ref = air.add_inst(AirInst {
+            data: AirInstData::Lt(counter_load_for_cond, len_const),
+            ty: Type::BOOL,
+            span,
+        });
+
+        // Build loop body
+        ctx.push_scope();
+        ctx.loop_depth += 1;
+
+        // let x = arr[__i]
+        let binding_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+
+        ctx.insert_local(
+            binding,
+            LocalVar {
+                slot: binding_slot,
+                ty: elem_type,
+                is_mut,
+                span,
+                allow_unused: false,
+            },
+        );
+
+        // Load index for element access
+        let counter_load_for_idx = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: Type::I32,
+            span,
+        });
+
+        // Read arr[__i] via PlaceRead
+        let place_ref = air.make_place(
+            AirPlaceBase::Local(arr_slot),
+            std::iter::once(AirProjection::Index {
+                array_type: arr_type,
+                index: counter_load_for_idx,
+            }),
+        );
+        let elem_read = air.add_inst(AirInst {
+            data: AirInstData::PlaceRead { place: place_ref },
+            ty: elem_type,
+            span,
+        });
+
+        // StorageLive + Alloc for binding
+        let binding_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: binding_slot },
+            ty: elem_type,
+            span,
+        });
+        let binding_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: binding_slot,
+                init: elem_read,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Increment counter before body (so continue doesn't skip it)
+        let counter_load_for_inc = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: Type::I32,
+            span,
+        });
+        let one_const = air.add_inst(AirInst {
+            data: AirInstData::Const(1),
+            ty: Type::I32,
+            span,
+        });
+        let incremented = air.add_inst(AirInst {
+            data: AirInstData::Add(counter_load_for_inc, one_const),
+            ty: Type::I32,
+            span,
+        });
+        let counter_store = air.add_inst(AirInst {
+            data: AirInstData::Store {
+                slot: counter_slot,
+                value: incremented,
+                had_live_value: true,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Analyze user body
+        let body_result = self.analyze_inst(air, body, ctx)?;
+
+        ctx.loop_depth -= 1;
+        ctx.pop_scope();
+
+        // Build body block: [binding_storage_live, binding_alloc, counter_store, body]
+        let body_stmts_start = air.add_extra(&[
+            binding_storage_live.as_u32(),
+            binding_alloc.as_u32(),
+            counter_store.as_u32(),
+        ]);
+        let body_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: body_stmts_start,
+                stmts_len: 3,
+                value: body_result.air_ref,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Build while loop
+        let loop_ref = air.add_inst(AirInst {
+            data: AirInstData::Loop {
+                cond: cond_ref,
+                body: body_block,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        ctx.pop_scope();
+
+        // Build outer block: [arr_storage_live, arr_alloc, counter_storage_live, counter_alloc, loop]
+        let outer_stmts_start = air.add_extra(&[
+            arr_storage_live.as_u32(),
+            arr_alloc.as_u32(),
+            counter_storage_live.as_u32(),
+            counter_alloc.as_u32(),
+        ]);
+        let outer_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: outer_stmts_start,
+                stmts_len: 4,
                 value: loop_ref,
             },
             ty: Type::UNIT,

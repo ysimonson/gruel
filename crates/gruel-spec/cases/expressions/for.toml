@@ -245,3 +245,152 @@ fn main() -> i32 {
 }
 """
 exit_code = 25
+
+# =============================================================================
+# Array For-In Loop
+# =============================================================================
+
+[[case]]
+name = "for_array_basic"
+spec = ["4.8:33", "4.8:35"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr = [10, 20, 30];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    sum
+}
+"""
+exit_code = 60
+
+[[case]]
+name = "for_array_single_element"
+spec = ["4.8:33"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr = [42];
+    let mut result = 0;
+    for x in arr {
+        result = x;
+    }
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "for_array_copy_type"
+spec = ["4.8:34"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    sum
+}
+"""
+exit_code = 15
+
+[[case]]
+name = "for_array_remains_valid"
+spec = ["4.8:35"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr = [1, 2, 3];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    sum + arr[0] + arr[1] + arr[2]
+}
+"""
+exit_code = 12
+
+[[case]]
+name = "for_array_break"
+spec = ["4.8:32", "4.8:33"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for x in arr {
+        if x == 4 {
+            break;
+        }
+        sum = sum + x;
+    }
+    sum
+}
+"""
+exit_code = 6
+
+[[case]]
+name = "for_array_continue"
+spec = ["4.8:32", "4.8:33"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for x in arr {
+        if x % 2 == 0 {
+            continue;
+        }
+        sum = sum + x;
+    }
+    sum
+}
+"""
+exit_code = 9
+
+[[case]]
+name = "for_array_mutable_binding"
+spec = ["4.8:25", "4.8:33"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr = [1, 2, 3];
+    let mut sum = 0;
+    for mut x in arr {
+        x = x * 10;
+        sum = sum + x;
+    }
+    sum
+}
+"""
+exit_code = 60
+
+[[case]]
+name = "for_array_bool_elements"
+spec = ["4.8:33", "4.8:34"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr = [true, false, true, true];
+    let mut count = 0;
+    for b in arr {
+        if b {
+            count = count + 1;
+        }
+    }
+    count
+}
+"""
+exit_code = 3

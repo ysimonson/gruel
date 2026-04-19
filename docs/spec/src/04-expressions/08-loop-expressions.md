@@ -236,6 +236,46 @@ fn main() -> i32 {
 
 `break` and `continue` work within for-in loops the same as in while loops: `break` exits the loop and `continue` skips to the next iteration.
 
+### Array Iteration
+
+{{ rule(id="4.8:33", cat="normative") }}
+
+A for-in loop can iterate over a fixed-size array. Each element is bound to the loop variable in order.
+
+{{ rule(id="4.8:34", cat="legality-rule") }}
+
+The array's element type **MUST** be a Copy type. Iterating over arrays with non-Copy element types is a compile-time error.
+
+{{ rule(id="4.8:35", cat="dynamic-semantics") }}
+
+Iterating over an array is equivalent to indexing each element in order:
+
+```gruel
+// for x in arr { body }
+// is equivalent to:
+let mut __i = 0;
+while __i < LENGTH {
+    let x = arr[__i];
+    __i = __i + 1;
+    body;
+}
+```
+
+The array remains valid after the loop.
+
+{{ rule(id="4.8:36") }}
+
+```gruel
+fn main() -> i32 {
+    let arr = [10, 20, 30];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    sum  // 60
+}
+```
+
 ## Nested Loops
 
 {{ rule(id="4.8:13", cat="normative") }}

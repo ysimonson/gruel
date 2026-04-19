@@ -912,13 +912,19 @@ impl<'a> ConstraintGenerator<'a> {
                 // Generate constraints for the iterable to determine the element type
                 let iterable_info = self.generate(*iterable, ctx);
 
-                // The loop variable has the same type as the iterable's element type.
-                // For @range, the iterable returns its argument type (an integer).
-                // Register the binding so the body can reference it.
+                // Determine the binding type from the iterable:
+                // - For @range: the iterable returns the integer type directly
+                // - For arrays: extract the element type from InferType::Array
+                let binding_ty = match &iterable_info.ty {
+                    InferType::Array { element, .. } => *element.clone(),
+                    other => other.clone(),
+                };
+
+                // Register the binding so the body can reference it
                 ctx.insert_local(
                     *binding,
                     LocalVarInfo {
-                        ty: iterable_info.ty,
+                        ty: binding_ty,
                         is_mut: *is_mut,
                         span,
                     },
