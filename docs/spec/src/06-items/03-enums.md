@@ -273,3 +273,48 @@ fn main() -> i32 {
     0
 }
 ```
+
+### Struct Variant Pattern Matching
+
+{{ rule(id="6.3:28", cat="normative") }}
+
+A struct variant can be matched in a `match` expression using a brace-enclosed
+list of field bindings:
+
+```ebnf
+enum_struct_pattern = IDENT "::" IDENT "{" [ field_patterns ] "}" ;
+field_patterns      = field_pattern { "," field_pattern } [ "," ] ;
+field_pattern       = IDENT ":" pattern_binding
+                    | IDENT ;
+pattern_binding     = "_" | [ "mut" ] IDENT ;
+```
+
+All fields **MUST** be listed — no partial matching is allowed.
+Field patterns **MAY** appear in any order.
+Field punning `{ radius }` binds the `radius` field to variable `radius`.
+`{ radius: r }` binds the `radius` field to variable `r`.
+`{ radius: _ }` discards the `radius` field.
+
+{{ rule(id="6.3:29", cat="legality-rule") }}
+
+Using struct-style pattern matching `Enum::Variant { ... }` on a tuple variant,
+or tuple-style pattern matching `Enum::Variant(...)` on a struct variant, is a
+compile-time error.
+
+{{ rule(id="6.3:30", cat="example") }}
+
+```gruel
+enum Shape {
+    Circle { radius: i32 },
+    Rectangle { width: i32, height: i32 },
+    Point,
+}
+
+fn area(s: Shape) -> i32 {
+    match s {
+        Shape::Circle { radius } => radius * radius,
+        Shape::Rectangle { width, height } => width * height,
+        Shape::Point => 0,
+    }
+}
+```

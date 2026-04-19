@@ -329,7 +329,7 @@ The last two catch attempts to use the wrong construction syntax for a variant's
   - Error when using `( )` on a struct variant or `{ }` on a tuple variant
   - Codegen: no changes needed — `EnumCreate` already handles this
 
-- [ ] **Phase 3: Struct variant pattern matching**
+- [x] **Phase 3: Struct variant pattern matching**
   - Parser: parse `Enum::Variant { field: binding }` patterns
   - AST: new `Pattern::StructVariant` variant
   - RIR: new `RirPattern::StructVariant` with named field bindings

@@ -911,26 +911,27 @@ impl<'a> ConstraintGenerator<'a> {
                         pattern.span(),
                     ));
 
-                    // For DataVariant patterns, add bound variables to scope before
+                    // For DataVariant/StructVariant patterns, add bound variables to scope before
                     // generating body constraints, so VarRef lookups resolve correctly.
-                    let bindings_to_remove = if let gruel_rir::RirPattern::DataVariant {
-                        type_name,
-                        variant,
-                        bindings,
-                        ..
-                    } = pattern
-                    {
-                        let mut added_bindings = Vec::new();
-                        if let Some(&enum_ty) = self.enums.get(type_name)
-                            && let Some(enum_id) = enum_ty.as_enum()
-                        {
-                            let enum_def = self.type_pool.enum_def(enum_id);
-                            let variant_name = self.interner.resolve(variant);
-                            if let Some(variant_idx) = enum_def.find_variant(variant_name) {
-                                let field_types = &enum_def.variants[variant_idx].fields;
-                                for (i, binding) in bindings.iter().enumerate() {
-                                    if !binding.is_wildcard {
-                                        if let Some(name) = binding.name {
+                    let bindings_to_remove = match pattern {
+                        gruel_rir::RirPattern::DataVariant {
+                            type_name,
+                            variant,
+                            bindings,
+                            ..
+                        } => {
+                            let mut added_bindings = Vec::new();
+                            if let Some(&enum_ty) = self.enums.get(type_name)
+                                && let Some(enum_id) = enum_ty.as_enum()
+                            {
+                                let enum_def = self.type_pool.enum_def(enum_id);
+                                let variant_name = self.interner.resolve(variant);
+                                if let Some(variant_idx) = enum_def.find_variant(variant_name) {
+                                    let field_types = &enum_def.variants[variant_idx].fields;
+                                    for (i, binding) in bindings.iter().enumerate() {
+                                        if !binding.is_wildcard
+                                            && let Some(name) = binding.name
+                                        {
                                             let field_ty = if i < field_types.len() {
                                                 InferType::Concrete(field_types[i])
                                             } else {
@@ -949,10 +950,50 @@ impl<'a> ConstraintGenerator<'a> {
                                     }
                                 }
                             }
+                            added_bindings
                         }
-                        added_bindings
-                    } else {
-                        Vec::new()
+                        gruel_rir::RirPattern::StructVariant {
+                            type_name,
+                            variant,
+                            field_bindings,
+                            ..
+                        } => {
+                            let mut added_bindings = Vec::new();
+                            if let Some(&enum_ty) = self.enums.get(type_name)
+                                && let Some(enum_id) = enum_ty.as_enum()
+                            {
+                                let enum_def = self.type_pool.enum_def(enum_id);
+                                let variant_name = self.interner.resolve(variant);
+                                if let Some(variant_idx) = enum_def.find_variant(variant_name) {
+                                    let variant_def = &enum_def.variants[variant_idx];
+                                    for fb in field_bindings {
+                                        if !fb.binding.is_wildcard
+                                            && let Some(name) = fb.binding.name
+                                        {
+                                            let field_name = self.interner.resolve(&fb.field_name);
+                                            let field_ty = if let Some(idx) =
+                                                variant_def.find_field(field_name)
+                                            {
+                                                InferType::Concrete(variant_def.fields[idx])
+                                            } else {
+                                                InferType::Concrete(Type::ERROR)
+                                            };
+                                            let old = ctx.locals.insert(
+                                                name,
+                                                LocalVarInfo {
+                                                    ty: field_ty,
+                                                    is_mut: fb.binding.is_mut,
+                                                    span: pattern.span(),
+                                                },
+                                            );
+                                            added_bindings.push((name, old));
+                                        }
+                                    }
+                                }
+                            }
+                            added_bindings
+                        }
+                        _ => Vec::new(),
                     };
 
                     // Generate body and collect its type
@@ -1332,7 +1373,8 @@ impl<'a> ConstraintGenerator<'a> {
             gruel_rir::RirPattern::Int(_, _) => InferType::IntLiteral,
             gruel_rir::RirPattern::Bool(_, _) => InferType::Concrete(Type::BOOL),
             gruel_rir::RirPattern::Path { type_name, .. }
-            | gruel_rir::RirPattern::DataVariant { type_name, .. } => {
+            | gruel_rir::RirPattern::DataVariant { type_name, .. }
+            | gruel_rir::RirPattern::StructVariant { type_name, .. } => {
                 if let Some(&enum_ty) = self.enums.get(type_name) {
                     InferType::Concrete(enum_ty)
                 } else {

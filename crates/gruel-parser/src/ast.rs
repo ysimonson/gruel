@@ -609,6 +609,27 @@ pub enum Pattern {
         bindings: Vec<PatternBinding>,
         span: Span,
     },
+    /// Struct variant pattern with named field bindings (e.g., `Shape::Circle { radius }`)
+    StructVariant {
+        /// Optional module prefix
+        base: Option<Box<Expr>>,
+        /// Enum type name
+        type_name: Ident,
+        /// Variant name
+        variant: Ident,
+        /// Named field bindings
+        fields: Vec<PatternFieldBinding>,
+        span: Span,
+    },
+}
+
+/// A named field binding in a struct variant pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatternFieldBinding {
+    /// The field name being matched
+    pub field_name: Ident,
+    /// The binding for this field
+    pub binding: PatternBinding,
 }
 
 /// A binding in a data variant pattern.
@@ -651,6 +672,7 @@ impl Pattern {
             Pattern::Bool(lit) => lit.span,
             Pattern::Path(path) => path.span,
             Pattern::DataVariant { span, .. } => *span,
+            Pattern::StructVariant { span, .. } => *span,
         }
     }
 }

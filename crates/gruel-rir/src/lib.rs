@@ -16,5 +16,5 @@ mod inst;
 pub use astgen::AstGen;
 pub use inst::{
     FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDirective,
-    RirFunctionView, RirParam, RirParamMode, RirPattern, RirPrinter,
+    RirFunctionView, RirParam, RirParamMode, RirPattern, RirPatternBinding, RirPrinter,
 };

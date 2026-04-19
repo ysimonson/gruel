@@ -17,7 +17,7 @@ use gruel_parser::{
 
 use crate::inst::{
     FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDestructureField,
-    RirDirective, RirParam, RirParamMode, RirPattern, RirPatternBinding,
+    RirDirective, RirParam, RirParamMode, RirPattern, RirPatternBinding, RirStructPatternBinding,
 };
 
 /// Generates RIR from an AST.
@@ -871,6 +871,43 @@ impl<'a> AstGen<'a> {
                     type_name: type_name.name,
                     variant: variant.name,
                     bindings: rir_bindings,
+                    span: *span,
+                }
+            }
+            Pattern::StructVariant {
+                base,
+                type_name,
+                variant,
+                fields,
+                span,
+            } => {
+                let module = base.as_ref().map(|b| self.gen_expr(b));
+                let field_bindings = fields
+                    .iter()
+                    .map(|fb| {
+                        let binding = match &fb.binding {
+                            PatternBinding::Wildcard(_) => RirPatternBinding {
+                                is_wildcard: true,
+                                is_mut: false,
+                                name: None,
+                            },
+                            PatternBinding::Ident { is_mut, name } => RirPatternBinding {
+                                is_wildcard: false,
+                                is_mut: *is_mut,
+                                name: Some(name.name),
+                            },
+                        };
+                        RirStructPatternBinding {
+                            field_name: fb.field_name.name,
+                            binding,
+                        }
+                    })
+                    .collect();
+                RirPattern::StructVariant {
+                    module,
+                    type_name: type_name.name,
+                    variant: variant.name,
+                    field_bindings,
                     span: *span,
                 }
             }

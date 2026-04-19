@@ -26,7 +26,9 @@ use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
     PreviewFeature, WarningKind,
 };
-use gruel_rir::{InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern};
+use gruel_rir::{
+    InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern, RirPatternBinding,
+};
 use lasso::Spur;
 
 use crate::sema::context::ConstValue;
@@ -849,6 +851,9 @@ impl<'a> Sema<'a> {
                     }
                     | RirPattern::DataVariant {
                         type_name, variant, ..
+                    }
+                    | RirPattern::StructVariant {
+                        type_name, variant, ..
                     } => {
                         format!(
                             "{}::{}",
@@ -1040,17 +1045,166 @@ impl<'a> Sema<'a> {
                     pattern_enum_id = Some(enum_id);
                     resolved_enum = Some((enum_id, variant_index as u32));
                 }
+                RirPattern::StructVariant {
+                    module,
+                    type_name,
+                    variant,
+                    field_bindings,
+                    ..
+                } => {
+                    // Gate behind preview feature
+                    self.require_preview(
+                        PreviewFeature::EnumStructVariants,
+                        "enum struct variant patterns",
+                        pattern_span,
+                    )?;
+
+                    // Look up the enum type
+                    let enum_id = if let Some(module_ref) = module {
+                        self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
+                    } else {
+                        *self.enums.get(type_name).ok_or_compile_error(
+                            ErrorKind::UnknownEnumType(
+                                self.interner.resolve(type_name).to_string(),
+                            ),
+                            pattern_span,
+                        )?
+                    };
+                    let enum_def = self.type_pool.enum_def(enum_id);
+
+                    // Check that scrutinee type matches
+                    if scrutinee_type != Type::new_enum(enum_id) {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: scrutinee_type.name().to_string(),
+                                found: enum_def.name.clone(),
+                            },
+                            pattern_span,
+                        ));
+                    }
+
+                    // Find the variant
+                    let variant_name = self.interner.resolve(variant);
+                    let variant_index = enum_def.find_variant(variant_name).ok_or_compile_error(
+                        ErrorKind::UnknownVariant {
+                            enum_name: enum_def.name.clone(),
+                            variant_name: variant_name.to_string(),
+                        },
+                        pattern_span,
+                    )?;
+
+                    let variant_def = &enum_def.variants[variant_index];
+
+                    // Verify this is a struct variant
+                    if !variant_def.is_struct_variant() {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: format!(
+                                    "tuple-style pattern `{}::{}(...)`",
+                                    enum_def.name, variant_name
+                                ),
+                                found: format!(
+                                    "struct-style pattern `{}::{} {{ ... }}`",
+                                    enum_def.name, variant_name
+                                ),
+                            },
+                            pattern_span,
+                        ));
+                    }
+
+                    // Check for unknown, duplicate, and missing fields
+                    let mut seen_fields =
+                        std::collections::HashSet::with_capacity(field_bindings.len());
+                    let qualified_name = format!("{}::{}", enum_def.name, variant_name);
+                    for fb in field_bindings {
+                        let field_name_str = self.interner.resolve(&fb.field_name);
+                        if !seen_fields.insert(fb.field_name) {
+                            return Err(CompileError::new(
+                                ErrorKind::DuplicateField {
+                                    struct_name: qualified_name.clone(),
+                                    field_name: field_name_str.to_string(),
+                                },
+                                pattern_span,
+                            ));
+                        }
+                        if variant_def.find_field(field_name_str).is_none() {
+                            return Err(CompileError::new(
+                                ErrorKind::UnknownField {
+                                    struct_name: qualified_name.clone(),
+                                    field_name: field_name_str.to_string(),
+                                },
+                                pattern_span,
+                            ));
+                        }
+                    }
+
+                    // Check for missing fields
+                    let declared_field_count = variant_def.field_names.len();
+                    if field_bindings.len() != declared_field_count {
+                        // Find which fields are missing
+                        let missing: Vec<_> = variant_def
+                            .field_names
+                            .iter()
+                            .filter(|name| {
+                                !field_bindings.iter().any(|fb| {
+                                    self.interner.resolve(&fb.field_name) == name.as_str()
+                                })
+                            })
+                            .cloned()
+                            .collect();
+                        return Err(CompileError::new(
+                            ErrorKind::MissingFields(Box::new(MissingFieldsError {
+                                struct_name: qualified_name,
+                                missing_fields: missing,
+                            })),
+                            pattern_span,
+                        ));
+                    }
+
+                    covered_variants.insert(variant_index as u32);
+                    pattern_enum_id = Some(enum_id);
+                    resolved_enum = Some((enum_id, variant_index as u32));
+                }
             }
 
             // Each arm gets its own scope
             ctx.push_scope();
 
-            // For DataVariant patterns, emit field extractions into the arm scope
+            // For DataVariant/StructVariant patterns, emit field extractions into the arm scope
             // before analyzing the body. Named bindings become local variables.
-            let body_result = if let RirPattern::DataVariant { bindings, .. } = pattern {
+            //
+            // Collect indexed bindings: (field_index, binding) for each field that needs extraction.
+            // DataVariant: bindings are positional (field_index == position).
+            // StructVariant: bindings are named, resolved to declaration-order indices.
+            let indexed_bindings: Option<Vec<(usize, &RirPatternBinding)>> = match pattern {
+                RirPattern::DataVariant { bindings, .. } => {
+                    Some(bindings.iter().enumerate().collect())
+                }
+                RirPattern::StructVariant { field_bindings, .. } => {
+                    let (enum_id, variant_index) = resolved_enum
+                        .expect("resolved_enum must be set for StructVariant patterns");
+                    let enum_def = self.type_pool.enum_def(enum_id);
+                    let variant_def = &enum_def.variants[variant_index as usize];
+                    Some(
+                        field_bindings
+                            .iter()
+                            .map(|fb| {
+                                let field_name = self.interner.resolve(&fb.field_name);
+                                let idx = variant_def
+                                    .find_field(field_name)
+                                    .expect("field name validated during pattern checking");
+                                (idx, &fb.binding)
+                            })
+                            .collect(),
+                    )
+                }
+                _ => None,
+            };
+
+            let body_result = if let Some(indexed_bindings) = indexed_bindings {
                 // Reuse the enum_id and variant_index resolved during validation.
-                let (enum_id, variant_index) =
-                    resolved_enum.expect("resolved_enum must be set for DataVariant patterns");
+                let (enum_id, variant_index) = resolved_enum
+                    .expect("resolved_enum must be set for data/struct variant patterns");
                 let enum_def = self.type_pool.enum_def(enum_id);
                 let field_types: Vec<Type> =
                     enum_def.variants[variant_index as usize].fields.clone();
@@ -1058,15 +1212,15 @@ impl<'a> Sema<'a> {
                 let mut storage_lives = Vec::new();
                 let mut allocs = Vec::new();
 
-                for (field_index, binding) in bindings.iter().enumerate() {
-                    let field_ty = field_types[field_index];
+                for (field_index, binding) in &indexed_bindings {
+                    let field_ty = field_types[*field_index];
 
                     // Extract field value from enum payload
                     let field_val = air.add_inst(AirInst {
                         data: AirInstData::EnumPayloadGet {
                             base: scrutinee_result.air_ref,
                             variant_index,
-                            field_index: field_index as u32,
+                            field_index: *field_index as u32,
                         },
                         ty: field_ty,
                         span: pattern_span,
@@ -1094,19 +1248,19 @@ impl<'a> Sema<'a> {
                     allocs.push(alloc);
 
                     // Register named bindings in the arm scope
-                    if !binding.is_wildcard {
-                        if let Some(name_spur) = binding.name {
-                            ctx.insert_local(
-                                name_spur,
-                                LocalVar {
-                                    slot,
-                                    ty: field_ty,
-                                    is_mut: binding.is_mut,
-                                    span: pattern_span,
-                                    allow_unused: false,
-                                },
-                            );
-                        }
+                    if !binding.is_wildcard
+                        && let Some(name_spur) = binding.name
+                    {
+                        ctx.insert_local(
+                            name_spur,
+                            LocalVar {
+                                slot,
+                                ty: field_ty,
+                                is_mut: binding.is_mut,
+                                span: pattern_span,
+                                allow_unused: false,
+                            },
+                        );
                     }
                 }
 
@@ -1167,7 +1321,7 @@ impl<'a> Sema<'a> {
 
                 AnalysisResult::new(combined, body_type)
             } else {
-                // Non-DataVariant: analyze body normally
+                // Non-data/struct variant: analyze body normally
                 self.analyze_inst(air, *body, ctx)?
             };
 
@@ -1206,7 +1360,9 @@ impl<'a> Sema<'a> {
                 RirPattern::Wildcard(_) => AirPattern::Wildcard,
                 RirPattern::Int(n, _) => AirPattern::Int(*n),
                 RirPattern::Bool(b, _) => AirPattern::Bool(*b),
-                RirPattern::Path { .. } | RirPattern::DataVariant { .. } => {
+                RirPattern::Path { .. }
+                | RirPattern::DataVariant { .. }
+                | RirPattern::StructVariant { .. } => {
                     let (enum_id, variant_index) =
                         resolved_enum.expect("resolved_enum must be set for enum patterns");
                     AirPattern::EnumVariant {

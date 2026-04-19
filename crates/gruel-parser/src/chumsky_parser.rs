@@ -11,8 +11,9 @@ use crate::ast::{
     FieldExpr, FieldInit, Function, Ident, IfExpr, IndexExpr, IntLit, IntrinsicArg,
     IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr, MatchArm, MatchExpr, Method,
     MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern,
-    PatternBinding, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit, StructDecl,
-    StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
+    PatternBinding, PatternFieldBinding, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit,
+    StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility,
+    WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -777,36 +778,77 @@ where
 
     // Parser for optional `(binding, binding, ...)` suffix on a path pattern
     let bindings_suffix = pattern_binding
+        .clone()
         .separated_by(just(TokenKind::Comma))
         .allow_trailing()
         .collect::<Vec<_>>()
         .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen));
 
-    // Simple path pattern: Enum::Variant or Enum::Variant(binding, ...)
+    // Parser for a single field binding in a struct variant pattern:
+    // `field: binding` or `field` (shorthand for `field: field`)
+    let pattern_field_binding = {
+        let explicit = ident_parser()
+            .then_ignore(just(TokenKind::Colon))
+            .then(pattern_binding.clone())
+            .map(|(field_name, binding)| PatternFieldBinding {
+                field_name,
+                binding,
+            });
+        let shorthand = ident_parser().map(|name| PatternFieldBinding {
+            field_name: name,
+            binding: PatternBinding::Ident {
+                is_mut: false,
+                name,
+            },
+        });
+        choice((explicit, shorthand))
+    };
+
+    // Parser for optional `{ field: binding, ... }` suffix on a path pattern
+    let struct_bindings_suffix = pattern_field_binding
+        .separated_by(just(TokenKind::Comma))
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace));
+
+    // Enum for the suffix on an enum variant pattern: tuple, struct, or none.
+    #[derive(Debug, Clone)]
+    enum PatternSuffix {
+        Tuple(Vec<PatternBinding>),
+        Struct(Vec<PatternFieldBinding>),
+    }
+
+    let pattern_suffix = choice((
+        bindings_suffix.clone().map(PatternSuffix::Tuple),
+        struct_bindings_suffix.clone().map(PatternSuffix::Struct),
+    ));
+
+    // Simple path pattern: Enum::Variant, Enum::Variant(binding, ...), or Enum::Variant { field: binding, ... }
     let simple_path_pat = ident_parser()
         .then_ignore(just(TokenKind::ColonColon))
         .then(ident_parser())
-        .then(bindings_suffix.clone().or_not())
-        // Negative lookahead to ensure we're not at the start of a qualified path
-        // (i.e., ensure there's no `.` before this pattern that would make it
-        // part of a module.Enum::Variant pattern)
-        .map_with(|((type_name, variant), bindings_opt), e| {
-            if let Some(bindings) = bindings_opt {
-                Pattern::DataVariant {
-                    base: None,
-                    type_name,
-                    variant,
-                    bindings,
-                    span: span_from_extra(e),
-                }
-            } else {
-                Pattern::Path(PathPattern {
-                    base: None,
-                    type_name,
-                    variant,
-                    span: span_from_extra(e),
-                })
-            }
+        .then(pattern_suffix.clone().or_not())
+        .map_with(|((type_name, variant), suffix_opt), e| match suffix_opt {
+            Some(PatternSuffix::Tuple(bindings)) => Pattern::DataVariant {
+                base: None,
+                type_name,
+                variant,
+                bindings,
+                span: span_from_extra(e),
+            },
+            Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
+                base: None,
+                type_name,
+                variant,
+                fields,
+                span: span_from_extra(e),
+            },
+            None => Pattern::Path(PathPattern {
+                base: None,
+                type_name,
+                variant,
+                span: span_from_extra(e),
+            }),
         });
 
     // Qualified path pattern: module.Enum::Variant or module.sub.Enum::Variant
@@ -822,8 +864,8 @@ where
         )
         .then_ignore(just(TokenKind::ColonColon))
         .then(ident_parser())
-        .then(bindings_suffix.or_not())
-        .map_with(|(((first, mut rest), variant), bindings_opt), e| {
+        .then(pattern_suffix.or_not())
+        .map_with(|(((first, mut rest), variant), suffix_opt), e| {
             // first is the first module identifier
             // rest contains all subsequent identifiers up to and including type_name
             // The last element of rest is the type_name
@@ -847,21 +889,27 @@ where
                 base
             };
 
-            if let Some(bindings) = bindings_opt {
-                Pattern::DataVariant {
+            match suffix_opt {
+                Some(PatternSuffix::Tuple(bindings)) => Pattern::DataVariant {
                     base: Some(Box::new(base_expr)),
                     type_name,
                     variant,
                     bindings,
                     span: span_from_extra(e),
-                }
-            } else {
-                Pattern::Path(PathPattern {
+                },
+                Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
+                    base: Some(Box::new(base_expr)),
+                    type_name,
+                    variant,
+                    fields,
+                    span: span_from_extra(e),
+                },
+                None => Pattern::Path(PathPattern {
                     base: Some(Box::new(base_expr)),
                     type_name,
                     variant,
                     span: span_from_extra(e),
-                })
+                }),
             }
         });
 
