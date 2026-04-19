@@ -1416,3 +1416,287 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# =============================================================================
+# Anonymous Enum Types (ADR-0039)
+# =============================================================================
+
+[[case]]
+name = "anon_enum_basic"
+spec = ["4.14:30"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn Option(comptime T: type) -> type {
+    enum {
+        Some(T),
+        None,
+    }
+}
+
+fn main() -> i32 {
+    let Opt = Option(i32);
+    let x = Opt::Some(42);
+    match x {
+        Opt::Some(v) => v,
+        Opt::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_enum_unit_variant"
+spec = ["4.14:30"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn Option(comptime T: type) -> type {
+    enum {
+        Some(T),
+        None,
+    }
+}
+
+fn main() -> i32 {
+    let Opt = Option(i32);
+    let x = Opt::None;
+    match x {
+        Opt::Some(v) => v,
+        Opt::None => 99,
+    }
+}
+"""
+exit_code = 99
+
+[[case]]
+name = "anon_enum_multiple_data_variants"
+spec = ["4.14:30"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn Either(comptime L: type, comptime R: type) -> type {
+    enum {
+        Left(L),
+        Right(R),
+    }
+}
+
+fn main() -> i32 {
+    let E = Either(i32, i32);
+    let a = E::Left(10);
+    let b = E::Right(32);
+    let x = match a {
+        E::Left(v) => v,
+        E::Right(v) => v,
+    };
+    let y = match b {
+        E::Left(v) => v,
+        E::Right(v) => v,
+    };
+    x + y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_enum_structural_equality"
+spec = ["4.14:31"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn MakeOpt1(comptime T: type) -> type {
+    enum { Some(T), None }
+}
+
+fn MakeOpt2(comptime T: type) -> type {
+    enum { Some(T), None }
+}
+
+fn main() -> i32 {
+    let A = MakeOpt1(i32);
+    let B = MakeOpt2(i32);
+    let x: A = A::Some(42);
+    let y: B = x;
+    match y {
+        B::Some(v) => v,
+        B::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_enum_empty_error"
+spec = ["4.14:32"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn Empty() -> type {
+    enum { }
+}
+
+fn main() -> i32 {
+    let E = Empty();
+    0
+}
+"""
+compile_fail = true
+error_contains = "must have at least one variant"
+
+[[case]]
+name = "anon_enum_method_self_match"
+spec = ["4.14:33"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn Option(comptime T: type) -> type {
+    enum {
+        Some(T),
+        None,
+
+        fn unwrap_or(self, default: T) -> T {
+            match self {
+                Self::Some(v) => v,
+                Self::None => default,
+            }
+        }
+    }
+}
+
+fn main() -> i32 {
+    let Opt = Option(i32);
+    let a = Opt::Some(42);
+    let b = Opt::None;
+    a.unwrap_or(0) + b.unwrap_or(10)
+}
+"""
+exit_code = 52
+
+[[case]]
+name = "anon_enum_static_method"
+spec = ["4.14:33"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn Option(comptime T: type) -> type {
+    enum {
+        Some(T),
+        None,
+
+        fn none() -> Self {
+            Self::None
+        }
+
+        fn some(val: T) -> Self {
+            Self::Some(val)
+        }
+    }
+}
+
+fn main() -> i32 {
+    let Opt = Option(i32);
+    let a = Opt::some(42);
+    let b = Opt::none();
+    match a {
+        Opt::Some(v) => match b {
+            Opt::Some(_) => 0,
+            Opt::None => v,
+        },
+        Opt::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_enum_comptime_param_capture"
+spec = ["4.14:34"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn Capped(comptime max: i32) -> type {
+    enum {
+        Value(i32),
+        Overflow,
+
+        fn new(val: i32) -> Self {
+            if val > max {
+                Self::Overflow
+            } else {
+                Self::Value(val)
+            }
+        }
+
+        fn get_or(self, default: i32) -> i32 {
+            match self {
+                Self::Value(v) => v,
+                Self::Overflow => default,
+            }
+        }
+    }
+}
+
+fn main() -> i32 {
+    let C = Capped(50);
+    let a = C::new(42);
+    let b = C::new(100);
+    a.get_or(0) + b.get_or(0)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_enum_is_some_method"
+spec = ["4.14:33"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn Option(comptime T: type) -> type {
+    enum {
+        Some(T),
+        None,
+
+        fn is_some(self) -> bool {
+            match self {
+                Self::Some(_) => true,
+                Self::None => false,
+            }
+        }
+    }
+}
+
+fn main() -> i32 {
+    let Opt = Option(i32);
+    let a = Opt::Some(42);
+    let b = Opt::None;
+    let x: i32 = if a.is_some() { 30 } else { 0 };
+    let y: i32 = if b.is_some() { 0 } else { 12 };
+    x + y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_enum_duplicate_method_error"
+spec = ["4.14:35"]
+preview = "anon_enum_types"
+preview_should_pass = true
+source = """
+fn Bad() -> type {
+    enum {
+        A,
+        B,
+
+        fn foo(self) -> i32 { 1 }
+        fn foo(self) -> i32 { 2 }
+    }
+}
+
+fn main() -> i32 {
+    let B = Bad();
+    0
+}
+"""
+compile_fail = true
+error_contains = "duplicate method"

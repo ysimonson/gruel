@@ -193,7 +193,7 @@ It is a compile-time error to define an anonymous enum with zero variants.
 
 - [x] **Phase 3: Sema (comptime path)** — Handle `AnonEnumType` in `try_evaluate_const_with_subst()` with type/value substitution. Support comptime type parameters in variant fields. Register methods with `Self` resolution (similar to `register_anon_struct_methods_for_comptime_with_subst`).
 
-- [ ] **Phase 4: Spec and tests** — Add spec section 4.14 paragraphs for anonymous enum types. Add spec tests covering: basic construction, pattern matching, structural equality, methods, comptime parameterization, `Self` usage, error cases (empty enum, duplicate variants). Ensure traceability.
+- [x] **Phase 4: Spec and tests** — Add spec section 4.14 paragraphs for anonymous enum types. Add spec tests covering: basic construction, pattern matching, structural equality, methods, comptime parameterization, `Self` usage, error cases (empty enum, duplicate variants). Ensure traceability.
 
 - [ ] **Phase 5: Stabilization** — Remove preview gate. Remove `preview` field from spec tests. Update ADR status.
 

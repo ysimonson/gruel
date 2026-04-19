@@ -1636,40 +1636,85 @@ impl<'a> Sema<'a> {
                 return Ok(AnalysisResult::new(air_ref, ty));
             }
 
-            // Look up the variable in locals
-            let name_str = self.interner.resolve(name);
-            let local = ctx.locals.get(name).ok_or_compile_error(
-                ErrorKind::UndefinedVariable(name_str.to_string()),
-                inst.span,
-            )?;
+            // Check if it's a local variable
+            if let Some(local) = ctx.locals.get(name) {
+                let ty = local.ty;
+                let slot = local.slot;
 
-            let ty = local.ty;
-            let slot = local.slot;
+                // Check if this variable has been fully moved
+                // (Partial moves are checked at the FieldGet level)
+                if let Some(move_state) = ctx.moved_vars.get(name)
+                    && let Some(moved_span) = move_state.full_move
+                {
+                    let name_str = self.interner.resolve(name);
+                    return Err(CompileError::new(
+                        ErrorKind::UseAfterMove(name_str.to_string()),
+                        inst.span,
+                    )
+                    .with_label("value moved here", moved_span));
+                }
 
-            // Check if this variable has been fully moved
-            // (Partial moves are checked at the FieldGet level)
-            if let Some(move_state) = ctx.moved_vars.get(name)
-                && let Some(moved_span) = move_state.full_move
-            {
-                return Err(CompileError::new(
-                    ErrorKind::UseAfterMove(name_str.to_string()),
-                    inst.span,
-                )
-                .with_label("value moved here", moved_span));
+                // NOTE: We do NOT mark as moved here - this is a projection
+
+                // Mark variable as used
+                ctx.used_locals.insert(*name);
+
+                // Load the variable
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Load { slot },
+                    ty,
+                    span: inst.span,
+                });
+                return Ok(AnalysisResult::new(air_ref, ty));
             }
 
-            // NOTE: We do NOT mark as moved here - this is a projection
+            // Check if it's a comptime type variable (e.g., `let P = Point();`)
+            if let Some(&ty) = ctx.comptime_type_vars.get(name) {
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::TypeConst(ty),
+                    ty: Type::COMPTIME_TYPE,
+                    span: inst.span,
+                });
+                return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
+            }
 
-            // Mark variable as used
-            ctx.used_locals.insert(*name);
+            // Check if it's a comptime value variable (e.g., captured `comptime N: i32`)
+            if let Some(const_value) = ctx.comptime_value_vars.get(name) {
+                match const_value {
+                    ConstValue::Integer(val) => {
+                        let air_ref = air.add_inst(AirInst {
+                            data: AirInstData::Const(*val as u64),
+                            ty: Type::I32,
+                            span: inst.span,
+                        });
+                        return Ok(AnalysisResult::new(air_ref, Type::I32));
+                    }
+                    ConstValue::Bool(val) => {
+                        let air_ref = air.add_inst(AirInst {
+                            data: AirInstData::Const(*val as u64),
+                            ty: Type::BOOL,
+                            span: inst.span,
+                        });
+                        return Ok(AnalysisResult::new(air_ref, Type::BOOL));
+                    }
+                    ConstValue::Type(ty) => {
+                        let air_ref = air.add_inst(AirInst {
+                            data: AirInstData::TypeConst(*ty),
+                            ty: Type::COMPTIME_TYPE,
+                            span: inst.span,
+                        });
+                        return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
+                    }
+                    _ => {}
+                }
+            }
 
-            // Load the variable
-            let air_ref = air.add_inst(AirInst {
-                data: AirInstData::Load { slot },
-                ty,
-                span: inst.span,
-            });
-            return Ok(AnalysisResult::new(air_ref, ty));
+            // Not found
+            let name_str = self.interner.resolve(name);
+            return Err(CompileError::new(
+                ErrorKind::UndefinedVariable(name_str.to_string()),
+                inst.span,
+            ));
         }
 
         // For nested field access (e.g., a.b.c), recursively use projection mode
@@ -2155,6 +2200,33 @@ impl<'a> Sema<'a> {
                         fields,
                         field_names,
                     });
+                }
+
+                // Check for duplicate method names
+                if *methods_len > 0 {
+                    let method_refs =
+                        self.rir.get_inst_refs(*methods_start, *methods_len);
+                    let mut seen_method_names: std::collections::HashSet<Spur> =
+                        std::collections::HashSet::new();
+                    for mref in method_refs {
+                        let minst = self.rir.get(mref);
+                        if let InstData::FnDecl {
+                            name: method_name, ..
+                        } = &minst.data
+                        {
+                            if !seen_method_names.insert(*method_name) {
+                                let method_name_str =
+                                    self.interner.resolve(method_name).to_string();
+                                return Err(CompileError::new(
+                                    ErrorKind::DuplicateMethod {
+                                        type_name: "anonymous enum".to_string(),
+                                        method_name: method_name_str,
+                                    },
+                                    minst.span,
+                                ));
+                            }
+                        }
+                    }
                 }
 
                 // Extract method signatures for structural equality comparison

@@ -298,6 +298,77 @@ fn C() -> type {
 }
 ```
 
+## Anonymous Enum Types
+
+{{ rule(id="4.14:30", cat="normative") }}
+
+A comptime function that returns `type` can construct an anonymous enum type using the following syntax:
+
+```ebnf
+anon_enum_type = "enum" "{" enum_variant { "," enum_variant } [ method_def { method_def } ] "}" ;
+enum_variant = IDENT [ "(" type { "," type } ")" ] [ "{" struct_field { "," struct_field } "}" ] ;
+```
+
+Anonymous enums support unit variants, tuple variants, and struct variants, matching the same variant forms as named enums.
+
+```gruel
+fn Option(comptime T: type) -> type {
+    enum {
+        Some(T),
+        None,
+    }
+}
+
+fn main() -> i32 {
+    let Opt = Option(i32);
+    let x = Opt::Some(42);
+    match x {
+        Opt::Some(v) => v,
+        Opt::None => 0,
+    }
+}
+```
+
+{{ rule(id="4.14:31", cat="normative") }}
+
+Two anonymous enum types are structurally equal if and only if they have the same variant names in the same order with the same field types, and the same method signatures.
+
+{{ rule(id="4.14:32", cat="legality-rule") }}
+
+It is a compile-time error to define an anonymous enum type with no variants.
+
+{{ rule(id="4.14:33", cat="normative") }}
+
+An anonymous enum type can include method definitions. Inside these methods, `Self` refers to the anonymous enum type being defined. `Self` can be used in type annotations, return types, and in variant construction and pattern matching using the `Self::Variant` syntax.
+
+```gruel
+fn Option(comptime T: type) -> type {
+    enum {
+        Some(T),
+        None,
+
+        fn unwrap_or(self, default: T) -> T {
+            match self {
+                Self::Some(v) => v,
+                Self::None => default,
+            }
+        }
+
+        fn none() -> Self {
+            Self::None
+        }
+    }
+}
+```
+
+{{ rule(id="4.14:34", cat="normative") }}
+
+Methods inside anonymous enums can access comptime parameters from the enclosing function, just like anonymous struct methods.
+
+{{ rule(id="4.14:35", cat="legality-rule") }}
+
+It is a compile-time error to define two methods with the same name in an anonymous enum type.
+
 ## Comptime Blocks with Local State
 
 {{ rule(id="4.14:16", cat="normative") }}
