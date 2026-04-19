@@ -36,6 +36,7 @@ fmt:
 # Check formatting without making changes (for CI).
 check:
 	cargo check --workspace --all-targets --exclude gruel-runtime
+	cargo check --manifest-path fuzz/Cargo.toml --all-targets
 	cargo clippy --workspace --all-targets --exclude gruel-runtime
 	cargo fmt --all -- --check
 
