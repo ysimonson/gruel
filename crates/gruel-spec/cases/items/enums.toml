@@ -535,14 +535,12 @@ fn main() -> i32 {
 exit_code = 42
 
 # =============================================================================
-# Struct Variants (Preview: enum_struct_variants)
+# Struct Variants
 # =============================================================================
 
 [[case]]
 name = "enum_struct_variant_declaration_basic"
 spec = ["6.3:21"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -557,8 +555,6 @@ exit_code = 0
 [[case]]
 name = "enum_struct_variant_multi_field"
 spec = ["6.3:21"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Rectangle { width: i32, height: i32 },
@@ -573,8 +569,6 @@ exit_code = 0
 [[case]]
 name = "enum_struct_variant_mixed_kinds"
 spec = ["6.3:21"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Message {
     Quit,
@@ -590,8 +584,6 @@ exit_code = 0
 [[case]]
 name = "enum_struct_variant_duplicate_field_error"
 spec = ["6.3:22"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Bad {
     Variant { x: i32, x: i32 },
@@ -604,8 +596,6 @@ error_contains = "duplicate"
 [[case]]
 name = "enum_struct_variant_trailing_comma"
 spec = ["6.3:21"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32, },
@@ -620,7 +610,6 @@ exit_code = 0
 [[case]]
 name = "enum_struct_variant_same_layout_as_tuple"
 spec = ["6.3:23"]
-preview = "enum_struct_variants"
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -632,28 +621,13 @@ fn main() -> i32 {
 """
 exit_code = 0
 
-[[case]]
-name = "enum_struct_variant_requires_preview"
-spec = ["6.3:21"]
-source = """
-enum Shape {
-    Circle { radius: i32 },
-    Point,
-}
-fn main() -> i32 { 0 }
-"""
-compile_fail = true
-error_contains = "preview"
-
 # =============================================================================
-# Struct Variant Construction (Preview: enum_struct_variants)
+# Struct Variant Construction
 # =============================================================================
 
 [[case]]
 name = "enum_struct_variant_construct_basic"
 spec = ["6.3:25"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -669,8 +643,6 @@ exit_code = 0
 [[case]]
 name = "enum_struct_variant_construct_multi_field"
 spec = ["6.3:25"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Rectangle { width: i32, height: i32 },
@@ -686,8 +658,6 @@ exit_code = 0
 [[case]]
 name = "enum_struct_variant_construct_any_order"
 spec = ["6.3:25"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Rectangle { width: i32, height: i32 },
@@ -703,8 +673,6 @@ exit_code = 0
 [[case]]
 name = "enum_struct_variant_construct_shorthand"
 spec = ["6.3:25"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -721,8 +689,6 @@ exit_code = 0
 [[case]]
 name = "enum_struct_variant_construct_and_match"
 spec = ["6.3:25"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -741,8 +707,6 @@ exit_code = 42
 [[case]]
 name = "enum_struct_variant_construct_missing_field_error"
 spec = ["6.3:25"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Rectangle { width: i32, height: i32 },
@@ -759,8 +723,6 @@ error_contains = "missing"
 [[case]]
 name = "enum_struct_variant_construct_unknown_field_error"
 spec = ["6.3:25"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -777,8 +739,6 @@ error_contains = "unknown"
 [[case]]
 name = "enum_struct_variant_construct_duplicate_field_error"
 spec = ["6.3:25"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -795,8 +755,6 @@ error_contains = "duplicate"
 [[case]]
 name = "enum_struct_variant_tuple_syntax_on_struct_error"
 spec = ["6.3:26"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -813,8 +771,6 @@ error_contains = "struct-style"
 [[case]]
 name = "enum_struct_variant_struct_syntax_on_tuple_error"
 spec = ["6.3:26"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -828,8 +784,6 @@ error_contains = "tuple-style"
 [[case]]
 name = "enum_struct_variant_type_mismatch_error"
 spec = ["6.3:25"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -850,8 +804,6 @@ error_contains = "type mismatch"
 [[case]]
 name = "enum_struct_variant_pattern_basic"
 spec = ["6.3:28"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Wrap {
     Value { inner: i32 },
@@ -870,8 +822,6 @@ exit_code = 42
 [[case]]
 name = "enum_struct_variant_pattern_multi_field"
 spec = ["6.3:28"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Rectangle { width: i32, height: i32 },
@@ -888,8 +838,6 @@ exit_code = 21
 [[case]]
 name = "enum_struct_variant_pattern_any_order"
 spec = ["6.3:28"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Rectangle { width: i32, height: i32 },
@@ -906,8 +854,6 @@ exit_code = 4
 [[case]]
 name = "enum_struct_variant_pattern_rebind"
 spec = ["6.3:28"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -924,8 +870,6 @@ exit_code = 5
 [[case]]
 name = "enum_struct_variant_pattern_wildcard_field"
 spec = ["6.3:28"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Rectangle { width: i32, height: i32 },
@@ -942,8 +886,6 @@ exit_code = 7
 [[case]]
 name = "enum_struct_variant_pattern_mixed_kinds"
 spec = ["6.3:28", "6.3:30"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -967,8 +909,6 @@ exit_code = 21
 [[case]]
 name = "enum_struct_variant_pattern_struct_on_tuple_error"
 spec = ["6.3:29"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum IntOption { Some(i32), None }
 fn main() -> i32 {
@@ -985,8 +925,6 @@ error_contains = "tuple-style"
 [[case]]
 name = "enum_struct_variant_pattern_unknown_field_error"
 spec = ["6.3:28"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -1004,8 +942,6 @@ error_contains = "unknown field"
 [[case]]
 name = "enum_struct_variant_pattern_missing_field_error"
 spec = ["6.3:28"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Rectangle { width: i32, height: i32 },
@@ -1023,8 +959,6 @@ error_contains = "missing field"
 [[case]]
 name = "enum_struct_variant_pattern_duplicate_field_error"
 spec = ["6.3:28"]
-preview = "enum_struct_variants"
-preview_should_pass = true
 source = """
 enum Shape {
     Circle { radius: i32 },
@@ -1039,19 +973,3 @@ fn main() -> i32 {
 compile_fail = true
 error_contains = "duplicate field"
 
-[[case]]
-name = "enum_struct_variant_pattern_requires_preview"
-spec = ["6.3:21"]
-source = """
-enum Shape {
-    Circle { radius: i32 },
-}
-fn main() -> i32 {
-    let s = Shape::Circle { radius: 5 };
-    match s {
-        Shape::Circle { radius } => radius,
-    }
-}
-"""
-compile_fail = true
-error_contains = "preview"

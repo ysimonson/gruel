@@ -1,12 +1,12 @@
 ---
 id: 0038
 title: Enum Struct Variants (Named-Field Enum Variants)
-status: proposal
+status: implemented
 tags: [types, syntax, pattern-matching, enums]
 feature-flag: enum_struct_variants
 created: 2026-04-18
-accepted:
-implemented:
+accepted: 2026-04-18
+implemented: 2026-04-18
 spec-sections: ["6.3"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -339,7 +339,7 @@ The last two catch attempts to use the wrong construction syntax for a variant's
   - All fields must be listed (no `..`)
   - Codegen: reuse `EnumPayloadGet` with resolved field indices
 
-- [ ] **Phase 4: Spec, tests, and stabilization**
+- [x] **Phase 4: Spec, tests, and stabilization**
   - Update spec section 6.3 with struct variant rules
   - Update grammar appendix
   - Add comprehensive spec tests with traceability

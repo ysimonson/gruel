@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
-    PreviewFeature, WarningKind,
+    WarningKind,
 };
 use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern, RirPatternBinding,
@@ -1052,13 +1052,6 @@ impl<'a> Sema<'a> {
                     field_bindings,
                     ..
                 } => {
-                    // Gate behind preview feature
-                    self.require_preview(
-                        PreviewFeature::EnumStructVariants,
-                        "enum struct variant patterns",
-                        pattern_span,
-                    )?;
-
                     // Look up the enum type
                     let enum_id = if let Some(module_ref) = module {
                         self.resolve_enum_through_module(*module_ref, *type_name, pattern_span)?
@@ -3219,13 +3212,6 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        // Gate behind preview feature
-        self.require_preview(
-            PreviewFeature::EnumStructVariants,
-            "enum struct variants",
-            span,
-        )?;
-
         // Look up the enum type
         let enum_id = if let Some(module_ref) = module {
             self.resolve_enum_through_module(module_ref, type_name, span)?

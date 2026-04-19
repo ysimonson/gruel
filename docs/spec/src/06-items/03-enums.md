@@ -13,8 +13,11 @@ An enum is defined using the `enum` keyword.
 {{ rule(id="6.3:2", cat="normative") }}
 
 ```ebnf
-enum_def = "enum" IDENT "{" [ enum_variants ] "}" ;
-enum_variants = IDENT { "," IDENT } [ "," ] ;
+enum_def       = "enum" IDENT "{" [ enum_variants ] "}" ;
+enum_variants  = enum_variant { "," enum_variant } [ "," ] ;
+enum_variant   = IDENT [ variant_fields ] ;
+variant_fields = "(" type_list ")"
+               | "{" struct_variant_fields "}" ;
 ```
 
 ## Enum Definition
@@ -104,8 +107,7 @@ fn get_value(c: Color) -> i32 {
 {{ rule(id="6.3:13", cat="normative") }}
 
 Enum variants may optionally carry tuple-style associated data, declared as a
-parenthesized list of types after the variant name. This feature requires the
-`enum_data_variants` preview feature (`--preview enum_data_variants`).
+parenthesized list of types after the variant name.
 
 ```ebnf
 enum_variant = IDENT [ "(" type_list ")" ] ;
@@ -196,9 +198,7 @@ stores, which are correct on all supported targets.
 {{ rule(id="6.3:21", cat="normative") }}
 
 Enum variants may carry struct-style associated data with named fields, declared
-as a brace-enclosed list of `name: type` pairs after the variant name. This
-feature requires the `enum_struct_variants` preview feature
-(`--preview enum_struct_variants`).
+as a brace-enclosed list of `name: type` pairs after the variant name.
 
 ```ebnf
 enum_variant        = IDENT [ variant_fields ] ;

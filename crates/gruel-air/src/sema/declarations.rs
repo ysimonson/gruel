@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 use gruel_builtins::is_reserved_type_name;
 use gruel_error::{
-    CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, PreviewFeature, ice,
+    CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice,
 };
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_span::Span;
@@ -180,14 +180,7 @@ impl<'a> Sema<'a> {
                             ));
                         }
 
-                        // Gate struct variants behind preview feature
                         if !field_names.is_empty() {
-                            self.require_preview(
-                                PreviewFeature::EnumStructVariants,
-                                "enum struct variants",
-                                inst.span,
-                            )?;
-
                             // Check for duplicate field names within the struct variant
                             let variant_str = self.interner.resolve(variant_name).to_string();
                             let mut seen_fields: HashSet<Spur> = HashSet::new();

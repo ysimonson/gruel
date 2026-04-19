@@ -35,7 +35,13 @@ struct_field   = IDENT ":" type ;
 
 (* Enums *)
 enum_def       = "enum" IDENT "{" [ enum_variants ] "}" ;
-enum_variants  = IDENT { "," IDENT } [ "," ] ;
+enum_variants  = enum_variant { "," enum_variant } [ "," ] ;
+enum_variant   = IDENT [ variant_fields ] ;
+variant_fields = "(" type_list ")"
+               | "{" struct_variant_fields "}" ;
+type_list      = type { "," type } ;
+struct_variant_fields = struct_variant_field { "," struct_variant_field } [ "," ] ;
+struct_variant_field  = IDENT ":" type ;
 
 (* Impl blocks *)
 impl_block     = "impl" IDENT "{" { method } "}" ;
@@ -86,7 +92,7 @@ primary        = INTEGER | BOOL | IDENT | enum_variant_expr
                | array_literal
                | struct_literal
                | intrinsic ;
-enum_variant_expr = IDENT "::" IDENT ;
+enum_variant_expr = IDENT "::" IDENT [ "(" [ args ] ")" | "{" [ field_inits ] "}" ] ;
 
 (* Compound expressions *)
 block_expr     = "{" block "}" ;
@@ -95,14 +101,20 @@ else_clause    = "else" ( "{" block "}" | if_expr ) ;
 match_expr     = "match" expression "{" { match_arm "," } [ match_arm ] "}" ;
 match_arm      = pattern "=>" expression ;
 pattern        = "_" | INTEGER | BOOL | enum_variant_pattern ;
-enum_variant_pattern = IDENT "::" IDENT ;
+enum_variant_pattern = IDENT "::" IDENT [ "(" [ bindings ] ")" | "{" [ field_patterns ] "}" ] ;
+bindings       = binding { "," binding } ;
+binding        = "_" | [ "mut" ] IDENT ;
+field_patterns = field_pattern { "," field_pattern } [ "," ] ;
+field_pattern  = IDENT ":" binding
+               | IDENT ;
 while_expr     = "while" expression "{" block "}" ;
 loop_expr      = "loop" "{" block "}" ;
 return_expr    = "return" expression ;
 array_literal  = "[" [ expression { "," expression } ] "]" ;
 struct_literal = IDENT "{" [ field_inits ] "}" ;
 field_inits    = field_init { "," field_init } [ "," ] ;
-field_init     = IDENT ":" expression ;
+field_init     = IDENT ":" expression
+               | IDENT ;
 
 (* Lexical elements *)
 IDENT          = ( letter | "_" ) { letter | digit | "_" } ;
