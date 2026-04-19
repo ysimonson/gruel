@@ -823,6 +823,42 @@ where
         struct_bindings_suffix.clone().map(PatternSuffix::Struct),
     ));
 
+    // Self path pattern: Self::Variant, Self::Variant(binding, ...), or Self::Variant { field: binding, ... }
+    // Used inside anonymous enum methods to match on the enum type via Self
+    let self_path_pat = just(TokenKind::SelfType)
+        .ignore_then(just(TokenKind::ColonColon))
+        .ignore_then(ident_parser())
+        .then(pattern_suffix.clone().or_not())
+        .map_with(|(variant, suffix_opt), e| {
+            let span = span_from_extra(e);
+            let type_name = Ident {
+                name: e.state().syms.self_type,
+                span,
+            };
+            match suffix_opt {
+                Some(PatternSuffix::Tuple(bindings)) => Pattern::DataVariant {
+                    base: None,
+                    type_name,
+                    variant,
+                    bindings,
+                    span,
+                },
+                Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
+                    base: None,
+                    type_name,
+                    variant,
+                    fields,
+                    span,
+                },
+                None => Pattern::Path(PathPattern {
+                    base: None,
+                    type_name,
+                    variant,
+                    span,
+                }),
+            }
+        });
+
     // Simple path pattern: Enum::Variant, Enum::Variant(binding, ...), or Enum::Variant { field: binding, ... }
     let simple_path_pat = ident_parser()
         .then_ignore(just(TokenKind::ColonColon))
@@ -919,8 +955,9 @@ where
         int_pat.boxed(),
         bool_true.boxed(),
         bool_false.boxed(),
-        // Try qualified path first (has more structure), then simple path
+        // Try qualified path first (has more structure), then Self path, then simple path
         qualified_path_pat.boxed(),
+        self_path_pat.boxed(),
         simple_path_pat.boxed(),
     ))
     .boxed()
@@ -1711,6 +1748,68 @@ where
             })
         });
 
+    // Self::Variant(args) — associated function call on Self (for anonymous enum variant construction)
+    let self_assoc_fn_call = just(TokenKind::SelfType)
+        .ignore_then(just(TokenKind::ColonColon))
+        .ignore_then(ident_parser())
+        .then(
+            call_args_parser(expr.clone())
+                .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)),
+        )
+        .map_with(|(function, args), e| {
+            let span = span_from_extra(e);
+            Expr::AssocFnCall(AssocFnCallExpr {
+                base: None,
+                type_name: Ident {
+                    name: e.state().syms.self_type,
+                    span,
+                },
+                function,
+                args,
+                span,
+            })
+        });
+
+    // Self::Variant { field: value, ... } — struct variant construction on Self
+    let self_enum_struct_lit = just(TokenKind::SelfType)
+        .ignore_then(just(TokenKind::ColonColon))
+        .ignore_then(ident_parser())
+        .then(
+            field_inits_parser(expr.clone())
+                .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
+        )
+        .map_with(|(variant, fields), e| {
+            let span = span_from_extra(e);
+            Expr::EnumStructLit(EnumStructLitExpr {
+                base: None,
+                type_name: Ident {
+                    name: e.state().syms.self_type,
+                    span,
+                },
+                variant,
+                fields,
+                span,
+            })
+        });
+
+    // Self::Variant — unit variant on Self (for anonymous enum variant construction)
+    let self_enum_variant = just(TokenKind::SelfType)
+        .ignore_then(just(TokenKind::ColonColon))
+        .ignore_then(ident_parser())
+        .then_ignore(none_of([TokenKind::LParen, TokenKind::LBrace]).rewind())
+        .map_with(|variant, e| {
+            let span = span_from_extra(e);
+            Expr::Path(PathExpr {
+                base: None,
+                type_name: Ident {
+                    name: e.state().syms.self_type,
+                    span,
+                },
+                variant,
+                span,
+            })
+        });
+
     // Primary expression (before field access and indexing)
     // Note: literal_parser() includes unit_lit which must come before paren_expr
     // so () is parsed as unit, not empty parens
@@ -1726,6 +1825,9 @@ where
         literal_parser(),
         control_flow_parser(expr.clone()),
         self_expr.boxed(),
+        self_assoc_fn_call.boxed(),
+        self_enum_struct_lit.boxed(),
+        self_enum_variant.boxed(),
         self_type_expr.boxed(),
         any_intrinsic_call.boxed(),
     ))

@@ -191,7 +191,7 @@ It is a compile-time error to define an anonymous enum with zero variants.
 
 - [x] **Phase 2: Sema (non-comptime path)** — Handle `AnonEnumType` in `analysis.rs` for direct anonymous enum type expressions (no comptime substitution). Implement `find_or_create_anon_enum()` in a new `anon_enums.rs` module with structural equality. Register anonymous enum in the type pool. Variant construction and pattern matching reuse existing named-enum code paths since the anonymous enum gets a real `EnumId`.
 
-- [ ] **Phase 3: Sema (comptime path)** — Handle `AnonEnumType` in `try_evaluate_const_with_subst()` with type/value substitution. Support comptime type parameters in variant fields. Register methods with `Self` resolution (similar to `register_anon_struct_methods_for_comptime_with_subst`).
+- [x] **Phase 3: Sema (comptime path)** — Handle `AnonEnumType` in `try_evaluate_const_with_subst()` with type/value substitution. Support comptime type parameters in variant fields. Register methods with `Self` resolution (similar to `register_anon_struct_methods_for_comptime_with_subst`).
 
 - [ ] **Phase 4: Spec and tests** — Add spec section 4.14 paragraphs for anonymous enum types. Add spec tests covering: basic construction, pattern matching, structural equality, methods, comptime parameterization, `Self` usage, error cases (empty enum, duplicate variants). Ensure traceability.
 

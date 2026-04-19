@@ -11,7 +11,7 @@ use super::types::{InferType, TypeVarAllocator, TypeVarId};
 use crate::Type;
 use crate::intern_pool::TypeInternPool;
 use crate::scope::ScopedContext;
-use crate::types::{PtrMutability, StructId, parse_array_type_syntax, parse_pointer_type_syntax};
+use crate::types::{EnumId, PtrMutability, StructId, parse_array_type_syntax, parse_pointer_type_syntax};
 use gruel_rir::{InstData, InstRef, Rir};
 use gruel_span::Span;
 use lasso::{Spur, ThreadedRodeo};
@@ -155,6 +155,8 @@ pub struct ConstraintGenerator<'a> {
     enums: &'a HashMap<Spur, Type>,
     /// Method signatures: (struct_id, method_name) -> MethodSig
     methods: &'a HashMap<(StructId, Spur), MethodSig>,
+    /// Enum method signatures: (enum_id, method_name) -> MethodSig
+    enum_methods: &'a HashMap<(EnumId, Spur), MethodSig>,
     /// Type variables allocated for integer literals.
     /// These start as unbound and need to be defaulted to i32 if unconstrained.
     int_literal_vars: Vec<TypeVarId>,
@@ -174,6 +176,7 @@ impl<'a> ConstraintGenerator<'a> {
         structs: &'a HashMap<Spur, Type>,
         enums: &'a HashMap<Spur, Type>,
         methods: &'a HashMap<(StructId, Spur), MethodSig>,
+        enum_methods: &'a HashMap<(EnumId, Spur), MethodSig>,
         type_pool: &'a TypeInternPool,
     ) -> Self {
         Self {
@@ -186,6 +189,7 @@ impl<'a> ConstraintGenerator<'a> {
             structs,
             enums,
             methods,
+            enum_methods,
             int_literal_vars: Vec::new(),
             type_subst: None,
             type_pool,
@@ -1270,26 +1274,49 @@ impl<'a> ConstraintGenerator<'a> {
                             }
                             method_sig.return_type.clone()
                         } else {
-                            // Method not found - sema will report the error
-                            // Still generate arg types to catch errors in arguments
+                            // Method not found in pre-built context - may be an anonymous
+                            // struct method registered during comptime evaluation.
+                            // Use a fresh type variable so inference doesn't poison
+                            // surrounding expressions with ERROR.
                             for arg in args.iter() {
                                 self.generate(arg.value, ctx);
                             }
-                            InferType::Concrete(Type::ERROR)
+                            InferType::Var(self.fresh_var())
+                        }
+                    } else if let Some(enum_id) = ty.as_enum() {
+                        // Enum receiver - check enum_methods
+                        let method_key = (enum_id, *method);
+                        if let Some(method_sig) = self.enum_methods.get(&method_key) {
+                            for (arg, param_type) in args.iter().zip(method_sig.param_types.iter())
+                            {
+                                let arg_info = self.generate(arg.value, ctx);
+                                self.add_constraint(Constraint::equal(
+                                    arg_info.ty,
+                                    param_type.clone(),
+                                    arg_info.span,
+                                ));
+                            }
+                            method_sig.return_type.clone()
+                        } else {
+                            // Enum method not found - use fresh var, sema reports error
+                            for arg in args.iter() {
+                                self.generate(arg.value, ctx);
+                            }
+                            InferType::Var(self.fresh_var())
                         }
                     } else {
-                        // Non-struct receiver - sema will report the error
+                        // Non-struct/non-enum receiver - sema will report the error
                         for arg in args.iter() {
                             self.generate(arg.value, ctx);
                         }
                         InferType::Concrete(Type::ERROR)
                     }
                 } else {
-                    // Non-concrete type - generate args and return error
+                    // Non-concrete receiver type - use fresh var, sema resolves it
                     for arg in args.iter() {
                         self.generate(arg.value, ctx);
                     }
-                    InferType::Concrete(Type::ERROR)
+                    InferType::Var(self.fresh_var())
                 }
             }
 
@@ -1318,19 +1345,20 @@ impl<'a> ConstraintGenerator<'a> {
                         }
                         method_sig.return_type.clone()
                     } else {
-                        // Method not found - sema will report the error
-                        // Still generate arg types to catch errors in arguments
+                        // Method not found - may be an anonymous struct method
+                        // registered during comptime. Use fresh var to avoid ERROR poison.
                         for arg in args.iter() {
                             self.generate(arg.value, ctx);
                         }
-                        InferType::Concrete(Type::ERROR)
+                        InferType::Var(self.fresh_var())
                     }
                 } else {
-                    // Type not found - sema will report the error
+                    // Type not found in pre-built context - may be a comptime type var.
+                    // Use fresh var so inference doesn't poison surrounding expressions.
                     for arg in args.iter() {
                         self.generate(arg.value, ctx);
                     }
-                    InferType::Concrete(Type::ERROR)
+                    InferType::Var(self.fresh_var())
                 }
             }
 
@@ -1525,6 +1553,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Add an integer constant to RIR
         let inst_ref = rir.add_inst(gruel_rir::Inst {
@@ -1533,7 +1562,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1555,6 +1584,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         let inst_ref = rir.add_inst(gruel_rir::Inst {
             data: InstData::BoolConst(true),
@@ -1562,7 +1592,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
@@ -1580,6 +1610,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: 1 + 2
         let lhs = rir.add_inst(gruel_rir::Inst {
@@ -1596,7 +1627,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1621,6 +1652,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: 1 < 2
         let lhs = rir.add_inst(gruel_rir::Inst {
@@ -1637,7 +1669,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
@@ -1657,6 +1689,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: true && false
         let lhs = rir.add_inst(gruel_rir::Inst {
@@ -1673,7 +1706,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
@@ -1693,6 +1726,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: -42
         let operand = rir.add_inst(gruel_rir::Inst {
@@ -1705,7 +1739,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1730,6 +1764,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: return 42
         let value = rir.add_inst(gruel_rir::Inst {
@@ -1742,7 +1777,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1762,6 +1797,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: if true { 1 } else { 2 }
         let cond = rir.add_inst(gruel_rir::Inst {
@@ -1786,7 +1822,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1806,6 +1842,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: while true { 0 }
         let cond = rir.add_inst(gruel_rir::Inst {
@@ -1822,7 +1859,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -1918,6 +1955,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: loop { 0 }
         let body = rir.add_inst(gruel_rir::Inst {
@@ -1930,7 +1968,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -1950,6 +1988,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         let break_inst = rir.add_inst(gruel_rir::Inst {
             data: InstData::Break,
@@ -1957,7 +1996,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -1976,6 +2015,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: arr[0]
         let base = rir.add_inst(gruel_rir::Inst {
@@ -1992,7 +2032,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -2016,6 +2056,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: arr[0] = 42
         let base = rir.add_inst(gruel_rir::Inst {
@@ -2036,7 +2077,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -2060,6 +2101,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: { } (empty block)
         let block = rir.add_inst(gruel_rir::Inst {
@@ -2071,7 +2113,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -2090,6 +2132,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: !42 (bitwise NOT)
         let operand = rir.add_inst(gruel_rir::Inst {
@@ -2102,7 +2145,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -2126,6 +2169,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Register a function that takes 2 parameters
         let func_name = interner.get_or_intern("foo");
@@ -2159,7 +2203,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
@@ -2179,6 +2223,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create a call to an unknown function
         let unknown_func = interner.get_or_intern("unknown");
@@ -2200,7 +2245,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -2220,6 +2265,7 @@ mod tests {
         let structs = HashMap::new();
         let enums = HashMap::new();
         let methods: HashMap<(StructId, Spur), MethodSig> = HashMap::new();
+        let enum_methods: HashMap<(EnumId, Spur), MethodSig> = HashMap::new();
 
         // Create: match x { 1 => 10, 2 => 20, _ => 30 }
         let scrutinee = rir.add_inst(gruel_rir::Inst {
@@ -2260,7 +2306,7 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &type_pool,
+            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);

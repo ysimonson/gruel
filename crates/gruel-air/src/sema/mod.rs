@@ -82,6 +82,8 @@ pub struct Sema<'a> {
     pub(crate) enums: HashMap<Spur, EnumId>,
     /// Method table: maps (struct_id, method_name) to method info
     pub(crate) methods: HashMap<(StructId, Spur), MethodInfo>,
+    /// Enum method table: maps (enum_id, method_name) to method info
+    pub(crate) enum_methods: HashMap<(EnumId, Spur), MethodInfo>,
     /// Constant table: maps const name symbol to const info
     pub(crate) constants: HashMap<Spur, ConstInfo>,
     /// Enabled preview features
@@ -147,6 +149,7 @@ impl<'a> Sema<'a> {
             structs: HashMap::new(),
             enums: HashMap::new(),
             methods: HashMap::new(),
+            enum_methods: HashMap::new(),
             constants: HashMap::new(),
             preview_features,
             builtin_string_id: None,

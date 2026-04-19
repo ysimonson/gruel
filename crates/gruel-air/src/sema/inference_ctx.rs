@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use lasso::Spur;
 
 use crate::inference::{FunctionSig, MethodSig};
-use crate::types::{StructId, Type};
+use crate::types::{EnumId, StructId, Type};
 
 /// Pre-computed type information for constraint generation.
 ///
@@ -33,4 +33,6 @@ pub struct InferenceContext {
     pub enum_types: HashMap<Spur, Type>,
     /// Method signatures with InferType: (struct_id, method_name) -> MethodSig.
     pub method_sigs: HashMap<(StructId, Spur), MethodSig>,
+    /// Enum method signatures: (enum_id, method_name) -> MethodSig.
+    pub enum_method_sigs: HashMap<(EnumId, Spur), MethodSig>,
 }

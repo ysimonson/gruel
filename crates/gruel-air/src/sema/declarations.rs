@@ -21,7 +21,7 @@ use lasso::Spur;
 
 use super::{ConstInfo, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::inference::{FunctionSig, MethodSig};
-use crate::types::{EnumDef, EnumVariantDef, StructDef, StructField, StructId, Type};
+use crate::types::{EnumDef, EnumId, EnumVariantDef, StructDef, StructField, StructId, Type};
 
 impl<'a> Sema<'a> {
     /// Build an `InferenceContext` from the collected type information.
@@ -98,11 +98,34 @@ impl<'a> Sema<'a> {
             })
             .collect();
 
+        // Build enum method signatures for constraint generation
+        let enum_method_sigs: HashMap<(EnumId, Spur), MethodSig> = self
+            .enum_methods
+            .iter()
+            .map(|((enum_id, method_name), info)| {
+                (
+                    (*enum_id, *method_name),
+                    MethodSig {
+                        struct_type: info.struct_type,
+                        has_self: info.has_self,
+                        param_types: self
+                            .param_arena
+                            .types(info.params)
+                            .iter()
+                            .map(|t| self.type_to_infer_type(*t))
+                            .collect(),
+                        return_type: self.type_to_infer_type(info.return_type),
+                    },
+                )
+            })
+            .collect();
+
         InferenceContext {
             func_sigs,
             struct_types,
             enum_types,
             method_sigs,
+            enum_method_sigs,
         }
     }
     /// Check if a directive list contains the @copy directive
@@ -448,22 +471,28 @@ impl<'a> Sema<'a> {
 
     /// Resolve @copy validation, destructors, functions, and methods.
     pub(crate) fn resolve_remaining_declarations(&mut self) -> CompileResult<()> {
-        // Collect all method InstRefs from anonymous struct types
+        // Collect all method InstRefs from anonymous struct and enum types.
         // These need to be skipped during function declaration collection because:
-        // - They may use `Self` type which requires struct context
+        // - They may use `Self` type which requires struct/enum context
         // - They are registered later during comptime evaluation with proper Self resolution
-        let mut anon_struct_method_refs = std::collections::HashSet::new();
+        let mut anon_type_method_refs = std::collections::HashSet::new();
         for (_, inst) in self.rir.iter() {
-            if let InstData::AnonStructType {
-                methods_start,
-                methods_len,
-                ..
-            } = &inst.data
-            {
-                let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
-                for method_ref in method_refs {
-                    anon_struct_method_refs.insert(method_ref);
-                }
+            let (methods_start, methods_len) = match &inst.data {
+                InstData::AnonStructType {
+                    methods_start,
+                    methods_len,
+                    ..
+                } => (*methods_start, *methods_len),
+                InstData::AnonEnumType {
+                    methods_start,
+                    methods_len,
+                    ..
+                } => (*methods_start, *methods_len),
+                _ => continue,
+            };
+            let method_refs = self.rir.get_inst_refs(methods_start, methods_len);
+            for method_ref in method_refs {
+                anon_type_method_refs.insert(method_ref);
             }
         }
 
@@ -509,9 +538,9 @@ impl<'a> Sema<'a> {
                         continue;
                     }
 
-                    // Skip ALL methods from anonymous structs (including associated functions)
+                    // Skip ALL methods from anonymous types (structs and enums)
                     // These are registered during comptime evaluation with proper Self type context
-                    if anon_struct_method_refs.contains(&inst_ref) {
+                    if anon_type_method_refs.contains(&inst_ref) {
                         continue;
                     }
                     self.collect_function_signature(

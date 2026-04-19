@@ -37,7 +37,7 @@ use crate::inference::{
 use crate::inst::{
     Air, AirArgMode, AirCallArg, AirInst, AirInstData, AirPlaceBase, AirProjection, AirRef,
 };
-use crate::types::{EnumVariantDef, StructField, StructId, Type, TypeKind};
+use crate::types::{EnumId, EnumVariantDef, StructField, StructId, Type, TypeKind};
 
 /// Data describing a method body for analysis.
 struct MethodBodySpec<'a> {
@@ -317,6 +317,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     // aren't in any named StructDecl. We use a fixed-point loop since analyzing one
     // method may create new anonymous struct types with their own methods.
     let mut analyzed_anon_methods: HashSet<(StructId, Spur)> = HashSet::new();
+    let mut analyzed_anon_enum_methods: HashSet<(EnumId, Spur)> = HashSet::new();
     loop {
         // Collect anonymous struct methods that haven't been analyzed yet
         let pending_anon_methods: Vec<(StructId, Spur, MethodInfo)> = sema
@@ -335,7 +336,23 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
             })
             .collect();
 
-        if pending_anon_methods.is_empty() {
+        // Collect anonymous enum methods that haven't been analyzed yet
+        let pending_anon_enum_methods: Vec<(EnumId, Spur, MethodInfo)> = sema
+            .enum_methods
+            .iter()
+            .filter_map(|((enum_id, method_name), method_info)| {
+                let enum_def = sema.type_pool.enum_def(*enum_id);
+                if enum_def.name.starts_with("__anon_enum_")
+                    && !analyzed_anon_enum_methods.contains(&(*enum_id, *method_name))
+                {
+                    Some((*enum_id, *method_name, *method_info))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if pending_anon_methods.is_empty() && pending_anon_enum_methods.is_empty() {
             break;
         }
 
@@ -379,6 +396,76 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
             let captured_values = sema
                 .anon_struct_captured_values
                 .get(&struct_id)
+                .cloned()
+                .unwrap_or_else(HashMap::new);
+
+            match sema.analyze_method_body(
+                &infer_ctx,
+                method_info.return_type,
+                &param_info,
+                method_info.body,
+                method_info.struct_type,
+                &captured_values,
+            ) {
+                Ok((
+                    air,
+                    num_locals,
+                    num_param_slots,
+                    param_modes_result,
+                    param_slot_types,
+                    warnings,
+                    local_strings,
+                    _ref_fns,
+                    _ref_meths,
+                )) => {
+                    let analyzed = AnalyzedFunction {
+                        name: full_name,
+                        air,
+                        num_locals,
+                        num_param_slots,
+                        param_modes: param_modes_result,
+                        param_slot_types,
+                        is_destructor: false,
+                    };
+                    functions_with_strings.push((analyzed, local_strings));
+                    all_warnings.extend(warnings);
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+
+        // Process anonymous enum methods in the same fixed-point loop
+        for (enum_id, method_name, method_info) in pending_anon_enum_methods {
+            analyzed_anon_enum_methods.insert((enum_id, method_name));
+
+            let enum_def = sema.type_pool.enum_def(enum_id);
+            let type_name_str = enum_def.name.clone();
+            let method_name_str = sema.interner.resolve(&method_name).to_string();
+
+            let full_name = if method_info.has_self {
+                format!("{}.{}", type_name_str, method_name_str)
+            } else {
+                format!("{}::{}", type_name_str, method_name_str)
+            };
+
+            let param_names = sema.param_arena.names(method_info.params);
+            let param_types = sema.param_arena.types(method_info.params);
+            let param_modes = sema.param_arena.modes(method_info.params);
+
+            let mut param_info: Vec<(Spur, Type, RirParamMode)> = Vec::new();
+
+            if method_info.has_self {
+                let self_sym = sema.interner.get_or_intern("self");
+                param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+            }
+
+            for i in 0..param_names.len() {
+                param_info.push((param_names[i], param_types[i], param_modes[i]));
+            }
+
+            let captured_values = sema
+                .anon_enum_captured_values
+                .get(&enum_id)
                 .cloned()
                 .unwrap_or_else(HashMap::new);
 
@@ -770,6 +857,100 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Analyze anonymous enum methods that were registered during comptime evaluation.
+    // These are not tracked by the work queue (which only handles struct methods),
+    // so we process them in a fixed-point loop similar to the eager path.
+    let mut analyzed_anon_enum_methods: HashSet<(EnumId, Spur)> = HashSet::new();
+    loop {
+        let pending_anon_enum_methods: Vec<(EnumId, Spur, MethodInfo)> = sema
+            .enum_methods
+            .iter()
+            .filter_map(|((enum_id, method_name), method_info)| {
+                let enum_def = sema.type_pool.enum_def(*enum_id);
+                if enum_def.name.starts_with("__anon_enum_")
+                    && !analyzed_anon_enum_methods.contains(&(*enum_id, *method_name))
+                {
+                    Some((*enum_id, *method_name, *method_info))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if pending_anon_enum_methods.is_empty() {
+            break;
+        }
+
+        for (enum_id, method_name, method_info) in pending_anon_enum_methods {
+            analyzed_anon_enum_methods.insert((enum_id, method_name));
+
+            let enum_def = sema.type_pool.enum_def(enum_id);
+            let type_name_str = enum_def.name.clone();
+            let method_name_str = sema.interner.resolve(&method_name).to_string();
+
+            let full_name = if method_info.has_self {
+                format!("{}.{}", type_name_str, method_name_str)
+            } else {
+                format!("{}::{}", type_name_str, method_name_str)
+            };
+
+            let param_names = sema.param_arena.names(method_info.params);
+            let param_types = sema.param_arena.types(method_info.params);
+            let param_modes = sema.param_arena.modes(method_info.params);
+
+            let mut param_info: Vec<(Spur, Type, RirParamMode)> = Vec::new();
+
+            if method_info.has_self {
+                let self_sym = sema.interner.get_or_intern("self");
+                param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+            }
+
+            for i in 0..param_names.len() {
+                param_info.push((param_names[i], param_types[i], param_modes[i]));
+            }
+
+            let captured_values = sema
+                .anon_enum_captured_values
+                .get(&enum_id)
+                .cloned()
+                .unwrap_or_else(HashMap::new);
+
+            match sema.analyze_method_body(
+                &infer_ctx,
+                method_info.return_type,
+                &param_info,
+                method_info.body,
+                method_info.struct_type,
+                &captured_values,
+            ) {
+                Ok((
+                    air,
+                    num_locals,
+                    num_param_slots,
+                    param_modes_result,
+                    param_slot_types,
+                    warnings,
+                    local_strings,
+                    _ref_fns,
+                    _ref_meths,
+                )) => {
+                    let analyzed = AnalyzedFunction {
+                        name: full_name,
+                        air,
+                        num_locals,
+                        num_param_slots,
+                        param_modes: param_modes_result,
+                        param_slot_types,
+                        is_destructor: false,
+                    };
+                    functions_with_strings.push((analyzed, local_strings));
+                    all_warnings.extend(warnings);
+                }
+                Err(e) => errors.push(e),
             }
         }
     }
@@ -1268,6 +1449,7 @@ impl<'a> Sema<'a> {
             &infer_ctx.struct_types,
             &infer_ctx.enum_types,
             &infer_ctx.method_sigs,
+            &infer_ctx.enum_method_sigs,
             &self.type_pool,
         )
         .with_type_subst(type_subst);
@@ -2296,7 +2478,75 @@ impl<'a> Sema<'a> {
             return self.analyze_module_member_call_impl(air, method, args, span, ctx);
         }
 
-        // Check that receiver is a struct type
+        // Check that receiver is a struct or enum type
+        // For enum methods, dispatch through enum_methods table
+        if let TypeKind::Enum(enum_id) = receiver_type.kind() {
+            let enum_def = self.type_pool.enum_def(enum_id);
+            let enum_name_str = enum_def.name.clone();
+
+            let method_key = (enum_id, method);
+            let method_info = self.enum_methods.get(&method_key).ok_or_compile_error(
+                ErrorKind::UndefinedMethod {
+                    type_name: enum_name_str.clone(),
+                    method_name: method_name_str.clone(),
+                },
+                span,
+            )?;
+
+            if !method_info.has_self {
+                return Err(CompileError::new(
+                    ErrorKind::AssocFnCalledAsMethod {
+                        type_name: enum_name_str,
+                        function_name: method_name_str,
+                    },
+                    span,
+                ));
+            }
+
+            let method_param_types = self.param_arena.types(method_info.params);
+            if args.len() != method_param_types.len() {
+                return Err(CompileError::new(
+                    ErrorKind::WrongArgumentCount {
+                        expected: method_param_types.len(),
+                        found: args.len(),
+                    },
+                    span,
+                ));
+            }
+
+            self.check_exclusive_access(&args, span)?;
+
+            let return_type = method_info.return_type;
+
+            let mut air_args = vec![AirCallArg {
+                value: receiver_result.air_ref,
+                mode: AirArgMode::Normal,
+            }];
+            air_args.extend(self.analyze_call_args(air, &args, ctx)?);
+
+            let call_name = format!("{}.{}", enum_name_str, method_name_str);
+            let call_name_sym = self.interner.get_or_intern(&call_name);
+
+            let args_len = air_args.len() as u32;
+            let mut extra_data = Vec::with_capacity(air_args.len() * 2);
+            for arg in &air_args {
+                extra_data.push(arg.value.as_u32());
+                extra_data.push(arg.mode.as_u32());
+            }
+            let args_start = air.add_extra(&extra_data);
+
+            let air_ref = air.add_inst(AirInst {
+                data: AirInstData::Call {
+                    name: call_name_sym,
+                    args_start,
+                    args_len,
+                },
+                ty: return_type,
+                span,
+            });
+            return Ok(AnalysisResult::new(air_ref, return_type));
+        }
+
         let struct_id = match receiver_type.kind() {
             TypeKind::Struct(id) => id,
             _ => {
@@ -2668,8 +2918,69 @@ impl<'a> Sema<'a> {
                     }
                     // Unit variant called as function — fall through to error
                 }
-                // Not a variant — could be an associated function (future)
-                // For now, fall through to error
+
+                // Not a variant — check for associated function on the enum
+                let method_key = (enum_id, function);
+                if let Some(method_info) = self.enum_methods.get(&method_key).copied() {
+                    ctx.referenced_methods
+                        .insert((StructId(enum_id.0), function));
+
+                    if method_info.has_self {
+                        return Err(CompileError::new(
+                            ErrorKind::MethodCalledAsAssocFn {
+                                type_name: type_name_str,
+                                method_name: function_name_str,
+                            },
+                            span,
+                        ));
+                    }
+
+                    let method_param_types: Vec<Type> =
+                        self.param_arena.types(method_info.params).to_vec();
+                    if args.len() != method_param_types.len() {
+                        return Err(CompileError::new(
+                            ErrorKind::WrongArgumentCount {
+                                expected: method_param_types.len(),
+                                found: args.len(),
+                            },
+                            span,
+                        ));
+                    }
+
+                    let mut extra_data = Vec::with_capacity(args.len() * 2);
+                    for (i, arg) in args.iter().enumerate() {
+                        let result = self.analyze_inst(air, arg.value, ctx)?;
+                        if result.ty != method_param_types[i] {
+                            return Err(CompileError::new(
+                                ErrorKind::TypeMismatch {
+                                    expected: method_param_types[i].name().to_string(),
+                                    found: result.ty.name().to_string(),
+                                },
+                                span,
+                            ));
+                        }
+                        extra_data.push(result.air_ref.as_u32());
+                        extra_data.push(AirArgMode::Normal.as_u32());
+                    }
+
+                    let enum_def = self.type_pool.enum_def(enum_id);
+                    let type_name_str2 = enum_def.name.clone();
+                    let full_name = format!("{}::{}", type_name_str2, function_name_str);
+                    let callee_sym = self.interner.get_or_intern(&full_name);
+
+                    let args_start = air.add_extra(&extra_data);
+                    let args_len = args.len() as u32;
+                    let air_ref = air.add_inst(AirInst {
+                        data: AirInstData::Call {
+                            name: callee_sym,
+                            args_start,
+                            args_len,
+                        },
+                        ty: method_info.return_type,
+                        span,
+                    });
+                    return Ok(AnalysisResult::new(air_ref, method_info.return_type));
+                }
             }
         }
 
@@ -3960,11 +4271,21 @@ impl<'a> Sema<'a> {
 
                 let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
 
-                let (enum_ty, _is_new) =
+                let (enum_ty, is_new) =
                     self.find_or_create_anon_enum(&enum_variants, &method_sigs, &HashMap::new());
 
-                // TODO (Phase 3): Register methods for anonymous enums
-                let _ = methods_len;
+                // Register methods for newly created anonymous enums
+                if is_new && *methods_len > 0 {
+                    if let TypeKind::Enum(enum_id) = enum_ty.kind() {
+                        self.register_anon_enum_methods_for_comptime_with_subst(
+                            enum_id,
+                            enum_ty,
+                            *methods_start,
+                            *methods_len,
+                            &HashMap::new(),
+                        );
+                    }
+                }
 
                 Some(ConstValue::Type(enum_ty))
             }
@@ -4398,11 +4719,21 @@ impl<'a> Sema<'a> {
 
                 let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
 
-                let (enum_ty, _is_new) =
+                let (enum_ty, is_new) =
                     self.find_or_create_anon_enum(&enum_variants, &method_sigs, value_subst);
 
-                // TODO (Phase 3): Register methods for anonymous enums with captured values
-                let _ = methods_len;
+                // Register methods for newly created anonymous enums with captured values
+                if is_new && *methods_len > 0 {
+                    if let TypeKind::Enum(enum_id) = enum_ty.kind() {
+                        self.register_anon_enum_methods_for_comptime_with_subst(
+                            enum_id,
+                            enum_ty,
+                            *methods_start,
+                            *methods_len,
+                            type_subst,
+                        );
+                    }
+                }
 
                 Some(ConstValue::Type(enum_ty))
             }
@@ -6031,6 +6362,88 @@ impl<'a> Sema<'a> {
                     key,
                     MethodInfo {
                         struct_type,
+                        has_self: *has_self,
+                        params: param_range,
+                        return_type: ret_type,
+                        body: *body,
+                        span: method_inst.span,
+                        is_unchecked: *is_unchecked,
+                    },
+                );
+            }
+        }
+        Some(())
+    }
+
+    /// Register methods for an anonymous enum created via comptime with type substitution.
+    ///
+    /// Analogous to `register_anon_struct_methods_for_comptime_with_subst`, but for enums.
+    /// Resolves method parameter/return types with `Self` mapped to the anonymous enum type.
+    fn register_anon_enum_methods_for_comptime_with_subst(
+        &mut self,
+        enum_id: EnumId,
+        enum_type: crate::types::Type,
+        methods_start: u32,
+        methods_len: u32,
+        type_subst: &std::collections::HashMap<Spur, Type>,
+    ) -> Option<()> {
+        let method_refs = self.rir.get_inst_refs(methods_start, methods_len);
+
+        let mut seen_methods: std::collections::HashSet<Spur> = std::collections::HashSet::new();
+
+        for method_ref in method_refs {
+            let method_inst = self.rir.get(method_ref);
+            if let InstData::FnDecl {
+                name: method_name,
+                is_unchecked,
+                params_start,
+                params_len,
+                return_type,
+                body,
+                has_self,
+                ..
+            } = &method_inst.data
+            {
+                let key = (enum_id, *method_name);
+
+                if seen_methods.contains(method_name) {
+                    return None;
+                }
+                seen_methods.insert(*method_name);
+
+                if self.enum_methods.contains_key(&key) {
+                    return None;
+                }
+
+                let params = self.rir.get_params(*params_start, *params_len);
+                let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
+                let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
+
+                for p in params {
+                    let type_str = self.interner.resolve(&p.ty);
+                    let resolved_ty = if type_str == "Self" {
+                        enum_type
+                    } else {
+                        self.resolve_type_for_comptime_with_subst(p.ty, type_subst)?
+                    };
+                    param_types.push(resolved_ty);
+                }
+
+                let ret_type_str = self.interner.resolve(return_type);
+                let ret_type = if ret_type_str == "Self" {
+                    enum_type
+                } else {
+                    self.resolve_type_for_comptime_with_subst(*return_type, type_subst)?
+                };
+
+                let param_range = self
+                    .param_arena
+                    .alloc_method(param_names.into_iter(), param_types.into_iter());
+
+                self.enum_methods.insert(
+                    key,
+                    MethodInfo {
+                        struct_type: enum_type,
                         has_self: *has_self,
                         params: param_range,
                         return_type: ret_type,

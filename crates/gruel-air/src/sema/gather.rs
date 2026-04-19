@@ -87,6 +87,7 @@ impl<'a> GatherOutput<'a> {
             structs: self.structs,
             enums: self.enums,
             methods: self.methods,
+            enum_methods: HashMap::new(),
             constants: self.constants,
             preview_features: self.preview_features,
             builtin_string_id: self.builtin_string_id,
