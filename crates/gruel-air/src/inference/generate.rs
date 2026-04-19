@@ -790,6 +790,16 @@ impl<'a> ConstraintGenerator<'a> {
                     } else {
                         InferType::Concrete(Type::ERROR)
                     }
+                } else if intrinsic_name == "field" {
+                    // @field(value, field_name): returns the type of the named field.
+                    // The field name is a comptime_str resolved at compile time, so
+                    // the return type depends on which field is accessed. Use a fresh
+                    // type variable — sema determines the concrete type.
+                    for arg_ref in args.iter() {
+                        self.generate(*arg_ref, ctx);
+                    }
+                    let result_var = self.fresh_var();
+                    InferType::Var(result_var)
                 } else {
                     // Generate constraints for arguments (they need to be processed)
                     for arg_ref in args.iter() {
@@ -1440,6 +1450,42 @@ impl<'a> ConstraintGenerator<'a> {
                 let var = self.fresh_var();
                 self.int_literal_vars.push(var);
                 InferType::Var(var)
+            }
+
+            // Comptime unroll for: the iterable is evaluated at comptime, the body is unrolled.
+            // Like regular for loops, the result type is unit.
+            // We must generate constraints for the body so that type inference resolves
+            // types for runtime expressions inside the loop body (e.g., `total + 1`).
+            // The binding variable holds a comptime value and is handled by sema, but
+            // we register it as an integer type variable so VarRef lookups don't fail.
+            InstData::ComptimeUnrollFor {
+                binding,
+                iterable,
+                body,
+            } => {
+                // Generate constraints for the iterable (it's a comptime block)
+                self.generate(*iterable, ctx);
+
+                // Register the binding as a fresh type variable.
+                // The actual comptime value type is determined by sema, but HM
+                // inference needs the binding in scope so VarRef doesn't fail.
+                let binding_ty = {
+                    let var = self.fresh_var();
+                    InferType::Var(var)
+                };
+                ctx.insert_local(
+                    *binding,
+                    LocalVarInfo {
+                        ty: binding_ty,
+                        is_mut: false,
+                        span,
+                    },
+                );
+
+                // Generate constraints for the body
+                self.generate(*body, ctx);
+
+                InferType::Concrete(Type::UNIT)
             }
 
             // Checked block: for type inference purposes, the type is the type of the inner expression

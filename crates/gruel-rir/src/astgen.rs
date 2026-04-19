@@ -804,6 +804,18 @@ impl<'a> AstGen<'a> {
                     span: comptime_block.span,
                 })
             }
+            Expr::ComptimeUnrollFor(unroll) => {
+                let iterable = self.gen_expr(&unroll.iterable);
+                let body = self.gen_block(&unroll.body);
+                self.rir.add_inst(Inst {
+                    data: InstData::ComptimeUnrollFor {
+                        binding: unroll.binding.name,
+                        iterable,
+                        body,
+                    },
+                    span: unroll.span,
+                })
+            }
             Expr::Checked(checked_block) => {
                 // Generate the inner expression, wrapped in a Checked instruction
                 // Unchecked operations are only allowed inside checked blocks

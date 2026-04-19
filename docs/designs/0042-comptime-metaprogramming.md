@@ -1,12 +1,12 @@
 ---
 id: 0042
 title: Comptime Metaprogramming — Diagnostics, Strings, Reflection, and comptime_unroll For
-status: proposal
+status: implemented
 tags: [compiler, comptime, metaprogramming, type-system]
 feature-flag: comptime-meta
 created: 2026-04-19
 accepted:
-implemented:
+implemented: 2026-04-19
 spec-sections: ["4.14"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -494,7 +494,7 @@ fn main() -> i32 {
 
 - [x] **Phase 3: `@typeInfo` and `@typeName`** — Add `TypeKind` builtin enum to `gruel-builtins` (variants: Struct, Enum, Int, Bool, Unit, Never, Array) and add it to `BUILTIN_ENUMS`. Add `@typeName` as a `TypeIntrinsic` handler in comptime evaluation: resolve type, format name, return `ComptimeStr`. Add `@typeInfo` as a `TypeIntrinsic` handler: resolve type, create anonymous struct types for the info structs (cache in `HashMap<Type, StructId>`), set `kind` field to the appropriate `TypeKind` variant, allocate instances on comptime heap with field values (using `ConstValue::ComptimeStr` for names, `ConstValue::Type` for type values, `ConstValue::Array` for field/variant lists), return `ConstValue::Struct`. Create `FieldInfo` and `VariantInfo` anonymous struct types. Handle struct, enum, and primitive type kinds. Gate behind `comptime_meta`. Add spec rules and tests.
 
-- [ ] **Phase 4: `comptime_unroll for` and `@field`** — Add `comptime_unroll` keyword to the lexer. Add `ComptimeUnrollFor` AST node in parser (`comptime_unroll` followed by `for`, then the standard for-loop binding/iterable syntax). Lower to `ComptimeUnrollFor` RIR instruction in AstGen. In Sema, evaluate the collection expression in comptime context, then for each element: bind the loop variable as a comptime local and analyze the body, emitting the resulting AIR instructions. Support both comptime arrays and `@range` with comptime-known arguments as the iterable. Add `@field(value, field_name)` intrinsic: resolve `field_name` as a `comptime_str` to a concrete field index, emit a `FieldGet` instruction. Gate behind `comptime_meta`. Add spec rules and tests. Extend the differential fuzzer to generate `comptime_unroll for` programs.
+- [x] **Phase 4: `comptime_unroll for` and `@field`** — Add `comptime_unroll` keyword to the lexer. Add `ComptimeUnrollFor` AST node in parser (`comptime_unroll` followed by `for`, then the standard for-loop binding/iterable syntax). Lower to `ComptimeUnrollFor` RIR instruction in AstGen. In Sema, evaluate the collection expression in comptime context, then for each element: bind the loop variable as a comptime local and analyze the body, emitting the resulting AIR instructions. Support both comptime arrays and `@range` with comptime-known arguments as the iterable. Add `@field(value, field_name)` intrinsic: resolve `field_name` as a `comptime_str` to a concrete field index, emit a `FieldGet` instruction. Gate behind `comptime_meta`. Add spec rules and tests. Extend the differential fuzzer to generate `comptime_unroll for` programs.
 
 ## Consequences
 

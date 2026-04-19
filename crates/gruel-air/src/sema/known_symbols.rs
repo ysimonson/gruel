@@ -108,6 +108,8 @@ pub struct KnownSymbols {
     pub type_info: Spur,
     /// The `typeName` type intrinsic symbol.
     pub type_name: Spur,
+    /// The `field` intrinsic symbol.
+    pub field: Spur,
 
     // For-loop intrinsics
     /// The `range` intrinsic symbol.
@@ -170,6 +172,7 @@ impl KnownSymbols {
             compile_log: interner.get_or_intern_static("compileLog"),
             type_info: interner.get_or_intern_static("typeInfo"),
             type_name: interner.get_or_intern_static("typeName"),
+            field: interner.get_or_intern_static("field"),
 
             // For-loop intrinsics
             range: interner.get_or_intern_static("range"),
@@ -246,6 +249,7 @@ mod tests {
         assert_eq!(interner.resolve(&known.compile_log), "compileLog");
         assert_eq!(interner.resolve(&known.type_info), "typeInfo");
         assert_eq!(interner.resolve(&known.type_name), "typeName");
+        assert_eq!(interner.resolve(&known.field), "field");
         assert_eq!(interner.resolve(&known.range), "range");
         assert_eq!(interner.resolve(&known.string_type), "String");
         assert_eq!(interner.resolve(&known.main_fn), "main");

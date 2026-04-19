@@ -39,15 +39,16 @@ pub enum TokenKind {
     Struct,
     Enum,
     Drop,
-    Linear,    // linear struct modifier
-    SelfValue, // self (value, not type)
-    SelfType,  // Self (type, not value) - used in methods to refer to the struct type
-    Comptime,  // comptime (compile-time evaluation)
-    Pub,       // pub visibility modifier (module system)
-    Const,     // const declaration (module system re-exports)
-    Checked,   // checked { } block for unchecked operations
-    Unchecked, // unchecked fn modifier
-    Ptr,       // ptr const T / ptr mut T pointer types
+    Linear,         // linear struct modifier
+    SelfValue,      // self (value, not type)
+    SelfType,       // Self (type, not value) - used in methods to refer to the struct type
+    Comptime,       // comptime (compile-time evaluation)
+    ComptimeUnroll, // comptime_unroll (compile-time loop unrolling)
+    Pub,            // pub visibility modifier (module system)
+    Const,          // const declaration (module system re-exports)
+    Checked,        // checked { } block for unchecked operations
+    Unchecked,      // unchecked fn modifier
+    Ptr,            // ptr const T / ptr mut T pointer types
 
     // Type keywords
     I8,
@@ -144,6 +145,7 @@ impl TokenKind {
             TokenKind::SelfValue => "'self'",
             TokenKind::SelfType => "'Self'",
             TokenKind::Comptime => "'comptime'",
+            TokenKind::ComptimeUnroll => "'comptime_unroll'",
             TokenKind::Pub => "'pub'",
             TokenKind::Const => "'const'",
             TokenKind::Checked => "'checked'",
@@ -247,6 +249,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::SelfValue => write!(f, "SELF"),
             TokenKind::SelfType => write!(f, "SELFTYPE"),
             TokenKind::Comptime => write!(f, "COMPTIME"),
+            TokenKind::ComptimeUnroll => write!(f, "COMPTIME_UNROLL"),
             TokenKind::Pub => write!(f, "PUB"),
             TokenKind::Const => write!(f, "CONST"),
             TokenKind::Checked => write!(f, "CHECKED"),

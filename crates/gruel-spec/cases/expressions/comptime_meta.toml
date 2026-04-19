@@ -713,3 +713,273 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# =============================================================================
+# comptime_unroll for (Phase 4)
+# =============================================================================
+
+[[case]]
+name = "comptime_unroll_range_basic"
+spec = ["4.14:70", "4.14:72", "4.14:73"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for i in comptime { @range(5) } {
+        total = total + 1;
+    }
+    total
+}
+"""
+exit_code = 5
+
+[[case]]
+name = "comptime_unroll_range_start_end"
+spec = ["4.14:70", "4.14:72"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for i in comptime { @range(2, 5) } {
+        total = total + 1;
+    }
+    total
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "comptime_unroll_empty"
+spec = ["4.14:70", "4.14:72"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut total: i32 = 42;
+    comptime_unroll for i in comptime { @range(0) } {
+        total = total + 1;
+    }
+    total
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_unroll_single_iteration"
+spec = ["4.14:70", "4.14:72"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for i in comptime { @range(1) } {
+        total = total + 42;
+    }
+    total
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_unroll_non_array_iterable"
+spec = ["4.14:74"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime_unroll for i in comptime { 42 } {
+    }
+    0
+}
+"""
+compile_fail = true
+error_contains = "requires an array iterable"
+
+[[case]]
+name = "comptime_unroll_preview_gate"
+spec = ["4.14:75"]
+source = """
+fn main() -> i32 {
+    comptime_unroll for i in comptime { @range(3) } {
+    }
+    0
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+[[case]]
+name = "comptime_unroll_typeinfo_fields"
+spec = ["4.14:70", "4.14:71"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 20 };
+    let mut total: i32 = 0;
+    comptime_unroll for field in comptime { @typeInfo(Point).fields } {
+        total = total + @field(p, field.name);
+    }
+    total
+}
+"""
+exit_code = 30
+
+[[case]]
+name = "comptime_unroll_runtime_body"
+spec = ["4.14:71"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut a: i32 = 1;
+    let mut b: i32 = 1;
+    comptime_unroll for i in comptime { @range(3) } {
+        let temp = a + b;
+        a = b;
+        b = temp;
+    }
+    b
+}
+"""
+exit_code = 5
+
+# =============================================================================
+# @field intrinsic (Phase 4)
+# =============================================================================
+
+[[case]]
+name = "field_intrinsic_basic"
+spec = ["4.14:76"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 42, y: 0 };
+    @field(p, "x")
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "field_intrinsic_second_field"
+spec = ["4.14:76"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 0, y: 42 };
+    @field(p, "y")
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "field_intrinsic_wrong_arg_count"
+spec = ["4.14:77"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 42, y: 0 };
+    @field(p)
+}
+"""
+compile_fail = true
+error_contains = "expects 2 arguments"
+
+[[case]]
+name = "field_intrinsic_non_struct"
+spec = ["4.14:77"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    @field(x, "foo")
+}
+"""
+compile_fail = true
+error_contains = "requires a struct value"
+
+[[case]]
+name = "field_intrinsic_unknown_field"
+spec = ["4.14:78"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 42, y: 0 };
+    @field(p, "z")
+}
+"""
+compile_fail = true
+error_contains = "has no field 'z'"
+
+[[case]]
+name = "field_intrinsic_preview_gate"
+spec = ["4.14:77"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 42, y: 0 };
+    @field(p, "x")
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+[[case]]
+name = "comptime_unroll_generic_sum_fields"
+spec = ["4.14:70", "4.14:76", "4.14:79"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn sum_fields(comptime T: type, val: T) -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for field in comptime { @typeInfo(T).fields } {
+        total = total + @field(val, field.name);
+    }
+    total
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    sum_fields(Point, p)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_unroll_three_field_struct"
+spec = ["4.14:70", "4.14:76"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Vec3 { x: i32, y: i32, z: i32 }
+
+fn main() -> i32 {
+    let v = Vec3 { x: 10, y: 20, z: 12 };
+    let mut total: i32 = 0;
+    comptime_unroll for field in comptime { @typeInfo(Vec3).fields } {
+        total = total + @field(v, field.name);
+    }
+    total
+}
+"""
+exit_code = 42

@@ -155,6 +155,8 @@ pub enum LogosTokenKind {
     SelfValue,
     #[token("Self")]
     SelfType,
+    #[token("comptime_unroll")]
+    ComptimeUnroll,
     #[token("comptime")]
     Comptime,
     #[token("pub")]
@@ -324,6 +326,7 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::Linear => TokenKind::Linear,
             LogosTokenKind::SelfValue => TokenKind::SelfValue,
             LogosTokenKind::SelfType => TokenKind::SelfType,
+            LogosTokenKind::ComptimeUnroll => TokenKind::ComptimeUnroll,
             LogosTokenKind::Comptime => TokenKind::Comptime,
             LogosTokenKind::Pub => TokenKind::Pub,
             LogosTokenKind::Const => TokenKind::Const,

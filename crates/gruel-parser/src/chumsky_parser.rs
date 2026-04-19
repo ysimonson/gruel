@@ -6,14 +6,14 @@
 use crate::ast::{
     AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget, AssocFnCallExpr, Ast,
     BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr, CheckedBlockExpr,
-    ComptimeBlockExpr, ConstDecl, ContinueExpr, DestructureBinding, DestructureField, Directive,
-    DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr, EnumVariant, Expr, FieldDecl,
-    FieldExpr, FieldInit, ForExpr, Function, Ident, IfExpr, IndexExpr, IntLit, IntrinsicArg,
-    IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr, MatchArm, MatchExpr, Method,
-    MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern,
-    PatternBinding, PatternFieldBinding, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit,
-    StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility,
-    WhileExpr,
+    ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr, DestructureBinding,
+    DestructureField, Directive, DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr,
+    EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, ForExpr, Function, Ident, IfExpr,
+    IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr,
+    MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr,
+    PathPattern, Pattern, PatternBinding, PatternFieldBinding, ReturnExpr, SelfExpr, SelfParam,
+    Statement, StringLit, StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp,
+    UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -1143,7 +1143,7 @@ where
     let match_expr: GruelParser<'src, I, Expr> = just(TokenKind::Match)
         .ignore_then(expr.clone())
         .then(
-            match_arm_parser(expr)
+            match_arm_parser(expr.clone())
                 .separated_by(just(TokenKind::Comma))
                 .allow_trailing()
                 .collect::<Vec<_>>()
@@ -1158,6 +1158,23 @@ where
         })
         .boxed();
 
+    // Comptime unroll for expression: comptime_unroll for ident in expr { body }
+    let comptime_unroll_for_expr: GruelParser<'src, I, Expr> = just(TokenKind::ComptimeUnroll)
+        .ignore_then(just(TokenKind::For))
+        .ignore_then(ident_parser())
+        .then_ignore(just(TokenKind::In))
+        .then(expr.clone())
+        .then(maybe_unit_block_parser(expr.clone()))
+        .map_with(|((binding, iterable), body), e| {
+            Expr::ComptimeUnrollFor(ComptimeUnrollForExpr {
+                binding,
+                iterable: Box::new(iterable),
+                body,
+                span: span_from_extra(e),
+            })
+        })
+        .boxed();
+
     choice((
         break_expr.boxed(),
         continue_expr.boxed(),
@@ -1165,6 +1182,7 @@ where
         if_expr,
         while_expr,
         for_expr,
+        comptime_unroll_for_expr,
         loop_expr,
         match_expr,
     ))
@@ -2102,6 +2120,7 @@ fn is_control_flow_expr(e: &Expr) -> bool {
             | Expr::Match(_)
             | Expr::While(_)
             | Expr::For(_)
+            | Expr::ComptimeUnrollFor(_)
             | Expr::Loop(_)
             | Expr::Break(_)
             | Expr::Continue(_)

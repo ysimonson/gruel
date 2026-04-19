@@ -2652,17 +2652,38 @@ impl<'a> Sema<'a> {
                     });
                     return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
                 }
-                ConstValue::ComptimeStr(_)
-                | ConstValue::Unit
-                | ConstValue::Struct(_)
+                ConstValue::ComptimeStr(_) => {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "comptime_str values cannot be used in runtime expressions"
+                                .to_string(),
+                        },
+                        span,
+                    ));
+                }
+                ConstValue::Unit => {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "comptime unit values cannot be used in runtime expressions"
+                                .to_string(),
+                        },
+                        span,
+                    ));
+                }
+                ConstValue::Struct(_)
                 | ConstValue::Array(_)
                 | ConstValue::EnumVariant { .. }
                 | ConstValue::EnumData { .. }
-                | ConstValue::EnumStruct { .. }
-                | ConstValue::BreakSignal
-                | ConstValue::ContinueSignal
-                | ConstValue::ReturnSignal => {
-                    unreachable!("control-flow signal or composite value in comptime_value_vars")
+                | ConstValue::EnumStruct { .. } => {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "comptime composite values cannot be used in runtime expressions; use @field to access fields".to_string(),
+                        },
+                        span,
+                    ));
+                }
+                ConstValue::BreakSignal | ConstValue::ContinueSignal | ConstValue::ReturnSignal => {
+                    unreachable!("control-flow signal in comptime_value_vars")
                 }
             }
         }

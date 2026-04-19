@@ -917,3 +917,74 @@ fn describe(comptime T: type) -> i32 {
     }
 }
 ```
+
+## Compile-Time Loop Unrolling
+
+{{ rule(id="4.14:70", cat="normative") }}
+
+The `comptime_unroll for` expression evaluates a compile-time iterable and unrolls the loop body once for each element. The iterable must be a `comptime` block that evaluates to a comptime array. The loop variable is bound to a comptime value for each iteration and is accessible within the body.
+
+```ebnf
+comptime_unroll_for = "comptime_unroll" "for" IDENT "in" comptime_expr block ;
+```
+
+{{ rule(id="4.14:71", cat="normative") }}
+
+The body of a `comptime_unroll for` is runtime code, not comptime code. Each unrolled iteration generates independent runtime instructions. The loop variable holds a comptime value that can be used in comptime intrinsics within the body (such as `@field`).
+
+{{ rule(id="4.14:72", cat="normative") }}
+
+`@range` can be used as the iterable in a `comptime_unroll for`. When evaluated at compile time, `@range(end)`, `@range(start, end)`, or `@range(start, end, stride)` produces a comptime array of integers.
+
+{{ rule(id="4.14:73") }}
+
+```gruel
+fn main() -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for i in comptime { @range(5) } {
+        total = total + 1;
+    }
+    total
+}
+```
+
+{{ rule(id="4.14:74", cat="legality-rule") }}
+
+It is a compile-time error if the iterable expression in a `comptime_unroll for` does not evaluate to a comptime array.
+
+{{ rule(id="4.14:75", cat="legality-rule") }}
+
+`comptime_unroll for` requires the `comptime_meta` preview feature.
+
+## Dynamic Field Access
+
+{{ rule(id="4.14:76", cat="normative") }}
+
+The `@field(value, field_name)` intrinsic accesses a field of a struct value using a compile-time known field name. The first argument is a runtime struct value. The second argument is a `comptime_str` that names a field on that struct. The field name is resolved at compile time to a concrete field index, and the result type is the type of the named field.
+
+{{ rule(id="4.14:77", cat="legality-rule") }}
+
+`@field` requires the `comptime_meta` preview feature. It **MUST** be called with exactly two arguments. The first argument **MUST** be a struct value. The second argument **MUST** evaluate to a `comptime_str` at compile time.
+
+{{ rule(id="4.14:78", cat="legality-rule") }}
+
+It is a compile-time error if the second argument to `@field` names a field that does not exist on the struct type of the first argument.
+
+{{ rule(id="4.14:79") }}
+
+```gruel
+struct Point { x: i32, y: i32 }
+
+fn sum_fields(comptime T: type, val: T) -> i32 {
+    let mut total: i32 = 0;
+    comptime_unroll for field in comptime { @typeInfo(T).fields } {
+        total = total + @field(val, field.name);
+    }
+    total
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    sum_fields(Point, p)
+}
+```
