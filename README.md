@@ -38,6 +38,7 @@ of buck, etc.
 - Removed beads issue tracking in favor of plain ADRs
 - Shorter mangled symbol names to support macOS's default linker
 - Added a Makefile as the primary build/test entrypoint
+- Added a spec test cache to run the full test suite quicker
 
 ## License
 
