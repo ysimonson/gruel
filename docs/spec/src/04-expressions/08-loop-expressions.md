@@ -149,6 +149,93 @@ fn main() -> i32 {
 }
 ```
 
+## For-In Loops
+
+{{ rule(id="4.8:22", cat="normative") }}
+
+A for-in loop iterates over a range, binding each element to a loop variable.
+
+{{ rule(id="4.8:23", cat="syntax") }}
+
+```ebnf
+for_expr = "for" ["mut"] identifier "in" expression "{" block "}" ;
+```
+
+{{ rule(id="4.8:24", cat="normative") }}
+
+A for-in expression has type `()`.
+
+{{ rule(id="4.8:25", cat="normative") }}
+
+The loop variable is immutable by default. If `mut` is specified, the loop variable is mutable within each iteration but does not affect the iteration itself.
+
+{{ rule(id="4.8:26", cat="normative") }}
+
+The iterable expression must be a call to the `@range` intrinsic. The `@range` intrinsic accepts 1, 2, or 3 integer arguments:
+
+- `@range(end)` — iterates from `0` (inclusive) to `end` (exclusive) with stride `1`
+- `@range(start, end)` — iterates from `start` (inclusive) to `end` (exclusive) with stride `1`
+- `@range(start, end, stride)` — iterates from `start` (inclusive) to `end` (exclusive) with the given stride
+
+{{ rule(id="4.8:27", cat="legality-rule") }}
+
+All arguments to `@range` **MUST** have the same integer type.
+
+{{ rule(id="4.8:28", cat="dynamic-semantics") }}
+
+A for-in loop over `@range` is equivalent to the following while loop desugaring. The counter is incremented before the body so that `continue` does not skip the increment:
+
+```gruel
+// for x in @range(start, end, stride) { body }
+// is equivalent to:
+let mut __counter = start;
+while __counter < end {
+    let x = __counter;
+    __counter = __counter + stride;
+    body;
+}
+```
+
+{{ rule(id="4.8:29") }}
+
+```gruel
+fn main() -> i32 {
+    let mut sum = 0;
+    for i in @range(5) {
+        sum = sum + i;
+    }
+    sum  // 10 (0+1+2+3+4)
+}
+```
+
+{{ rule(id="4.8:30") }}
+
+```gruel
+fn main() -> i32 {
+    let mut sum = 0;
+    for i in @range(1, 4) {
+        sum = sum + i;
+    }
+    sum  // 6 (1+2+3)
+}
+```
+
+{{ rule(id="4.8:31") }}
+
+```gruel
+fn main() -> i32 {
+    let mut sum = 0;
+    for i in @range(0, 10, 3) {
+        sum = sum + i;
+    }
+    sum  // 18 (0+3+6+9)
+}
+```
+
+{{ rule(id="4.8:32", cat="normative") }}
+
+`break` and `continue` work within for-in loops the same as in while loops: `break` exits the loop and `continue` skips to the next iteration.
+
 ## Nested Loops
 
 {{ rule(id="4.8:13", cat="normative") }}

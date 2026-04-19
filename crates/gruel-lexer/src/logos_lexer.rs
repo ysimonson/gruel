@@ -127,6 +127,10 @@ pub enum LogosTokenKind {
     Match,
     #[token("while")]
     While,
+    #[token("for")]
+    For,
+    #[token("in")]
+    In,
     #[token("loop")]
     Loop,
     #[token("break")]
@@ -306,6 +310,8 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::Else => TokenKind::Else,
             LogosTokenKind::Match => TokenKind::Match,
             LogosTokenKind::While => TokenKind::While,
+            LogosTokenKind::For => TokenKind::For,
+            LogosTokenKind::In => TokenKind::In,
             LogosTokenKind::Loop => TokenKind::Loop,
             LogosTokenKind::Break => TokenKind::Break,
             LogosTokenKind::Continue => TokenKind::Continue,

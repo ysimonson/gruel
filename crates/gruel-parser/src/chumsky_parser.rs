@@ -13,7 +13,7 @@ use crate::ast::{
     MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern,
     PatternBinding, PatternFieldBinding, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit,
     StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility,
-    WhileExpr,
+    ForExpr, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -1110,6 +1110,24 @@ where
         })
         .boxed();
 
+    // For-in expression: for [mut] ident in expr { body }
+    let for_expr: GruelParser<'src, I, Expr> = just(TokenKind::For)
+        .ignore_then(just(TokenKind::Mut).or_not())
+        .then(ident_parser())
+        .then_ignore(just(TokenKind::In))
+        .then(expr.clone())
+        .then(maybe_unit_block_parser(expr.clone()))
+        .map_with(|(((is_mut, binding), iterable), body), e| {
+            Expr::For(ForExpr {
+                binding,
+                is_mut: is_mut.is_some(),
+                iterable: Box::new(iterable),
+                body,
+                span: span_from_extra(e),
+            })
+        })
+        .boxed();
+
     // Loop expression (infinite loop)
     let loop_expr: GruelParser<'src, I, Expr> = just(TokenKind::Loop)
         .ignore_then(maybe_unit_block_parser(expr.clone()))
@@ -1146,6 +1164,7 @@ where
         return_expr.boxed(),
         if_expr,
         while_expr,
+        for_expr,
         loop_expr,
         match_expr,
     ))
@@ -2082,6 +2101,7 @@ fn is_control_flow_expr(e: &Expr) -> bool {
         Expr::If(_)
             | Expr::Match(_)
             | Expr::While(_)
+            | Expr::For(_)
             | Expr::Loop(_)
             | Expr::Break(_)
             | Expr::Continue(_)

@@ -1,0 +1,247 @@
+[section]
+id = "expressions.for"
+spec_chapter = "4.8"
+name = "For-In Loop Expressions"
+description = "For-in loops iterate over ranges, binding each element to a loop variable."
+
+# =============================================================================
+# Basic For-In Loop
+# =============================================================================
+
+[[case]]
+name = "for_range_one_arg"
+spec = ["4.8:22", "4.8:24", "4.8:26"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for i in @range(5) {
+        sum = sum + i;
+    }
+    sum
+}
+"""
+exit_code = 10
+
+[[case]]
+name = "for_range_two_args"
+spec = ["4.8:22", "4.8:26"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for i in @range(2, 5) {
+        sum = sum + i;
+    }
+    sum
+}
+"""
+exit_code = 9
+
+[[case]]
+name = "for_range_three_args"
+spec = ["4.8:22", "4.8:26"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for i in @range(0, 10, 3) {
+        sum = sum + i;
+    }
+    sum
+}
+"""
+exit_code = 18
+
+# =============================================================================
+# For-In Syntax
+# =============================================================================
+
+[[case]]
+name = "for_syntax"
+spec = ["4.8:23"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 0;
+    for i in @range(3) {
+        x = x + i;
+    }
+    x
+}
+"""
+exit_code = 3
+
+# =============================================================================
+# For-In Has Unit Type
+# =============================================================================
+
+[[case]]
+name = "for_has_unit_type"
+spec = ["4.8:24"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn takes_unit(x: ()) -> i32 { 42 }
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    takes_unit(for i in @range(3) { sum = sum + i; })
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Mutable Binding
+# =============================================================================
+
+[[case]]
+name = "for_immutable_binding"
+spec = ["4.8:25"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for i in @range(5) {
+        sum = sum + i;
+    }
+    sum
+}
+"""
+exit_code = 10
+
+[[case]]
+name = "for_mutable_binding"
+spec = ["4.8:25"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for mut i in @range(5) {
+        i = i * 2;
+        sum = sum + i;
+    }
+    sum
+}
+"""
+exit_code = 20
+
+[[case]]
+name = "for_immutable_binding_no_assign"
+spec = ["4.8:25"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    for i in @range(5) {
+        i = 10;
+    }
+    0
+}
+"""
+compile_fail = true
+
+# =============================================================================
+# Range Arguments Must Match Type
+# =============================================================================
+
+[[case]]
+name = "for_range_type_match"
+spec = ["4.8:27"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    let start: i32 = 2;
+    let end: i32 = 5;
+    for i in @range(start, end) {
+        sum = sum + i;
+    }
+    sum
+}
+"""
+exit_code = 9
+
+# =============================================================================
+# While Loop Desugaring Semantics
+# =============================================================================
+
+[[case]]
+name = "for_range_empty"
+spec = ["4.8:28"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for i in @range(0) {
+        sum = sum + 1;
+    }
+    sum
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "for_range_single_element"
+spec = ["4.8:28"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for i in @range(1) {
+        sum = sum + i + 1;
+    }
+    sum
+}
+"""
+exit_code = 1
+
+# =============================================================================
+# Break and Continue
+# =============================================================================
+
+[[case]]
+name = "for_break"
+spec = ["4.8:32"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for i in @range(100) {
+        if i == 5 {
+            break;
+        }
+        sum = sum + i;
+    }
+    sum
+}
+"""
+exit_code = 10
+
+[[case]]
+name = "for_continue"
+spec = ["4.8:32"]
+preview = "for_loops"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for i in @range(10) {
+        if i % 2 == 0 {
+            continue;
+        }
+        sum = sum + i;
+    }
+    sum
+}
+"""
+exit_code = 25

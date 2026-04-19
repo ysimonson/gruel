@@ -99,6 +99,10 @@ pub struct KnownSymbols {
     /// The `target_os` intrinsic symbol - returns target operating system.
     pub target_os: Spur,
 
+    // For-loop intrinsics
+    /// The `range` intrinsic symbol.
+    pub range: Spur,
+
     // Builtin type names
     /// The `String` type name symbol.
     pub string_type: Spur,
@@ -150,6 +154,9 @@ impl KnownSymbols {
             // Target platform intrinsics
             target_arch: interner.get_or_intern_static("target_arch"),
             target_os: interner.get_or_intern_static("target_os"),
+
+            // For-loop intrinsics
+            range: interner.get_or_intern_static("range"),
 
             // Builtin type names
             string_type: interner.get_or_intern_static("String"),
@@ -219,6 +226,7 @@ mod tests {
         assert_eq!(interner.resolve(&known.syscall), "syscall");
         assert_eq!(interner.resolve(&known.target_arch), "target_arch");
         assert_eq!(interner.resolve(&known.target_os), "target_os");
+        assert_eq!(interner.resolve(&known.range), "range");
         assert_eq!(interner.resolve(&known.string_type), "String");
         assert_eq!(interner.resolve(&known.main_fn), "main");
     }

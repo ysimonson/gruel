@@ -528,6 +528,19 @@ impl<'a> AstGen<'a> {
                     span: while_expr.span,
                 })
             }
+            Expr::For(for_expr) => {
+                let iterable = self.gen_expr(&for_expr.iterable);
+                let body = self.gen_block(&for_expr.body);
+                self.rir.add_inst(Inst {
+                    data: InstData::For {
+                        binding: for_expr.binding.name,
+                        is_mut: for_expr.is_mut,
+                        iterable,
+                        body,
+                    },
+                    span: for_expr.span,
+                })
+            }
             Expr::Loop(loop_expr) => {
                 let body = self.gen_block(&loop_expr.body);
                 self.rir.add_inst(Inst {
