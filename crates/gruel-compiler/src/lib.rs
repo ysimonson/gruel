@@ -1183,7 +1183,12 @@ fn link_system_with_warnings(
         cmd.arg("-e").arg("__main");
     } else {
         // Linux/ELF-specific flags
+        // -no-pie is required because GCC 13+ defaults to static-PIE when
+        // -static is used, which pulls in dl-reloc-static-pie.o (needing
+        // _DYNAMIC) and libc-start.o (needing _init/_fini from crti.o/crtn.o
+        // that -nostartfiles excludes).
         cmd.arg("-static");
+        cmd.arg("-no-pie");
         cmd.arg("-nostartfiles");
     }
 
