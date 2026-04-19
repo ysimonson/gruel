@@ -2117,3 +2117,115 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+[[case]]
+name = "comptime_struct_destructure"
+spec = ["4.14:43"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let p = Point { x: 10, y: 32 };
+        let Point { x, y } = p;
+        x + y
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_struct_destructure_renamed"
+spec = ["4.14:43"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let p = Point { x: 20, y: 22 };
+        let Point { x: a, y: b } = p;
+        a + b
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_method_call"
+spec = ["4.14:44"]
+source = """
+struct Counter {
+    value: i32,
+
+    fn get(self) -> i32 { self.value }
+}
+
+fn main() -> i32 {
+    comptime {
+        let c = Counter { value: 42 };
+        c.get()
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_method_call_with_args"
+spec = ["4.14:44"]
+source = """
+struct Adder {
+    base: i32,
+
+    fn add(self, x: i32) -> i32 { self.base + x }
+}
+
+fn main() -> i32 {
+    comptime {
+        let a = Adder { base: 30 };
+        a.add(12)
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_intcast"
+spec = ["4.14:45"]
+source = """
+fn cast_to_i32(x: i64) -> i32 {
+    @intCast(x)
+}
+
+fn main() -> i32 {
+    comptime {
+        cast_to_i32(42)
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_size_of"
+spec = ["4.14:46"]
+source = """
+fn main() -> i32 {
+    comptime {
+        @size_of(i32)
+    }
+}
+"""
+exit_code = 8
+
+[[case]]
+name = "comptime_size_of_struct"
+spec = ["4.14:46"]
+source = """
+struct Pair { a: i32, b: i32 }
+
+fn main() -> i32 {
+    comptime {
+        @size_of(Pair)
+    }
+}
+"""
+exit_code = 16

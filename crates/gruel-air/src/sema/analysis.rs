@@ -6135,6 +6135,192 @@ impl<'a> Sema<'a> {
                 ))
             }
 
+            // ── Struct destructuring ─────────────────────────────────────────
+            InstData::StructDestructure {
+                type_name,
+                fields_start,
+                fields_len,
+                init,
+            } => {
+                // Evaluate the initializer to a struct value.
+                let init_val = self.evaluate_comptime_inst(init, locals, ctx, outer_span)?;
+                let heap_idx = match init_val {
+                    ConstValue::Struct(idx) => idx,
+                    _ => return Err(not_const(inst_span)),
+                };
+
+                // Resolve the struct type.
+                let struct_id = match self.resolve_comptime_struct(type_name, ctx) {
+                    Some(id) => id,
+                    None => return Err(not_const(inst_span)),
+                };
+
+                // Get field values from the heap.
+                let field_values = match &self.comptime_heap[heap_idx as usize] {
+                    ComptimeHeapItem::Struct { fields, .. } => fields.clone(),
+                    _ => return Err(not_const(inst_span)),
+                };
+
+                // Get the struct definition for field name lookup.
+                let struct_def = self.type_pool.struct_def(struct_id);
+                let field_name_to_idx: HashMap<String, usize> = struct_def
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| (f.name.clone(), i))
+                    .collect();
+
+                // Bind each field into locals.
+                let destr_fields = self.rir.get_destructure_fields(fields_start, fields_len);
+                for field in &destr_fields {
+                    if field.is_wildcard {
+                        continue;
+                    }
+                    let field_name = self.interner.resolve(&field.field_name).to_string();
+                    let field_idx = match field_name_to_idx.get(&field_name) {
+                        Some(&idx) => idx,
+                        None => return Err(not_const(inst_span)),
+                    };
+                    let binding_name = field.binding_name.unwrap_or(field.field_name);
+                    locals.insert(binding_name, field_values[field_idx]);
+                }
+                Ok(ConstValue::Unit)
+            }
+
+            // ── Method call ─────────────────────────────────────────────────────
+            InstData::MethodCall {
+                receiver,
+                method,
+                args_start,
+                args_len,
+            } => {
+                const COMPTIME_CALL_DEPTH_LIMIT: u32 = 64;
+
+                // Evaluate the receiver to get the struct value.
+                let receiver_val =
+                    self.evaluate_comptime_inst(receiver, locals, ctx, outer_span)?;
+
+                // Determine the struct type from the receiver value.
+                let struct_id = match receiver_val {
+                    ConstValue::Struct(heap_idx) => match &self.comptime_heap[heap_idx as usize] {
+                        ComptimeHeapItem::Struct { struct_id, .. } => *struct_id,
+                        _ => return Err(not_const(inst_span)),
+                    },
+                    _ => return Err(not_const(inst_span)),
+                };
+
+                // Look up the method.
+                let method_key = (struct_id, method);
+                let method_info = match self.methods.get(&method_key) {
+                    Some(info) => *info,
+                    None => return Err(not_const(inst_span)),
+                };
+
+                // Evaluate all explicit arguments.
+                let call_args = self.rir.get_call_args(args_start, args_len);
+                let mut arg_values = Vec::with_capacity(call_args.len());
+                for call_arg in &call_args {
+                    let val =
+                        self.evaluate_comptime_inst(call_arg.value, locals, ctx, outer_span)?;
+                    arg_values.push(val);
+                }
+
+                // Enforce call stack depth limit.
+                if self.comptime_call_depth >= COMPTIME_CALL_DEPTH_LIMIT {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "comptime call stack depth exceeded {} levels",
+                                COMPTIME_CALL_DEPTH_LIMIT
+                            ),
+                        },
+                        inst_span,
+                    ));
+                }
+
+                // Bind self and parameters.
+                let param_names = self.param_arena.names(method_info.params).to_vec();
+                let mut call_locals: HashMap<Spur, ConstValue> =
+                    HashMap::with_capacity(param_names.len() + 1);
+                // Bind `self`.
+                let self_sym = self.interner.get_or_intern("self");
+                call_locals.insert(self_sym, receiver_val);
+                for (param_name, arg_val) in param_names.iter().zip(arg_values.iter()) {
+                    call_locals.insert(*param_name, *arg_val);
+                }
+
+                // Execute the method body.
+                self.comptime_call_depth += 1;
+                let body_result = self.evaluate_comptime_inst(
+                    method_info.body,
+                    &mut call_locals,
+                    ctx,
+                    outer_span,
+                );
+                self.comptime_call_depth -= 1;
+                let body_result = body_result?;
+
+                match body_result {
+                    ConstValue::ReturnSignal => {
+                        self.comptime_return_value.take().ok_or_else(|| {
+                            CompileError::new(
+                                ErrorKind::ComptimeEvaluationFailed {
+                                    reason: "comptime return signal missing its value".into(),
+                                },
+                                inst_span,
+                            )
+                        })
+                    }
+                    ConstValue::BreakSignal | ConstValue::ContinueSignal => Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "break/continue outside a loop in comptime method".into(),
+                        },
+                        inst_span,
+                    )),
+                    val => Ok(val),
+                }
+            }
+
+            // ── Intrinsic ────────────────────────────────────────────────────────
+            InstData::Intrinsic {
+                name,
+                args_start,
+                args_len,
+            } => {
+                // For now, only @intCast/@cast are supported in comptime.
+                // Both are no-ops in comptime since all integers are i64.
+                if name == self.known.int_cast || name == self.known.cast {
+                    let arg_refs = self.rir.get_inst_refs(args_start, args_len);
+                    if arg_refs.len() != 1 {
+                        return Err(not_const(inst_span));
+                    }
+                    // Evaluate the argument and pass through.
+                    return self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span);
+                }
+                Err(not_const(inst_span))
+            }
+
+            // ── Type intrinsic (@size_of, @align_of) ────────────────────────────
+            InstData::TypeIntrinsic { name, type_arg } => {
+                let intrinsic_name = self.interner.resolve(&name).to_string();
+                // Resolve the type argument.
+                let ty = self
+                    .resolve_type(type_arg, inst_span)
+                    .map_err(|_| not_const(inst_span))?;
+                let value = match intrinsic_name.as_str() {
+                    "size_of" => {
+                        let slot_count = self.abi_slot_count(ty);
+                        (slot_count as i64) * 8
+                    }
+                    "align_of" => {
+                        let slot_count = self.abi_slot_count(ty);
+                        if slot_count == 0 { 1 } else { 8 }
+                    }
+                    _ => return Err(not_const(inst_span)),
+                };
+                Ok(ConstValue::Integer(value))
+            }
+
             // ── Not yet supported ─────────────────────────────────────────────
             _ => Err(not_const(inst_span)),
         }

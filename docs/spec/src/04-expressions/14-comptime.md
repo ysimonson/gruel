@@ -706,3 +706,74 @@ fn main() -> i32 {
     }
 }
 ```
+
+## Comptime Struct Destructuring
+
+{{ rule(id="4.14:43", cat="normative") }}
+
+A comptime block can destructure structs using `let Type { fields } = expr;` syntax. The initializer must evaluate to a compile-time struct value. Each named field is bound to a local variable; wildcard bindings (`field: _`) are skipped.
+
+```gruel
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    comptime {
+        let p = Point { x: 10, y: 32 };
+        let Point { x, y } = p;
+        x + y
+    }
+}
+```
+
+## Comptime Method Calls
+
+{{ rule(id="4.14:44", cat="normative") }}
+
+A comptime block can call methods on compile-time struct values. The receiver is bound to `self` in the method body. The method body is interpreted with the same comptime evaluation rules. Methods that mutate fields operate on the comptime heap.
+
+```gruel
+struct Counter {
+    value: i32,
+
+    fn get(self) -> i32 { self.value }
+}
+
+fn main() -> i32 {
+    comptime {
+        let c = Counter { value: 42 };
+        c.get()
+    }
+}
+```
+
+## Comptime Integer Casts
+
+{{ rule(id="4.14:45", cat="normative") }}
+
+A comptime block can use `@intCast` and `@cast` intrinsics. Since all comptime integer values are stored as `i64`, integer casts are pass-through operations that preserve the value.
+
+```gruel
+fn cast_to_i32(x: i64) -> i32 {
+    @intCast(x)
+}
+
+fn main() -> i32 {
+    comptime {
+        cast_to_i32(42)
+    }
+}
+```
+
+## Comptime Type Intrinsics
+
+{{ rule(id="4.14:46", cat="normative") }}
+
+A comptime block can use `@size_of` and `@align_of` type intrinsics. These compute the size and alignment of a type at compile time. Sizes are returned in bytes (8 bytes per slot for scalar types). Zero-sized types have 1-byte alignment.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        @size_of(i32)
+    }
+}
+```
