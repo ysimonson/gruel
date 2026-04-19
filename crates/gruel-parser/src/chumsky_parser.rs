@@ -8,12 +8,12 @@ use crate::ast::{
     BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr, CheckedBlockExpr,
     ComptimeBlockExpr, ConstDecl, ContinueExpr, DestructureBinding, DestructureField, Directive,
     DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr, EnumVariant, Expr, FieldDecl,
-    FieldExpr, FieldInit, Function, Ident, IfExpr, IndexExpr, IntLit, IntrinsicArg,
+    FieldExpr, FieldInit, ForExpr, Function, Ident, IfExpr, IndexExpr, IntLit, IntrinsicArg,
     IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr, MatchArm, MatchExpr, Method,
     MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern,
     PatternBinding, PatternFieldBinding, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit,
     StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility,
-    ForExpr, WhileExpr,
+    WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;

@@ -796,6 +796,7 @@ impl<'a> Sema<'a> {
     ///     }
     /// }
     /// ```
+    #[allow(clippy::too_many_arguments)]
     fn analyze_for_loop(
         &mut self,
         air: &mut Air,
@@ -818,7 +819,16 @@ impl<'a> Sema<'a> {
                 args_len,
             } if *name == self.known.range => {
                 let args = self.rir.get_inst_refs(*args_start, *args_len);
-                self.analyze_range_for_loop(air, binding, is_mut, &args, body, span, iterable_inst.span, ctx)
+                self.analyze_range_for_loop(
+                    air,
+                    binding,
+                    is_mut,
+                    &args,
+                    body,
+                    span,
+                    iterable_inst.span,
+                    ctx,
+                )
             }
             _ => {
                 // Not @range — analyze the iterable expression and check if it's an array
@@ -831,8 +841,17 @@ impl<'a> Sema<'a> {
                     let is_copy = self.is_type_copy(elem_type);
 
                     self.analyze_array_for_loop(
-                        air, binding, is_mut, iterable_result.air_ref, iterable_type,
-                        elem_type, array_len, is_copy, body, span, ctx,
+                        air,
+                        binding,
+                        is_mut,
+                        iterable_result.air_ref,
+                        iterable_type,
+                        elem_type,
+                        array_len,
+                        is_copy,
+                        body,
+                        span,
+                        ctx,
                     )
                 } else {
                     Err(CompileError::new(
@@ -848,6 +867,7 @@ impl<'a> Sema<'a> {
     }
 
     /// Desugar `for x in @range(...) { body }` into a while loop in AIR.
+    #[allow(clippy::too_many_arguments)]
     fn analyze_range_for_loop(
         &mut self,
         air: &mut Air,
@@ -1072,10 +1092,8 @@ impl<'a> Sema<'a> {
         ctx.pop_scope();
 
         // Build the outer block: [counter_storage_live, counter_alloc, loop]
-        let outer_stmts_start = air.add_extra(&[
-            counter_storage_live.as_u32(),
-            counter_alloc.as_u32(),
-        ]);
+        let outer_stmts_start =
+            air.add_extra(&[counter_storage_live.as_u32(), counter_alloc.as_u32()]);
         let outer_block = air.add_inst(AirInst {
             data: AirInstData::Block {
                 stmts_start: outer_stmts_start,
@@ -1094,6 +1112,7 @@ impl<'a> Sema<'a> {
     /// For Copy element types, elements are copied out and the array remains valid.
     /// For non-Copy element types, elements are moved out and the array is consumed;
     /// `break` is forbidden because it would leave un-dropped elements.
+    #[allow(clippy::too_many_arguments)]
     fn analyze_array_for_loop(
         &mut self,
         air: &mut Air,

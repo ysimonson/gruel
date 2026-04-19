@@ -973,7 +973,9 @@ pub enum ErrorKind {
     // Control flow errors
     #[error("'break' outside of loop")]
     BreakOutsideLoop,
-    #[error("'break' in for-in loop over array with non-Copy element type '{element_type}' would leak un-iterated elements")]
+    #[error(
+        "'break' in for-in loop over array with non-Copy element type '{element_type}' would leak un-iterated elements"
+    )]
     BreakInConsumingForLoop { element_type: String },
     #[error("'continue' outside of loop")]
     ContinueOutsideLoop,

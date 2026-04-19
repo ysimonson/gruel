@@ -1234,7 +1234,12 @@ impl Rir {
                 cond: renumber(*cond),
                 body: renumber(*body),
             },
-            InstData::For { binding, is_mut, iterable, body } => InstData::For {
+            InstData::For {
+                binding,
+                is_mut,
+                iterable,
+                body,
+            } => InstData::For {
                 binding: *binding,
                 is_mut: *is_mut,
                 iterable: renumber(*iterable),
@@ -2371,9 +2376,22 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     }
                 }
                 InstData::Loop { cond, body } => writeln!(out, "loop {}, {}", cond, body).unwrap(),
-                InstData::For { binding, is_mut, iterable, body } => {
+                InstData::For {
+                    binding,
+                    is_mut,
+                    iterable,
+                    body,
+                } => {
                     let mut_str = if *is_mut { "mut " } else { "" };
-                    writeln!(out, "for {}{} in {}, {}", mut_str, self.interner.resolve(binding), iterable, body).unwrap()
+                    writeln!(
+                        out,
+                        "for {}{} in {}, {}",
+                        mut_str,
+                        self.interner.resolve(binding),
+                        iterable,
+                        body
+                    )
+                    .unwrap()
                 }
                 InstData::InfiniteLoop { body } => writeln!(out, "infinite_loop {}", body).unwrap(),
                 InstData::Match {
