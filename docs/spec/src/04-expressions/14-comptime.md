@@ -796,11 +796,11 @@ fn main() -> i32 {
 
 {{ rule(id="4.14:48", cat="normative") }}
 
-The `@compileError` intrinsic emits a user-defined compile error during comptime evaluation. It takes a single string literal argument and has type `!` (never), terminating compilation of the current comptime block.
+The `@compileError` intrinsic emits a user-defined compile error during comptime evaluation. It takes a single string literal or `comptime_str` argument and has type `!` (never), terminating compilation of the current comptime block.
 
 {{ rule(id="4.14:49", cat="legality-rule") }}
 
-It is a compile-time error if `@compileError` is called with a non-string-literal argument, or with a number of arguments other than one.
+It is a compile-time error if `@compileError` is called with an argument that is not a string literal or `comptime_str` value, or with a number of arguments other than one.
 
 {{ rule(id="4.14:50", cat="normative") }}
 
@@ -835,5 +835,34 @@ fn compute(comptime n: i32) -> i32 {
 
 fn main() -> i32 {
     compute(21)  // compiles with warning: comptime log present
+}
+```
+
+## Comptime Strings
+
+{{ rule(id="4.14:55", cat="normative") }}
+
+The `comptime_str` type represents a string value that exists only at compile time. String literals inside `comptime` blocks are promoted to `comptime_str` values.
+
+{{ rule(id="4.14:56", cat="legality-rule") }}
+
+It is a compile-time error to use a `comptime_str` value in a runtime position. `comptime_str` values cannot be stored in variables, passed as arguments, or returned from functions that execute at runtime.
+
+{{ rule(id="4.14:57", cat="normative") }}
+
+The `comptime_str` type supports the comparison operators `==`, `!=`, `<`, `<=`, `>`, `>=`. Comparisons use lexicographic byte ordering.
+
+{{ rule(id="4.14:58", cat="normative") }}
+
+The `comptime_str` type provides the following methods: `len() -> i32` returns the byte length, `is_empty() -> bool` returns whether the string is empty, `contains(needle: comptime_str) -> bool` checks for substring presence, `starts_with(prefix: comptime_str) -> bool` checks for a prefix, `ends_with(suffix: comptime_str) -> bool` checks for a suffix, and `concat(other: comptime_str) -> comptime_str` concatenates two strings.
+
+{{ rule(id="4.14:59") }}
+
+```gruel
+fn check_name(comptime name: comptime_str) -> i32 {
+    if name.len() == 0 {
+        @compileError("name must not be empty");
+    }
+    name.len()
 }
 ```

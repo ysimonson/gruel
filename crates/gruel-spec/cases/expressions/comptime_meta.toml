@@ -161,6 +161,200 @@ fn main() -> i32 {
 exit_code = 42
 
 # =============================================================================
+# comptime_str
+# =============================================================================
+
+[[case]]
+name = "comptime_str_promotion"
+spec = ["4.14:55"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        if s.len() == 5 { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_is_empty"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        let e = "";
+        if !s.is_empty() && e.is_empty() { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_contains"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello world";
+        if s.contains("world") && !s.contains("xyz") { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_starts_ends_with"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello world";
+        if s.starts_with("hello") && s.ends_with("world") { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_eq_ne"
+spec = ["4.14:57"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = "hello";
+        let b = "hello";
+        let c = "world";
+        if a == b && a != c { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_ordering"
+spec = ["4.14:57"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = "abc";
+        let b = "abd";
+        if a < b && b > a && a <= a && a >= a { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_concat"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = "hello";
+        let b = " world";
+        let c = a.concat(b);
+        if c.len() == 11 { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_method_eq"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = "test";
+        let b = "test";
+        if a.eq(b) && !a.ne(b) { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_runtime_rejected"
+spec = ["4.14:56"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s
+    }
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+[[case]]
+name = "comptime_str_compile_error_accepts"
+spec = ["4.14:48", "4.14:55"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let msg = "custom error";
+        @compileError(msg);
+        0
+    }
+}
+"""
+compile_fail = true
+error_contains = "custom error"
+
+[[case]]
+name = "comptime_str_compile_log_accepts"
+spec = ["4.14:52", "4.14:55"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let msg = "hello";
+        @compileLog(msg);
+        42
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_str_requires_preview"
+spec = ["4.14:55"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s.len()
+    }
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+# =============================================================================
 # Preview Feature Gate
 # =============================================================================
 

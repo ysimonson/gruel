@@ -2652,7 +2652,8 @@ impl<'a> Sema<'a> {
                     });
                     return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
                 }
-                ConstValue::Unit
+                ConstValue::ComptimeStr(_)
+                | ConstValue::Unit
                 | ConstValue::Struct(_)
                 | ConstValue::Array(_)
                 | ConstValue::EnumVariant { .. }

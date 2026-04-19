@@ -1498,6 +1498,7 @@ impl<'a> Sema<'a> {
                     ConstValue::Bool(_) => Type::BOOL,
                     ConstValue::Type(t) => *t,
                     ConstValue::Unit => Type::UNIT,
+                    ConstValue::ComptimeStr(_) => Type::COMPTIME_STR,
                     ConstValue::Struct(_)
                     | ConstValue::Array(_)
                     | ConstValue::EnumVariant { .. }
@@ -2077,6 +2078,12 @@ impl<'a> Sema<'a> {
                     ConstValue::Type(_) => Err(CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
                             reason: "type values cannot exist at runtime".to_string(),
+                        },
+                        span,
+                    )),
+                    ConstValue::ComptimeStr(_) => Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "comptime_str values cannot exist at runtime".to_string(),
                         },
                         span,
                     )),
@@ -5027,6 +5034,15 @@ impl<'a> Sema<'a> {
             }),
             ConstValue::Integer(v) => Ok(format!("{v}")),
             ConstValue::Unit => Ok("()".to_string()),
+            ConstValue::ComptimeStr(idx) => match &self.comptime_heap[idx as usize] {
+                ComptimeHeapItem::String(s) => Ok(s.clone()),
+                _ => Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "invalid comptime_str heap reference".into(),
+                    },
+                    span,
+                )),
+            },
             _ => Err(CompileError::new(
                 ErrorKind::ComptimeEvaluationFailed {
                     reason: "expression contains values that cannot be known at compile time"
@@ -5037,23 +5053,170 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Evaluate a comptime intrinsic argument as a string.
-    ///
-    /// In Phase 1, this only accepts `StringConst` instructions (string literals).
-    /// Later phases will extend this to accept `ConstValue::ComptimeStr` values.
-    fn evaluate_comptime_string_arg(
-        &self,
-        arg_ref: InstRef,
-        _locals: &mut HashMap<Spur, ConstValue>,
-        _ctx: &AnalysisContext,
-        _outer_span: Span,
-    ) -> CompileResult<String> {
-        let arg_inst = self.rir.get(arg_ref);
-        match &arg_inst.data {
-            gruel_rir::InstData::StringConst(spur) => Ok(self.interner.resolve(spur).to_string()),
+    /// Resolve a `ConstValue::ComptimeStr` to its Rust string content.
+    fn resolve_comptime_str(&self, idx: u32, span: Span) -> CompileResult<&str> {
+        match &self.comptime_heap[idx as usize] {
+            ComptimeHeapItem::String(s) => Ok(s.as_str()),
             _ => Err(CompileError::new(
                 ErrorKind::ComptimeEvaluationFailed {
-                    reason: "@compileError requires a string literal argument".into(),
+                    reason: "invalid comptime_str heap reference".into(),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Evaluate a `comptime_str` method call in the comptime interpreter.
+    ///
+    /// Dispatches methods like `len`, `is_empty`, `contains`, `starts_with`,
+    /// `ends_with`, `eq`, `ne`, `lt`, `le`, `gt`, `ge`, and `concat`.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_comptime_str_method(
+        &mut self,
+        str_idx: u32,
+        method_name: &str,
+        call_args: &[gruel_rir::RirCallArg],
+        locals: &mut HashMap<Spur, ConstValue>,
+        ctx: &AnalysisContext,
+        outer_span: Span,
+        inst_span: Span,
+    ) -> CompileResult<ConstValue> {
+        let s = self.resolve_comptime_str(str_idx, inst_span)?.to_string();
+
+        match method_name {
+            "len" => {
+                if !call_args.is_empty() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: "len".to_string(),
+                            expected: 0,
+                            found: call_args.len(),
+                        },
+                        inst_span,
+                    ));
+                }
+                Ok(ConstValue::Integer(s.len() as i64))
+            }
+            "is_empty" => {
+                if !call_args.is_empty() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: "is_empty".to_string(),
+                            expected: 0,
+                            found: call_args.len(),
+                        },
+                        inst_span,
+                    ));
+                }
+                Ok(ConstValue::Bool(s.is_empty()))
+            }
+            "contains" | "starts_with" | "ends_with" | "eq" | "ne" | "lt" | "le" | "gt" | "ge" => {
+                if call_args.len() != 1 {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: method_name.to_string(),
+                            expected: 1,
+                            found: call_args.len(),
+                        },
+                        inst_span,
+                    ));
+                }
+                let arg_val =
+                    self.evaluate_comptime_inst(call_args[0].value, locals, ctx, outer_span)?;
+                let other_idx = match arg_val {
+                    ConstValue::ComptimeStr(idx) => idx,
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: format!(
+                                    "comptime_str.{method_name} expects a comptime_str argument"
+                                ),
+                            },
+                            inst_span,
+                        ));
+                    }
+                };
+                let other = self.resolve_comptime_str(other_idx, inst_span)?.to_string();
+                let result = match method_name {
+                    "contains" => s.contains(other.as_str()),
+                    "starts_with" => s.starts_with(other.as_str()),
+                    "ends_with" => s.ends_with(other.as_str()),
+                    "eq" => s == other,
+                    "ne" => s != other,
+                    "lt" => s < other,
+                    "le" => s <= other,
+                    "gt" => s > other,
+                    "ge" => s >= other,
+                    _ => unreachable!(),
+                };
+                Ok(ConstValue::Bool(result))
+            }
+            "concat" => {
+                if call_args.len() != 1 {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: "concat".to_string(),
+                            expected: 1,
+                            found: call_args.len(),
+                        },
+                        inst_span,
+                    ));
+                }
+                let arg_val =
+                    self.evaluate_comptime_inst(call_args[0].value, locals, ctx, outer_span)?;
+                let other_idx = match arg_val {
+                    ConstValue::ComptimeStr(idx) => idx,
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: "comptime_str.concat expects a comptime_str argument"
+                                    .into(),
+                            },
+                            inst_span,
+                        ));
+                    }
+                };
+                let other = self.resolve_comptime_str(other_idx, inst_span)?.to_string();
+                let result = format!("{s}{other}");
+                let idx = self.comptime_heap.len() as u32;
+                self.comptime_heap.push(ComptimeHeapItem::String(result));
+                Ok(ConstValue::ComptimeStr(idx))
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("unknown comptime_str method '{method_name}'"),
+                },
+                inst_span,
+            )),
+        }
+    }
+
+    /// Evaluate a comptime intrinsic argument as a string.
+    ///
+    /// Accepts both `StringConst` instructions (string literals) and
+    /// `ConstValue::ComptimeStr` values from comptime evaluation.
+    fn evaluate_comptime_string_arg(
+        &mut self,
+        arg_ref: InstRef,
+        locals: &mut HashMap<Spur, ConstValue>,
+        ctx: &AnalysisContext,
+        outer_span: Span,
+    ) -> CompileResult<String> {
+        let arg_inst = self.rir.get(arg_ref);
+        // Try string literal first
+        if let gruel_rir::InstData::StringConst(spur) = &arg_inst.data {
+            return Ok(self.interner.resolve(spur).to_string());
+        }
+        // Otherwise evaluate as a comptime expression
+        let val = self.evaluate_comptime_inst(arg_ref, locals, ctx, outer_span)?;
+        match val {
+            ConstValue::ComptimeStr(idx) => self
+                .resolve_comptime_str(idx, arg_inst.span)
+                .map(|s| s.to_string()),
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "@compileError requires a string literal or comptime_str argument"
+                        .into(),
                 },
                 arg_inst.span,
             )),
@@ -5169,6 +5332,14 @@ impl<'a> Sema<'a> {
             InstData::BoolConst(value) => Ok(ConstValue::Bool(value)),
 
             InstData::UnitConst => Ok(ConstValue::Unit),
+
+            InstData::StringConst(spur) => {
+                self.require_preview(PreviewFeature::ComptimeMeta, "comptime_str type", inst_span)?;
+                let s = self.interner.resolve(&spur).to_string();
+                let idx = self.comptime_heap.len() as u32;
+                self.comptime_heap.push(ComptimeHeapItem::String(s));
+                Ok(ConstValue::ComptimeStr(idx))
+            }
 
             // ── Unary operations ─────────────────────────────────────────────
             InstData::Neg { operand } => {
@@ -5289,6 +5460,11 @@ impl<'a> Sema<'a> {
                         Ok(ConstValue::Bool(a == b))
                     }
                     (ConstValue::Bool(a), ConstValue::Bool(b)) => Ok(ConstValue::Bool(a == b)),
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa == sb))
+                    }
                     _ => Err(not_const(inst_span)),
                 }
             }
@@ -5300,52 +5476,69 @@ impl<'a> Sema<'a> {
                         Ok(ConstValue::Bool(a != b))
                     }
                     (ConstValue::Bool(a), ConstValue::Bool(b)) => Ok(ConstValue::Bool(a != b)),
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa != sb))
+                    }
                     _ => Err(not_const(inst_span)),
                 }
             }
             InstData::Lt { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l < r))
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => Ok(ConstValue::Bool(a < b)),
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa < sb))
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
             InstData::Gt { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l > r))
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => Ok(ConstValue::Bool(a > b)),
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa > sb))
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
             InstData::Le { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l <= r))
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                        Ok(ConstValue::Bool(a <= b))
+                    }
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa <= sb))
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
             InstData::Ge { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l >= r))
+                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                match (l, r) {
+                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                        Ok(ConstValue::Bool(a >= b))
+                    }
+                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                        let sa = self.resolve_comptime_str(a, inst_span)?;
+                        let sb = self.resolve_comptime_str(b, inst_span)?;
+                        Ok(ConstValue::Bool(sa >= sb))
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
             }
 
             // ── Logical ───────────────────────────────────────────────────────
@@ -6345,9 +6538,24 @@ impl<'a> Sema<'a> {
             } => {
                 const COMPTIME_CALL_DEPTH_LIMIT: u32 = 64;
 
-                // Evaluate the receiver to get the struct value.
+                // Evaluate the receiver to get the value.
                 let receiver_val =
                     self.evaluate_comptime_inst(receiver, locals, ctx, outer_span)?;
+
+                // Handle comptime_str method dispatch.
+                if let ConstValue::ComptimeStr(str_idx) = receiver_val {
+                    let method_name = self.interner.resolve(&method).to_string();
+                    let call_args = self.rir.get_call_args(args_start, args_len);
+                    return self.evaluate_comptime_str_method(
+                        str_idx,
+                        &method_name,
+                        &call_args,
+                        locals,
+                        ctx,
+                        outer_span,
+                        inst_span,
+                    );
+                }
 
                 // Determine the struct type from the receiver value.
                 let struct_id = match receiver_val {
@@ -6490,16 +6698,8 @@ impl<'a> Sema<'a> {
                     let arg_refs = self.rir.get_inst_refs(args_start, args_len);
                     let mut parts = Vec::new();
                     for &arg_ref in &arg_refs {
-                        // String literals need special handling since StringConst
-                        // isn't a comptime-evaluable instruction (no ConstValue for strings yet).
-                        let arg_inst = self.rir.get(arg_ref);
-                        if let gruel_rir::InstData::StringConst(spur) = &arg_inst.data {
-                            parts.push(format!("\"{}\"", self.interner.resolve(spur)));
-                        } else {
-                            let val =
-                                self.evaluate_comptime_inst(arg_ref, locals, ctx, outer_span)?;
-                            parts.push(self.format_const_value(val, inst_span)?);
-                        }
+                        let val = self.evaluate_comptime_inst(arg_ref, locals, ctx, outer_span)?;
+                        parts.push(self.format_const_value(val, inst_span)?);
                     }
                     let msg = parts.join(" ");
                     eprintln!("comptime log: {msg}");

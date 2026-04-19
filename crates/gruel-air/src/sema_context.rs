@@ -446,8 +446,10 @@ impl<'a> SemaContext<'a> {
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values)
             TypeKind::Enum(_) => true,
-            // Never, Error, and ComptimeType are Copy for convenience
-            TypeKind::Never | TypeKind::Error | TypeKind::ComptimeType => true,
+            // Never, Error, ComptimeType, and ComptimeStr are Copy for convenience
+            TypeKind::Never | TypeKind::Error | TypeKind::ComptimeType | TypeKind::ComptimeStr => {
+                true
+            }
             // Struct types: check if marked with @copy
             TypeKind::Struct(struct_id) => {
                 let struct_def = self.type_pool.struct_def(struct_id);
