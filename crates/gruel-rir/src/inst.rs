@@ -1019,6 +1019,19 @@ impl Rir {
                 type_name: *type_name,
                 variant: *variant,
             },
+            InstData::EnumStructVariant {
+                module,
+                type_name,
+                variant,
+                fields_start,
+                fields_len,
+            } => InstData::EnumStructVariant {
+                module: module.map(renumber),
+                type_name: *type_name,
+                variant: *variant,
+                fields_start: *fields_start,
+                fields_len: *fields_len,
+            },
             InstData::TypeIntrinsic { name, type_arg } => InstData::TypeIntrinsic {
                 name: *name,
                 type_arg: *type_arg,
@@ -1471,6 +1484,11 @@ impl Rir {
                     fields_start,
                     fields_len,
                     ..
+                }
+                | InstData::EnumStructVariant {
+                    fields_start,
+                    fields_len,
+                    ..
                 } => {
                     let start = (*fields_start + extra_offset) as usize;
                     for i in 0..*fields_len as usize {
@@ -1884,6 +1902,21 @@ pub enum InstData {
         type_name: Spur,
         /// Variant name
         variant: Spur,
+    },
+
+    /// Enum struct variant construction: `Enum::Variant { field: value, ... }`
+    /// Fields are stored in the extra array using add_field_inits/get_field_inits.
+    EnumStructVariant {
+        /// Optional module reference (for qualified paths)
+        module: Option<InstRef>,
+        /// Enum type name
+        type_name: Spur,
+        /// Variant name
+        variant: Spur,
+        /// Start of field initializers in extra array
+        fields_start: u32,
+        /// Number of field initializers
+        fields_len: u32,
     },
 
     // Array operations
@@ -2473,6 +2506,29 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         module_str,
                         self.interner.resolve(type_name),
                         self.interner.resolve(variant)
+                    )
+                    .unwrap();
+                }
+                InstData::EnumStructVariant {
+                    module,
+                    type_name,
+                    variant,
+                    fields_start,
+                    fields_len,
+                } => {
+                    let module_str = module.map(|m| format!("{}.", m)).unwrap_or_default();
+                    let fields = self.rir.get_field_inits(*fields_start, *fields_len);
+                    let field_strs: Vec<String> = fields
+                        .iter()
+                        .map(|(name, value)| format!("{}: {}", self.interner.resolve(name), value))
+                        .collect();
+                    writeln!(
+                        out,
+                        "enum_struct_variant {}{}::{} {{ {} }}",
+                        module_str,
+                        self.interner.resolve(type_name),
+                        self.interner.resolve(variant),
+                        field_strs.join(", ")
                     )
                     .unwrap();
                 }

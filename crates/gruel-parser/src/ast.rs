@@ -445,6 +445,8 @@ pub enum Expr {
     Index(IndexExpr),
     /// Path expression (e.g., `Color::Red`)
     Path(PathExpr),
+    /// Enum struct variant literal (e.g., `Shape::Circle { radius: 5 }`)
+    EnumStructLit(EnumStructLitExpr),
     /// Associated function call (e.g., `Point::origin()`)
     AssocFnCall(AssocFnCallExpr),
     /// Self expression (e.g., `self` in method bodies)
@@ -792,6 +794,20 @@ pub struct PathExpr {
     pub span: Span,
 }
 
+/// An enum struct variant literal expression (e.g., `Shape::Circle { radius: 5 }`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumStructLitExpr {
+    /// Optional module/namespace prefix
+    pub base: Option<Box<Expr>>,
+    /// The enum type name (e.g., `Shape`)
+    pub type_name: Ident,
+    /// The variant name (e.g., `Circle`)
+    pub variant: Ident,
+    /// Field initializers
+    pub fields: Vec<FieldInit>,
+    pub span: Span,
+}
+
 /// An associated function call expression (e.g., `Point::origin()` or `module.Point::origin()`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssocFnCallExpr {
@@ -1003,6 +1019,7 @@ impl Expr {
             Expr::ArrayLit(array_lit) => array_lit.span,
             Expr::Index(index_expr) => index_expr.span,
             Expr::Path(path_expr) => path_expr.span,
+            Expr::EnumStructLit(lit) => lit.span,
             Expr::AssocFnCall(assoc_fn_call) => assoc_fn_call.span,
             Expr::SelfExpr(self_expr) => self_expr.span,
             Expr::Comptime(comptime_expr) => comptime_expr.span,
@@ -1326,6 +1343,20 @@ fn fmt_expr(f: &mut fmt::Formatter<'_>, expr: &Expr, level: usize) -> fmt::Resul
             path.type_name.name.into_usize(),
             path.variant.name.into_usize()
         ),
+        Expr::EnumStructLit(lit) => {
+            writeln!(
+                f,
+                "EnumStructLit sym:{}::sym:{}",
+                lit.type_name.name.into_usize(),
+                lit.variant.name.into_usize()
+            )?;
+            for field in &lit.fields {
+                indent(f, level + 1)?;
+                writeln!(f, "field sym:{}:", field.name.name.into_usize())?;
+                fmt_expr(f, &field.value, level + 2)?;
+            }
+            Ok(())
+        }
         Expr::AssocFnCall(assoc_fn_call) => {
             writeln!(
                 f,

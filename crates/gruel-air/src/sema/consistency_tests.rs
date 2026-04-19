@@ -77,6 +77,7 @@ mod tests {
         // Enums
         "EnumDecl",
         "EnumVariant",
+        "EnumStructVariant",
         // Arrays
         "ArrayInit",
         "IndexGet",

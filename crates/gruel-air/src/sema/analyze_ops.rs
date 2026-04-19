@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
-    WarningKind,
+    PreviewFeature, WarningKind,
 };
 use gruel_rir::{InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern};
 use lasso::Spur;
@@ -3024,6 +3024,23 @@ impl<'a> Sema<'a> {
                 Ok(AnalysisResult::new(air_ref, ty))
             }
 
+            InstData::EnumStructVariant {
+                module,
+                type_name,
+                variant,
+                fields_start,
+                fields_len,
+            } => self.analyze_enum_struct_variant(
+                air,
+                *module,
+                *type_name,
+                *variant,
+                *fields_start,
+                *fields_len,
+                inst.span,
+                _ctx,
+            ),
+
             _ => Err(CompileError::new(
                 ErrorKind::InternalError(format!(
                     "analyze_enum_ops called with non-enum instruction: {:?}",
@@ -3032,6 +3049,173 @@ impl<'a> Sema<'a> {
                 inst.span,
             )),
         }
+    }
+
+    /// Analyze an enum struct variant construction: `Enum::Variant { field: value, ... }`
+    fn analyze_enum_struct_variant(
+        &mut self,
+        air: &mut Air,
+        module: Option<InstRef>,
+        type_name: Spur,
+        variant_spur: Spur,
+        fields_start: u32,
+        fields_len: u32,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // Gate behind preview feature
+        self.require_preview(
+            PreviewFeature::EnumStructVariants,
+            "enum struct variants",
+            span,
+        )?;
+
+        // Look up the enum type
+        let enum_id = if let Some(module_ref) = module {
+            self.resolve_enum_through_module(module_ref, type_name, span)?
+        } else {
+            *self.enums.get(&type_name).ok_or_compile_error(
+                ErrorKind::UnknownEnumType(self.interner.resolve(&type_name).to_string()),
+                span,
+            )?
+        };
+        let enum_def = self.type_pool.enum_def(enum_id);
+        let enum_name = enum_def.name.clone();
+
+        // Find the variant
+        let variant_name = self.interner.resolve(&variant_spur).to_string();
+        let variant_index = enum_def.find_variant(&variant_name).ok_or_compile_error(
+            ErrorKind::UnknownVariant {
+                enum_name: enum_name.clone(),
+                variant_name: variant_name.clone(),
+            },
+            span,
+        )?;
+
+        let variant_def = &enum_def.variants[variant_index];
+
+        // Verify this is a struct variant
+        if !variant_def.is_struct_variant() {
+            return Err(CompileError::new(
+                ErrorKind::TypeMismatch {
+                    expected: format!(
+                        "tuple-style construction for variant {}::{}",
+                        enum_name, variant_name
+                    ),
+                    found: "struct-style construction { ... }".to_string(),
+                },
+                span,
+            ));
+        }
+
+        let field_types: Vec<Type> = variant_def.fields.clone();
+        let field_names: Vec<String> = variant_def.field_names.clone();
+        let qualified_name = format!("{}::{}", enum_name, variant_name);
+
+        // Build field name to index map
+        let field_index_map: std::collections::HashMap<&str, usize> = field_names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.as_str(), i))
+            .collect();
+
+        // Get field initializers
+        let field_inits = self.rir.get_field_inits(fields_start, fields_len);
+
+        // Check for unknown and duplicate fields
+        let mut seen_fields = std::collections::HashSet::new();
+        for (init_field_name, _) in &field_inits {
+            let init_name = self.interner.resolve(init_field_name);
+
+            if !field_index_map.contains_key(init_name) {
+                return Err(CompileError::new(
+                    ErrorKind::UnknownField {
+                        struct_name: qualified_name.clone(),
+                        field_name: init_name.to_string(),
+                    },
+                    span,
+                ));
+            }
+
+            if !seen_fields.insert(init_name.to_string()) {
+                return Err(CompileError::new(
+                    ErrorKind::DuplicateField {
+                        struct_name: qualified_name.clone(),
+                        field_name: init_name.to_string(),
+                    },
+                    span,
+                ));
+            }
+        }
+
+        // Check all fields are provided
+        if field_inits.len() != field_names.len() {
+            let missing: Vec<String> = field_names
+                .iter()
+                .filter(|n| !seen_fields.contains(n.as_str()))
+                .cloned()
+                .collect();
+            return Err(CompileError::new(
+                ErrorKind::MissingFields(Box::new(MissingFieldsError {
+                    struct_name: qualified_name,
+                    missing_fields: missing,
+                })),
+                span,
+            ));
+        }
+
+        // Analyze field values in source order, then reorder to declaration order
+        let mut analyzed_fields: Vec<Option<AirRef>> = vec![None; field_names.len()];
+
+        for (init_field_name, field_value) in &field_inits {
+            let init_name = self.interner.resolve(init_field_name);
+            let field_idx = field_index_map[init_name];
+            let expected_type = field_types[field_idx];
+
+            let result = self.analyze_inst(air, *field_value, ctx)?;
+
+            if result.ty != expected_type {
+                return Err(CompileError::new(
+                    ErrorKind::TypeMismatch {
+                        expected: expected_type.name().to_string(),
+                        found: result.ty.name().to_string(),
+                    },
+                    span,
+                )
+                .with_label(
+                    format!(
+                        "field '{}' expects type {}",
+                        init_name,
+                        expected_type.name()
+                    ),
+                    span,
+                ));
+            }
+
+            analyzed_fields[field_idx] = Some(result.air_ref);
+        }
+
+        // Collect in declaration order for EnumCreate
+        let field_air_refs: Vec<u32> = analyzed_fields
+            .into_iter()
+            .map(|opt| opt.expect("all fields should be initialized").as_u32())
+            .collect();
+
+        let enum_type = Type::new_enum(enum_id);
+        let air_fields_len = field_air_refs.len() as u32;
+        let air_fields_start = air.add_extra(&field_air_refs);
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::EnumCreate {
+                enum_id,
+                variant_index: variant_index as u32,
+                fields_start: air_fields_start,
+                fields_len: air_fields_len,
+            },
+            ty: enum_type,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, enum_type))
     }
 
     // ========================================================================

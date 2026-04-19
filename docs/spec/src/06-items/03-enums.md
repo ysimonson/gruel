@@ -233,3 +233,43 @@ enum Shape {
     Point,
 }
 ```
+
+### Struct Variant Construction
+
+{{ rule(id="6.3:25", cat="normative") }}
+
+A struct variant is constructed using path syntax followed by a brace-enclosed
+list of field initializers:
+
+```ebnf
+enum_struct_expr = IDENT "::" IDENT "{" [ field_inits ] "}" ;
+field_inits      = field_init { "," field_init } [ "," ] ;
+field_init       = IDENT ":" expression
+                 | IDENT ;
+```
+
+All fields **MUST** be initialized — no partial initialization is allowed.
+Field initializers **MAY** appear in any order. Field init shorthand `{ x }`
+is equivalent to `{ x: x }`.
+
+{{ rule(id="6.3:26", cat="legality-rule") }}
+
+Using tuple-style construction `Enum::Variant(...)` on a struct variant, or
+struct-style construction `Enum::Variant { ... }` on a tuple variant, is a
+compile-time error.
+
+{{ rule(id="6.3:27", cat="example") }}
+
+```gruel
+enum Shape {
+    Circle { radius: i32 },
+    Rectangle { width: i32, height: i32 },
+    Point,
+}
+
+fn main() -> i32 {
+    let radius = 5;
+    let s = Shape::Circle { radius };
+    0
+}
+```

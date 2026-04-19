@@ -1752,9 +1752,9 @@ impl<'a> Sema<'a> {
             }
 
             // Enum operations
-            InstData::EnumDecl { .. } | InstData::EnumVariant { .. } => {
-                self.analyze_enum_ops(air, inst_ref, ctx)
-            }
+            InstData::EnumDecl { .. }
+            | InstData::EnumVariant { .. }
+            | InstData::EnumStructVariant { .. } => self.analyze_enum_ops(air, inst_ref, ctx),
 
             // Call operations
             InstData::Call { .. } | InstData::MethodCall { .. } | InstData::AssocFnCall { .. } => {
@@ -2470,8 +2470,26 @@ impl<'a> Sema<'a> {
         if let Some(&enum_id) = self.enums.get(&type_name) {
             let enum_def = self.type_pool.enum_def(enum_id);
             if let Some(variant_index) = enum_def.find_variant(&function_name_str) {
-                let field_types: Vec<Type> = enum_def.variants[variant_index].fields.clone();
+                let variant_def = &enum_def.variants[variant_index];
+                let field_types: Vec<Type> = variant_def.fields.clone();
                 if !field_types.is_empty() {
+                    // If this is a struct variant, error: use { } instead of ( )
+                    if variant_def.is_struct_variant() {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: format!(
+                                    "struct-style construction `{}::{} {{ ... }}`",
+                                    type_name_str, function_name_str
+                                ),
+                                found: format!(
+                                    "tuple-style construction `{}::{}(...)`",
+                                    type_name_str, function_name_str
+                                ),
+                            },
+                            span,
+                        ));
+                    }
+
                     // Check argument count
                     if args.len() != field_types.len() {
                         return Err(CompileError::new(

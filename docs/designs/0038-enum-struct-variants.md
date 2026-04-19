@@ -318,7 +318,7 @@ The last two catch attempts to use the wrong construction syntax for a variant's
   - Gate behind preview feature
   - Ensure existing enum tests still pass
 
-- [ ] **Phase 2: Struct variant construction expressions**
+- [x] **Phase 2: Struct variant construction expressions**
   - Parser: add `PathStructLit(Ident, Vec<FieldInit>)` to `IdentSuffix`
   - AST: new `Expr` variant or extend existing for `Enum::Variant { ... }`
   - RIR: lower struct variant construction (reuse `EnumVariant` inst with field refs, or add a new instruction)

@@ -644,3 +644,201 @@ fn main() -> i32 { 0 }
 """
 compile_fail = true
 error_contains = "preview"
+
+# =============================================================================
+# Struct Variant Construction (Preview: enum_struct_variants)
+# =============================================================================
+
+[[case]]
+name = "enum_struct_variant_construct_basic"
+spec = ["6.3:25"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let _s = Shape::Circle { radius: 5 };
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_struct_variant_construct_multi_field"
+spec = ["6.3:25"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Rectangle { width: i32, height: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let _s = Shape::Rectangle { width: 10, height: 20 };
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_struct_variant_construct_any_order"
+spec = ["6.3:25"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Rectangle { width: i32, height: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let _s = Shape::Rectangle { height: 20, width: 10 };
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_struct_variant_construct_shorthand"
+spec = ["6.3:25"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let radius = 5;
+    let _s = Shape::Circle { radius };
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "enum_struct_variant_construct_and_match"
+spec = ["6.3:25"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let s = Shape::Circle { radius: 42 };
+    match s {
+        Shape::Circle => 42,
+        Shape::Point => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_struct_variant_construct_missing_field_error"
+spec = ["6.3:25"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Rectangle { width: i32, height: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let _s = Shape::Rectangle { width: 10 };
+    0
+}
+"""
+compile_fail = true
+error_contains = "missing"
+
+[[case]]
+name = "enum_struct_variant_construct_unknown_field_error"
+spec = ["6.3:25"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let _s = Shape::Circle { x: 5 };
+    0
+}
+"""
+compile_fail = true
+error_contains = "unknown"
+
+[[case]]
+name = "enum_struct_variant_construct_duplicate_field_error"
+spec = ["6.3:25"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let _s = Shape::Circle { radius: 1, radius: 2 };
+    0
+}
+"""
+compile_fail = true
+error_contains = "duplicate"
+
+[[case]]
+name = "enum_struct_variant_tuple_syntax_on_struct_error"
+spec = ["6.3:26"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let _s = Shape::Circle(5);
+    0
+}
+"""
+compile_fail = true
+error_contains = "struct-style"
+
+[[case]]
+name = "enum_struct_variant_struct_syntax_on_tuple_error"
+spec = ["6.3:26"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum IntOption { Some(i32), None }
+fn main() -> i32 {
+    let _x = IntOption::Some { value: 42 };
+    0
+}
+"""
+compile_fail = true
+error_contains = "tuple-style"
+
+[[case]]
+name = "enum_struct_variant_type_mismatch_error"
+spec = ["6.3:25"]
+preview = "enum_struct_variants"
+preview_should_pass = true
+source = """
+enum Shape {
+    Circle { radius: i32 },
+    Point,
+}
+fn main() -> i32 {
+    let _s = Shape::Circle { radius: true };
+    0
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"

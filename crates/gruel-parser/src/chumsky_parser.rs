@@ -7,12 +7,12 @@ use crate::ast::{
     AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget, AssocFnCallExpr, Ast,
     BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr, CheckedBlockExpr,
     ComptimeBlockExpr, ConstDecl, ContinueExpr, DestructureBinding, DestructureField, Directive,
-    DirectiveArg, Directives, DropFn, EnumDecl, EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit,
-    Function, Ident, IfExpr, IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern,
-    LetStatement, LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param,
-    ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, PatternBinding, ReturnExpr, SelfExpr,
-    SelfParam, Statement, StringLit, StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr,
-    UnaryOp, UnitLit, Visibility, WhileExpr,
+    DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr, EnumVariant, Expr, FieldDecl,
+    FieldExpr, FieldInit, Function, Ident, IfExpr, IndexExpr, IntLit, IntrinsicArg,
+    IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr, MatchArm, MatchExpr, Method,
+    MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern,
+    PatternBinding, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit, StructDecl,
+    StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -518,15 +518,24 @@ fn field_init_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    ident_parser()
+    // Field init with explicit value: `name: expr`
+    let explicit = ident_parser()
         .then_ignore(just(TokenKind::Colon))
         .then(expr)
         .map_with(|(name, value), e| FieldInit {
             name,
             value: Box::new(value),
             span: span_from_extra(e),
-        })
-        .boxed()
+        });
+
+    // Field init shorthand: `name` means `name: name`
+    let shorthand = ident_parser().map_with(|name, e| FieldInit {
+        value: Box::new(Expr::Ident(name.clone())),
+        name,
+        span: span_from_extra(e),
+    });
+
+    choice((explicit, shorthand)).boxed()
 }
 
 /// Parser for comma-separated field initializers
@@ -1063,8 +1072,9 @@ where
 enum IdentSuffix {
     Call(Vec<CallArg>),
     StructLit(Vec<FieldInit>),
-    Path(Ident),                   // ::Variant (for enum variants)
-    PathCall(Ident, Vec<CallArg>), // ::function() (for associated functions)
+    Path(Ident),                          // ::Variant (for enum variants)
+    PathCall(Ident, Vec<CallArg>),        // ::function() (for associated functions)
+    PathStructLit(Ident, Vec<FieldInit>), // ::Variant { field: value } (for enum struct variants)
     None,
 }
 
@@ -1081,9 +1091,27 @@ where
                     .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
                     .map(IdentSuffix::Call)
                     .boxed(),
-                // Struct literal: { field: value, ... }
-                field_inits_parser(expr.clone())
-                    .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace))
+                // Struct literal: { field: value, ... } or { field, ... } (shorthand)
+                // Lookahead: require `{ }` or `{ ident :` or `{ ident ,`
+                // to disambiguate from blocks like `if cond { expr }`
+                just(TokenKind::LBrace)
+                    .then(
+                        choice((
+                            just(TokenKind::RBrace).ignored(),
+                            select! { TokenKind::Ident(_) => () }
+                                .then_ignore(just(TokenKind::Colon))
+                                .ignored(),
+                            select! { TokenKind::Ident(_) => () }
+                                .then_ignore(just(TokenKind::Comma))
+                                .ignored(),
+                        ))
+                        .rewind(),
+                    )
+                    .rewind()
+                    .ignore_then(
+                        field_inits_parser(expr.clone())
+                            .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
+                    )
                     .map(IdentSuffix::StructLit)
                     .boxed(),
                 // Associated function call: ::function(args)
@@ -1094,6 +1122,15 @@ where
                             .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)),
                     )
                     .map(|(func, args)| IdentSuffix::PathCall(func, args))
+                    .boxed(),
+                // Enum struct variant literal: ::Variant { field: value, ... }
+                just(TokenKind::ColonColon)
+                    .ignore_then(ident_parser())
+                    .then(
+                        field_inits_parser(expr.clone())
+                            .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
+                    )
+                    .map(|(variant, fields)| IdentSuffix::PathStructLit(variant, fields))
                     .boxed(),
                 // Path: ::Variant (for enum variants)
                 just(TokenKind::ColonColon)
@@ -1121,6 +1158,13 @@ where
                 type_name: name,
                 function,
                 args,
+                span: span_from_extra(e),
+            }),
+            IdentSuffix::PathStructLit(variant, fields) => Expr::EnumStructLit(EnumStructLitExpr {
+                base: None,
+                type_name: name,
+                variant,
+                fields,
                 span: span_from_extra(e),
             }),
             IdentSuffix::Path(variant) => Expr::Path(PathExpr {
@@ -1151,6 +1195,8 @@ enum Suffix {
     QualifiedPath(Ident, Ident, u32),
     /// Qualified associated function call: .TypeName::function(args)
     QualifiedAssocFnCall(Ident, Ident, Vec<CallArg>, u32),
+    /// Qualified enum struct variant literal: .EnumName::Variant { field: value }
+    QualifiedEnumStructLit(Ident, Ident, Vec<FieldInit>, u32),
 }
 
 /// Wraps a primary expression parser with field access, method call, and indexing suffixes
@@ -1238,6 +1284,17 @@ where
             Suffix::QualifiedAssocFnCall(type_name, function, args, offset_to_u32(e.span().end))
         });
 
+    // Qualified enum struct variant literal: .EnumName::Variant { field: value, ... }
+    let qualified_enum_struct_lit_suffix = type_and_member
+        .clone()
+        .then(
+            field_inits_parser(expr.clone())
+                .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
+        )
+        .map_with(|((type_name, variant), fields), e| {
+            Suffix::QualifiedEnumStructLit(type_name, variant, fields, offset_to_u32(e.span().end))
+        });
+
     // Qualified path (enum variant): .EnumName::Variant
     // We capture the end position from the variant ident before the negative lookahead
     let qualified_path_suffix = type_and_member
@@ -1245,7 +1302,7 @@ where
             let end = variant.span.end;
             (type_name, variant, end)
         })
-        .then_ignore(none_of([TokenKind::LParen]).rewind())
+        .then_ignore(none_of([TokenKind::LParen, TokenKind::LBrace]).rewind())
         .map(|(type_name, variant, end)| Suffix::QualifiedPath(type_name, variant, end));
 
     // Field access: .ident (but NOT followed by '(', '::', or struct literal pattern)
@@ -1274,6 +1331,7 @@ where
             choice((
                 method_call_suffix.boxed(),
                 qualified_assoc_fn_suffix.boxed(),
+                qualified_enum_struct_lit_suffix.boxed(),
                 qualified_struct_lit_suffix,
                 qualified_path_suffix.boxed(),
                 field_suffix.boxed(),
@@ -1327,6 +1385,17 @@ where
                         base: Some(Box::new(base)),
                         type_name,
                         variant,
+                        span,
+                    })
+                }
+                Suffix::QualifiedEnumStructLit(type_name, variant, fields, end) => {
+                    // module.EnumName::Variant { ... } → EnumStructLitExpr with base
+                    let span = base.span().extend_to(end);
+                    Expr::EnumStructLit(EnumStructLitExpr {
+                        base: Some(Box::new(base)),
+                        type_name,
+                        variant,
+                        fields,
                         span,
                     })
                 }

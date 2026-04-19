@@ -570,6 +570,30 @@ impl<'a> AstGen<'a> {
                     span: struct_lit.span,
                 })
             }
+            Expr::EnumStructLit(lit) => {
+                let module = lit.base.as_ref().map(|base_expr| self.gen_expr(base_expr));
+
+                let fields: Vec<_> = lit
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        let field_value = self.gen_expr(&f.value);
+                        (f.name.name, field_value)
+                    })
+                    .collect();
+                let (fields_start, fields_len) = self.rir.add_field_inits(&fields);
+
+                self.rir.add_inst(Inst {
+                    data: InstData::EnumStructVariant {
+                        module,
+                        type_name: lit.type_name.name,
+                        variant: lit.variant.name,
+                        fields_start,
+                        fields_len,
+                    },
+                    span: lit.span,
+                })
+            }
             Expr::Field(field_expr) => {
                 let base = self.gen_expr(&field_expr.base);
 

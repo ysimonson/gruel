@@ -1044,8 +1044,27 @@ impl<'a> ConstraintGenerator<'a> {
                 InferType::Concrete(Type::UNIT)
             }
 
-            // Enum variant
+            // Enum variant (unit or path)
             InstData::EnumVariant { type_name, .. } => {
+                if let Some(&enum_ty) = self.enums.get(type_name) {
+                    InferType::Concrete(enum_ty)
+                } else {
+                    InferType::Concrete(Type::ERROR)
+                }
+            }
+
+            // Enum struct variant construction
+            InstData::EnumStructVariant {
+                type_name,
+                fields_start,
+                fields_len,
+                ..
+            } => {
+                // Generate constraints for field value expressions
+                let fields = self.rir.get_field_inits(*fields_start, *fields_len);
+                for (_, value_ref) in fields.iter() {
+                    self.generate(*value_ref, ctx);
+                }
                 if let Some(&enum_ty) = self.enums.get(type_name) {
                     InferType::Concrete(enum_ty)
                 } else {
