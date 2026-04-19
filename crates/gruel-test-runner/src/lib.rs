@@ -1069,7 +1069,7 @@ pub fn find_gruel_binary() -> PathBuf {
     std::env::var("GRUEL_BINARY")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            let possible_paths = ["target/release/gruel", "target/debug/gruel"];
+            let possible_paths = ["target/debug/gruel", "target/release/gruel"];
             for path in possible_paths {
                 let p = Path::new(path);
                 if p.exists() {

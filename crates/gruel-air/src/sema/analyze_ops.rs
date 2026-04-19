@@ -3199,9 +3199,7 @@ impl<'a> Sema<'a> {
                     }
                 } else {
                     return Err(CompileError::new(
-                        ErrorKind::UnknownEnumType(
-                            self.interner.resolve(type_name).to_string(),
-                        ),
+                        ErrorKind::UnknownEnumType(self.interner.resolve(type_name).to_string()),
                         inst.span,
                     ));
                 };
@@ -3279,18 +3277,14 @@ impl<'a> Sema<'a> {
                 TypeKind::Enum(id) => id,
                 _ => {
                     return Err(CompileError::new(
-                        ErrorKind::UnknownEnumType(
-                            self.interner.resolve(&type_name).to_string(),
-                        ),
+                        ErrorKind::UnknownEnumType(self.interner.resolve(&type_name).to_string()),
                         span,
                     ));
                 }
             }
         } else {
             return Err(CompileError::new(
-                ErrorKind::UnknownEnumType(
-                    self.interner.resolve(&type_name).to_string(),
-                ),
+                ErrorKind::UnknownEnumType(self.interner.resolve(&type_name).to_string()),
                 span,
             ));
         };

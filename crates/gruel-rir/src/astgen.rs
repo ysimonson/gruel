@@ -850,8 +850,10 @@ impl<'a> AstGen<'a> {
                                         (variant_name, field_types, vec![])
                                     }
                                     EnumVariantKind::Struct(fields) => {
-                                        let field_types: Vec<Spur> =
-                                            fields.iter().map(|f| self.intern_type(&f.ty)).collect();
+                                        let field_types: Vec<Spur> = fields
+                                            .iter()
+                                            .map(|f| self.intern_type(&f.ty))
+                                            .collect();
                                         let field_names: Vec<Spur> =
                                             fields.iter().map(|f| f.name.name).collect();
                                         (variant_name, field_types, field_names)
@@ -888,8 +890,7 @@ impl<'a> AstGen<'a> {
                                 // For now, use a placeholder
                                 self.interner.get_or_intern_static("array")
                             }
-                            TypeExpr::AnonymousStruct { .. }
-                            | TypeExpr::AnonymousEnum { .. } => {
+                            TypeExpr::AnonymousStruct { .. } | TypeExpr::AnonymousEnum { .. } => {
                                 unreachable!("handled above")
                             }
                             TypeExpr::PointerConst { .. } | TypeExpr::PointerMut { .. } => {

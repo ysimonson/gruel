@@ -2823,9 +2823,9 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     methods_len,
                 } => {
                     write!(out, "enum {{ ").unwrap();
-                    let variants =
-                        self.rir
-                            .get_enum_variant_decls(*variants_start, *variants_len);
+                    let variants = self
+                        .rir
+                        .get_enum_variant_decls(*variants_start, *variants_len);
                     let variants_str: Vec<String> = variants
                         .iter()
                         .map(|(v, field_types, field_names)| {

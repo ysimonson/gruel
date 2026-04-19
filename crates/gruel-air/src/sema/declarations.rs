@@ -12,9 +12,7 @@
 use std::collections::{HashMap, HashSet};
 
 use gruel_builtins::is_reserved_type_name;
-use gruel_error::{
-    CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice,
-};
+use gruel_error::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_span::Span;
 use lasso::Spur;

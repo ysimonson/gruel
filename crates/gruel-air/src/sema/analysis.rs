@@ -2168,8 +2168,9 @@ impl<'a> Sema<'a> {
                 methods_len,
             } => {
                 // Get the variant declarations from the RIR
-                let variant_decls =
-                    self.rir.get_enum_variant_decls(*variants_start, *variants_len);
+                let variant_decls = self
+                    .rir
+                    .get_enum_variant_decls(*variants_start, *variants_len);
 
                 // Empty enums are not allowed
                 if variant_decls.is_empty() {
@@ -2198,8 +2199,7 @@ impl<'a> Sema<'a> {
 
                 // Check for duplicate method names
                 if *methods_len > 0 {
-                    let method_refs =
-                        self.rir.get_inst_refs(*methods_start, *methods_len);
+                    let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
                     let mut seen_method_names: std::collections::HashSet<Spur> =
                         std::collections::HashSet::new();
                     for mref in method_refs {
@@ -2227,11 +2227,8 @@ impl<'a> Sema<'a> {
                 let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
 
                 // Check if an equivalent anonymous enum already exists (structural equality)
-                let (enum_ty, _is_new) = self.find_or_create_anon_enum(
-                    &enum_variants,
-                    &method_sigs,
-                    &HashMap::new(),
-                );
+                let (enum_ty, _is_new) =
+                    self.find_or_create_anon_enum(&enum_variants, &method_sigs, &HashMap::new());
 
                 let air_ref = air.add_inst(AirInst {
                     data: AirInstData::TypeConst(enum_ty),
@@ -4313,8 +4310,9 @@ impl<'a> Sema<'a> {
                 methods_start,
                 methods_len,
             } => {
-                let variant_decls =
-                    self.rir.get_enum_variant_decls(*variants_start, *variants_len);
+                let variant_decls = self
+                    .rir
+                    .get_enum_variant_decls(*variants_start, *variants_len);
 
                 let mut enum_variants = Vec::with_capacity(variant_decls.len());
                 for (name_sym, field_type_syms, field_name_syms) in &variant_decls {
@@ -4760,8 +4758,9 @@ impl<'a> Sema<'a> {
                 methods_start,
                 methods_len,
             } => {
-                let variant_decls =
-                    self.rir.get_enum_variant_decls(*variants_start, *variants_len);
+                let variant_decls = self
+                    .rir
+                    .get_enum_variant_decls(*variants_start, *variants_len);
 
                 let mut enum_variants = Vec::with_capacity(variant_decls.len());
                 for (name_sym, field_type_syms, field_name_syms) in &variant_decls {

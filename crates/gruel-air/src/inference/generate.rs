@@ -11,7 +11,9 @@ use super::types::{InferType, TypeVarAllocator, TypeVarId};
 use crate::Type;
 use crate::intern_pool::TypeInternPool;
 use crate::scope::ScopedContext;
-use crate::types::{EnumId, PtrMutability, StructId, parse_array_type_syntax, parse_pointer_type_syntax};
+use crate::types::{
+    EnumId, PtrMutability, StructId, parse_array_type_syntax, parse_pointer_type_syntax,
+};
 use gruel_rir::{InstData, InstRef, Rir};
 use gruel_span::Span;
 use lasso::{Spur, ThreadedRodeo};
@@ -1562,7 +1564,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1592,7 +1601,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
@@ -1627,7 +1643,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1669,7 +1692,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
@@ -1706,7 +1736,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
@@ -1739,7 +1776,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1777,7 +1821,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1822,7 +1873,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -1859,7 +1917,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -1968,7 +2033,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -1996,7 +2068,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -2032,7 +2111,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -2077,7 +2163,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -2113,7 +2206,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
@@ -2145,7 +2245,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -2203,7 +2310,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
@@ -2245,7 +2359,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
@@ -2306,7 +2427,14 @@ mod tests {
         });
 
         let mut cgen = ConstraintGenerator::new(
-            &rir, &interner, &functions, &structs, &enums, &methods, &enum_methods, &type_pool,
+            &rir,
+            &interner,
+            &functions,
+            &structs,
+            &enums,
+            &methods,
+            &enum_methods,
+            &type_pool,
         );
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
