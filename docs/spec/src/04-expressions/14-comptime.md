@@ -777,3 +777,17 @@ fn main() -> i32 {
     }
 }
 ```
+
+{{ rule(id="4.14:47", cat="normative") }}
+
+A comptime block can use the `@dbg` intrinsic to emit debug output during compile-time evaluation. Integer values are formatted as signed decimal; boolean values are formatted as `true` or `false`. The output is collected in a buffer accessible through the compiler API and is not printed to stdout during compilation.
+
+```gruel
+fn main() -> i32 {
+    comptime {
+        let x = 42;
+        @dbg(x);
+        x
+    }
+}
+```

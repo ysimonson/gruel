@@ -137,6 +137,10 @@ pub struct Sema<'a> {
     /// When a comptime generic call is executing, type parameters are stored here
     /// so that enum/struct resolution can find them. Checked before `ctx.comptime_type_vars`.
     pub(crate) comptime_type_overrides: HashMap<Spur, Type>,
+    /// Buffer for `@dbg` output collected during comptime evaluation.
+    /// Each entry is one formatted line (without trailing newline), matching
+    /// the format of the runtime `__gruel_dbg_*` functions.
+    pub(crate) comptime_dbg_output: Vec<String>,
 }
 
 impl<'a> Sema<'a> {
@@ -173,6 +177,7 @@ impl<'a> Sema<'a> {
             comptime_call_depth: 0,
             comptime_heap: Vec::new(),
             comptime_type_overrides: HashMap::new(),
+            comptime_dbg_output: Vec::new(),
         }
     }
 

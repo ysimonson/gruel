@@ -2229,3 +2229,31 @@ fn main() -> i32 {
 }
 """
 exit_code = 16
+
+[[case]]
+name = "comptime_dbg_integer"
+spec = ["4.14:47"]
+source = """
+fn main() -> i32 {
+    comptime {
+        let x = 42;
+        @dbg(x);
+        x
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "comptime_dbg_bool"
+spec = ["4.14:47"]
+source = """
+fn main() -> i32 {
+    comptime {
+        @dbg(true);
+        @dbg(false);
+        7
+    }
+}
+"""
+exit_code = 7

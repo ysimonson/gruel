@@ -5,7 +5,6 @@
 //! guides generation toward interesting inputs.
 
 use arbitrary::{Arbitrary, Unstructured};
-use gruel_codegen::x86_64::{LabelId, Operand, Reg, X86Inst, X86Mir};
 
 // ---------------------------------------------------------------------------
 // Source-level generators
@@ -262,116 +261,137 @@ fn gen_bool_expr(
 }
 
 // ---------------------------------------------------------------------------
-// Codegen generator
+// Comptime differential fuzzing generator
 // ---------------------------------------------------------------------------
 
-/// An arbitrary x86-64 MIR program with properly allocated labels.
+/// A program suitable for comptime/runtime differential comparison.
+///
+/// Generates programs using only constructs supported by both the comptime
+/// interpreter and the runtime: i32 arithmetic, booleans, control flow,
+/// function calls, and `@dbg` for observable output. No I/O, strings,
+/// or non-deterministic operations.
 #[derive(Debug)]
-pub struct ArbitraryX86Mir(pub X86Mir);
+pub struct ComptimeProgram {
+    /// The generated function body (without fn main wrapper).
+    body: String,
+}
 
-impl<'a> Arbitrary<'a> for ArbitraryX86Mir {
+impl ComptimeProgram {
+    /// Get the raw body (statements + final expression).
+    pub fn body(&self) -> &str {
+        &self.body
+    }
+
+    /// Wrap the body for comptime evaluation.
+    /// The `@dbg` output is collected in the compiler's buffer.
+    pub fn comptime_source(&self) -> String {
+        format!(
+            "const _: () = comptime {{\n{}\n}};\nfn main() -> i32 {{ 0 }}",
+            self.body
+        )
+    }
+
+    /// Wrap the body for runtime execution.
+    /// The `@dbg` output goes to stdout.
+    pub fn runtime_source(&self) -> String {
+        format!("fn main() -> i32 {{\n{}\n0\n}}", self.body)
+    }
+}
+
+impl<'a> Arbitrary<'a> for ComptimeProgram {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut mir = X86Mir::new();
+        let mut body = String::new();
+        let mut vars: Vec<String> = Vec::new();
 
-        let num_labels: u8 = u.int_in_range(0..=8)?;
-        let labels: Vec<LabelId> =
-            (0..num_labels).map(|_| mir.alloc_label()).collect();
-
-        let num_insts: u8 = u.int_in_range(1..=32)?;
-        for _ in 0..num_insts {
-            let inst = gen_x86_inst(u, &labels)?;
-            mir.push(inst);
+        // Generate 1-8 statements, each with a @dbg call
+        let num_stmts: u8 = u.int_in_range(1..=8)?;
+        for i in 0..num_stmts {
+            let name = format!("ct{}", i);
+            let expr = gen_comptime_i32_expr(u, &vars, 2)?;
+            body.push_str(&format!("    let {}: i32 = {};\n", name, expr));
+            // Emit @dbg for this variable so we can compare output
+            body.push_str(&format!("    @dbg({});\n", name));
+            vars.push(name);
         }
 
-        // Define all labels at the end so every forward reference resolves.
-        for &label in &labels {
-            mir.push(X86Inst::Label { id: label });
+        // Optionally dbg a boolean expression
+        if u.ratio(1, 3)? {
+            let bool_expr = gen_bool_expr(u, &vars, 1)?;
+            body.push_str(&format!("    @dbg({});\n", bool_expr));
         }
-        mir.push(X86Inst::Ret);
 
-        Ok(ArbitraryX86Mir(mir))
+        Ok(ComptimeProgram { body })
     }
 }
 
-fn arb_reg(u: &mut Unstructured<'_>) -> arbitrary::Result<Reg> {
-    // All GPRs except RSP/RBP (callee-saved / frame pointer).
-    let regs = [
-        Reg::Rax, Reg::Rcx, Reg::Rdx, Reg::Rbx,
-        Reg::Rsi, Reg::Rdi, Reg::R8,  Reg::R9,
-        Reg::R10, Reg::R11, Reg::R12, Reg::R13,
-        Reg::R14, Reg::R15,
-    ];
-    Ok(*u.choose(&regs)?)
-}
-
-fn arb_op(u: &mut Unstructured<'_>) -> arbitrary::Result<Operand> {
-    Ok(Operand::Physical(arb_reg(u)?))
-}
-
-fn arb_imm32(u: &mut Unstructured<'_>) -> arbitrary::Result<i32> {
-    // Bias toward boundary values
-    if u.ratio(1, 3)? {
-        Ok(*u.choose(&[
-            0i32, 1, -1, 127, -128, 255, 256, i32::MAX, i32::MIN,
-        ])?)
-    } else {
-        u.arbitrary()
-    }
-}
-
-fn arb_shift(u: &mut Unstructured<'_>, max: u8) -> arbitrary::Result<u8> {
-    if u.ratio(1, 3)? {
-        // Boundary values
-        let bounds: Vec<u8> = vec![0, 1, max - 1];
-        Ok(*u.choose(&bounds)?)
-    } else {
-        u.int_in_range(0..=max - 1)
-    }
-}
-
-fn gen_x86_inst(
+/// Generate an i32 expression valid in both comptime and runtime contexts.
+/// Only uses: literals, variables, arithmetic (+, -, *, &, |, ^), negation,
+/// if-else, and blocks with inner lets.
+fn gen_comptime_i32_expr(
     u: &mut Unstructured<'_>,
-    labels: &[LabelId],
-) -> arbitrary::Result<X86Inst> {
-    let has_labels = !labels.is_empty();
-    let max = if has_labels { 30u8 } else { 20 };
+    vars: &[String],
+    depth: u8,
+) -> arbitrary::Result<String> {
+    if depth == 0 {
+        return gen_comptime_i32_leaf(u, vars);
+    }
 
-    let dst = arb_op(u)?;
-    let src = arb_op(u)?;
-    let imm = arb_imm32(u)?;
-
-    match u.int_in_range(0..=max - 1)? {
-        0  => Ok(X86Inst::MovRI32 { dst, imm }),
-        1  => Ok(X86Inst::MovRI64 { dst, imm: imm as i64 }),
-        2  => Ok(X86Inst::MovRR { dst, src }),
-        3  => Ok(X86Inst::AddRR { dst, src }),
-        4  => Ok(X86Inst::AddRR64 { dst, src }),
-        5  => Ok(X86Inst::SubRR { dst, src }),
-        6  => Ok(X86Inst::SubRR64 { dst, src }),
-        7  => Ok(X86Inst::AddRI { dst, imm }),
-        8  => Ok(X86Inst::ImulRR { dst, src }),
-        9  => Ok(X86Inst::Neg { dst }),
-        10 => Ok(X86Inst::AndRR { dst, src }),
-        11 => Ok(X86Inst::OrRR { dst, src }),
-        12 => Ok(X86Inst::XorRR { dst, src }),
-        13 => Ok(X86Inst::NotR { dst }),
-        14 => Ok(X86Inst::ShlRI { dst, imm: arb_shift(u, 64)? }),
-        15 => Ok(X86Inst::ShrRI { dst, imm: arb_shift(u, 64)? }),
-        16 => Ok(X86Inst::SarRI { dst, imm: arb_shift(u, 64)? }),
-        17 => Ok(X86Inst::CmpRR { src1: dst, src2: src }),
-        18 => Ok(X86Inst::CmpRI { src: dst, imm }),
-        19 => Ok(X86Inst::Ret),
-        // Label / jump variants (only reachable when labels exist)
-        20 => Ok(X86Inst::Label { id: *u.choose(labels)? }),
-        21 => Ok(X86Inst::Jz { label: *u.choose(labels)? }),
-        22 => Ok(X86Inst::Jnz { label: *u.choose(labels)? }),
-        23 => Ok(X86Inst::Jo { label: *u.choose(labels)? }),
-        24 => Ok(X86Inst::Jb { label: *u.choose(labels)? }),
-        25 => Ok(X86Inst::Jae { label: *u.choose(labels)? }),
-        26 => Ok(X86Inst::Jbe { label: *u.choose(labels)? }),
-        27 => Ok(X86Inst::Jge { label: *u.choose(labels)? }),
-        28 => Ok(X86Inst::Jle { label: *u.choose(labels)? }),
-        29 => Ok(X86Inst::Jmp { label: *u.choose(labels)? }),
-        _  => Ok(X86Inst::Ret),
+    match u.int_in_range(0u8..=5)? {
+        // Literal
+        0 => gen_comptime_i32_literal(u),
+        // Variable
+        1 if !vars.is_empty() => {
+            let v = u.choose(vars)?;
+            Ok(v.clone())
+        }
+        // Binary arithmetic (avoid division to prevent div-by-zero panics)
+        1 | 2 => {
+            let op = u.choose(&["+", "-", "*", "&", "|", "^"])?;
+            let lhs = gen_comptime_i32_expr(u, vars, depth - 1)?;
+            let rhs = gen_comptime_i32_expr(u, vars, depth - 1)?;
+            Ok(format!("({} {} {})", lhs, op, rhs))
+        }
+        // Unary negation
+        3 => {
+            let e = gen_comptime_i32_expr(u, vars, depth - 1)?;
+            Ok(format!("(-{})", e))
+        }
+        // If-else
+        4 => {
+            let cond = gen_bool_expr(u, vars, depth - 1)?;
+            let then = gen_comptime_i32_expr(u, vars, depth - 1)?;
+            let else_ = gen_comptime_i32_expr(u, vars, depth - 1)?;
+            Ok(format!("if {} {{ {} }} else {{ {} }}", cond, then, else_))
+        }
+        // Block with inner let
+        _ => {
+            let inner_name = format!("inner{}", u.int_in_range(0u16..=999)?);
+            let val = gen_comptime_i32_expr(u, vars, depth - 1)?;
+            let mut inner_vars = vars.to_vec();
+            inner_vars.push(inner_name.clone());
+            let ret = gen_comptime_i32_expr(u, &inner_vars, depth - 1)?;
+            Ok(format!("{{ let {}: i32 = {}; {} }}", inner_name, val, ret))
+        }
     }
 }
+
+fn gen_comptime_i32_leaf(
+    u: &mut Unstructured<'_>,
+    vars: &[String],
+) -> arbitrary::Result<String> {
+    if !vars.is_empty() && u.ratio(1, 2)? {
+        let v = u.choose(vars)?;
+        Ok(v.clone())
+    } else {
+        gen_comptime_i32_literal(u)
+    }
+}
+
+fn gen_comptime_i32_literal(u: &mut Unstructured<'_>) -> arbitrary::Result<String> {
+    // Use small values to avoid arithmetic overflow panics
+    let small = u.choose(&[0i32, 1, -1, 2, -2, 3, 5, 7, 10, 42, 100, -100])?;
+    Ok(small.to_string())
+}
+
+
+

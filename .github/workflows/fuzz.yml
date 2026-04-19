@@ -45,20 +45,14 @@ jobs:
       - name: Fuzz compiler (5 minutes)
         run: cargo +nightly fuzz run compiler -- -max_total_time=300
 
-      - name: Fuzz x86-64 emitter (5 minutes)
-        run: cargo +nightly fuzz run emitter -- -max_total_time=300
-
-      - name: Fuzz x86-64 emitter sequences (5 minutes)
-        run: cargo +nightly fuzz run emitter_sequence -- -max_total_time=300
-
       - name: Fuzz structured compiler (5 minutes)
         run: cargo +nightly fuzz run structured_compiler -- -max_total_time=300
 
       - name: Fuzz structured invalid programs (5 minutes)
         run: cargo +nightly fuzz run structured_invalid -- -max_total_time=300
 
-      - name: Fuzz structured emitter (5 minutes)
-        run: cargo +nightly fuzz run structured_emitter -- -max_total_time=300
+      - name: Fuzz comptime differential (5 minutes)
+        run: cargo +nightly fuzz run comptime_differential -- -max_total_time=300
 
       - name: Upload crash artifacts
         if: failure()

@@ -539,6 +539,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         strings: global_strings,
         warnings: all_warnings,
         type_pool: sema.type_pool.clone(),
+        comptime_dbg_output: std::mem::take(&mut sema.comptime_dbg_output),
     };
 
     // Run specialization pass to rewrite CallGeneric instructions to Call
@@ -1017,6 +1018,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
         strings: global_strings,
         warnings: all_warnings,
         type_pool: sema.type_pool.clone(),
+        comptime_dbg_output: std::mem::take(&mut sema.comptime_dbg_output),
     };
 
     // Run specialization pass to rewrite CallGeneric instructions to Call
@@ -6287,15 +6289,34 @@ impl<'a> Sema<'a> {
                 args_start,
                 args_len,
             } => {
-                // For now, only @intCast/@cast are supported in comptime.
-                // Both are no-ops in comptime since all integers are i64.
+                // @intCast/@cast are no-ops in comptime since all integers are i64.
                 if name == self.known.int_cast || name == self.known.cast {
                     let arg_refs = self.rir.get_inst_refs(args_start, args_len);
                     if arg_refs.len() != 1 {
                         return Err(not_const(inst_span));
                     }
-                    // Evaluate the argument and pass through.
                     return self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span);
+                }
+                // @dbg formats the value and appends to the comptime dbg buffer.
+                if name == self.known.dbg {
+                    let arg_refs = self.rir.get_inst_refs(args_start, args_len);
+                    if arg_refs.len() != 1 {
+                        return Err(not_const(inst_span));
+                    }
+                    let val = self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span)?;
+                    let formatted = match val {
+                        ConstValue::Bool(b) => {
+                            if b {
+                                "true".to_string()
+                            } else {
+                                "false".to_string()
+                            }
+                        }
+                        ConstValue::Integer(v) => format!("{v}"),
+                        _ => return Err(not_const(inst_span)),
+                    };
+                    self.comptime_dbg_output.push(formatted);
+                    return Ok(ConstValue::Unit);
                 }
                 Err(not_const(inst_span))
             }

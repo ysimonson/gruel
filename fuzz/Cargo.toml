@@ -13,7 +13,7 @@ libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
 gruel-lexer = { path = "../crates/gruel-lexer" }
 gruel-parser = { path = "../crates/gruel-parser" }
 gruel-compiler = { path = "../crates/gruel-compiler" }
-gruel-codegen = { path = "../crates/gruel-codegen" }
+tempfile = "3"
 
 [[bin]]
 name = "lexer"
@@ -33,17 +33,6 @@ path = "fuzz_targets/compiler.rs"
 test = false
 doc = false
 
-[[bin]]
-name = "emitter"
-path = "fuzz_targets/emitter.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "emitter_sequence"
-path = "fuzz_targets/emitter_sequence.rs"
-test = false
-doc = false
 
 [[bin]]
 name = "structured_compiler"
@@ -57,8 +46,9 @@ path = "fuzz_targets/structured_invalid.rs"
 test = false
 doc = false
 
+
 [[bin]]
-name = "structured_emitter"
-path = "fuzz_targets/structured_emitter.rs"
+name = "comptime_differential"
+path = "fuzz_targets/comptime_differential.rs"
 test = false
 doc = false

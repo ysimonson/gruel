@@ -48,4 +48,6 @@ pub struct SemaOutput {
     pub warnings: Vec<CompileWarning>,
     /// Type intern pool (contains all types including arrays).
     pub type_pool: TypeInternPool,
+    /// Lines of `@dbg` output collected during comptime evaluation.
+    pub comptime_dbg_output: Vec<String>,
 }

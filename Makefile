@@ -1,6 +1,7 @@
 .PHONY: test quick-test fmt fmt-check check bench website website-serve website-deploy \
-        fuzz fuzz-lexer fuzz-parser fuzz-compiler fuzz-emitter fuzz-emitter-sequence \
-        fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter \
+        fuzz fuzz-lexer fuzz-parser fuzz-compiler \
+        fuzz-structured-compiler fuzz-structured-invalid \
+        fuzz-comptime-differential \
         claude
 
 # Detect LLVM 22 on macOS (Homebrew). Set LLVM_SYS_221_PREFIX if not already set.
@@ -45,8 +46,9 @@ bench:
 # Run all fuzz targets for FUZZ_TIME seconds each (default: 60).
 # Pass FUZZ_TIME=300 for a longer run.
 FUZZ_TIME ?= 60
-fuzz: fuzz-lexer fuzz-parser fuzz-compiler fuzz-emitter fuzz-emitter-sequence \
-      fuzz-structured-compiler fuzz-structured-invalid fuzz-structured-emitter
+fuzz: fuzz-lexer fuzz-parser fuzz-compiler \
+      fuzz-structured-compiler fuzz-structured-invalid \
+      fuzz-comptime-differential
 
 fuzz-lexer:
 	cargo +nightly fuzz run lexer -- -max_total_time=$(FUZZ_TIME)
@@ -57,20 +59,14 @@ fuzz-parser:
 fuzz-compiler:
 	cargo +nightly fuzz run compiler -- -max_total_time=$(FUZZ_TIME)
 
-fuzz-emitter:
-	cargo +nightly fuzz run emitter -- -max_total_time=$(FUZZ_TIME)
-
-fuzz-emitter-sequence:
-	cargo +nightly fuzz run emitter_sequence -- -max_total_time=$(FUZZ_TIME)
-
 fuzz-structured-compiler:
 	cargo +nightly fuzz run structured_compiler -- -max_total_time=$(FUZZ_TIME)
 
 fuzz-structured-invalid:
 	cargo +nightly fuzz run structured_invalid -- -max_total_time=$(FUZZ_TIME)
 
-fuzz-structured-emitter:
-	cargo +nightly fuzz run structured_emitter -- -max_total_time=$(FUZZ_TIME)
+fuzz-comptime-differential:
+	cargo +nightly fuzz run comptime_differential -- -max_total_time=$(FUZZ_TIME)
 
 # Run Claude in a sandboxed environment.
 claude:

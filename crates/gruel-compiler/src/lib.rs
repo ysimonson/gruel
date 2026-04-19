@@ -758,6 +758,8 @@ pub struct CompileState {
     pub strings: Vec<String>,
     /// Warnings collected during compilation.
     pub warnings: Vec<CompileWarning>,
+    /// Lines of `@dbg` output collected during comptime evaluation.
+    pub comptime_dbg_output: Vec<String>,
 }
 
 /// Output from successful compilation.
@@ -925,6 +927,7 @@ pub fn compile_frontend_from_ast_with_options(
         type_pool: sema_output.type_pool,
         strings: sema_output.strings,
         warnings,
+        comptime_dbg_output: sema_output.comptime_dbg_output,
     })
 }
 
@@ -1035,6 +1038,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
         type_pool: sema_output.type_pool,
         strings: sema_output.strings,
         warnings,
+        comptime_dbg_output: sema_output.comptime_dbg_output,
     })
 }
 
@@ -1055,6 +1059,8 @@ pub struct CompileStateFromRir {
     pub strings: Vec<String>,
     /// Warnings collected during compilation.
     pub warnings: Vec<CompileWarning>,
+    /// Lines of `@dbg` output collected during comptime evaluation.
+    pub comptime_dbg_output: Vec<String>,
 }
 
 /// Compile source code to an ELF binary.
