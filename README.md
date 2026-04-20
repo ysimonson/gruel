@@ -19,16 +19,17 @@ of buck, etc.
 ### Language
 
 - Added for loops and first class `Range`s (ADR-0041)
-- Stabilized anonymous struct methods
-- Struct destructuring with partial move ban (ADR-0036)
+- Stabilized anonymous struct methods (ADR-0029)
+- Added struct destructuring (ADR-0036)
+- Banned partial moves to simplify analysis, especially with linear types (ADR-0036)
 - Enums with struct variants (ADR-0037), pattern matching (ADR-0038), and anonymous types with comptime generics support (ADR-0039)
 - Significantly expanded comptime capabilities (ADR-0040, ADR-0042)
 
 ### Language Tooling
 
-- Replaced custom x86-64 and AArch64 backends with LLVM
-- Removed the custom linker in favor of the system linker (`cc`)
-- Replaced inline syscalls with libc-based platform abstraction
+- Replaced custom x86-64 and AArch64 backends with LLVM (ADR-0033)
+- Removed the custom linker in favor of the system linker LLVM (ADR-0033)
+- Replaced inline syscalls with libc-based platform abstraction (ADR-0035)
 - Significantly expanded benchmarks to track comptime and runtime performance (ADR-0043)
 
 ### Infrastructure
