@@ -181,29 +181,45 @@ def filter_runs_by_opt_level(runs: list[dict], opt_level: str) -> list[dict]:
     return filtered
 
 
-def get_benchmark_memory(run: dict, benchmark_name: str) -> float:
-    """Get peak memory (MB) for a specific benchmark from a run."""
+def _find_benchmark(run: dict, benchmark_name: str) -> Optional[dict]:
+    """Find a benchmark entry by name, handling @opt suffix mismatches.
+
+    After filter_runs_by_opt_level, benchmarks may lose their @opt suffix
+    (legacy data never had it). This tries exact match first, then base name.
+    """
     for bench in run.get("benchmarks", []):
         if bench.get("name") == benchmark_name:
-            if "peak_memory_bytes" in bench:
-                return bench["peak_memory_bytes"] / (1024 * 1024)
+            return bench
+    # Try base name (strip @opt) for legacy data
+    base, _ = parse_benchmark_name(benchmark_name)
+    if base != benchmark_name:
+        for bench in run.get("benchmarks", []):
+            if bench.get("name") == base:
+                return bench
+    return None
+
+
+def get_benchmark_memory(run: dict, benchmark_name: str) -> float:
+    """Get peak memory (MB) for a specific benchmark from a run."""
+    bench = _find_benchmark(run, benchmark_name)
+    if bench and "peak_memory_bytes" in bench:
+        return bench["peak_memory_bytes"] / (1024 * 1024)
     return 0
 
 
 def get_benchmark_binary_size(run: dict, benchmark_name: str) -> float:
     """Get binary size (KB) for a specific benchmark from a run."""
-    for bench in run.get("benchmarks", []):
-        if bench.get("name") == benchmark_name:
-            if "binary_size_bytes" in bench:
-                return bench["binary_size_bytes"] / 1024
+    bench = _find_benchmark(run, benchmark_name)
+    if bench and "binary_size_bytes" in bench:
+        return bench["binary_size_bytes"] / 1024
     return 0
 
 
 def get_benchmark_runtime(run: dict, benchmark_name: str) -> float:
     """Get runtime (in ms) for a specific benchmark from a run."""
-    for bench in run.get("benchmarks", []):
-        if bench.get("name") == benchmark_name:
-            return bench.get("runtime_ms", 0)
+    bench = _find_benchmark(run, benchmark_name)
+    if bench:
+        return bench.get("runtime_ms", 0)
     return 0
 
 
@@ -383,15 +399,15 @@ BENCHMARK_COLORS = [
 
 def get_benchmark_time(run: dict, benchmark_name: str) -> float:
     """Get timing for a specific benchmark from a run."""
-    for bench in run.get("benchmarks", []):
-        if bench.get("name") == benchmark_name:
-            if "mean_ms" in bench:
-                return bench["mean_ms"]
-            if "total_ms" in bench:
-                total = bench["total_ms"]
-                if isinstance(total, dict):
-                    return total.get("mean", 0)
-                return total
+    bench = _find_benchmark(run, benchmark_name)
+    if bench:
+        if "mean_ms" in bench:
+            return bench["mean_ms"]
+        if "total_ms" in bench:
+            total = bench["total_ms"]
+            if isinstance(total, dict):
+                return total.get("mean", 0)
+            return total
     return 0
 
 
@@ -399,13 +415,13 @@ def get_benchmark_time(run: dict, benchmark_name: str) -> float:
 
 def get_pass_times_for_benchmark(run: dict, benchmark_name: str) -> dict[str, float]:
     """Extract pass timing for a specific benchmark from a run."""
-    for bench in run.get("benchmarks", []):
-        if bench.get("name") == benchmark_name and "passes" in bench:
-            passes = bench["passes"]
-            return {
-                name: passes.get(name, {}).get("mean_ms", 0)
-                for name in PASS_ORDER
-            }
+    bench = _find_benchmark(run, benchmark_name)
+    if bench and "passes" in bench:
+        passes = bench["passes"]
+        return {
+            name: passes.get(name, {}).get("mean_ms", 0)
+            for name in PASS_ORDER
+        }
     return {}
 
 
