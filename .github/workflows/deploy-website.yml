@@ -2,14 +2,14 @@ name: Website
 
 on:
   push:
-    branches: [trunk]
+    branches: [main]
     paths:
       - 'website/**'
       - 'docs/spec/**'
       - 'scripts/generate-charts.py'
       - '.github/workflows/deploy-website.yml'
   pull_request:
-    branches: [trunk]
+    branches: [main]
     paths:
       - 'website/**'
       - 'docs/spec/**'
@@ -19,7 +19,7 @@ on:
   workflow_run:
     workflows: ["Benchmarks"]
     types: [completed]
-    branches: [trunk]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -73,17 +73,17 @@ jobs:
         run: website/build.sh deploy
 
       - name: Add CNAME
-        if: github.ref == 'refs/heads/trunk'
+        if: github.ref == 'refs/heads/main'
         run: echo "gruel.yusufsimonson.com" > website/public/CNAME
 
       - name: Upload artifact
-        if: github.ref == 'refs/heads/trunk'
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: website/public
 
   deploy:
-    if: github.ref == 'refs/heads/trunk' && github.repository == 'ysimonson/gruel'
+    if: github.ref == 'refs/heads/main' && github.repository == 'ysimonson/gruel'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -2,7 +2,7 @@ name: Benchmarks
 
 on:
   push:
-    branches: [trunk]
+    branches: [main]
   schedule:
     # Run every 15 minutes to ensure benchmark coverage
     # This provides predictable resource usage and handles high commit velocity
@@ -128,10 +128,10 @@ jobs:
     name: benchmark (${{ matrix.name }})
 
     steps:
-      - name: Checkout trunk
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: trunk
+          ref: main
           fetch-depth: 0  # Full history for commit info
 
       - name: Install LLVM 22 (Linux)
@@ -237,16 +237,16 @@ jobs:
     if: ${{ needs.check-queue.outputs.should_run == 'true' && !cancelled() && needs.benchmark.result != 'failure' }}
 
     steps:
-      - name: Checkout trunk for scripts
+      - name: Checkout main for scripts
         uses: actions/checkout@v4
         with:
-          ref: trunk
-          path: trunk
+          ref: main
+          path: main
 
       - name: Get commit info and range
         id: commit
         run: |
-          cd trunk
+          cd main
           echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "full_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
@@ -366,7 +366,7 @@ EOF
             fi
 
             # Append enhanced results to history using the Python script
-            if ! python3 trunk/scripts/append-benchmark.py "$enhanced_file" "$history_file"; then
+            if ! python3 main/scripts/append-benchmark.py "$enhanced_file" "$history_file"; then
               echo "::error::Failed to append benchmark results for $platform"
               exit 1
             fi
