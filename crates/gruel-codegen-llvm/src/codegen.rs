@@ -2516,27 +2516,52 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 )
             }
 
-            // ---- Raw syscall (x86_64 Linux) ----
+            // ---- Raw syscall ----
             "syscall" => {
                 let i64_ty = self.ctx.i64_type();
                 // Build argument values (all u64, first is syscall number)
-                let arg_vals: Vec<_> = args.iter().map(|a| self.get_value(*a).into_int_value()).collect();
+                let arg_vals: Vec<_> = args
+                    .iter()
+                    .map(|a| self.get_value(*a).into_int_value())
+                    .collect();
                 let num_args = arg_vals.len(); // 1..=7 (syscall_num + up to 6 args)
 
-                // x86_64 syscall convention:
-                //   rax = syscall number
-                //   rdi, rsi, rdx, r10, r8, r9 = arg1..arg6
-                //   return value in rax
-                //   rcx and r11 are clobbered by the kernel
-                let (asm_str, constraints) = match num_args {
-                    1 => ("syscall".to_string(), "={rax},{rax},~{rcx},~{r11},~{memory}".to_string()),
-                    2 => ("syscall".to_string(), "={rax},{rax},{rdi},~{rcx},~{r11},~{memory}".to_string()),
-                    3 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}".to_string()),
-                    4 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},~{rcx},~{r11},~{memory}".to_string()),
-                    5 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},~{rcx},~{r11},~{memory}".to_string()),
-                    6 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},~{rcx},~{r11},~{memory}".to_string()),
-                    7 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}".to_string()),
-                    _ => unreachable!("syscall validated to 1-7 args by sema"),
+                let triple = TargetMachine::get_default_triple();
+                let triple_str = triple.as_str().to_string_lossy();
+                let is_aarch64 =
+                    triple_str.starts_with("aarch64") || triple_str.starts_with("arm64");
+
+                let (asm_str, constraints) = if is_aarch64 {
+                    // aarch64 syscall convention:
+                    //   x8 = syscall number
+                    //   x0, x1, x2, x3, x4, x5 = arg1..arg6
+                    //   return value in x0
+                    match num_args {
+                        1 => ("svc #0".to_string(), "={x0},{x8},~{memory}".to_string()),
+                        2 => ("svc #0".to_string(), "={x0},{x8},{x0},~{memory}".to_string()),
+                        3 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},~{memory}".to_string()),
+                        4 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},{x2},~{memory}".to_string()),
+                        5 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},{x2},{x3},~{memory}".to_string()),
+                        6 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},{x2},{x3},{x4},~{memory}".to_string()),
+                        7 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}".to_string()),
+                        _ => unreachable!("syscall validated to 1-7 args by sema"),
+                    }
+                } else {
+                    // x86_64 syscall convention:
+                    //   rax = syscall number
+                    //   rdi, rsi, rdx, r10, r8, r9 = arg1..arg6
+                    //   return value in rax
+                    //   rcx and r11 are clobbered by the kernel
+                    match num_args {
+                        1 => ("syscall".to_string(), "={rax},{rax},~{rcx},~{r11},~{memory}".to_string()),
+                        2 => ("syscall".to_string(), "={rax},{rax},{rdi},~{rcx},~{r11},~{memory}".to_string()),
+                        3 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}".to_string()),
+                        4 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},~{rcx},~{r11},~{memory}".to_string()),
+                        5 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},~{rcx},~{r11},~{memory}".to_string()),
+                        6 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},~{rcx},~{r11},~{memory}".to_string()),
+                        7 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}".to_string()),
+                        _ => unreachable!("syscall validated to 1-7 args by sema"),
+                    }
                 };
 
                 // Build the function type: (i64, ...) -> i64
