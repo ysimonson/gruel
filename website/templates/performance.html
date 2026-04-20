@@ -20,6 +20,13 @@
                         <!-- Options populated by JavaScript from metadata.json -->
                     </select>
                 </div>
+                <div class="flex items-center gap-2">
+                    <label for="opt-level-select" class="text-sm font-medium">Opt Level:</label>
+                    <select id="opt-level-select" class="bg-surface border border-themed rounded px-3 py-2 text-sm">
+                        <option value="O0">-O0 (default)</option>
+                        <!-- Additional options populated by JavaScript from metadata.json -->
+                    </select>
+                </div>
                 <span id="platform-info" class="text-sm text-muted"></span>
             </div>
         </section>
@@ -151,6 +158,29 @@
             </div>
         </section>
 
+        <!-- Runtime Performance Chart -->
+        <section id="runtime-section" class="mb-12">
+            <h2 class="text-xl font-semibold mb-4">Runtime Performance</h2>
+            <p class="text-muted mb-4">
+                Execution time of compiled binaries over recent commits. Lower is better.
+                Shows how well the compiler optimizes generated code.
+            </p>
+            <div id="runtime-chart-container" class="benchmark-chart-container bg-surface border border-themed rounded-lg p-4">
+                <p class="text-muted text-center py-8">Loading chart...</p>
+            </div>
+        </section>
+
+        <!-- Binary Size by Optimization Level -->
+        <section id="binary-opt-section" class="mb-12">
+            <h2 class="text-xl font-semibold mb-4">Binary Size by Optimization Level</h2>
+            <p class="text-muted mb-4">
+                Comparison of binary sizes across optimization levels for the latest benchmark run.
+            </p>
+            <div id="binary-opt-chart-container" class="benchmark-chart-container bg-surface border border-themed rounded-lg p-4">
+                <p class="text-muted text-center py-8">Loading chart...</p>
+            </div>
+        </section>
+
         <!-- Metrics Table -->
         <section id="metrics-section" class="mb-12">
             <h2 class="text-xl font-semibold mb-4">Detailed Metrics</h2>
@@ -165,6 +195,7 @@
         <script>
         (function() {
             const platformSelect = document.getElementById('platform-select');
+            const optLevelSelect = document.getElementById('opt-level-select');
             const platformInfo = document.getElementById('platform-info');
             const benchmarkSelect = document.getElementById('benchmark-select');
             const timelineContainer = document.getElementById('timeline-chart-container');
@@ -176,11 +207,16 @@
             const memoryContainer = document.getElementById('memory-chart-container');
             const binarySection = document.getElementById('binary-section');
             const binaryContainer = document.getElementById('binary-chart-container');
+            const runtimeSection = document.getElementById('runtime-section');
+            const runtimeContainer = document.getElementById('runtime-chart-container');
+            const binaryOptSection = document.getElementById('binary-opt-section');
+            const binaryOptContainer = document.getElementById('binary-opt-chart-container');
             const metricsSection = document.getElementById('metrics-section');
             const metricsContainer = document.getElementById('metrics-table-container');
             const coverageSection = document.getElementById('coverage-section');
 
             let currentPlatform = 'comparison';
+            let currentOptLevel = 'O0';
             let platformMetadata = null;
 
             // Fetch an SVG and insert it into a container
@@ -277,11 +313,11 @@
                 html += '<thead class="bg-surface border-b border-themed">';
                 html += '<tr>';
                 html += '<th class="text-left p-2">Program</th>';
-                html += '<th class="text-right p-2">Time (ms)</th>';
+                html += '<th class="text-right p-2">Opt</th>';
+                html += '<th class="text-right p-2">Compile (ms)</th>';
+                html += '<th class="text-right p-2">Runtime (ms)</th>';
                 html += '<th class="text-right p-2">Lines</th>';
-                html += '<th class="text-right p-2">Tokens</th>';
                 html += '<th class="text-right p-2">Lines/sec</th>';
-                html += '<th class="text-right p-2">Tokens/sec</th>';
                 html += '<th class="text-right p-2">Memory (MB)</th>';
                 html += '<th class="text-right p-2">Binary (KB)</th>';
                 html += '</tr></thead><tbody>';
@@ -289,11 +325,11 @@
                 benchmarks.forEach(b => {
                     html += '<tr class="border-b border-themed">';
                     html += `<td class="p-2 font-medium">${b.name}</td>`;
+                    html += `<td class="p-2 text-right">${b.opt_level || 'O0'}</td>`;
                     html += `<td class="p-2 text-right">${b.mean_ms?.toFixed(2) || '-'}</td>`;
+                    html += `<td class="p-2 text-right">${b.runtime_ms?.toFixed(2) || '-'}</td>`;
                     html += `<td class="p-2 text-right">${b.source_metrics?.lines?.toLocaleString() || '-'}</td>`;
-                    html += `<td class="p-2 text-right">${b.source_metrics?.tokens?.toLocaleString() || '-'}</td>`;
                     html += `<td class="p-2 text-right">${b.lines_per_sec?.toLocaleString() || '-'}</td>`;
-                    html += `<td class="p-2 text-right">${b.tokens_per_sec?.toLocaleString() || '-'}</td>`;
                     html += `<td class="p-2 text-right">${b.peak_memory_mb?.toFixed(1) || '-'}</td>`;
                     html += `<td class="p-2 text-right">${b.binary_size_kb?.toFixed(1) || '-'}</td>`;
                     html += '</tr>';
@@ -344,6 +380,17 @@
                 document.getElementById('coverage-runs-list').innerHTML = html;
             }
 
+            // Load charts for the current opt level
+            function loadChartsForOptLevel(basePath, opt) {
+                loadSvg(timelineContainer, `${basePath}/timeline_${opt}.svg`);
+                loadSvg(timelineByProgramContainer, `${basePath}/timeline_by_program_${opt}.svg`);
+                loadSvg(breakdownContainer, `${basePath}/breakdown_${opt}.svg`);
+                loadSvg(memoryContainer, `${basePath}/memory_${opt}.svg`);
+                loadSvg(binaryContainer, `${basePath}/binary_size_${opt}.svg`);
+                loadSvg(runtimeContainer, `${basePath}/runtime_${opt}.svg`);
+                loadSvg(binaryOptContainer, `${basePath}/binary_size_by_opt.svg`);
+            }
+
             // Load data for a specific platform
             function loadPlatformData(platform) {
                 currentPlatform = platform;
@@ -355,8 +402,11 @@
                     breakdownSection.style.display = 'none';
                     memorySection.style.display = 'none';
                     binarySection.style.display = 'none';
+                    runtimeSection.style.display = 'none';
+                    binaryOptSection.style.display = 'none';
                     metricsSection.style.display = 'none';
                     coverageSection.style.display = 'none';
+                    optLevelSelect.parentElement.style.display = 'none';
 
                     loadSvg(timelineContainer, '/benchmarks/comparison/timeline.svg');
                     updateStats(null);
@@ -368,18 +418,18 @@
                     breakdownSection.style.display = 'block';
                     memorySection.style.display = 'block';
                     binarySection.style.display = 'block';
+                    runtimeSection.style.display = 'block';
+                    binaryOptSection.style.display = 'block';
                     metricsSection.style.display = 'block';
                     coverageSection.style.display = 'block';
+                    optLevelSelect.parentElement.style.display = 'flex';
 
                     const basePath = `/benchmarks/platforms/${platform}`;
 
-                    loadSvg(timelineContainer, `${basePath}/timeline.svg`);
-                    loadSvg(timelineByProgramContainer, `${basePath}/timeline_by_program.svg`);
-                    loadSvg(breakdownContainer, `${basePath}/breakdown.svg`);
-                    loadSvg(memoryContainer, `${basePath}/memory.svg`);
-                    loadSvg(binaryContainer, `${basePath}/binary_size.svg`);
+                    // Load charts for current opt level
+                    loadChartsForOptLevel(basePath, currentOptLevel);
 
-                    // Fetch platform metadata for stats and benchmarks
+                    // Fetch platform metadata for stats, benchmarks, and opt levels
                     fetch(`${basePath}/metadata.json`)
                         .then(r => r.json())
                         .then(data => {
@@ -387,7 +437,21 @@
                             updateMetricsTable(data.latest_benchmarks);
                             updateCoverage(data.coverage);
 
-                            // Populate benchmark dropdown
+                            // Populate opt level dropdown
+                            const optLevels = data.opt_levels || ['O0'];
+                            optLevelSelect.innerHTML = '';
+                            optLevels.forEach(opt => {
+                                const option = document.createElement('option');
+                                option.value = opt;
+                                option.textContent = `-${opt}`;
+                                if (opt === currentOptLevel) option.selected = true;
+                                optLevelSelect.appendChild(option);
+                            });
+
+                            // Show binary-by-opt only if multiple opt levels
+                            binaryOptSection.style.display = optLevels.length >= 2 ? 'block' : 'none';
+
+                            // Populate benchmark dropdown (filtered to current opt level)
                             benchmarkSelect.innerHTML = '<option value="">All (aggregate)</option>';
                             if (data.benchmarks && data.benchmarks.length > 0) {
                                 data.benchmarks.forEach(name => {
@@ -437,10 +501,13 @@
                 .catch(() => {
                     // Fallback to legacy mode (single history.json)
                     platformSelect.parentElement.parentElement.style.display = 'none';
+                    optLevelSelect.parentElement.style.display = 'none';
                     timelineByProgramSection.style.display = 'block';
                     breakdownSection.style.display = 'block';
                     memorySection.style.display = 'block';
                     binarySection.style.display = 'block';
+                    runtimeSection.style.display = 'block';
+                    binaryOptSection.style.display = 'none';
                     metricsSection.style.display = 'block';
                     coverageSection.style.display = 'block';
 
@@ -449,6 +516,7 @@
                     loadSvg(breakdownContainer, '/benchmarks/breakdown.svg');
                     loadSvg(memoryContainer, '/benchmarks/memory.svg');
                     loadSvg(binaryContainer, '/benchmarks/binary_size.svg');
+                    loadSvg(runtimeContainer, '/benchmarks/runtime_O0.svg');
 
                     // Try to load legacy metadata
                     fetch('/benchmarks/metadata.json')
@@ -481,6 +549,15 @@
                 loadPlatformData(this.value);
             });
 
+            // Handle opt level selection changes
+            optLevelSelect.addEventListener('change', function() {
+                currentOptLevel = this.value;
+                if (currentPlatform !== 'comparison') {
+                    const basePath = `/benchmarks/platforms/${currentPlatform}`;
+                    loadChartsForOptLevel(basePath, currentOptLevel);
+                }
+            });
+
             // Handle benchmark selection changes for breakdown chart
             benchmarkSelect.addEventListener('change', function() {
                 if (currentPlatform === 'comparison') return;
@@ -489,7 +566,7 @@
                 const basePath = `/benchmarks/platforms/${currentPlatform}`;
                 const svgPath = value
                     ? `${basePath}/breakdown_${value}.svg`
-                    : `${basePath}/breakdown.svg`;
+                    : `${basePath}/breakdown_${currentOptLevel}.svg`;
 
                 loadSvg(breakdownContainer, svgPath);
             });
@@ -520,12 +597,29 @@
                 different parts of the compiler:
             </p>
             <ul>
-                <li><strong>many_functions</strong> - 100+ functions to stress function handling</li>
-                <li><strong>deep_nesting</strong> - Deeply nested blocks and expressions</li>
-                <li><strong>large_structs</strong> - Many struct types with multiple fields</li>
-                <li><strong>arithmetic_heavy</strong> - Lots of arithmetic expressions</li>
-                <li><strong>control_flow</strong> - Complex if/while/match patterns</li>
+                <li><strong>many_functions</strong> - 1000 functions to stress function handling and symbol resolution</li>
+                <li><strong>deep_nesting</strong> - 150 functions with deep block/if/while nesting (up to 40 levels)</li>
+                <li><strong>large_structs</strong> - 700 struct types with 4-8 fields each to stress type handling</li>
+                <li><strong>arithmetic_heavy</strong> - 250 functions with long arithmetic chains to stress parsing/codegen</li>
+                <li><strong>control_flow</strong> - 390 functions with complex if/while/match patterns to stress CFG construction</li>
+                <li><strong>array_heavy</strong> - 200 functions with array declarations, indexing, and modifications</li>
+                <li><strong>register_pressure</strong> - 210 functions with many simultaneous live variables</li>
+                <li><strong>comptime_heavy</strong> - 68 comptime blocks with loops, recursion, structs, arrays, enums, and pattern matching</li>
             </ul>
+            <h3>Optimization Levels</h3>
+            <p>
+                Each benchmark is compiled at both <code>-O0</code> (no optimization) and
+                <code>-O3</code> (full optimization). This tracks the cost of LLVM optimization
+                passes and the quality of generated code. Use the "Opt Level" dropdown to switch
+                between views.
+            </p>
+            <h3>Runtime Measurement</h3>
+            <p>
+                After compiling each benchmark, the resulting binary is executed multiple times
+                to measure runtime performance. This tracks how well the compiler's generated code
+                performs. Programs do deterministic computation (no I/O, no randomness) for reliable
+                measurements.
+            </p>
             <h3>Environment</h3>
             <p>
                 Benchmarks run on GitHub Actions runners. While there is some variability

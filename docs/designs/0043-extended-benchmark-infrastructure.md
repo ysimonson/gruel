@@ -185,9 +185,9 @@ No changes to the workflow YAML itself — the expansion is entirely within `ben
 
 - [x] **Phase 4: Runtime benchmarking** — After compiling each benchmark in `bench.sh`, run the binary with `/usr/bin/time` for multiple iterations. Compute mean/stddev of wall-clock execution time. Add `"runtime_ms"` and `"runtime_std_ms"` to the per-benchmark JSON output.
 
-- [ ] **Phase 5: Website visualization** — Update `generate-charts.py` to generate runtime charts and opt-level comparison charts. Update `performance.html` to add opt-level dropdown, runtime section, and binary size comparison section. Update `metadata.json` generation to include runtime stats.
+- [x] **Phase 5: Website visualization** — Update `generate-charts.py` to generate runtime charts and opt-level comparison charts. Update `performance.html` to add opt-level dropdown, runtime section, and binary size comparison section. Update `metadata.json` generation to include runtime stats.
 
-- [ ] **Phase 6: Polish and documentation** — Update `benchmarks/README.md` with new benchmark descriptions and opt-level configuration. Update the website's methodology section. Update CLAUDE.md if the benchmark workflow instructions change.
+- [x] **Phase 6: Polish and documentation** — Update `benchmarks/README.md` with new benchmark descriptions and opt-level configuration. Update the website's methodology section. Update CLAUDE.md if the benchmark workflow instructions change.
 
 ## Consequences
 
