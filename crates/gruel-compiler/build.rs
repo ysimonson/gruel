@@ -5,7 +5,7 @@ use std::process::Command;
 /// embedded by `include_bytes!(concat!(env!("OUT_DIR"), "/libgruel_runtime.a"))`.
 ///
 /// This mirrors what Buck2's `mapped_srcs` did: compile gruel-runtime with special
-/// flags (`-Cpanic=abort`, `-Copt-level=z`, `-Crelocation-model=static`, etc.) and
+/// flags (`-Cpanic=abort`, `-Copt-level=z`, `-Crelocation-model=pic`, etc.) and
 /// make the resulting archive available to the compiler crate at build time.
 fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
@@ -35,9 +35,10 @@ fn main() {
             "-Cpanic=abort",
             // LTO for smaller output.
             "-Clto=true",
-            // Static relocation model — our simple linker doesn't support
-            // GOT-relative relocations.
-            "-Crelocation-model=static",
+            // PIC is required for linking into PIE executables (the default
+            // on modern Linux). The LLVM backend always uses the system linker
+            // which expects position-independent code.
+            "-Crelocation-model=pic",
             // Disable LSE atomics on aarch64 to avoid __aarch64_have_lse_atomics
             // runtime detection symbols from compiler-rt that we don't have.
             "-Ctarget-feature=-lse,-lse2,-outline-atomics",
