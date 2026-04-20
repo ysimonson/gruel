@@ -1,5 +1,5 @@
 ---
-id: 0043
+id: 0044
 title: LLVM Codegen Quality Improvements and Build Profiles
 status: proposal
 tags: [codegen, llvm, optimization, cli]
@@ -11,7 +11,7 @@ spec-sections: []
 superseded-by:
 ---
 
-# ADR-0043: LLVM Codegen Quality Improvements and Build Profiles
+# ADR-0044: LLVM Codegen Quality Improvements and Build Profiles
 
 ## Status
 
