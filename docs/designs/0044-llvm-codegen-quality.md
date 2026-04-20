@@ -1,12 +1,12 @@
 ---
 id: 0044
 title: LLVM Codegen Quality Improvements and Build Profiles
-status: proposal
+status: implemented
 tags: [codegen, llvm, optimization, cli]
 feature-flag:
 created: 2026-04-20
 accepted:
-implemented:
+implemented: 2026-04-20
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -129,11 +129,11 @@ Help text update:
 
 ## Implementation Phases
 
-- [ ] **Phase 1: `cold` attribute on panic functions** — Add `cold` alongside `noreturn` in `get_or_declare_noreturn_fn`. Verify with `--emit asm` that the attribute appears. Add a golden test.
-- [ ] **Phase 2: Branch weight metadata via `llvm.expect`** — Add `llvm.expect.i1` calls in `build_checked_int_op`, `build_bounds_check`, `build_div_zero_check`, and the intcast overflow checks. Verify with `--emit asm`.
-- [ ] **Phase 3: Lifetime markers** — Emit `llvm.lifetime.start` after each local alloca in `get_or_create_local`, and `llvm.lifetime.end` at return terminators. Requires tracking which locals were allocated so we can end their lifetimes. Verify with `--emit asm` at `-O0`.
-- [ ] **Phase 4: `noalias` on `inout` parameters** — Add the attribute in `declare_function` for inout params. Add a spec test or golden test showing the attribute. Verify that an optimized build of a two-inout-param function generates better code (e.g., no redundant reload after a store through one param).
-- [ ] **Phase 5: `--debug`/`--release` CLI flags** — Add flag parsing with mutual exclusivity checks. Add unit tests for all valid and invalid combinations. Update help text.
+- [x] **Phase 1: `cold` attribute on panic functions** — Add `cold` alongside `noreturn` in `get_or_declare_noreturn_fn`. Verify with `--emit asm` that the attribute appears. Add a golden test.
+- [x] **Phase 2: Branch weight metadata via `llvm.expect`** — Add `llvm.expect.i1` calls in `build_checked_int_op`, `build_bounds_check`, `build_div_zero_check`, and the intcast overflow checks. Verify with `--emit asm`.
+- [x] **Phase 3: Lifetime markers** — Emit `llvm.lifetime.start` after each local alloca in `get_or_create_local`, and `llvm.lifetime.end` at return terminators. Requires tracking which locals were allocated so we can end their lifetimes. Verify with `--emit asm` at `-O0`.
+- [x] **Phase 4: `noalias` on `inout` parameters** — Add the attribute in `declare_function` for inout params. Add a spec test or golden test showing the attribute. Verify that an optimized build of a two-inout-param function generates better code (e.g., no redundant reload after a store through one param).
+- [x] **Phase 5: `--debug`/`--release` CLI flags** — Add flag parsing with mutual exclusivity checks. Add unit tests for all valid and invalid combinations. Update help text.
 
 ## Consequences
 

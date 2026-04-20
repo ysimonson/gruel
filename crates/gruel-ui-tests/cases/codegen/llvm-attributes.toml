@@ -1,0 +1,160 @@
+[section]
+id = "codegen.llvm-attributes"
+name = "LLVM IR Attributes"
+description = "Tests that verify LLVM IR attributes are emitted correctly for optimization hints."
+
+# =============================================================================
+# cold attribute on panic functions
+# =============================================================================
+
+[[case]]
+name = "overflow_panic_has_cold_attribute"
+source = """
+fn main() -> i32 {
+    let x: i32 = 1 + 2;
+    x
+}
+"""
+asm_contains = ['"cold"', '"noreturn"', "__gruel_overflow"]
+
+[[case]]
+name = "bounds_check_panic_has_cold_attribute"
+source = """
+fn main() -> i32 {
+    let arr = [10, 20, 30];
+    arr[1]
+}
+"""
+asm_contains = ['"cold"', '"noreturn"', "__gruel_bounds_check"]
+
+[[case]]
+name = "div_by_zero_panic_has_cold_attribute"
+source = """
+fn main() -> i32 {
+    let x: i32 = 10 / 2;
+    x
+}
+"""
+asm_contains = ['"cold"', '"noreturn"', "__gruel_div_by_zero"]
+
+# =============================================================================
+# llvm.expect branch weight hints
+# =============================================================================
+
+[[case]]
+name = "overflow_check_has_expect"
+source = """
+fn add(a: i32, b: i32) -> i32 { a + b }
+fn main() -> i32 { add(1, 2) }
+"""
+asm_contains = ["@llvm.expect.i1(i1 %ovf_flag, i1 false)"]
+
+[[case]]
+name = "bounds_check_has_expect"
+source = """
+fn get(arr: [i32; 3], idx: u64) -> i32 { arr[idx] }
+fn main() -> i32 { let a = [10, 20, 30]; get(a, 1) }
+"""
+asm_contains = ["@llvm.expect.i1(i1 %bchk, i1 true)"]
+
+[[case]]
+name = "div_zero_check_has_expect"
+source = """
+fn divide(a: i32, b: i32) -> i32 { a / b }
+fn main() -> i32 { divide(10, 2) }
+"""
+asm_contains = ["@llvm.expect.i1(i1 %divzero_check, i1 false)"]
+
+[[case]]
+name = "intcast_narrowing_has_expect"
+source = """
+fn narrow(x: i64) -> i32 {
+    let y: i32 = @intCast(x);
+    y
+}
+fn main() -> i32 { narrow(42) }
+"""
+asm_contains = ["@llvm.expect.i1(i1 %fits, i1 true)"]
+
+# =============================================================================
+# llvm.lifetime markers
+# =============================================================================
+
+[[case]]
+name = "locals_have_lifetime_start"
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    x
+}
+"""
+asm_contains = ["@llvm.lifetime.start.p0(ptr %slot0)"]
+
+[[case]]
+name = "locals_have_lifetime_end_at_return"
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    x
+}
+"""
+asm_contains = ["@llvm.lifetime.end.p0(ptr %slot0)"]
+
+[[case]]
+name = "multiple_locals_have_lifetime_markers"
+source = """
+fn compute(a: i32, b: i32) -> i32 {
+    let x: i32 = a;
+    let y: i32 = b;
+    x
+}
+fn main() -> i32 { compute(1, 2) }
+"""
+asm_contains = ["@llvm.lifetime.start.p0(ptr %slot0)", "@llvm.lifetime.start.p0(ptr %slot1)", "@llvm.lifetime.end.p0(ptr %slot0)", "@llvm.lifetime.end.p0(ptr %slot1)"]
+
+# =============================================================================
+# noalias on inout parameters
+# =============================================================================
+
+[[case]]
+name = "inout_params_have_noalias"
+source = """
+fn swap(inout a: i32, inout b: i32) {
+    let t = a;
+    a = b;
+    b = t;
+}
+fn main() -> i32 {
+    let mut x = 1;
+    let mut y = 2;
+    swap(inout x, inout y);
+    x
+}
+"""
+asm_contains = ["ptr noalias %0, ptr noalias %1"]
+
+[[case]]
+name = "mixed_params_only_inout_gets_noalias"
+source = """
+fn update(val: i32, inout target: i32) {
+    target = val;
+}
+fn main() -> i32 {
+    let mut x = 0;
+    update(42, inout x);
+    x
+}
+"""
+asm_contains = ["ptr noalias"]
+
+# =============================================================================
+# nounwind on all functions
+# =============================================================================
+
+[[case]]
+name = "functions_have_nounwind"
+source = """
+fn add(a: i32, b: i32) -> i32 { a + b }
+fn main() -> i32 { add(1, 2) }
+"""
+asm_contains = ["attributes #0 = { nounwind }"]
