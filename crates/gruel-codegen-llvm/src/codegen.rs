@@ -2520,7 +2520,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             "syscall" => {
                 let i64_ty = self.ctx.i64_type();
                 // Build argument values (all u64, first is syscall number)
-                let arg_vals: Vec<_> = args.iter().map(|a| self.get_value(*a).into_int_value()).collect();
+                let arg_vals: Vec<_> = args
+                    .iter()
+                    .map(|a| self.get_value(*a).into_int_value())
+                    .collect();
                 let num_args = arg_vals.len(); // 1..=7 (syscall_num + up to 6 args)
 
                 // x86_64 syscall convention:
@@ -2529,13 +2532,36 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 //   return value in rax
                 //   rcx and r11 are clobbered by the kernel
                 let (asm_str, constraints) = match num_args {
-                    1 => ("syscall".to_string(), "={rax},{rax},~{rcx},~{r11},~{memory}".to_string()),
-                    2 => ("syscall".to_string(), "={rax},{rax},{rdi},~{rcx},~{r11},~{memory}".to_string()),
-                    3 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}".to_string()),
-                    4 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},~{rcx},~{r11},~{memory}".to_string()),
-                    5 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},~{rcx},~{r11},~{memory}".to_string()),
-                    6 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},~{rcx},~{r11},~{memory}".to_string()),
-                    7 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}".to_string()),
+                    1 => (
+                        "syscall".to_string(),
+                        "={rax},{rax},~{rcx},~{r11},~{memory}".to_string(),
+                    ),
+                    2 => (
+                        "syscall".to_string(),
+                        "={rax},{rax},{rdi},~{rcx},~{r11},~{memory}".to_string(),
+                    ),
+                    3 => (
+                        "syscall".to_string(),
+                        "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}".to_string(),
+                    ),
+                    4 => (
+                        "syscall".to_string(),
+                        "={rax},{rax},{rdi},{rsi},{rdx},~{rcx},~{r11},~{memory}".to_string(),
+                    ),
+                    5 => (
+                        "syscall".to_string(),
+                        "={rax},{rax},{rdi},{rsi},{rdx},{r10},~{rcx},~{r11},~{memory}".to_string(),
+                    ),
+                    6 => (
+                        "syscall".to_string(),
+                        "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},~{rcx},~{r11},~{memory}"
+                            .to_string(),
+                    ),
+                    7 => (
+                        "syscall".to_string(),
+                        "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}"
+                            .to_string(),
+                    ),
                     _ => unreachable!("syscall validated to 1-7 args by sema"),
                 };
 
