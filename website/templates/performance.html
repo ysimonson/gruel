@@ -277,13 +277,25 @@
             function loadAllCharts() {
                 if (currentPlatform === 'comparison') {
                     const basePath = '/benchmarks/comparison';
-                    const suffix = currentOptLevel === 'all' ? '' : `_${currentOptLevel}`;
+                    const optLevels = platformMetadata?.opt_levels || ['O0'];
+                    const opt = resolveOptLevel(optLevels);
 
-                    loadSvg(timelineContainer, `${basePath}/timeline${suffix}.svg`);
-                    loadSvg(breakdownContainer, `${basePath}/breakdown${suffix}.svg`);
-                    loadSvg(memoryContainer, `${basePath}/memory${suffix}.svg`);
-                    loadSvg(binaryContainer, `${basePath}/binary_size${suffix}.svg`);
-                    loadSvg(runtimeContainer, `${basePath}/runtime${suffix}.svg`);
+                    // When a program is selected, load per-program SVGs; otherwise aggregate
+                    if (currentBenchmark) {
+                        const benchSuffix = `${currentBenchmark}@${opt}`;
+                        loadSvg(timelineContainer, `${basePath}/timeline_${benchSuffix}.svg`);
+                        loadSvg(breakdownContainer, `${basePath}/breakdown_${benchSuffix}.svg`);
+                        loadSvg(memoryContainer, `${basePath}/memory_${benchSuffix}.svg`);
+                        loadSvg(binaryContainer, `${basePath}/binary_size_${benchSuffix}.svg`);
+                        loadSvg(runtimeContainer, `${basePath}/runtime_${benchSuffix}.svg`);
+                    } else {
+                        const suffix = currentOptLevel === 'all' ? '' : `_${currentOptLevel}`;
+                        loadSvg(timelineContainer, `${basePath}/timeline${suffix}.svg`);
+                        loadSvg(breakdownContainer, `${basePath}/breakdown${suffix}.svg`);
+                        loadSvg(memoryContainer, `${basePath}/memory${suffix}.svg`);
+                        loadSvg(binaryContainer, `${basePath}/binary_size${suffix}.svg`);
+                        loadSvg(runtimeContainer, `${basePath}/runtime${suffix}.svg`);
+                    }
 
                     coverageSection.style.display = 'none';
                     updateMetricsTable(null);
@@ -292,16 +304,20 @@
                     const optLevels = currentPlatformMeta?.opt_levels || ['O0'];
                     const opt = resolveOptLevel(optLevels);
 
-                    loadSvg(timelineContainer, `${basePath}/timeline_${opt}.svg`);
-                    loadSvg(memoryContainer, `${basePath}/memory_${opt}.svg`);
-                    loadSvg(binaryContainer, `${basePath}/binary_size_${opt}.svg`);
-                    loadSvg(runtimeContainer, `${basePath}/runtime_${opt}.svg`);
-
-                    // Breakdown: use per-program if selected, otherwise aggregate
+                    // When a program is selected, load per-program SVGs; otherwise aggregate
                     if (currentBenchmark) {
-                        loadSvg(breakdownContainer, `${basePath}/breakdown_${currentBenchmark}@${opt}.svg`);
+                        const benchSuffix = `${currentBenchmark}@${opt}`;
+                        loadSvg(timelineContainer, `${basePath}/timeline_${benchSuffix}.svg`);
+                        loadSvg(breakdownContainer, `${basePath}/breakdown_${benchSuffix}.svg`);
+                        loadSvg(memoryContainer, `${basePath}/memory_${benchSuffix}.svg`);
+                        loadSvg(binaryContainer, `${basePath}/binary_size_${benchSuffix}.svg`);
+                        loadSvg(runtimeContainer, `${basePath}/runtime_${benchSuffix}.svg`);
                     } else {
+                        loadSvg(timelineContainer, `${basePath}/timeline_${opt}.svg`);
                         loadSvg(breakdownContainer, `${basePath}/breakdown_${opt}.svg`);
+                        loadSvg(memoryContainer, `${basePath}/memory_${opt}.svg`);
+                        loadSvg(binaryContainer, `${basePath}/binary_size_${opt}.svg`);
+                        loadSvg(runtimeContainer, `${basePath}/runtime_${opt}.svg`);
                     }
 
                     coverageSection.style.display = 'block';

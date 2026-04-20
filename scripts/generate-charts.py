@@ -179,6 +179,24 @@ def filter_runs_by_opt_level(runs: list[dict], opt_level: str) -> list[dict]:
     return filtered
 
 
+def get_benchmark_memory(run: dict, benchmark_name: str) -> float:
+    """Get peak memory (MB) for a specific benchmark from a run."""
+    for bench in run.get("benchmarks", []):
+        if bench.get("name") == benchmark_name:
+            if "peak_memory_bytes" in bench:
+                return bench["peak_memory_bytes"] / (1024 * 1024)
+    return 0
+
+
+def get_benchmark_binary_size(run: dict, benchmark_name: str) -> float:
+    """Get binary size (KB) for a specific benchmark from a run."""
+    for bench in run.get("benchmarks", []):
+        if bench.get("name") == benchmark_name:
+            if "binary_size_bytes" in bench:
+                return bench["binary_size_bytes"] / 1024
+    return 0
+
+
 def get_benchmark_runtime(run: dict, benchmark_name: str) -> float:
     """Get runtime (in ms) for a specific benchmark from a run."""
     for bench in run.get("benchmarks", []):
@@ -227,15 +245,18 @@ def generate_empty_chart(width: int, height: int, message: str) -> str:
 </svg>'''
 
 
-def generate_timeline_chart(runs: list[dict], platform: Optional[str] = None) -> str:
-    """Generate time-series SVG chart of total compilation time."""
+def generate_timeline_chart(runs: list[dict], platform: Optional[str] = None, benchmark_name: Optional[str] = None) -> str:
+    """Generate time-series SVG chart of total compilation time.
+
+    If benchmark_name is provided, shows data for that specific benchmark only.
+    """
     if not runs:
         return generate_empty_chart(TIMELINE_WIDTH, TIMELINE_HEIGHT, "No benchmark data available yet")
 
     # Extract data points
     points = []
     for run in runs[-20:]:  # Show last 20 commits
-        total = get_total_time(run)
+        total = get_benchmark_time(run, benchmark_name) if benchmark_name else get_total_time(run)
         commit = short_commit(run.get("commit", ""))
         points.append({"commit": commit, "time": total})
 
@@ -260,8 +281,11 @@ def generate_timeline_chart(runs: list[dict], platform: Optional[str] = None) ->
     def scale_y(v: float) -> float:
         return margin["top"] + chart_height - (v / max_time) * chart_height
 
-    # Title with optional platform
+    # Title with optional platform and benchmark
     title = "Compilation Time Over Recent Commits"
+    if benchmark_name:
+        base, _ = parse_benchmark_name(benchmark_name)
+        title = f"Compilation Time - {base}"
     if platform:
         platform_name = PLATFORM_INFO.get(platform, {}).get("name", platform)
         title = f"{title} ({platform_name})"
@@ -493,15 +517,18 @@ def generate_breakdown_chart(runs: list[dict], benchmark_name: Optional[str] = N
     return "\n".join(svg_parts)
 
 
-def generate_memory_chart(runs: list[dict], platform: Optional[str] = None) -> str:
-    """Generate time-series SVG chart of peak memory usage."""
+def generate_memory_chart(runs: list[dict], platform: Optional[str] = None, benchmark_name: Optional[str] = None) -> str:
+    """Generate time-series SVG chart of peak memory usage.
+
+    If benchmark_name is provided, shows data for that specific benchmark only.
+    """
     if not runs:
         return generate_empty_chart(MEMORY_WIDTH, MEMORY_HEIGHT, "No benchmark data available yet")
 
     # Extract data points
     points = []
     for run in runs[-20:]:  # Show last 20 commits
-        memory = get_peak_memory(run)
+        memory = get_benchmark_memory(run, benchmark_name) if benchmark_name else get_peak_memory(run)
         commit = short_commit(run.get("commit", ""))
         points.append({"commit": commit, "memory": memory})
 
@@ -526,8 +553,11 @@ def generate_memory_chart(runs: list[dict], platform: Optional[str] = None) -> s
     def scale_y(v: float) -> float:
         return margin["top"] + chart_height - (v / max_memory) * chart_height
 
-    # Title with optional platform
+    # Title with optional platform and benchmark
     title = "Peak Memory Usage Over Recent Commits"
+    if benchmark_name:
+        base, _ = parse_benchmark_name(benchmark_name)
+        title = f"Peak Memory - {base}"
     if platform:
         platform_name = PLATFORM_INFO.get(platform, {}).get("name", platform)
         title = f"{title} ({platform_name})"
@@ -601,15 +631,18 @@ def generate_memory_chart(runs: list[dict], platform: Optional[str] = None) -> s
     return "\n".join(svg_parts)
 
 
-def generate_binary_size_chart(runs: list[dict], platform: Optional[str] = None) -> str:
-    """Generate time-series SVG chart of binary size."""
+def generate_binary_size_chart(runs: list[dict], platform: Optional[str] = None, benchmark_name: Optional[str] = None) -> str:
+    """Generate time-series SVG chart of binary size.
+
+    If benchmark_name is provided, shows data for that specific benchmark only.
+    """
     if not runs:
         return generate_empty_chart(BINARY_WIDTH, BINARY_HEIGHT, "No benchmark data available yet")
 
     # Extract data points
     points = []
     for run in runs[-20:]:  # Show last 20 commits
-        size = get_binary_size(run)
+        size = get_benchmark_binary_size(run, benchmark_name) if benchmark_name else get_binary_size(run)
         commit = short_commit(run.get("commit", ""))
         points.append({"commit": commit, "size": size})
 
@@ -634,8 +667,11 @@ def generate_binary_size_chart(runs: list[dict], platform: Optional[str] = None)
     def scale_y(v: float) -> float:
         return margin["top"] + chart_height - (v / max_size) * chart_height
 
-    # Title with optional platform
+    # Title with optional platform and benchmark
     title = "Binary Size Over Recent Commits"
+    if benchmark_name:
+        base, _ = parse_benchmark_name(benchmark_name)
+        title = f"Binary Size - {base}"
     if platform:
         platform_name = PLATFORM_INFO.get(platform, {}).get("name", platform)
         title = f"{title} ({platform_name})"
@@ -1303,21 +1339,51 @@ def generate_platform_charts(history_path: Path, output_dir: Path, platform: Opt
             f.write(svg)
         print(f"  Generated {path}")
 
-        # Per-benchmark breakdown
-        for bench_name in opt_names:
-            svg = generate_breakdown_chart(opt_runs, bench_name, platform)
-            safe_name = bench_name.replace(" ", "_").replace("/", "_")
-            path = output_dir / f"breakdown_{safe_name}.svg"
-            with open(path, "w") as f:
-                f.write(svg)
-            print(f"  Generated {path}")
-
-        # Runtime chart (per opt level)
+        # Runtime chart (aggregate - all benchmarks)
         svg = generate_runtime_chart(opt_runs, opt_names, platform)
         path = output_dir / f"runtime_{opt}.svg"
         with open(path, "w") as f:
             f.write(svg)
         print(f"  Generated {path}")
+
+        # Per-benchmark charts for all chart types
+        # Always use {base_name}@{opt} naming for consistency with HTML loading
+        for bench_name in opt_names:
+            base_name, _ = parse_benchmark_name(bench_name)
+            canonical_name = f"{base_name}@{opt}"
+            safe_name = canonical_name.replace(" ", "_").replace("/", "_")
+
+            # Breakdown
+            svg = generate_breakdown_chart(opt_runs, bench_name, platform)
+            path = output_dir / f"breakdown_{safe_name}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Timeline
+            svg = generate_timeline_chart(opt_runs, platform, benchmark_name=bench_name)
+            path = output_dir / f"timeline_{safe_name}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Memory
+            svg = generate_memory_chart(opt_runs, platform, benchmark_name=bench_name)
+            path = output_dir / f"memory_{safe_name}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Binary size
+            svg = generate_binary_size_chart(opt_runs, platform, benchmark_name=bench_name)
+            path = output_dir / f"binary_size_{safe_name}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Runtime (single benchmark)
+            svg = generate_runtime_chart(opt_runs, [bench_name], platform)
+            path = output_dir / f"runtime_{safe_name}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+        print(f"  Generated per-benchmark charts for {len(opt_names)} benchmarks")
 
     # Generate backwards-compatible default charts (using first opt level, typically O0)
     default_opt = opt_levels[0] if opt_levels else "O0"
@@ -1483,6 +1549,87 @@ def generate_comparison_charts(history_files: list[Path], output_dir: Path):
             with open(path, "w") as f:
                 f.write(svg)
             print(f"    Generated {path}")
+
+        # Per-benchmark comparison charts
+        for bench_base in benchmark_names:
+            bench_full = f"{bench_base}@{opt}"
+
+            # Timeline per-benchmark
+            def make_bench_time_fn(name):
+                return lambda run: get_benchmark_time(run, name)
+            svg = _generate_comparison_line_chart(
+                filtered_data, make_bench_time_fn(bench_full),
+                f"Compilation Time - {bench_base} (All Platforms)",
+                lambda v: f"{v:.1f}ms",
+                "No timing data available",
+            )
+            path = output_dir / f"timeline_{bench_full}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Memory per-benchmark
+            def make_bench_mem_fn(name):
+                return lambda run: get_benchmark_memory(run, name)
+            svg = _generate_comparison_line_chart(
+                filtered_data, make_bench_mem_fn(bench_full),
+                f"Peak Memory - {bench_base} (All Platforms)",
+                lambda v: f"{v:.1f}MB",
+                "No memory data available",
+            )
+            path = output_dir / f"memory_{bench_full}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Binary size per-benchmark
+            def make_bench_bin_fn(name):
+                return lambda run: get_benchmark_binary_size(run, name)
+            svg = _generate_comparison_line_chart(
+                filtered_data, make_bench_bin_fn(bench_full),
+                f"Binary Size - {bench_base} (All Platforms)",
+                lambda v: f"{v:.1f}KB",
+                "No binary size data available",
+            )
+            path = output_dir / f"binary_size_{bench_full}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Runtime per-benchmark
+            def make_bench_rt_fn(name):
+                return lambda run: get_benchmark_runtime(run, name)
+            svg = _generate_comparison_line_chart(
+                filtered_data, make_bench_rt_fn(bench_full),
+                f"Runtime - {bench_base} (All Platforms)",
+                lambda v: f"{v:.2f}ms",
+                "No runtime data available",
+            )
+            path = output_dir / f"runtime_{bench_full}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Breakdown per-benchmark
+            def make_bench_breakdown(data, name):
+                """Generate comparison breakdown for a specific benchmark."""
+                platform_passes = {}
+                for plat, runs in data.items():
+                    for run in reversed(runs):
+                        pt = get_pass_times_for_benchmark(run, name)
+                        if pt and any(v > 0 for v in pt.values()):
+                            platform_passes[plat] = pt
+                            break
+                if not platform_passes:
+                    return generate_empty_chart(BREAKDOWN_WIDTH, BREAKDOWN_HEIGHT, "No pass timing data available")
+                # Reuse comparison breakdown but with per-benchmark data
+                fake_data = {}
+                for plat, pt in platform_passes.items():
+                    fake_data[plat] = [{"benchmarks": [{"passes": {k: {"mean_ms": v} for k, v in pt.items()}}]}]
+                return generate_comparison_breakdown_chart(fake_data)
+
+            svg = make_bench_breakdown(filtered_data, bench_full)
+            path = output_dir / f"breakdown_{bench_full}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+        print(f"  Generated per-benchmark comparison charts for {len(benchmark_names)} programs")
 
     # Generate default (no opt suffix) comparison charts using first opt level
     default_opt = opt_levels[0] if opt_levels else "O0"
