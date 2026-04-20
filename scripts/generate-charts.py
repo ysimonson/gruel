@@ -41,6 +41,10 @@ MEMORY_WIDTH = 800
 MEMORY_HEIGHT = 250
 BINARY_WIDTH = 800
 BINARY_HEIGHT = 250
+RUNTIME_WIDTH = 800
+RUNTIME_HEIGHT = 350
+BINARY_OPT_WIDTH = 800
+BINARY_OPT_HEIGHT = 300
 COMPARISON_WIDTH = 900
 COMPARISON_HEIGHT = 400
 
@@ -50,13 +54,14 @@ PASS_COLORS = {
     "parser": "#7c9dff",    # lighter blue
     "astgen": "#3b82f6",    # sky blue
     "sema": "#06b6d4",      # cyan
+    "comptime": "#8b5cf6",  # violet
     "cfg": "#10b981",       # emerald
     "codegen": "#f59e0b",   # amber
     "linker": "#ef4444",    # red
 }
 
 # Order of passes in the stack
-PASS_ORDER = ["lexer", "parser", "astgen", "sema", "cfg", "codegen", "linker"]
+PASS_ORDER = ["lexer", "parser", "astgen", "sema", "comptime", "cfg", "codegen", "linker"]
 
 # Platform display names and colors
 PLATFORM_INFO = {
@@ -132,6 +137,56 @@ def format_bytes(size_bytes: float) -> str:
         return f"{size_bytes / 1024:.1f}KB"
     else:
         return f"{size_bytes:.0f}B"
+
+
+def parse_benchmark_name(name: str) -> tuple[str, str]:
+    """Parse a benchmark name into (base_name, opt_level).
+
+    E.g., 'many_functions@O3' -> ('many_functions', 'O3')
+    E.g., 'many_functions' -> ('many_functions', '')
+    """
+    if "@" in name:
+        base, opt = name.rsplit("@", 1)
+        return base, opt
+    return name, ""
+
+
+def get_opt_levels_from_runs(runs: list[dict]) -> list[str]:
+    """Get sorted list of optimization levels present in benchmark runs."""
+    levels = set()
+    for run in runs:
+        for bench in run.get("benchmarks", []):
+            _, opt = parse_benchmark_name(bench.get("name", ""))
+            if opt:
+                levels.add(opt)
+    return sorted(levels) if levels else ["O0"]
+
+
+def filter_runs_by_opt_level(runs: list[dict], opt_level: str) -> list[dict]:
+    """Return runs with benchmarks filtered to only those matching opt_level.
+
+    Benchmarks with no opt level suffix are included when opt_level is 'O0' (legacy compat).
+    """
+    filtered = []
+    for run in runs:
+        new_run = dict(run)
+        new_benchmarks = []
+        for bench in run.get("benchmarks", []):
+            _, opt = parse_benchmark_name(bench.get("name", ""))
+            if opt == opt_level or (not opt and opt_level == "O0"):
+                new_benchmarks.append(bench)
+        if new_benchmarks:
+            new_run["benchmarks"] = new_benchmarks
+            filtered.append(new_run)
+    return filtered
+
+
+def get_benchmark_runtime(run: dict, benchmark_name: str) -> float:
+    """Get runtime (in ms) for a specific benchmark from a run."""
+    for bench in run.get("benchmarks", []):
+        if bench.get("name") == benchmark_name:
+            return bench.get("runtime_ms", 0)
+    return 0
 
 
 def calculate_delta(current: float, previous: float) -> tuple[float, str]:
@@ -781,6 +836,287 @@ def generate_binary_size_chart(runs: list[dict], platform: Optional[str] = None)
     return "\n".join(svg_parts)
 
 
+def generate_runtime_chart(runs: list[dict], benchmark_names: list[str], platform: Optional[str] = None) -> str:
+    """Generate time-series SVG chart of runtime performance for compiled binaries."""
+    if not runs or not benchmark_names:
+        return generate_empty_chart(RUNTIME_WIDTH, RUNTIME_HEIGHT, "No runtime data available yet")
+
+    # Filter to benchmarks that have runtime data
+    names_with_runtime = []
+    for name in benchmark_names:
+        for run in runs:
+            if get_benchmark_runtime(run, name) > 0:
+                names_with_runtime.append(name)
+                break
+
+    if not names_with_runtime:
+        return generate_empty_chart(RUNTIME_WIDTH, RUNTIME_HEIGHT, "No runtime data in benchmarks")
+
+    # Extract data points for each benchmark
+    commits = [short_commit(run.get("commit", "")) for run in runs[-20:]]
+    benchmark_data = {}
+
+    for name in names_with_runtime:
+        points = []
+        for run in runs[-20:]:
+            runtime = get_benchmark_runtime(run, name)
+            points.append(runtime)
+        benchmark_data[name] = points
+
+    all_runtimes = [t for pts in benchmark_data.values() for t in pts if t > 0]
+    if not all_runtimes:
+        return generate_empty_chart(RUNTIME_WIDTH, RUNTIME_HEIGHT, "No runtime data in benchmarks")
+
+    # Chart layout (taller to accommodate legend)
+    height = RUNTIME_HEIGHT
+    margin = {"top": 40, "right": 30, "bottom": 60, "left": 70}
+    chart_width = RUNTIME_WIDTH - margin["left"] - margin["right"]
+    chart_height = RUNTIME_HEIGHT - margin["top"] - margin["bottom"] - 80  # Room for legend
+
+    # Scale calculations
+    max_runtime = max(all_runtimes) * 1.1
+    if max_runtime == 0:
+        max_runtime = 1
+
+    def scale_x(i: int) -> float:
+        if len(commits) == 1:
+            return margin["left"] + chart_width / 2
+        return margin["left"] + (i / (len(commits) - 1)) * chart_width
+
+    def scale_y(v: float) -> float:
+        return margin["top"] + chart_height - (v / max_runtime) * chart_height
+
+    # Title
+    title = "Runtime Performance Over Recent Commits"
+    if platform:
+        platform_name = PLATFORM_INFO.get(platform, {}).get("name", platform)
+        title = f"{title} ({platform_name})"
+
+    # Build SVG
+    svg_parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {RUNTIME_WIDTH} {height}" class="benchmark-chart">',
+        '''  <style>
+    .chart-bg { fill: var(--chart-bg, #ffffff); }
+    .chart-text { fill: var(--chart-text, #6b7280); font-family: system-ui, sans-serif; }
+    .chart-title { fill: var(--chart-title, #1a1a1a); font-family: system-ui, sans-serif; font-weight: 600; }
+    .chart-grid { stroke: var(--chart-grid, #e5e7eb); stroke-width: 1; }
+    .chart-axis { stroke: var(--chart-axis, #9ca3af); stroke-width: 1; }
+    @media (prefers-color-scheme: dark) {
+      .chart-bg { fill: #1a1a1a; }
+      .chart-text { fill: #9ca3af; }
+      .chart-title { fill: #f0f0f0; }
+      .chart-grid { stroke: #2e2e2e; }
+      .chart-axis { stroke: #4b5563; }
+    }
+  </style>''',
+        f'  <rect class="chart-bg" width="{RUNTIME_WIDTH}" height="{height}" rx="8"/>',
+        f'  <text class="chart-title" x="{RUNTIME_WIDTH/2}" y="25" text-anchor="middle" font-size="16">{escape_xml(title)}</text>',
+    ]
+
+    # Y-axis grid lines and labels
+    num_grid_lines = 5
+    for i in range(num_grid_lines + 1):
+        y = margin["top"] + (i / num_grid_lines) * chart_height
+        value = max_runtime * (1 - i / num_grid_lines)
+        svg_parts.append(
+            f'  <line class="chart-grid" x1="{margin["left"]}" y1="{y}" x2="{RUNTIME_WIDTH - margin["right"]}" y2="{y}"/>'
+        )
+        svg_parts.append(
+            f'  <text class="chart-text" x="{margin["left"] - 10}" y="{y + 4}" text-anchor="end" font-size="11">{value:.2f}ms</text>'
+        )
+
+    # Axes
+    svg_parts.append(
+        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{margin["top"]}" x2="{margin["left"]}" y2="{margin["top"] + chart_height}"/>'
+    )
+    svg_parts.append(
+        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{margin["top"] + chart_height}" x2="{RUNTIME_WIDTH - margin["right"]}" y2="{margin["top"] + chart_height}"/>'
+    )
+
+    # Draw lines and points for each benchmark
+    for idx, name in enumerate(names_with_runtime):
+        color = BENCHMARK_COLORS[idx % len(BENCHMARK_COLORS)]
+        points = benchmark_data[name]
+
+        # Draw connecting line
+        if len(points) > 1:
+            line_points = []
+            for i, runtime in enumerate(points):
+                if runtime > 0:
+                    line_points.append(f"{scale_x(i)},{scale_y(runtime)}")
+            if line_points:
+                path_d = "M " + " L ".join(line_points)
+                svg_parts.append(f'  <path d="{path_d}" fill="none" stroke="{color}" stroke-width="2"/>')
+
+        # Draw points
+        for i, runtime in enumerate(points):
+            if runtime > 0:
+                x = scale_x(i)
+                y = scale_y(runtime)
+                svg_parts.append(f'  <circle cx="{x}" cy="{y}" r="3" fill="{color}"/>')
+
+    # X-axis labels (commits)
+    for i, commit in enumerate(commits):
+        x = scale_x(i)
+        label_y = margin["top"] + chart_height + 15
+        svg_parts.append(
+            f'  <text class="chart-text" x="{x}" y="{label_y}" text-anchor="end" font-size="10" transform="rotate(-45 {x} {label_y})">{escape_xml(commit)}</text>'
+        )
+
+    # Legend at bottom
+    legend_y = height - 60
+    legend_x_start = margin["left"]
+    for idx, name in enumerate(names_with_runtime):
+        color = BENCHMARK_COLORS[idx % len(BENCHMARK_COLORS)]
+        # Strip @opt_level for display in legend
+        display_name, _ = parse_benchmark_name(name)
+        x = legend_x_start + (idx % 3) * 220
+        y = legend_y + (idx // 3) * 20
+        svg_parts.append(f'  <rect x="{x}" y="{y}" width="12" height="12" fill="{color}" rx="2"/>')
+        svg_parts.append(
+            f'  <text class="chart-text" x="{x + 18}" y="{y + 10}" font-size="11">{escape_xml(display_name)}</text>'
+        )
+
+    svg_parts.append("</svg>")
+    return "\n".join(svg_parts)
+
+
+def generate_binary_size_by_opt_chart(runs: list[dict], opt_levels: list[str], platform: Optional[str] = None) -> str:
+    """Generate a grouped bar chart comparing binary sizes across optimization levels."""
+    if not runs or len(opt_levels) < 2:
+        return generate_empty_chart(BINARY_OPT_WIDTH, BINARY_OPT_HEIGHT, "Need multiple opt levels for comparison")
+
+    # Get latest run
+    latest_run = runs[-1] if runs else None
+    if not latest_run:
+        return generate_empty_chart(BINARY_OPT_WIDTH, BINARY_OPT_HEIGHT, "No benchmark data available")
+
+    # Group benchmarks by base name and opt level
+    size_by_base: dict[str, dict[str, float]] = {}
+    for bench in latest_run.get("benchmarks", []):
+        name = bench.get("name", "")
+        base, opt = parse_benchmark_name(name)
+        if not opt:
+            opt = "O0"
+        size_bytes = bench.get("binary_size_bytes", 0)
+        if size_bytes > 0:
+            if base not in size_by_base:
+                size_by_base[base] = {}
+            size_by_base[base][opt] = size_bytes / 1024  # KB
+
+    if not size_by_base:
+        return generate_empty_chart(BINARY_OPT_WIDTH, BINARY_OPT_HEIGHT, "No binary size data available")
+
+    base_names = sorted(size_by_base.keys())
+    commit = short_commit(latest_run.get("commit", ""))
+
+    # Chart layout
+    margin = {"top": 50, "right": 30, "bottom": 80, "left": 70}
+    chart_width = BINARY_OPT_WIDTH - margin["left"] - margin["right"]
+    chart_height = BINARY_OPT_HEIGHT - margin["top"] - margin["bottom"]
+
+    # Scale
+    all_sizes = [s for sizes in size_by_base.values() for s in sizes.values()]
+    max_size = max(all_sizes) * 1.1 if all_sizes else 1
+
+    # Bar layout
+    group_width = chart_width / len(base_names)
+    bar_width = group_width / (len(opt_levels) + 1)  # +1 for padding
+
+    # Opt level colors
+    OPT_COLORS = {"O0": "#4f6ddb", "O1": "#06b6d4", "O2": "#10b981", "O3": "#f59e0b"}
+
+    # Title
+    title = "Binary Size by Optimization Level"
+    if platform:
+        platform_name = PLATFORM_INFO.get(platform, {}).get("name", platform)
+        title = f"{title} ({platform_name})"
+
+    svg_parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {BINARY_OPT_WIDTH} {BINARY_OPT_HEIGHT}" class="benchmark-chart">',
+        '''  <style>
+    .chart-bg { fill: var(--chart-bg, #ffffff); }
+    .chart-text { fill: var(--chart-text, #6b7280); font-family: system-ui, sans-serif; }
+    .chart-title { fill: var(--chart-title, #1a1a1a); font-family: system-ui, sans-serif; font-weight: 600; }
+    .chart-grid { stroke: var(--chart-grid, #e5e7eb); stroke-width: 1; }
+    .chart-axis { stroke: var(--chart-axis, #9ca3af); stroke-width: 1; }
+    @media (prefers-color-scheme: dark) {
+      .chart-bg { fill: #1a1a1a; }
+      .chart-text { fill: #9ca3af; }
+      .chart-title { fill: #f0f0f0; }
+      .chart-grid { stroke: #2e2e2e; }
+      .chart-axis { stroke: #4b5563; }
+    }
+  </style>''',
+        f'  <rect class="chart-bg" width="{BINARY_OPT_WIDTH}" height="{BINARY_OPT_HEIGHT}" rx="8"/>',
+        f'  <text class="chart-title" x="{BINARY_OPT_WIDTH/2}" y="25" text-anchor="middle" font-size="16">{escape_xml(title)}</text>',
+        f'  <text class="chart-text" x="{BINARY_OPT_WIDTH/2}" y="42" text-anchor="middle" font-size="11">(commit: {escape_xml(commit)})</text>',
+    ]
+
+    # Y-axis grid lines
+    num_grid_lines = 4
+    for i in range(num_grid_lines + 1):
+        y = margin["top"] + (i / num_grid_lines) * chart_height
+        value = max_size * (1 - i / num_grid_lines)
+        svg_parts.append(
+            f'  <line class="chart-grid" x1="{margin["left"]}" y1="{y}" x2="{BINARY_OPT_WIDTH - margin["right"]}" y2="{y}"/>'
+        )
+        svg_parts.append(
+            f'  <text class="chart-text" x="{margin["left"] - 10}" y="{y + 4}" text-anchor="end" font-size="11">{value:.0f}KB</text>'
+        )
+
+    # Axes
+    svg_parts.append(
+        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{margin["top"]}" x2="{margin["left"]}" y2="{margin["top"] + chart_height}"/>'
+    )
+    svg_parts.append(
+        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{margin["top"] + chart_height}" x2="{BINARY_OPT_WIDTH - margin["right"]}" y2="{margin["top"] + chart_height}"/>'
+    )
+
+    # Draw grouped bars
+    for gi, base in enumerate(base_names):
+        group_x = margin["left"] + gi * group_width
+        sizes = size_by_base[base]
+
+        for oi, opt in enumerate(opt_levels):
+            size = sizes.get(opt, 0)
+            if size <= 0:
+                continue
+            bar_height = (size / max_size) * chart_height
+            bx = group_x + (oi + 0.5) * bar_width
+            by = margin["top"] + chart_height - bar_height
+            color = OPT_COLORS.get(opt, "#888888")
+            svg_parts.append(
+                f'  <rect x="{bx}" y="{by}" width="{bar_width * 0.8}" height="{bar_height}" fill="{color}" rx="2"/>'
+            )
+            # Size label on top of bar if there's room
+            if bar_height > 15:
+                svg_parts.append(
+                    f'  <text x="{bx + bar_width * 0.4}" y="{by - 4}" text-anchor="middle" font-size="9" class="chart-text">{size:.0f}</text>'
+                )
+
+        # X-axis label (benchmark name)
+        label_x = group_x + group_width / 2
+        label_y = margin["top"] + chart_height + 15
+        svg_parts.append(
+            f'  <text class="chart-text" x="{label_x}" y="{label_y}" text-anchor="end" font-size="10" transform="rotate(-45 {label_x} {label_y})">{escape_xml(base)}</text>'
+        )
+
+    # Legend
+    legend_y = BINARY_OPT_HEIGHT - 20
+    legend_x_start = margin["left"]
+    for idx, opt in enumerate(opt_levels):
+        color = OPT_COLORS.get(opt, "#888888")
+        x = legend_x_start + idx * 100
+        svg_parts.append(f'  <rect x="{x}" y="{legend_y}" width="12" height="12" fill="{color}" rx="2"/>')
+        svg_parts.append(
+            f'  <text class="chart-text" x="{x + 18}" y="{legend_y + 10}" font-size="11">-{opt}</text>'
+        )
+
+    svg_parts.append("</svg>")
+    return "\n".join(svg_parts)
+
+
 def generate_comparison_timeline_chart(platform_data: dict[str, list[dict]]) -> str:
     """Generate a comparison chart showing all platforms on the same timeline."""
     if not platform_data or all(not runs for runs in platform_data.values()):
@@ -1035,60 +1371,115 @@ def generate_platform_charts(history_path: Path, output_dir: Path, platform: Opt
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Get benchmark names first (needed for multi-timeline)
-    benchmark_names = get_benchmark_names(runs)
-    print(f"Found {len(benchmark_names)} benchmarks: {', '.join(benchmark_names)}")
+    # Detect optimization levels present in the data
+    opt_levels = get_opt_levels_from_runs(runs)
+    print(f"Optimization levels found: {', '.join(opt_levels)}")
 
-    # Generate aggregate timeline chart
-    timeline_svg = generate_timeline_chart(runs, platform)
-    timeline_path = output_dir / "timeline.svg"
-    with open(timeline_path, "w") as f:
+    # Get all benchmark names (includes @opt suffixes)
+    all_benchmark_names = get_benchmark_names(runs)
+    print(f"Found {len(all_benchmark_names)} benchmarks: {', '.join(all_benchmark_names)}")
+
+    # Generate per-opt-level chart variants
+    for opt in opt_levels:
+        opt_runs = filter_runs_by_opt_level(runs, opt)
+        opt_names = get_benchmark_names(opt_runs)
+
+        if not opt_runs:
+            print(f"  No data for {opt}, skipping")
+            continue
+
+        print(f"  Generating charts for -{opt} ({len(opt_names)} benchmarks)")
+
+        # Timeline (aggregate)
+        svg = generate_timeline_chart(opt_runs, platform)
+        path = output_dir / f"timeline_{opt}.svg"
+        with open(path, "w") as f:
+            f.write(svg)
+        print(f"  Generated {path}")
+
+        # Timeline by program (multi-line)
+        if opt_names:
+            svg = generate_multi_timeline_chart(opt_runs, opt_names)
+            path = output_dir / f"timeline_by_program_{opt}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+            print(f"  Generated {path}")
+
+        # Breakdown (aggregate)
+        svg = generate_breakdown_chart(opt_runs, platform=platform)
+        path = output_dir / f"breakdown_{opt}.svg"
+        with open(path, "w") as f:
+            f.write(svg)
+        print(f"  Generated {path}")
+
+        # Memory
+        svg = generate_memory_chart(opt_runs, platform)
+        path = output_dir / f"memory_{opt}.svg"
+        with open(path, "w") as f:
+            f.write(svg)
+        print(f"  Generated {path}")
+
+        # Binary size
+        svg = generate_binary_size_chart(opt_runs, platform)
+        path = output_dir / f"binary_size_{opt}.svg"
+        with open(path, "w") as f:
+            f.write(svg)
+        print(f"  Generated {path}")
+
+        # Per-benchmark breakdown
+        for bench_name in opt_names:
+            svg = generate_breakdown_chart(opt_runs, bench_name, platform)
+            safe_name = bench_name.replace(" ", "_").replace("/", "_")
+            path = output_dir / f"breakdown_{safe_name}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+            print(f"  Generated {path}")
+
+        # Runtime chart (per opt level)
+        svg = generate_runtime_chart(opt_runs, opt_names, platform)
+        path = output_dir / f"runtime_{opt}.svg"
+        with open(path, "w") as f:
+            f.write(svg)
+        print(f"  Generated {path}")
+
+    # Generate backwards-compatible default charts (using first opt level, typically O0)
+    default_opt = opt_levels[0] if opt_levels else "O0"
+    default_runs = filter_runs_by_opt_level(runs, default_opt)
+    default_names = get_benchmark_names(default_runs)
+
+    timeline_svg = generate_timeline_chart(default_runs, platform)
+    with open(output_dir / "timeline.svg", "w") as f:
         f.write(timeline_svg)
-    print(f"Generated {timeline_path}")
 
-    # Generate per-program timeline chart (multi-line)
-    if benchmark_names:
-        multi_timeline_svg = generate_multi_timeline_chart(runs, benchmark_names)
-        multi_timeline_path = output_dir / "timeline_by_program.svg"
-        with open(multi_timeline_path, "w") as f:
-            f.write(multi_timeline_svg)
-        print(f"Generated {multi_timeline_path}")
+    if default_names:
+        svg = generate_multi_timeline_chart(default_runs, default_names)
+        with open(output_dir / "timeline_by_program.svg", "w") as f:
+            f.write(svg)
 
-    # Generate aggregate breakdown chart (for backwards compatibility)
-    breakdown_svg = generate_breakdown_chart(runs, platform=platform)
-    breakdown_path = output_dir / "breakdown.svg"
-    with open(breakdown_path, "w") as f:
+    breakdown_svg = generate_breakdown_chart(default_runs, platform=platform)
+    with open(output_dir / "breakdown.svg", "w") as f:
         f.write(breakdown_svg)
-    print(f"Generated {breakdown_path}")
 
-    # Generate memory usage chart
-    memory_svg = generate_memory_chart(runs, platform)
-    memory_path = output_dir / "memory.svg"
-    with open(memory_path, "w") as f:
+    memory_svg = generate_memory_chart(default_runs, platform)
+    with open(output_dir / "memory.svg", "w") as f:
         f.write(memory_svg)
-    print(f"Generated {memory_path}")
 
-    # Generate binary size chart
-    binary_svg = generate_binary_size_chart(runs, platform)
-    binary_path = output_dir / "binary_size.svg"
-    with open(binary_path, "w") as f:
+    binary_svg = generate_binary_size_chart(default_runs, platform)
+    with open(output_dir / "binary_size.svg", "w") as f:
         f.write(binary_svg)
-    print(f"Generated {binary_path}")
 
-    # Generate per-benchmark breakdown charts
-    for bench_name in benchmark_names:
-        bench_svg = generate_breakdown_chart(runs, bench_name, platform)
-        # Use sanitized filename
-        safe_name = bench_name.replace(" ", "_").replace("/", "_")
-        bench_path = output_dir / f"breakdown_{safe_name}.svg"
-        with open(bench_path, "w") as f:
-            f.write(bench_svg)
-        print(f"Generated {bench_path}")
+    # Generate binary size by opt level comparison chart
+    if len(opt_levels) >= 2:
+        svg = generate_binary_size_by_opt_chart(runs, opt_levels, platform)
+        path = output_dir / "binary_size_by_opt.svg"
+        with open(path, "w") as f:
+            f.write(svg)
+        print(f"Generated {path}")
 
-    # Generate summary statistics
-    summary = generate_summary_data(runs, platform)
+    # Generate summary statistics (using default opt level)
+    summary = generate_summary_data(default_runs, platform)
 
-    # Include latest run's metrics for display
+    # Include latest run's metrics for display (all opt levels)
     latest_benchmarks = []
     if runs:
         latest_run = runs[-1]
@@ -1109,6 +1500,14 @@ def generate_platform_charts(history_path: Path, output_dir: Path, platform: Opt
                 bench_info["peak_memory_mb"] = round(bench["peak_memory_bytes"] / (1024 * 1024), 2)
             if "binary_size_bytes" in bench:
                 bench_info["binary_size_kb"] = round(bench["binary_size_bytes"] / 1024, 2)
+            if "runtime_ms" in bench:
+                bench_info["runtime_ms"] = round(bench["runtime_ms"], 3)
+            if "runtime_std_ms" in bench:
+                bench_info["runtime_std_ms"] = round(bench["runtime_std_ms"], 3)
+            # Include opt level info
+            _, opt = parse_benchmark_name(bench.get("name", ""))
+            if opt:
+                bench_info["opt_level"] = opt
             latest_benchmarks.append(bench_info)
 
     # Calculate coverage metrics
@@ -1116,7 +1515,8 @@ def generate_platform_charts(history_path: Path, output_dir: Path, platform: Opt
 
     # Write metadata JSON for the website to consume (includes summary and detailed metrics)
     metadata = {
-        "benchmarks": benchmark_names,
+        "benchmarks": all_benchmark_names,
+        "opt_levels": opt_levels,
         "run_count": len(runs),
         "latest_commit": short_commit(runs[-1].get("commit", "")) if runs else None,
         "summary": summary,

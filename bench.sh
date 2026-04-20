@@ -125,6 +125,31 @@ log_info "Running benchmarks ($ITERATIONS iterations each)..."
 
 RESULTS_FILE="$TEMP_DIR/results.json"
 
+# Parse opt_levels from [config] section (default: O0 only)
+opt_levels=()
+in_config=false
+while IFS= read -r line; do
+    line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ "$line" == "[config]" ]]; then
+        in_config=true
+    elif [[ "$line" =~ ^\[  ]]; then
+        in_config=false
+    elif [[ "$in_config" == true && "$line" =~ ^opt_levels[[:space:]]*= ]]; then
+        # Parse array like ["O0", "O3"]
+        values=$(echo "$line" | sed 's/.*=//; s/\[//; s/\]//; s/"//g; s/,/ /g')
+        for v in $values; do
+            v=$(echo "$v" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [[ -n "$v" ]] && opt_levels+=("$v")
+        done
+    fi
+done < "$MANIFEST"
+
+# Default to O0 if no opt_levels configured
+if [[ ${#opt_levels[@]} -eq 0 ]]; then
+    opt_levels=("O0")
+fi
+log_info "Optimization levels: ${opt_levels[*]}"
+
 # Parse benchmarks from manifest
 # Format: [[benchmark]] followed by name = "...", path = "..."
 benchmark_names=()
@@ -158,12 +183,20 @@ if [[ -n "$current_name" && -n "$current_path" ]]; then
     benchmark_paths+=("$current_path")
 fi
 
-# Run each benchmark
+# Run each benchmark at each optimization level
 all_results=()
 for i in "${!benchmark_names[@]}"; do
-    name="${benchmark_names[$i]}"
+  for opt_level in "${opt_levels[@]}"; do
+    base_name="${benchmark_names[$i]}"
     path="${benchmark_paths[$i]}"
     full_path="$BENCHMARKS_DIR/$path"
+
+    # Tag the result name with the opt level
+    if [[ ${#opt_levels[@]} -gt 1 ]]; then
+        name="${base_name}@${opt_level}"
+    else
+        name="$base_name"
+    fi
 
     if [[ ! -f "$full_path" ]]; then
         log_warn "Benchmark file not found: $path (skipping)"
@@ -171,6 +204,9 @@ for i in "${!benchmark_names[@]}"; do
     fi
 
     log_info "Running: $name"
+
+    # Build the opt-level flag (e.g., -O0, -O3)
+    opt_flag="-${opt_level}"
 
     # Run multiple iterations and collect timing data
     iteration_results=()
@@ -185,7 +221,7 @@ for i in "${!benchmark_names[@]}"; do
         time_output="$TEMP_DIR/time_output_$$"
         if [[ "$os" == "darwin" ]]; then
             # macOS: -l gives max resident set size in bytes
-            if ! timing_json=$(/usr/bin/time -l "$GRUEL_BIN" --benchmark-json "$full_path" "$output_binary" 2>"$time_output"); then
+            if ! timing_json=$(/usr/bin/time -l "$GRUEL_BIN" --benchmark-json "$opt_flag" "$full_path" "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
                 rm -f "$time_output"
                 continue
@@ -194,7 +230,7 @@ for i in "${!benchmark_names[@]}"; do
             peak_mem_bytes=$(grep "maximum resident set size" "$time_output" 2>/dev/null | awk '{print $1}')
         else
             # Linux: -v gives max resident set size in KB
-            if ! timing_json=$(/usr/bin/time -v "$GRUEL_BIN" --benchmark-json "$full_path" "$output_binary" 2>"$time_output"); then
+            if ! timing_json=$(/usr/bin/time -v "$GRUEL_BIN" --benchmark-json "$opt_flag" "$full_path" "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
                 rm -f "$time_output"
                 continue
@@ -231,12 +267,56 @@ for i in "${!benchmark_names[@]}"; do
             binary_size=$(stat -f%z "$output_binary" 2>/dev/null || stat -c%s "$output_binary" 2>/dev/null || echo 0)
         fi
 
+        # Keep the binary from the last successful iteration for runtime measurement
+        if [[ -f "$output_binary" ]]; then
+            cp "$output_binary" "$TEMP_DIR/bench_binary_for_runtime"
+        fi
         rm -f "$output_binary"
     done
 
     if [[ ${#iteration_results[@]} -eq 0 ]]; then
         log_warn "  No successful iterations for $name"
         continue
+    fi
+
+    # --- Runtime measurement ---
+    # Run the compiled binary multiple times and measure wall-clock execution time.
+    runtime_binary="$TEMP_DIR/bench_binary_for_runtime"
+    iteration_runtimes=()
+    if [[ -x "$runtime_binary" ]]; then
+        for ((iter=1; iter<=ITERATIONS; iter++)); do
+            # Measure wall-clock time in milliseconds using date or Python
+            runtime_start_ns=$(python3 -c "import time; print(int(time.monotonic_ns()))")
+            "$runtime_binary" >/dev/null 2>&1 || true  # ignore exit code
+            runtime_end_ns=$(python3 -c "import time; print(int(time.monotonic_ns()))")
+            runtime_ns=$((runtime_end_ns - runtime_start_ns))
+            runtime_ms=$(echo "scale=3; $runtime_ns / 1000000" | bc -l)
+            iteration_runtimes+=("$runtime_ms")
+        done
+        rm -f "$runtime_binary"
+    fi
+
+    # Calculate runtime mean and stddev
+    runtime_mean=0
+    runtime_stddev=0
+    if [[ ${#iteration_runtimes[@]} -gt 0 ]]; then
+        rt_sum=0
+        for val in "${iteration_runtimes[@]}"; do
+            rt_sum=$(echo "$rt_sum + $val" | bc -l)
+        done
+        rt_count=${#iteration_runtimes[@]}
+        runtime_mean_raw=$(echo "scale=3; $rt_sum / $rt_count" | bc -l)
+        runtime_mean=$(printf "%.3f" "$runtime_mean_raw")
+
+        rt_sum_sq=0
+        for val in "${iteration_runtimes[@]}"; do
+            rt_diff=$(echo "$val - $runtime_mean_raw" | bc -l)
+            rt_sq=$(echo "$rt_diff * $rt_diff" | bc -l)
+            rt_sum_sq=$(echo "$rt_sum_sq + $rt_sq" | bc -l)
+        done
+        rt_variance=$(echo "scale=6; $rt_sum_sq / $rt_count" | bc -l)
+        runtime_stddev_raw=$(echo "scale=6; sqrt($rt_variance)" | bc -l)
+        runtime_stddev=$(printf "%.6f" "$runtime_stddev_raw")
     fi
 
     # Calculate mean and stddev for total time
@@ -287,7 +367,7 @@ for i in "${!benchmark_names[@]}"; do
     mem_mean_mb=$(echo "scale=2; $mem_mean / 1048576" | bc -l)
     binary_size_kb=$(echo "scale=2; $binary_size / 1024" | bc -l)
 
-    log_info "  $name: time=${mean}ms (±${stddev}), mem=${mem_mean_mb}MB, binary=${binary_size_kb}KB (n=$count)"
+    log_info "  $name: compile=${mean}ms (±${stddev}), runtime=${runtime_mean}ms, mem=${mem_mean_mb}MB, binary=${binary_size_kb}KB (n=$count)"
 
     # Extract and aggregate per-pass timing data, source metrics, and memory
     # Use Python to parse JSON and compute per-pass means
@@ -336,13 +416,18 @@ print(json.dumps(result))
     passes_json=$(echo "$extra_json" | python3 -c "import sys, json; d=json.load(sys.stdin); print(json.dumps(d.get('passes', {})))")
     source_metrics_json=$(echo "$extra_json" | python3 -c "import sys, json; d=json.load(sys.stdin); sm=d.get('source_metrics'); print(json.dumps(sm) if sm else 'null')")
 
-    # Store result with all data (including memory and binary size from iteration tracking)
+    # Store result with all data (including memory, binary size, and runtime)
     result_parts=("\"name\":\"$name\"" "\"iterations\":$count" "\"mean_ms\":$mean" "\"std_ms\":$stddev" "\"passes\":$passes_json")
+    [[ ${#opt_levels[@]} -gt 1 ]] && result_parts+=("\"opt_level\":\"$opt_level\"")
     [[ "$source_metrics_json" != "null" ]] && result_parts+=("\"source_metrics\":$source_metrics_json")
     [[ "$mem_mean" -gt 0 ]] && result_parts+=("\"peak_memory_bytes\":$mem_mean")
     [[ "$binary_size" -gt 0 ]] && result_parts+=("\"binary_size_bytes\":$binary_size")
+    if [[ ${#iteration_runtimes[@]} -gt 0 ]]; then
+        result_parts+=("\"runtime_ms\":$runtime_mean" "\"runtime_std_ms\":$runtime_stddev")
+    fi
 
     all_results+=("{$(IFS=,; echo "${result_parts[*]}")}")
+  done
 done
 
 # Fail early if no benchmarks were collected

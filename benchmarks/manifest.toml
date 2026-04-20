@@ -4,6 +4,9 @@
 # Each benchmark is a Gruel program designed to stress specific compiler phases.
 # Each benchmark should take approximately 1-2 seconds to compile for useful graphs.
 
+[config]
+opt_levels = ["O0", "O3"]
+
 [[benchmark]]
 name = "many_functions"
 path = "stress/many_functions.gruel"
@@ -38,3 +41,8 @@ description = "200 functions with array declarations, indexing, and modification
 name = "register_pressure"
 path = "stress/register_pressure.gruel"
 description = "210 functions with many simultaneous live variables to stress register allocation"
+
+[[benchmark]]
+name = "comptime_heavy"
+path = "stress/comptime_heavy.gruel"
+description = "68 comptime blocks with loops, recursion, structs, arrays, enums, and pattern matching"
