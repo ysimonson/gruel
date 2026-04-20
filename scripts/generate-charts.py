@@ -43,8 +43,6 @@ BINARY_WIDTH = 800
 BINARY_HEIGHT = 250
 RUNTIME_WIDTH = 800
 RUNTIME_HEIGHT = 350
-BINARY_OPT_WIDTH = 800
-BINARY_OPT_HEIGHT = 300
 COMPARISON_WIDTH = 900
 COMPARISON_HEIGHT = 400
 
@@ -371,131 +369,6 @@ def get_benchmark_time(run: dict, benchmark_name: str) -> float:
     return 0
 
 
-def generate_multi_timeline_chart(runs: list[dict], benchmark_names: list[str]) -> str:
-    """Generate time-series SVG chart showing each benchmark program as a separate line."""
-    if not runs or not benchmark_names:
-        return generate_empty_chart(TIMELINE_WIDTH, TIMELINE_HEIGHT + 50, "No benchmark data available yet")
-
-    # Extract data points for each benchmark
-    commits = [short_commit(run.get("commit", "")) for run in runs[-20:]]
-    benchmark_data = {}
-
-    for name in benchmark_names:
-        points = []
-        for run in runs[-20:]:
-            time = get_benchmark_time(run, name)
-            points.append(time)
-        benchmark_data[name] = points
-
-    # Check if we have any data
-    all_times = [t for pts in benchmark_data.values() for t in pts]
-    if not all_times or all(t == 0 for t in all_times):
-        return generate_empty_chart(TIMELINE_WIDTH, TIMELINE_HEIGHT + 50, "No timing data in benchmarks")
-
-    # Chart layout (taller to accommodate legend)
-    height = TIMELINE_HEIGHT + 80
-    margin = {"top": 40, "right": 30, "bottom": 60, "left": 70}
-    chart_width = TIMELINE_WIDTH - margin["left"] - margin["right"]
-    chart_height = TIMELINE_HEIGHT - margin["top"] - margin["bottom"]
-
-    # Scale calculations
-    max_time = max(all_times) * 1.1  # 10% padding
-    if max_time == 0:
-        max_time = 1
-
-    def scale_x(i: int) -> float:
-        if len(commits) == 1:
-            return margin["left"] + chart_width / 2
-        return margin["left"] + (i / (len(commits) - 1)) * chart_width
-
-    def scale_y(v: float) -> float:
-        return margin["top"] + chart_height - (v / max_time) * chart_height
-
-    # Build SVG
-    svg_parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {TIMELINE_WIDTH} {height}" class="benchmark-chart">',
-        '''  <style>
-    .chart-bg { fill: var(--chart-bg, #ffffff); }
-    .chart-text { fill: var(--chart-text, #6b7280); font-family: system-ui, sans-serif; }
-    .chart-title { fill: var(--chart-title, #1a1a1a); font-family: system-ui, sans-serif; font-weight: 600; }
-    .chart-grid { stroke: var(--chart-grid, #e5e7eb); stroke-width: 1; }
-    .chart-axis { stroke: var(--chart-axis, #9ca3af); stroke-width: 1; }
-    @media (prefers-color-scheme: dark) {
-      .chart-bg { fill: #1a1a1a; }
-      .chart-text { fill: #9ca3af; }
-      .chart-title { fill: #f0f0f0; }
-      .chart-grid { stroke: #2e2e2e; }
-      .chart-axis { stroke: #4b5563; }
-    }
-  </style>''',
-        f'  <rect class="chart-bg" width="{TIMELINE_WIDTH}" height="{height}" rx="8"/>',
-        f'  <text class="chart-title" x="{TIMELINE_WIDTH/2}" y="25" text-anchor="middle" font-size="16">Compilation Time by Program</text>',
-    ]
-
-    # Y-axis grid lines and labels
-    num_grid_lines = 5
-    for i in range(num_grid_lines + 1):
-        y = margin["top"] + (i / num_grid_lines) * chart_height
-        value = max_time * (1 - i / num_grid_lines)
-        svg_parts.append(
-            f'  <line class="chart-grid" x1="{margin["left"]}" y1="{y}" x2="{TIMELINE_WIDTH - margin["right"]}" y2="{y}"/>'
-        )
-        svg_parts.append(
-            f'  <text class="chart-text" x="{margin["left"] - 10}" y="{y + 4}" text-anchor="end" font-size="11">{value:.1f}ms</text>'
-        )
-
-    # Axes
-    svg_parts.append(
-        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{margin["top"]}" x2="{margin["left"]}" y2="{TIMELINE_HEIGHT - margin["bottom"]}"/>'
-    )
-    svg_parts.append(
-        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{TIMELINE_HEIGHT - margin["bottom"]}" x2="{TIMELINE_WIDTH - margin["right"]}" y2="{TIMELINE_HEIGHT - margin["bottom"]}"/>'
-    )
-
-    # Draw lines and points for each benchmark
-    for idx, name in enumerate(benchmark_names):
-        color = BENCHMARK_COLORS[idx % len(BENCHMARK_COLORS)]
-        points = benchmark_data[name]
-
-        # Draw connecting line
-        if len(points) > 1:
-            line_points = []
-            for i, time in enumerate(points):
-                if time > 0:
-                    line_points.append(f"{scale_x(i)},{scale_y(time)}")
-            if line_points:
-                path_d = "M " + " L ".join(line_points)
-                svg_parts.append(f'  <path d="{path_d}" fill="none" stroke="{color}" stroke-width="2"/>')
-
-        # Draw points
-        for i, time in enumerate(points):
-            if time > 0:
-                x = scale_x(i)
-                y = scale_y(time)
-                svg_parts.append(f'  <circle cx="{x}" cy="{y}" r="3" fill="{color}"/>')
-
-    # X-axis labels (commits)
-    for i, commit in enumerate(commits):
-        x = scale_x(i)
-        label_y = TIMELINE_HEIGHT - margin["bottom"] + 15
-        svg_parts.append(
-            f'  <text class="chart-text" x="{x}" y="{label_y}" text-anchor="end" font-size="10" transform="rotate(-45 {x} {label_y})">{escape_xml(commit)}</text>'
-        )
-
-    # Legend at bottom
-    legend_y = TIMELINE_HEIGHT + 10
-    legend_x_start = margin["left"]
-    for idx, name in enumerate(benchmark_names):
-        color = BENCHMARK_COLORS[idx % len(BENCHMARK_COLORS)]
-        x = legend_x_start + (idx % 3) * 200
-        y = legend_y + (idx // 3) * 20
-        svg_parts.append(f'  <rect x="{x}" y="{y}" width="12" height="12" fill="{color}" rx="2"/>')
-        svg_parts.append(
-            f'  <text class="chart-text" x="{x + 18}" y="{y + 10}" font-size="11">{escape_xml(name)}</text>'
-        )
-
-    svg_parts.append("</svg>")
-    return "\n".join(svg_parts)
 
 
 def get_pass_times_for_benchmark(run: dict, benchmark_name: str) -> dict[str, float]:
@@ -981,175 +854,44 @@ def generate_runtime_chart(runs: list[dict], benchmark_names: list[str], platfor
     return "\n".join(svg_parts)
 
 
-def generate_binary_size_by_opt_chart(runs: list[dict], opt_levels: list[str], platform: Optional[str] = None) -> str:
-    """Generate a grouped bar chart comparing binary sizes across optimization levels."""
-    if not runs or len(opt_levels) < 2:
-        return generate_empty_chart(BINARY_OPT_WIDTH, BINARY_OPT_HEIGHT, "Need multiple opt levels for comparison")
-
-    # Get latest run
-    latest_run = runs[-1] if runs else None
-    if not latest_run:
-        return generate_empty_chart(BINARY_OPT_WIDTH, BINARY_OPT_HEIGHT, "No benchmark data available")
-
-    # Group benchmarks by base name and opt level
-    size_by_base: dict[str, dict[str, float]] = {}
-    for bench in latest_run.get("benchmarks", []):
-        name = bench.get("name", "")
-        base, opt = parse_benchmark_name(name)
-        if not opt:
-            opt = "O0"
-        size_bytes = bench.get("binary_size_bytes", 0)
-        if size_bytes > 0:
-            if base not in size_by_base:
-                size_by_base[base] = {}
-            size_by_base[base][opt] = size_bytes / 1024  # KB
-
-    if not size_by_base:
-        return generate_empty_chart(BINARY_OPT_WIDTH, BINARY_OPT_HEIGHT, "No binary size data available")
-
-    base_names = sorted(size_by_base.keys())
-    commit = short_commit(latest_run.get("commit", ""))
-
-    # Chart layout
-    margin = {"top": 50, "right": 30, "bottom": 80, "left": 70}
-    chart_width = BINARY_OPT_WIDTH - margin["left"] - margin["right"]
-    chart_height = BINARY_OPT_HEIGHT - margin["top"] - margin["bottom"]
-
-    # Scale
-    all_sizes = [s for sizes in size_by_base.values() for s in sizes.values()]
-    max_size = max(all_sizes) * 1.1 if all_sizes else 1
-
-    # Bar layout
-    group_width = chart_width / len(base_names)
-    bar_width = group_width / (len(opt_levels) + 1)  # +1 for padding
-
-    # Opt level colors
-    OPT_COLORS = {"O0": "#4f6ddb", "O1": "#06b6d4", "O2": "#10b981", "O3": "#f59e0b"}
-
-    # Title
-    title = "Binary Size by Optimization Level"
-    if platform:
-        platform_name = PLATFORM_INFO.get(platform, {}).get("name", platform)
-        title = f"{title} ({platform_name})"
-
-    svg_parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {BINARY_OPT_WIDTH} {BINARY_OPT_HEIGHT}" class="benchmark-chart">',
-        '''  <style>
-    .chart-bg { fill: var(--chart-bg, #ffffff); }
-    .chart-text { fill: var(--chart-text, #6b7280); font-family: system-ui, sans-serif; }
-    .chart-title { fill: var(--chart-title, #1a1a1a); font-family: system-ui, sans-serif; font-weight: 600; }
-    .chart-grid { stroke: var(--chart-grid, #e5e7eb); stroke-width: 1; }
-    .chart-axis { stroke: var(--chart-axis, #9ca3af); stroke-width: 1; }
-    @media (prefers-color-scheme: dark) {
-      .chart-bg { fill: #1a1a1a; }
-      .chart-text { fill: #9ca3af; }
-      .chart-title { fill: #f0f0f0; }
-      .chart-grid { stroke: #2e2e2e; }
-      .chart-axis { stroke: #4b5563; }
-    }
-  </style>''',
-        f'  <rect class="chart-bg" width="{BINARY_OPT_WIDTH}" height="{BINARY_OPT_HEIGHT}" rx="8"/>',
-        f'  <text class="chart-title" x="{BINARY_OPT_WIDTH/2}" y="25" text-anchor="middle" font-size="16">{escape_xml(title)}</text>',
-        f'  <text class="chart-text" x="{BINARY_OPT_WIDTH/2}" y="42" text-anchor="middle" font-size="11">(commit: {escape_xml(commit)})</text>',
-    ]
-
-    # Y-axis grid lines
-    num_grid_lines = 4
-    for i in range(num_grid_lines + 1):
-        y = margin["top"] + (i / num_grid_lines) * chart_height
-        value = max_size * (1 - i / num_grid_lines)
-        svg_parts.append(
-            f'  <line class="chart-grid" x1="{margin["left"]}" y1="{y}" x2="{BINARY_OPT_WIDTH - margin["right"]}" y2="{y}"/>'
-        )
-        svg_parts.append(
-            f'  <text class="chart-text" x="{margin["left"] - 10}" y="{y + 4}" text-anchor="end" font-size="11">{value:.0f}KB</text>'
-        )
-
-    # Axes
-    svg_parts.append(
-        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{margin["top"]}" x2="{margin["left"]}" y2="{margin["top"] + chart_height}"/>'
-    )
-    svg_parts.append(
-        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{margin["top"] + chart_height}" x2="{BINARY_OPT_WIDTH - margin["right"]}" y2="{margin["top"] + chart_height}"/>'
-    )
-
-    # Draw grouped bars
-    for gi, base in enumerate(base_names):
-        group_x = margin["left"] + gi * group_width
-        sizes = size_by_base[base]
-
-        for oi, opt in enumerate(opt_levels):
-            size = sizes.get(opt, 0)
-            if size <= 0:
-                continue
-            bar_height = (size / max_size) * chart_height
-            bx = group_x + (oi + 0.5) * bar_width
-            by = margin["top"] + chart_height - bar_height
-            color = OPT_COLORS.get(opt, "#888888")
-            svg_parts.append(
-                f'  <rect x="{bx}" y="{by}" width="{bar_width * 0.8}" height="{bar_height}" fill="{color}" rx="2"/>'
-            )
-            # Size label on top of bar if there's room
-            if bar_height > 15:
-                svg_parts.append(
-                    f'  <text x="{bx + bar_width * 0.4}" y="{by - 4}" text-anchor="middle" font-size="9" class="chart-text">{size:.0f}</text>'
-                )
-
-        # X-axis label (benchmark name)
-        label_x = group_x + group_width / 2
-        label_y = margin["top"] + chart_height + 15
-        svg_parts.append(
-            f'  <text class="chart-text" x="{label_x}" y="{label_y}" text-anchor="end" font-size="10" transform="rotate(-45 {label_x} {label_y})">{escape_xml(base)}</text>'
-        )
-
-    # Legend
-    legend_y = BINARY_OPT_HEIGHT - 20
-    legend_x_start = margin["left"]
-    for idx, opt in enumerate(opt_levels):
-        color = OPT_COLORS.get(opt, "#888888")
-        x = legend_x_start + idx * 100
-        svg_parts.append(f'  <rect x="{x}" y="{legend_y}" width="12" height="12" fill="{color}" rx="2"/>')
-        svg_parts.append(
-            f'  <text class="chart-text" x="{x + 18}" y="{legend_y + 10}" font-size="11">-{opt}</text>'
-        )
-
-    svg_parts.append("</svg>")
-    return "\n".join(svg_parts)
 
 
-def generate_comparison_timeline_chart(platform_data: dict[str, list[dict]]) -> str:
-    """Generate a comparison chart showing all platforms on the same timeline."""
+def _generate_comparison_line_chart(
+    platform_data: dict[str, list[dict]],
+    metric_fn,
+    title: str,
+    y_format_fn,
+    empty_msg: str = "No data available",
+) -> str:
+    """Generic comparison line chart showing a metric across all platforms."""
     if not platform_data or all(not runs for runs in platform_data.values()):
-        return generate_empty_chart(COMPARISON_WIDTH, COMPARISON_HEIGHT, "No benchmark data available")
+        return generate_empty_chart(COMPARISON_WIDTH, COMPARISON_HEIGHT, empty_msg)
 
-    # Build a unified commit timeline from all platforms
-    commit_to_times: dict[str, dict[str, float]] = {}
-
+    # Build unified commit timeline
+    commit_to_values: dict[str, dict[str, float]] = {}
     for platform, runs in platform_data.items():
         for run in runs[-20:]:
             commit = short_commit(run.get("commit", ""))
-            time = get_total_time(run)
-            if commit not in commit_to_times:
-                commit_to_times[commit] = {}
-            commit_to_times[commit][platform] = time
+            value = metric_fn(run)
+            if commit not in commit_to_values:
+                commit_to_values[commit] = {}
+            commit_to_values[commit][platform] = value
 
-    if not commit_to_times:
-        return generate_empty_chart(COMPARISON_WIDTH, COMPARISON_HEIGHT, "No timing data available")
+    if not commit_to_values:
+        return generate_empty_chart(COMPARISON_WIDTH, COMPARISON_HEIGHT, empty_msg)
 
-    # Sort commits (we'll use order of appearance in first platform that has data)
-    commits = list(commit_to_times.keys())[-20:]  # Last 20 unique commits
+    commits = list(commit_to_values.keys())[-20:]
     platforms = list(platform_data.keys())
 
-    # Find max time across all platforms
-    all_times = [t for times in commit_to_times.values() for t in times.values() if t > 0]
-    if not all_times:
-        return generate_empty_chart(COMPARISON_WIDTH, COMPARISON_HEIGHT, "No timing data available")
-    max_time = max(all_times) * 1.1
+    all_values = [v for values in commit_to_values.values() for v in values.values() if v > 0]
+    if not all_values:
+        return generate_empty_chart(COMPARISON_WIDTH, COMPARISON_HEIGHT, empty_msg)
+    max_value = max(all_values) * 1.1
 
     # Chart layout
     margin = {"top": 50, "right": 150, "bottom": 70, "left": 70}
     chart_width = COMPARISON_WIDTH - margin["left"] - margin["right"]
-    chart_height = COMPARISON_HEIGHT - margin["top"] - margin["bottom"] - 50  # Room for legend
+    chart_height = COMPARISON_HEIGHT - margin["top"] - margin["bottom"] - 50
 
     def scale_x(i: int) -> float:
         if len(commits) == 1:
@@ -1157,9 +899,8 @@ def generate_comparison_timeline_chart(platform_data: dict[str, list[dict]]) -> 
         return margin["left"] + (i / (len(commits) - 1)) * chart_width
 
     def scale_y(v: float) -> float:
-        return margin["top"] + chart_height - (v / max_time) * chart_height
+        return margin["top"] + chart_height - (v / max_value) * chart_height
 
-    # Build SVG
     svg_parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {COMPARISON_WIDTH} {COMPARISON_HEIGHT}" class="benchmark-chart">',
         '''  <style>
@@ -1177,19 +918,19 @@ def generate_comparison_timeline_chart(platform_data: dict[str, list[dict]]) -> 
     }
   </style>''',
         f'  <rect class="chart-bg" width="{COMPARISON_WIDTH}" height="{COMPARISON_HEIGHT}" rx="8"/>',
-        f'  <text class="chart-title" x="{COMPARISON_WIDTH/2}" y="25" text-anchor="middle" font-size="16">Compilation Time - All Platforms</text>',
+        f'  <text class="chart-title" x="{COMPARISON_WIDTH/2}" y="25" text-anchor="middle" font-size="16">{escape_xml(title)}</text>',
     ]
 
     # Y-axis grid lines and labels
     num_grid_lines = 5
     for i in range(num_grid_lines + 1):
         y = margin["top"] + (i / num_grid_lines) * chart_height
-        value = max_time * (1 - i / num_grid_lines)
+        value = max_value * (1 - i / num_grid_lines)
         svg_parts.append(
             f'  <line class="chart-grid" x1="{margin["left"]}" y1="{y}" x2="{COMPARISON_WIDTH - margin["right"]}" y2="{y}"/>'
         )
         svg_parts.append(
-            f'  <text class="chart-text" x="{margin["left"] - 10}" y="{y + 4}" text-anchor="end" font-size="11">{value:.1f}ms</text>'
+            f'  <text class="chart-text" x="{margin["left"] - 10}" y="{y + 4}" text-anchor="end" font-size="11">{y_format_fn(value)}</text>'
         )
 
     # Axes
@@ -1205,23 +946,20 @@ def generate_comparison_timeline_chart(platform_data: dict[str, list[dict]]) -> 
         info = PLATFORM_INFO.get(platform, {"name": platform, "color": "#888888"})
         color = info["color"]
 
-        # Collect points for this platform
         line_points = []
         for i, commit in enumerate(commits):
-            time = commit_to_times.get(commit, {}).get(platform, 0)
-            if time > 0:
-                line_points.append((i, time))
+            value = commit_to_values.get(commit, {}).get(platform, 0)
+            if value > 0:
+                line_points.append((i, value))
 
-        # Draw connecting line
         if len(line_points) > 1:
             path_d = "M " + " L ".join(
-                f"{scale_x(i)},{scale_y(t)}" for i, t in line_points
+                f"{scale_x(i)},{scale_y(v)}" for i, v in line_points
             )
             svg_parts.append(f'  <path d="{path_d}" fill="none" stroke="{color}" stroke-width="2"/>')
 
-        # Draw points
-        for i, t in line_points:
-            svg_parts.append(f'  <circle cx="{scale_x(i)}" cy="{scale_y(t)}" r="4" fill="{color}"/>')
+        for i, v in line_points:
+            svg_parts.append(f'  <circle cx="{scale_x(i)}" cy="{scale_y(v)}" r="4" fill="{color}"/>')
 
     # X-axis labels
     for i, commit in enumerate(commits):
@@ -1240,6 +978,153 @@ def generate_comparison_timeline_chart(platform_data: dict[str, list[dict]]) -> 
         svg_parts.append(f'  <rect x="{x}" y="{legend_y}" width="14" height="14" fill="{info["color"]}" rx="2"/>')
         svg_parts.append(
             f'  <text class="chart-text" x="{x + 20}" y="{legend_y + 11}" font-size="12">{escape_xml(info["name"])}</text>'
+        )
+
+    svg_parts.append("</svg>")
+    return "\n".join(svg_parts)
+
+
+def generate_comparison_timeline_chart(platform_data: dict[str, list[dict]]) -> str:
+    """Generate a comparison chart showing compilation time across all platforms."""
+    return _generate_comparison_line_chart(
+        platform_data, get_total_time,
+        "Compilation Time - All Platforms",
+        lambda v: f"{v:.1f}ms",
+        "No timing data available",
+    )
+
+
+def generate_comparison_memory_chart(platform_data: dict[str, list[dict]]) -> str:
+    """Generate a comparison chart showing peak memory across all platforms."""
+    return _generate_comparison_line_chart(
+        platform_data, get_peak_memory,
+        "Peak Memory - All Platforms",
+        lambda v: f"{v:.1f}MB",
+        "No memory data available",
+    )
+
+
+def generate_comparison_binary_chart(platform_data: dict[str, list[dict]]) -> str:
+    """Generate a comparison chart showing binary size across all platforms."""
+    return _generate_comparison_line_chart(
+        platform_data, get_binary_size,
+        "Binary Size - All Platforms",
+        lambda v: f"{v:.1f}KB",
+        "No binary size data available",
+    )
+
+
+def generate_comparison_runtime_chart(platform_data: dict[str, list[dict]]) -> str:
+    """Generate a comparison chart showing total runtime across all platforms."""
+    def get_total_runtime(run: dict) -> float:
+        total = 0
+        for bench in run.get("benchmarks", []):
+            total += bench.get("runtime_ms", 0)
+        return total
+
+    return _generate_comparison_line_chart(
+        platform_data, get_total_runtime,
+        "Runtime Performance - All Platforms",
+        lambda v: f"{v:.2f}ms",
+        "No runtime data available",
+    )
+
+
+def generate_comparison_breakdown_chart(platform_data: dict[str, list[dict]]) -> str:
+    """Generate a comparison breakdown chart showing pass times per platform."""
+    if not platform_data:
+        return generate_empty_chart(BREAKDOWN_WIDTH, BREAKDOWN_HEIGHT, "No data available")
+
+    # Get latest pass times for each platform
+    platform_passes: dict[str, dict[str, float]] = {}
+    for platform, runs in platform_data.items():
+        for run in reversed(runs):
+            pt = get_pass_times(run)
+            if pt and any(v > 0 for v in pt.values()):
+                platform_passes[platform] = pt
+                break
+
+    if not platform_passes:
+        return generate_empty_chart(BREAKDOWN_WIDTH, BREAKDOWN_HEIGHT, "No pass timing data available")
+
+    platforms = list(platform_passes.keys())
+
+    # Chart layout
+    margin = {"top": 50, "right": 150, "bottom": 40, "left": 120}
+    chart_width = BREAKDOWN_WIDTH - margin["left"] - margin["right"]
+    chart_height = BREAKDOWN_HEIGHT - margin["top"] - margin["bottom"]
+
+    # Max total for scaling
+    max_total = max(sum(pt.values()) for pt in platform_passes.values())
+    if max_total == 0:
+        max_total = 1
+
+    bar_height = min(40, chart_height / (len(platforms) + 1))
+    bar_gap = bar_height * 0.5
+    total_bars_height = len(platforms) * (bar_height + bar_gap) - bar_gap
+    start_y = margin["top"] + (chart_height - total_bars_height) / 2
+
+    svg_parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {BREAKDOWN_WIDTH} {BREAKDOWN_HEIGHT}" class="benchmark-chart">',
+        '''  <style>
+    .chart-bg { fill: var(--chart-bg, #ffffff); }
+    .chart-text { fill: var(--chart-text, #6b7280); font-family: system-ui, sans-serif; }
+    .chart-title { fill: var(--chart-title, #1a1a1a); font-family: system-ui, sans-serif; font-weight: 600; }
+    .chart-grid { stroke: var(--chart-grid, #e5e7eb); stroke-width: 1; }
+    .chart-axis { stroke: var(--chart-axis, #9ca3af); stroke-width: 1; }
+    @media (prefers-color-scheme: dark) {
+      .chart-bg { fill: #1a1a1a; }
+      .chart-text { fill: #9ca3af; }
+      .chart-title { fill: #f0f0f0; }
+      .chart-grid { stroke: #2e2e2e; }
+      .chart-axis { stroke: #4b5563; }
+    }
+  </style>''',
+        f'  <rect class="chart-bg" width="{BREAKDOWN_WIDTH}" height="{BREAKDOWN_HEIGHT}" rx="8"/>',
+        f'  <text class="chart-title" x="{BREAKDOWN_WIDTH/2}" y="25" text-anchor="middle" font-size="16">Compilation Time by Pass - All Platforms</text>',
+    ]
+
+    for pi, platform in enumerate(platforms):
+        pass_times = platform_passes[platform]
+        total = sum(pass_times.values())
+        bar_y = start_y + pi * (bar_height + bar_gap)
+
+        # Platform label
+        info = PLATFORM_INFO.get(platform, {"name": platform})
+        svg_parts.append(
+            f'  <text class="chart-text" x="{margin["left"] - 10}" y="{bar_y + bar_height / 2 + 4}" text-anchor="end" font-size="11">{escape_xml(info.get("name", platform))}</text>'
+        )
+
+        # Stacked bars
+        x_offset = margin["left"]
+        for pass_name in PASS_ORDER:
+            time = pass_times.get(pass_name, 0)
+            width = (time / max_total) * chart_width if time > 0 else 0
+            color = PASS_COLORS.get(pass_name, "#888888")
+            if width > 0:
+                svg_parts.append(
+                    f'  <rect x="{x_offset}" y="{bar_y}" width="{width}" height="{bar_height}" fill="{color}" rx="2"/>'
+                )
+                if width > 30:
+                    svg_parts.append(
+                        f'  <text x="{x_offset + width / 2}" y="{bar_y + bar_height / 2 + 4}" text-anchor="middle" font-size="10" fill="white">{time:.1f}ms</text>'
+                    )
+                x_offset += width
+
+        # Total label
+        svg_parts.append(
+            f'  <text class="chart-text" x="{x_offset + 5}" y="{bar_y + bar_height / 2 + 4}" font-size="10">{total:.1f}ms</text>'
+        )
+
+    # Legend
+    legend_x = BREAKDOWN_WIDTH - margin["right"] + 20
+    legend_y = margin["top"] + 20
+    for i, pass_name in enumerate(PASS_ORDER):
+        y = legend_y + i * 22
+        color = PASS_COLORS.get(pass_name, "#888888")
+        svg_parts.append(f'  <rect x="{legend_x}" y="{y}" width="12" height="12" fill="{color}" rx="2"/>')
+        svg_parts.append(
+            f'  <text class="chart-text" x="{legend_x + 18}" y="{y + 10}" font-size="11">{pass_name}</text>'
         )
 
     svg_parts.append("</svg>")
@@ -1397,14 +1282,6 @@ def generate_platform_charts(history_path: Path, output_dir: Path, platform: Opt
             f.write(svg)
         print(f"  Generated {path}")
 
-        # Timeline by program (multi-line)
-        if opt_names:
-            svg = generate_multi_timeline_chart(opt_runs, opt_names)
-            path = output_dir / f"timeline_by_program_{opt}.svg"
-            with open(path, "w") as f:
-                f.write(svg)
-            print(f"  Generated {path}")
-
         # Breakdown (aggregate)
         svg = generate_breakdown_chart(opt_runs, platform=platform)
         path = output_dir / f"breakdown_{opt}.svg"
@@ -1445,16 +1322,10 @@ def generate_platform_charts(history_path: Path, output_dir: Path, platform: Opt
     # Generate backwards-compatible default charts (using first opt level, typically O0)
     default_opt = opt_levels[0] if opt_levels else "O0"
     default_runs = filter_runs_by_opt_level(runs, default_opt)
-    default_names = get_benchmark_names(default_runs)
 
     timeline_svg = generate_timeline_chart(default_runs, platform)
     with open(output_dir / "timeline.svg", "w") as f:
         f.write(timeline_svg)
-
-    if default_names:
-        svg = generate_multi_timeline_chart(default_runs, default_names)
-        with open(output_dir / "timeline_by_program.svg", "w") as f:
-            f.write(svg)
 
     breakdown_svg = generate_breakdown_chart(default_runs, platform=platform)
     with open(output_dir / "breakdown.svg", "w") as f:
@@ -1467,14 +1338,6 @@ def generate_platform_charts(history_path: Path, output_dir: Path, platform: Opt
     binary_svg = generate_binary_size_chart(default_runs, platform)
     with open(output_dir / "binary_size.svg", "w") as f:
         f.write(binary_svg)
-
-    # Generate binary size by opt level comparison chart
-    if len(opt_levels) >= 2:
-        svg = generate_binary_size_by_opt_chart(runs, opt_levels, platform)
-        path = output_dir / "binary_size_by_opt.svg"
-        with open(path, "w") as f:
-            f.write(svg)
-        print(f"Generated {path}")
 
     # Generate summary statistics (using default opt level)
     summary = generate_summary_data(default_runs, platform)
@@ -1577,17 +1440,71 @@ def generate_comparison_charts(history_files: list[Path], output_dir: Path):
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate comparison timeline
-    comparison_svg = generate_comparison_timeline_chart(platform_data)
-    comparison_path = output_dir / "timeline.svg"
-    with open(comparison_path, "w") as f:
-        f.write(comparison_svg)
-    print(f"Generated {comparison_path}")
+    # Determine all opt levels and benchmark names across platforms
+    all_opt_levels: set[str] = set()
+    all_benchmark_base_names: set[str] = set()
+    for runs in platform_data.values():
+        all_opt_levels.update(get_opt_levels_from_runs(runs))
+        for name in get_benchmark_names(runs):
+            base, _ = parse_benchmark_name(name)
+            all_benchmark_base_names.add(base)
+    opt_levels = sorted(all_opt_levels) if all_opt_levels else ["O0"]
+    benchmark_names = sorted(all_benchmark_base_names)
+
+    print(f"  Opt levels across platforms: {', '.join(opt_levels)}")
+    print(f"  Benchmark programs: {', '.join(benchmark_names)}")
+
+    # Chart generators: (name_prefix, generator_function)
+    chart_generators = [
+        ("timeline", generate_comparison_timeline_chart),
+        ("memory", generate_comparison_memory_chart),
+        ("binary_size", generate_comparison_binary_chart),
+        ("runtime", generate_comparison_runtime_chart),
+        ("breakdown", generate_comparison_breakdown_chart),
+    ]
+
+    # Generate per-opt-level comparison charts
+    for opt in opt_levels:
+        filtered_data = {
+            p: filter_runs_by_opt_level(runs, opt)
+            for p, runs in platform_data.items()
+        }
+        # Remove platforms with no data for this opt level
+        filtered_data = {p: runs for p, runs in filtered_data.items() if runs}
+
+        if not filtered_data:
+            print(f"  No data for {opt} across platforms, skipping")
+            continue
+
+        print(f"  Generating comparison charts for -{opt}")
+        for prefix, gen_fn in chart_generators:
+            svg = gen_fn(filtered_data)
+            path = output_dir / f"{prefix}_{opt}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+            print(f"    Generated {path}")
+
+    # Generate default (no opt suffix) comparison charts using first opt level
+    default_opt = opt_levels[0] if opt_levels else "O0"
+    default_data = {
+        p: filter_runs_by_opt_level(runs, default_opt)
+        for p, runs in platform_data.items()
+    }
+    default_data = {p: runs for p, runs in default_data.items() if runs}
+
+    for prefix, gen_fn in chart_generators:
+        svg = gen_fn(default_data)
+        path = output_dir / f"{prefix}.svg"
+        with open(path, "w") as f:
+            f.write(svg)
+        print(f"  Generated {path}")
 
     # Generate comparison metadata
     metadata = {
         "platforms": platform_info_list,
-        "default_platform": platform_info_list[0]["id"] if platform_info_list else None
+        "default_platform": platform_info_list[0]["id"] if platform_info_list else None,
+        "opt_levels": opt_levels,
+        "benchmarks": benchmark_names,
     }
     metadata_path = output_dir / "metadata.json"
     with open(metadata_path, "w") as f:

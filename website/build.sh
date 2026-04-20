@@ -128,6 +128,16 @@ metadata = {
     'default_platform': platforms[0]['id'] if platforms else None
 }
 
+# Merge opt_levels and benchmarks from comparison metadata if available
+comparison_meta = benchmarks_dir / 'comparison' / 'metadata.json'
+if comparison_meta.exists():
+    with open(comparison_meta) as f:
+        comp_data = json.load(f)
+    if 'opt_levels' in comp_data:
+        metadata['opt_levels'] = comp_data['opt_levels']
+    if 'benchmarks' in comp_data:
+        metadata['benchmarks'] = comp_data['benchmarks']
+
 with open(benchmarks_dir / 'metadata.json', 'w') as f:
     json.dump(metadata, f, indent=2)
 print(f'  Generated {benchmarks_dir}/metadata.json with {len([p for p in platforms if p[\"has_data\"]])} platforms with data')
