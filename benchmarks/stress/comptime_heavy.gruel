@@ -1,0 +1,484 @@
+// Stress test: Heavy compile-time evaluation.
+// Tests the comptime interpreter's handling of arithmetic, loops, function
+// calls, struct mutation, array operations, enum construction, and pattern
+// matching — all evaluated at compile time.
+
+// --- Helper types ---
+
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+struct Vec3 {
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+struct Matrix2x2 {
+    a: i32,
+    b: i32,
+    c: i32,
+    d: i32,
+}
+
+enum Shape {
+    Circle(i32),
+    Rectangle { w: i32, h: i32 },
+    Triangle { base: i32, height: i32 },
+}
+
+// --- Comptime helper functions ---
+
+// Sum of 0..n using a loop (exercises loop + mutation)
+fn ct_sum(n: i32) -> i32 {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+// Fibonacci (exercises recursive function calls)
+fn ct_fib(n: i32) -> i32 {
+    if n <= 1 { n } else { ct_fib(n - 1) + ct_fib(n - 2) }
+}
+
+// Iterative fibonacci (exercises loops with multiple variables)
+fn ct_fib_iter(n: i32) -> i32 {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    b
+}
+
+// GCD using Euclidean algorithm (exercises while + modulo)
+fn ct_gcd(a: i32, b: i32) -> i32 {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// Power function (exercises loop + multiplication)
+fn ct_pow(base: i32, exp: i32) -> i32 {
+    let mut result = 1;
+    let mut i = 0;
+    while i < exp {
+        result = result * base;
+        i = i + 1;
+    }
+    result
+}
+
+// Nested loop sum (exercises deeply nested iteration)
+fn ct_nested_sum(n: i32) -> i32 {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            total = total + (i * n + j) % 100;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// Matrix multiply 2x2 (exercises struct construction and field access)
+fn ct_mat_mul(a: Matrix2x2, b: Matrix2x2) -> Matrix2x2 {
+    Matrix2x2 {
+        a: a.a * b.a + a.b * b.c,
+        b: a.a * b.b + a.b * b.d,
+        c: a.c * b.a + a.d * b.c,
+        d: a.c * b.b + a.d * b.d,
+    }
+}
+
+// Matrix power (exercises function calls + struct ops in loop)
+fn ct_mat_pow(m: Matrix2x2, n: i32) -> Matrix2x2 {
+    let mut result = Matrix2x2 { a: 1, b: 0, c: 0, d: 1 };
+    let mut i = 0;
+    while i < n {
+        result = ct_mat_mul(result, m);
+        i = i + 1;
+    }
+    result
+}
+
+// Shape area via pattern matching (exercises enum + match)
+fn ct_shape_area(s: Shape) -> i32 {
+    match s {
+        Shape::Circle(r) => r * r * 3,
+        Shape::Rectangle { w, h } => w * h,
+        Shape::Triangle { base, height } => base * height / 2,
+    }
+}
+
+// Sum of shape areas (exercises enum construction + match in loop)
+fn ct_total_area(n: i32) -> i32 {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let shape = if i % 3 == 0 {
+            Shape::Circle(i + 1)
+        } else if i % 3 == 1 {
+            Shape::Rectangle { w: i + 1, h: i + 2 }
+        } else {
+            Shape::Triangle { base: i + 1, height: i + 3 }
+        };
+        total = total + ct_shape_area(shape);
+        i = i + 1;
+    }
+    total
+}
+
+// Array bubble sort (exercises array indexing and mutation)
+fn ct_bubble_sort_sum() -> i32 {
+    let mut arr = [50, 30, 10, 40, 20, 60, 5, 35, 15, 45];
+    let n = 10;
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n - 1 - i {
+            if arr[j] > arr[j + 1] {
+                let tmp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Sum sorted array
+    let mut total = 0;
+    let mut k = 0;
+    while k < n {
+        total = total + arr[k];
+        k = k + 1;
+    }
+    total
+}
+
+// Point spiral (exercises struct field mutation in loop)
+fn ct_point_spiral(steps: i32) -> i32 {
+    let mut p = Point { x: 0, y: 0 };
+    let mut i = 0;
+    while i < steps {
+        let dir = i % 4;
+        if dir == 0 {
+            p.x = p.x + i;
+        } else if dir == 1 {
+            p.y = p.y + i;
+        } else if dir == 2 {
+            p.x = p.x - i;
+        } else {
+            p.y = p.y - i;
+        }
+        i = i + 1;
+    }
+    let ax = if p.x < 0 { 0 - p.x } else { p.x };
+    let ay = if p.y < 0 { 0 - p.y } else { p.y };
+    ax + ay
+}
+
+// Vec3 cross-product accumulation (exercises struct-heavy computation)
+fn ct_vec3_work(n: i32) -> i32 {
+    let mut _acc = Vec3 { x: 1, y: 2, z: 3 };
+    let mut i = 0;
+    while i < n {
+        let _v = Vec3 { x: i + 1, y: i + 2, z: i + 3 };
+        // Cross product components
+        let cx = _acc.y * _v.z - _acc.z * _v.y;
+        let cy = _acc.z * _v.x - _acc.x * _v.z;
+        let cz = _acc.x * _v.y - _acc.y * _v.x;
+        // Keep values manageable with modulo
+        _acc.x = (cx % 1000 + 1000) % 1000;
+        _acc.y = (cy % 1000 + 1000) % 1000;
+        _acc.z = (cz % 1000 + 1000) % 1000;
+        i = i + 1;
+    }
+    _acc.x + _acc.y + _acc.z
+}
+
+// Collatz sequence length (exercises while with complex condition)
+fn ct_collatz_len(start: i32) -> i32 {
+    let mut n = start;
+    let mut steps = 0;
+    while n != 1 {
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = n * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+// Sum of Collatz lengths for 1..n (small n to fit step budget)
+fn ct_collatz_sum(n: i32) -> i32 {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= n {
+        total = total + ct_collatz_len(i);
+        i = i + 1;
+    }
+    total
+}
+
+// --- Comptime blocks (each exercises the interpreter) ---
+
+// Block 1: Recursive fibonacci (exponential cost in interpreter steps)
+fn block_fib_01() -> i32 { comptime { ct_fib(20) } }
+fn block_fib_02() -> i32 { comptime { ct_fib(19) } }
+fn block_fib_03() -> i32 { comptime { ct_fib(18) } }
+fn block_fib_04() -> i32 { comptime { ct_fib(20) } }
+fn block_fib_05() -> i32 { comptime { ct_fib(19) } }
+fn block_fib_06() -> i32 { comptime { ct_fib(18) } }
+fn block_fib_07() -> i32 { comptime { ct_fib(20) } }
+fn block_fib_08() -> i32 { comptime { ct_fib(19) } }
+fn block_fib_09() -> i32 { comptime { ct_fib(18) } }
+fn block_fib_10() -> i32 { comptime { ct_fib(20) } }
+
+// Block 2: Iterative sums (exercises loop-heavy evaluation)
+fn block_sum_01() -> i32 { comptime { ct_sum(5000) } }
+fn block_sum_02() -> i32 { comptime { ct_sum(5000) } }
+fn block_sum_03() -> i32 { comptime { ct_sum(5000) } }
+fn block_sum_04() -> i32 { comptime { ct_sum(5000) } }
+fn block_sum_05() -> i32 { comptime { ct_sum(5000) } }
+fn block_sum_06() -> i32 { comptime { ct_sum(5000) } }
+fn block_sum_07() -> i32 { comptime { ct_sum(5000) } }
+fn block_sum_08() -> i32 { comptime { ct_sum(5000) } }
+fn block_sum_09() -> i32 { comptime { ct_sum(5000) } }
+fn block_sum_10() -> i32 { comptime { ct_sum(5000) } }
+
+// Block 3: Matrix powers (exercises struct-heavy function calls)
+fn block_mat_01() -> i32 {
+    comptime {
+        let m = Matrix2x2 { a: 1, b: 1, c: 1, d: 0 };
+        let r = ct_mat_pow(m, 30);
+        r.a
+    }
+}
+fn block_mat_02() -> i32 {
+    comptime {
+        let m = Matrix2x2 { a: 2, b: 1, c: 1, d: 1 };
+        let r = ct_mat_pow(m, 25);
+        r.a % 1000
+    }
+}
+fn block_mat_03() -> i32 {
+    comptime {
+        let m = Matrix2x2 { a: 1, b: 1, c: 1, d: 0 };
+        let r = ct_mat_pow(m, 28);
+        r.a
+    }
+}
+fn block_mat_04() -> i32 {
+    comptime {
+        let m = Matrix2x2 { a: 2, b: 1, c: 1, d: 1 };
+        let r = ct_mat_pow(m, 22);
+        r.a % 1000
+    }
+}
+fn block_mat_05() -> i32 {
+    comptime {
+        let m = Matrix2x2 { a: 1, b: 1, c: 1, d: 0 };
+        let r = ct_mat_pow(m, 26);
+        r.a
+    }
+}
+
+// Block 4: Nested loop sums (exercises quadratic iteration)
+fn block_nested_01() -> i32 { comptime { ct_nested_sum(30) } }
+fn block_nested_02() -> i32 { comptime { ct_nested_sum(30) } }
+fn block_nested_03() -> i32 { comptime { ct_nested_sum(30) } }
+fn block_nested_04() -> i32 { comptime { ct_nested_sum(30) } }
+fn block_nested_05() -> i32 { comptime { ct_nested_sum(30) } }
+
+// Block 5: Shape areas with enum + match
+fn block_shape_01() -> i32 { comptime { ct_total_area(100) } }
+fn block_shape_02() -> i32 { comptime { ct_total_area(100) } }
+fn block_shape_03() -> i32 { comptime { ct_total_area(100) } }
+fn block_shape_04() -> i32 { comptime { ct_total_area(100) } }
+fn block_shape_05() -> i32 { comptime { ct_total_area(100) } }
+
+// Block 6: Array sorting
+fn block_sort_01() -> i32 { comptime { ct_bubble_sort_sum() } }
+fn block_sort_02() -> i32 { comptime { ct_bubble_sort_sum() } }
+fn block_sort_03() -> i32 { comptime { ct_bubble_sort_sum() } }
+fn block_sort_04() -> i32 { comptime { ct_bubble_sort_sum() } }
+fn block_sort_05() -> i32 { comptime { ct_bubble_sort_sum() } }
+
+// Block 7: Point spiral (struct field mutation)
+fn block_spiral_01() -> i32 { comptime { ct_point_spiral(500) } }
+fn block_spiral_02() -> i32 { comptime { ct_point_spiral(500) } }
+fn block_spiral_03() -> i32 { comptime { ct_point_spiral(500) } }
+fn block_spiral_04() -> i32 { comptime { ct_point_spiral(500) } }
+fn block_spiral_05() -> i32 { comptime { ct_point_spiral(500) } }
+
+// Block 8: Vec3 cross product accumulation
+fn block_vec3_01() -> i32 { comptime { ct_vec3_work(200) } }
+fn block_vec3_02() -> i32 { comptime { ct_vec3_work(200) } }
+fn block_vec3_03() -> i32 { comptime { ct_vec3_work(200) } }
+fn block_vec3_04() -> i32 { comptime { ct_vec3_work(200) } }
+fn block_vec3_05() -> i32 { comptime { ct_vec3_work(200) } }
+
+// Block 9: Collatz sequences (small ranges)
+fn block_collatz_01() -> i32 { comptime { ct_collatz_sum(20) } }
+fn block_collatz_02() -> i32 { comptime { ct_collatz_sum(20) } }
+fn block_collatz_03() -> i32 { comptime { ct_collatz_sum(20) } }
+fn block_collatz_04() -> i32 { comptime { ct_collatz_sum(20) } }
+fn block_collatz_05() -> i32 { comptime { ct_collatz_sum(20) } }
+
+// Block 10: GCD chains (smaller ranges to fit step budget)
+fn block_gcd_01() -> i32 {
+    comptime {
+        let mut total = 0;
+        let mut i = 1;
+        while i <= 30 {
+            total = total + ct_gcd(i * 7, (i + 3) * 13);
+            i = i + 1;
+        }
+        total % 1000
+    }
+}
+fn block_gcd_02() -> i32 {
+    comptime {
+        let mut total = 0;
+        let mut i = 1;
+        while i <= 30 {
+            total = total + ct_gcd(i * 11, (i + 5) * 17);
+            i = i + 1;
+        }
+        total % 1000
+    }
+}
+fn block_gcd_03() -> i32 {
+    comptime {
+        let mut total = 0;
+        let mut i = 1;
+        while i <= 30 {
+            total = total + ct_gcd(i * 3, (i + 7) * 19);
+            i = i + 1;
+        }
+        total % 1000
+    }
+}
+
+// Block 11: Iterative fibonacci (stays within i32 range)
+fn block_fib_iter_01() -> i32 { comptime { ct_fib_iter(40) } }
+fn block_fib_iter_02() -> i32 { comptime { ct_fib_iter(38) } }
+fn block_fib_iter_03() -> i32 { comptime { ct_fib_iter(36) } }
+fn block_fib_iter_04() -> i32 { comptime { ct_fib_iter(40) } }
+fn block_fib_iter_05() -> i32 { comptime { ct_fib_iter(38) } }
+
+// --- main: call all blocks so nothing is unused ---
+
+fn main() -> i32 {
+    let mut total: i32 = 0;
+
+    // Fibonacci blocks
+    total = total + block_fib_01();
+    total = total + block_fib_02();
+    total = total + block_fib_03();
+    total = total + block_fib_04();
+    total = total + block_fib_05();
+    total = total + block_fib_06();
+    total = total + block_fib_07();
+    total = total + block_fib_08();
+    total = total + block_fib_09();
+    total = total + block_fib_10();
+
+    // Sum blocks
+    total = total + block_sum_01();
+    total = total + block_sum_02();
+    total = total + block_sum_03();
+    total = total + block_sum_04();
+    total = total + block_sum_05();
+    total = total + block_sum_06();
+    total = total + block_sum_07();
+    total = total + block_sum_08();
+    total = total + block_sum_09();
+    total = total + block_sum_10();
+
+    // Matrix blocks
+    total = total + block_mat_01();
+    total = total + block_mat_02();
+    total = total + block_mat_03();
+    total = total + block_mat_04();
+    total = total + block_mat_05();
+
+    // Nested loop blocks
+    total = total + block_nested_01();
+    total = total + block_nested_02();
+    total = total + block_nested_03();
+    total = total + block_nested_04();
+    total = total + block_nested_05();
+
+    // Shape blocks
+    total = total + block_shape_01();
+    total = total + block_shape_02();
+    total = total + block_shape_03();
+    total = total + block_shape_04();
+    total = total + block_shape_05();
+
+    // Sort blocks
+    total = total + block_sort_01();
+    total = total + block_sort_02();
+    total = total + block_sort_03();
+    total = total + block_sort_04();
+    total = total + block_sort_05();
+
+    // Spiral blocks
+    total = total + block_spiral_01();
+    total = total + block_spiral_02();
+    total = total + block_spiral_03();
+    total = total + block_spiral_04();
+    total = total + block_spiral_05();
+
+    // Vec3 blocks
+    total = total + block_vec3_01();
+    total = total + block_vec3_02();
+    total = total + block_vec3_03();
+    total = total + block_vec3_04();
+    total = total + block_vec3_05();
+
+    // Collatz blocks
+    total = total + block_collatz_01();
+    total = total + block_collatz_02();
+    total = total + block_collatz_03();
+    total = total + block_collatz_04();
+    total = total + block_collatz_05();
+
+    // GCD blocks
+    total = total + block_gcd_01();
+    total = total + block_gcd_02();
+    total = total + block_gcd_03();
+
+    // Iterative fib blocks
+    total = total + block_fib_iter_01();
+    total = total + block_fib_iter_02();
+    total = total + block_fib_iter_03();
+    total = total + block_fib_iter_04();
+    total = total + block_fib_iter_05();
+
+    // Return deterministic exit code
+    total - total
+}
