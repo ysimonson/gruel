@@ -1183,17 +1183,10 @@ fn link_system_with_warnings(
         cmd.arg("-e").arg("__main");
     } else {
         // Linux/ELF-specific flags
-        // -no-pie is required because GCC 13+ defaults to static-PIE when
-        // -static is used, which pulls in dl-reloc-static-pie.o (needing
-        // _DYNAMIC) and libc-start.o (needing _init/_fini from crti.o/crtn.o
-        // that -nostartfiles excludes).
-        // _init/_fini stubs are provided by the runtime (entry.rs).
-        // _DYNAMIC is defined as 0 (null) so dl-reloc-static-pie.o's
-        // _dl_relocate_static_pie sees no relocations and returns immediately.
-        cmd.arg("-static");
-        cmd.arg("-no-pie");
+        // Dynamic linking lets ld.so initialize libc (TLS, malloc, stdio)
+        // before jumping to our _start. We only skip the C startup files
+        // since the runtime provides its own _start entry point.
         cmd.arg("-nostartfiles");
-        cmd.arg("-Wl,--defsym=_DYNAMIC=0");
     }
 
     cmd.arg("-o");

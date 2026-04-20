@@ -89,18 +89,6 @@ pub unsafe extern "C" fn _start() -> ! {
     platform::exit(exit_code)
 }
 
-/// Empty stub for `_init` — normally provided by `crti.o` (which `-nostartfiles`
-/// excludes). Required because `libc.a`'s `libc-start.o` references this symbol
-/// on GCC 13+.
-#[cfg(all(not(test), target_os = "linux"))]
-#[unsafe(no_mangle)]
-pub extern "C" fn _init() {}
-
-/// Empty stub for `_fini` — see `_init`.
-#[cfg(all(not(test), target_os = "linux"))]
-#[unsafe(no_mangle)]
-pub extern "C" fn _fini() {}
-
 /// Exit the process with the given status code.
 ///
 /// Called by Gruel-generated code when `main()` returns.
