@@ -327,8 +327,8 @@ jobs:
             fi
 
             # Extract platform from directory name
-            # Format: benchmark-results-{sha}-{platform}
-            platform=$(basename "$artifact_dir" | sed 's/benchmark-results-.*-//')
+            # Format: benchmark-results-{full_sha}-{platform}
+            platform=$(basename "$artifact_dir" | sed "s/benchmark-results-${{ steps.commit.outputs.full_sha }}-//")
             results_file="$artifact_dir/results.json"
 
             if [ ! -f "$results_file" ]; then
