@@ -17,12 +17,14 @@ on:
 permissions:
   contents: write  # Needed to push to perf branch (used by collector job)
 
-# Time-based batching: Cancel older queued runs when new ones arrive
-# This handles high commit velocity by ensuring only the latest commit is benchmarked
-# Scheduled runs every 15 minutes ensure coverage even during quiet periods
+# Serialize benchmark runs — only one at a time.
+# We use cancel-in-progress: false so that scheduled runs don't cancel
+# a currently-executing benchmark (which would prevent any run from ever
+# completing if benchmarks take > 15 minutes). The check-queue job handles
+# backlog by skipping runs when too many are queued.
 concurrency:
   group: benchmarks
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # Graceful degradation: Check queue depth and decide whether to run
