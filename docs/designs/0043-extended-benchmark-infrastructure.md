@@ -177,7 +177,7 @@ No changes to the workflow YAML itself — the expansion is entirely within `ben
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Comptime tracing span** — Add `info_span!("comptime")` around `evaluate_comptime_block` in `gruel-air/src/sema/analyze_ops.rs`. Verify it appears in `--time-passes` and `--benchmark-json` output. Add "comptime" to chart generator's `PASS_ORDER`/`PASS_COLORS`.
+- [x] **Phase 1: Comptime tracing span** — Add `info_span!("comptime")` around `evaluate_comptime_block` in `gruel-air/src/sema/analyze_ops.rs`. Verify it appears in `--time-passes` and `--benchmark-json` output. Add "comptime" to chart generator's `PASS_ORDER`/`PASS_COLORS`.
 
 - [ ] **Phase 2: Comptime stress benchmark** — Write `benchmarks/stress/comptime_heavy.gruel` exercising comptime arithmetic, function calls, `comptime_unroll`, struct/array construction, and pattern matching. Register in `manifest.toml`. Verify the program compiles and runs, and that the comptime span shows significant time.
 

@@ -17,6 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use gruel_builtins::BuiltinTypeDef;
+use tracing::info_span;
 use gruel_error::{
     CompileError, CompileErrors, CompileResult, CompileWarning, ErrorKind,
     IntrinsicTypeMismatchError, MultiErrorResult, OptionExt, PreviewFeature, WarningKind,
@@ -5910,6 +5911,7 @@ impl<'a> Sema<'a> {
         ctx: &AnalysisContext,
         span: Span,
     ) -> CompileResult<ConstValue> {
+        let _span = info_span!("comptime").entered();
         // Reset the step counter and heap for this comptime block evaluation.
         self.comptime_steps_used = 0;
         self.comptime_heap.clear();

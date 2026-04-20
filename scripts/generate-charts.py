@@ -50,13 +50,14 @@ PASS_COLORS = {
     "parser": "#7c9dff",    # lighter blue
     "astgen": "#3b82f6",    # sky blue
     "sema": "#06b6d4",      # cyan
+    "comptime": "#8b5cf6",  # violet
     "cfg": "#10b981",       # emerald
     "codegen": "#f59e0b",   # amber
     "linker": "#ef4444",    # red
 }
 
 # Order of passes in the stack
-PASS_ORDER = ["lexer", "parser", "astgen", "sema", "cfg", "codegen", "linker"]
+PASS_ORDER = ["lexer", "parser", "astgen", "sema", "comptime", "cfg", "codegen", "linker"]
 
 # Platform display names and colors
 PLATFORM_INFO = {
