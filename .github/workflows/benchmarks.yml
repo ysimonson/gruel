@@ -17,12 +17,14 @@ on:
 permissions:
   contents: write  # Needed to push to perf branch (used by collector job)
 
-# Time-based batching: Cancel older queued runs when new ones arrive
-# This handles high commit velocity by ensuring only the latest commit is benchmarked
-# Scheduled runs every 15 minutes ensure coverage even during quiet periods
+# Serialize benchmark runs — only one at a time.
+# We use cancel-in-progress: false so that scheduled runs don't cancel
+# a currently-executing benchmark (which would prevent any run from ever
+# completing if benchmarks take > 15 minutes). The check-queue job handles
+# backlog by skipping runs when too many are queued.
 concurrency:
   group: benchmarks
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # Graceful degradation: Check queue depth and decide whether to run
@@ -338,25 +340,12 @@ jobs:
 
             # Enhance results with commit range metadata (convert to version 2 schema)
             enhanced_file="$artifact_dir/results_enhanced.json"
-            python3 << EOF
-import json
-import sys
-
-with open('$results_file') as f:
-    data = json.load(f)
-
-data['version'] = 2
-data['benchmark_reason'] = '$benchmark_reason'
-
-commit_range_str = '${{ steps.commit.outputs.commit_range }}'
-if commit_range_str:
-    data['commit_range'] = [c.strip() for c in commit_range_str.split(',') if c.strip()]
-else:
-    data['commit_range'] = ['${{ steps.commit.outputs.full_sha }}']
-
-with open('$enhanced_file', 'w') as f:
-    json.dump(data, f, indent=2)
-EOF
+            python3 main/scripts/enhance-benchmark.py \
+              "$results_file" \
+              "$enhanced_file" \
+              "$benchmark_reason" \
+              "${{ steps.commit.outputs.commit_range }}" \
+              "${{ steps.commit.outputs.full_sha }}"
 
             # Create platform-specific history file if it doesn't exist
             history_file="perf-branch/benchmarks/history-$platform.json"
@@ -394,6 +383,7 @@ EOF
             # Push to perf branch (create if doesn't exist)
             # Only this job pushes, so no race conditions
             git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:perf
+          fi
 
       - name: Summary
         run: |
