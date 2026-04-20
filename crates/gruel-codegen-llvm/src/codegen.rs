@@ -2516,6 +2516,53 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 )
             }
 
+            // ---- Raw syscall (x86_64 Linux) ----
+            "syscall" => {
+                let i64_ty = self.ctx.i64_type();
+                // Build argument values (all u64, first is syscall number)
+                let arg_vals: Vec<_> = args.iter().map(|a| self.get_value(*a).into_int_value()).collect();
+                let num_args = arg_vals.len(); // 1..=7 (syscall_num + up to 6 args)
+
+                // x86_64 syscall convention:
+                //   rax = syscall number
+                //   rdi, rsi, rdx, r10, r8, r9 = arg1..arg6
+                //   return value in rax
+                //   rcx and r11 are clobbered by the kernel
+                let (asm_str, constraints) = match num_args {
+                    1 => ("syscall".to_string(), "={rax},{rax},~{rcx},~{r11},~{memory}".to_string()),
+                    2 => ("syscall".to_string(), "={rax},{rax},{rdi},~{rcx},~{r11},~{memory}".to_string()),
+                    3 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}".to_string()),
+                    4 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},~{rcx},~{r11},~{memory}".to_string()),
+                    5 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},~{rcx},~{r11},~{memory}".to_string()),
+                    6 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},~{rcx},~{r11},~{memory}".to_string()),
+                    7 => ("syscall".to_string(), "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}".to_string()),
+                    _ => unreachable!("syscall validated to 1-7 args by sema"),
+                };
+
+                // Build the function type: (i64, ...) -> i64
+                let param_types: Vec<inkwell::types::BasicMetadataTypeEnum> =
+                    vec![i64_ty.into(); num_args];
+                let fn_ty = i64_ty.fn_type(&param_types, false);
+
+                let asm_val = self.ctx.create_inline_asm(
+                    fn_ty,
+                    asm_str,
+                    constraints,
+                    true,  // side effects
+                    true,  // align stack
+                    None,  // default dialect (AT&T)
+                    false, // can_throw
+                );
+
+                let call_args: Vec<BasicMetadataValueEnum> =
+                    arg_vals.iter().map(|v| (*v).into()).collect();
+                let result = self
+                    .builder
+                    .build_indirect_call(fn_ty, asm_val, &call_args, "syscall_ret")
+                    .unwrap();
+                result.try_as_basic_value().basic()
+            }
+
             // ---- Fallback: return zero value for unimplemented intrinsics ----
             _ => gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero()),
         }
