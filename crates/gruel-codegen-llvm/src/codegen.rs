@@ -2538,12 +2538,30 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     //   return value in x0
                     match num_args {
                         1 => ("svc #0".to_string(), "={x0},{x8},~{memory}".to_string()),
-                        2 => ("svc #0".to_string(), "={x0},{x8},{x0},~{memory}".to_string()),
-                        3 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},~{memory}".to_string()),
-                        4 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},{x2},~{memory}".to_string()),
-                        5 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},{x2},{x3},~{memory}".to_string()),
-                        6 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},{x2},{x3},{x4},~{memory}".to_string()),
-                        7 => ("svc #0".to_string(), "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}".to_string()),
+                        2 => (
+                            "svc #0".to_string(),
+                            "={x0},{x8},{x0},~{memory}".to_string(),
+                        ),
+                        3 => (
+                            "svc #0".to_string(),
+                            "={x0},{x8},{x0},{x1},~{memory}".to_string(),
+                        ),
+                        4 => (
+                            "svc #0".to_string(),
+                            "={x0},{x8},{x0},{x1},{x2},~{memory}".to_string(),
+                        ),
+                        5 => (
+                            "svc #0".to_string(),
+                            "={x0},{x8},{x0},{x1},{x2},{x3},~{memory}".to_string(),
+                        ),
+                        6 => (
+                            "svc #0".to_string(),
+                            "={x0},{x8},{x0},{x1},{x2},{x3},{x4},~{memory}".to_string(),
+                        ),
+                        7 => (
+                            "svc #0".to_string(),
+                            "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}".to_string(),
+                        ),
                         _ => unreachable!("syscall validated to 1-7 args by sema"),
                     }
                 } else {
