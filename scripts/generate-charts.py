@@ -99,32 +99,34 @@ def get_pass_times(run: dict) -> dict[str, float]:
 
 
 def get_total_time(run: dict) -> float:
-    """Get total compilation time from a run."""
+    """Get total compilation time (sum across all benchmarks) from a run."""
+    total = 0
     for bench in run.get("benchmarks", []):
         if "mean_ms" in bench:
-            return bench["mean_ms"]
-        if "total_ms" in bench:
-            total = bench["total_ms"]
-            if isinstance(total, dict):
-                return total.get("mean", 0)
-            return total
-    return 0
+            total += bench["mean_ms"]
+        elif "total_ms" in bench:
+            t = bench["total_ms"]
+            total += t.get("mean", 0) if isinstance(t, dict) else t
+    return total
 
 
 def get_peak_memory(run: dict) -> float:
-    """Get peak memory usage (in MB) from a run."""
+    """Get peak memory usage (max across all benchmarks, in MB) from a run."""
+    peak = 0
     for bench in run.get("benchmarks", []):
         if "peak_memory_bytes" in bench:
-            return bench["peak_memory_bytes"] / (1024 * 1024)  # Convert to MB
-    return 0
+            mb = bench["peak_memory_bytes"] / (1024 * 1024)
+            peak = max(peak, mb)
+    return peak
 
 
 def get_binary_size(run: dict) -> float:
-    """Get binary size (in KB) from a run."""
+    """Get total binary size (sum across all benchmarks, in KB) from a run."""
+    total = 0
     for bench in run.get("benchmarks", []):
         if "binary_size_bytes" in bench:
-            return bench["binary_size_bytes"] / 1024  # Convert to KB
-    return 0
+            total += bench["binary_size_bytes"] / 1024
+    return total
 
 
 def format_bytes(size_bytes: float) -> str:
