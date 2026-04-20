@@ -17,7 +17,6 @@
 use std::collections::{HashMap, HashSet};
 
 use gruel_builtins::BuiltinTypeDef;
-use tracing::info_span;
 use gruel_error::{
     CompileError, CompileErrors, CompileResult, CompileWarning, ErrorKind,
     IntrinsicTypeMismatchError, MultiErrorResult, OptionExt, PreviewFeature, WarningKind,
@@ -28,6 +27,7 @@ use gruel_rir::{
 use gruel_span::Span;
 use gruel_target::{Arch, Os};
 use lasso::Spur;
+use tracing::info_span;
 
 use super::context::{
     AnalysisContext, AnalysisResult, BuiltinMethodContext, ComptimeHeapItem, ConstValue, ParamInfo,
