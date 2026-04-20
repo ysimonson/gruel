@@ -276,6 +276,22 @@ fn main() -> i32 {
 exit_code = 42
 
 [[case]]
+name = "comptime_str_clone"
+spec = ["4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let a = "hello";
+        let b = a.clone();
+        if b.len() == 5 { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
 name = "comptime_str_method_eq"
 spec = ["4.14:58"]
 preview = "comptime_meta"
@@ -290,22 +306,6 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
-
-[[case]]
-name = "comptime_str_runtime_rejected"
-spec = ["4.14:56"]
-preview = "comptime_meta"
-preview_should_pass = true
-source = """
-fn main() -> i32 {
-    comptime {
-        let s = "hello";
-        s
-    }
-}
-"""
-compile_fail = true
-error_contains = "comptime_str values cannot exist at runtime"
 
 [[case]]
 name = "comptime_str_compile_error_accepts"
@@ -983,3 +983,107 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# =============================================================================
+# Comptime String Materialization (ADR-0045)
+# =============================================================================
+
+[[case]]
+name = "comptime_str_materialize_literal"
+spec = ["4.14:56"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s: String = comptime { "hello" };
+    if s == "hello" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "comptime_str_materialize_concat"
+spec = ["4.14:56", "4.14:58"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s: String = comptime {
+        let a = "hello";
+        let b = " world";
+        a.concat(b)
+    };
+    if s == "hello world" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "comptime_str_materialize_type_name"
+spec = ["4.14:56", "4.14:60"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn get_name(comptime T: type) -> String {
+    comptime { @typeName(T) }
+}
+
+fn main() -> i32 {
+    let name = get_name(Point);
+    if name == "Point" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "comptime_str_materialize_empty"
+spec = ["4.14:56"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s: String = comptime { "" };
+    if s == "" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+# =============================================================================
+# Comptime String Mutation Errors (4.14:59a)
+# =============================================================================
+
+[[case]]
+name = "comptime_str_push_str_error"
+spec = ["4.14:59a"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s.push_str(" world");
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot call .push_str() on a compile-time string"
+
+[[case]]
+name = "comptime_str_capacity_error"
+spec = ["4.14:59a"]
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s.capacity();
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "capacity is not available for compile-time strings"

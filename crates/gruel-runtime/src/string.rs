@@ -52,6 +52,34 @@ pub extern "C" fn __gruel_str_eq(ptr1: *const u8, len1: u64, ptr2: *const u8, le
 }
 
 // =============================================================================
+// String Ordering Comparison
+// =============================================================================
+
+/// Lexicographic byte comparison of two strings.
+/// Returns -1 if s1 < s2, 0 if s1 == s2, 1 if s1 > s2.
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_str_cmp(ptr1: *const u8, len1: u64, ptr2: *const u8, len2: u64) -> i8 {
+    let min_len = if len1 < len2 { len1 } else { len2 };
+    for i in 0..min_len as usize {
+        let b1 = unsafe { *ptr1.add(i) };
+        let b2 = unsafe { *ptr2.add(i) };
+        if b1 < b2 {
+            return -1;
+        }
+        if b1 > b2 {
+            return 1;
+        }
+    }
+    if len1 < len2 {
+        -1
+    } else if len1 > len2 {
+        1
+    } else {
+        0
+    }
+}
+
+// =============================================================================
 // Heap Allocation Wrappers
 // =============================================================================
 
@@ -181,6 +209,130 @@ pub extern "C" fn String__capacity(_ptr: *const u8, _len: u64, cap: u64) -> u64 
 #[allow(non_snake_case)]
 pub extern "C" fn String__is_empty(_ptr: *const u8, len: u64, _cap: u64) -> u8 {
     if len == 0 { 1 } else { 0 }
+}
+
+/// Check if a String contains a substring.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__contains(
+    ptr: *const u8,
+    len: u64,
+    _cap: u64,
+    needle_ptr: *const u8,
+    needle_len: u64,
+    _needle_cap: u64,
+) -> u8 {
+    if needle_len == 0 {
+        return 1;
+    }
+    if needle_len > len {
+        return 0;
+    }
+    let haystack = unsafe { core::slice::from_raw_parts(ptr, len as usize) };
+    let needle = unsafe { core::slice::from_raw_parts(needle_ptr, needle_len as usize) };
+    for i in 0..=(len - needle_len) as usize {
+        if &haystack[i..i + needle_len as usize] == needle {
+            return 1;
+        }
+    }
+    0
+}
+
+/// Check if a String starts with a prefix.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__starts_with(
+    ptr: *const u8,
+    len: u64,
+    _cap: u64,
+    prefix_ptr: *const u8,
+    prefix_len: u64,
+    _prefix_cap: u64,
+) -> u8 {
+    if prefix_len == 0 {
+        return 1;
+    }
+    if prefix_len > len {
+        return 0;
+    }
+    let haystack = unsafe { core::slice::from_raw_parts(ptr, prefix_len as usize) };
+    let prefix = unsafe { core::slice::from_raw_parts(prefix_ptr, prefix_len as usize) };
+    if haystack == prefix { 1 } else { 0 }
+}
+
+/// Check if a String ends with a suffix.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__ends_with(
+    ptr: *const u8,
+    len: u64,
+    _cap: u64,
+    suffix_ptr: *const u8,
+    suffix_len: u64,
+    _suffix_cap: u64,
+) -> u8 {
+    if suffix_len == 0 {
+        return 1;
+    }
+    if suffix_len > len {
+        return 0;
+    }
+    let offset = (len - suffix_len) as usize;
+    let tail = unsafe { core::slice::from_raw_parts(ptr.add(offset), suffix_len as usize) };
+    let suffix = unsafe { core::slice::from_raw_parts(suffix_ptr, suffix_len as usize) };
+    if tail == suffix { 1 } else { 0 }
+}
+
+/// Concatenate two strings, returning a new string.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__concat(
+    out: *mut StringResult,
+    ptr: *const u8,
+    len: u64,
+    _cap: u64,
+    other_ptr: *const u8,
+    other_len: u64,
+    _other_cap: u64,
+) {
+    let total_len = len + other_len;
+    if total_len == 0 {
+        unsafe {
+            (*out).ptr = core::ptr::null_mut();
+            (*out).len = 0;
+            (*out).cap = 0;
+        }
+        return;
+    }
+    let new_cap = total_len.max(STRING_MIN_CAPACITY);
+    let new_ptr = heap::alloc(new_cap, 1);
+    if new_ptr.is_null() {
+        unsafe {
+            (*out).ptr = core::ptr::null_mut();
+            (*out).len = 0;
+            (*out).cap = 0;
+        }
+        return;
+    }
+    if len > 0 && !ptr.is_null() {
+        unsafe {
+            core::ptr::copy_nonoverlapping(ptr, new_ptr, len as usize);
+        }
+    }
+    if other_len > 0 && !other_ptr.is_null() {
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                other_ptr,
+                new_ptr.add(len as usize),
+                other_len as usize,
+            );
+        }
+    }
+    unsafe {
+        (*out).ptr = new_ptr;
+        (*out).len = total_len;
+        (*out).cap = new_cap;
+    }
 }
 
 // =============================================================================

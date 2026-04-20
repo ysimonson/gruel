@@ -496,3 +496,270 @@ fn main() -> i32 {
 }
 """
 exit_code = 0
+
+# =============================================================================
+# Search Methods (3.10:34 - 3.10:38)
+# =============================================================================
+
+[[case]]
+name = "string_contains_found"
+spec = ["3.10:34", "3.10:37"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello world";
+    if s.contains("world") { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_contains_not_found"
+spec = ["3.10:34"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello world";
+    if s.contains("xyz") { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_contains_empty_needle"
+spec = ["3.10:34", "3.10:37"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello";
+    if s.contains("") { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_starts_with_true"
+spec = ["3.10:35", "3.10:37"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello world";
+    if s.starts_with("hello") { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_starts_with_false"
+spec = ["3.10:35"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello world";
+    if s.starts_with("world") { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_starts_with_empty"
+spec = ["3.10:35", "3.10:37"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello";
+    if s.starts_with("") { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_ends_with_true"
+spec = ["3.10:36", "3.10:37"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello world";
+    if s.ends_with("world") { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_ends_with_false"
+spec = ["3.10:36"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello world";
+    if s.ends_with("hello") { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_ends_with_empty"
+spec = ["3.10:36", "3.10:37"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello";
+    if s.ends_with("") { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_search_combined"
+spec = ["3.10:34", "3.10:35", "3.10:36", "3.10:38"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello world";
+    if s.contains("world") && s.starts_with("hello") && s.ends_with("world") {
+        0
+    } else {
+        1
+    }
+}
+"""
+exit_code = 0
+
+# =============================================================================
+# Concatenation (3.10:39 - 3.10:41)
+# =============================================================================
+
+[[case]]
+name = "string_concat_basic"
+spec = ["3.10:39", "3.10:41"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a = "hello";
+    let b = " world";
+    let c = a.concat(b);
+    if c == "hello world" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_concat_empty"
+spec = ["3.10:39", "3.10:40"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a = "hello";
+    let b = "";
+    let c = a.concat(b);
+    if c == "hello" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_concat_both_empty"
+spec = ["3.10:39"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a = "";
+    let b = "";
+    let c = a.concat(b);
+    if c == "" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+# =============================================================================
+# String Ordering (3.7:15 - 3.7:17)
+# =============================================================================
+
+[[case]]
+name = "string_lt"
+spec = ["3.7:15", "3.7:16"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    if "abc" < "abd" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_lt_prefix"
+spec = ["3.7:15", "3.7:16"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    if "abc" < "abcd" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_gt"
+spec = ["3.7:15", "3.7:16"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    if "b" > "a" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_le_equal"
+spec = ["3.7:15"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    if "abc" <= "abc" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_ge_equal"
+spec = ["3.7:15"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    if "abc" >= "abc" { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "string_ordering_combined"
+spec = ["3.7:15", "3.7:16", "3.7:17"]
+preview = "consistent_str"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    if "abc" < "abd" && "abc" <= "abc" && "b" > "a" && "abc" >= "abc" {
+        0
+    } else {
+        1
+    }
+}
+"""
+exit_code = 0

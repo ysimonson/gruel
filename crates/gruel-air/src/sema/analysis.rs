@@ -2109,12 +2109,19 @@ impl<'a> Sema<'a> {
                         },
                         span,
                     )),
-                    ConstValue::ComptimeStr(_) => Err(CompileError::new(
-                        ErrorKind::ComptimeEvaluationFailed {
-                            reason: "comptime_str values cannot exist at runtime".to_string(),
-                        },
-                        span,
-                    )),
+                    ConstValue::ComptimeStr(str_idx) => {
+                        // Materialize comptime string as a runtime String constant.
+                        let content =
+                            self.resolve_comptime_str(str_idx, span)?.to_string();
+                        let ty = self.builtin_string_type();
+                        let local_string_id = ctx.add_local_string(content);
+                        let air_ref = air.add_inst(AirInst {
+                            data: AirInstData::StringConst(local_string_id),
+                            ty,
+                            span,
+                        });
+                        Ok(AnalysisResult::new(air_ref, ty))
+                    }
                     ConstValue::Unit => {
                         let air_ref = air.add_inst(AirInst {
                             data: AirInstData::UnitConst,
@@ -4372,10 +4379,10 @@ impl<'a> Sema<'a> {
                     self.rir.get(lhs).span,
                 ));
             }
-        } else if !lhs_type.is_integer() {
+        } else if !lhs_type.is_integer() && !self.is_builtin_string(lhs_type) {
             return Err(CompileError::new(
                 ErrorKind::TypeMismatch {
-                    expected: "integer".to_string(),
+                    expected: "integer or string".to_string(),
                     found: lhs_type.name().to_string(),
                 },
                 self.rir.get(lhs).span,
@@ -5402,6 +5409,33 @@ impl<'a> Sema<'a> {
                 self.comptime_heap.push(ComptimeHeapItem::String(result));
                 Ok(ConstValue::ComptimeStr(idx))
             }
+            "clone" => {
+                if !call_args.is_empty() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: "clone".to_string(),
+                            expected: 0,
+                            found: call_args.len(),
+                        },
+                        inst_span,
+                    ));
+                }
+                Ok(self.alloc_comptime_str(s))
+            }
+            "push_str" | "push" | "clear" | "reserve" => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "cannot call .{method_name}() on a compile-time string; use .concat() to produce a new string"
+                    ),
+                },
+                inst_span,
+            )),
+            "capacity" => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "capacity is not available for compile-time strings".into(),
+                },
+                inst_span,
+            )),
             _ => Err(CompileError::new(
                 ErrorKind::ComptimeEvaluationFailed {
                     reason: format!("unknown comptime_str method '{method_name}'"),

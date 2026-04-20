@@ -1897,7 +1897,10 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra, for_loops, comptime_meta, consistent_str");
+        assert_eq!(
+            names,
+            "test_infra, for_loops, comptime_meta, consistent_str"
+        );
     }
 
     // ========================================================================

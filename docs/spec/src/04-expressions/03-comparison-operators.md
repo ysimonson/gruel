@@ -74,7 +74,7 @@ Ordering operators work only on integers.
 
 {{ rule(id="4.3:6", cat="legality-rule") }}
 
-Ordering operators on boolean, string, unit, or struct values are a compile-time error. Implementations **MUST** reject such programs.
+Ordering operators on boolean, unit, or struct values are a compile-time error. Implementations **MUST** reject such programs. Ordering operators on strings use lexicographic byte comparison (see §3.7).
 
 {{ rule(id="4.3:7") }}
 

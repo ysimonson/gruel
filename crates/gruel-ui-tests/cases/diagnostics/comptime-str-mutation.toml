@@ -1,0 +1,88 @@
+[section]
+id = "diagnostics.comptime-str-mutation"
+name = "Comptime String Mutation Errors"
+description = "Tests that runtime-only mutation methods on comptime_str produce clear error messages."
+
+# =============================================================================
+# Mutation methods on comptime_str should produce specific error messages
+# =============================================================================
+
+[[case]]
+name = "comptime_str_push_str"
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s.push_str(" world");
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot call .push_str() on a compile-time string; use .concat() to produce a new string"
+
+[[case]]
+name = "comptime_str_push"
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s.push(65);
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot call .push() on a compile-time string; use .concat() to produce a new string"
+
+[[case]]
+name = "comptime_str_clear"
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s.clear();
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot call .clear() on a compile-time string; use .concat() to produce a new string"
+
+[[case]]
+name = "comptime_str_reserve"
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s.reserve(100);
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot call .reserve() on a compile-time string; use .concat() to produce a new string"
+
+[[case]]
+name = "comptime_str_capacity"
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        let s = "hello";
+        s.capacity();
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "capacity is not available for compile-time strings"

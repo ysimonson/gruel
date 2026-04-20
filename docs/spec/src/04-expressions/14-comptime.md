@@ -844,9 +844,17 @@ fn main() -> i32 {
 
 The `comptime_str` type represents a string value that exists only at compile time. String literals inside `comptime` blocks are promoted to `comptime_str` values.
 
-{{ rule(id="4.14:56", cat="legality-rule") }}
+{{ rule(id="4.14:56", cat="normative") }}
 
-It is a compile-time error to use a `comptime_str` value in a runtime position. `comptime_str` values cannot be stored in variables, passed as arguments, or returned from functions that execute at runtime.
+When a `comptime { }` block evaluates to a `comptime_str` value, the compiler auto-materializes it as a runtime `String` constant. The comptime string's content is emitted as a string constant using the same mechanism as string literals. This allows `comptime_str` values to escape comptime blocks as runtime `String` values.
+
+{{ rule(id="4.14:56a", cat="example") }}
+
+```gruel
+fn describe(comptime T: type) -> String {
+    comptime { @typeName(T) }   // comptime_str materialized as runtime String
+}
+```
 
 {{ rule(id="4.14:57", cat="normative") }}
 
@@ -854,7 +862,7 @@ The `comptime_str` type supports the comparison operators `==`, `!=`, `<`, `<=`,
 
 {{ rule(id="4.14:58", cat="normative") }}
 
-The `comptime_str` type provides the following methods: `len() -> i32` returns the byte length, `is_empty() -> bool` returns whether the string is empty, `contains(needle: comptime_str) -> bool` checks for substring presence, `starts_with(prefix: comptime_str) -> bool` checks for a prefix, `ends_with(suffix: comptime_str) -> bool` checks for a suffix, and `concat(other: comptime_str) -> comptime_str` concatenates two strings.
+The `comptime_str` type provides the following methods: `len() -> i32` returns the byte length, `is_empty() -> bool` returns whether the string is empty, `contains(needle: comptime_str) -> bool` checks for substring presence, `starts_with(prefix: comptime_str) -> bool` checks for a prefix, `ends_with(suffix: comptime_str) -> bool` checks for a suffix, `concat(other: comptime_str) -> comptime_str` concatenates two strings, and `clone() -> comptime_str` copies the string.
 
 {{ rule(id="4.14:59") }}
 
@@ -866,6 +874,10 @@ fn check_name(comptime name: comptime_str) -> i32 {
     name.len()
 }
 ```
+
+{{ rule(id="4.14:59a", cat="legality-rule") }}
+
+It is a compile-time error to call runtime-only mutation methods (`push_str`, `push`, `clear`, `reserve`) on a `comptime_str` value. The compiler produces a diagnostic suggesting `.concat()` as the immutable alternative. Calling `.capacity()` on a `comptime_str` is also a compile-time error, since compile-time strings have no allocation.
 
 ## Type Reflection
 

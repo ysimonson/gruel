@@ -705,6 +705,52 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         self.module.add_function(NAME, fn_type, None)
     }
 
+    /// Get or declare `__gruel_str_cmp(ptr, len, ptr, len) -> i8`.
+    fn get_or_declare_str_cmp(&self) -> FunctionValue<'ctx> {
+        const NAME: &str = "__gruel_str_cmp";
+        if let Some(f) = self.module.get_function(NAME) {
+            return f;
+        }
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let i64_ty = self.ctx.i64_type();
+        let fn_type = self.ctx.i8_type().fn_type(
+            &[ptr_ty.into(), i64_ty.into(), ptr_ty.into(), i64_ty.into()],
+            false,
+        );
+        self.module.add_function(NAME, fn_type, None)
+    }
+
+    /// Build a string ordering comparison using `__gruel_str_cmp`.
+    /// `pred` should be the IntPredicate for comparing the cmp result against 0.
+    fn build_str_cmp(
+        &mut self,
+        l: BasicValueEnum<'ctx>,
+        r: BasicValueEnum<'ctx>,
+        pred: IntPredicate,
+        name: &str,
+    ) -> inkwell::values::IntValue<'ctx> {
+        let (ptr1, len1) = self.extract_str_ptr_len(l);
+        let (ptr2, len2) = self.extract_str_ptr_len(r);
+        let str_cmp_fn = self.get_or_declare_str_cmp();
+        let result = self
+            .builder
+            .build_call(
+                str_cmp_fn,
+                &[ptr1.into(), len1.into(), ptr2.into(), len2.into()],
+                "strcmp",
+            )
+            .unwrap();
+        let cmp_val = result
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+        let zero = self.ctx.i8_type().const_zero();
+        self.builder
+            .build_int_compare(pred, cmp_val, zero, name)
+            .unwrap()
+    }
+
     /// Get or declare `__gruel_drop_String(ptr, len, cap) -> void`.
     fn get_or_declare_drop_string(&self) -> FunctionValue<'ctx> {
         const NAME: &str = "__gruel_drop_String";
@@ -1420,55 +1466,79 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
             CfgInstData::Lt(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
-                let (pred, upred) = (IntPredicate::SLT, IntPredicate::ULT);
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                Some(
-                    self.builder
-                        .build_int_compare(p, l, r, "lt")
-                        .unwrap()
-                        .into(),
-                )
+                if self.is_builtin_string(lhs_ty) {
+                    let l = self.get_value(lhs);
+                    let r = self.get_value(rhs);
+                    Some(self.build_str_cmp(l, r, IntPredicate::SLT, "strlt").into())
+                } else {
+                    let (pred, upred) = (IntPredicate::SLT, IntPredicate::ULT);
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    let p = if is_signed_type(lhs_ty) { pred } else { upred };
+                    Some(
+                        self.builder
+                            .build_int_compare(p, l, r, "lt")
+                            .unwrap()
+                            .into(),
+                    )
+                }
             }
             CfgInstData::Gt(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
-                let (pred, upred) = (IntPredicate::SGT, IntPredicate::UGT);
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                Some(
-                    self.builder
-                        .build_int_compare(p, l, r, "gt")
-                        .unwrap()
-                        .into(),
-                )
+                if self.is_builtin_string(lhs_ty) {
+                    let l = self.get_value(lhs);
+                    let r = self.get_value(rhs);
+                    Some(self.build_str_cmp(l, r, IntPredicate::SGT, "strgt").into())
+                } else {
+                    let (pred, upred) = (IntPredicate::SGT, IntPredicate::UGT);
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    let p = if is_signed_type(lhs_ty) { pred } else { upred };
+                    Some(
+                        self.builder
+                            .build_int_compare(p, l, r, "gt")
+                            .unwrap()
+                            .into(),
+                    )
+                }
             }
             CfgInstData::Le(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
-                let (pred, upred) = (IntPredicate::SLE, IntPredicate::ULE);
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                Some(
-                    self.builder
-                        .build_int_compare(p, l, r, "le")
-                        .unwrap()
-                        .into(),
-                )
+                if self.is_builtin_string(lhs_ty) {
+                    let l = self.get_value(lhs);
+                    let r = self.get_value(rhs);
+                    Some(self.build_str_cmp(l, r, IntPredicate::SLE, "strle").into())
+                } else {
+                    let (pred, upred) = (IntPredicate::SLE, IntPredicate::ULE);
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    let p = if is_signed_type(lhs_ty) { pred } else { upred };
+                    Some(
+                        self.builder
+                            .build_int_compare(p, l, r, "le")
+                            .unwrap()
+                            .into(),
+                    )
+                }
             }
             CfgInstData::Ge(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
-                let (pred, upred) = (IntPredicate::SGE, IntPredicate::UGE);
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                Some(
-                    self.builder
-                        .build_int_compare(p, l, r, "ge")
-                        .unwrap()
-                        .into(),
-                )
+                if self.is_builtin_string(lhs_ty) {
+                    let l = self.get_value(lhs);
+                    let r = self.get_value(rhs);
+                    Some(self.build_str_cmp(l, r, IntPredicate::SGE, "strge").into())
+                } else {
+                    let (pred, upred) = (IntPredicate::SGE, IntPredicate::UGE);
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    let p = if is_signed_type(lhs_ty) { pred } else { upred };
+                    Some(
+                        self.builder
+                            .build_int_compare(p, l, r, "ge")
+                            .unwrap()
+                            .into(),
+                    )
+                }
             }
 
             // ---- Bitwise ----

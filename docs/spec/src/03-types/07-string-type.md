@@ -88,6 +88,28 @@ fn main() -> i32 {
 }
 ```
 
+## String Ordering
+
+{{ rule(id="3.7:15", cat="normative") }}
+
+Strings support the ordering operators `<`, `<=`, `>`, `>=`. Ordering uses lexicographic byte comparison.
+
+{{ rule(id="3.7:16", cat="normative") }}
+
+String `a` is less than string `b` if at the first position where they differ, the byte in `a` is less than the byte in `b`, or if `a` is a prefix of `b`.
+
+{{ rule(id="3.7:17", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    if "abc" < "abd" && "abc" <= "abc" && "b" > "a" && "abc" >= "abc" {
+        0
+    } else {
+        1
+    }
+}
+```
+
 ## String Debugging
 
 {{ rule(id="3.7:12", cat="normative") }}
@@ -109,9 +131,7 @@ fn main() -> i32 {
 {{ rule(id="3.7:14", cat="informative") }}
 
 The current implementation does not support:
-- String concatenation
 - String indexing or slicing
 - Pattern matching on strings
-- Mutable strings
 
-These features may be added in future versions.
+These features may be added in future versions. For mutable strings, concatenation, and search methods, see §3.10.

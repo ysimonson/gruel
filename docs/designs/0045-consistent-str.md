@@ -181,19 +181,19 @@ Update spec section 4.14 (Comptime Strings):
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Runtime String query methods** — Add `contains`, `starts_with`, `ends_with` as runtime methods. In `gruel-builtins` (`STRING_TYPE`), add three new `BuiltinMethod` entries with `receiver_mode: ByRef` and a `SelfType` parameter (the needle/prefix/suffix). In `gruel-runtime/src/string.rs`, implement `String__contains`, `String__starts_with`, `String__ends_with` — each takes `(ptr, len, cap, other_ptr, other_len, other_cap)` and returns `u8` (0 or 1). Add spec tests.
+- [x] **Phase 1: Runtime String query methods** — Add `contains`, `starts_with`, `ends_with` as runtime methods. In `gruel-builtins` (`STRING_TYPE`), add three new `BuiltinMethod` entries with `receiver_mode: ByRef` and a `SelfType` parameter (the needle/prefix/suffix). In `gruel-runtime/src/string.rs`, implement `String__contains`, `String__starts_with`, `String__ends_with` — each takes `(ptr, len, cap, other_ptr, other_len, other_cap)` and returns `u8` (0 or 1). Add spec tests.
 
-- [ ] **Phase 2: Runtime String concat and clone** — Add `concat` as a runtime method in `gruel-builtins` (`STRING_TYPE`) with `receiver_mode: ByRef`, one `SelfType` parameter, and `return_ty: SelfType`. In `gruel-runtime`, implement `String__concat` — allocates a new string with the concatenation of both inputs, returns via `StringResult`. Add spec tests.
+- [x] **Phase 2: Runtime String concat and clone** — Add `concat` as a runtime method in `gruel-builtins` (`STRING_TYPE`) with `receiver_mode: ByRef`, one `SelfType` parameter, and `return_ty: SelfType`. In `gruel-runtime`, implement `String__concat` — allocates a new string with the concatenation of both inputs, returns via `StringResult`. Add spec tests.
 
-- [ ] **Phase 3: Runtime String ordering operators** — Add `Lt`, `Le`, `Gt`, `Ge` operators to `STRING_TYPE.operators` in `gruel-builtins`. Implement `__gruel_str_lt`, `__gruel_str_le`, `__gruel_str_gt`, `__gruel_str_ge` in `gruel-runtime` (or implement as a single `__gruel_str_cmp` returning `i32` and derive each operator from it). Add spec tests.
+- [x] **Phase 3: Runtime String ordering operators** — Add `Lt`, `Le`, `Gt`, `Ge` operators to `STRING_TYPE.operators` in `gruel-builtins`. Implement `__gruel_str_lt`, `__gruel_str_le`, `__gruel_str_gt`, `__gruel_str_ge` in `gruel-runtime` (or implement as a single `__gruel_str_cmp` returning `i32` and derive each operator from it). Add spec tests.
 
-- [ ] **Phase 4: Comptime `clone` method** — Add `clone` to `evaluate_comptime_str_method` in `analysis.rs`. Implementation: copy the string content to a new comptime heap slot and return `ConstValue::ComptimeStr(new_idx)`. Add spec tests.
+- [x] **Phase 4: Comptime `clone` method** — Add `clone` to `evaluate_comptime_str_method` in `analysis.rs`. Implementation: copy the string content to a new comptime heap slot and return `ConstValue::ComptimeStr(new_idx)`. Add spec tests.
 
-- [ ] **Phase 5: Auto-materialization** — In the `InstData::Comptime` handler in `analysis.rs`, replace the `ConstValue::ComptimeStr` error with code that materializes the comptime string as a runtime `String` via `AirInstData::StringConst` (extract content from comptime heap, call `add_local_string`, emit `StringConst` with `builtin_string_type()`). Add tests for `comptime { "hello" }`, `comptime { @typeName(T) }` escaping to runtime.
+- [x] **Phase 5: Auto-materialization** — In the `InstData::Comptime` handler in `analysis.rs`, replace the `ConstValue::ComptimeStr` error with code that materializes the comptime string as a runtime `String` via `AirInstData::StringConst` (extract content from comptime heap, call `add_local_string`, emit `StringConst` with `builtin_string_type()`). Add tests for `comptime { "hello" }`, `comptime { @typeName(T) }` escaping to runtime.
 
-- [ ] **Phase 6: Comptime mutation errors** — In `evaluate_comptime_str_method`, add arms for `push_str`, `push`, `clear`, `reserve`, and `capacity` that return a clear error: "cannot call .<method>() on a compile-time string; use .concat() to produce a new string" (or "capacity is not available for compile-time strings"). This prevents confusing "unknown method" errors when users try runtime-only methods on `comptime_str`. Add UI tests.
+- [x] **Phase 6: Comptime mutation errors** — In `evaluate_comptime_str_method`, add arms for `push_str`, `push`, `clear`, `reserve`, and `capacity` that return a clear error: "cannot call .<method>() on a compile-time string; use .concat() to produce a new string" (or "capacity is not available for compile-time strings"). This prevents confusing "unknown method" errors when users try runtime-only methods on `comptime_str`. Add UI tests.
 
-- [ ] **Phase 7: Spec & tests** — Update spec section 4.14: modify rule 4.14:56 (materialization), update rule 4.14:58 (add `.clone()`), add rules for runtime `String` methods and operators, add rules for comptime mutation errors. Update existing spec tests. Verify traceability.
+- [x] **Phase 7: Spec & tests** — Update spec section 4.14: modify rule 4.14:56 (materialization), update rule 4.14:58 (add `.clone()`), add rules for runtime `String` methods and operators, add rules for comptime mutation errors. Update existing spec tests. Verify traceability.
 
 ## Consequences
 

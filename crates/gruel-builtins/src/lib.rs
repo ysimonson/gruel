@@ -327,7 +327,26 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             runtime_fn: "__gruel_str_eq",
             invert_result: true,
         },
-        // Note: String does NOT support Lt, Le, Gt, Ge
+        BuiltinOperator {
+            op: BinOp::Lt,
+            runtime_fn: "__gruel_str_cmp",
+            invert_result: false,
+        },
+        BuiltinOperator {
+            op: BinOp::Le,
+            runtime_fn: "__gruel_str_cmp",
+            invert_result: false,
+        },
+        BuiltinOperator {
+            op: BinOp::Gt,
+            runtime_fn: "__gruel_str_cmp",
+            invert_result: false,
+        },
+        BuiltinOperator {
+            op: BinOp::Ge,
+            runtime_fn: "__gruel_str_cmp",
+            invert_result: false,
+        },
     ],
     associated_fns: &[
         BuiltinAssociatedFn {
@@ -375,6 +394,46 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__clone",
+        },
+        BuiltinMethod {
+            name: "contains",
+            receiver_mode: ReceiverMode::ByRef,
+            params: &[BuiltinParam {
+                name: "needle",
+                ty: BuiltinParamType::SelfType,
+            }],
+            return_ty: BuiltinReturnType::Bool,
+            runtime_fn: "String__contains",
+        },
+        BuiltinMethod {
+            name: "starts_with",
+            receiver_mode: ReceiverMode::ByRef,
+            params: &[BuiltinParam {
+                name: "prefix",
+                ty: BuiltinParamType::SelfType,
+            }],
+            return_ty: BuiltinReturnType::Bool,
+            runtime_fn: "String__starts_with",
+        },
+        BuiltinMethod {
+            name: "ends_with",
+            receiver_mode: ReceiverMode::ByRef,
+            params: &[BuiltinParam {
+                name: "suffix",
+                ty: BuiltinParamType::SelfType,
+            }],
+            return_ty: BuiltinReturnType::Bool,
+            runtime_fn: "String__ends_with",
+        },
+        BuiltinMethod {
+            name: "concat",
+            receiver_mode: ReceiverMode::ByRef,
+            params: &[BuiltinParam {
+                name: "other",
+                ty: BuiltinParamType::SelfType,
+            }],
+            return_ty: BuiltinReturnType::SelfType,
+            runtime_fn: "String__concat",
         },
         // Mutation methods (take &mut self, return modified String)
         BuiltinMethod {
@@ -587,8 +646,8 @@ mod tests {
     fn test_string_operators() {
         assert!(STRING_TYPE.supports_operator(BinOp::Eq));
         assert!(STRING_TYPE.supports_operator(BinOp::Ne));
-        assert!(!STRING_TYPE.supports_operator(BinOp::Lt));
-        assert!(!STRING_TYPE.supports_operator(BinOp::Gt));
+        assert!(STRING_TYPE.supports_operator(BinOp::Lt));
+        assert!(STRING_TYPE.supports_operator(BinOp::Gt));
 
         let eq = STRING_TYPE.find_operator(BinOp::Eq).unwrap();
         assert_eq!(eq.runtime_fn, "__gruel_str_eq");
@@ -615,7 +674,18 @@ mod tests {
     fn test_all_string_methods_present() {
         // Verify all expected methods are defined
         let expected_methods = [
-            "len", "capacity", "is_empty", "clone", "push_str", "push", "clear", "reserve",
+            "len",
+            "capacity",
+            "is_empty",
+            "clone",
+            "contains",
+            "starts_with",
+            "ends_with",
+            "concat",
+            "push_str",
+            "push",
+            "clear",
+            "reserve",
         ];
         for name in expected_methods {
             assert!(

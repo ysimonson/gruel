@@ -223,3 +223,55 @@ Gruel strings are *conventionally UTF-8* rather than strictly validated:
 {{ rule(id="3.10:33", cat="informative") }}
 
 This approach matches Go's `string` and Rust's `bstr` crate: UTF-8 is the convention, but the type does not enforce it at runtime.
+
+## Search Methods
+
+{{ rule(id="3.10:34", cat="normative") }}
+
+`fn contains(borrow self, needle: String) -> bool` returns true if the string contains the given substring.
+
+{{ rule(id="3.10:35", cat="normative") }}
+
+`fn starts_with(borrow self, prefix: String) -> bool` returns true if the string begins with the given prefix.
+
+{{ rule(id="3.10:36", cat="normative") }}
+
+`fn ends_with(borrow self, suffix: String) -> bool` returns true if the string ends with the given suffix.
+
+{{ rule(id="3.10:37", cat="informative") }}
+
+Search methods use `borrow self` and borrow the argument, leaving both strings valid after the call. An empty needle, prefix, or suffix always matches.
+
+{{ rule(id="3.10:38", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    let s = "hello world";
+    if s.contains("world") && s.starts_with("hello") && s.ends_with("world") {
+        0
+    } else {
+        1
+    }
+}
+```
+
+## Concatenation
+
+{{ rule(id="3.10:39", cat="normative") }}
+
+`fn concat(borrow self, other: String) -> String` returns a new string that is the concatenation of `self` and `other`. Neither input is consumed.
+
+{{ rule(id="3.10:40", cat="informative") }}
+
+Unlike `push_str`, which mutates in place, `concat` is a pure operation that allocates a new string. It works alongside `push_str` — use `concat` when a new string is desired, `push_str` when mutation is preferred.
+
+{{ rule(id="3.10:41", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    let a = "hello";
+    let b = " world";
+    let c = a.concat(b);
+    if c == "hello world" { 0 } else { 1 }
+}
+```
