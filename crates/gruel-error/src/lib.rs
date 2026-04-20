@@ -305,6 +305,8 @@ pub enum PreviewFeature {
     /// Comptime metaprogramming: @compileError, @compileLog, comptime_str,
     /// @typeInfo, @typeName, comptime_unroll for, @field (ADR-0042).
     ComptimeMeta,
+    /// Consistent string interface and comptime string materialization (ADR-0045).
+    ConsistentStr,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -326,6 +328,7 @@ impl PreviewFeature {
             PreviewFeature::TestInfra => "test_infra",
             PreviewFeature::ForLoops => "for_loops",
             PreviewFeature::ComptimeMeta => "comptime_meta",
+            PreviewFeature::ConsistentStr => "consistent_str",
         }
     }
 
@@ -335,6 +338,7 @@ impl PreviewFeature {
             PreviewFeature::TestInfra => "ADR-0005",
             PreviewFeature::ForLoops => "ADR-0041",
             PreviewFeature::ComptimeMeta => "ADR-0042",
+            PreviewFeature::ConsistentStr => "ADR-0045",
         }
     }
 
@@ -344,6 +348,7 @@ impl PreviewFeature {
             PreviewFeature::TestInfra,
             PreviewFeature::ForLoops,
             PreviewFeature::ComptimeMeta,
+            PreviewFeature::ConsistentStr,
         ]
     }
 
@@ -369,6 +374,7 @@ impl std::str::FromStr for PreviewFeature {
             "test_infra" => Ok(PreviewFeature::TestInfra),
             "for_loops" => Ok(PreviewFeature::ForLoops),
             "comptime_meta" => Ok(PreviewFeature::ComptimeMeta),
+            "consistent_str" => Ok(PreviewFeature::ConsistentStr),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1891,7 +1897,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra, for_loops, comptime_meta");
+        assert_eq!(names, "test_infra, for_loops, comptime_meta, consistent_str");
     }
 
     // ========================================================================
