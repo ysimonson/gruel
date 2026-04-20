@@ -181,7 +181,7 @@ No changes to the workflow YAML itself — the expansion is entirely within `ben
 
 - [x] **Phase 2: Comptime stress benchmark** — Write `benchmarks/stress/comptime_heavy.gruel` exercising comptime arithmetic, function calls, `comptime_unroll`, struct/array construction, and pattern matching. Register in `manifest.toml`. Verify the program compiles and runs, and that the comptime span shows significant time.
 
-- [ ] **Phase 3: Multi-opt-level benchmarking** — Extend `bench.sh` to parse `opt_levels` from `manifest.toml` `[config]` section. Run each benchmark at each opt level. Tag results with `"opt_level"` field and `"@{level}"` suffix in benchmark name. Update `manifest.toml` with `opt_levels = ["O0", "O3"]`. Update `append-benchmark.py` if needed to handle the new fields.
+- [x] **Phase 3: Multi-opt-level benchmarking** — Extend `bench.sh` to parse `opt_levels` from `manifest.toml` `[config]` section. Run each benchmark at each opt level. Tag results with `"opt_level"` field and `"@{level}"` suffix in benchmark name. Update `manifest.toml` with `opt_levels = ["O0", "O3"]`. Update `append-benchmark.py` if needed to handle the new fields.
 
 - [ ] **Phase 4: Runtime benchmarking** — After compiling each benchmark in `bench.sh`, run the binary with `/usr/bin/time` for multiple iterations. Compute mean/stddev of wall-clock execution time. Add `"runtime_ms"` and `"runtime_std_ms"` to the per-benchmark JSON output.
 

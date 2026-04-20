@@ -125,6 +125,31 @@ log_info "Running benchmarks ($ITERATIONS iterations each)..."
 
 RESULTS_FILE="$TEMP_DIR/results.json"
 
+# Parse opt_levels from [config] section (default: O0 only)
+opt_levels=()
+in_config=false
+while IFS= read -r line; do
+    line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ "$line" == "[config]" ]]; then
+        in_config=true
+    elif [[ "$line" =~ ^\[  ]]; then
+        in_config=false
+    elif [[ "$in_config" == true && "$line" =~ ^opt_levels[[:space:]]*= ]]; then
+        # Parse array like ["O0", "O3"]
+        values=$(echo "$line" | sed 's/.*=//; s/\[//; s/\]//; s/"//g; s/,/ /g')
+        for v in $values; do
+            v=$(echo "$v" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [[ -n "$v" ]] && opt_levels+=("$v")
+        done
+    fi
+done < "$MANIFEST"
+
+# Default to O0 if no opt_levels configured
+if [[ ${#opt_levels[@]} -eq 0 ]]; then
+    opt_levels=("O0")
+fi
+log_info "Optimization levels: ${opt_levels[*]}"
+
 # Parse benchmarks from manifest
 # Format: [[benchmark]] followed by name = "...", path = "..."
 benchmark_names=()
@@ -158,12 +183,20 @@ if [[ -n "$current_name" && -n "$current_path" ]]; then
     benchmark_paths+=("$current_path")
 fi
 
-# Run each benchmark
+# Run each benchmark at each optimization level
 all_results=()
 for i in "${!benchmark_names[@]}"; do
-    name="${benchmark_names[$i]}"
+  for opt_level in "${opt_levels[@]}"; do
+    base_name="${benchmark_names[$i]}"
     path="${benchmark_paths[$i]}"
     full_path="$BENCHMARKS_DIR/$path"
+
+    # Tag the result name with the opt level
+    if [[ ${#opt_levels[@]} -gt 1 ]]; then
+        name="${base_name}@${opt_level}"
+    else
+        name="$base_name"
+    fi
 
     if [[ ! -f "$full_path" ]]; then
         log_warn "Benchmark file not found: $path (skipping)"
@@ -171,6 +204,9 @@ for i in "${!benchmark_names[@]}"; do
     fi
 
     log_info "Running: $name"
+
+    # Build the opt-level flag (e.g., -O0, -O3)
+    opt_flag="-${opt_level}"
 
     # Run multiple iterations and collect timing data
     iteration_results=()
@@ -185,7 +221,7 @@ for i in "${!benchmark_names[@]}"; do
         time_output="$TEMP_DIR/time_output_$$"
         if [[ "$os" == "darwin" ]]; then
             # macOS: -l gives max resident set size in bytes
-            if ! timing_json=$(/usr/bin/time -l "$GRUEL_BIN" --benchmark-json "$full_path" "$output_binary" 2>"$time_output"); then
+            if ! timing_json=$(/usr/bin/time -l "$GRUEL_BIN" --benchmark-json "$opt_flag" "$full_path" "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
                 rm -f "$time_output"
                 continue
@@ -194,7 +230,7 @@ for i in "${!benchmark_names[@]}"; do
             peak_mem_bytes=$(grep "maximum resident set size" "$time_output" 2>/dev/null | awk '{print $1}')
         else
             # Linux: -v gives max resident set size in KB
-            if ! timing_json=$(/usr/bin/time -v "$GRUEL_BIN" --benchmark-json "$full_path" "$output_binary" 2>"$time_output"); then
+            if ! timing_json=$(/usr/bin/time -v "$GRUEL_BIN" --benchmark-json "$opt_flag" "$full_path" "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
                 rm -f "$time_output"
                 continue
@@ -338,11 +374,13 @@ print(json.dumps(result))
 
     # Store result with all data (including memory and binary size from iteration tracking)
     result_parts=("\"name\":\"$name\"" "\"iterations\":$count" "\"mean_ms\":$mean" "\"std_ms\":$stddev" "\"passes\":$passes_json")
+    [[ ${#opt_levels[@]} -gt 1 ]] && result_parts+=("\"opt_level\":\"$opt_level\"")
     [[ "$source_metrics_json" != "null" ]] && result_parts+=("\"source_metrics\":$source_metrics_json")
     [[ "$mem_mean" -gt 0 ]] && result_parts+=("\"peak_memory_bytes\":$mem_mean")
     [[ "$binary_size" -gt 0 ]] && result_parts+=("\"binary_size_bytes\":$binary_size")
 
     all_results+=("{$(IFS=,; echo "${result_parts[*]}")}")
+  done
 done
 
 # Fail early if no benchmarks were collected
