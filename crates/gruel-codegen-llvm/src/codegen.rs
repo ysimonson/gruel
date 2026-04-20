@@ -234,7 +234,43 @@ fn declare_function<'ctx>(
         None => ctx.void_type().fn_type(&param_types, false),
     };
 
-    Ok(module.add_function(name, fn_type, None))
+    let f = module.add_function(name, fn_type, None);
+
+    // Gruel has no exceptions/unwinding, so all functions are `nounwind`.
+    f.add_attribute(
+        inkwell::attributes::AttributeLoc::Function,
+        ctx.create_enum_attribute(
+            inkwell::attributes::Attribute::get_named_enum_kind_id("nounwind"),
+            0,
+        ),
+    );
+
+    // Add `noalias` to inout parameters. The language spec forbids aliasing
+    // between inout params (check_exclusivity), so this is sound.
+    let slot_to_llvm = build_slot_to_llvm_param(cfg, type_pool);
+    let num_params = cfg.num_params() as usize;
+    let mut i = 0usize;
+    while i < num_params {
+        if cfg.is_param_inout(i as u32) {
+            let llvm_idx = slot_to_llvm[i];
+            f.add_attribute(
+                inkwell::attributes::AttributeLoc::Param(llvm_idx),
+                ctx.create_enum_attribute(
+                    inkwell::attributes::Attribute::get_named_enum_kind_id("noalias"),
+                    0,
+                ),
+            );
+            i += 1;
+        } else {
+            let ty = cfg
+                .param_type(i as u32)
+                .expect("param slot in range must have a type");
+            let raw_slot_count = type_pool.abi_slot_count(ty);
+            i += raw_slot_count.max(1) as usize;
+        }
+    }
+
+    Ok(f)
 }
 
 /// Collect LLVM parameter types for a Gruel function.
@@ -345,6 +381,8 @@ struct FnCodegen<'ctx, 'a> {
     values: Vec<Option<BasicValueEnum<'ctx>>>,
     /// Alloca slots for local variables (one per slot index).
     locals: Vec<Option<inkwell::values::PointerValue<'ctx>>>,
+    /// Tracks local allocas for lifetime marker emission at returns.
+    local_lifetime_ptrs: Vec<inkwell::values::PointerValue<'ctx>>,
     /// Phi nodes for block parameters (indexed by CfgValue index).
     /// Created before translation so that `Goto`/`Branch` terminators can
     /// add incoming edges even when the target block is processed later.
@@ -402,6 +440,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             llvm_blocks,
             values: vec![None; value_count],
             locals: vec![None; num_locals],
+            local_lifetime_ptrs: Vec::new(),
             phi_nodes: vec![None; value_count],
             param_allocas: vec![None; num_params],
             slot_to_llvm_param,
@@ -451,6 +490,15 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .build_alloca(llvm_ty, &format!("slot{}", slot))
             .expect("build_alloca failed");
 
+        // Emit llvm.lifetime.start immediately after the alloca.
+        let lifetime_start_fn = self.get_or_declare_lifetime_start();
+        self.builder
+            .build_call(lifetime_start_fn, &[ptr.into()], "")
+            .unwrap();
+
+        // Track for lifetime.end emission at returns.
+        self.local_lifetime_ptrs.push(ptr);
+
         // Restore builder position.
         if let Some(bb) = current_bb {
             self.builder.position_at_end(bb);
@@ -490,7 +538,71 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             inkwell::attributes::AttributeLoc::Function,
             self.ctx.create_string_attribute("noreturn", ""),
         );
+        // Mark as `cold` so LLVM deprioritizes panic paths in code layout and inlining.
+        f.add_attribute(
+            inkwell::attributes::AttributeLoc::Function,
+            self.ctx.create_string_attribute("cold", ""),
+        );
         f
+    }
+
+    /// Wrap a boolean with `llvm.expect.i1(val, expected)` to hint branch prediction.
+    ///
+    /// Returns a new i1 value with the expectation metadata attached.
+    fn build_expect_i1(
+        &self,
+        val: inkwell::values::IntValue<'ctx>,
+        expected: bool,
+    ) -> inkwell::values::IntValue<'ctx> {
+        let expect_intrinsic =
+            Intrinsic::find("llvm.expect").expect("llvm.expect intrinsic not found");
+        let bool_ty = self.ctx.bool_type();
+        let expect_fn = expect_intrinsic
+            .get_declaration(self.module, &[bool_ty.into()])
+            .expect("failed to declare llvm.expect.i1");
+        let expected_val = bool_ty.const_int(expected as u64, false);
+        self.builder
+            .build_call(expect_fn, &[val.into(), expected_val.into()], "exp")
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value()
+    }
+
+    /// Get or declare `llvm.lifetime.start.p0(ptr) -> void`.
+    fn get_or_declare_lifetime_start(&self) -> FunctionValue<'ctx> {
+        let intrinsic = Intrinsic::find("llvm.lifetime.start")
+            .expect("llvm.lifetime.start intrinsic not found");
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        intrinsic
+            .get_declaration(self.module, &[ptr_ty.into()])
+            .expect("failed to declare llvm.lifetime.start")
+    }
+
+    /// Get or declare `llvm.lifetime.end.p0(ptr) -> void`.
+    fn get_or_declare_lifetime_end(&self) -> FunctionValue<'ctx> {
+        let intrinsic =
+            Intrinsic::find("llvm.lifetime.end").expect("llvm.lifetime.end intrinsic not found");
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        intrinsic
+            .get_declaration(self.module, &[ptr_ty.into()])
+            .expect("failed to declare llvm.lifetime.end")
+    }
+
+    /// Emit `llvm.lifetime.end` for all tracked local allocas.
+    ///
+    /// Called before function return terminators so LLVM can reuse stack slots.
+    fn emit_lifetime_ends(&self) {
+        if self.local_lifetime_ptrs.is_empty() {
+            return;
+        }
+        let lifetime_end_fn = self.get_or_declare_lifetime_end();
+        for &ptr in &self.local_lifetime_ptrs {
+            self.builder
+                .build_call(lifetime_end_fn, &[ptr.into()], "")
+                .unwrap();
+        }
     }
 
     /// Check if a Gruel type is the builtin `String` type.
@@ -704,6 +816,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .builder
             .build_int_compare(IntPredicate::ULT, idx_i64, len_val, "bchk")
             .unwrap();
+        let in_bounds = self.build_expect_i1(in_bounds, true);
 
         let current_fn = self
             .builder
@@ -928,6 +1041,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .build_extract_value(struct_val, 1, "ovf_flag")
             .unwrap()
             .into_int_value();
+        let overflow = self.build_expect_i1(overflow, false);
 
         // Emit conditional branch to overflow handler or continuation.
         let current_fn = self
@@ -963,6 +1077,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .builder
             .build_int_compare(IntPredicate::EQ, divisor, zero, "divzero_check")
             .unwrap();
+        let is_zero = self.build_expect_i1(is_zero, false);
 
         let current_fn = self
             .builder
@@ -1640,6 +1755,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         .builder
                         .build_int_compare(IntPredicate::EQ, v, extended, "fits")
                         .unwrap();
+                    let fits = self.build_expect_i1(fits, true);
                     // Emit conditional branch to intcast overflow handler.
                     let current_fn = self
                         .builder
@@ -1681,6 +1797,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         v.get_type().const_int(1, false)
                     };
                     // Branch to overflow handler if the value is out of range.
+                    let fits = self.build_expect_i1(fits, true);
                     let current_fn = self
                         .builder
                         .get_insert_block()
@@ -2617,10 +2734,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             Terminator::Return { value: Some(v) } => {
                 let ty = self.cfg.get_inst(v).ty;
                 if gruel_type_to_llvm(ty, self.ctx, self.type_pool).is_none() {
-                    // Unit-typed return value.
-                    // For `fn main() { }` the runtime reads eax/w0 after the call,
-                    // so a bare `ret void` leaves the exit code undefined.
-                    // Call __gruel_exit(0) so the process exits cleanly.
+                    self.emit_lifetime_ends();
                     if self.cfg.fn_name() == "main" {
                         let exit_fn = self.get_or_declare_exit_fn();
                         let zero = self.ctx.i32_type().const_zero();
@@ -2633,11 +2747,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     }
                 } else {
                     let ret_val = self.get_value(v);
+                    self.emit_lifetime_ends();
                     self.builder.build_return(Some(&ret_val)).unwrap();
                 }
             }
             Terminator::Return { value: None } => {
-                // Unit return (no explicit return value).
+                self.emit_lifetime_ends();
                 if self.cfg.fn_name() == "main" {
                     let exit_fn = self.get_or_declare_exit_fn();
                     let zero = self.ctx.i32_type().const_zero();

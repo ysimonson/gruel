@@ -140,6 +140,9 @@ pub struct Case {
     /// Expected CFG dump (golden test)
     #[serde(default)]
     pub expected_cfg: Option<String>,
+    /// Substrings that must all appear in the `--emit asm` (LLVM IR) output.
+    #[serde(default)]
+    pub asm_contains: Vec<String>,
     /// Expected runtime error message (program compiles but fails at runtime)
     #[serde(default)]
     pub runtime_error: Option<String>,
@@ -362,6 +365,11 @@ pub fn expand_case(case: Case) -> Vec<Case> {
                 expected_rir: case.expected_rir.clone(),
                 expected_air: case.expected_air.clone(),
                 expected_cfg: case.expected_cfg.clone(),
+                asm_contains: case
+                    .asm_contains
+                    .iter()
+                    .map(|s| substitute_placeholders(s, params))
+                    .collect(),
                 runtime_exit_code: case.runtime_exit_code,
                 skip: case.skip,
                 warning_contains: case.warning_contains.clone(),
@@ -858,6 +866,35 @@ fn run_test_case_inner(case: &Case, gruel_binary: &Path) -> TestResult {
         cmd
     };
 
+    // Check for asm_contains (LLVM IR substring checks)
+    if !case.asm_contains.is_empty() {
+        let output = build_command(gruel_binary)
+            .arg("--emit")
+            .arg("asm")
+            .arg(&source_path)
+            .output()
+            .map_err(|e| format!("Failed to run gruel --emit asm: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "gruel --emit asm failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let actual = String::from_utf8_lossy(&output.stdout);
+        for expected_substr in &case.asm_contains {
+            if !actual.contains(expected_substr.as_str()) {
+                return Err(format!(
+                    "LLVM IR does not contain expected substring:\n  expected: {}\n  actual output:\n{}",
+                    expected_substr, actual
+                ));
+            }
+        }
+
+        return Ok(());
+    }
+
     // Check for golden IR tests (tokens, AST, RIR, AIR, CFG)
     if case.expected_tokens.is_some()
         || case.expected_ast.is_some()
@@ -1312,6 +1349,7 @@ mod tests {
             expected_rir: None,
             expected_air: None,
             expected_cfg: None,
+            asm_contains: vec![],
             runtime_error: None,
             runtime_exit_code: None,
             skip: false,
@@ -1362,6 +1400,7 @@ mod tests {
             expected_rir: None,
             expected_air: None,
             expected_cfg: None,
+            asm_contains: vec![],
             runtime_error: None,
             runtime_exit_code: None,
             skip: false,
@@ -1420,6 +1459,7 @@ mod tests {
             expected_rir: None,
             expected_air: None,
             expected_cfg: None,
+            asm_contains: vec![],
             runtime_error: None,
             runtime_exit_code: None,
             skip: false,
@@ -1470,6 +1510,7 @@ mod tests {
             expected_rir: None,
             expected_air: None,
             expected_cfg: None,
+            asm_contains: vec![],
             runtime_error: None,
             runtime_exit_code: None,
             skip: false,
@@ -1778,6 +1819,7 @@ mod tests {
             expected_rir: None,
             expected_air: None,
             expected_cfg: None,
+            asm_contains: vec![],
             runtime_error: None,
             runtime_exit_code: None,
             skip: false,

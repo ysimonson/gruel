@@ -216,8 +216,11 @@ fn print_usage() {
     eprintln!("  --linker <linker>    Set linker to use (default: internal)");
     eprintln!("                       Use 'internal' for built-in linker, or a command");
     eprintln!("                       like 'clang', 'gcc', or 'ld' for system linker");
+    eprintln!("  --debug              Build without optimizations (equivalent to -O0)");
+    eprintln!("  --release            Build with full optimizations (equivalent to -O3)");
     eprintln!("  -O<level>            Set optimization level (default: -O0)");
     eprintln!("                       Levels: {}", OptLevel::all_names());
+    eprintln!("                       Cannot be used with --debug or --release");
     eprintln!("  -j, --jobs <N>       Set number of parallel jobs (default: 0 = auto)");
     eprintln!("                       Use -j1 for single-threaded compilation");
     eprintln!("  --emit <stage>       Emit intermediate representation and exit");
@@ -260,6 +263,7 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
     let mut target: Option<Target> = None;
     let mut linker: Option<LinkerMode> = None;
     let mut opt_level: Option<OptLevel> = None;
+    let mut build_profile: Option<&str> = None; // "debug" or "release"
     let mut preview_features = PreviewFeatures::new();
     let mut log_level: Option<LogLevel> = None;
     let mut log_format: Option<LogFormat> = None;
@@ -380,6 +384,28 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
                 };
                 output_path = Some(out_str.to_string());
             }
+            "--debug" => {
+                if build_profile == Some("release") {
+                    eprintln!("Error: cannot use both --debug and --release");
+                    return ParseResult::Error;
+                }
+                if opt_level.is_some() {
+                    eprintln!("Error: cannot use --debug with an explicit -O level");
+                    return ParseResult::Error;
+                }
+                build_profile = Some("debug");
+            }
+            "--release" => {
+                if build_profile == Some("debug") {
+                    eprintln!("Error: cannot use both --debug and --release");
+                    return ParseResult::Error;
+                }
+                if opt_level.is_some() {
+                    eprintln!("Error: cannot use --release with an explicit -O level");
+                    return ParseResult::Error;
+                }
+                build_profile = Some("release");
+            }
             "--time-passes" => {
                 time_passes = true;
             }
@@ -395,6 +421,10 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
                 return ParseResult::Exit;
             }
             _ if arg.starts_with("-O") => {
+                if let Some(profile) = build_profile {
+                    eprintln!("Error: cannot use -O with --{}", profile);
+                    return ParseResult::Error;
+                }
                 // Parse -O0, -O1, -O2, -O3
                 let level_str = &arg[2..];
                 match level_str.parse::<OptLevel>() {
@@ -452,13 +482,20 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
         return ParseResult::Error;
     };
 
+    // Resolve --debug/--release into opt_level.
+    let resolved_opt_level = match build_profile {
+        Some("debug") => OptLevel::O0,
+        Some("release") => OptLevel::O3,
+        _ => opt_level.unwrap_or_default(),
+    };
+
     ParseResult::Options(Options {
         source_paths,
         output_path: final_output_path,
         emit_stages,
         target: target.unwrap_or_else(Target::host),
         linker: linker.unwrap_or_default(),
-        opt_level: opt_level.unwrap_or_default(),
+        opt_level: resolved_opt_level,
         preview_features,
         log_level: log_level.unwrap_or_default(),
         log_format: log_format.unwrap_or_default(),
@@ -1796,5 +1833,73 @@ mod tests {
     #[test]
     fn log_format_all_names() {
         assert_eq!(LogFormat::all_names(), "text, json");
+    }
+
+    // ========== --debug / --release tests ==========
+
+    #[test]
+    fn parse_debug_flag() {
+        let opts = unwrap_options(parse_args_from(&["--debug", "source.gruel"]));
+        assert_eq!(opts.opt_level, OptLevel::O0);
+    }
+
+    #[test]
+    fn parse_release_flag() {
+        let opts = unwrap_options(parse_args_from(&["--release", "source.gruel"]));
+        assert_eq!(opts.opt_level, OptLevel::O3);
+    }
+
+    #[test]
+    fn parse_debug_release_conflict() {
+        assert!(is_error(&parse_args_from(&[
+            "--debug",
+            "--release",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_release_debug_conflict() {
+        assert!(is_error(&parse_args_from(&[
+            "--release",
+            "--debug",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_debug_with_opt_level_conflict() {
+        assert!(is_error(&parse_args_from(&[
+            "--debug",
+            "-O2",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_release_with_opt_level_conflict() {
+        assert!(is_error(&parse_args_from(&[
+            "--release",
+            "-O1",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_opt_level_then_debug_conflict() {
+        assert!(is_error(&parse_args_from(&[
+            "-O2",
+            "--debug",
+            "source.gruel"
+        ])));
+    }
+
+    #[test]
+    fn parse_opt_level_then_release_conflict() {
+        assert!(is_error(&parse_args_from(&[
+            "-O1",
+            "--release",
+            "source.gruel"
+        ])));
     }
 }
