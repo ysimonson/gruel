@@ -135,7 +135,7 @@ print(f'  Generated {benchmarks_dir}/metadata.json with {len([p for p in platfor
 
 # Backwards compatibility: Generate charts from legacy history.json if it exists
 # and no per-platform history exists yet
-if [[ -f "$BENCHMARKS_DIR/history.json" && ${#PLATFORMS_WITH_DATA[@]} -eq 0 ]]; then
+if [[ -s "$BENCHMARKS_DIR/history.json" && ${#PLATFORMS_WITH_DATA[@]} -eq 0 ]]; then
     echo "  Generating legacy charts from history.json..."
     python3 "$ROOT/scripts/generate-charts.py" \
         "$BENCHMARKS_DIR/history.json" \
