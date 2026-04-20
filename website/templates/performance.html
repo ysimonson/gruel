@@ -33,43 +33,6 @@
                         <!-- Options populated by JavaScript from metadata.json -->
                     </select>
                 </div>
-                <span id="platform-info" class="text-sm text-muted"></span>
-            </div>
-        </section>
-
-        <!-- Summary Stats -->
-        <section id="summary-stats" class="mb-12">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div class="bg-surface border border-themed rounded-lg p-4">
-                    <div class="text-sm text-muted mb-1">Compilation Time</div>
-                    <div class="flex items-baseline gap-2">
-                        <span id="stat-time" class="text-2xl font-semibold">--</span>
-                        <span id="stat-time-delta" class="text-sm"></span>
-                    </div>
-                    <div class="text-xs text-muted mt-1">
-                        <span id="stat-time-avg">Avg: --</span> | <span id="stat-time-best">Best: --</span>
-                    </div>
-                </div>
-                <div class="bg-surface border border-themed rounded-lg p-4">
-                    <div class="text-sm text-muted mb-1">Peak Memory</div>
-                    <div class="flex items-baseline gap-2">
-                        <span id="stat-memory" class="text-2xl font-semibold">--</span>
-                        <span id="stat-memory-delta" class="text-sm"></span>
-                    </div>
-                    <div class="text-xs text-muted mt-1">
-                        <span id="stat-memory-avg">Avg: --</span>
-                    </div>
-                </div>
-                <div class="bg-surface border border-themed rounded-lg p-4">
-                    <div class="text-sm text-muted mb-1">Binary Size</div>
-                    <div class="flex items-baseline gap-2">
-                        <span id="stat-binary" class="text-2xl font-semibold">--</span>
-                        <span id="stat-binary-delta" class="text-sm"></span>
-                    </div>
-                    <div class="text-xs text-muted mt-1">
-                        <span id="stat-commit">Commit: --</span>
-                    </div>
-                </div>
             </div>
         </section>
 
@@ -171,18 +134,12 @@
         (function() {
             const platformSelect = document.getElementById('platform-select');
             const optLevelSelect = document.getElementById('opt-level-select');
-            const platformInfo = document.getElementById('platform-info');
             const benchmarkSelect = document.getElementById('benchmark-select');
             const timelineContainer = document.getElementById('timeline-chart-container');
-            const breakdownSection = document.getElementById('breakdown-section');
             const breakdownContainer = document.getElementById('breakdown-chart-container');
-            const memorySection = document.getElementById('memory-section');
             const memoryContainer = document.getElementById('memory-chart-container');
-            const binarySection = document.getElementById('binary-section');
             const binaryContainer = document.getElementById('binary-chart-container');
-            const runtimeSection = document.getElementById('runtime-section');
             const runtimeContainer = document.getElementById('runtime-chart-container');
-            const metricsSection = document.getElementById('metrics-section');
             const metricsContainer = document.getElementById('metrics-table-container');
             const coverageSection = document.getElementById('coverage-section');
 
@@ -215,74 +172,6 @@
                 return currentOptLevel;
             }
 
-            // Update summary stats from metadata
-            function updateStats(summary) {
-                if (!summary) {
-                    document.getElementById('stat-time').textContent = '--';
-                    document.getElementById('stat-time-delta').textContent = '';
-                    document.getElementById('stat-time-avg').textContent = 'Avg: --';
-                    document.getElementById('stat-time-best').textContent = 'Best: --';
-                    document.getElementById('stat-memory').textContent = '--';
-                    document.getElementById('stat-memory-delta').textContent = '';
-                    document.getElementById('stat-memory-avg').textContent = 'Avg: --';
-                    document.getElementById('stat-binary').textContent = '--';
-                    document.getElementById('stat-binary-delta').textContent = '';
-                    document.getElementById('stat-commit').textContent = 'Commit: --';
-                    return;
-                }
-
-                const s = summary;
-
-                // Time stats
-                document.getElementById('stat-time').textContent =
-                    s.latest_time_ms ? `${s.latest_time_ms.toFixed(1)}ms` : '--';
-                document.getElementById('stat-time-avg').textContent =
-                    s.avg_time_ms ? `Avg: ${s.avg_time_ms.toFixed(1)}ms` : 'Avg: --';
-                document.getElementById('stat-time-best').textContent =
-                    s.best_time_ms ? `Best: ${s.best_time_ms.toFixed(1)}ms` : 'Best: --';
-
-                // Time delta with color
-                const timeDelta = document.getElementById('stat-time-delta');
-                if (s.time_delta_str) {
-                    timeDelta.textContent = s.time_delta_str;
-                    timeDelta.className = s.time_delta_pct > 0 ? 'text-sm text-red-500' : 'text-sm text-green-500';
-                } else {
-                    timeDelta.textContent = '';
-                }
-
-                // Memory stats
-                document.getElementById('stat-memory').textContent =
-                    s.latest_memory_mb ? `${s.latest_memory_mb.toFixed(1)}MB` : '--';
-                document.getElementById('stat-memory-avg').textContent =
-                    s.avg_memory_mb ? `Avg: ${s.avg_memory_mb.toFixed(1)}MB` : 'Avg: --';
-
-                // Memory delta with color
-                const memDelta = document.getElementById('stat-memory-delta');
-                if (s.memory_delta_str) {
-                    memDelta.textContent = s.memory_delta_str;
-                    memDelta.className = s.memory_delta_pct > 0 ? 'text-sm text-red-500' : 'text-sm text-green-500';
-                } else {
-                    memDelta.textContent = '';
-                }
-
-                // Binary stats
-                document.getElementById('stat-binary').textContent =
-                    s.latest_binary_kb ? `${s.latest_binary_kb.toFixed(1)}KB` : '--';
-
-                // Binary delta with color
-                const binDelta = document.getElementById('stat-binary-delta');
-                if (s.binary_delta_str) {
-                    binDelta.textContent = s.binary_delta_str;
-                    binDelta.className = s.binary_delta_pct > 0 ? 'text-sm text-red-500' : 'text-sm text-green-500';
-                } else {
-                    binDelta.textContent = '';
-                }
-
-                // Commit info
-                document.getElementById('stat-commit').textContent =
-                    s.latest_commit ? `Commit: ${s.latest_commit}` : 'Commit: --';
-            }
-
             // Build metrics table
             function updateMetricsTable(benchmarks) {
                 if (!benchmarks || benchmarks.length === 0) {
@@ -300,8 +189,16 @@
                     });
                 }
 
+                // Filter by opt level if set
+                if (currentOptLevel !== 'all') {
+                    filtered = filtered.filter(b => {
+                        const opt = b.opt_level || 'O0';
+                        return opt === currentOptLevel;
+                    });
+                }
+
                 if (filtered.length === 0) {
-                    metricsContainer.innerHTML = '<p class="text-muted text-center py-8">No metrics for selected program</p>';
+                    metricsContainer.innerHTML = '<p class="text-muted text-center py-8">No metrics for selected filters</p>';
                     return;
                 }
 
@@ -376,67 +273,65 @@
                 document.getElementById('coverage-runs-list').innerHTML = html;
             }
 
-            // Load all charts for comparison mode (all platforms)
-            function loadComparisonCharts(opt) {
-                const basePath = '/benchmarks/comparison';
-                const suffix = opt === 'all' ? '' : `_${opt}`;
+            // Load all charts based on current filter state
+            function loadAllCharts() {
+                if (currentPlatform === 'comparison') {
+                    const basePath = '/benchmarks/comparison';
+                    const suffix = currentOptLevel === 'all' ? '' : `_${currentOptLevel}`;
 
-                loadSvg(timelineContainer, `${basePath}/timeline${suffix}.svg`);
-                loadSvg(breakdownContainer, `${basePath}/breakdown${suffix}.svg`);
-                loadSvg(memoryContainer, `${basePath}/memory${suffix}.svg`);
-                loadSvg(binaryContainer, `${basePath}/binary_size${suffix}.svg`);
-                loadSvg(runtimeContainer, `${basePath}/runtime${suffix}.svg`);
-            }
+                    loadSvg(timelineContainer, `${basePath}/timeline${suffix}.svg`);
+                    loadSvg(breakdownContainer, `${basePath}/breakdown${suffix}.svg`);
+                    loadSvg(memoryContainer, `${basePath}/memory${suffix}.svg`);
+                    loadSvg(binaryContainer, `${basePath}/binary_size${suffix}.svg`);
+                    loadSvg(runtimeContainer, `${basePath}/runtime${suffix}.svg`);
 
-            // Load charts for a single platform
-            function loadPlatformCharts(basePath, opt) {
-                loadSvg(timelineContainer, `${basePath}/timeline_${opt}.svg`);
-                loadSvg(memoryContainer, `${basePath}/memory_${opt}.svg`);
-                loadSvg(binaryContainer, `${basePath}/binary_size_${opt}.svg`);
-                loadSvg(runtimeContainer, `${basePath}/runtime_${opt}.svg`);
-
-                // Breakdown: use per-program if selected, otherwise aggregate
-                if (currentBenchmark) {
-                    loadSvg(breakdownContainer, `${basePath}/breakdown_${currentBenchmark}@${opt}.svg`);
+                    coverageSection.style.display = 'none';
+                    updateMetricsTable(null);
                 } else {
-                    loadSvg(breakdownContainer, `${basePath}/breakdown_${opt}.svg`);
+                    const basePath = `/benchmarks/platforms/${currentPlatform}`;
+                    const optLevels = currentPlatformMeta?.opt_levels || ['O0'];
+                    const opt = resolveOptLevel(optLevels);
+
+                    loadSvg(timelineContainer, `${basePath}/timeline_${opt}.svg`);
+                    loadSvg(memoryContainer, `${basePath}/memory_${opt}.svg`);
+                    loadSvg(binaryContainer, `${basePath}/binary_size_${opt}.svg`);
+                    loadSvg(runtimeContainer, `${basePath}/runtime_${opt}.svg`);
+
+                    // Breakdown: use per-program if selected, otherwise aggregate
+                    if (currentBenchmark) {
+                        loadSvg(breakdownContainer, `${basePath}/breakdown_${currentBenchmark}@${opt}.svg`);
+                    } else {
+                        loadSvg(breakdownContainer, `${basePath}/breakdown_${opt}.svg`);
+                    }
+
+                    coverageSection.style.display = 'block';
+
+                    // Update metrics table with current filters
+                    if (currentPlatformMeta) {
+                        updateMetricsTable(currentPlatformMeta.latest_benchmarks);
+                    }
                 }
             }
 
-            // Load data for a specific platform
+            // Load data for a specific platform (fetches metadata, then loads charts)
             function loadPlatformData(platform) {
                 currentPlatform = platform;
 
                 if (platform === 'comparison') {
-                    // Comparison mode: show all charts with cross-platform data
-                    platformInfo.textContent = 'Showing all platforms';
-                    coverageSection.style.display = 'none';
-
                     // Use comparison metadata for opt levels and benchmarks
-                    const compMeta = platformMetadata;
-                    if (compMeta) {
-                        populateOptLevels(compMeta.opt_levels || ['O0']);
-                        populateBenchmarks(compMeta.benchmarks || []);
+                    if (platformMetadata) {
+                        populateOptLevels(platformMetadata.opt_levels || ['O0']);
+                        populateBenchmarks(platformMetadata.benchmarks || []);
                     }
-
-                    loadComparisonCharts(currentOptLevel);
-                    updateStats(null);
-                    updateMetricsTable(null);
+                    loadAllCharts();
                 } else {
-                    // Single platform mode: show all charts with platform-specific data
-                    const platformName = platformMetadata?.platforms?.find(p => p.id === platform)?.name || platform;
-                    platformInfo.textContent = platformName;
-                    coverageSection.style.display = 'block';
-
                     const basePath = `/benchmarks/platforms/${platform}`;
 
-                    // Fetch platform metadata for stats, benchmarks, and opt levels
+                    // Fetch platform metadata for benchmarks and opt levels
                     fetch(`${basePath}/metadata.json`)
                         .then(r => r.json())
                         .then(data => {
                             currentPlatformMeta = data;
-                            updateStats(data.summary);
-                            updateMetricsTable(data.latest_benchmarks);
                             updateCoverage(data.coverage);
 
                             // Populate opt level dropdown
@@ -454,14 +349,12 @@
                             }
                             populateBenchmarks(baseNames);
 
-                            // Load charts
-                            const opt = resolveOptLevel(data.opt_levels);
-                            loadPlatformCharts(basePath, opt);
+                            // Load all charts with current filters
+                            loadAllCharts();
                         })
                         .catch(() => {
-                            updateStats(null);
-                            updateMetricsTable(null);
                             updateCoverage(null);
+                            updateMetricsTable(null);
                         });
                 }
             }
@@ -500,23 +393,6 @@
                 }
             }
 
-            // Reload charts based on current filter state
-            function reloadCharts() {
-                if (currentPlatform === 'comparison') {
-                    loadComparisonCharts(currentOptLevel);
-                } else {
-                    const basePath = `/benchmarks/platforms/${currentPlatform}`;
-                    const optLevels = currentPlatformMeta?.opt_levels || ['O0'];
-                    const opt = resolveOptLevel(optLevels);
-                    loadPlatformCharts(basePath, opt);
-
-                    // Re-filter metrics table
-                    if (currentPlatformMeta) {
-                        updateMetricsTable(currentPlatformMeta.latest_benchmarks);
-                    }
-                }
-            }
-
             // Initialize: load root metadata to populate platform selector
             fetch('/benchmarks/metadata.json')
                 .then(r => r.json())
@@ -547,7 +423,6 @@
                     if (data.platforms?.some(p => p.has_data)) {
                         loadPlatformData('comparison');
                     } else {
-                        platformInfo.textContent = 'No benchmark data available yet';
                         timelineContainer.innerHTML = '<p class="text-muted text-center py-8">No benchmark data available</p>';
                     }
                 })
@@ -561,37 +436,21 @@
                     loadSvg(memoryContainer, '/benchmarks/memory.svg');
                     loadSvg(binaryContainer, '/benchmarks/binary_size.svg');
                     loadSvg(runtimeContainer, '/benchmarks/runtime_O0.svg');
-
-                    // Try to load legacy metadata
-                    fetch('/benchmarks/metadata.json')
-                        .then(r => r.json())
-                        .then(data => {
-                            updateStats(data.summary);
-                            updateMetricsTable(data.latest_benchmarks);
-                            updateCoverage(data.coverage);
-                        })
-                        .catch(() => {
-                            updateStats(null);
-                            updateMetricsTable(null);
-                            updateCoverage(null);
-                        });
                 });
 
-            // Handle platform selection changes
+            // All filter changes reload all charts
             platformSelect.addEventListener('change', function() {
                 loadPlatformData(this.value);
             });
 
-            // Handle opt level selection changes
             optLevelSelect.addEventListener('change', function() {
                 currentOptLevel = this.value;
-                reloadCharts();
+                loadAllCharts();
             });
 
-            // Handle benchmark selection changes
             benchmarkSelect.addEventListener('change', function() {
                 currentBenchmark = this.value;
-                reloadCharts();
+                loadAllCharts();
             });
         })();
         </script>
