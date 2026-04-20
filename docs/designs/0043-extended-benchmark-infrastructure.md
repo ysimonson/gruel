@@ -183,7 +183,7 @@ No changes to the workflow YAML itself — the expansion is entirely within `ben
 
 - [x] **Phase 3: Multi-opt-level benchmarking** — Extend `bench.sh` to parse `opt_levels` from `manifest.toml` `[config]` section. Run each benchmark at each opt level. Tag results with `"opt_level"` field and `"@{level}"` suffix in benchmark name. Update `manifest.toml` with `opt_levels = ["O0", "O3"]`. Update `append-benchmark.py` if needed to handle the new fields.
 
-- [ ] **Phase 4: Runtime benchmarking** — After compiling each benchmark in `bench.sh`, run the binary with `/usr/bin/time` for multiple iterations. Compute mean/stddev of wall-clock execution time. Add `"runtime_ms"` and `"runtime_std_ms"` to the per-benchmark JSON output.
+- [x] **Phase 4: Runtime benchmarking** — After compiling each benchmark in `bench.sh`, run the binary with `/usr/bin/time` for multiple iterations. Compute mean/stddev of wall-clock execution time. Add `"runtime_ms"` and `"runtime_std_ms"` to the per-benchmark JSON output.
 
 - [ ] **Phase 5: Website visualization** — Update `generate-charts.py` to generate runtime charts and opt-level comparison charts. Update `performance.html` to add opt-level dropdown, runtime section, and binary size comparison section. Update `metadata.json` generation to include runtime stats.
 
