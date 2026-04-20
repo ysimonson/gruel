@@ -162,7 +162,7 @@ pub fn generate(
             "generic",
             "",
             to_llvm_opt_level(opt_level),
-            RelocMode::Default,
+            RelocMode::PIC,
             CodeModel::Default,
         )
         .ok_or_else(|| llvm_error("failed to create LLVM TargetMachine"))?;
@@ -206,7 +206,7 @@ pub fn generate_ir(
                 "generic",
                 "",
                 to_llvm_opt_level(opt_level),
-                RelocMode::Default,
+                RelocMode::PIC,
                 CodeModel::Default,
             )
             .ok_or_else(|| llvm_error("failed to create LLVM TargetMachine"))?;
