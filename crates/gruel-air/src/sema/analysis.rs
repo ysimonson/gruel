@@ -1495,7 +1495,7 @@ impl<'a> Sema<'a> {
         if let Some(values) = value_subst {
             for (name, const_val) in values {
                 let ty = match const_val {
-                    ConstValue::Integer(_) => Type::I32, // TODO: Track actual type
+                    ConstValue::Integer(_) => Type::COMPTIME_INT,
                     ConstValue::Bool(_) => Type::BOOL,
                     ConstValue::Type(t) => *t,
                     ConstValue::Unit => Type::UNIT,
@@ -1714,12 +1714,18 @@ impl<'a> Sema<'a> {
             if let Some(const_value) = ctx.comptime_value_vars.get(name) {
                 match const_value {
                     ConstValue::Integer(val) => {
+                        let ty = Self::get_resolved_type(
+                            ctx,
+                            inst_ref,
+                            inst.span,
+                            "comptime integer value",
+                        )?;
                         let air_ref = air.add_inst(AirInst {
                             data: AirInstData::Const(*val as u64),
-                            ty: Type::I32,
+                            ty,
                             span: inst.span,
                         });
-                        return Ok(AnalysisResult::new(air_ref, Type::I32));
+                        return Ok(AnalysisResult::new(air_ref, ty));
                     }
                     ConstValue::Bool(val) => {
                         let air_ref = air.add_inst(AirInst {

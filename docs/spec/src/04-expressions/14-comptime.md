@@ -879,6 +879,34 @@ fn check_name(comptime name: comptime_str) -> i32 {
 
 It is a compile-time error to call runtime-only mutation methods (`push_str`, `push`, `clear`, `reserve`) on a `comptime_str` value. The compiler produces a diagnostic suggesting `.concat()` as the immutable alternative. Calling `.capacity()` on a `comptime_str` is also a compile-time error, since compile-time strings have no allocation.
 
+## Comptime Integers
+
+{{ rule(id="4.14:80", cat="normative") }}
+
+The `comptime_int` type represents an integer value that exists only at compile time. Integer expressions evaluated inside `comptime` blocks produce `comptime_int` values. Internally, `comptime_int` values are stored as signed 64-bit integers.
+
+{{ rule(id="4.14:81", cat="normative") }}
+
+When a `comptime_int` value flows into a runtime context, it is implicitly coerced to the expected integer type. The target type is determined by type inference. If no type constraint is present, the value defaults to `i32`.
+
+{{ rule(id="4.14:82", cat="legality-rule") }}
+
+It is a compile-time error if a `comptime_int` value does not fit in the target integer type.
+
+{{ rule(id="4.14:83", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    let x: u64 = comptime { 100 };   // comptime_int coerces to u64
+    let y: i32 = comptime { 42 };    // comptime_int coerces to i32
+    @intCast(x) + y
+}
+```
+
+{{ rule(id="4.14:84", cat="normative") }}
+
+Captured comptime integer parameters (e.g., `comptime N: i32`) are represented as `comptime_int` values inside the comptime system. When referenced in runtime code, they coerce to the type expected by the surrounding context.
+
 ## Type Reflection
 
 {{ rule(id="4.14:60", cat="normative") }}

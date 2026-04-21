@@ -921,6 +921,7 @@ impl TypeInternPool {
             TypeKind::Module(_) => panic!("Cannot intern module types"),
             TypeKind::ComptimeType => panic!("Cannot intern comptime types"),
             TypeKind::ComptimeStr => panic!("Cannot intern comptime_str types"),
+            TypeKind::ComptimeInt => panic!("Cannot intern comptime_int types"),
         }
     }
 
@@ -1060,8 +1061,8 @@ impl TypeInternPool {
             | TypeKind::PtrConst(_)
             | TypeKind::PtrMut(_)
             | TypeKind::Module(_) => None,
-            // ComptimeType/ComptimeStr are comptime-only types, cannot be interned for runtime
-            TypeKind::ComptimeType | TypeKind::ComptimeStr => None,
+            // Comptime-only types cannot be interned for runtime
+            TypeKind::ComptimeType | TypeKind::ComptimeStr | TypeKind::ComptimeInt => None,
         }
     }
 
@@ -1116,6 +1117,7 @@ impl TypeInternPool {
             | TypeKind::Never
             | TypeKind::ComptimeType
             | TypeKind::ComptimeStr
+            | TypeKind::ComptimeInt
             | TypeKind::Module(_) => 0,
             _ => 1,
         }
@@ -1145,6 +1147,7 @@ impl TypeInternPool {
             TypeKind::Error => "<error>".to_string(),
             TypeKind::ComptimeType => "type".to_string(),
             TypeKind::ComptimeStr => "comptime_str".to_string(),
+            TypeKind::ComptimeInt => "comptime_int".to_string(),
             TypeKind::Struct(id) => self.struct_def(id).name.clone(),
             TypeKind::Enum(id) => self.enum_def(id).name.clone(),
             TypeKind::Array(id) => {

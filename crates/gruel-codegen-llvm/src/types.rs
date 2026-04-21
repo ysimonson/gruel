@@ -248,9 +248,11 @@ pub fn gruel_type_to_llvm<'ctx>(
         }
 
         // Non-code-gen types — not representable in LLVM IR.
-        TypeKind::Error | TypeKind::ComptimeType | TypeKind::ComptimeStr | TypeKind::Module(_) => {
-            None
-        }
+        TypeKind::Error
+        | TypeKind::ComptimeType
+        | TypeKind::ComptimeStr
+        | TypeKind::ComptimeInt
+        | TypeKind::Module(_) => None,
     }
 }
 

@@ -108,6 +108,7 @@ pub fn type_name_component(ty: Type, type_pool: &TypeInternPool) -> String {
         TypeKind::Error => "error".to_owned(),
         TypeKind::ComptimeType => "comptime_type".to_owned(),
         TypeKind::ComptimeStr => "comptime_str".to_owned(),
+        TypeKind::ComptimeInt => "comptime_int".to_owned(),
         TypeKind::Enum(id) => format!("enum{}", id.0),
         TypeKind::Struct(id) => type_pool.struct_def(id).name.clone(),
         TypeKind::Array(id) => {

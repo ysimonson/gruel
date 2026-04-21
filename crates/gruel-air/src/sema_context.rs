@@ -453,10 +453,12 @@ impl<'a> SemaContext<'a> {
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values)
             TypeKind::Enum(_) => true,
-            // Never, Error, ComptimeType, and ComptimeStr are Copy for convenience
-            TypeKind::Never | TypeKind::Error | TypeKind::ComptimeType | TypeKind::ComptimeStr => {
-                true
-            }
+            // Never, Error, ComptimeType, ComptimeStr, and ComptimeInt are Copy for convenience
+            TypeKind::Never
+            | TypeKind::Error
+            | TypeKind::ComptimeType
+            | TypeKind::ComptimeStr
+            | TypeKind::ComptimeInt => true,
             // Struct types: check if marked with @copy
             TypeKind::Struct(struct_id) => {
                 let struct_def = self.type_pool.struct_def(struct_id);
@@ -499,6 +501,8 @@ impl<'a> SemaContext<'a> {
                     length,
                 }
             }
+            // ComptimeInt coerces to any integer type (like an integer literal)
+            TypeKind::ComptimeInt => InferType::IntLiteral,
             _ => InferType::Concrete(ty),
         }
     }

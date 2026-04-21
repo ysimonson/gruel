@@ -43,6 +43,8 @@ impl<'a> Sema<'a> {
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values)
             TypeKind::Enum(_) => true,
+            // ComptimeInt is Copy (like ComptimeStr)
+            TypeKind::ComptimeInt => true,
             // Never and Error are Copy for convenience
             TypeKind::Never | TypeKind::Error => true,
             // Struct types: check if marked with @copy
@@ -102,6 +104,8 @@ impl<'a> Sema<'a> {
                     length,
                 }
             }
+            // ComptimeInt coerces to any integer type (like an integer literal)
+            TypeKind::ComptimeInt => InferType::IntLiteral,
             // All other types wrap directly
             _ => InferType::Concrete(ty),
         }
@@ -344,8 +348,12 @@ impl<'a> Sema<'a> {
             | TypeKind::Bool
             | TypeKind::Error => 1,
             // Zero-sized types use 0 slots
-            // ComptimeType/ComptimeStr are comptime-only and use 0 runtime slots
-            TypeKind::Unit | TypeKind::Never | TypeKind::ComptimeType | TypeKind::ComptimeStr => 0,
+            // ComptimeType/ComptimeStr/ComptimeInt are comptime-only and use 0 runtime slots
+            TypeKind::Unit
+            | TypeKind::Never
+            | TypeKind::ComptimeType
+            | TypeKind::ComptimeStr
+            | TypeKind::ComptimeInt => 0,
             // Enums are represented as their discriminant type (a scalar), so 1 slot
             TypeKind::Enum(_) => 1,
             // Struct uses sum of all field slots (includes builtin String with 3 fields)

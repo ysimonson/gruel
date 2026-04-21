@@ -184,13 +184,13 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 ### Phase 4: Compile-time integer type (comptime_int)
 
-- [ ] Add `ComptimeInt` to `TypeKind`, `Type` constant (tag 19)
-- [ ] Add `is_comptime_int()` helper, update `is_copy()`, `is_valid_encoding()`
-- [ ] Mirror `ComptimeStr` handling: cannot be interned in type pool, not a runtime type
-- [ ] Update comptime interpreter to produce `ComptimeInt` for integer expressions in comptime blocks
-- [ ] Implement coercion from `comptime_int` to any integer type (with compile-time range validation)
-- [ ] Update `Display`/`Debug`/`name()` to return `"comptime_int"`
-- [ ] Add spec tests for comptime_int usage and coercion
+- [x] Add `ComptimeInt` to `TypeKind`, `Type` constant (tag 19)
+- [x] Add `is_comptime_int()` helper, update `is_copy()`, `is_valid_encoding()`
+- [x] Mirror `ComptimeStr` handling: cannot be interned in type pool, not a runtime type
+- [x] Update comptime interpreter to produce `ComptimeInt` for integer expressions in comptime blocks
+- [x] Implement coercion from `comptime_int` to any integer type (with compile-time range validation)
+- [x] Update `Display`/`Debug`/`name()` to return `"comptime_int"`
+- [x] Add spec tests for comptime_int usage and coercion (7 tests in `comptime.toml`, spec paragraphs 4.14:80-84)
 
 ### Phase 5: Polish and edge cases
 

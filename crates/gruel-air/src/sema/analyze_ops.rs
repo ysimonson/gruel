@@ -2173,7 +2173,7 @@ impl<'a> Sema<'a> {
                 self.analyze_struct_destructure(air, inst_ref, ctx)
             }
 
-            InstData::VarRef { name } => self.analyze_var_ref(air, *name, inst.span, ctx),
+            InstData::VarRef { name } => self.analyze_var_ref(air, inst_ref, *name, inst.span, ctx),
 
             InstData::ParamRef { index: _, name } => {
                 self.analyze_param_ref(air, *name, inst.span, ctx)
@@ -2543,6 +2543,7 @@ impl<'a> Sema<'a> {
     fn analyze_var_ref(
         &mut self,
         air: &mut Air,
+        inst_ref: InstRef,
         name: Spur,
         span: Span,
         ctx: &mut AnalysisContext,
@@ -2657,13 +2658,14 @@ impl<'a> Sema<'a> {
         if let Some(const_value) = ctx.comptime_value_vars.get(&name) {
             match const_value {
                 ConstValue::Integer(val) => {
-                    // For now, emit as i32 const. TODO: Track actual type.
+                    let ty =
+                        Self::get_resolved_type(ctx, inst_ref, span, "comptime integer value")?;
                     let air_ref = air.add_inst(AirInst {
                         data: AirInstData::Const(*val as u64),
-                        ty: Type::I32,
+                        ty,
                         span,
                     });
-                    return Ok(AnalysisResult::new(air_ref, Type::I32));
+                    return Ok(AnalysisResult::new(air_ref, ty));
                 }
                 ConstValue::Bool(val) => {
                     let air_ref = air.add_inst(AirInst {
