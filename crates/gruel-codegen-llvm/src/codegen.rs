@@ -9,6 +9,7 @@ use gruel_cfg::{
     BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator, drop_names,
 };
 use gruel_error::{CompileError, CompileResult, ErrorKind};
+use inkwell::FloatPredicate;
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
 use inkwell::basic_block::BasicBlock as LlvmBlock;
@@ -1230,6 +1231,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 }
                 all_eq
             }
+            _ if ty.is_float() => {
+                let l_f = l.into_float_value();
+                let r_f = r.into_float_value();
+                self.builder
+                    .build_float_compare(FloatPredicate::OEQ, l_f, r_f, "feq")
+                    .unwrap()
+            }
             _ => {
                 // Scalar: icmp eq on integers (bool, enums, ints all map to LLVM int types).
                 let l_int = l.into_int_value();
@@ -1390,60 +1398,90 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             // ---- Binary arithmetic ----
             CfgInstData::Add(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                let intrinsic = if is_signed_type(lhs_ty) {
-                    "llvm.sadd.with.overflow"
+                if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    Some(self.builder.build_float_add(l, r, "fadd").unwrap().into())
                 } else {
-                    "llvm.uadd.with.overflow"
-                };
-                Some(self.build_checked_int_op(l, r, intrinsic).into())
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    let intrinsic = if is_signed_type(lhs_ty) {
+                        "llvm.sadd.with.overflow"
+                    } else {
+                        "llvm.uadd.with.overflow"
+                    };
+                    Some(self.build_checked_int_op(l, r, intrinsic).into())
+                }
             }
             CfgInstData::Sub(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                let intrinsic = if is_signed_type(lhs_ty) {
-                    "llvm.ssub.with.overflow"
+                if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    Some(self.builder.build_float_sub(l, r, "fsub").unwrap().into())
                 } else {
-                    "llvm.usub.with.overflow"
-                };
-                Some(self.build_checked_int_op(l, r, intrinsic).into())
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    let intrinsic = if is_signed_type(lhs_ty) {
+                        "llvm.ssub.with.overflow"
+                    } else {
+                        "llvm.usub.with.overflow"
+                    };
+                    Some(self.build_checked_int_op(l, r, intrinsic).into())
+                }
             }
             CfgInstData::Mul(lhs, rhs) => {
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                let intrinsic = if is_signed_type(lhs_ty) {
-                    "llvm.smul.with.overflow"
+                if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    Some(self.builder.build_float_mul(l, r, "fmul").unwrap().into())
                 } else {
-                    "llvm.umul.with.overflow"
-                };
-                Some(self.build_checked_int_op(l, r, intrinsic).into())
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    let intrinsic = if is_signed_type(lhs_ty) {
+                        "llvm.smul.with.overflow"
+                    } else {
+                        "llvm.umul.with.overflow"
+                    };
+                    Some(self.build_checked_int_op(l, r, intrinsic).into())
+                }
             }
             CfgInstData::Div(lhs, rhs) => {
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
-                self.build_div_zero_check(r);
-                let v = if is_signed_type(lhs_ty) {
-                    self.builder.build_int_signed_div(l, r, "div").unwrap()
+                if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    Some(self.builder.build_float_div(l, r, "fdiv").unwrap().into())
                 } else {
-                    self.builder.build_int_unsigned_div(l, r, "div").unwrap()
-                };
-                Some(v.into())
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    self.build_div_zero_check(r);
+                    let v = if is_signed_type(lhs_ty) {
+                        self.builder.build_int_signed_div(l, r, "div").unwrap()
+                    } else {
+                        self.builder.build_int_unsigned_div(l, r, "div").unwrap()
+                    };
+                    Some(v.into())
+                }
             }
             CfgInstData::Mod(lhs, rhs) => {
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
                 let lhs_ty = self.cfg.get_inst(lhs).ty;
-                self.build_div_zero_check(r);
-                let v = if is_signed_type(lhs_ty) {
-                    self.builder.build_int_signed_rem(l, r, "rem").unwrap()
+                if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    Some(self.builder.build_float_rem(l, r, "frem").unwrap().into())
                 } else {
-                    self.builder.build_int_unsigned_rem(l, r, "rem").unwrap()
-                };
-                Some(v.into())
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    self.build_div_zero_check(r);
+                    let v = if is_signed_type(lhs_ty) {
+                        self.builder.build_int_signed_rem(l, r, "rem").unwrap()
+                    } else {
+                        self.builder.build_int_unsigned_rem(l, r, "rem").unwrap()
+                    };
+                    Some(v.into())
+                }
             }
 
             // ---- Comparisons (produce i1) ----
@@ -1477,6 +1515,15 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let l = self.get_value(lhs);
                     let r = self.get_value(rhs);
                     Some(self.build_str_cmp(l, r, IntPredicate::SLT, "strlt").into())
+                } else if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    Some(
+                        self.builder
+                            .build_float_compare(FloatPredicate::OLT, l, r, "flt")
+                            .unwrap()
+                            .into(),
+                    )
                 } else {
                     let (pred, upred) = (IntPredicate::SLT, IntPredicate::ULT);
                     let l = self.get_value(lhs).into_int_value();
@@ -1496,6 +1543,15 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let l = self.get_value(lhs);
                     let r = self.get_value(rhs);
                     Some(self.build_str_cmp(l, r, IntPredicate::SGT, "strgt").into())
+                } else if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    Some(
+                        self.builder
+                            .build_float_compare(FloatPredicate::OGT, l, r, "fgt")
+                            .unwrap()
+                            .into(),
+                    )
                 } else {
                     let (pred, upred) = (IntPredicate::SGT, IntPredicate::UGT);
                     let l = self.get_value(lhs).into_int_value();
@@ -1515,6 +1571,15 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let l = self.get_value(lhs);
                     let r = self.get_value(rhs);
                     Some(self.build_str_cmp(l, r, IntPredicate::SLE, "strle").into())
+                } else if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    Some(
+                        self.builder
+                            .build_float_compare(FloatPredicate::OLE, l, r, "fle")
+                            .unwrap()
+                            .into(),
+                    )
                 } else {
                     let (pred, upred) = (IntPredicate::SLE, IntPredicate::ULE);
                     let l = self.get_value(lhs).into_int_value();
@@ -1534,6 +1599,15 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let l = self.get_value(lhs);
                     let r = self.get_value(rhs);
                     Some(self.build_str_cmp(l, r, IntPredicate::SGE, "strge").into())
+                } else if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    Some(
+                        self.builder
+                            .build_float_compare(FloatPredicate::OGE, l, r, "fge")
+                            .unwrap()
+                            .into(),
+                    )
                 } else {
                     let (pred, upred) = (IntPredicate::SGE, IntPredicate::UGE);
                     let l = self.get_value(lhs).into_int_value();
@@ -1585,13 +1659,19 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
             // ---- Unary ----
             CfgInstData::Neg(operand) => {
-                let v = self.get_value(operand).into_int_value();
-                // Negation on signed types: 0 - v, with overflow check.
-                let zero = v.get_type().const_zero();
-                Some(
-                    self.build_checked_int_op(zero, v, "llvm.ssub.with.overflow")
-                        .into(),
-                )
+                let op_ty = self.cfg.get_inst(operand).ty;
+                if op_ty.is_float() {
+                    let v = self.get_value(operand).into_float_value();
+                    Some(self.builder.build_float_neg(v, "fneg").unwrap().into())
+                } else {
+                    let v = self.get_value(operand).into_int_value();
+                    // Negation on signed types: 0 - v, with overflow check.
+                    let zero = v.get_type().const_zero();
+                    Some(
+                        self.build_checked_int_op(zero, v, "llvm.ssub.with.overflow")
+                            .into(),
+                    )
+                }
             }
             CfgInstData::Not(operand) => {
                 // Boolean not: compare == 0.

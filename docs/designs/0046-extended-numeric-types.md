@@ -198,12 +198,13 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 ### Phase 4: Floating-point codegen and semantics
 
-- [ ] Emit float arithmetic: `fadd`, `fsub`, `fmul`, `fdiv`, `frem` for all four widths
-- [ ] Emit float comparisons: `fcmp` with ordered predicates (OEQ, ONE, OLT, OGT, OLE, OGE)
-- [ ] Emit float negation: `fneg`
-- [ ] Reject bitwise operators on float types in Sema
+- [x] Emit float arithmetic: `fadd`, `fsub`, `fmul`, `fdiv`, `frem` for all four widths
+- [x] Emit float comparisons: `fcmp` with ordered predicates (OEQ, OLT, OGT, OLE, OGE)
+- [x] Emit float negation: `fneg`
+- [x] Reject bitwise operators on float types in Sema (via `IsNumeric` vs `IsInteger` constraint split)
+- [x] Add spec tests for float arithmetic, comparison, negation, bitwise rejection (19 new tests)
 - [ ] Extend `@intCast` or add `@cast` for float↔int and float↔float conversions (fptrunc/fpext)
-- [ ] Add spec tests for float arithmetic, comparison, casting, edge cases (NaN, infinity, negative zero)
+- [ ] Add spec tests for float casting, edge cases (NaN, infinity, negative zero)
 - [ ] Add spec tests for f16 range limits and f128 precision
 
 ### Phase 5: Compile-time integer type (comptime_int)
@@ -220,7 +221,6 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 - [ ] Update `Display`/`Debug` impls for new types
 - [ ] Update fuzz targets to generate programs with new types
-- [ ] Update comptime evaluation to use `i128` internally (currently uses `i64` — straightforward promotion)
 - [ ] Decide comptime float evaluation strategy (run at compile time or defer to runtime)
 - [ ] Ensure error messages mention new types correctly
 - [ ] Update `EnumDef::discriminant_type` if needed for very large enums

@@ -1576,6 +1576,10 @@ impl<'a> Sema<'a> {
                     expected: "unsigned integer type".to_string(),
                     found: ty.name().to_string(),
                 },
+                UnifyResult::NotNumeric { ty } => ErrorKind::TypeMismatch {
+                    expected: "numeric type".to_string(),
+                    found: ty.name().to_string(),
+                },
                 UnifyResult::ArrayLengthMismatch { expected, found } => {
                     ErrorKind::ArrayLengthMismatch {
                         expected: *expected,
@@ -4303,11 +4307,11 @@ impl<'a> Sema<'a> {
         let lhs_result = self.analyze_inst(air, lhs, ctx)?;
         let rhs_result = self.analyze_inst(air, rhs, ctx)?;
 
-        // Verify the type is integer (HM should have enforced this, but check anyway)
-        if !lhs_result.ty.is_integer() && !lhs_result.ty.is_error() && !lhs_result.ty.is_never() {
+        // Verify the type is numeric (HM should have enforced this, but check anyway)
+        if !lhs_result.ty.is_numeric() && !lhs_result.ty.is_error() && !lhs_result.ty.is_never() {
             return Err(CompileError::new(
                 ErrorKind::TypeMismatch {
-                    expected: "integer type".to_string(),
+                    expected: "numeric type".to_string(),
                     found: lhs_result.ty.name().to_string(),
                 },
                 span,
@@ -4366,9 +4370,9 @@ impl<'a> Sema<'a> {
 
         // Validate the type is appropriate for this comparison
         if allow_bool {
-            // Equality operators (==, !=) work on integers, booleans, strings, unit, and structs
+            // Equality operators (==, !=) work on integers, floats, booleans, strings, unit, and structs
             // Note: String is now a struct, so is_struct() covers it
-            if !lhs_type.is_integer()
+            if !lhs_type.is_numeric()
                 && lhs_type != Type::BOOL
                 && lhs_type != Type::UNIT
                 && !lhs_type.is_struct()
@@ -4376,16 +4380,16 @@ impl<'a> Sema<'a> {
             {
                 return Err(CompileError::new(
                     ErrorKind::TypeMismatch {
-                        expected: "integer, bool, string, unit, or struct".to_string(),
+                        expected: "numeric, bool, string, unit, or struct".to_string(),
                         found: lhs_type.name().to_string(),
                     },
                     self.rir.get(lhs).span,
                 ));
             }
-        } else if !lhs_type.is_integer() && !self.is_builtin_string(lhs_type) {
+        } else if !lhs_type.is_numeric() && !self.is_builtin_string(lhs_type) {
             return Err(CompileError::new(
                 ErrorKind::TypeMismatch {
-                    expected: "integer or string".to_string(),
+                    expected: "numeric or string".to_string(),
                     found: lhs_type.name().to_string(),
                 },
                 self.rir.get(lhs).span,

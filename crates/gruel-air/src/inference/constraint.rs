@@ -39,6 +39,12 @@ pub enum Constraint {
     ///
     /// Generated for array indexing which requires non-negative indices.
     IsUnsigned(InferType, Span),
+
+    /// Type must be numeric (integer or float): τ ∈ {i8..i128, u8..u128, isize, usize, f16..f128}.
+    ///
+    /// Generated for arithmetic operators (+, -, *, /, %) which work on both
+    /// integer and floating-point types.
+    IsNumeric(InferType, Span),
 }
 
 impl Constraint {
@@ -62,13 +68,19 @@ impl Constraint {
         Constraint::IsUnsigned(ty, span)
     }
 
+    /// Create a "must be numeric" constraint (integer or float).
+    pub fn is_numeric(ty: InferType, span: Span) -> Self {
+        Constraint::IsNumeric(ty, span)
+    }
+
     /// Get the span for this constraint (for error reporting).
     pub fn span(&self) -> Span {
         match self {
             Constraint::Equal(_, _, span)
             | Constraint::IsSigned(_, span)
             | Constraint::IsInteger(_, span)
-            | Constraint::IsUnsigned(_, span) => *span,
+            | Constraint::IsUnsigned(_, span)
+            | Constraint::IsNumeric(_, span) => *span,
         }
     }
 }

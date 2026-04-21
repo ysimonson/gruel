@@ -202,12 +202,12 @@ mod tests {
             "Should have exactly 1 error, not cascading errors"
         );
 
-        // Verify the error is about type mismatch (integer vs bool)
+        // Verify the error is about type mismatch (numeric vs bool)
         let error = errors.iter().next().unwrap();
         assert!(
             matches!(&error.kind, ErrorKind::TypeMismatch { expected, found }
-                if expected.contains("integer") && found.contains("bool")),
-            "Error should mention integer and bool, got: {:?}",
+                if expected.contains("numeric") && found.contains("bool")),
+            "Error should mention numeric and bool, got: {:?}",
             error.kind
         );
     }

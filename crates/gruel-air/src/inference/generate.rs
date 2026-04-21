@@ -328,19 +328,19 @@ impl<'a> ConstraintGenerator<'a> {
 
             InstData::UnitConst => InferType::Concrete(Type::UNIT),
 
-            // Binary arithmetic: both operands must have the same type, result is that type
+            // Binary arithmetic: both operands must have the same numeric type
             InstData::Add { lhs, rhs }
             | InstData::Sub { lhs, rhs }
             | InstData::Mul { lhs, rhs }
             | InstData::Div { lhs, rhs }
             | InstData::Mod { lhs, rhs } => self.generate_binary_arith(*lhs, *rhs, ctx),
 
-            // Bitwise operations: same as arithmetic
+            // Bitwise operations: operands must be integers (no floats)
             InstData::BitAnd { lhs, rhs }
             | InstData::BitOr { lhs, rhs }
             | InstData::BitXor { lhs, rhs }
             | InstData::Shl { lhs, rhs }
-            | InstData::Shr { lhs, rhs } => self.generate_binary_arith(*lhs, *rhs, ctx),
+            | InstData::Shr { lhs, rhs } => self.generate_binary_bitwise(*lhs, *rhs, ctx),
 
             // Comparison operators: operands must match, result is bool
             InstData::Eq { lhs, rhs }
@@ -1527,7 +1527,9 @@ impl<'a> ConstraintGenerator<'a> {
         ExprInfo::new(ty, span)
     }
 
-    /// Generate constraints for a binary arithmetic operation.
+    /// Generate constraints for a binary arithmetic operation (+, -, *, /, %).
+    ///
+    /// Operands must be numeric (integer or float).
     fn generate_binary_arith(
         &mut self,
         lhs: InstRef,
@@ -1537,8 +1539,6 @@ impl<'a> ConstraintGenerator<'a> {
         let lhs_info = self.generate(lhs, ctx);
         let rhs_info = self.generate(rhs, ctx);
 
-        // Both operands must have the same type
-        // Use a fresh type variable for the result
         let result_var = self.fresh_var();
         let result_ty = InferType::Var(result_var);
 
@@ -1553,7 +1553,39 @@ impl<'a> ConstraintGenerator<'a> {
             rhs_info.span,
         ));
 
-        // Result must be an integer type (catches errors like `true + 1` early)
+        // Result must be numeric (integer or float)
+        self.add_constraint(Constraint::is_numeric(result_ty.clone(), lhs_info.span));
+
+        result_ty
+    }
+
+    /// Generate constraints for a binary bitwise operation (&, |, ^, <<, >>).
+    ///
+    /// Operands must be integers (floats are not allowed).
+    fn generate_binary_bitwise(
+        &mut self,
+        lhs: InstRef,
+        rhs: InstRef,
+        ctx: &mut ConstraintContext,
+    ) -> InferType {
+        let lhs_info = self.generate(lhs, ctx);
+        let rhs_info = self.generate(rhs, ctx);
+
+        let result_var = self.fresh_var();
+        let result_ty = InferType::Var(result_var);
+
+        self.add_constraint(Constraint::equal(
+            lhs_info.ty,
+            result_ty.clone(),
+            lhs_info.span,
+        ));
+        self.add_constraint(Constraint::equal(
+            rhs_info.ty,
+            result_ty.clone(),
+            rhs_info.span,
+        ));
+
+        // Result must be an integer type (no floats)
         self.add_constraint(Constraint::is_integer(result_ty.clone(), lhs_info.span));
 
         result_ty
@@ -1787,12 +1819,12 @@ mod tests {
 
         // Result should be a type variable
         assert!(info.ty.is_var());
-        // Should generate 3 constraints: lhs = result, rhs = result, IsInteger(result)
+        // Should generate 3 constraints: lhs = result, rhs = result, IsNumeric(result)
         assert_eq!(cgen.constraints().len(), 3);
-        // Verify the third constraint is IsInteger
+        // Verify the third constraint is IsNumeric
         match &cgen.constraints()[2] {
-            Constraint::IsInteger(_, _) => {}
-            _ => panic!("Expected IsInteger constraint for arithmetic result"),
+            Constraint::IsNumeric(_, _) => {}
+            _ => panic!("Expected IsNumeric constraint for arithmetic result"),
         }
     }
 

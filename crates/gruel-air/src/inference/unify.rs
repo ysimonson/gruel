@@ -37,6 +37,9 @@ pub enum UnifyResult {
     /// Type must be unsigned but is signed.
     NotUnsigned { ty: Type },
 
+    /// Type must be numeric (integer or float) but is not.
+    NotNumeric { ty: Type },
+
     /// Array lengths don't match.
     ArrayLengthMismatch { expected: u64, found: u64 },
 }
@@ -86,6 +89,9 @@ impl UnificationError {
             }
             UnifyResult::NotUnsigned { ty } => {
                 format!("array index must be unsigned integer type, found {ty}")
+            }
+            UnifyResult::NotNumeric { ty } => {
+                format!("expected numeric type, found {ty}")
             }
             UnifyResult::ArrayLengthMismatch { expected, found } => {
                 format!("array length mismatch: expected {expected}, found {found}")
@@ -347,6 +353,27 @@ impl Unifier {
         }
     }
 
+    /// Check that a type is numeric (integer or float).
+    ///
+    /// Returns an error if the type is a concrete non-numeric type (e.g., bool).
+    /// For type variables, IntLiteral, and FloatLiteral, the check passes.
+    pub fn check_numeric(&self, ty: &InferType) -> UnifyResult {
+        let ty = self.substitution.apply(ty);
+        match &ty {
+            InferType::Concrete(concrete) => {
+                if concrete.is_numeric() || concrete.is_error() || concrete.is_never() {
+                    UnifyResult::Ok
+                } else {
+                    UnifyResult::NotNumeric { ty: *concrete }
+                }
+            }
+            // Type variables, IntLiteral, and FloatLiteral are OK
+            InferType::Var(_) | InferType::IntLiteral | InferType::FloatLiteral => UnifyResult::Ok,
+            // Arrays are not numeric
+            InferType::Array { .. } => UnifyResult::NotNumeric { ty: Type::ERROR },
+        }
+    }
+
     /// Check that a type is an unsigned integer.
     ///
     /// Returns an error if the type is a concrete signed integer or non-integer type.
@@ -431,6 +458,10 @@ impl Unifier {
                         _ => {}
                     }
                     let result = self.check_unsigned(ty);
+                    (result, *span)
+                }
+                Constraint::IsNumeric(ty, span) => {
+                    let result = self.check_numeric(ty);
                     (result, *span)
                 }
             };

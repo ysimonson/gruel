@@ -144,6 +144,285 @@ fn main() -> i32 {
 """
 exit_code = 0
 
+# --- Arithmetic ---
+
+[[case]]
+name = "float_addition"
+spec = ["3.11:10"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _a: f64 = 1.5 + 2.5;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_subtraction"
+spec = ["3.11:10"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _a: f64 = 10.0 - 3.0;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_multiplication"
+spec = ["3.11:10"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _a: f64 = 2.0 * 3.0;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_division"
+spec = ["3.11:10"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _a: f64 = 10.0 / 3.0;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_remainder"
+spec = ["3.11:10"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _a: f64 = 10.0 % 3.0;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_f32_arithmetic"
+spec = ["3.11:10"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f32 = 1.5;
+    let b: f32 = 2.5;
+    let _c: f32 = a + b;
+    0
+}
+"""
+exit_code = 0
+
+# --- Comparisons ---
+
+[[case]]
+name = "float_equality"
+spec = ["3.11:11"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 1.0;
+    let b: f64 = 1.0;
+    if a == b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_inequality"
+spec = ["3.11:11"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 1.0;
+    let b: f64 = 2.0;
+    if a != b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_less_than"
+spec = ["3.11:11"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 1.0;
+    let b: f64 = 2.0;
+    if a < b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_greater_than"
+spec = ["3.11:11"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 2.0;
+    let b: f64 = 1.0;
+    if a > b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_less_equal"
+spec = ["3.11:11"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 1.0;
+    let b: f64 = 1.0;
+    if a <= b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_greater_equal"
+spec = ["3.11:11"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 2.0;
+    let b: f64 = 1.0;
+    if a >= b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+# --- Negation ---
+
+[[case]]
+name = "float_negation"
+spec = ["3.11:12"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 5.0;
+    let b: f64 = -a;
+    if b < a { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_negation_literal"
+spec = ["3.11:12"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _a: f64 = -3.14;
+    0
+}
+"""
+exit_code = 0
+
+# --- Bitwise rejection ---
+
+[[case]]
+name = "float_bitwise_and_rejected"
+spec = ["3.11:13"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 1.0;
+    let b: f64 = 2.0;
+    let _c: f64 = a & b;
+    0
+}
+"""
+compile_fail = true
+error_contains = "integer type"
+
+[[case]]
+name = "float_bitwise_or_rejected"
+spec = ["3.11:13"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 1.0;
+    let b: f64 = 2.0;
+    let _c: f64 = a | b;
+    0
+}
+"""
+compile_fail = true
+error_contains = "integer type"
+
+[[case]]
+name = "float_bitwise_xor_rejected"
+spec = ["3.11:13"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 1.0;
+    let b: f64 = 2.0;
+    let _c: f64 = a ^ b;
+    0
+}
+"""
+compile_fail = true
+error_contains = "integer type"
+
+[[case]]
+name = "float_shift_left_rejected"
+spec = ["3.11:13"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 1.0;
+    let b: f64 = 2.0;
+    let _c: f64 = a << b;
+    0
+}
+"""
+compile_fail = true
+error_contains = "integer type"
+
+[[case]]
+name = "float_shift_right_rejected"
+spec = ["3.11:13"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: f64 = 1.0;
+    let b: f64 = 2.0;
+    let _c: f64 = a >> b;
+    0
+}
+"""
+compile_fail = true
+error_contains = "integer type"
+
 # --- Preview gate ---
 
 [[case]]
