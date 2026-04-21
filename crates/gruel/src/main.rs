@@ -193,6 +193,10 @@ struct Options {
     benchmark_json: bool,
     /// Number of parallel jobs (0 = auto-detect, use all cores).
     jobs: usize,
+    /// When true, suppress stderr printing of comptime `@dbg` output. The
+    /// output is still buffered on `SemaOutput` and a warning is still emitted.
+    /// Used by fuzz harnesses that want structured access to the output.
+    capture_comptime_dbg: bool,
 }
 
 /// Version string for the gruel compiler.
@@ -236,6 +240,9 @@ fn print_usage() {
     eprintln!("                       Can also use RUST_LOG environment variable");
     eprintln!("  --log-format <fmt>   Set logging format (default: text)");
     eprintln!("                       Formats: {}", LogFormat::all_names());
+    eprintln!("  --capture-comptime-dbg");
+    eprintln!("                       Suppress stderr printing of comptime @dbg");
+    eprintln!("                       output (still buffered; warning still emitted)");
     eprintln!("  --time-passes        Show timing for each compilation pass");
     eprintln!("  --benchmark-json     Output timing as JSON (for benchmarking)");
     eprintln!("  --version            Show version information");
@@ -270,6 +277,7 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
     let mut time_passes = false;
     let mut benchmark_json = false;
     let mut jobs: Option<usize> = None;
+    let mut capture_comptime_dbg = false;
     let mut output_path: Option<String> = None;
     let mut positional = Vec::new();
     let mut args_iter = args.iter().peekable();
@@ -406,6 +414,9 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
                 }
                 build_profile = Some("release");
             }
+            "--capture-comptime-dbg" => {
+                capture_comptime_dbg = true;
+            }
             "--time-passes" => {
                 time_passes = true;
             }
@@ -502,6 +513,7 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
         time_passes,
         benchmark_json,
         jobs: jobs.unwrap_or(0),
+        capture_comptime_dbg,
     })
 }
 
@@ -826,6 +838,7 @@ fn main() {
         opt_level: options.opt_level,
         preview_features: options.preview_features.clone(),
         jobs: options.jobs,
+        capture_comptime_dbg: options.capture_comptime_dbg,
     };
     match compile_multi_file_with_options(&source_files, &compile_options) {
         Ok(output) => {

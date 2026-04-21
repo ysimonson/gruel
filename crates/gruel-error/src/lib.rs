@@ -1459,9 +1459,9 @@ pub enum WarningKind {
     /// A pattern that will never be matched because a previous pattern already covers it.
     #[error("unreachable pattern '{0}'")]
     UnreachablePattern(String),
-    /// A `@compileLog` call was present during compilation.
-    #[error("comptime log present — remove before release")]
-    ComptimeLogPresent(String),
+    /// A comptime-evaluated `@dbg` call was present during compilation.
+    #[error("comptime debug statement present — remove before release")]
+    ComptimeDbgPresent(String),
 }
 
 /// A compilation warning with optional source location information.

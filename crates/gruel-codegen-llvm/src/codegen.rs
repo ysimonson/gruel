@@ -2607,10 +2607,27 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
             // ---- Debug print ----
             "dbg" => {
-                if !args.is_empty() {
-                    let arg_val = args[0];
+                let i64_ty = self.ctx.i64_type();
+                let void_noarg_ty = self.ctx.void_type().fn_type(&[], false);
+                let space_fn = self
+                    .module
+                    .get_function("__gruel_dbg_space")
+                    .unwrap_or_else(|| {
+                        self.module
+                            .add_function("__gruel_dbg_space", void_noarg_ty, None)
+                    });
+                let newline_fn = self
+                    .module
+                    .get_function("__gruel_dbg_newline")
+                    .unwrap_or_else(|| {
+                        self.module
+                            .add_function("__gruel_dbg_newline", void_noarg_ty, None)
+                    });
+                for (i, arg_val) in args.iter().copied().enumerate() {
+                    if i > 0 {
+                        self.builder.build_call(space_fn, &[], "").unwrap();
+                    }
                     let arg_ty = self.cfg.get_inst(arg_val).ty;
-                    let i64_ty = self.ctx.i64_type();
                     match arg_ty.kind() {
                         TypeKind::I8 | TypeKind::I16 | TypeKind::I32 | TypeKind::I64 => {
                             let v = self.get_value(arg_val).into_int_value();
@@ -2620,12 +2637,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 v
                             };
                             let fn_ty = self.ctx.void_type().fn_type(&[i64_ty.into()], false);
-                            let f =
-                                self.module
-                                    .get_function("__gruel_dbg_i64")
-                                    .unwrap_or_else(|| {
-                                        self.module.add_function("__gruel_dbg_i64", fn_ty, None)
-                                    });
+                            let f = self
+                                .module
+                                .get_function("__gruel_dbg_i64_noln")
+                                .unwrap_or_else(|| {
+                                    self.module
+                                        .add_function("__gruel_dbg_i64_noln", fn_ty, None)
+                                });
                             self.builder.build_call(f, &[v64.into()], "").unwrap();
                         }
                         TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64 => {
@@ -2636,28 +2654,29 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 v
                             };
                             let fn_ty = self.ctx.void_type().fn_type(&[i64_ty.into()], false);
-                            let f =
-                                self.module
-                                    .get_function("__gruel_dbg_u64")
-                                    .unwrap_or_else(|| {
-                                        self.module.add_function("__gruel_dbg_u64", fn_ty, None)
-                                    });
+                            let f = self
+                                .module
+                                .get_function("__gruel_dbg_u64_noln")
+                                .unwrap_or_else(|| {
+                                    self.module
+                                        .add_function("__gruel_dbg_u64_noln", fn_ty, None)
+                                });
                             self.builder.build_call(f, &[v64.into()], "").unwrap();
                         }
                         TypeKind::Bool => {
                             let v = self.get_value(arg_val).into_int_value();
                             let v64 = self.builder.build_int_z_extend(v, i64_ty, "zext").unwrap();
                             let fn_ty = self.ctx.void_type().fn_type(&[i64_ty.into()], false);
-                            let f =
-                                self.module
-                                    .get_function("__gruel_dbg_bool")
-                                    .unwrap_or_else(|| {
-                                        self.module.add_function("__gruel_dbg_bool", fn_ty, None)
-                                    });
+                            let f = self
+                                .module
+                                .get_function("__gruel_dbg_bool_noln")
+                                .unwrap_or_else(|| {
+                                    self.module
+                                        .add_function("__gruel_dbg_bool_noln", fn_ty, None)
+                                });
                             self.builder.build_call(f, &[v64.into()], "").unwrap();
                         }
                         _ if self.is_builtin_string(arg_ty) => {
-                            // String: call __gruel_dbg_str(ptr, len)
                             let str_val = self.get_value(arg_val);
                             let (ptr, len) = self.extract_str_ptr_len(str_val);
                             let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
@@ -2665,24 +2684,24 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 .ctx
                                 .void_type()
                                 .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-                            let f =
-                                self.module
-                                    .get_function("__gruel_dbg_str")
-                                    .unwrap_or_else(|| {
-                                        self.module.add_function("__gruel_dbg_str", fn_ty, None)
-                                    });
+                            let f = self
+                                .module
+                                .get_function("__gruel_dbg_str_noln")
+                                .unwrap_or_else(|| {
+                                    self.module
+                                        .add_function("__gruel_dbg_str_noln", fn_ty, None)
+                                });
                             self.builder
                                 .build_call(f, &[ptr.into(), len.into()], "")
                                 .unwrap();
                         }
                         _ => {
-                            // Arrays and non-String structs are not supported by @dbg.
-                            // This matches the native backend's ICE for unsupported types.
                             unreachable!("@dbg: unsupported type {:?}", arg_ty.kind());
                         }
                     }
                 }
-                None // @dbg always returns unit
+                self.builder.build_call(newline_fn, &[], "").unwrap();
+                None
             }
 
             // ---- Pointer operations ----

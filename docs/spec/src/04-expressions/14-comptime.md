@@ -780,13 +780,17 @@ fn main() -> i32 {
 
 {{ rule(id="4.14:47", cat="normative") }}
 
-A comptime block can use the `@dbg` intrinsic to emit debug output during compile-time evaluation. Integer values are formatted as signed decimal; boolean values are formatted as `true` or `false`. The output is collected in a buffer accessible through the compiler API and is not printed to stdout during compilation.
+A comptime block can use the `@dbg` intrinsic to emit debug output during compile-time evaluation. `@dbg` accepts zero or more comptime-evaluable arguments, formats each, and joins the results with single ASCII space characters. Integer values are formatted as signed decimal, boolean values as `true` or `false`, `comptime_str` values as their contents, and `()` as `()`. See [`@dbg`](@/04-expressions/13-intrinsics.md) for the full specification.
+
+{{ rule(id="4.14:47a", cat="normative") }}
+
+Compile-time `@dbg` calls are written to the compiler's standard error with a `comptime dbg: ` prefix as each call is evaluated. The compiler additionally collects the formatted messages in a buffer accessible through the compilation result, and emits a "debug statement present" warning for each call. A compiler-driver flag (`--capture-comptime-dbg`) suppresses the on-the-fly stderr print while leaving the buffer intact.
 
 ```gruel
 fn main() -> i32 {
     comptime {
         let x = 42;
-        @dbg(x);
+        @dbg(x);              // compiler stderr: comptime dbg: 42
         x
     }
 }
@@ -819,22 +823,22 @@ fn Matrix(comptime rows: i32, comptime cols: i32) -> type {
 
 {{ rule(id="4.14:52", cat="normative") }}
 
-The `@compileLog` intrinsic emits a compile-time log message during comptime evaluation. It accepts any number of arguments of any comptime-evaluable type. Each argument is formatted as a string and the results are joined with spaces. The result type is `()`.
+The behavior previously provided by `@compileLog` is subsumed by `@dbg`. See [`@dbg`](@/04-expressions/13-intrinsics.md) for the unified compile-time debug-print intrinsic, which accepts variadic arguments, prints to the compiler's standard error with a `comptime dbg: ` prefix, and emits a "debug statement present" warning for each call.
 
-{{ rule(id="4.14:53", cat="normative") }}
+{{ rule(id="4.14:53", cat="legality-rule") }}
 
-A program that compiles successfully but contains evaluated `@compileLog` calls emits a warning for each call.
+It is a compile-time error to call `@compileLog`. The diagnostic suggests `@dbg` as the replacement.
 
-{{ rule(id="4.14:54") }}
+{{ rule(id="4.14:54", cat="example") }}
 
 ```gruel
 fn compute(comptime n: i32) -> i32 {
-    @compileLog("computing with n =", n);
+    comptime { @dbg("computing with n =", n); }
     n * 2
 }
 
 fn main() -> i32 {
-    compute(21)  // compiles with warning: comptime log present
+    compute(21)  // compiles with warning: debug statement present
 }
 ```
 

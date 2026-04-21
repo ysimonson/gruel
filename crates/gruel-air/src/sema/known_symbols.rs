@@ -102,8 +102,6 @@ pub struct KnownSymbols {
     // Comptime metaprogramming intrinsics
     /// The `compileError` intrinsic symbol.
     pub compile_error: Spur,
-    /// The `compileLog` intrinsic symbol.
-    pub compile_log: Spur,
     /// The `typeInfo` type intrinsic symbol.
     pub type_info: Spur,
     /// The `typeName` type intrinsic symbol.
@@ -169,7 +167,6 @@ impl KnownSymbols {
 
             // Comptime metaprogramming intrinsics
             compile_error: interner.get_or_intern_static("compileError"),
-            compile_log: interner.get_or_intern_static("compileLog"),
             type_info: interner.get_or_intern_static("typeInfo"),
             type_name: interner.get_or_intern_static("typeName"),
             field: interner.get_or_intern_static("field"),
@@ -246,7 +243,6 @@ mod tests {
         assert_eq!(interner.resolve(&known.target_arch), "target_arch");
         assert_eq!(interner.resolve(&known.target_os), "target_os");
         assert_eq!(interner.resolve(&known.compile_error), "compileError");
-        assert_eq!(interner.resolve(&known.compile_log), "compileLog");
         assert_eq!(interner.resolve(&known.type_info), "typeInfo");
         assert_eq!(interner.resolve(&known.type_name), "typeName");
         assert_eq!(interner.resolve(&known.field), "field");

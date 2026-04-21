@@ -533,10 +533,10 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         functions.push(analyzed);
     }
 
-    // Emit warnings for any @compileLog calls that occurred during comptime evaluation.
+    // Emit warnings for any comptime @dbg calls that occurred during comptime evaluation.
     for (msg, span) in std::mem::take(&mut sema.comptime_log_output) {
         all_warnings.push(CompileWarning::new(
-            WarningKind::ComptimeLogPresent(msg),
+            WarningKind::ComptimeDbgPresent(msg),
             span,
         ));
     }
@@ -1020,10 +1020,10 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
         functions.push(analyzed);
     }
 
-    // Emit warnings for any @compileLog calls that occurred during comptime evaluation.
+    // Emit warnings for any comptime @dbg calls that occurred during comptime evaluation.
     for (msg, span) in std::mem::take(&mut sema.comptime_log_output) {
         all_warnings.push(CompileWarning::new(
-            WarningKind::ComptimeLogPresent(msg),
+            WarningKind::ComptimeDbgPresent(msg),
             span,
         ));
     }
@@ -3419,8 +3419,6 @@ impl<'a> Sema<'a> {
             self.analyze_target_os_intrinsic(air, &args, span)
         } else if name == known.compile_error {
             self.analyze_compile_error_intrinsic(air, &args, span)
-        } else if name == known.compile_log {
-            self.analyze_compile_log_intrinsic(air, &args, span, ctx)
         } else if name == known.field {
             self.analyze_field_intrinsic(air, &args, span, ctx)
         } else {
@@ -3443,45 +3441,44 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        if args.len() != 1 {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicWrongArgCount {
-                    name: "dbg".to_string(),
-                    expected: 1,
-                    found: args.len(),
-                },
-                span,
-            ));
+        let mut arg_air_refs = Vec::with_capacity(args.len());
+        for arg in args {
+            let arg_result = self.analyze_inst(air, arg.value, ctx)?;
+            let arg_type = arg_result.ty;
+
+            // Validate type. At runtime, @dbg accepts integers, booleans, and
+            // strings. Structs/enums/arrays are rejected (except errors/never,
+            // which propagate); String itself is a builtin struct and is
+            // recognized via is_builtin_string in codegen — at the sema level
+            // we allow structs here and let codegen handle the String case.
+            if !arg_type.is_integer()
+                && arg_type != Type::BOOL
+                && !arg_type.is_struct()
+                && !arg_type.is_enum()
+                && !arg_type.is_array()
+                && !arg_type.is_error()
+                && !arg_type.is_never()
+            {
+                return Err(CompileError::new(
+                    ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                        name: "dbg".to_string(),
+                        expected: "integer, bool, or string".to_string(),
+                        found: arg_type.name().to_string(),
+                    })),
+                    span,
+                ));
+            }
+
+            arg_air_refs.push(arg_result.air_ref.as_u32());
         }
 
-        let arg_result = self.analyze_inst(air, args[0].value, ctx)?;
-        let arg_type = arg_result.ty;
-
-        // Validate type
-        if !arg_type.is_integer()
-            && arg_type != Type::BOOL
-            && !arg_type.is_struct()
-            && !arg_type.is_enum()
-            && !arg_type.is_array()
-            && !arg_type.is_error()
-            && !arg_type.is_never()
-        {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
-                    name: "dbg".to_string(),
-                    expected: "integer, bool, struct, enum, or array".to_string(),
-                    found: arg_type.name().to_string(),
-                })),
-                span,
-            ));
-        }
-
-        let args_start = air.add_extra(&[arg_result.air_ref.as_u32()]);
+        let args_len = arg_air_refs.len() as u32;
+        let args_start = air.add_extra(&arg_air_refs);
         let air_ref = air.add_inst(AirInst {
             data: AirInstData::Intrinsic {
                 name: self.known.dbg,
                 args_start,
-                args_len: 1,
+                args_len,
             },
             ty: Type::UNIT,
             span,
@@ -3811,33 +3808,6 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, Type::NEVER))
-    }
-
-    /// Analyze @compileLog intrinsic.
-    ///
-    /// In the runtime analysis path, @compileLog is a comptime-only intrinsic
-    /// that has type `()`. It accepts any number of arguments.
-    /// The actual log emission happens in the comptime interpreter.
-    fn analyze_compile_log_intrinsic(
-        &mut self,
-        air: &mut Air,
-        args: &[RirCallArg],
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        self.require_preview(PreviewFeature::ComptimeMeta, "@compileLog intrinsic", span)?;
-
-        // Analyze all arguments for type checking (but discard results)
-        for arg in args {
-            self.analyze_inst(air, arg.value, ctx)?;
-        }
-
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::UnitConst,
-            ty: Type::UNIT,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, Type::UNIT))
     }
 
     /// Analyze @field(value, field_name) intrinsic.
@@ -7427,15 +7397,22 @@ impl<'a> Sema<'a> {
                     }
                     return self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span);
                 }
-                // @dbg formats the value and appends to the comptime dbg buffer.
+                // @dbg formats values, prints to stderr on-the-fly (unless
+                // suppressed), appends to the comptime dbg buffer, and queues a
+                // warning to be emitted after sema completes.
                 if name == self.known.dbg {
                     let arg_refs = self.rir.get_inst_refs(args_start, args_len);
-                    if arg_refs.len() != 1 {
-                        return Err(not_const(inst_span));
+                    let mut parts = Vec::with_capacity(arg_refs.len());
+                    for &arg_ref in &arg_refs {
+                        let val = self.evaluate_comptime_inst(arg_ref, locals, ctx, outer_span)?;
+                        parts.push(self.format_const_value(val, inst_span)?);
                     }
-                    let val = self.evaluate_comptime_inst(arg_refs[0], locals, ctx, outer_span)?;
-                    let formatted = self.format_const_value(val, inst_span)?;
-                    self.comptime_dbg_output.push(formatted);
+                    let msg = parts.join(" ");
+                    if !self.suppress_comptime_dbg_print {
+                        eprintln!("comptime dbg: {msg}");
+                    }
+                    self.comptime_dbg_output.push(msg.clone());
+                    self.comptime_log_output.push((msg, inst_span));
                     return Ok(ConstValue::Unit);
                 }
                 // @compileError emits a user-defined compile error.
@@ -7462,24 +7439,6 @@ impl<'a> Sema<'a> {
                         ErrorKind::ComptimeUserError(msg),
                         inst_span,
                     ));
-                }
-                // @compileLog emits compile-time debug messages.
-                if name == self.known.compile_log {
-                    self.require_preview(
-                        PreviewFeature::ComptimeMeta,
-                        "@compileLog intrinsic",
-                        inst_span,
-                    )?;
-                    let arg_refs = self.rir.get_inst_refs(args_start, args_len);
-                    let mut parts = Vec::new();
-                    for &arg_ref in &arg_refs {
-                        let val = self.evaluate_comptime_inst(arg_ref, locals, ctx, outer_span)?;
-                        parts.push(self.format_const_value(val, inst_span)?);
-                    }
-                    let msg = parts.join(" ");
-                    eprintln!("comptime log: {msg}");
-                    self.comptime_log_output.push((msg, inst_span));
-                    return Ok(ConstValue::Unit);
                 }
                 // @range produces a comptime array of integers.
                 if name == self.known.range {
@@ -7578,7 +7537,15 @@ impl<'a> Sema<'a> {
                     self.comptime_heap.push(ComptimeHeapItem::Array(elements));
                     return Ok(ConstValue::Array(idx));
                 }
-                Err(not_const(inst_span))
+                // Unrecognized intrinsic: surface the name in the diagnostic
+                // rather than the generic "cannot be known at compile time"
+                // message. In particular, `@compileLog` was removed in favor of
+                // `@dbg` — reporting the name guides users to the replacement.
+                let intrinsic_name = self.interner.resolve(&name).to_string();
+                Err(CompileError::new(
+                    ErrorKind::UnknownIntrinsic(intrinsic_name),
+                    inst_span,
+                ))
             }
 
             // ── Type intrinsic (@size_of, @align_of, @typeName, @typeInfo) ──────

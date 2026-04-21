@@ -23,10 +23,12 @@ fn preview_features() -> gruel_error::PreviewFeatures {
 fuzz_target!(|prog: ComptimeProgram| {
     let preview = preview_features();
 
-    // Path A: comptime evaluation — @dbg output collected in compiler buffer
+    // Path A: comptime evaluation — @dbg output collected in compiler buffer.
+    // Suppress on-the-fly stderr printing so the fuzzer doesn't flood the
+    // terminal; the buffer is still populated.
     let comptime_source = prog.comptime_source();
     let comptime_dbg =
-        match gruel_compiler::compile_frontend_with_options(&comptime_source, &preview) {
+        match gruel_compiler::compile_frontend_with_options_full(&comptime_source, &preview, true) {
             Ok(state) => state.comptime_dbg_output.join("\n"),
             Err(_) => return, // Skip programs that don't compile
         };
