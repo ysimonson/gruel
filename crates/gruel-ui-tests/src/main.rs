@@ -4,8 +4,8 @@
 //! such as warnings, diagnostics quality, and compiler flags.
 
 use gruel_test_runner::{
-    CacheStore, Case, find_dir, find_gruel_binary, load_test_files, run_test_case,
-    should_skip_for_platform,
+    CacheStore, Case, build_gruel_binary, find_dir, find_gruel_binary, load_test_files,
+    run_test_case, should_skip_for_platform,
 };
 use libtest2_mimic::{Harness, RunContext, RunError, Trial};
 use std::path::Path;
@@ -36,6 +36,9 @@ fn run_case_wrapper(
 }
 
 fn main() {
+    // Build the gruel compiler before running tests
+    build_gruel_binary();
+
     // Find the gruel binary
     let gruel_binary = find_gruel_binary();
 

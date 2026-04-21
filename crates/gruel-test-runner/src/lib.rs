@@ -1284,6 +1284,24 @@ pub fn find_dir(env_var: &str, possible_paths: &[&str], fallback: &str) -> PathB
         })
 }
 
+/// Build the gruel compiler via `cargo build -p gruel`.
+///
+/// Exits the process with a non-zero status if the build fails. Safe to call
+/// even when `GRUEL_BINARY` is set externally — rebuilding is cheap when
+/// nothing has changed, and ensures the binary at `target/debug/gruel` is
+/// fresh when test runners are invoked standalone (e.g. `cargo run -p
+/// gruel-ui-tests`) rather than via the Makefile.
+pub fn build_gruel_binary() {
+    let status = std::process::Command::new("cargo")
+        .args(["build", "-p", "gruel"])
+        .status()
+        .expect("failed to run cargo build");
+    if !status.success() {
+        eprintln!("Error: cargo build -p gruel failed");
+        std::process::exit(1);
+    }
+}
+
 /// Find the gruel binary in common locations.
 ///
 /// Checks `GRUEL_BINARY` env var first, then falls back to the Cargo target

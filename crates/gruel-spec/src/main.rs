@@ -35,7 +35,8 @@
 //! - `GRUEL_BINARY` - Path to the gruel compiler binary
 
 use gruel_test_runner::{
-    CacheStore, Case, find_dir, find_gruel_binary, load_test_files, run_test_case,
+    CacheStore, Case, build_gruel_binary, find_dir, find_gruel_binary, load_test_files,
+    run_test_case,
     should_skip_for_platform,
 };
 use libtest2_mimic::{Harness, RunContext, RunError, Trial};
@@ -147,14 +148,7 @@ fn main() {
     }
 
     // Build the gruel compiler before running tests
-    let status = std::process::Command::new("cargo")
-        .args(["build", "-p", "gruel"])
-        .status()
-        .expect("failed to run cargo build");
-    if !status.success() {
-        eprintln!("Error: cargo build -p gruel failed");
-        std::process::exit(1);
-    }
+    build_gruel_binary();
 
     // Find the gruel binary
     let gruel_binary = find_gruel_binary();
