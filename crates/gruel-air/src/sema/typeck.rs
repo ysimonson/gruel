@@ -6,7 +6,7 @@
 //! - ABI slot calculations
 //! - Type conversions between AIR types and inference types
 
-use gruel_error::{CompileError, CompileResult, ErrorKind, PreviewFeature};
+use gruel_error::{CompileError, CompileResult, ErrorKind};
 use gruel_span::Span;
 use lasso::Spur;
 
@@ -127,26 +127,11 @@ impl<'a> Sema<'a> {
             "u16" => return Ok(Type::U16),
             "u32" => return Ok(Type::U32),
             "u64" => return Ok(Type::U64),
-            "isize" => {
-                self.require_preview(PreviewFeature::ExtendedNumericTypes, "isize type", span)?;
-                return Ok(Type::ISIZE);
-            }
-            "usize" => {
-                self.require_preview(PreviewFeature::ExtendedNumericTypes, "usize type", span)?;
-                return Ok(Type::USIZE);
-            }
-            "f16" => {
-                self.require_preview(PreviewFeature::ExtendedNumericTypes, "f16 type", span)?;
-                return Ok(Type::F16);
-            }
-            "f32" => {
-                self.require_preview(PreviewFeature::ExtendedNumericTypes, "f32 type", span)?;
-                return Ok(Type::F32);
-            }
-            "f64" => {
-                self.require_preview(PreviewFeature::ExtendedNumericTypes, "f64 type", span)?;
-                return Ok(Type::F64);
-            }
+            "isize" => return Ok(Type::ISIZE),
+            "usize" => return Ok(Type::USIZE),
+            "f16" => return Ok(Type::F16),
+            "f32" => return Ok(Type::F32),
+            "f64" => return Ok(Type::F64),
             "bool" => return Ok(Type::BOOL),
             "()" => return Ok(Type::UNIT),
             "!" => return Ok(Type::NEVER),

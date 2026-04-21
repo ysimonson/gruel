@@ -40,8 +40,6 @@ stderr_contains = "integer cast overflow"
 [[case]]
 name = "cast_i32_to_f64"
 spec = ["4.13:95", "4.13:96", "4.13:101"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let n: i32 = 42;
@@ -55,8 +53,6 @@ exit_code = 42
 [[case]]
 name = "cast_i32_to_f32"
 spec = ["4.13:101"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let n: i32 = 100;
@@ -70,8 +66,6 @@ exit_code = 100
 [[case]]
 name = "cast_u32_to_f64"
 spec = ["4.13:101"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let u: u32 = 200;
@@ -85,8 +79,6 @@ exit_code = 200
 [[case]]
 name = "cast_negative_i32_to_f64"
 spec = ["4.13:101"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let n: i32 = -50;
@@ -100,8 +92,6 @@ exit_code = 0
 [[case]]
 name = "cast_i64_to_f64"
 spec = ["4.13:101"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let n: i64 = 99;
@@ -115,8 +105,6 @@ exit_code = 99
 [[case]]
 name = "cast_u8_to_f64"
 spec = ["4.13:101"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let u: u8 = 255;
@@ -134,8 +122,6 @@ exit_code = 255
 [[case]]
 name = "cast_f64_to_f32"
 spec = ["4.13:95", "4.13:100"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: f64 = 3.14;
@@ -158,8 +144,6 @@ exit_code = 0
 [[case]]
 name = "cast_f32_to_f64"
 spec = ["4.13:100"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: f32 = 2.5;
@@ -173,8 +157,6 @@ exit_code = 2
 [[case]]
 name = "cast_f64_to_f16"
 spec = ["4.13:100"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: f64 = 1.0;
@@ -189,8 +171,6 @@ exit_code = 1
 [[case]]
 name = "cast_f16_to_f32"
 spec = ["4.13:100"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: f16 = 10.0;
@@ -208,8 +188,6 @@ exit_code = 10
 [[case]]
 name = "cast_f64_to_i32_truncates"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f: f64 = 3.7;
@@ -222,8 +200,6 @@ exit_code = 3
 [[case]]
 name = "cast_f64_to_i32_negative_truncates"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f: f64 = -3.7;
@@ -236,8 +212,6 @@ exit_code = 97
 [[case]]
 name = "cast_f64_to_u32"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f: f64 = 200.9;
@@ -250,8 +224,6 @@ exit_code = 200
 [[case]]
 name = "cast_f32_to_i32"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f: f32 = 42.0;
@@ -264,8 +236,6 @@ exit_code = 42
 [[case]]
 name = "cast_f64_to_i8"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f: f64 = 127.0;
@@ -278,8 +248,6 @@ exit_code = 127
 [[case]]
 name = "cast_f64_zero_to_i32"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f: f64 = 0.0;
@@ -296,8 +264,6 @@ exit_code = 0
 [[case]]
 name = "cast_nan_to_i32_panics"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let nan: f64 = 0.0 / 0.0;
@@ -311,8 +277,6 @@ stderr_contains = "float-to-integer cast overflow"
 [[case]]
 name = "cast_overflow_f64_to_i32_panics"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let big: f64 = 9999999999999999999999.0;
@@ -326,8 +290,6 @@ stderr_contains = "float-to-integer cast overflow"
 [[case]]
 name = "cast_negative_f64_to_u32_panics"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let neg: f64 = -1.0;
@@ -341,8 +303,6 @@ stderr_contains = "float-to-integer cast overflow"
 [[case]]
 name = "cast_infinity_to_i32_panics"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let inf: f64 = 1.0 / 0.0;
@@ -356,8 +316,6 @@ stderr_contains = "float-to-integer cast overflow"
 [[case]]
 name = "cast_neg_infinity_to_i32_panics"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let neg_inf: f64 = -1.0 / 0.0;
@@ -388,8 +346,6 @@ error_contains = "numeric type"
 [[case]]
 name = "cast_bool_target_rejected"
 spec = ["4.13:98"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let n: i32 = 1;
@@ -407,8 +363,6 @@ error_contains = "numeric"
 [[case]]
 name = "cast_same_type_noop"
 spec = ["4.13:95"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f: f64 = 3.14;
@@ -425,8 +379,6 @@ exit_code = 0
 [[case]]
 name = "cast_f16_max_value"
 spec = ["3.11:2", "4.13:100"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     // f16 max is ~65504
@@ -451,8 +403,6 @@ exit_code = 0
 [[case]]
 name = "cast_f16_overflow_to_infinity"
 spec = ["3.11:2", "4.13:100"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     // Value way beyond f16 range becomes infinity
@@ -472,8 +422,6 @@ exit_code = 0
 [[case]]
 name = "cast_negative_zero"
 spec = ["4.13:102"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     // -0.0 truncates to 0

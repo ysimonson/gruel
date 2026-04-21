@@ -39,15 +39,6 @@ fn gen_float_literal(u: &mut Unstructured<'_>) -> arbitrary::Result<String> {
 #[derive(Debug)]
 pub struct GruelProgram(pub String);
 
-/// Whether the program uses extended numeric types (needing preview feature).
-pub fn uses_extended_numeric_types(source: &str) -> bool {
-    source.contains("isize")
-        || source.contains("usize")
-        || source.contains("f16")
-        || source.contains("f32")
-        || source.contains("f64")
-}
-
 /// A syntactically valid program that may contain semantic errors
 /// (missing main, type mismatches, undefined variables, duplicates).
 #[derive(Debug)]

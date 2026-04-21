@@ -2265,8 +2265,6 @@ exit_code = 7
 [[case]]
 name = "comptime_int_coerces_to_i32"
 spec = ["4.14:80", "4.14:81"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: i32 = comptime { 42 };
@@ -2278,8 +2276,6 @@ exit_code = 42
 [[case]]
 name = "comptime_int_coerces_to_u64"
 spec = ["4.14:80", "4.14:81"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: u64 = comptime { 100 };
@@ -2291,8 +2287,6 @@ exit_code = 100
 [[case]]
 name = "comptime_int_coerces_to_u8"
 spec = ["4.14:80", "4.14:81"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: u8 = comptime { 255 };
@@ -2304,8 +2298,6 @@ exit_code = 255
 [[case]]
 name = "comptime_int_coerces_to_usize"
 spec = ["4.14:80", "4.14:81"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: usize = comptime { 50 };
@@ -2317,8 +2309,6 @@ exit_code = 50
 [[case]]
 name = "comptime_int_defaults_to_i32"
 spec = ["4.14:81"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime { 42 }
@@ -2329,8 +2319,6 @@ exit_code = 42
 [[case]]
 name = "comptime_int_captured_param_coerces"
 spec = ["4.14:84"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn make_value(comptime N: i32) -> type {
     struct {
@@ -2351,8 +2339,6 @@ exit_code = 42
 [[case]]
 name = "comptime_int_out_of_range_u8"
 spec = ["4.14:82"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let _x: u8 = comptime { 256 };

@@ -308,8 +308,6 @@ pub enum PreviewFeature {
     ComptimeMeta,
     /// Consistent string interface and comptime string materialization (ADR-0045).
     ConsistentStr,
-    /// Extended numeric types: isize/usize, f16/f32/f64 (ADR-0046).
-    ExtendedNumericTypes,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -332,7 +330,6 @@ impl PreviewFeature {
             PreviewFeature::ForLoops => "for_loops",
             PreviewFeature::ComptimeMeta => "comptime_meta",
             PreviewFeature::ConsistentStr => "consistent_str",
-            PreviewFeature::ExtendedNumericTypes => "extended_numeric_types",
         }
     }
 
@@ -343,7 +340,6 @@ impl PreviewFeature {
             PreviewFeature::ForLoops => "ADR-0041",
             PreviewFeature::ComptimeMeta => "ADR-0042",
             PreviewFeature::ConsistentStr => "ADR-0045",
-            PreviewFeature::ExtendedNumericTypes => "ADR-0046",
         }
     }
 
@@ -354,7 +350,6 @@ impl PreviewFeature {
             PreviewFeature::ForLoops,
             PreviewFeature::ComptimeMeta,
             PreviewFeature::ConsistentStr,
-            PreviewFeature::ExtendedNumericTypes,
         ]
     }
 
@@ -381,7 +376,6 @@ impl std::str::FromStr for PreviewFeature {
             "for_loops" => Ok(PreviewFeature::ForLoops),
             "comptime_meta" => Ok(PreviewFeature::ComptimeMeta),
             "consistent_str" => Ok(PreviewFeature::ConsistentStr),
-            "extended_numeric_types" => Ok(PreviewFeature::ExtendedNumericTypes),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1909,7 +1903,7 @@ mod tests {
         let names = PreviewFeature::all_names();
         assert_eq!(
             names,
-            "test_infra, for_loops, comptime_meta, consistent_str, extended_numeric_types"
+            "test_infra, for_loops, comptime_meta, consistent_str"
         );
     }
 

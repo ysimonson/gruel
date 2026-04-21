@@ -8,8 +8,6 @@ name = "Pointer-Sized Integer Types (isize/usize)"
 [[case]]
 name = "isize_basic_literal"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: isize = 42;
@@ -22,8 +20,6 @@ exit_code = 42
 [[case]]
 name = "isize_negative"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: isize = -10;
@@ -36,8 +32,6 @@ exit_code = 246
 [[case]]
 name = "isize_arithmetic"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: isize = 30;
@@ -52,8 +46,6 @@ exit_code = 42
 [[case]]
 name = "isize_subtraction"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: isize = 100;
@@ -68,8 +60,6 @@ exit_code = 42
 [[case]]
 name = "isize_multiplication"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: isize = 6;
@@ -84,8 +74,6 @@ exit_code = 42
 [[case]]
 name = "isize_division"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: isize = 126;
@@ -100,8 +88,6 @@ exit_code = 42
 [[case]]
 name = "isize_comparison"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: isize = 10;
@@ -118,8 +104,6 @@ exit_code = 42
 [[case]]
 name = "isize_function_param"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn double(x: isize) -> isize {
     x * 2
@@ -139,8 +123,6 @@ exit_code = 42
 [[case]]
 name = "usize_basic_literal"
 spec = ["3.1:24"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: usize = 42;
@@ -153,8 +135,6 @@ exit_code = 42
 [[case]]
 name = "usize_arithmetic"
 spec = ["3.1:24"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: usize = 30;
@@ -169,8 +149,6 @@ exit_code = 42
 [[case]]
 name = "usize_subtraction"
 spec = ["3.1:24"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: usize = 100;
@@ -185,8 +163,6 @@ exit_code = 42
 [[case]]
 name = "usize_multiplication"
 spec = ["3.1:24"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: usize = 6;
@@ -201,8 +177,6 @@ exit_code = 42
 [[case]]
 name = "usize_comparison"
 spec = ["3.1:24"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: usize = 10;
@@ -219,8 +193,6 @@ exit_code = 42
 [[case]]
 name = "usize_function_param"
 spec = ["3.1:24"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn triple(x: usize) -> usize {
     x * 3
@@ -240,8 +212,6 @@ exit_code = 42
 [[case]]
 name = "intcast_i32_to_isize"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: i32 = 42;
@@ -255,8 +225,6 @@ exit_code = 42
 [[case]]
 name = "intcast_u64_to_usize"
 spec = ["3.1:24"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let a: u64 = 99;
@@ -267,13 +235,9 @@ fn main() -> i32 {
 """
 exit_code = 99
 
-# --- preview gate ---
-
 [[case]]
 name = "isize_requires_preview"
 spec = ["3.1:23"]
-preview = "extended_numeric_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: isize = 1;

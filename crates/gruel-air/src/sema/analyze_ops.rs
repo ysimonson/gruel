@@ -2224,21 +2224,6 @@ impl<'a> Sema<'a> {
         let init_result = self.analyze_inst(air, init, ctx)?;
         let var_type = init_result.ty;
 
-        // Gate extended numeric types behind preview feature
-        if var_type.is_pointer_sized() {
-            self.require_preview(
-                PreviewFeature::ExtendedNumericTypes,
-                if var_type.is_signed() {
-                    "isize type"
-                } else {
-                    "usize type"
-                },
-                span,
-            )?;
-        } else if var_type.is_float() {
-            self.require_preview(PreviewFeature::ExtendedNumericTypes, var_type.name(), span)?;
-        }
-
         // If name is None, this is a wildcard pattern `_` that discards the value
         let Some(name) = name else {
             return Ok(AnalysisResult::new(init_result.air_ref, Type::UNIT));

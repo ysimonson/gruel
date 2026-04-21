@@ -1,12 +1,12 @@
 ---
 id: 0046
 title: Extended Numeric Types (isize/usize, f16/f32/f64, comptime_int)
-status: proposal
+status: implemented
 tags: [types, syntax, codegen]
-feature-flag: extended_numeric_types
+feature-flag:
 created: 2026-04-20
-accepted:
-implemented:
+accepted: 2026-04-20
+implemented: 2026-04-21
 spec-sections: ["3.1", "3.5"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
