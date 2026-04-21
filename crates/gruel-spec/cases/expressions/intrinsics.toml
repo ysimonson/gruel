@@ -107,7 +107,7 @@ exit_code = 0
 
 [[case]]
 name = "dbg_returns_unit"
-spec = ["4.13:9"]
+spec = ["4.13:10"]
 source = """
 fn takes_unit(x: ()) -> i32 { 0 }
 fn main() -> i32 {
@@ -117,33 +117,36 @@ fn main() -> i32 {
 exit_code = 0
 
 [[case]]
-name = "dbg_wrong_arg_count_zero"
-spec = ["4.13:4", "4.13:7"]
+name = "dbg_zero_args"
+spec = ["4.13:7", "4.13:8"]
 source = """
 fn main() -> i32 {
     @dbg();
     0
 }
 """
-compile_fail = true
+exit_code = 0
 
 [[case]]
-name = "dbg_wrong_arg_count_two"
-spec = ["4.13:4", "4.13:7"]
+name = "dbg_variadic"
+spec = ["4.13:7", "4.13:8", "4.13:9"]
 source = """
 fn main() -> i32 {
-    @dbg(1, 2);
+    @dbg(1, 2, 3);
+    @dbg("n =", 42);
     0
 }
 """
-compile_fail = true
+exit_code = 0
 
 [[case]]
 name = "dbg_invalid_type_unit"
 spec = ["4.13:7"]
 source = """
+fn returns_unit() -> () { () }
 fn main() -> i32 {
-    @dbg(());
+    let u = returns_unit();
+    @dbg(u);
     0
 }
 """

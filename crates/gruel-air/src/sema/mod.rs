@@ -143,9 +143,12 @@ pub struct Sema<'a> {
     /// Each entry is one formatted line (without trailing newline), matching
     /// the format of the runtime `__gruel_dbg_*` functions.
     pub(crate) comptime_dbg_output: Vec<String>,
-    /// Buffer for `@compileLog` output collected during comptime evaluation.
-    /// Each entry is (message, span) for warning generation after sema completes.
+    /// Pending warnings for comptime `@dbg` calls. Each entry is (message, span).
     pub(crate) comptime_log_output: Vec<(String, gruel_span::Span)>,
+    /// When true, comptime `@dbg` does not print to stderr on-the-fly. The output
+    /// is still appended to `comptime_dbg_output` and a warning is still emitted.
+    /// Set by the `--capture-comptime-dbg` CLI flag (used by the fuzzer).
+    pub(crate) suppress_comptime_dbg_print: bool,
 }
 
 impl<'a> Sema<'a> {
@@ -185,7 +188,15 @@ impl<'a> Sema<'a> {
             comptime_type_overrides: HashMap::new(),
             comptime_dbg_output: Vec::new(),
             comptime_log_output: Vec::new(),
+            suppress_comptime_dbg_print: false,
         }
+    }
+
+    /// Configure whether comptime `@dbg` prints to stderr on-the-fly.
+    /// When suppressed, output is still buffered into `comptime_dbg_output`
+    /// and warnings are still emitted.
+    pub fn set_suppress_comptime_dbg_print(&mut self, suppress: bool) {
+        self.suppress_comptime_dbg_print = suppress;
     }
 
     /// Perform semantic analysis on the RIR.

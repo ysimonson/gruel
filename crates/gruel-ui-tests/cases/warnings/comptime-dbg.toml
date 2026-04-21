@@ -1,0 +1,51 @@
+[section]
+id = "warnings.comptime_dbg"
+name = "Comptime @dbg Warnings"
+description = "Tests that comptime-evaluated @dbg calls emit a 'debug statement present' warning."
+
+[[case]]
+name = "comptime_dbg_emits_warning"
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @dbg("hello");
+        0
+    };
+    0
+}
+"""
+exit_code = 0
+warning_contains = ["comptime debug statement present"]
+expected_warning_count = 1
+
+[[case]]
+name = "comptime_dbg_warning_per_call"
+preview = "comptime_meta"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    comptime {
+        @dbg("a");
+        @dbg("b");
+        @dbg("c");
+        0
+    };
+    0
+}
+"""
+exit_code = 0
+warning_contains = ["comptime debug statement present"]
+expected_warning_count = 3
+
+[[case]]
+name = "runtime_dbg_no_warning"
+source = """
+fn main() -> i32 {
+    @dbg(42);
+    0
+}
+"""
+exit_code = 0
+no_warnings = true

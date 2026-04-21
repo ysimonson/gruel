@@ -393,6 +393,7 @@ impl<'src> CompilationUnit<'src> {
             let _span = info_span!("sema").entered();
             let mut sema = Sema::new(rir, interner, self.options.preview_features.clone());
             sema.set_file_paths(self.file_paths.clone());
+            sema.set_suppress_comptime_dbg_print(self.options.capture_comptime_dbg);
             let output = sema.analyze_all()?;
             info!(
                 function_count = output.functions.len(),

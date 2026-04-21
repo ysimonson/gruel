@@ -185,6 +185,27 @@ pub fn print_bool(value: bool) {
     }
 }
 
+/// Convert a signed 64-bit integer to decimal and write to stdout without a trailing newline.
+pub fn print_i64_noln(value: i64) {
+    // %lld\0
+    unsafe { dprintf(STDOUT as i32, b"%lld\0".as_ptr(), value) };
+}
+
+/// Convert an unsigned 64-bit integer to decimal and write to stdout without a trailing newline.
+pub fn print_u64_noln(value: u64) {
+    // %llu\0
+    unsafe { dprintf(STDOUT as i32, b"%llu\0".as_ptr(), value) };
+}
+
+/// Print a boolean value to stdout without a trailing newline.
+pub fn print_bool_noln(value: bool) {
+    if value {
+        write_stdout(b"true");
+    } else {
+        write_stdout(b"false");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

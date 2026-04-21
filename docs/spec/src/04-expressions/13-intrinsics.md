@@ -41,7 +41,7 @@ The following table provides a quick reference to all available intrinsics:
 
 | Intrinsic | Purpose | Arguments | Return Type |
 |-----------|---------|-----------|-------------|
-| `@dbg` | Print debug output | 1 expression (int, bool, or string) | `()` |
+| `@dbg` | Print debug output | 0+ expressions (phase-dependent types) | `()` |
 | `@size_of` | Get type size in bytes | 1 type | `i32` |
 | `@align_of` | Get type alignment in bytes | 1 type | `i32` |
 | `@intCast` | Convert between integer types | 1 expression (integer) | inferred integer type |
@@ -62,35 +62,53 @@ The following table provides a quick reference to all available intrinsics:
 
 {{ rule(id="4.13:6", cat="normative") }}
 
-The `@dbg` intrinsic prints a value to standard output for debugging purposes.
+The `@dbg` intrinsic prints its arguments for debugging purposes. Its output destination depends on the phase in which it executes: calls evaluated at runtime print to standard output, while calls evaluated inside a [comptime context](@/04-expressions/14-comptime.md) print to standard error during compilation.
 
 {{ rule(id="4.13:7", cat="normative") }}
 
-`@dbg` accepts exactly one argument of integer, boolean, or string type.
+`@dbg` accepts zero or more arguments. The accepted argument types depend on the evaluation phase:
+
+- At runtime: each argument **MUST** be of integer, boolean, or `String` type.
+- At compile time: each argument **MUST** be a compile-time evaluable value of integer, boolean, unit, or `comptime_str` type.
 
 {{ rule(id="4.13:8", cat="normative") }}
 
-`@dbg` prints the value followed by a newline character.
+`@dbg` formats each argument as a human-readable string, joins the results with single ASCII space characters, and emits the resulting line followed by a newline. A call with zero arguments emits an empty line.
 
 {{ rule(id="4.13:9", cat="normative") }}
 
+At runtime, the formatted line is written to standard output. Integer values are formatted as signed or unsigned decimal according to their declared type, boolean values as `true` or `false`, and `String` values as their UTF-8 contents.
+
+{{ rule(id="4.13:9a", cat="normative") }}
+
+When `@dbg` is evaluated during compile-time interpretation, the compiler immediately writes the formatted line to standard error, prefixed with the literal string `comptime dbg: `. Compile-time evaluation always formats integers as signed decimal, booleans as `true` or `false`, `comptime_str` values as their contents, and `()` as `()`.
+
+{{ rule(id="4.13:9b", cat="normative") }}
+
+Each `@dbg` call whose arguments are evaluated at compile time also produces a post-compilation warning ("debug statement present"). The warning is attached to the call site and is emitted once per call.
+
+{{ rule(id="4.13:9c", cat="normative") }}
+
+The compiler collects the formatted messages from compile-time `@dbg` calls in a buffer on the compilation result, whether or not the compiler also prints them. A compiler-driver flag (`--capture-comptime-dbg`) suppresses the on-the-fly stderr print while leaving the buffer intact; this flag is intended for tools that consume the buffer directly.
+
+{{ rule(id="4.13:10", cat="normative") }}
+
 The return type of `@dbg` is `()`.
 
-{{ rule(id="4.13:10") }}
+{{ rule(id="4.13:10a", cat="example") }}
 
 ```gruel
 fn main() -> i32 {
-    @dbg(42);           // prints: 42
-    @dbg(-17);          // prints: -17
-    @dbg(true);         // prints: true
-    @dbg(false);        // prints: false
-    @dbg(10 + 5);       // prints: 15
-    @dbg("hello");      // prints: hello
+    @dbg(42);                 // prints: 42
+    @dbg(true);               // prints: true
+    @dbg("hello");            // prints: hello
+    @dbg("n =", 42);          // prints: n = 42 (variadic)
+    @dbg();                   // prints an empty line
     0
 }
 ```
 
-{{ rule(id="4.13:11") }}
+{{ rule(id="4.13:11", cat="example") }}
 
 `@dbg` is useful for inspecting values during development:
 
@@ -106,6 +124,23 @@ fn factorial(n: i32) -> i32 {
 
 fn main() -> i32 {
     factorial(5)
+}
+```
+
+{{ rule(id="4.13:11a", cat="example") }}
+
+Inside a comptime block, `@dbg` is a compile-time debugging tool. The output appears on the compiler's standard error and the build emits a warning for each call:
+
+```gruel
+fn compute(comptime n: i32) -> i32 {
+    comptime { @dbg("computing with n =", n); }
+    n * 2
+}
+
+fn main() -> i32 {
+    compute(21)
+    // compiler output: comptime dbg: computing with n = 21
+    // compiler warning: debug statement present — remove before release
 }
 ```
 

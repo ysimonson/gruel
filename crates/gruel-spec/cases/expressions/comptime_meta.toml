@@ -1,12 +1,13 @@
 # Comptime Metaprogramming Tests (ADR-0042)
 #
-# Tests for @compileError and @compileLog intrinsics (Phase 1).
+# Tests for @compileError and comptime-evaluated @dbg (Phase 1).
+# @compileLog was removed in ADR-0047 in favor of phase-polymorphic @dbg.
 
 [section]
 id = "expressions.comptime_meta"
 spec_chapter = "4.14"
 name = "Comptime Metaprogramming"
-description = "Comptime diagnostics: @compileError and @compileLog."
+description = "Comptime diagnostics: @compileError and comptime @dbg."
 
 # =============================================================================
 # @compileError
@@ -97,18 +98,18 @@ compile_fail = true
 error_contains = "string literal"
 
 # =============================================================================
-# @compileLog
+# Comptime @dbg (subsumes the removed @compileLog)
 # =============================================================================
 
 [[case]]
-name = "compile_log_basic"
-spec = ["4.14:52", "4.14:53"]
+name = "comptime_dbg_basic"
+spec = ["4.13:9a", "4.13:9b", "4.13:9c", "4.14:47", "4.14:47a"]
 preview = "comptime_meta"
 preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
-        @compileLog("hello", 42);
+        @dbg("hello", 42);
         42
     }
 }
@@ -116,14 +117,14 @@ fn main() -> i32 {
 exit_code = 42
 
 [[case]]
-name = "compile_log_no_args"
-spec = ["4.14:52"]
+name = "comptime_dbg_no_args"
+spec = ["4.14:47"]
 preview = "comptime_meta"
 preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
-        @compileLog();
+        @dbg();
         42
     }
 }
@@ -131,14 +132,14 @@ fn main() -> i32 {
 exit_code = 42
 
 [[case]]
-name = "compile_log_multiple_args"
-spec = ["4.14:52"]
+name = "comptime_dbg_multiple_args"
+spec = ["4.14:47"]
 preview = "comptime_meta"
 preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
-        @compileLog("a", 1, true, false);
+        @dbg("a", 1, true, false);
         42
     }
 }
@@ -146,14 +147,14 @@ fn main() -> i32 {
 exit_code = 42
 
 [[case]]
-name = "compile_log_returns_unit"
-spec = ["4.14:52"]
+name = "comptime_dbg_returns_unit"
+spec = ["4.14:47"]
 preview = "comptime_meta"
 preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
-        @compileLog("hello");
+        @dbg("hello");
         42
     }
 }
@@ -325,15 +326,15 @@ compile_fail = true
 error_contains = "custom error"
 
 [[case]]
-name = "comptime_str_compile_log_accepts"
-spec = ["4.14:52", "4.14:55"]
+name = "comptime_str_dbg_accepts"
+spec = ["4.14:47", "4.14:55"]
 preview = "comptime_meta"
 preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
         let msg = "hello";
-        @compileLog(msg);
+        @dbg(msg);
         42
     }
 }
@@ -373,8 +374,8 @@ compile_fail = true
 error_contains = "preview feature"
 
 [[case]]
-name = "compile_log_requires_preview"
-spec = ["4.14:52"]
+name = "compile_log_removed"
+spec = ["4.14:52", "4.14:53"]
 source = """
 fn main() -> i32 {
     comptime {
@@ -384,7 +385,7 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
-error_contains = "preview feature"
+error_contains = "compileLog"
 
 # =============================================================================
 # @typeName

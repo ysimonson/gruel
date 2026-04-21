@@ -714,6 +714,10 @@ pub struct CompileOptions {
     pub preview_features: PreviewFeatures,
     /// Number of parallel jobs (0 = auto-detect, use all cores).
     pub jobs: usize,
+    /// When true, suppress the on-the-fly stderr print of comptime `@dbg`
+    /// output. The output is still collected on `SemaOutput.comptime_dbg_output`
+    /// and a warning is still emitted for each call. Used by fuzz harnesses.
+    pub capture_comptime_dbg: bool,
 }
 
 impl Default for CompileOptions {
@@ -724,6 +728,7 @@ impl Default for CompileOptions {
             opt_level: OptLevel::default(),
             preview_features: PreviewFeatures::new(),
             jobs: 0,
+            capture_comptime_dbg: false,
         }
     }
 }
@@ -800,6 +805,19 @@ pub fn compile_frontend_with_options(
     source: &str,
     preview_features: &PreviewFeatures,
 ) -> MultiErrorResult<CompileState> {
+    compile_frontend_with_options_full(source, preview_features, false)
+}
+
+/// Like [`compile_frontend_with_options`], but additionally lets the caller
+/// suppress the on-the-fly stderr print of comptime `@dbg` output. When
+/// `suppress_comptime_dbg_print` is true, output is only collected in the
+/// `SemaOutput.comptime_dbg_output` buffer. Used by fuzz harnesses that
+/// consume the buffer directly and don't want noise on stderr.
+pub fn compile_frontend_with_options_full(
+    source: &str,
+    preview_features: &PreviewFeatures,
+    suppress_comptime_dbg_print: bool,
+) -> MultiErrorResult<CompileState> {
     let _span = info_span!("frontend", source_bytes = source.len()).entered();
 
     // Lexing - errors here are fatal (can't continue without tokens)
@@ -820,7 +838,12 @@ pub fn compile_frontend_with_options(
         (ast, interner)
     };
 
-    compile_frontend_from_ast_with_options(ast, interner, preview_features)
+    compile_frontend_from_ast_with_options_full(
+        ast,
+        interner,
+        preview_features,
+        suppress_comptime_dbg_print,
+    )
 }
 
 /// Compile from an already-parsed AST through all remaining frontend phases.
@@ -850,6 +873,17 @@ pub fn compile_frontend_from_ast_with_options(
     interner: ThreadedRodeo,
     preview_features: &PreviewFeatures,
 ) -> MultiErrorResult<CompileState> {
+    compile_frontend_from_ast_with_options_full(ast, interner, preview_features, false)
+}
+
+/// Like [`compile_frontend_from_ast_with_options`], but additionally lets the
+/// caller suppress the on-the-fly stderr print of comptime `@dbg` output.
+pub fn compile_frontend_from_ast_with_options_full(
+    ast: Ast,
+    interner: ThreadedRodeo,
+    preview_features: &PreviewFeatures,
+    suppress_comptime_dbg_print: bool,
+) -> MultiErrorResult<CompileState> {
     // AST to RIR (untyped IR)
     let (rir, interner) = {
         let _span = info_span!("astgen").entered();
@@ -862,7 +896,8 @@ pub fn compile_frontend_from_ast_with_options(
     // Semantic analysis (RIR to AIR) - this now collects multiple errors
     let sema_output = {
         let _span = info_span!("sema").entered();
-        let sema = Sema::new(&rir, &interner, preview_features.clone());
+        let mut sema = Sema::new(&rir, &interner, preview_features.clone());
+        sema.set_suppress_comptime_dbg_print(suppress_comptime_dbg_print);
         let output = sema.analyze_all()?;
         info!(
             function_count = output.functions.len(),
