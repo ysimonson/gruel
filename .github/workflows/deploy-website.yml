@@ -44,6 +44,25 @@ jobs:
       - name: Install dotslash
         run: cargo install dotslash
 
+      - name: Install LLVM 22
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y libpolly-22-dev
+          echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22" >> $GITHUB_ENV
+
+      - name: Cache Cargo registry and build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-deploy-website-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-deploy-website-
+
       - name: Fetch benchmark data from perf branch
         run: |
           # Try to fetch benchmark history from the perf branch
@@ -70,7 +89,7 @@ jobs:
           fi
 
       - name: Build website
-        run: website/build.sh deploy
+        run: make website-deploy
 
       - name: Add CNAME
         if: github.ref == 'refs/heads/main'
