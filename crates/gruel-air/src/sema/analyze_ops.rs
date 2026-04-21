@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
-    PreviewFeature, WarningKind,
+    WarningKind,
 };
 use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern, RirPatternBinding,
@@ -819,9 +819,6 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        // Gate behind preview feature
-        self.require_preview(PreviewFeature::ForLoops, "for-in loops", span)?;
-
         // Check if the iterable is a @range(...) intrinsic
         let iterable_inst = self.rir.get(iterable);
         match &iterable_inst.data {

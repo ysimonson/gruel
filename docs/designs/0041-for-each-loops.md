@@ -1,12 +1,12 @@
 ---
 id: 0041
 title: For-Each Loops
-status: proposal
+status: implemented
 tags: [syntax, semantics]
 feature-flag: for_loops
 created: 2026-04-19
-accepted:
-implemented:
+accepted: 2026-04-19
+implemented: 2026-04-21
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 

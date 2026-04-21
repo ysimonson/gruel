@@ -9,8 +9,6 @@ description = "Tests that runtime-only mutation methods on comptime_str produce 
 
 [[case]]
 name = "comptime_str_push_str"
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -25,8 +23,6 @@ error_contains = "cannot call .push_str() on a compile-time string; use .concat(
 
 [[case]]
 name = "comptime_str_push"
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -41,8 +37,6 @@ error_contains = "cannot call .push() on a compile-time string; use .concat() to
 
 [[case]]
 name = "comptime_str_clear"
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -57,8 +51,6 @@ error_contains = "cannot call .clear() on a compile-time string; use .concat() t
 
 [[case]]
 name = "comptime_str_reserve"
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -73,8 +65,6 @@ error_contains = "cannot call .reserve() on a compile-time string; use .concat()
 
 [[case]]
 name = "comptime_str_capacity"
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {

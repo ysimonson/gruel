@@ -301,13 +301,6 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
-    /// For-each loops over arrays and integer ranges.
-    ForLoops,
-    /// Comptime metaprogramming: @compileError, @compileLog, comptime_str,
-    /// @typeInfo, @typeName, comptime_unroll for, @field (ADR-0042).
-    ComptimeMeta,
-    /// Consistent string interface and comptime string materialization (ADR-0045).
-    ConsistentStr,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -327,9 +320,6 @@ impl PreviewFeature {
     pub fn name(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
-            PreviewFeature::ForLoops => "for_loops",
-            PreviewFeature::ComptimeMeta => "comptime_meta",
-            PreviewFeature::ConsistentStr => "consistent_str",
         }
     }
 
@@ -337,20 +327,12 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
-            PreviewFeature::ForLoops => "ADR-0041",
-            PreviewFeature::ComptimeMeta => "ADR-0042",
-            PreviewFeature::ConsistentStr => "ADR-0045",
         }
     }
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[
-            PreviewFeature::TestInfra,
-            PreviewFeature::ForLoops,
-            PreviewFeature::ComptimeMeta,
-            PreviewFeature::ConsistentStr,
-        ]
+        &[PreviewFeature::TestInfra]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -373,9 +355,6 @@ impl std::str::FromStr for PreviewFeature {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "test_infra" => Ok(PreviewFeature::TestInfra),
-            "for_loops" => Ok(PreviewFeature::ForLoops),
-            "comptime_meta" => Ok(PreviewFeature::ComptimeMeta),
-            "consistent_str" => Ok(PreviewFeature::ConsistentStr),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1901,10 +1880,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(
-            names,
-            "test_infra, for_loops, comptime_meta, consistent_str"
-        );
+        assert_eq!(names, "test_infra");
     }
 
     // ========================================================================

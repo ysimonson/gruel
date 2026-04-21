@@ -1,12 +1,12 @@
 ---
 id: 0045
 title: Consistent String Interface and Comptime String Materialization
-status: proposal
+status: implemented
 tags: [comptime, types, strings]
 feature-flag: consistent_str
 created: 2026-04-20
-accepted:
-implemented:
+accepted: 2026-04-20
+implemented: 2026-04-21
 spec-sections: [4.14]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 

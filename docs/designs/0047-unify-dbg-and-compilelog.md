@@ -1,12 +1,12 @@
 ---
 id: 0047
 title: Unify @dbg and @compileLog
-status: proposal
+status: implemented
 tags: [intrinsics, comptime, diagnostics]
 feature-flag: comptime_meta
 created: 2026-04-21
-accepted:
-implemented:
+accepted: 2026-04-21
+implemented: 2026-04-21
 spec-sections: [4.13, 4.14]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 

@@ -16,8 +16,6 @@ description = "Comptime diagnostics: @compileError and comptime @dbg."
 [[case]]
 name = "compile_error_basic"
 spec = ["4.14:48"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -32,8 +30,6 @@ error_contains = "something went wrong"
 [[case]]
 name = "compile_error_unreachable_not_evaluated"
 spec = ["4.14:50"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -50,8 +46,6 @@ exit_code = 42
 [[case]]
 name = "compile_error_has_never_type"
 spec = ["4.14:48"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -68,8 +62,6 @@ exit_code = 42
 [[case]]
 name = "compile_error_wrong_arg_count"
 spec = ["4.14:49"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -84,8 +76,6 @@ error_contains = "expects 1 argument"
 [[case]]
 name = "compile_error_requires_string_literal"
 spec = ["4.14:49"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -104,8 +94,6 @@ error_contains = "string literal"
 [[case]]
 name = "comptime_dbg_basic"
 spec = ["4.13:9a", "4.13:9b", "4.13:9c", "4.14:47", "4.14:47a"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -119,8 +107,6 @@ exit_code = 42
 [[case]]
 name = "comptime_dbg_no_args"
 spec = ["4.14:47"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -134,8 +120,6 @@ exit_code = 42
 [[case]]
 name = "comptime_dbg_multiple_args"
 spec = ["4.14:47"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -149,8 +133,6 @@ exit_code = 42
 [[case]]
 name = "comptime_dbg_returns_unit"
 spec = ["4.14:47"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -168,8 +150,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_promotion"
 spec = ["4.14:55"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -183,8 +163,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_is_empty"
 spec = ["4.14:58"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -199,8 +177,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_contains"
 spec = ["4.14:58"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -214,8 +190,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_starts_ends_with"
 spec = ["4.14:58"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -229,8 +203,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_eq_ne"
 spec = ["4.14:57"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -246,8 +218,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_ordering"
 spec = ["4.14:57"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -262,8 +232,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_concat"
 spec = ["4.14:58"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -279,8 +247,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_clone"
 spec = ["4.14:58"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -295,8 +261,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_method_eq"
 spec = ["4.14:58"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -311,8 +275,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_compile_error_accepts"
 spec = ["4.14:48", "4.14:55"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -328,8 +290,6 @@ error_contains = "custom error"
 [[case]]
 name = "comptime_str_dbg_accepts"
 spec = ["4.14:47", "4.14:55"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -340,38 +300,6 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
-
-[[case]]
-name = "comptime_str_requires_preview"
-spec = ["4.14:55"]
-source = """
-fn main() -> i32 {
-    comptime {
-        let s = "hello";
-        s.len()
-    }
-}
-"""
-compile_fail = true
-error_contains = "preview feature"
-
-# =============================================================================
-# Preview Feature Gate
-# =============================================================================
-
-[[case]]
-name = "compile_error_requires_preview"
-spec = ["4.14:48"]
-source = """
-fn main() -> i32 {
-    comptime {
-        @compileError("test");
-        0
-    }
-}
-"""
-compile_fail = true
-error_contains = "preview feature"
 
 [[case]]
 name = "compile_log_removed"
@@ -394,8 +322,6 @@ error_contains = "compileLog"
 [[case]]
 name = "type_name_primitive_i32"
 spec = ["4.14:60"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -409,8 +335,6 @@ exit_code = 42
 [[case]]
 name = "type_name_primitive_bool"
 spec = ["4.14:60"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -424,8 +348,6 @@ exit_code = 42
 [[case]]
 name = "type_name_struct"
 spec = ["4.14:60"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Point { x: i32, y: i32 }
 
@@ -441,8 +363,6 @@ exit_code = 42
 [[case]]
 name = "type_name_enum"
 spec = ["4.14:60"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 enum Color { Red, Green, Blue }
 
@@ -456,18 +376,17 @@ fn main() -> i32 {
 exit_code = 42
 
 [[case]]
-name = "type_name_requires_preview"
+name = "type_name_in_comptime_block"
 spec = ["4.14:61"]
 source = """
 fn main() -> i32 {
     comptime {
-        let name = @typeName(i32);
+        let _name = @typeName(i32);
         42
     }
 }
 """
-compile_fail = true
-error_contains = "preview feature"
+exit_code = 42
 
 # =============================================================================
 # @typeInfo
@@ -476,8 +395,6 @@ error_contains = "preview feature"
 [[case]]
 name = "type_info_struct_kind"
 spec = ["4.14:62", "4.14:64", "4.14:65"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Point { x: i32, y: i32 }
 
@@ -496,8 +413,6 @@ exit_code = 42
 [[case]]
 name = "type_info_struct_name"
 spec = ["4.14:62", "4.14:65"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Foo { x: i32 }
 
@@ -513,8 +428,6 @@ exit_code = 42
 [[case]]
 name = "type_info_struct_field_count"
 spec = ["4.14:65"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Trio { a: i32, b: i32, c: i32 }
 
@@ -530,8 +443,6 @@ exit_code = 3
 [[case]]
 name = "type_info_struct_field_name"
 spec = ["4.14:65"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Pair { first: i32, second: bool }
 
@@ -547,8 +458,6 @@ exit_code = 42
 [[case]]
 name = "type_info_enum_kind"
 spec = ["4.14:62", "4.14:64", "4.14:66"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 enum Dir { Up, Down, Left, Right }
 
@@ -567,8 +476,6 @@ exit_code = 42
 [[case]]
 name = "type_info_enum_variant_count"
 spec = ["4.14:66"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 enum Color { Red, Green, Blue }
 
@@ -584,8 +491,6 @@ exit_code = 3
 [[case]]
 name = "type_info_enum_variant_name"
 spec = ["4.14:66"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 enum Color { Red, Green, Blue }
 
@@ -601,8 +506,6 @@ exit_code = 42
 [[case]]
 name = "type_info_int_kind"
 spec = ["4.14:64", "4.14:67"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -619,8 +522,6 @@ exit_code = 42
 [[case]]
 name = "type_info_int_bits"
 spec = ["4.14:67"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -634,8 +535,6 @@ exit_code = 64
 [[case]]
 name = "type_info_int_signed"
 spec = ["4.14:67"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -650,8 +549,6 @@ exit_code = 42
 [[case]]
 name = "type_info_bool_kind"
 spec = ["4.14:64", "4.14:68"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -668,8 +565,6 @@ exit_code = 42
 [[case]]
 name = "type_info_unit_kind"
 spec = ["4.14:68"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -684,24 +579,21 @@ fn main() -> i32 {
 exit_code = 42
 
 [[case]]
-name = "type_info_requires_preview"
+name = "type_info_in_comptime_block"
 spec = ["4.14:63"]
 source = """
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(i32);
+        let _info = @typeInfo(i32);
         42
     }
 }
 """
-compile_fail = true
-error_contains = "preview feature"
+exit_code = 42
 
 [[case]]
 name = "type_info_with_type_name"
 spec = ["4.14:60", "4.14:62"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Widget { val: i32 }
 
@@ -722,8 +614,6 @@ exit_code = 42
 [[case]]
 name = "comptime_unroll_range_basic"
 spec = ["4.14:70", "4.14:72", "4.14:73"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut total: i32 = 0;
@@ -738,8 +628,6 @@ exit_code = 5
 [[case]]
 name = "comptime_unroll_range_start_end"
 spec = ["4.14:70", "4.14:72"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut total: i32 = 0;
@@ -754,8 +642,6 @@ exit_code = 3
 [[case]]
 name = "comptime_unroll_empty"
 spec = ["4.14:70", "4.14:72"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut total: i32 = 42;
@@ -770,8 +656,6 @@ exit_code = 42
 [[case]]
 name = "comptime_unroll_single_iteration"
 spec = ["4.14:70", "4.14:72"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut total: i32 = 0;
@@ -786,8 +670,6 @@ exit_code = 42
 [[case]]
 name = "comptime_unroll_non_array_iterable"
 spec = ["4.14:74"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime_unroll for i in comptime { 42 } {
@@ -799,23 +681,20 @@ compile_fail = true
 error_contains = "requires an array iterable"
 
 [[case]]
-name = "comptime_unroll_preview_gate"
+name = "comptime_unroll_for_range"
 spec = ["4.14:75"]
 source = """
 fn main() -> i32 {
-    comptime_unroll for i in comptime { @range(3) } {
+    comptime_unroll for _i in comptime { @range(3) } {
     }
     0
 }
 """
-compile_fail = true
-error_contains = "preview feature"
+exit_code = 0
 
 [[case]]
 name = "comptime_unroll_typeinfo_fields"
 spec = ["4.14:70", "4.14:71"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Point { x: i32, y: i32 }
 
@@ -833,8 +712,6 @@ exit_code = 30
 [[case]]
 name = "comptime_unroll_runtime_body"
 spec = ["4.14:71"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut a: i32 = 1;
@@ -856,8 +733,6 @@ exit_code = 5
 [[case]]
 name = "field_intrinsic_basic"
 spec = ["4.14:76"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Point { x: i32, y: i32 }
 
@@ -871,8 +746,6 @@ exit_code = 42
 [[case]]
 name = "field_intrinsic_second_field"
 spec = ["4.14:76"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Point { x: i32, y: i32 }
 
@@ -886,8 +759,6 @@ exit_code = 42
 [[case]]
 name = "field_intrinsic_wrong_arg_count"
 spec = ["4.14:77"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Point { x: i32, y: i32 }
 
@@ -902,8 +773,6 @@ error_contains = "expects 2 arguments"
 [[case]]
 name = "field_intrinsic_non_struct"
 spec = ["4.14:77"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
@@ -916,8 +785,6 @@ error_contains = "requires a struct value"
 [[case]]
 name = "field_intrinsic_unknown_field"
 spec = ["4.14:78"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Point { x: i32, y: i32 }
 
@@ -930,24 +797,8 @@ compile_fail = true
 error_contains = "has no field 'z'"
 
 [[case]]
-name = "field_intrinsic_preview_gate"
-spec = ["4.14:77"]
-source = """
-struct Point { x: i32, y: i32 }
-
-fn main() -> i32 {
-    let p = Point { x: 42, y: 0 };
-    @field(p, "x")
-}
-"""
-compile_fail = true
-error_contains = "preview feature"
-
-[[case]]
 name = "comptime_unroll_generic_sum_fields"
 spec = ["4.14:70", "4.14:76", "4.14:79"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Point { x: i32, y: i32 }
 
@@ -969,8 +820,6 @@ exit_code = 42
 [[case]]
 name = "comptime_unroll_three_field_struct"
 spec = ["4.14:70", "4.14:76"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Vec3 { x: i32, y: i32, z: i32 }
 
@@ -992,8 +841,6 @@ exit_code = 42
 [[case]]
 name = "comptime_str_materialize_literal"
 spec = ["4.14:56"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s: String = comptime { "hello" };
@@ -1005,8 +852,6 @@ exit_code = 0
 [[case]]
 name = "comptime_str_materialize_concat"
 spec = ["4.14:56", "4.14:58"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s: String = comptime {
@@ -1022,8 +867,6 @@ exit_code = 0
 [[case]]
 name = "comptime_str_materialize_type_name"
 spec = ["4.14:56", "4.14:60"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 struct Point { x: i32, y: i32 }
 
@@ -1041,8 +884,6 @@ exit_code = 0
 [[case]]
 name = "comptime_str_materialize_empty"
 spec = ["4.14:56"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s: String = comptime { "" };
@@ -1058,8 +899,6 @@ exit_code = 0
 [[case]]
 name = "comptime_str_push_str_error"
 spec = ["4.14:59a"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {
@@ -1075,8 +914,6 @@ error_contains = "cannot call .push_str() on a compile-time string"
 [[case]]
 name = "comptime_str_capacity_error"
 spec = ["4.14:59a"]
-preview = "comptime_meta"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     comptime {

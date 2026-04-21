@@ -1,12 +1,12 @@
 ---
 id: 0043
 title: Extended Benchmark Infrastructure — Comptime, Opt Levels, and Runtime
-status: proposal
+status: implemented
 tags: [tooling, performance, benchmarks, website]
 feature-flag: null
 created: 2026-04-20
-accepted:
-implemented:
+accepted: 2026-04-20
+implemented: 2026-04-21
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 

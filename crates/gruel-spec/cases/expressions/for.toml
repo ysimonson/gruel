@@ -11,8 +11,6 @@ description = "For-in loops iterate over ranges, binding each element to a loop 
 [[case]]
 name = "for_range_one_arg"
 spec = ["4.8:22", "4.8:24", "4.8:26", "4.13:89", "4.13:90", "4.13:92", "4.13:93"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -27,8 +25,6 @@ exit_code = 10
 [[case]]
 name = "for_range_two_args"
 spec = ["4.8:22", "4.8:26", "4.13:90"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -43,8 +39,6 @@ exit_code = 9
 [[case]]
 name = "for_range_three_args"
 spec = ["4.8:22", "4.8:26", "4.13:90", "4.13:94"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -63,8 +57,6 @@ exit_code = 18
 [[case]]
 name = "for_syntax"
 spec = ["4.8:23"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut x: i32 = 0;
@@ -83,8 +75,6 @@ exit_code = 3
 [[case]]
 name = "for_has_unit_type"
 spec = ["4.8:24"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn takes_unit(x: ()) -> i32 { 42 }
 fn main() -> i32 {
@@ -101,8 +91,6 @@ exit_code = 42
 [[case]]
 name = "for_immutable_binding"
 spec = ["4.8:25"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -117,8 +105,6 @@ exit_code = 10
 [[case]]
 name = "for_mutable_binding"
 spec = ["4.8:25"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -134,8 +120,6 @@ exit_code = 20
 [[case]]
 name = "for_immutable_binding_no_assign"
 spec = ["4.8:25"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     for i in @range(5) {
@@ -153,8 +137,6 @@ compile_fail = true
 [[case]]
 name = "for_range_type_match"
 spec = ["4.8:27", "4.13:91"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -175,8 +157,6 @@ exit_code = 9
 [[case]]
 name = "for_range_empty"
 spec = ["4.8:28"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -191,8 +171,6 @@ exit_code = 0
 [[case]]
 name = "for_range_single_element"
 spec = ["4.8:28"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -211,8 +189,6 @@ exit_code = 1
 [[case]]
 name = "for_break"
 spec = ["4.8:32"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -230,8 +206,6 @@ exit_code = 10
 [[case]]
 name = "for_continue"
 spec = ["4.8:32"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut sum: i32 = 0;
@@ -253,8 +227,6 @@ exit_code = 25
 [[case]]
 name = "for_array_basic"
 spec = ["4.8:33", "4.8:35"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr = [10, 20, 30];
@@ -270,8 +242,6 @@ exit_code = 60
 [[case]]
 name = "for_array_single_element"
 spec = ["4.8:33"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr = [42];
@@ -287,8 +257,6 @@ exit_code = 42
 [[case]]
 name = "for_array_copy_type"
 spec = ["4.8:34"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr = [1, 2, 3, 4, 5];
@@ -304,8 +272,6 @@ exit_code = 15
 [[case]]
 name = "for_array_remains_valid"
 spec = ["4.8:35"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr = [1, 2, 3];
@@ -321,8 +287,6 @@ exit_code = 12
 [[case]]
 name = "for_array_break"
 spec = ["4.8:32", "4.8:33"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr = [1, 2, 3, 4, 5];
@@ -341,8 +305,6 @@ exit_code = 6
 [[case]]
 name = "for_array_continue"
 spec = ["4.8:32", "4.8:33"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr = [1, 2, 3, 4, 5];
@@ -361,8 +323,6 @@ exit_code = 9
 [[case]]
 name = "for_array_mutable_binding"
 spec = ["4.8:25", "4.8:33"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr = [1, 2, 3];
@@ -379,8 +339,6 @@ exit_code = 60
 [[case]]
 name = "for_array_bool_elements"
 spec = ["4.8:33", "4.8:34"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr = [true, false, true, true];
@@ -402,8 +360,6 @@ exit_code = 3
 [[case]]
 name = "for_array_move_type_basic"
 spec = ["4.8:33", "4.8:35", "4.8:38"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 struct Data { value: i32 }
 
@@ -421,8 +377,6 @@ exit_code = 60
 [[case]]
 name = "for_array_move_type_consumed"
 spec = ["4.8:35"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 struct Data { value: i32 }
 
@@ -442,8 +396,6 @@ error_contains = "use of moved value"
 [[case]]
 name = "for_array_move_type_break_forbidden"
 spec = ["4.8:37"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 struct Data { value: i32 }
 
@@ -465,8 +417,6 @@ error_contains = "break"
 [[case]]
 name = "for_array_move_type_continue_allowed"
 spec = ["4.8:32", "4.8:35"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 struct Data { value: i32 }
 
@@ -487,8 +437,6 @@ exit_code = 4
 [[case]]
 name = "for_array_move_type_single"
 spec = ["4.8:33", "4.8:35"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 struct Data { value: i32 }
 
@@ -506,8 +454,6 @@ exit_code = 42
 [[case]]
 name = "for_array_copy_type_break_still_allowed"
 spec = ["4.8:32", "4.8:34"]
-preview = "for_loops"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr = [1, 2, 3, 4, 5];

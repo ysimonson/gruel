@@ -2179,8 +2179,6 @@ impl<'a> Sema<'a> {
                 let iterable = *iterable;
                 let body = *body;
 
-                self.require_preview(PreviewFeature::ComptimeMeta, "comptime_unroll for", span)?;
-
                 // Step 1: Evaluate the iterable expression at comptime.
                 // We use evaluate_comptime_block which clears and rebuilds the heap.
                 let iterable_val = self.evaluate_comptime_block(iterable, ctx, span)?;
@@ -3773,12 +3771,6 @@ impl<'a> Sema<'a> {
         args: &[RirCallArg],
         span: Span,
     ) -> CompileResult<AnalysisResult> {
-        self.require_preview(
-            PreviewFeature::ComptimeMeta,
-            "@compileError intrinsic",
-            span,
-        )?;
-
         if args.len() != 1 {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicWrongArgCount {
@@ -3822,8 +3814,6 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        self.require_preview(PreviewFeature::ComptimeMeta, "@field intrinsic", span)?;
-
         if args.len() != 2 {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicWrongArgCount {
@@ -6079,7 +6069,6 @@ impl<'a> Sema<'a> {
             InstData::UnitConst => Ok(ConstValue::Unit),
 
             InstData::StringConst(spur) => {
-                self.require_preview(PreviewFeature::ComptimeMeta, "comptime_str type", inst_span)?;
                 let s = self.interner.resolve(&spur).to_string();
                 let idx = self.comptime_heap.len() as u32;
                 self.comptime_heap.push(ComptimeHeapItem::String(s));
@@ -7417,11 +7406,6 @@ impl<'a> Sema<'a> {
                 }
                 // @compileError emits a user-defined compile error.
                 if name == self.known.compile_error {
-                    self.require_preview(
-                        PreviewFeature::ComptimeMeta,
-                        "@compileError intrinsic",
-                        inst_span,
-                    )?;
                     let arg_refs = self.rir.get_inst_refs(args_start, args_len);
                     if arg_refs.len() != 1 {
                         return Err(CompileError::new(
@@ -7585,19 +7569,9 @@ impl<'a> Sema<'a> {
                         Ok(ConstValue::Integer(if slot_count == 0 { 1 } else { 8 }))
                     }
                     "typeName" => {
-                        self.require_preview(
-                            PreviewFeature::ComptimeMeta,
-                            "@typeName intrinsic",
-                            inst_span,
-                        )?;
                         self.evaluate_comptime_type_name(ty, inst_span)
                     }
                     "typeInfo" => {
-                        self.require_preview(
-                            PreviewFeature::ComptimeMeta,
-                            "@typeInfo intrinsic",
-                            inst_span,
-                        )?;
                         self.evaluate_comptime_type_info(ty, inst_span)
                     }
                     _ => Err(not_const(inst_span)),

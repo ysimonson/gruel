@@ -9,19 +9,12 @@
 
 #![no_main]
 use gruel_compiler::CompileOptions;
-use gruel_error::PreviewFeature;
 use gruel_fuzz::ComptimeProgram;
 use libfuzzer_sys::fuzz_target;
 use std::io::Write;
 
-fn preview_features() -> gruel_error::PreviewFeatures {
-    let mut features = gruel_error::PreviewFeatures::new();
-    features.insert(PreviewFeature::ComptimeMeta);
-    features
-}
-
 fuzz_target!(|prog: ComptimeProgram| {
-    let preview = preview_features();
+    let preview = gruel_error::PreviewFeatures::new();
 
     // Path A: comptime evaluation — @dbg output collected in compiler buffer.
     // Suppress on-the-fly stderr printing so the fuzzer doesn't flood the
