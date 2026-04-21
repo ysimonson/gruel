@@ -180,27 +180,30 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 ### Phase 3: Floating-point types (f16/f32/f64/f128) — lexer and type system
 
-- [ ] Add `F16`/`F32`/`F64`/`F128` to `TypeKind`, `Type` constants (tags 18–21)
-- [ ] Add `is_float()`, `is_numeric()` helpers
-- [ ] Update `is_signed()`, `is_copy()`, etc.
-- [ ] Add `f16`/`f32`/`f64`/`f128` type keyword tokens to lexer
-- [ ] Add floating-point literal token: regex `[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?` and `[0-9]+[eE][+-]?[0-9]+`
-- [ ] Handle parser ambiguity: `42.method()` vs `42.0` (lookahead after `.` — if followed by digit, it's a float literal; if followed by identifier, it's a method call)
-- [ ] Update parser type parsing to recognize `f16`/`f32`/`f64`/`f128`
-- [ ] Add `Float(f64)` literal variant to RIR and AIR instruction data (store all float literals as f64, narrow to target width during codegen)
+- [x] Add `F16`/`F32`/`F64`/`F128` to `TypeKind`, `Type` constants (tags 12–15)
+- [x] Add `is_float()`, `is_numeric()` helpers
+- [x] Update `is_signed()`, `is_copy()`, etc.
+- [x] Add `f16`/`f32`/`f64`/`f128` type keyword tokens to lexer
+- [x] Add floating-point literal token: regex `[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?` and `[0-9]+[eE][+-]?[0-9]+`
+- [x] Handle parser ambiguity: `42.method()` vs `42.0` (logos naturally disambiguates — dot-digit is float, dot-ident is method call)
+- [x] Update parser type parsing to recognize `f16`/`f32`/`f64`/`f128`
+- [x] Add `Float(u64)` literal variant to AST, RIR, AIR, and CFG instruction data (store f64 bits as u64 for Eq/Copy compatibility)
+- [x] Add `FloatLiteral` to `InferType` for type inference (defaults to f64 if unconstrained)
+- [x] Add LLVM type mapping: `ctx.f16_type()`, `ctx.f32_type()`, `ctx.f64_type()`, `ctx.f128_type()`
+- [x] Update `type_byte_size` and `type_alignment`: f16 (2/2), f32 (4/4), f64 (8/8), f128 (16/16)
+- [x] Add `FloatConst` codegen: LLVM `const_float` emission
+- [x] Add spec section 3.11 for floating-point types (9 normative paragraphs)
+- [x] Add spec tests (11 tests covering type declarations, literals, inference, copy, preview gate)
+- [x] Preview-gated via `--preview extended_numeric_types`
 
 ### Phase 4: Floating-point codegen and semantics
 
-- [ ] Add LLVM codegen: `ctx.f16_type()`, `ctx.f32_type()`, `ctx.f64_type()`, `ctx.f128_type()`
 - [ ] Emit float arithmetic: `fadd`, `fsub`, `fmul`, `fdiv`, `frem` for all four widths
 - [ ] Emit float comparisons: `fcmp` with ordered predicates (OEQ, ONE, OLT, OGT, OLE, OGE)
 - [ ] Emit float negation: `fneg`
 - [ ] Reject bitwise operators on float types in Sema
-- [ ] Update `type_byte_size` and `type_alignment`: f16 (2/2), f32 (4/4), f64 (8/8), f128 (16/16)
 - [ ] Extend `@intCast` or add `@cast` for float↔int and float↔float conversions (fptrunc/fpext)
-- [ ] Add spec section 3.5 for floating-point types
 - [ ] Add spec tests for float arithmetic, comparison, casting, edge cases (NaN, infinity, negative zero)
-- [ ] Add spec tests for float literal parsing
 - [ ] Add spec tests for f16 range limits and f128 precision
 
 ### Phase 5: Compile-time integer type (comptime_int)

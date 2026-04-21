@@ -172,6 +172,14 @@ pub enum TypeKind {
     Isize,
     /// Pointer-sized unsigned integer
     Usize,
+    /// IEEE 754 binary16 (half-precision float)
+    F16,
+    /// IEEE 754 binary32 (single-precision float)
+    F32,
+    /// IEEE 754 binary64 (double-precision float)
+    F64,
+    /// IEEE 754 binary128 (quad-precision float)
+    F128,
     /// Boolean
     Bool,
     /// The unit type (for functions that don't return a value)
@@ -206,9 +214,9 @@ pub enum TypeKind {
 /// # Encoding
 ///
 /// The u32 value uses a tag-based encoding:
-/// - Primitives (0-17): I8=0, I16=1, I32=2, I64=3, U8=4, U16=5, U32=6, U64=7,
-///   I128=8, U128=9, Isize=10, Usize=11, Bool=12, Unit=13, Error=14, Never=15,
-///   ComptimeType=16, ComptimeStr=17
+/// - Primitives (0-21): I8=0, I16=1, I32=2, I64=3, U8=4, U16=5, U32=6, U64=7,
+///   I128=8, U128=9, Isize=10, Usize=11, F16=12, F32=13, F64=14, F128=15,
+///   Bool=16, Unit=17, Error=18, Never=19, ComptimeType=20, ComptimeStr=21
 /// - Composites: low byte is tag (TAG_STRUCT, TAG_ENUM, TAG_ARRAY, TAG_MODULE),
 ///   high 24 bits are the ID
 ///
@@ -257,6 +265,10 @@ impl std::fmt::Debug for Type {
             TypeKind::U128 => write!(f, "Type::U128"),
             TypeKind::Isize => write!(f, "Type::ISIZE"),
             TypeKind::Usize => write!(f, "Type::USIZE"),
+            TypeKind::F16 => write!(f, "Type::F16"),
+            TypeKind::F32 => write!(f, "Type::F32"),
+            TypeKind::F64 => write!(f, "Type::F64"),
+            TypeKind::F128 => write!(f, "Type::F128"),
             TypeKind::Bool => write!(f, "Type::BOOL"),
             TypeKind::Unit => write!(f, "Type::UNIT"),
             TypeKind::Error => write!(f, "Type::ERROR"),
@@ -309,18 +321,26 @@ impl Type {
     pub const ISIZE: Type = Type(10);
     /// Pointer-sized unsigned integer
     pub const USIZE: Type = Type(11);
+    /// IEEE 754 binary16 (half-precision float)
+    pub const F16: Type = Type(12);
+    /// IEEE 754 binary32 (single-precision float)
+    pub const F32: Type = Type(13);
+    /// IEEE 754 binary64 (double-precision float)
+    pub const F64: Type = Type(14);
+    /// IEEE 754 binary128 (quad-precision float)
+    pub const F128: Type = Type(15);
     /// Boolean
-    pub const BOOL: Type = Type(12);
+    pub const BOOL: Type = Type(16);
     /// The unit type (for functions that don't return a value)
-    pub const UNIT: Type = Type(13);
+    pub const UNIT: Type = Type(17);
     /// An error type (used during type checking to continue after errors)
-    pub const ERROR: Type = Type(14);
+    pub const ERROR: Type = Type(18);
     /// The never type - represents computations that don't return
-    pub const NEVER: Type = Type(15);
+    pub const NEVER: Type = Type(19);
     /// The comptime type - the type of types themselves
-    pub const COMPTIME_TYPE: Type = Type(16);
+    pub const COMPTIME_TYPE: Type = Type(20);
     /// The comptime string type - compile-time only string values
-    pub const COMPTIME_STR: Type = Type(17);
+    pub const COMPTIME_STR: Type = Type(21);
 }
 
 // Composite type constructors
@@ -566,7 +586,7 @@ impl Type {
             panic!(
                 "invalid Type encoding: raw value {:#010x} (tag={}, id={}). \
                  This indicates data corruption or a bug in Type construction. \
-                 Valid tags are 0-17 (primitives) or 100-105 (composites).",
+                 Valid tags are 0-21 (primitives) or 100-105 (composites).",
                 self.0,
                 self.0 & 0xFF,
                 self.0 >> 8
@@ -607,12 +627,16 @@ impl Type {
             9 => Some(TypeKind::U128),
             10 => Some(TypeKind::Isize),
             11 => Some(TypeKind::Usize),
-            12 => Some(TypeKind::Bool),
-            13 => Some(TypeKind::Unit),
-            14 => Some(TypeKind::Error),
-            15 => Some(TypeKind::Never),
-            16 => Some(TypeKind::ComptimeType),
-            17 => Some(TypeKind::ComptimeStr),
+            12 => Some(TypeKind::F16),
+            13 => Some(TypeKind::F32),
+            14 => Some(TypeKind::F64),
+            15 => Some(TypeKind::F128),
+            16 => Some(TypeKind::Bool),
+            17 => Some(TypeKind::Unit),
+            18 => Some(TypeKind::Error),
+            19 => Some(TypeKind::Never),
+            20 => Some(TypeKind::ComptimeType),
+            21 => Some(TypeKind::ComptimeStr),
             TAG_STRUCT => Some(TypeKind::Struct(StructId(self.0 >> 8))),
             TAG_ENUM => Some(TypeKind::Enum(EnumId(self.0 >> 8))),
             TAG_ARRAY => Some(TypeKind::Array(ArrayTypeId(self.0 >> 8))),
@@ -640,6 +664,10 @@ impl Type {
             TypeKind::U128 => "u128",
             TypeKind::Isize => "isize",
             TypeKind::Usize => "usize",
+            TypeKind::F16 => "f16",
+            TypeKind::F32 => "f32",
+            TypeKind::F64 => "f64",
+            TypeKind::F128 => "f128",
             TypeKind::Bool => "bool",
             TypeKind::Unit => "()",
             TypeKind::Struct(_) => "<struct>",
@@ -829,6 +857,19 @@ impl Type {
         self.0 <= 3 || self.0 == 8 || self.0 == 10
     }
 
+    /// Check if this is a floating-point type.
+    /// Float types: F16=12, F32=13, F64=14, F128=15.
+    #[inline]
+    pub fn is_float(&self) -> bool {
+        self.0 >= 12 && self.0 <= 15
+    }
+
+    /// Check if this is a numeric type (integer or float).
+    #[inline]
+    pub fn is_numeric(&self) -> bool {
+        self.0 <= 15
+    }
+
     /// Check if this is a Copy type (can be implicitly duplicated).
     ///
     /// Copy types are:
@@ -848,10 +889,10 @@ impl Type {
     pub fn is_copy(&self) -> bool {
         let tag = self.0 & 0xFF;
         match tag {
-            // Primitive Copy types (I8..Unit = 0..13, includes i128/u128/isize/usize/bool/unit)
-            0..=13 => true,
+            // Primitive Copy types (I8..Unit = 0..17, includes integers/floats/bool/unit)
+            0..=17 => true,
             // Error, Never, ComptimeType, ComptimeStr are Copy for convenience
-            14..=17 => true,
+            18..=21 => true,
             // Enum types are Copy (they're small discriminant values)
             TAG_ENUM => true,
             // Module types are Copy (they're just compile-time namespace references)
@@ -1011,8 +1052,8 @@ impl Type {
     pub fn is_valid_encoding(v: u32) -> bool {
         let tag = v & 0xFF;
         match tag {
-            // Primitive types: I8=0 through ComptimeStr=17
-            0..=17 => true,
+            // Primitive types: I8=0 through ComptimeStr=21
+            0..=21 => true,
             // Composite types with valid tags
             TAG_STRUCT | TAG_ENUM | TAG_ARRAY | TAG_PTR_CONST | TAG_PTR_MUT | TAG_MODULE => true,
             // Everything else is invalid
@@ -1737,8 +1778,8 @@ mod tests {
 
     #[test]
     fn test_is_valid_encoding_invalid() {
-        // Tags between primitives and composites are invalid (18-99)
-        for tag in 18..100u32 {
+        // Tags between primitives and composites are invalid (22-99)
+        for tag in 22..100u32 {
             assert!(
                 !Type::is_valid_encoding(tag),
                 "tag {} should be invalid",

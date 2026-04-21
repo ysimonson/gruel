@@ -1098,6 +1098,7 @@ impl Rir {
         let data = match &inst.data {
             // No renumbering needed for these
             InstData::IntConst(v) => InstData::IntConst(*v),
+            InstData::FloatConst(bits) => InstData::FloatConst(*bits),
             InstData::BoolConst(v) => InstData::BoolConst(*v),
             InstData::StringConst(s) => InstData::StringConst(*s),
             InstData::UnitConst => InstData::UnitConst,
@@ -1664,6 +1665,7 @@ impl Rir {
 
                 // These don't have InstRefs in extra
                 InstData::IntConst(_)
+                | InstData::FloatConst(_)
                 | InstData::BoolConst(_)
                 | InstData::StringConst(_)
                 | InstData::UnitConst
@@ -1731,6 +1733,10 @@ pub struct Inst {
 pub enum InstData {
     /// Integer constant
     IntConst(u64),
+
+    /// Floating-point constant, stored as f64 bits for Eq/Hash/Copy compatibility.
+    /// Use `f64::from_bits()` to recover the value.
+    FloatConst(u64),
 
     /// Boolean constant
     BoolConst(bool),
@@ -2354,6 +2360,9 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
             match &inst.data {
                 // Constants
                 InstData::IntConst(v) => writeln!(out, "const {}", v).unwrap(),
+                InstData::FloatConst(bits) => {
+                    writeln!(out, "const {}", f64::from_bits(*bits)).unwrap()
+                }
                 InstData::BoolConst(v) => writeln!(out, "const {}", v).unwrap(),
                 InstData::StringConst(s) => {
                     writeln!(out, "const {:?}", self.interner.resolve(s)).unwrap()

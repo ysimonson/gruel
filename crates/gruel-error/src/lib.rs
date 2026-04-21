@@ -64,6 +64,7 @@ impl ErrorCode {
     pub const INVALID_INTEGER: Self = Self(2);
     pub const INVALID_STRING_ESCAPE: Self = Self(3);
     pub const UNTERMINATED_STRING: Self = Self(4);
+    pub const INVALID_FLOAT: Self = Self(5);
 
     // ========================================================================
     // Parser errors (E0100-E0199)
@@ -806,6 +807,8 @@ pub enum ErrorKind {
     UnexpectedCharacter(char),
     #[error("invalid integer literal")]
     InvalidInteger,
+    #[error("invalid floating-point literal")]
+    InvalidFloat,
     #[error("invalid escape sequence: \\{0}")]
     InvalidStringEscape(char),
     #[error("unterminated string literal")]
@@ -1115,6 +1118,7 @@ impl ErrorKind {
             // Lexer errors (E0001-E0099)
             ErrorKind::UnexpectedCharacter(_) => ErrorCode::UNEXPECTED_CHARACTER,
             ErrorKind::InvalidInteger => ErrorCode::INVALID_INTEGER,
+            ErrorKind::InvalidFloat => ErrorCode::INVALID_FLOAT,
             ErrorKind::InvalidStringEscape(_) => ErrorCode::INVALID_STRING_ESCAPE,
             ErrorKind::UnterminatedString => ErrorCode::UNTERMINATED_STRING,
 
@@ -2120,6 +2124,7 @@ mod tests {
                 ErrorCode::UNEXPECTED_CHARACTER,
             ),
             (ErrorKind::InvalidInteger, ErrorCode::INVALID_INTEGER),
+            (ErrorKind::InvalidFloat, ErrorCode::INVALID_FLOAT),
             (
                 ErrorKind::InvalidStringEscape('n'),
                 ErrorCode::INVALID_STRING_ESCAPE,

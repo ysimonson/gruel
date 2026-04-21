@@ -1,0 +1,159 @@
+[section]
+id = "types.floating_point"
+spec_chapter = "3.11"
+name = "Floating-Point Types"
+description = "Tests for floating-point type declarations, literals, and type inference."
+
+# --- Type declarations ---
+
+[[case]]
+name = "f64_variable"
+spec = ["3.11:1", "3.11:4"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x: f64 = 3.14;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "f32_variable"
+spec = ["3.11:1", "3.11:3"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x: f32 = 2.718;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "f16_variable"
+spec = ["3.11:1", "3.11:2"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x: f16 = 1.0;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "f128_variable"
+spec = ["3.11:1", "3.11:5"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x: f128 = 1.0;
+    0
+}
+"""
+exit_code = 0
+
+# --- Copy semantics ---
+
+[[case]]
+name = "float_is_copy"
+spec = ["3.11:6"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x: f64 = 1.0;
+    let _y: f64 = _x;
+    let _z: f64 = _x;
+    0
+}
+"""
+exit_code = 0
+
+# --- Literal forms ---
+
+[[case]]
+name = "float_literal_decimal"
+spec = ["3.11:7"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x: f64 = 42.0;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_literal_scientific"
+spec = ["3.11:7"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x: f64 = 1e10;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_literal_scientific_with_decimal"
+spec = ["3.11:7"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x: f64 = 2.5e3;
+    0
+}
+"""
+exit_code = 0
+
+# --- Type inference ---
+
+[[case]]
+name = "float_literal_defaults_to_f64"
+spec = ["3.11:8"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x = 3.14;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "float_literal_inferred_to_f32"
+spec = ["3.11:9"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let _x: f32 = 3.14;
+    0
+}
+"""
+exit_code = 0
+
+# --- Preview gate ---
+
+[[case]]
+name = "float_requires_preview"
+spec = ["3.11:1"]
+source = """
+fn main() -> i32 {
+    let _x: f64 = 1.0;
+    0
+}
+"""
+compile_fail = true
+error_contains = "preview feature"

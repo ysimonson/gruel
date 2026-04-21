@@ -269,6 +269,9 @@ pub enum CfgInstData {
     /// Integer constant (typed)
     Const(u64),
 
+    /// Floating-point constant, stored as f64 bits via `f64::to_bits()`.
+    FloatConst(u64),
+
     /// Boolean constant
     BoolConst(bool),
 
@@ -1116,6 +1119,7 @@ impl Cfg {
     fn fmt_inst_data(&self, f: &mut fmt::Formatter<'_>, data: &CfgInstData) -> fmt::Result {
         match data {
             CfgInstData::Const(v) => write!(f, "const {}", v),
+            CfgInstData::FloatConst(bits) => write!(f, "const {}", f64::from_bits(*bits)),
             CfgInstData::BoolConst(v) => write!(f, "const {}", v),
             CfgInstData::StringConst(idx) => write!(f, "string_const @{}", idx),
             CfgInstData::Param { index } => write!(f, "param {}", index),

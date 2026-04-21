@@ -64,11 +64,15 @@ use crate::types::{
 /// - 9: u128
 /// - 10: isize
 /// - 11: usize
-/// - 12: bool
-/// - 13: unit
-/// - 14: never
-/// - 15: error
-/// - 16-17: reserved for future primitives
+/// - 12: f16
+/// - 13: f32
+/// - 14: f64
+/// - 15: f128
+/// - 16: bool
+/// - 17: unit
+/// - 18: never
+/// - 19: error
+/// - 20-21: reserved for future primitives
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct InternedType(u32);
 
@@ -86,12 +90,16 @@ impl InternedType {
     pub const U128: InternedType = InternedType(9);
     pub const ISIZE: InternedType = InternedType(10);
     pub const USIZE: InternedType = InternedType(11);
-    pub const BOOL: InternedType = InternedType(12);
-    pub const UNIT: InternedType = InternedType(13);
-    pub const NEVER: InternedType = InternedType(14);
-    pub const ERROR: InternedType = InternedType(15);
+    pub const F16: InternedType = InternedType(12);
+    pub const F32: InternedType = InternedType(13);
+    pub const F64: InternedType = InternedType(14);
+    pub const F128: InternedType = InternedType(15);
+    pub const BOOL: InternedType = InternedType(16);
+    pub const UNIT: InternedType = InternedType(17);
+    pub const NEVER: InternedType = InternedType(18);
+    pub const ERROR: InternedType = InternedType(19);
 
-    const PRIMITIVE_COUNT: u32 = 18;
+    const PRIMITIVE_COUNT: u32 = 22;
 
     /// Check if this is a primitive type (no pool lookup needed).
     #[inline]
@@ -867,10 +875,14 @@ impl TypeInternPool {
                 9 => Type::U128,
                 10 => Type::ISIZE,
                 11 => Type::USIZE,
-                12 => Type::BOOL,
-                13 => Type::UNIT,
-                14 => Type::NEVER,
-                15 => Type::ERROR,
+                12 => Type::F16,
+                13 => Type::F32,
+                14 => Type::F64,
+                15 => Type::F128,
+                16 => Type::BOOL,
+                17 => Type::UNIT,
+                18 => Type::NEVER,
+                19 => Type::ERROR,
                 _ => panic!("Unknown primitive index: {}", ty.0),
             };
         }
@@ -905,6 +917,10 @@ impl TypeInternPool {
             TypeKind::U128 => InternedType::U128,
             TypeKind::Isize => InternedType::ISIZE,
             TypeKind::Usize => InternedType::USIZE,
+            TypeKind::F16 => InternedType::F16,
+            TypeKind::F32 => InternedType::F32,
+            TypeKind::F64 => InternedType::F64,
+            TypeKind::F128 => InternedType::F128,
             TypeKind::Bool => InternedType::BOOL,
             TypeKind::Unit => InternedType::UNIT,
             TypeKind::Never => InternedType::NEVER,
@@ -1042,6 +1058,10 @@ impl TypeInternPool {
             TypeKind::U128 => Some(InternedType::U128),
             TypeKind::Isize => Some(InternedType::ISIZE),
             TypeKind::Usize => Some(InternedType::USIZE),
+            TypeKind::F16 => Some(InternedType::F16),
+            TypeKind::F32 => Some(InternedType::F32),
+            TypeKind::F64 => Some(InternedType::F64),
+            TypeKind::F128 => Some(InternedType::F128),
             TypeKind::Bool => Some(InternedType::BOOL),
             TypeKind::Unit => Some(InternedType::UNIT),
             TypeKind::Never => Some(InternedType::NEVER),
@@ -1082,10 +1102,14 @@ impl TypeInternPool {
             9 => Type::U128,
             10 => Type::ISIZE,
             11 => Type::USIZE,
-            12 => Type::BOOL,
-            13 => Type::UNIT,
-            14 => Type::NEVER,
-            15 => Type::ERROR,
+            12 => Type::F16,
+            13 => Type::F32,
+            14 => Type::F64,
+            15 => Type::F128,
+            16 => Type::BOOL,
+            17 => Type::UNIT,
+            18 => Type::NEVER,
+            19 => Type::ERROR,
             _ => return None,
         })
     }
@@ -1132,6 +1156,10 @@ impl TypeInternPool {
             TypeKind::U128 => "u128".to_string(),
             TypeKind::Isize => "isize".to_string(),
             TypeKind::Usize => "usize".to_string(),
+            TypeKind::F16 => "f16".to_string(),
+            TypeKind::F32 => "f32".to_string(),
+            TypeKind::F64 => "f64".to_string(),
+            TypeKind::F128 => "f128".to_string(),
             TypeKind::Bool => "bool".to_string(),
             TypeKind::Unit => "()".to_string(),
             TypeKind::Never => "!".to_string(),
@@ -1229,8 +1257,12 @@ mod tests {
         assert_eq!(InternedType::U128.index(), 9);
         assert_eq!(InternedType::ISIZE.index(), 10);
         assert_eq!(InternedType::USIZE.index(), 11);
-        assert_eq!(InternedType::BOOL.index(), 12);
-        assert_eq!(InternedType::UNIT.index(), 13);
+        assert_eq!(InternedType::F16.index(), 12);
+        assert_eq!(InternedType::F32.index(), 13);
+        assert_eq!(InternedType::F64.index(), 14);
+        assert_eq!(InternedType::F128.index(), 15);
+        assert_eq!(InternedType::BOOL.index(), 16);
+        assert_eq!(InternedType::UNIT.index(), 17);
     }
 
     #[test]

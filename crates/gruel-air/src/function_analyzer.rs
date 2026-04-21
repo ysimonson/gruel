@@ -136,7 +136,10 @@ impl<'a, 'ctx> FunctionAnalyzer<'a, 'ctx> {
                     self.get_or_create_array_type(elem_ty, *length);
                 }
             }
-            InferType::Concrete(_) | InferType::Var(_) | InferType::IntLiteral => {
+            InferType::Concrete(_)
+            | InferType::Var(_)
+            | InferType::IntLiteral
+            | InferType::FloatLiteral => {
                 // Non-array types don't need pre-creation
             }
         }
@@ -148,6 +151,7 @@ impl<'a, 'ctx> FunctionAnalyzer<'a, 'ctx> {
             InferType::Concrete(t) => *t,
             InferType::Var(_) => Type::ERROR,
             InferType::IntLiteral => Type::I32,
+            InferType::FloatLiteral => Type::F64,
             InferType::Array { element, length } => {
                 let elem_ty = self.infer_type_to_type(element);
                 if elem_ty == Type::ERROR {

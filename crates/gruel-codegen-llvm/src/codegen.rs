@@ -1308,6 +1308,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     .map(|llvm_ty| llvm_ty.into_int_type().const_int(n, true).into())
             }
 
+            CfgInstData::FloatConst(bits) => {
+                let f64_val = f64::from_bits(bits);
+                let llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
+                    .expect("float type must have LLVM representation");
+                Some(llvm_ty.into_float_type().const_float(f64_val).into())
+            }
+
             CfgInstData::BoolConst(b) => {
                 Some(self.ctx.bool_type().const_int(b as u64, false).into())
             }

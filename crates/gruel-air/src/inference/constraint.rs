@@ -157,7 +157,7 @@ impl Substitution {
         match ty {
             InferType::Concrete(_) => ty.clone(),
             InferType::Var(id) => self.apply_var(*id),
-            InferType::IntLiteral => ty.clone(),
+            InferType::IntLiteral | InferType::FloatLiteral => ty.clone(),
             InferType::Array { element, length } => {
                 let resolved_element = self.apply(element);
                 InferType::Array {
@@ -217,7 +217,7 @@ impl Substitution {
                     None => false,
                 }
             }
-            InferType::IntLiteral => false,
+            InferType::IntLiteral | InferType::FloatLiteral => false,
             InferType::Array { element, .. } => self.occurs_in(var, element),
         }
     }

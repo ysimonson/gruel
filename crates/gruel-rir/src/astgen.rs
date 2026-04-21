@@ -441,6 +441,10 @@ impl<'a> AstGen<'a> {
                 data: InstData::IntConst(lit.value),
                 span: lit.span,
             }),
+            Expr::Float(lit) => self.rir.add_inst(Inst {
+                data: InstData::FloatConst(lit.bits),
+                span: lit.span,
+            }),
             Expr::Bool(lit) => self.rir.add_inst(Inst {
                 data: InstData::BoolConst(lit.value),
                 span: lit.span,

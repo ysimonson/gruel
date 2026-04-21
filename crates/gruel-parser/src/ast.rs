@@ -428,6 +428,8 @@ pub struct UnitLit {
 pub enum Expr {
     /// Integer literal
     Int(IntLit),
+    /// Floating-point literal
+    Float(FloatLit),
     /// String literal
     String(StringLit),
     /// Boolean literal
@@ -499,6 +501,14 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntLit {
     pub value: u64,
+    pub span: Span,
+}
+
+/// A floating-point literal, stored as f64 bits for Eq compatibility.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FloatLit {
+    /// The f64 value stored as bits via `f64::to_bits()`.
+    pub bits: u64,
     pub span: Span,
 }
 
@@ -1078,6 +1088,7 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Int(lit) => lit.span,
+            Expr::Float(lit) => lit.span,
             Expr::String(lit) => lit.span,
             Expr::Bool(lit) => lit.span,
             Expr::Unit(lit) => lit.span,
@@ -1280,6 +1291,7 @@ fn fmt_expr(f: &mut fmt::Formatter<'_>, expr: &Expr, level: usize) -> fmt::Resul
     indent(f, level)?;
     match expr {
         Expr::Int(lit) => writeln!(f, "Int({})", lit.value),
+        Expr::Float(lit) => writeln!(f, "Float({})", f64::from_bits(lit.bits)),
         Expr::String(lit) => writeln!(f, "String(sym:{})", lit.value.into_usize()),
         Expr::Bool(lit) => writeln!(f, "Bool({})", lit.value),
         Expr::Unit(_) => writeln!(f, "Unit"),

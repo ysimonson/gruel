@@ -38,6 +38,10 @@ impl<'a> Sema<'a> {
             | TypeKind::U128
             | TypeKind::Isize
             | TypeKind::Usize
+            | TypeKind::F16
+            | TypeKind::F32
+            | TypeKind::F64
+            | TypeKind::F128
             | TypeKind::Bool
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values)
@@ -73,6 +77,7 @@ impl<'a> Sema<'a> {
             InferType::Concrete(t) => *t,
             InferType::Var(_) => Type::ERROR,   // Unbound variable
             InferType::IntLiteral => Type::I32, // Default (shouldn't happen after resolution)
+            InferType::FloatLiteral => Type::F64, // Default (shouldn't happen after resolution)
             InferType::Array { element, length } => {
                 // Recursively convert element type
                 let elem_ty = self.infer_type_to_type(element);
@@ -136,6 +141,22 @@ impl<'a> Sema<'a> {
             "usize" => {
                 self.require_preview(PreviewFeature::ExtendedNumericTypes, "usize type", span)?;
                 return Ok(Type::USIZE);
+            }
+            "f16" => {
+                self.require_preview(PreviewFeature::ExtendedNumericTypes, "f16 type", span)?;
+                return Ok(Type::F16);
+            }
+            "f32" => {
+                self.require_preview(PreviewFeature::ExtendedNumericTypes, "f32 type", span)?;
+                return Ok(Type::F32);
+            }
+            "f64" => {
+                self.require_preview(PreviewFeature::ExtendedNumericTypes, "f64 type", span)?;
+                return Ok(Type::F64);
+            }
+            "f128" => {
+                self.require_preview(PreviewFeature::ExtendedNumericTypes, "f128 type", span)?;
+                return Ok(Type::F128);
             }
             "bool" => return Ok(Type::BOOL),
             "()" => return Ok(Type::UNIT),
@@ -218,6 +239,10 @@ impl<'a> Sema<'a> {
             "u64" => return Some(Type::U64),
             "u128" => return Some(Type::U128),
             "usize" => return Some(Type::USIZE),
+            "f16" => return Some(Type::F16),
+            "f32" => return Some(Type::F32),
+            "f64" => return Some(Type::F64),
+            "f128" => return Some(Type::F128),
             "bool" => return Some(Type::BOOL),
             "()" => return Some(Type::UNIT),
             "!" => return Some(Type::NEVER),
@@ -282,7 +307,10 @@ impl<'a> Sema<'a> {
                     self.get_or_create_array_type(elem_ty, *length);
                 }
             }
-            InferType::Concrete(_) | InferType::Var(_) | InferType::IntLiteral => {
+            InferType::Concrete(_)
+            | InferType::Var(_)
+            | InferType::IntLiteral
+            | InferType::FloatLiteral => {
                 // Non-array types don't need pre-creation
             }
         }
@@ -298,6 +326,7 @@ impl<'a> Sema<'a> {
             InferType::Concrete(t) => *t,
             InferType::Var(_) => Type::ERROR,   // Unbound variable
             InferType::IntLiteral => Type::I32, // Default
+            InferType::FloatLiteral => Type::F64, // Default
             InferType::Array { element, length } => {
                 // For nested arrays, look up or create the array type
                 let elem_ty = self.infer_type_to_concrete_type_for_key(element);
@@ -329,6 +358,10 @@ impl<'a> Sema<'a> {
             | TypeKind::U128
             | TypeKind::Isize
             | TypeKind::Usize
+            | TypeKind::F16
+            | TypeKind::F32
+            | TypeKind::F64
+            | TypeKind::F128
             | TypeKind::Bool
             | TypeKind::Error => 1,
             // Zero-sized types use 0 slots

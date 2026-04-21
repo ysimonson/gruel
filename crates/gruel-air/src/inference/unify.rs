@@ -185,8 +185,35 @@ impl Unifier {
                 }
             }
 
+            // FloatLiteral with concrete type
+            (InferType::FloatLiteral, InferType::Concrete(ty))
+            | (InferType::Concrete(ty), InferType::FloatLiteral) => {
+                if ty.is_float() {
+                    self.rebind_float_literal_to_concrete(lhs, ty);
+                    self.rebind_float_literal_to_concrete(rhs, ty);
+                    UnifyResult::Ok
+                } else if ty.is_error() {
+                    UnifyResult::Ok
+                } else {
+                    UnifyResult::TypeMismatch {
+                        expected: lhs_resolved,
+                        found: rhs_resolved,
+                    }
+                }
+            }
+
             // Two IntLiterals unify (both remain as IntLiteral)
             (InferType::IntLiteral, InferType::IntLiteral) => UnifyResult::Ok,
+
+            // Two FloatLiterals unify (both remain as FloatLiteral)
+            (InferType::FloatLiteral, InferType::FloatLiteral) => UnifyResult::Ok,
+
+            // IntLiteral and FloatLiteral are incompatible
+            (InferType::IntLiteral, InferType::FloatLiteral)
+            | (InferType::FloatLiteral, InferType::IntLiteral) => UnifyResult::TypeMismatch {
+                expected: lhs_resolved,
+                found: rhs_resolved,
+            },
 
             // Two arrays: lengths must match, element types must unify
             (
@@ -236,6 +263,16 @@ impl Unifier {
         }
     }
 
+    fn rebind_float_literal_to_concrete(&mut self, original: &InferType, concrete_ty: &Type) {
+        if let InferType::Var(var) = original
+            && let Some(bound) = self.substitution.get(*var)
+            && matches!(bound, InferType::FloatLiteral)
+        {
+            self.substitution
+                .insert(*var, InferType::Concrete(*concrete_ty));
+        }
+    }
+
     /// Bind a type variable to a type.
     ///
     /// Performs the occurs check to prevent infinite types.
@@ -280,6 +317,8 @@ impl Unifier {
             // For variables and IntLiteral, assume OK for now
             // (IntLiteral defaults to i32 which is signed)
             InferType::Var(_) | InferType::IntLiteral => UnifyResult::Ok,
+            // FloatLiteral - not an integer, but error will be caught elsewhere
+            InferType::FloatLiteral => UnifyResult::Ok,
             // Arrays are not signed - error will be caught elsewhere
             InferType::Array { .. } => UnifyResult::Ok,
         }
@@ -301,6 +340,8 @@ impl Unifier {
             }
             // Type variables and IntLiteral are OK - they will be resolved to integers
             InferType::Var(_) | InferType::IntLiteral => UnifyResult::Ok,
+            // FloatLiteral is not an integer
+            InferType::FloatLiteral => UnifyResult::NotInteger { ty: Type::F64 },
             // Arrays are not integers - return error
             InferType::Array { .. } => UnifyResult::NotInteger { ty: Type::ERROR },
         }
@@ -328,6 +369,8 @@ impl Unifier {
             InferType::Var(_) => UnifyResult::Ok,
             // IntLiteral can be used as unsigned - it will be inferred to u64
             InferType::IntLiteral => UnifyResult::Ok,
+            // FloatLiteral is not unsigned
+            InferType::FloatLiteral => UnifyResult::NotUnsigned { ty: Type::F64 },
             // Arrays are not unsigned integers
             InferType::Array { .. } => UnifyResult::NotUnsigned { ty: Type::ERROR },
         }
@@ -443,6 +486,17 @@ impl Unifier {
         }
     }
 
+    /// Default unconstrained float literal type variables to f64.
+    pub fn default_float_literal_vars(&mut self, float_literal_vars: &[TypeVarId]) {
+        for &var in float_literal_vars {
+            let resolved = self.substitution.apply(&InferType::Var(var));
+            if let InferType::Var(_) = resolved {
+                self.substitution
+                    .insert(var, InferType::Concrete(Type::F64));
+            }
+        }
+    }
+
     /// Resolve a type to its final form after applying all substitutions.
     ///
     /// Follows the substitution chain and defaults IntLiteral to i32.
@@ -454,6 +508,7 @@ impl Unifier {
             InferType::Concrete(_) => resolved,
             InferType::Var(_) => resolved, // Unbound variable stays as-is
             InferType::IntLiteral => InferType::Concrete(Type::I32), // Default to i32
+            InferType::FloatLiteral => InferType::Concrete(Type::F64), // Default to f64
             InferType::Array { element, length } => {
                 let resolved_element = self.resolve_infer_type(&element);
                 InferType::Array {
@@ -473,8 +528,9 @@ impl Unifier {
         let resolved = self.resolve_infer_type(ty);
         match resolved {
             InferType::Concrete(t) => Some(t),
-            InferType::Var(_) => None,                // Unbound variable
+            InferType::Var(_) => None,                  // Unbound variable
             InferType::IntLiteral => Some(Type::I32), // Default to i32 (shouldn't happen after resolve_infer_type)
+            InferType::FloatLiteral => Some(Type::F64), // Default to f64
             InferType::Array { .. } => None,          // Arrays need special handling
         }
     }

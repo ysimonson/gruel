@@ -162,6 +162,9 @@ pub struct ConstraintGenerator<'a> {
     /// Type variables allocated for integer literals.
     /// These start as unbound and need to be defaulted to i32 if unconstrained.
     int_literal_vars: Vec<TypeVarId>,
+    /// Type variables allocated for float literals.
+    /// These start as unbound and need to be defaulted to f64 if unconstrained.
+    float_literal_vars: Vec<TypeVarId>,
     /// Type substitutions for Self and type parameters (used in method bodies).
     /// Maps type names (like "Self") to their concrete types.
     type_subst: Option<&'a HashMap<Spur, Type>>,
@@ -194,6 +197,7 @@ impl<'a> ConstraintGenerator<'a> {
             methods,
             enum_methods,
             int_literal_vars: Vec::new(),
+            float_literal_vars: Vec::new(),
             type_subst: None,
             type_pool,
         }
@@ -250,7 +254,7 @@ impl<'a> ConstraintGenerator<'a> {
         &self.expr_types
     }
 
-    /// Consume the constraint generator and return (constraints, int_literal_vars, expr_types, type_var_count).
+    /// Consume the constraint generator and return (constraints, int_literal_vars, float_literal_vars, expr_types, type_var_count).
     ///
     /// This is useful when you need ownership of the expression types map.
     /// The `type_var_count` can be used to pre-size the unifier's substitution for better performance.
@@ -259,12 +263,14 @@ impl<'a> ConstraintGenerator<'a> {
     ) -> (
         Vec<Constraint>,
         Vec<TypeVarId>,
+        Vec<TypeVarId>,
         HashMap<InstRef, InferType>,
         u32,
     ) {
         (
             self.constraints,
             self.int_literal_vars,
+            self.float_literal_vars,
             self.expr_types,
             self.type_vars.count(),
         )
@@ -293,6 +299,13 @@ impl<'a> ConstraintGenerator<'a> {
                 // and rebinds ?0 -> Concrete(i64) via rebind_int_literal_to_concrete.
                 let var = self.fresh_var();
                 self.int_literal_vars.push(var);
+                InferType::Var(var)
+            }
+
+            InstData::FloatConst(_) => {
+                // Float literals work like int literals but default to f64.
+                let var = self.fresh_var();
+                self.float_literal_vars.push(var);
                 InferType::Var(var)
             }
 
@@ -1627,6 +1640,10 @@ impl<'a> ConstraintGenerator<'a> {
             "u128" => Type::U128,
             "isize" => Type::ISIZE,
             "usize" => Type::USIZE,
+            "f16" => Type::F16,
+            "f32" => Type::F32,
+            "f64" => Type::F64,
+            "f128" => Type::F128,
             "bool" => Type::BOOL,
             "()" => Type::UNIT,
             _ => {

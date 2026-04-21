@@ -63,6 +63,10 @@ pub enum TokenKind {
     U64,
     U128,
     Usize,
+    F16,
+    F32,
+    F64,
+    F128,
     Bool,
 
     // Patterns
@@ -70,6 +74,9 @@ pub enum TokenKind {
 
     // Literals
     Int(u64),
+    /// Floating-point literal, stored as f64 bits for Eq/Copy compatibility.
+    /// Use `f64::from_bits()` to recover the value.
+    Float(u64),
     String(Spur),
 
     // Identifiers
@@ -167,9 +174,14 @@ impl TokenKind {
             TokenKind::U64 => "type 'u64'",
             TokenKind::U128 => "type 'u128'",
             TokenKind::Usize => "type 'usize'",
+            TokenKind::F16 => "type 'f16'",
+            TokenKind::F32 => "type 'f32'",
+            TokenKind::F64 => "type 'f64'",
+            TokenKind::F128 => "type 'f128'",
             TokenKind::Bool => "type 'bool'",
             TokenKind::Underscore => "'_'",
             TokenKind::Int(_) => "integer",
+            TokenKind::Float(_) => "float",
             TokenKind::String(_) => "string",
             TokenKind::Ident(_) => "identifier",
             TokenKind::Plus => "'+'",
@@ -275,9 +287,14 @@ impl std::fmt::Display for TokenKind {
             TokenKind::U64 => write!(f, "TYPE(u64)"),
             TokenKind::U128 => write!(f, "TYPE(u128)"),
             TokenKind::Usize => write!(f, "TYPE(usize)"),
+            TokenKind::F16 => write!(f, "TYPE(f16)"),
+            TokenKind::F32 => write!(f, "TYPE(f32)"),
+            TokenKind::F64 => write!(f, "TYPE(f64)"),
+            TokenKind::F128 => write!(f, "TYPE(f128)"),
             TokenKind::Bool => write!(f, "TYPE(bool)"),
             TokenKind::Underscore => write!(f, "UNDERSCORE"),
             TokenKind::Int(v) => write!(f, "INT({})", v),
+            TokenKind::Float(bits) => write!(f, "FLOAT({})", f64::from_bits(*bits)),
             TokenKind::String(s) => write!(f, "STRING(sym:{})", s.into_usize()),
             TokenKind::Ident(s) => write!(f, "IDENT(sym:{})", s.into_usize()),
             TokenKind::Plus => write!(f, "PLUS"),

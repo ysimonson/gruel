@@ -313,6 +313,18 @@ impl<'a> Sema<'a> {
                 Ok(AnalysisResult::new(air_ref, ty))
             }
 
+            InstData::FloatConst(bits) => {
+                let ty =
+                    Self::get_resolved_type(ctx, inst_ref, inst.span, "floating-point literal")?;
+
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::FloatConst(*bits),
+                    ty,
+                    span: inst.span,
+                });
+                Ok(AnalysisResult::new(air_ref, ty))
+            }
+
             InstData::BoolConst(value) => {
                 let ty = Type::BOOL;
                 let air_ref = air.add_inst(AirInst {
@@ -2233,6 +2245,8 @@ impl<'a> Sema<'a> {
                 },
                 span,
             )?;
+        } else if var_type.is_float() {
+            self.require_preview(PreviewFeature::ExtendedNumericTypes, var_type.name(), span)?;
         }
 
         // If name is None, this is a wildcard pattern `_` that discards the value

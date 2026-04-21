@@ -14,6 +14,7 @@ pub enum LexError {
     #[default]
     UnexpectedCharacter,
     InvalidInteger,
+    InvalidFloat,
     InvalidStringEscape,
     UnterminatedString,
 }
@@ -195,12 +196,30 @@ pub enum LogosTokenKind {
     U128,
     #[token("usize")]
     Usize,
+    #[token("f16")]
+    F16,
+    #[token("f32")]
+    F32,
+    #[token("f64")]
+    F64,
+    #[token("f128")]
+    F128,
     #[token("bool")]
     Bool,
 
     // Patterns
     #[token("_")]
     Underscore,
+
+    // Floating-point literals (must appear before Int so 42.0 matches as float, not int + dot + int)
+    // Matches: 3.14, 1.0e10, 2.5E-3, 1e10, 1E+5
+    #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?", |lex| {
+        lex.slice().parse::<f64>().map(|v| v.to_bits()).map_err(|_| LexError::InvalidFloat)
+    })]
+    #[regex(r"[0-9]+[eE][+-]?[0-9]+", |lex| {
+        lex.slice().parse::<f64>().map(|v| v.to_bits()).map_err(|_| LexError::InvalidFloat)
+    })]
+    Float(u64),
 
     // Integer literals
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<u64>().map_err(|_| LexError::InvalidInteger))]
@@ -353,7 +372,12 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::U64 => TokenKind::U64,
             LogosTokenKind::U128 => TokenKind::U128,
             LogosTokenKind::Usize => TokenKind::Usize,
+            LogosTokenKind::F16 => TokenKind::F16,
+            LogosTokenKind::F32 => TokenKind::F32,
+            LogosTokenKind::F64 => TokenKind::F64,
+            LogosTokenKind::F128 => TokenKind::F128,
             LogosTokenKind::Bool => TokenKind::Bool,
+            LogosTokenKind::Float(bits) => TokenKind::Float(bits),
             LogosTokenKind::Underscore => TokenKind::Underscore,
             LogosTokenKind::Int(n) => TokenKind::Int(n),
             LogosTokenKind::String(s) => TokenKind::String(s),
@@ -480,6 +504,7 @@ impl<'a> LogosLexer<'a> {
                     let error_char = slice.chars().next().unwrap_or('?');
                     let kind = match lex_error {
                         LexError::InvalidInteger => ErrorKind::InvalidInteger,
+                        LexError::InvalidFloat => ErrorKind::InvalidFloat,
                         LexError::UnexpectedCharacter => ErrorKind::UnexpectedCharacter(error_char),
                         LexError::InvalidStringEscape => {
                             // Find the escape character after backslash

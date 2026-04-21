@@ -8,7 +8,7 @@ use crate::ast::{
     BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr, CheckedBlockExpr,
     ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr, DestructureBinding,
     DestructureField, Directive, DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr,
-    EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, ForExpr, Function, Ident, IfExpr,
+    EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, FloatLit, ForExpr, Function, Ident, IfExpr,
     IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr,
     MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr,
     PathPattern, Pattern, PatternBinding, PatternFieldBinding, ReturnExpr, SelfExpr, SelfParam,
@@ -43,6 +43,10 @@ pub struct PrimitiveTypeSpurs {
     pub u64: Spur,
     pub u128: Spur,
     pub usize: Spur,
+    pub f16: Spur,
+    pub f32: Spur,
+    pub f64: Spur,
+    pub f128: Spur,
     pub bool: Spur,
     /// Self type keyword - used in methods to refer to the containing struct type
     pub self_type: Spur,
@@ -64,6 +68,10 @@ impl PrimitiveTypeSpurs {
             u64: interner.get_or_intern("u64"),
             u128: interner.get_or_intern("u128"),
             usize: interner.get_or_intern("usize"),
+            f16: interner.get_or_intern("f16"),
+            f32: interner.get_or_intern("f32"),
+            f64: interner.get_or_intern("f64"),
+            f128: interner.get_or_intern("f128"),
             bool: interner.get_or_intern("bool"),
             self_type: interner.get_or_intern("Self"),
         }
@@ -260,6 +268,38 @@ where
                 span: span_from_extra(e),
             })
         });
+    let f16_parser =
+        just(TokenKind::F16).map_with(|_, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
+            let syms = e.state().0.syms;
+            TypeExpr::Named(Ident {
+                name: syms.f16,
+                span: span_from_extra(e),
+            })
+        });
+    let f32_parser =
+        just(TokenKind::F32).map_with(|_, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
+            let syms = e.state().0.syms;
+            TypeExpr::Named(Ident {
+                name: syms.f32,
+                span: span_from_extra(e),
+            })
+        });
+    let f64_parser =
+        just(TokenKind::F64).map_with(|_, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
+            let syms = e.state().0.syms;
+            TypeExpr::Named(Ident {
+                name: syms.f64,
+                span: span_from_extra(e),
+            })
+        });
+    let f128_parser =
+        just(TokenKind::F128).map_with(|_, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
+            let syms = e.state().0.syms;
+            TypeExpr::Named(Ident {
+                name: syms.f128,
+                span: span_from_extra(e),
+            })
+        });
     let bool_parser =
         just(TokenKind::Bool).map_with(|_, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
             let syms = e.state().0.syms;
@@ -282,6 +322,10 @@ where
         u64_parser.boxed(),
         u128_parser.boxed(),
         usize_parser.boxed(),
+        f16_parser.boxed(),
+        f32_parser.boxed(),
+        f64_parser.boxed(),
+        f128_parser.boxed(),
         bool_parser.boxed(),
     ))
     .boxed()
@@ -1036,6 +1080,14 @@ where
         }),
     };
 
+    // Floating-point literal
+    let float_lit = select! {
+        TokenKind::Float(bits) = e => Expr::Float(FloatLit {
+            bits,
+            span: span_from_extra(e),
+        }),
+    };
+
     // String literal
     let string_lit = select! {
         TokenKind::String(s) = e => Expr::String(StringLit {
@@ -1070,6 +1122,7 @@ where
 
     choice((
         int_lit.boxed(),
+        float_lit.boxed(),
         string_lit.boxed(),
         bool_true.boxed(),
         bool_false.boxed(),

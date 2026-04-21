@@ -54,6 +54,12 @@ pub enum InferType {
     /// If unconstrained at the end of inference, defaults to `i32`.
     IntLiteral,
 
+    /// A floating-point literal type.
+    ///
+    /// Float literals can unify with any float type (f16, f32, f64, f128).
+    /// If unconstrained at the end of inference, defaults to `f64`.
+    FloatLiteral,
+
     /// An array type during inference.
     ///
     /// Unlike `Concrete(Type::new_array(id))`, this stores the element type as an
@@ -122,6 +128,7 @@ impl std::fmt::Display for InferType {
             InferType::Concrete(ty) => write!(f, "{ty}"),
             InferType::Var(id) => write!(f, "{id}"),
             InferType::IntLiteral => write!(f, "{{integer}}"),
+            InferType::FloatLiteral => write!(f, "{{float}}"),
             InferType::Array { element, length } => write!(f, "[{element}; {length}]"),
         }
     }

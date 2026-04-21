@@ -182,6 +182,15 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
+            AirInstData::FloatConst(bits) => {
+                let value = self.emit(CfgInstData::FloatConst(*bits), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
             AirInstData::BoolConst(v) => {
                 let value = self.emit(CfgInstData::BoolConst(*v), ty, span);
                 self.cache(air_ref, value);

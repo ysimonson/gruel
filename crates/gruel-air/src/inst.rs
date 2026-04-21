@@ -640,6 +640,9 @@ pub enum AirInstData {
     /// Integer constant (typed)
     Const(u64),
 
+    /// Floating-point constant, stored as f64 bits via `f64::to_bits()`.
+    FloatConst(u64),
+
     /// Boolean constant
     BoolConst(bool),
 
@@ -1042,6 +1045,7 @@ impl fmt::Display for Air {
             write!(f, "    {} : {} = ", inst_ref, inst.ty.name())?;
             match &inst.data {
                 AirInstData::Const(v) => writeln!(f, "const {}", v)?,
+                AirInstData::FloatConst(bits) => writeln!(f, "const {}", f64::from_bits(*bits))?,
                 AirInstData::BoolConst(v) => writeln!(f, "const {}", v)?,
                 AirInstData::StringConst(idx) => writeln!(f, "string_const @{}", idx)?,
                 AirInstData::UnitConst => writeln!(f, "const ()")?,

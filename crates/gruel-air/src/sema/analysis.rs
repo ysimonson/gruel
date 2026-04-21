@@ -1538,7 +1538,8 @@ impl<'a> Sema<'a> {
         ));
 
         // Consume the constraint generator to release borrows
-        let (constraints, int_literal_vars, expr_types, type_var_count) = cgen.into_parts();
+        let (constraints, int_literal_vars, float_literal_vars, expr_types, type_var_count) =
+            cgen.into_parts();
 
         // Phase 2: Solve constraints via unification
         // Pre-size the substitution for better performance on large functions
@@ -1593,8 +1594,9 @@ impl<'a> Sema<'a> {
             return Err(compile_error);
         }
 
-        // Default any unconstrained integer literals to i32
+        // Default any unconstrained integer literals to i32 and float literals to f64
         unifier.default_int_literal_vars(&int_literal_vars);
+        unifier.default_float_literal_vars(&float_literal_vars);
 
         // Pre-collect all array types from resolved InferTypes before converting them.
         // This ensures all array types are created before the conversion loop, which
@@ -1940,6 +1942,7 @@ impl<'a> Sema<'a> {
         match &inst.data {
             // Literals
             InstData::IntConst(_)
+            | InstData::FloatConst(_)
             | InstData::BoolConst(_)
             | InstData::StringConst(_)
             | InstData::UnitConst => self.analyze_literal(air, inst_ref, ctx),
