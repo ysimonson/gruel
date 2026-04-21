@@ -1,0 +1,284 @@
+[section]
+id = "types.integers_isize_usize"
+spec_chapter = "3.1"
+name = "Pointer-Sized Integer Types (isize/usize)"
+
+# --- isize basic ---
+
+[[case]]
+name = "isize_basic_literal"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: isize = 42;
+    let result: i32 = @intCast(x);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "isize_negative"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: isize = -10;
+    let result: i32 = @intCast(x);
+    result
+}
+"""
+exit_code = 246
+
+[[case]]
+name = "isize_arithmetic"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: isize = 30;
+    let b: isize = 12;
+    let sum: isize = a + b;
+    let result: i32 = @intCast(sum);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "isize_subtraction"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: isize = 100;
+    let b: isize = 58;
+    let diff: isize = a - b;
+    let result: i32 = @intCast(diff);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "isize_multiplication"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: isize = 6;
+    let b: isize = 7;
+    let prod: isize = a * b;
+    let result: i32 = @intCast(prod);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "isize_division"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: isize = 126;
+    let b: isize = 3;
+    let quot: isize = a / b;
+    let result: i32 = @intCast(quot);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "isize_comparison"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: isize = 10;
+    let b: isize = 20;
+    if a < b {
+        42
+    } else {
+        0
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "isize_function_param"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn double(x: isize) -> isize {
+    x * 2
+}
+
+fn main() -> i32 {
+    let val: isize = 21;
+    let result: isize = double(val);
+    let out: i32 = @intCast(result);
+    out
+}
+"""
+exit_code = 42
+
+# --- usize basic ---
+
+[[case]]
+name = "usize_basic_literal"
+spec = ["3.1:24"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: usize = 42;
+    let result: i32 = @intCast(x);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "usize_arithmetic"
+spec = ["3.1:24"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: usize = 30;
+    let b: usize = 12;
+    let sum: usize = a + b;
+    let result: i32 = @intCast(sum);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "usize_subtraction"
+spec = ["3.1:24"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: usize = 100;
+    let b: usize = 58;
+    let diff: usize = a - b;
+    let result: i32 = @intCast(diff);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "usize_multiplication"
+spec = ["3.1:24"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: usize = 6;
+    let b: usize = 7;
+    let prod: usize = a * b;
+    let result: i32 = @intCast(prod);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "usize_comparison"
+spec = ["3.1:24"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: usize = 10;
+    let b: usize = 20;
+    if a < b {
+        42
+    } else {
+        0
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "usize_function_param"
+spec = ["3.1:24"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn triple(x: usize) -> usize {
+    x * 3
+}
+
+fn main() -> i32 {
+    let val: usize = 14;
+    let result: usize = triple(val);
+    let out: i32 = @intCast(result);
+    out
+}
+"""
+exit_code = 42
+
+# --- intcast between isize/usize and other types ---
+
+[[case]]
+name = "intcast_i32_to_isize"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: i32 = 42;
+    let b: isize = @intCast(a);
+    let result: i32 = @intCast(b);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "intcast_u64_to_usize"
+spec = ["3.1:24"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: u64 = 99;
+    let b: usize = @intCast(a);
+    let result: i32 = @intCast(b);
+    result
+}
+"""
+exit_code = 99
+
+# --- preview gate ---
+
+[[case]]
+name = "isize_requires_preview"
+spec = ["3.1:23"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: isize = 1;
+    let r: i32 = @intCast(x);
+    r
+}
+"""
+exit_code = 1

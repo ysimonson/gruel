@@ -166,16 +166,17 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 ### Phase 2: Pointer-sized integers (isize/usize)
 
-- [ ] Add `Isize`/`Usize` to `TypeKind`, `Type` constants (tags 16, 17)
-- [ ] Update all type helper methods
-- [ ] Add `isize`/`usize` tokens to lexer
-- [ ] Update parser type parsing
-- [ ] Update RIR and Sema for arithmetic/comparison
-- [ ] Update `@intCast` to handle isize/usize
-- [ ] Add LLVM codegen: map to `i32`/`i64` based on `gruel-target` pointer width
-- [ ] Update `type_byte_size` and `type_alignment` (target-dependent)
-- [ ] Add spec section 3.1 paragraphs for isize/usize
-- [ ] Add spec tests
+- [x] Add `Isize`/`Usize` to `TypeKind`, `Type` constants (tags 10, 11)
+- [x] Update all type helper methods (is_integer, is_signed, is_unsigned, is_copy, literal_fits, etc.)
+- [x] Add `isize`/`usize` tokens to lexer
+- [x] Update parser type parsing
+- [x] Update RIR and Sema for arithmetic/comparison
+- [x] Update `@intCast` to handle isize/usize (fixed same-width same-sign codegen bug)
+- [x] Add LLVM codegen: map to `i64` on 64-bit targets
+- [x] Update `type_byte_size` and `type_alignment` (8-byte on 64-bit targets)
+- [x] Add spec section 3.1 paragraphs for isize/usize (3.1:23, 3.1:24)
+- [x] Add spec tests (17 tests covering arithmetic, casting, comparison, function calls)
+- [x] Preview-gated via `--preview extended_numeric_types`
 
 ### Phase 3: Floating-point types (f16/f32/f64/f128) — lexer and type system
 

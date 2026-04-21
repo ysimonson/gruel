@@ -1847,44 +1847,49 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     self.builder.position_at_end(cont_bb);
                     truncated
                 } else {
-                    // Same-width cast between signed and unsigned types.
-                    // Check that the value is representable in the destination type.
-                    let fits = if is_signed_type(from_ty) && !is_signed_type(ty) {
-                        // Signed → Unsigned: overflow if value < 0.
-                        let zero = v.get_type().const_zero();
-                        self.builder
-                            .build_int_compare(IntPredicate::SGE, v, zero, "ick_fits")
-                            .unwrap()
-                    } else if !is_signed_type(from_ty) && is_signed_type(ty) {
-                        // Unsigned → Signed: overflow if value > INT_MAX.
-                        let int_max_val = (i64::MAX as u64) >> (64u32.saturating_sub(src_bits));
-                        let max = v.get_type().const_int(int_max_val, false);
-                        self.builder
-                            .build_int_compare(IntPredicate::ULE, v, max, "ick_fits")
-                            .unwrap()
+                    // Same-width cast between signed and unsigned types (or
+                    // same-sign aliases like u64 → usize on 64-bit targets).
+                    let src_signed = is_signed_type(from_ty);
+                    let dst_signed = is_signed_type(ty);
+                    if src_signed == dst_signed {
+                        // Same sign, same width — no conversion needed (e.g. u64 ↔ usize).
+                        v
                     } else {
-                        // Same sign (shouldn't happen in valid Gruel) — no overflow.
-                        v.get_type().const_int(1, false)
-                    };
-                    // Branch to overflow handler if the value is out of range.
-                    let fits = self.build_expect_i1(fits, true);
-                    let current_fn = self
-                        .builder
-                        .get_insert_block()
-                        .unwrap()
-                        .get_parent()
-                        .unwrap();
-                    let overflow_bb = self.ctx.append_basic_block(current_fn, "icast_ovf");
-                    let cont_bb = self.ctx.append_basic_block(current_fn, "icast_cont");
-                    self.builder
-                        .build_conditional_branch(fits, cont_bb, overflow_bb)
-                        .unwrap();
-                    self.builder.position_at_end(overflow_bb);
-                    let panic_fn = self.get_or_declare_noreturn_fn("__gruel_intcast_overflow");
-                    self.builder.build_call(panic_fn, &[], "").unwrap();
-                    self.builder.build_unreachable().unwrap();
-                    self.builder.position_at_end(cont_bb);
-                    v // Return original bits (reinterpreted as destination type)
+                        // Check that the value is representable in the destination type.
+                        let fits = if src_signed && !dst_signed {
+                            // Signed → Unsigned: overflow if value < 0.
+                            let zero = v.get_type().const_zero();
+                            self.builder
+                                .build_int_compare(IntPredicate::SGE, v, zero, "ick_fits")
+                                .unwrap()
+                        } else {
+                            // Unsigned → Signed: overflow if value > INT_MAX.
+                            let int_max_val = (i64::MAX as u64) >> (64u32.saturating_sub(src_bits));
+                            let max = v.get_type().const_int(int_max_val, false);
+                            self.builder
+                                .build_int_compare(IntPredicate::ULE, v, max, "ick_fits")
+                                .unwrap()
+                        };
+                        // Branch to overflow handler if the value is out of range.
+                        let fits = self.build_expect_i1(fits, true);
+                        let current_fn = self
+                            .builder
+                            .get_insert_block()
+                            .unwrap()
+                            .get_parent()
+                            .unwrap();
+                        let overflow_bb = self.ctx.append_basic_block(current_fn, "icast_ovf");
+                        let cont_bb = self.ctx.append_basic_block(current_fn, "icast_cont");
+                        self.builder
+                            .build_conditional_branch(fits, cont_bb, overflow_bb)
+                            .unwrap();
+                        self.builder.position_at_end(overflow_bb);
+                        let panic_fn = self.get_or_declare_noreturn_fn("__gruel_intcast_overflow");
+                        self.builder.build_call(panic_fn, &[], "").unwrap();
+                        self.builder.build_unreachable().unwrap();
+                        self.builder.position_at_end(cont_bb);
+                        v // Return original bits (reinterpreted as destination type)
+                    }
                 };
                 Some(result.into())
             }
@@ -2979,6 +2984,11 @@ fn define_function<'ctx>(
 fn is_signed_type(ty: Type) -> bool {
     matches!(
         ty.kind(),
-        TypeKind::I8 | TypeKind::I16 | TypeKind::I32 | TypeKind::I64 | TypeKind::I128
+        TypeKind::I8
+            | TypeKind::I16
+            | TypeKind::I32
+            | TypeKind::I64
+            | TypeKind::I128
+            | TypeKind::Isize
     )
 }

@@ -10,7 +10,7 @@ template = "spec/page.html"
 
 {{ rule(id="3.1:1", cat="normative") }}
 
-A signed integer type is one of: `i8`, `i16`, `i32`, `i64`, or `i128`.
+A signed integer type is one of: `i8`, `i16`, `i32`, `i64`, `i128`, or `isize`.
 
 {{ rule(id="3.1:2", cat="normative") }}
 
@@ -32,6 +32,10 @@ The type `i64` represents signed integers in the range [-9223372036854775808, 92
 
 The type `i128` represents signed integers in the range [-170141183460469231731687303715884105728, 170141183460469231731687303715884105727].
 
+{{ rule(id="3.1:23", cat="normative") }}
+
+The type `isize` is a signed integer type whose size equals the target platform's pointer size. On 64-bit targets, `isize` has the same range as `i64`.
+
 {{ rule(id="3.1:6", cat="dynamic-semantics") }}
 
 Signed integer arithmetic that overflows **MUST** cause a runtime panic.
@@ -52,7 +56,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.1:8", cat="normative") }}
 
-An unsigned integer type is one of: `u8`, `u16`, `u32`, `u64`, or `u128`.
+An unsigned integer type is one of: `u8`, `u16`, `u32`, `u64`, `u128`, or `usize`.
 
 {{ rule(id="3.1:9", cat="normative") }}
 
@@ -73,6 +77,10 @@ The type `u64` represents unsigned integers in the range [0, 1844674407370955161
 {{ rule(id="3.1:22", cat="normative") }}
 
 The type `u128` represents unsigned integers in the range [0, 340282366920938463463374607431768211455].
+
+{{ rule(id="3.1:24", cat="normative") }}
+
+The type `usize` is an unsigned integer type whose size equals the target platform's pointer size. On 64-bit targets, `usize` has the same range as `u64`.
 
 {{ rule(id="3.1:13", cat="dynamic-semantics") }}
 

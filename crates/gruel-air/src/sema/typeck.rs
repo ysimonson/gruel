@@ -36,6 +36,8 @@ impl<'a> Sema<'a> {
             | TypeKind::U64
             | TypeKind::I128
             | TypeKind::U128
+            | TypeKind::Isize
+            | TypeKind::Usize
             | TypeKind::Bool
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values)
@@ -127,6 +129,14 @@ impl<'a> Sema<'a> {
                 self.require_preview(PreviewFeature::ExtendedNumericTypes, "u128 type", span)?;
                 return Ok(Type::U128);
             }
+            "isize" => {
+                self.require_preview(PreviewFeature::ExtendedNumericTypes, "isize type", span)?;
+                return Ok(Type::ISIZE);
+            }
+            "usize" => {
+                self.require_preview(PreviewFeature::ExtendedNumericTypes, "usize type", span)?;
+                return Ok(Type::USIZE);
+            }
             "bool" => return Ok(Type::BOOL),
             "()" => return Ok(Type::UNIT),
             "!" => return Ok(Type::NEVER),
@@ -201,11 +211,13 @@ impl<'a> Sema<'a> {
             "i32" => return Some(Type::I32),
             "i64" => return Some(Type::I64),
             "i128" => return Some(Type::I128),
+            "isize" => return Some(Type::ISIZE),
             "u8" => return Some(Type::U8),
             "u16" => return Some(Type::U16),
             "u32" => return Some(Type::U32),
             "u64" => return Some(Type::U64),
             "u128" => return Some(Type::U128),
+            "usize" => return Some(Type::USIZE),
             "bool" => return Some(Type::BOOL),
             "()" => return Some(Type::UNIT),
             "!" => return Some(Type::NEVER),
@@ -315,6 +327,8 @@ impl<'a> Sema<'a> {
             | TypeKind::U64
             | TypeKind::I128
             | TypeKind::U128
+            | TypeKind::Isize
+            | TypeKind::Usize
             | TypeKind::Bool
             | TypeKind::Error => 1,
             // Zero-sized types use 0 slots

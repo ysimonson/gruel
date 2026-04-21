@@ -36,11 +36,13 @@ pub struct PrimitiveTypeSpurs {
     pub i32: Spur,
     pub i64: Spur,
     pub i128: Spur,
+    pub isize: Spur,
     pub u8: Spur,
     pub u16: Spur,
     pub u32: Spur,
     pub u64: Spur,
     pub u128: Spur,
+    pub usize: Spur,
     pub bool: Spur,
     /// Self type keyword - used in methods to refer to the containing struct type
     pub self_type: Spur,
@@ -55,11 +57,13 @@ impl PrimitiveTypeSpurs {
             i32: interner.get_or_intern("i32"),
             i64: interner.get_or_intern("i64"),
             i128: interner.get_or_intern("i128"),
+            isize: interner.get_or_intern("isize"),
             u8: interner.get_or_intern("u8"),
             u16: interner.get_or_intern("u16"),
             u32: interner.get_or_intern("u32"),
             u64: interner.get_or_intern("u64"),
             u128: interner.get_or_intern("u128"),
+            usize: interner.get_or_intern("usize"),
             bool: interner.get_or_intern("bool"),
             self_type: interner.get_or_intern("Self"),
         }
@@ -240,6 +244,22 @@ where
                 span: span_from_extra(e),
             })
         });
+    let isize_parser =
+        just(TokenKind::Isize).map_with(|_, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
+            let syms = e.state().0.syms;
+            TypeExpr::Named(Ident {
+                name: syms.isize,
+                span: span_from_extra(e),
+            })
+        });
+    let usize_parser =
+        just(TokenKind::Usize).map_with(|_, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
+            let syms = e.state().0.syms;
+            TypeExpr::Named(Ident {
+                name: syms.usize,
+                span: span_from_extra(e),
+            })
+        });
     let bool_parser =
         just(TokenKind::Bool).map_with(|_, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
             let syms = e.state().0.syms;
@@ -255,11 +275,13 @@ where
         i32_parser.boxed(),
         i64_parser.boxed(),
         i128_parser.boxed(),
+        isize_parser.boxed(),
         u8_parser.boxed(),
         u16_parser.boxed(),
         u32_parser.boxed(),
         u64_parser.boxed(),
         u128_parser.boxed(),
+        usize_parser.boxed(),
         bool_parser.boxed(),
     ))
     .boxed()

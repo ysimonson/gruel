@@ -1625,6 +1625,8 @@ impl<'a> ConstraintGenerator<'a> {
             "u32" => Type::U32,
             "u64" => Type::U64,
             "u128" => Type::U128,
+            "isize" => Type::ISIZE,
+            "usize" => Type::USIZE,
             "bool" => Type::BOOL,
             "()" => Type::UNIT,
             _ => {
