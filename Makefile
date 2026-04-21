@@ -1,4 +1,5 @@
-.PHONY: test quick-test fmt fmt-check check bench website website-serve website-deploy \
+.PHONY: test quick-test fmt fmt-check check bench crate-docs \
+        website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler \
         fuzz-structured-compiler fuzz-structured-invalid \
         fuzz-comptime-differential \
@@ -74,14 +75,29 @@ claude:
 	vibe --send "ln -fs ~/.claude/dot_claude_dot_json_should_have_been_here.json ~/.claude.json" \
 	     --send "IS_SANDBOX=1 claude --allow-dangerously-skip-permissions --dangerously-skip-permissions --append-system-prompt='You are running in a sandboxed debian environment, so feel free to install and remove packages as needed, etc. DO NOT destructively rewrite git history or do something crazy like sending an email.'"
 
+# Generate rustdoc for workspace library crates and stage the output under
+# website/static/crate-docs/ so zola copies it into the final site.
+# gruel-runtime is no_std/staticlib-only; the other excluded crates are
+# binaries/test harnesses with no useful library docs.
+crate-docs:
+	cargo doc --workspace --no-deps \
+	    --exclude gruel \
+	    --exclude gruel-runtime \
+	    --exclude gruel-spec \
+	    --exclude gruel-ui-tests \
+	    --exclude gruel-test-runner
+	rm -rf website/static/crate-docs
+	mkdir -p website/static/crate-docs
+	cp -R target/doc/. website/static/crate-docs/
+
 # Build the website.
-website:
+website: crate-docs
 	./website/build.sh
 
 # Run the website dev server at http://127.0.0.1:1111.
-website-serve:
+website-serve: crate-docs
 	./website/build.sh serve
 
 # Build the website for production deployment.
-website-deploy:
+website-deploy: crate-docs
 	./website/build.sh deploy
