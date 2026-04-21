@@ -36,8 +36,7 @@
 
 use gruel_test_runner::{
     CacheStore, Case, build_gruel_binary, find_dir, find_gruel_binary, load_test_files,
-    run_test_case,
-    should_skip_for_platform,
+    run_test_case, should_skip_for_platform,
 };
 use libtest2_mimic::{Harness, RunContext, RunError, Trial};
 use std::path::Path;
