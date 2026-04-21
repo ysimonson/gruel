@@ -1981,6 +1981,147 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 Some(result.into())
             }
 
+            // ---- Float cast (fptrunc / fpext) ----
+            CfgInstData::FloatCast { value, from_ty: _ } => {
+                let v = self.get_value(value).into_float_value();
+                let dst_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
+                    .expect("FloatCast target must be non-void")
+                    .into_float_type();
+                let src_bits = float_bit_width(v.get_type(), self.ctx);
+                let dst_bits = float_bit_width(dst_ty, self.ctx);
+                let result = if dst_bits < src_bits {
+                    // Narrowing (e.g. f64 → f32): fptrunc
+                    self.builder
+                        .build_float_trunc(v, dst_ty, "fptrunc")
+                        .unwrap()
+                } else {
+                    // Widening (e.g. f32 → f64): fpext
+                    self.builder.build_float_ext(v, dst_ty, "fpext").unwrap()
+                };
+                Some(result.into())
+            }
+
+            // ---- Integer to float (sitofp / uitofp) ----
+            CfgInstData::IntToFloat { value, from_ty } => {
+                let v = self.get_value(value).into_int_value();
+                let dst_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
+                    .expect("IntToFloat target must be non-void")
+                    .into_float_type();
+                let result = if is_signed_type(from_ty) {
+                    self.builder
+                        .build_signed_int_to_float(v, dst_ty, "sitofp")
+                        .unwrap()
+                } else {
+                    self.builder
+                        .build_unsigned_int_to_float(v, dst_ty, "uitofp")
+                        .unwrap()
+                };
+                Some(result.into())
+            }
+
+            // ---- Float to integer (fptosi / fptoui) with NaN + overflow check ----
+            CfgInstData::FloatToInt { value, from_ty: _ } => {
+                let v = self.get_value(value).into_float_value();
+                let dst_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
+                    .expect("FloatToInt target must be non-void")
+                    .into_int_type();
+                let dst_signed = is_signed_type(ty);
+                let dst_bits = dst_ty.get_bit_width();
+
+                // Check 1: NaN check — fcmp ord (ordered) returns false if either is NaN.
+                let is_ordered = self
+                    .builder
+                    .build_float_compare(inkwell::FloatPredicate::ORD, v, v, "nan_chk")
+                    .unwrap();
+
+                // Check 2: Range check — value must be within [min, max] for the target integer.
+                // For signed N-bit: min = -(2^(N-1)), max = 2^(N-1) - 1
+                // For unsigned N-bit: min = 0, max = 2^N - 1
+                // We use float comparisons: value >= min_float && value <= max_float
+                // where min_float/max_float are the exact boundaries (or the nearest
+                // representable float that doesn't overflow the integer).
+                let float_ty = v.get_type();
+                let (min_val, max_val) = if dst_signed {
+                    let min = -(2.0_f64.powi(dst_bits as i32 - 1));
+                    let max = 2.0_f64.powi(dst_bits as i32 - 1) - 1.0;
+                    (min, max)
+                } else {
+                    let min = 0.0_f64;
+                    // For u64, 2^64-1 is not exactly representable in f64.
+                    // Use 2^64 - any float >= 2^64 overflows u64.
+                    // We check value < 2^N (strict less) for unsigned.
+                    let max = 2.0_f64.powi(dst_bits as i32);
+                    (min, max)
+                };
+
+                let ge_min = if dst_signed {
+                    // value >= min (where min is negative, e.g. -2^63)
+                    let min_const = float_ty.const_float(min_val);
+                    self.builder
+                        .build_float_compare(inkwell::FloatPredicate::OGE, v, min_const, "ge_min")
+                        .unwrap()
+                } else {
+                    // value >= 0.0
+                    let zero = float_ty.const_float(0.0);
+                    self.builder
+                        .build_float_compare(inkwell::FloatPredicate::OGE, v, zero, "ge_min")
+                        .unwrap()
+                };
+
+                let le_max = if dst_signed {
+                    // value <= max
+                    let max_const = float_ty.const_float(max_val);
+                    self.builder
+                        .build_float_compare(inkwell::FloatPredicate::OLE, v, max_const, "le_max")
+                        .unwrap()
+                } else {
+                    // value < 2^N (strict less, since 2^N itself overflows)
+                    let max_const = float_ty.const_float(max_val);
+                    self.builder
+                        .build_float_compare(inkwell::FloatPredicate::OLT, v, max_const, "lt_max")
+                        .unwrap()
+                };
+
+                // Combine: not_nan && in_range
+                let in_range = self.builder.build_and(ge_min, le_max, "in_range").unwrap();
+                let valid = self
+                    .builder
+                    .build_and(is_ordered, in_range, "f2i_valid")
+                    .unwrap();
+                let valid = self.build_expect_i1(valid, true);
+
+                let current_fn = self
+                    .builder
+                    .get_insert_block()
+                    .unwrap()
+                    .get_parent()
+                    .unwrap();
+                let overflow_bb = self.ctx.append_basic_block(current_fn, "f2i_ovf");
+                let cont_bb = self.ctx.append_basic_block(current_fn, "f2i_cont");
+                self.builder
+                    .build_conditional_branch(valid, cont_bb, overflow_bb)
+                    .unwrap();
+
+                // Overflow/NaN handler
+                self.builder.position_at_end(overflow_bb);
+                let panic_fn = self.get_or_declare_noreturn_fn("__gruel_float_to_int_overflow");
+                self.builder.build_call(panic_fn, &[], "").unwrap();
+                self.builder.build_unreachable().unwrap();
+
+                // Continue with the conversion
+                self.builder.position_at_end(cont_bb);
+                let result = if dst_signed {
+                    self.builder
+                        .build_float_to_signed_int(v, dst_ty, "fptosi")
+                        .unwrap()
+                } else {
+                    self.builder
+                        .build_float_to_unsigned_int(v, dst_ty, "fptoui")
+                        .unwrap()
+                };
+                Some(result.into())
+            }
+
             // ---- Drop / storage liveness ----
             CfgInstData::Drop {
                 value: dropped_value,
@@ -3073,4 +3214,18 @@ fn is_signed_type(ty: Type) -> bool {
         ty.kind(),
         TypeKind::I8 | TypeKind::I16 | TypeKind::I32 | TypeKind::I64 | TypeKind::Isize
     )
+}
+
+/// Returns the bit width of an LLVM float type.
+fn float_bit_width<'ctx>(
+    float_ty: inkwell::types::FloatType<'ctx>,
+    ctx: &'ctx inkwell::context::Context,
+) -> u32 {
+    if float_ty == ctx.f16_type() {
+        16
+    } else if float_ty == ctx.f32_type() {
+        32
+    } else {
+        64
+    }
 }

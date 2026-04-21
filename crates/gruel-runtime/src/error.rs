@@ -38,6 +38,13 @@ pub extern "C" fn __gruel_bounds_check() -> ! {
     platform::exit(101)
 }
 
+/// Runtime error: float-to-integer cast overflow (value is NaN or out of range).
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_float_to_int_overflow() -> ! {
+    platform::write_stderr(b"error: float-to-integer cast overflow\n");
+    platform::exit(101)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -46,6 +53,7 @@ mod tests {
         assert_eq!(b"error: integer overflow\n".len(), 24);
         assert_eq!(b"error: integer cast overflow\n".len(), 29);
         assert_eq!(b"error: index out of bounds\n".len(), 27);
+        assert_eq!(b"error: float-to-integer cast overflow\n".len(), 38);
     }
 
     #[test]
@@ -54,5 +62,6 @@ mod tests {
         assert!(core::str::from_utf8(b"error: integer overflow\n").is_ok());
         assert!(core::str::from_utf8(b"error: integer cast overflow\n").is_ok());
         assert!(core::str::from_utf8(b"error: index out of bounds\n").is_ok());
+        assert!(core::str::from_utf8(b"error: float-to-integer cast overflow\n").is_ok());
     }
 }

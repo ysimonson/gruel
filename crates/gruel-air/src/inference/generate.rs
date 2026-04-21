@@ -645,13 +645,11 @@ impl<'a> ConstraintGenerator<'a> {
                 let intrinsic_name = self.interner.resolve(name);
                 let args = self.rir.get_inst_refs(*args_start, *args_len);
 
-                if intrinsic_name == "intCast" {
-                    // @intCast: target type is inferred from context
-                    // The argument must be an integer type
+                if intrinsic_name == "intCast" || intrinsic_name == "cast" {
+                    // @intCast/@cast: target type is inferred from context
+                    // The argument must be a numeric type (checked in sema)
                     if !args.is_empty() {
                         let arg_info = self.generate(args[0], ctx);
-                        // Constraint: argument must be an integer
-                        // We'll check this in sema, for now just process the argument
                         let _ = arg_info;
                     }
                     // Return type is inferred from context - create a fresh type variable

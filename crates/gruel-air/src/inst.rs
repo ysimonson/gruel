@@ -1003,6 +1003,34 @@ pub enum AirInstData {
         from_ty: Type,
     },
 
+    /// Float cast: convert between floating-point types (fptrunc/fpext).
+    /// The target type is stored in AirInst.ty.
+    FloatCast {
+        /// The value to cast
+        value: AirRef,
+        /// The source float type
+        from_ty: Type,
+    },
+
+    /// Integer to float conversion (sitofp/uitofp).
+    /// The target type is stored in AirInst.ty.
+    IntToFloat {
+        /// The integer value to convert
+        value: AirRef,
+        /// The source integer type (for determining signedness)
+        from_ty: Type,
+    },
+
+    /// Float to integer conversion (fptosi/fptoui) with runtime range check.
+    /// Panics if the value is NaN or out of range of the target integer type.
+    /// The target type is stored in AirInst.ty.
+    FloatToInt {
+        /// The float value to convert
+        value: AirRef,
+        /// The source float type
+        from_ty: Type,
+    },
+
     // Drop/destructor operations
     /// Drop a value, running its destructor if the type has one.
     /// For trivially droppable types, this is a no-op.
@@ -1347,6 +1375,15 @@ impl fmt::Display for Air {
                 }
                 AirInstData::IntCast { value, from_ty } => {
                     writeln!(f, "intcast {} from {}", value, from_ty.name())?;
+                }
+                AirInstData::FloatCast { value, from_ty } => {
+                    writeln!(f, "floatcast {} from {}", value, from_ty.name())?;
+                }
+                AirInstData::IntToFloat { value, from_ty } => {
+                    writeln!(f, "int_to_float {} from {}", value, from_ty.name())?;
+                }
+                AirInstData::FloatToInt { value, from_ty } => {
+                    writeln!(f, "float_to_int {} from {}", value, from_ty.name())?;
                 }
                 AirInstData::Drop { value } => {
                     writeln!(f, "drop {}", value)?;

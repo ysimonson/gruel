@@ -476,6 +476,34 @@ pub enum CfgInstData {
         from_ty: Type,
     },
 
+    /// Float cast: convert between floating-point types (fptrunc/fpext).
+    /// The target type is stored in CfgInst.ty.
+    FloatCast {
+        /// The value to cast
+        value: CfgValue,
+        /// The source float type
+        from_ty: Type,
+    },
+
+    /// Integer to float conversion (sitofp/uitofp).
+    /// The target type is stored in CfgInst.ty.
+    IntToFloat {
+        /// The integer value to convert
+        value: CfgValue,
+        /// The source integer type (for determining signedness)
+        from_ty: Type,
+    },
+
+    /// Float to integer conversion (fptosi/fptoui) with runtime range check.
+    /// Panics if the value is NaN or out of range of the target integer type.
+    /// The target type is stored in CfgInst.ty.
+    FloatToInt {
+        /// The float value to convert
+        value: CfgValue,
+        /// The source float type
+        from_ty: Type,
+    },
+
     // Drop/destructor operations
     /// Drop a value, running its destructor if the type has one.
     /// For trivially droppable types, this is a no-op that will be elided.
@@ -1313,6 +1341,15 @@ impl Cfg {
             }
             CfgInstData::IntCast { value, from_ty } => {
                 write!(f, "intcast {} from {}", value, from_ty.name())
+            }
+            CfgInstData::FloatCast { value, from_ty } => {
+                write!(f, "floatcast {} from {}", value, from_ty.name())
+            }
+            CfgInstData::IntToFloat { value, from_ty } => {
+                write!(f, "int_to_float {} from {}", value, from_ty.name())
+            }
+            CfgInstData::FloatToInt { value, from_ty } => {
+                write!(f, "float_to_int {} from {}", value, from_ty.name())
             }
             CfgInstData::Drop { value } => {
                 write!(f, "drop {}", value)

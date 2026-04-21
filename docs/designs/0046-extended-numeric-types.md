@@ -178,9 +178,9 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 - [x] Emit float negation: `fneg`
 - [x] Reject bitwise operators on float types in Sema (via `IsNumeric` vs `IsInteger` constraint split)
 - [x] Add spec tests for float arithmetic, comparison, negation, bitwise rejection (19 new tests)
-- [ ] Extend `@intCast` or add `@cast` for float↔int and float↔float conversions (fptrunc/fpext)
-- [ ] Add spec tests for float casting, edge cases (NaN, infinity, negative zero)
-- [ ] Add spec tests for f16 range limits
+- [x] Extend `@cast` for float↔int, float↔float, and int↔float conversions (fptrunc/fpext/sitofp/uitofp/fptosi/fptoui)
+- [x] Add spec tests for float casting, edge cases (NaN, infinity, negative zero) — 29 tests in `cast.toml`
+- [x] Add spec tests for f16 range limits
 
 ### Phase 4: Compile-time integer type (comptime_int)
 

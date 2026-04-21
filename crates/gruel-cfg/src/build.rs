@@ -1890,14 +1890,68 @@ impl<'a> CfgBuilder<'a> {
             }
 
             AirInstData::IntCast { value, from_ty } => {
-                // Lower the value to cast
                 let Some(val) = self.lower_value(*value) else {
                     return Self::diverged();
                 };
-
-                // Emit the IntCast instruction
                 let result = self.emit(
                     CfgInstData::IntCast {
+                        value: val,
+                        from_ty: *from_ty,
+                    },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, result);
+                ExprResult {
+                    value: Some(result),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::FloatCast { value, from_ty } => {
+                let Some(val) = self.lower_value(*value) else {
+                    return Self::diverged();
+                };
+                let result = self.emit(
+                    CfgInstData::FloatCast {
+                        value: val,
+                        from_ty: *from_ty,
+                    },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, result);
+                ExprResult {
+                    value: Some(result),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::IntToFloat { value, from_ty } => {
+                let Some(val) = self.lower_value(*value) else {
+                    return Self::diverged();
+                };
+                let result = self.emit(
+                    CfgInstData::IntToFloat {
+                        value: val,
+                        from_ty: *from_ty,
+                    },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, result);
+                ExprResult {
+                    value: Some(result),
+                    continuation: Continuation::Continues,
+                }
+            }
+
+            AirInstData::FloatToInt { value, from_ty } => {
+                let Some(val) = self.lower_value(*value) else {
+                    return Self::diverged();
+                };
+                let result = self.emit(
+                    CfgInstData::FloatToInt {
                         value: val,
                         from_ty: *from_ty,
                     },

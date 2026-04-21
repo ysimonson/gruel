@@ -3508,22 +3508,23 @@ impl<'a> Sema<'a> {
         let arg_result = self.analyze_inst(air, args[0].value, ctx)?;
         let source_type = arg_result.ty;
 
-        // Validate types
-        if !source_type.is_integer() && !source_type.is_error() && !source_type.is_never() {
+        // Validate source type: must be numeric (integer or float)
+        if !source_type.is_numeric() && !source_type.is_error() && !source_type.is_never() {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "cast".to_string(),
-                    expected: "integer type".to_string(),
+                    expected: "numeric type".to_string(),
                     found: source_type.name().to_string(),
                 })),
                 span,
             ));
         }
-        if !target_type.is_integer() && !target_type.is_error() && !target_type.is_never() {
+        // Validate target type: must be numeric (integer or float)
+        if !target_type.is_numeric() && !target_type.is_error() && !target_type.is_never() {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "cast".to_string(),
-                    expected: "integer target type".to_string(),
+                    expected: "numeric target type".to_string(),
                     found: target_type.name().to_string(),
                 })),
                 span,
@@ -3535,11 +3536,28 @@ impl<'a> Sema<'a> {
             return Ok(arg_result);
         }
 
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::IntCast {
+        // Choose the right instruction based on source/target type categories
+        let data = match (source_type.is_integer(), target_type.is_integer()) {
+            (true, true) => AirInstData::IntCast {
                 value: arg_result.air_ref,
                 from_ty: source_type,
             },
+            (true, false) => AirInstData::IntToFloat {
+                value: arg_result.air_ref,
+                from_ty: source_type,
+            },
+            (false, true) => AirInstData::FloatToInt {
+                value: arg_result.air_ref,
+                from_ty: source_type,
+            },
+            (false, false) => AirInstData::FloatCast {
+                value: arg_result.air_ref,
+                from_ty: source_type,
+            },
+        };
+
+        let air_ref = air.add_inst(AirInst {
+            data,
             ty: target_type,
             span,
         });

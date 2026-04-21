@@ -45,6 +45,7 @@ The following table provides a quick reference to all available intrinsics:
 | `@size_of` | Get type size in bytes | 1 type | `i32` |
 | `@align_of` | Get type alignment in bytes | 1 type | `i32` |
 | `@intCast` | Convert between integer types | 1 expression (integer) | inferred integer type |
+| `@cast` | Convert between numeric types | 1 expression (numeric) | inferred numeric type |
 | `@read_line` | Read line from stdin | none | `String` |
 | `@parse_i32` | Parse string to i32 | 1 expression (`String`) | `i32` |
 | `@parse_i64` | Parse string to i64 | 1 expression (`String`) | `i64` |
@@ -237,6 +238,96 @@ fn main() -> i32 {
     let x: i32 = -1;
     let y: u32 = @intCast(x); // panic: integer cast overflow
     0
+}
+```
+
+## `@cast`
+
+{{ rule(id="4.13:95", cat="normative") }}
+
+The `@cast` intrinsic converts a numeric value from one numeric type to another. It is a superset of `@intCast` that additionally supports floating-point types.
+
+{{ rule(id="4.13:96", cat="normative") }}
+
+`@cast` accepts exactly one argument, which **MUST** be a numeric type (any integer type or any floating-point type).
+
+{{ rule(id="4.13:97", cat="normative") }}
+
+The target type of the conversion is inferred from the context where `@cast` is used.
+
+{{ rule(id="4.13:98", cat="legality-rule") }}
+
+It is a compile-time error if the target type cannot be inferred or is not a numeric type.
+
+{{ rule(id="4.13:99", cat="dynamic-semantics") }}
+
+For integer-to-integer conversions, `@cast` behaves identically to `@intCast`: if the source value cannot be exactly represented in the target type, a runtime panic occurs.
+
+{{ rule(id="4.13:100", cat="dynamic-semantics") }}
+
+For float-to-float conversions (e.g., `f64` to `f32`), the value is narrowed or widened following IEEE 754 rounding rules. Precision loss during narrowing is silent (no panic). Narrowing a value outside the target range produces infinity.
+
+{{ rule(id="4.13:101", cat="dynamic-semantics") }}
+
+For integer-to-float conversions, the integer value is converted to the closest representable floating-point value. Loss of precision for large integer values is silent (no panic).
+
+{{ rule(id="4.13:102", cat="dynamic-semantics") }}
+
+For float-to-integer conversions, the float value is truncated toward zero. A runtime panic occurs if the value is NaN or if the truncated value is outside the representable range of the target integer type.
+
+{{ rule(id="4.13:103") }}
+
+```gruel
+fn main() -> i32 {
+    let x: f64 = 3.14;
+    let y: f32 = @cast(x);      // f64 → f32 (narrowing)
+    let z: f64 = @cast(y);      // f32 → f64 (widening)
+    0
+}
+```
+
+{{ rule(id="4.13:104") }}
+
+```gruel
+fn main() -> i32 {
+    let n: i32 = 42;
+    let f: f64 = @cast(n);      // i32 → f64
+    let m: i32 = @cast(f);      // f64 → i32 (truncates toward zero)
+    m
+}
+```
+
+{{ rule(id="4.13:105") }}
+
+```gruel
+// This panics at runtime: NaN cannot be converted to an integer
+fn main() -> i32 {
+    let nan: f64 = 0.0 / 0.0;
+    let n: i32 = @cast(nan);    // panic: float-to-integer cast overflow
+    n
+}
+```
+
+{{ rule(id="4.13:106") }}
+
+```gruel
+// This panics at runtime: value too large for target integer type
+fn main() -> i32 {
+    let big: f64 = 9999999999999999999999.0;
+    let n: i32 = @cast(big);    // panic: float-to-integer cast overflow
+    n
+}
+```
+
+{{ rule(id="4.13:107") }}
+
+`@cast` subsumes `@intCast` for integer conversions:
+
+```gruel
+fn main() -> i32 {
+    let x: i32 = 100;
+    let y: u8 = @cast(x);       // Same as @intCast(x)
+    @cast(y)                     // Convert back to i32
 }
 ```
 
