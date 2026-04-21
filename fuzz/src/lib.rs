@@ -10,9 +10,43 @@ use arbitrary::{Arbitrary, Unstructured};
 // Source-level generators
 // ---------------------------------------------------------------------------
 
+/// Pick a random numeric type name for use in generated programs.
+fn gen_numeric_type(u: &mut Unstructured<'_>) -> arbitrary::Result<&'static str> {
+    u.choose(&[
+        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "isize", "usize", "f16", "f32",
+        "f64",
+    ])
+    .copied()
+}
+
+/// Whether a type name represents a floating-point type.
+fn is_float_type(ty: &str) -> bool {
+    matches!(ty, "f16" | "f32" | "f64")
+}
+
+/// Whether a type name represents a signed integer type.
+fn is_signed_type(ty: &str) -> bool {
+    matches!(ty, "i8" | "i16" | "i32" | "i64" | "isize")
+}
+
+/// Generate a float literal appropriate for the given type.
+fn gen_float_literal(u: &mut Unstructured<'_>) -> arbitrary::Result<String> {
+    let val = u.choose(&[0.0f64, 1.0, -1.0, 0.5, 2.5, 3.14, 42.0, 100.0, -0.5])?;
+    Ok(format!("{:.1}", val))
+}
+
 /// A syntactically and semantically valid Gruel program.
 #[derive(Debug)]
 pub struct GruelProgram(pub String);
+
+/// Whether the program uses extended numeric types (needing preview feature).
+pub fn uses_extended_numeric_types(source: &str) -> bool {
+    source.contains("isize")
+        || source.contains("usize")
+        || source.contains("f16")
+        || source.contains("f32")
+        || source.contains("f64")
+}
 
 /// A syntactically valid program that may contain semantic errors
 /// (missing main, type mismatches, undefined variables, duplicates).
@@ -23,36 +57,68 @@ impl<'a> Arbitrary<'a> for GruelProgram {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let mut src = String::new();
 
-        // Optional helper functions (0-3)
-        let num_helpers: u8 = u.int_in_range(0..=3)?;
-        let mut helpers = Vec::new();
-        for i in 0..num_helpers {
-            let name = format!("helper_{}", i);
-            let num_params: u8 = u.int_in_range(0..=2)?;
-            let params: Vec<String> = (0..num_params).map(|j| format!("p{}", j)).collect();
-            let param_list: Vec<String> = params.iter().map(|p| format!("{}: i32", p)).collect();
-            let body = gen_i32_expr(u, &params, 2)?;
-            src.push_str(&format!(
-                "fn {}({}) -> i32 {{ {} }}\n\n",
-                name,
-                param_list.join(", "),
-                body,
-            ));
-            helpers.push((name, num_params));
-        }
+        // 25% chance to generate a program with extended numeric types
+        let use_extended = u.ratio(1, 4)?;
 
-        // Optional struct
-        if u.ratio(1, 4)? {
-            let num_fields: u8 = u.int_in_range(1..=3)?;
-            let fields: Vec<String> = (0..num_fields)
-                .map(|i| format!("    f{}: i32", i))
-                .collect();
-            src.push_str(&format!("struct Data {{\n{}\n}}\n\n", fields.join(",\n"),));
-        }
+        if use_extended {
+            // Generate a simpler program exercising various numeric types
+            let ty = gen_numeric_type(u)?;
+            if is_float_type(ty) {
+                // Float programs: arithmetic only (no bitwise)
+                let lit = gen_float_literal(u)?;
+                let op = u.choose(&["+", "-", "*", "/"])?;
+                let lit2 = gen_float_literal(u)?;
+                src.push_str(&format!(
+                    "fn main() -> i32 {{\n    let x: {} = {} {} {};\n    0\n}}\n",
+                    ty, lit, op, lit2
+                ));
+            } else {
+                // Integer programs with various widths
+                let val = u.int_in_range(0i32..=127)?;
+                let val_str = if is_signed_type(ty) && u.ratio(1, 3)? {
+                    format!("-{}", val)
+                } else {
+                    val.to_string()
+                };
+                src.push_str(&format!(
+                    "fn main() -> i32 {{\n    let x: {} = {};\n    @intCast(x)\n}}\n",
+                    ty, val_str
+                ));
+            }
+        } else {
+            // Standard i32 program generation (unchanged)
+            // Optional helper functions (0-3)
+            let num_helpers: u8 = u.int_in_range(0..=3)?;
+            let mut helpers = Vec::new();
+            for i in 0..num_helpers {
+                let name = format!("helper_{}", i);
+                let num_params: u8 = u.int_in_range(0..=2)?;
+                let params: Vec<String> = (0..num_params).map(|j| format!("p{}", j)).collect();
+                let param_list: Vec<String> =
+                    params.iter().map(|p| format!("{}: i32", p)).collect();
+                let body = gen_i32_expr(u, &params, 2)?;
+                src.push_str(&format!(
+                    "fn {}({}) -> i32 {{ {} }}\n\n",
+                    name,
+                    param_list.join(", "),
+                    body,
+                ));
+                helpers.push((name, num_params));
+            }
 
-        // main function
-        let body = gen_body(u, &helpers, 2)?;
-        src.push_str(&format!("fn main() -> i32 {{\n{}}}\n", body));
+            // Optional struct
+            if u.ratio(1, 4)? {
+                let num_fields: u8 = u.int_in_range(1..=3)?;
+                let fields: Vec<String> = (0..num_fields)
+                    .map(|i| format!("    f{}: i32", i))
+                    .collect();
+                src.push_str(&format!("struct Data {{\n{}\n}}\n\n", fields.join(",\n"),));
+            }
+
+            // main function
+            let body = gen_body(u, &helpers, 2)?;
+            src.push_str(&format!("fn main() -> i32 {{\n{}}}\n", body));
+        }
 
         Ok(GruelProgram(src))
     }

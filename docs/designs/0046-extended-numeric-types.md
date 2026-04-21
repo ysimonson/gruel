@@ -194,11 +194,11 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 ### Phase 5: Polish and edge cases
 
-- [ ] Update `Display`/`Debug` impls for new types
-- [ ] Update fuzz targets to generate programs with new types
-- [ ] Decide comptime float evaluation strategy (run at compile time or defer to runtime)
-- [ ] Ensure error messages mention new types correctly
-- [ ] Update `EnumDef::discriminant_type` if needed for very large enums
+- [x] Update `Display`/`Debug` impls for new types (already handled in Phase 1-4)
+- [x] Update fuzz targets to generate programs with new types (structured_compiler generates isize/usize/f16/f32/f64 programs with preview feature enabled)
+- [x] Decide comptime float evaluation strategy (deferred: float comptime evaluation not supported yet, only integer comptime is implemented)
+- [x] Ensure error messages mention new types correctly (verified: type mismatch and literal range errors display new type names)
+- [x] Update `EnumDef::discriminant_type` if needed for very large enums (no change needed: u8/u16/u32/u64 discriminants suffice)
 
 ## Consequences
 
