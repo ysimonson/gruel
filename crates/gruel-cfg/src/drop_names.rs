@@ -97,6 +97,8 @@ pub fn type_name_component(ty: Type, type_pool: &TypeInternPool) -> String {
         TypeKind::U16 => "u16".to_owned(),
         TypeKind::U32 => "u32".to_owned(),
         TypeKind::U64 => "u64".to_owned(),
+        TypeKind::I128 => "i128".to_owned(),
+        TypeKind::U128 => "u128".to_owned(),
         TypeKind::Bool => "bool".to_owned(),
         TypeKind::Unit => "unit".to_owned(),
         TypeKind::Never => "never".to_owned(),

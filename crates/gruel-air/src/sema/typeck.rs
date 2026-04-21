@@ -6,7 +6,7 @@
 //! - ABI slot calculations
 //! - Type conversions between AIR types and inference types
 
-use gruel_error::{CompileError, CompileResult, ErrorKind};
+use gruel_error::{CompileError, CompileResult, ErrorKind, PreviewFeature};
 use gruel_span::Span;
 use lasso::Spur;
 
@@ -34,6 +34,8 @@ impl<'a> Sema<'a> {
             | TypeKind::U16
             | TypeKind::U32
             | TypeKind::U64
+            | TypeKind::I128
+            | TypeKind::U128
             | TypeKind::Bool
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values)
@@ -113,10 +115,18 @@ impl<'a> Sema<'a> {
             "i16" => return Ok(Type::I16),
             "i32" => return Ok(Type::I32),
             "i64" => return Ok(Type::I64),
+            "i128" => {
+                self.require_preview(PreviewFeature::ExtendedNumericTypes, "i128 type", span)?;
+                return Ok(Type::I128);
+            }
             "u8" => return Ok(Type::U8),
             "u16" => return Ok(Type::U16),
             "u32" => return Ok(Type::U32),
             "u64" => return Ok(Type::U64),
+            "u128" => {
+                self.require_preview(PreviewFeature::ExtendedNumericTypes, "u128 type", span)?;
+                return Ok(Type::U128);
+            }
             "bool" => return Ok(Type::BOOL),
             "()" => return Ok(Type::UNIT),
             "!" => return Ok(Type::NEVER),
@@ -190,10 +200,12 @@ impl<'a> Sema<'a> {
             "i16" => return Some(Type::I16),
             "i32" => return Some(Type::I32),
             "i64" => return Some(Type::I64),
+            "i128" => return Some(Type::I128),
             "u8" => return Some(Type::U8),
             "u16" => return Some(Type::U16),
             "u32" => return Some(Type::U32),
             "u64" => return Some(Type::U64),
+            "u128" => return Some(Type::U128),
             "bool" => return Some(Type::BOOL),
             "()" => return Some(Type::UNIT),
             "!" => return Some(Type::NEVER),
@@ -301,6 +313,8 @@ impl<'a> Sema<'a> {
             | TypeKind::U16
             | TypeKind::U32
             | TypeKind::U64
+            | TypeKind::I128
+            | TypeKind::U128
             | TypeKind::Bool
             | TypeKind::Error => 1,
             // Zero-sized types use 0 slots

@@ -60,11 +60,13 @@ use crate::types::{
 /// - 5: u16
 /// - 6: u32
 /// - 7: u64
-/// - 8: bool
-/// - 9: unit
-/// - 10: never
-/// - 11: error
-/// - 12-15: reserved for future primitives
+/// - 8: i128
+/// - 9: u128
+/// - 10: bool
+/// - 11: unit
+/// - 12: never
+/// - 13: error
+/// - 14-15: reserved for future primitives
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct InternedType(u32);
 
@@ -78,10 +80,12 @@ impl InternedType {
     pub const U16: InternedType = InternedType(5);
     pub const U32: InternedType = InternedType(6);
     pub const U64: InternedType = InternedType(7);
-    pub const BOOL: InternedType = InternedType(8);
-    pub const UNIT: InternedType = InternedType(9);
-    pub const NEVER: InternedType = InternedType(10);
-    pub const ERROR: InternedType = InternedType(11);
+    pub const I128: InternedType = InternedType(8);
+    pub const U128: InternedType = InternedType(9);
+    pub const BOOL: InternedType = InternedType(10);
+    pub const UNIT: InternedType = InternedType(11);
+    pub const NEVER: InternedType = InternedType(12);
+    pub const ERROR: InternedType = InternedType(13);
 
     const PRIMITIVE_COUNT: u32 = 16;
 
@@ -855,10 +859,12 @@ impl TypeInternPool {
                 5 => Type::U16,
                 6 => Type::U32,
                 7 => Type::U64,
-                8 => Type::BOOL,
-                9 => Type::UNIT,
-                10 => Type::NEVER,
-                11 => Type::ERROR,
+                8 => Type::I128,
+                9 => Type::U128,
+                10 => Type::BOOL,
+                11 => Type::UNIT,
+                12 => Type::NEVER,
+                13 => Type::ERROR,
                 _ => panic!("Unknown primitive index: {}", ty.0),
             };
         }
@@ -889,6 +895,8 @@ impl TypeInternPool {
             TypeKind::U16 => InternedType::U16,
             TypeKind::U32 => InternedType::U32,
             TypeKind::U64 => InternedType::U64,
+            TypeKind::I128 => InternedType::I128,
+            TypeKind::U128 => InternedType::U128,
             TypeKind::Bool => InternedType::BOOL,
             TypeKind::Unit => InternedType::UNIT,
             TypeKind::Never => InternedType::NEVER,
@@ -1022,6 +1030,8 @@ impl TypeInternPool {
             TypeKind::U16 => Some(InternedType::U16),
             TypeKind::U32 => Some(InternedType::U32),
             TypeKind::U64 => Some(InternedType::U64),
+            TypeKind::I128 => Some(InternedType::I128),
+            TypeKind::U128 => Some(InternedType::U128),
             TypeKind::Bool => Some(InternedType::BOOL),
             TypeKind::Unit => Some(InternedType::UNIT),
             TypeKind::Never => Some(InternedType::NEVER),
@@ -1058,10 +1068,12 @@ impl TypeInternPool {
             5 => Type::U16,
             6 => Type::U32,
             7 => Type::U64,
-            8 => Type::BOOL,
-            9 => Type::UNIT,
-            10 => Type::NEVER,
-            11 => Type::ERROR,
+            8 => Type::I128,
+            9 => Type::U128,
+            10 => Type::BOOL,
+            11 => Type::UNIT,
+            12 => Type::NEVER,
+            13 => Type::ERROR,
             _ => return None,
         })
     }
@@ -1104,6 +1116,8 @@ impl TypeInternPool {
             TypeKind::U16 => "u16".to_string(),
             TypeKind::U32 => "u32".to_string(),
             TypeKind::U64 => "u64".to_string(),
+            TypeKind::I128 => "i128".to_string(),
+            TypeKind::U128 => "u128".to_string(),
             TypeKind::Bool => "bool".to_string(),
             TypeKind::Unit => "()".to_string(),
             TypeKind::Never => "!".to_string(),
@@ -1197,8 +1211,10 @@ mod tests {
         assert_eq!(InternedType::I32.index(), 2);
         assert_eq!(InternedType::I64.index(), 3);
         assert_eq!(InternedType::U8.index(), 4);
-        assert_eq!(InternedType::BOOL.index(), 8);
-        assert_eq!(InternedType::UNIT.index(), 9);
+        assert_eq!(InternedType::I128.index(), 8);
+        assert_eq!(InternedType::U128.index(), 9);
+        assert_eq!(InternedType::BOOL.index(), 10);
+        assert_eq!(InternedType::UNIT.index(), 11);
     }
 
     #[test]

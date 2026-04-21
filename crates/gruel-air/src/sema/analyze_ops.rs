@@ -2212,6 +2212,19 @@ impl<'a> Sema<'a> {
         let init_result = self.analyze_inst(air, init, ctx)?;
         let var_type = init_result.ty;
 
+        // Gate i128/u128 behind preview feature
+        if var_type.is_128_bit() {
+            self.require_preview(
+                PreviewFeature::ExtendedNumericTypes,
+                if var_type.is_signed() {
+                    "i128 type"
+                } else {
+                    "u128 type"
+                },
+                span,
+            )?;
+        }
+
         // If name is None, this is a wildcard pattern `_` that discards the value
         let Some(name) = name else {
             return Ok(AnalysisResult::new(init_result.air_ref, Type::UNIT));

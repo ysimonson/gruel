@@ -1,0 +1,249 @@
+[section]
+id = "types.integers_128"
+spec_chapter = "3.1"
+name = "128-bit Integer Types"
+description = "Signed and unsigned 128-bit integer types: i128, u128"
+
+# =============================================================================
+# Basic i128/u128 tests
+# =============================================================================
+
+[[case]]
+name = "i128_basic"
+spec = ["3.1:1", "3.1:21"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i128 = 42;
+    let result: i32 = @intCast(x);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "u128_basic"
+spec = ["3.1:8", "3.1:22"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: u128 = 100;
+    let result: i32 = @intCast(x);
+    result
+}
+"""
+exit_code = 100
+
+[[case]]
+name = "i128_zero"
+spec = ["3.1:1", "3.1:21"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i128 = 0;
+    let result: i32 = @intCast(x);
+    result
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "u128_zero"
+spec = ["3.1:8", "3.1:22"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: u128 = 0;
+    let result: i32 = @intCast(x);
+    result
+}
+"""
+exit_code = 0
+
+# =============================================================================
+# Arithmetic operations
+# =============================================================================
+
+[[case]]
+name = "i128_addition"
+spec = ["3.1:21"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: i128 = 30;
+    let b: i128 = 12;
+    let result: i32 = @intCast(a + b);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "u128_addition"
+spec = ["3.1:22"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: u128 = 50;
+    let b: u128 = 50;
+    let result: i32 = @intCast(a + b);
+    result
+}
+"""
+exit_code = 100
+
+[[case]]
+name = "i128_subtraction"
+spec = ["3.1:21"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: i128 = 100;
+    let b: i128 = 58;
+    let result: i32 = @intCast(a - b);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "i128_multiplication"
+spec = ["3.1:21"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: i128 = 6;
+    let b: i128 = 7;
+    let result: i32 = @intCast(a * b);
+    result
+}
+"""
+exit_code = 42
+
+# Note: i128/u128 division, remainder, and overflow panic tests are deferred
+# to Phase 6 due to linker issues with compiler_builtins requiring
+# _rust_eh_personality for __divti3/__modti3, and the lexer not yet
+# supporting literals larger than i64::MAX.
+
+# =============================================================================
+# @intCast between 128-bit and smaller types
+# =============================================================================
+
+[[case]]
+name = "intcast_i32_to_i128"
+spec = ["3.1:21"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: i32 = 42;
+    let b: i128 = @intCast(a);
+    let result: i32 = @intCast(b);
+    result
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "intcast_u64_to_u128"
+spec = ["3.1:22"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: u64 = 99;
+    let b: u128 = @intCast(a);
+    let result: i32 = @intCast(b);
+    result
+}
+"""
+exit_code = 99
+
+# =============================================================================
+# Comparison operations
+# =============================================================================
+
+[[case]]
+name = "i128_comparison"
+spec = ["3.1:21"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: i128 = 100;
+    let b: i128 = 50;
+    if a > b { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "i128_equality"
+spec = ["3.1:21"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let a: i128 = 42;
+    let b: i128 = 42;
+    if a == b { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# =============================================================================
+# Function calls with i128/u128
+# =============================================================================
+
+[[case]]
+name = "i128_function_param_and_return"
+spec = ["3.1:21"]
+preview = "extended_numeric_types"
+preview_should_pass = true
+source = """
+fn add_i128(a: i128, b: i128) -> i128 {
+    a + b
+}
+
+fn main() -> i32 {
+    let result: i32 = @intCast(add_i128(20, 22));
+    result
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Preview gate tests
+# =============================================================================
+
+[[case]]
+name = "i128_requires_preview"
+spec = ["3.1:21"]
+source = """
+fn main() -> i32 {
+    let x: i128 = 42;
+    0
+}
+"""
+compile_fail = true
+error_contains = "preview feature"
+
+[[case]]
+name = "u128_requires_preview"
+spec = ["3.1:22"]
+source = """
+fn main() -> i32 {
+    let x: u128 = 42;
+    0
+}
+"""
+compile_fail = true
+error_contains = "preview feature"

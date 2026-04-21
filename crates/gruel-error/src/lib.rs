@@ -1905,7 +1905,7 @@ mod tests {
         let names = PreviewFeature::all_names();
         assert_eq!(
             names,
-            "test_infra, for_loops, comptime_meta, consistent_str"
+            "test_infra, for_loops, comptime_meta, consistent_str, extended_numeric_types"
         );
     }
 

@@ -149,17 +149,20 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 ### Phase 1: 128-bit integers (i128/u128)
 
-- [ ] Add `I128`/`U128` to `TypeKind`, `Type` constants (tags 14, 15)
-- [ ] Update all `is_integer()`, `is_signed()`, `is_unsigned()`, `is_copy()`, `literal_fits()`, `negated_literal_fits()` helpers
-- [ ] Add `i128`/`u128` tokens to lexer (`LogosTokenKind`)
-- [ ] Update parser type parsing to recognize `i128`/`u128`
-- [ ] Update RIR type resolution
-- [ ] Update Sema to allow arithmetic/comparison on i128/u128
-- [ ] Update `@intCast` to handle 128-bit types
-- [ ] Add LLVM codegen: `ctx.i128_type()`, extend arithmetic/comparison emission
-- [ ] Update `type_byte_size` and `type_alignment` (16 bytes, 16-byte or 8-byte aligned depending on target)
-- [ ] Add spec section 3.1 paragraphs for i128/u128
-- [ ] Add spec tests
+- [x] Add `I128`/`U128` to `TypeKind`, `Type` constants (tags 8, 9 — shifted Bool+ up by 2)
+- [x] Update all `is_integer()`, `is_signed()`, `is_unsigned()`, `is_copy()`, `literal_fits()`, `negated_literal_fits()` helpers
+- [x] Add `i128`/`u128` tokens to lexer (`LogosTokenKind`)
+- [x] Update parser type parsing to recognize `i128`/`u128`
+- [x] Update RIR type resolution (inference `resolve_type_name` + sema `resolve_type`)
+- [x] Update Sema to allow arithmetic/comparison on i128/u128
+- [x] Update `@intCast` to handle 128-bit types
+- [x] Add LLVM codegen: `ctx.i128_type()`, extend arithmetic/comparison emission
+- [x] Update `type_byte_size` and `type_alignment` (16 bytes, 8-byte aligned on aarch64)
+- [x] Add spec section 3.1 paragraphs for i128/u128 (3.1:21, 3.1:22)
+- [x] Add spec tests (15 tests covering basic ops, casting, comparison, function calls, preview gate)
+- [ ] **Deferred**: i128/u128 division/remainder (linker issue with compiler_builtins)
+- [ ] **Deferred**: Overflow panic tests (lexer can't parse literals > i64::MAX)
+- [x] Preview-gated via `--preview extended_numeric_types`
 
 ### Phase 2: Pointer-sized integers (isize/usize)
 

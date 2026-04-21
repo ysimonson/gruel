@@ -10,7 +10,7 @@ template = "spec/page.html"
 
 {{ rule(id="3.1:1", cat="normative") }}
 
-A signed integer type is one of: `i8`, `i16`, `i32`, or `i64`.
+A signed integer type is one of: `i8`, `i16`, `i32`, `i64`, or `i128`.
 
 {{ rule(id="3.1:2", cat="normative") }}
 
@@ -27,6 +27,10 @@ The type `i32` represents signed integers in the range [-2147483648, 2147483647]
 {{ rule(id="3.1:5", cat="normative") }}
 
 The type `i64` represents signed integers in the range [-9223372036854775808, 9223372036854775807].
+
+{{ rule(id="3.1:21", cat="normative") }}
+
+The type `i128` represents signed integers in the range [-170141183460469231731687303715884105728, 170141183460469231731687303715884105727].
 
 {{ rule(id="3.1:6", cat="dynamic-semantics") }}
 
@@ -48,7 +52,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.1:8", cat="normative") }}
 
-An unsigned integer type is one of: `u8`, `u16`, `u32`, or `u64`.
+An unsigned integer type is one of: `u8`, `u16`, `u32`, `u64`, or `u128`.
 
 {{ rule(id="3.1:9", cat="normative") }}
 
@@ -65,6 +69,10 @@ The type `u32` represents unsigned integers in the range [0, 4294967295].
 {{ rule(id="3.1:12", cat="normative") }}
 
 The type `u64` represents unsigned integers in the range [0, 18446744073709551615].
+
+{{ rule(id="3.1:22", cat="normative") }}
+
+The type `u128` represents unsigned integers in the range [0, 340282366920938463463374607431768211455].
 
 {{ rule(id="3.1:13", cat="dynamic-semantics") }}
 

@@ -179,6 +179,8 @@ pub enum LogosTokenKind {
     I32,
     #[token("i64")]
     I64,
+    #[token("i128")]
+    I128,
     #[token("u8")]
     U8,
     #[token("u16")]
@@ -187,6 +189,8 @@ pub enum LogosTokenKind {
     U32,
     #[token("u64")]
     U64,
+    #[token("u128")]
+    U128,
     #[token("bool")]
     Bool,
 
@@ -337,10 +341,12 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::I16 => TokenKind::I16,
             LogosTokenKind::I32 => TokenKind::I32,
             LogosTokenKind::I64 => TokenKind::I64,
+            LogosTokenKind::I128 => TokenKind::I128,
             LogosTokenKind::U8 => TokenKind::U8,
             LogosTokenKind::U16 => TokenKind::U16,
             LogosTokenKind::U32 => TokenKind::U32,
             LogosTokenKind::U64 => TokenKind::U64,
+            LogosTokenKind::U128 => TokenKind::U128,
             LogosTokenKind::Bool => TokenKind::Bool,
             LogosTokenKind::Underscore => TokenKind::Underscore,
             LogosTokenKind::Int(n) => TokenKind::Int(n),
