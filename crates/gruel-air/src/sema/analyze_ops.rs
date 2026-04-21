@@ -2225,17 +2225,7 @@ impl<'a> Sema<'a> {
         let var_type = init_result.ty;
 
         // Gate extended numeric types behind preview feature
-        if var_type.is_128_bit() {
-            self.require_preview(
-                PreviewFeature::ExtendedNumericTypes,
-                if var_type.is_signed() {
-                    "i128 type"
-                } else {
-                    "u128 type"
-                },
-                span,
-            )?;
-        } else if var_type.is_pointer_sized() {
+        if var_type.is_pointer_sized() {
             self.require_preview(
                 PreviewFeature::ExtendedNumericTypes,
                 if var_type.is_signed() {

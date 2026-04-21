@@ -1,6 +1,6 @@
 ---
 id: 0046
-title: Extended Numeric Types (i128/u128, isize/usize, f16/f32/f64/f128, comptime_int)
+title: Extended Numeric Types (isize/usize, f16/f32/f64, comptime_int)
 status: proposal
 tags: [types, syntax, codegen]
 feature-flag: extended_numeric_types
@@ -11,7 +11,7 @@ spec-sections: ["3.1", "3.5"]
 superseded-by:
 ---
 
-# ADR-0046: Extended Numeric Types (i128/u128, isize/usize, f16/f32/f64/f128, comptime_int)
+# ADR-0046: Extended Numeric Types (isize/usize, f16/f32/f64, comptime_int)
 
 ## Status
 
@@ -19,7 +19,7 @@ Proposal
 
 ## Summary
 
-Add the remaining Rust-equivalent numeric primitive types to Gruel: 128-bit integers (`i128`, `u128`), pointer-sized integers (`isize`, `usize`), IEEE 754 floating-point types (`f16`, `f32`, `f64`, `f128`), and a compile-time integer type (`comptime_int`). This brings Gruel beyond Rust's numeric parity (which lacks `f16`/`f128`) and matches Zig's float coverage, enabling real-world systems programming workloads.
+Add the remaining Rust-equivalent numeric primitive types to Gruel: pointer-sized integers (`isize`, `usize`), IEEE 754 floating-point types (`f16`, `f32`, `f64`), and a compile-time integer type (`comptime_int`). This enables real-world systems programming workloads.
 
 ## Context
 
@@ -27,14 +27,12 @@ Gruel currently supports `i8`/`i16`/`i32`/`i64` and `u8`/`u16`/`u32`/`u64`. This
 
 1. **`isize`/`usize`**: Required for safe array/slice indexing and memory-sized quantities. Today Gruel has no pointer-sized integer, making array indexing inherently un-portable across 32-bit and 64-bit targets.
 
-2. **`i128`/`u128`**: Needed for cryptographic operations, UUIDs, IPv6 addresses, and high-precision intermediate calculations. Rust and Zig both support these.
-
-3. **`f16`/`f32`/`f64`/`f128`**: Floating-point math is essential for scientific computing, graphics, game development, audio processing, and general-purpose programming. Without floats, Gruel cannot serve as a general-purpose language. `f16` is increasingly important for ML inference and GPU interop. `f128` enables high-precision scientific computation and matches Zig's float coverage.
+2. **`f16`/`f32`/`f64`**: Floating-point math is essential for scientific computing, graphics, game development, audio processing, and general-purpose programming. Without floats, Gruel cannot serve as a general-purpose language. `f16` is increasingly important for ML inference and GPU interop.
 
 ### Design constraints
 
-- The `Type` encoding uses a u32 with tag bits 0–13 for primitives and 100+ for composites. Adding 9 new primitive tags (14–22) fits cleanly within the existing scheme.
-- LLVM natively supports all of these types (`i128`, `half`, `float`, `double`, `fp128`, plus target-specific `isize`/`usize` mapping to `i32` or `i64`).
+- The `Type` encoding uses a u32 with tag bits 0–13 for primitives and 100+ for composites. Adding new primitive tags fits cleanly within the existing scheme.
+- LLVM natively supports all of these types (`half`, `float`, `double`, plus target-specific `isize`/`usize` mapping to `i32` or `i64`).
 - Floating-point introduces a new literal syntax (`3.14`, `1e10`) and new semantic considerations (NaN, infinities, comparison semantics).
 
 ## Decision
@@ -43,14 +41,11 @@ Gruel currently supports `i8`/`i16`/`i32`/`i64` and `u8`/`u16`/`u32`/`u64`. This
 
 | Gruel type | LLVM type | Size | Notes |
 |------------|-----------|------|-------|
-| `i128` | `i128` | 16 bytes | Signed 128-bit integer |
-| `u128` | `i128` | 16 bytes | Unsigned 128-bit integer |
 | `isize` | `i32` or `i64` | target-dependent | Pointer-sized signed integer |
 | `usize` | `i32` or `i64` | target-dependent | Pointer-sized unsigned integer |
 | `f16` | `half` | 2 bytes | IEEE 754 binary16 (half-precision) |
 | `f32` | `float` | 4 bytes | IEEE 754 binary32 (single-precision) |
 | `f64` | `double` | 8 bytes | IEEE 754 binary64 (double-precision) |
-| `f128` | `fp128` | 16 bytes | IEEE 754 binary128 (quad-precision) |
 | `comptime_int` | N/A (compile-time only) | 8 bytes (i64) | Compile-time integer, analogous to `comptime_str` |
 
 ### `comptime_int`
@@ -88,38 +83,35 @@ Extend the primitive tag range in `Type(u32)`:
 | Tag | Type |
 |-----|------|
 | 0–7 | (existing: i8..u64) |
-| 8 | Bool |
-| 9 | Unit |
-| 10 | Error |
-| 11 | Never |
-| 12 | ComptimeType |
-| 13 | ComptimeStr |
-| **14** | **I128** |
-| **15** | **U128** |
-| **16** | **Isize** |
-| **17** | **Usize** |
-| **18** | **F16** |
-| **19** | **F32** |
-| **20** | **F64** |
-| **21** | **F128** |
-| **22** | **ComptimeInt** |
+| **8** | **Isize** |
+| **9** | **Usize** |
+| **10** | **F16** |
+| **11** | **F32** |
+| **12** | **F64** |
+| 13 | Bool |
+| 14 | Unit |
+| 15 | Error |
+| 16 | Never |
+| 17 | ComptimeType |
+| 18 | ComptimeStr |
+| **19** | **ComptimeInt** |
 
 This requires updating:
 - `TypeKind` enum
 - `Type` constants and `kind()`/`try_kind()` dispatch
-- `is_integer()` (now 0–17 includes 128-bit and pointer-sized)
-- New `is_float()` helper (18–21)
+- `is_integer()` (now 0–9 includes pointer-sized)
+- New `is_float()` helper (10–12)
 - New `is_numeric()` helper (`is_integer() || is_float()`)
-- `is_signed()` (now includes I128=14, Isize=16, and all floats)
+- `is_signed()` (now includes Isize=8, and all floats)
 - `is_64_bit()` (add U64, I64, Isize/Usize on 64-bit targets, F64)
-- `is_comptime_int()` helper (tag 22), mirroring `is_comptime_str()`
+- `is_comptime_int()` helper (tag 19), mirroring `is_comptime_str()`
 - `is_copy()` (ComptimeInt is Copy, like ComptimeStr)
 
 ### Arithmetic semantics
 
-**Integers (i128/u128/isize/usize)**: Follow existing Gruel semantics — overflow panics at runtime (both signed and unsigned). All existing integer operators (`+`, `-`, `*`, `/`, `%`, `<<`, `>>`, `&`, `|`, `^`) work on these types.
+**Integers (isize/usize)**: Follow existing Gruel semantics — overflow panics at runtime (both signed and unsigned). All existing integer operators (`+`, `-`, `*`, `/`, `%`, `<<`, `>>`, `&`, `|`, `^`) work on these types.
 
-**Floating-point (f16/f32/f64/f128)**: Support `+`, `-`, `*`, `/`, `%` (remainder), unary `-`. Do **not** support bitwise operators (`&`, `|`, `^`, `<<`, `>>`).
+**Floating-point (f16/f32/f64)**: Support `+`, `-`, `*`, `/`, `%` (remainder), unary `-`. Do **not** support bitwise operators (`&`, `|`, `^`, `<<`, `>>`).
 
 **Floating-point comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=` use IEEE 754 semantics (NaN != NaN, NaN comparisons return false). No special NaN-handling syntax initially.
 
@@ -130,8 +122,8 @@ This requires updating:
 ### Casting
 
 Extend `@intCast` or introduce a more general `@cast` intrinsic for:
-- Integer ↔ integer (existing, extended to 128-bit and pointer-sized)
-- Float → float (`f16` ↔ `f32` ↔ `f64` ↔ `f128`)
+- Integer ↔ integer (existing, extended to pointer-sized)
+- Float → float (`f16` ↔ `f32` ↔ `f64`)
 - Integer → float
 - Float → integer (truncates toward zero; panics if value is NaN or out of range of the target integer type, matching Rust's checked `as` behavior since 1.45)
 
@@ -147,26 +139,9 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 ## Implementation Phases
 
-### Phase 1: 128-bit integers (i128/u128)
+### Phase 1: Pointer-sized integers (isize/usize)
 
-- [x] Add `I128`/`U128` to `TypeKind`, `Type` constants (tags 8, 9 — shifted Bool+ up by 2)
-- [x] Update all `is_integer()`, `is_signed()`, `is_unsigned()`, `is_copy()`, `literal_fits()`, `negated_literal_fits()` helpers
-- [x] Add `i128`/`u128` tokens to lexer (`LogosTokenKind`)
-- [x] Update parser type parsing to recognize `i128`/`u128`
-- [x] Update RIR type resolution (inference `resolve_type_name` + sema `resolve_type`)
-- [x] Update Sema to allow arithmetic/comparison on i128/u128
-- [x] Update `@intCast` to handle 128-bit types
-- [x] Add LLVM codegen: `ctx.i128_type()`, extend arithmetic/comparison emission
-- [x] Update `type_byte_size` and `type_alignment` (16 bytes, 8-byte aligned on aarch64)
-- [x] Add spec section 3.1 paragraphs for i128/u128 (3.1:21, 3.1:22)
-- [x] Add spec tests (15 tests covering basic ops, casting, comparison, function calls, preview gate)
-- [ ] **Deferred**: i128/u128 division/remainder (linker issue with compiler_builtins)
-- [ ] **Deferred**: Overflow panic tests (lexer can't parse literals > i64::MAX)
-- [x] Preview-gated via `--preview extended_numeric_types`
-
-### Phase 2: Pointer-sized integers (isize/usize)
-
-- [x] Add `Isize`/`Usize` to `TypeKind`, `Type` constants (tags 10, 11)
+- [x] Add `Isize`/`Usize` to `TypeKind`, `Type` constants (tags 8, 9)
 - [x] Update all type helper methods (is_integer, is_signed, is_unsigned, is_copy, literal_fits, etc.)
 - [x] Add `isize`/`usize` tokens to lexer
 - [x] Update parser type parsing
@@ -178,38 +153,38 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 - [x] Add spec tests (17 tests covering arithmetic, casting, comparison, function calls)
 - [x] Preview-gated via `--preview extended_numeric_types`
 
-### Phase 3: Floating-point types (f16/f32/f64/f128) — lexer and type system
+### Phase 2: Floating-point types (f16/f32/f64) — lexer and type system
 
-- [x] Add `F16`/`F32`/`F64`/`F128` to `TypeKind`, `Type` constants (tags 12–15)
+- [x] Add `F16`/`F32`/`F64` to `TypeKind`, `Type` constants (tags 10–12)
 - [x] Add `is_float()`, `is_numeric()` helpers
 - [x] Update `is_signed()`, `is_copy()`, etc.
-- [x] Add `f16`/`f32`/`f64`/`f128` type keyword tokens to lexer
+- [x] Add `f16`/`f32`/`f64` type keyword tokens to lexer
 - [x] Add floating-point literal token: regex `[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?` and `[0-9]+[eE][+-]?[0-9]+`
 - [x] Handle parser ambiguity: `42.method()` vs `42.0` (logos naturally disambiguates — dot-digit is float, dot-ident is method call)
-- [x] Update parser type parsing to recognize `f16`/`f32`/`f64`/`f128`
+- [x] Update parser type parsing to recognize `f16`/`f32`/`f64`
 - [x] Add `Float(u64)` literal variant to AST, RIR, AIR, and CFG instruction data (store f64 bits as u64 for Eq/Copy compatibility)
 - [x] Add `FloatLiteral` to `InferType` for type inference (defaults to f64 if unconstrained)
-- [x] Add LLVM type mapping: `ctx.f16_type()`, `ctx.f32_type()`, `ctx.f64_type()`, `ctx.f128_type()`
-- [x] Update `type_byte_size` and `type_alignment`: f16 (2/2), f32 (4/4), f64 (8/8), f128 (16/16)
+- [x] Add LLVM type mapping: `ctx.f16_type()`, `ctx.f32_type()`, `ctx.f64_type()`
+- [x] Update `type_byte_size` and `type_alignment`: f16 (2/2), f32 (4/4), f64 (8/8)
 - [x] Add `FloatConst` codegen: LLVM `const_float` emission
-- [x] Add spec section 3.11 for floating-point types (9 normative paragraphs)
-- [x] Add spec tests (11 tests covering type declarations, literals, inference, copy, preview gate)
+- [x] Add spec section 3.11 for floating-point types
+- [x] Add spec tests (10 tests covering type declarations, literals, inference, copy, preview gate)
 - [x] Preview-gated via `--preview extended_numeric_types`
 
-### Phase 4: Floating-point codegen and semantics
+### Phase 3: Floating-point codegen and semantics
 
-- [x] Emit float arithmetic: `fadd`, `fsub`, `fmul`, `fdiv`, `frem` for all four widths
+- [x] Emit float arithmetic: `fadd`, `fsub`, `fmul`, `fdiv`, `frem` for all three widths
 - [x] Emit float comparisons: `fcmp` with ordered predicates (OEQ, OLT, OGT, OLE, OGE)
 - [x] Emit float negation: `fneg`
 - [x] Reject bitwise operators on float types in Sema (via `IsNumeric` vs `IsInteger` constraint split)
 - [x] Add spec tests for float arithmetic, comparison, negation, bitwise rejection (19 new tests)
 - [ ] Extend `@intCast` or add `@cast` for float↔int and float↔float conversions (fptrunc/fpext)
 - [ ] Add spec tests for float casting, edge cases (NaN, infinity, negative zero)
-- [ ] Add spec tests for f16 range limits and f128 precision
+- [ ] Add spec tests for f16 range limits
 
-### Phase 5: Compile-time integer type (comptime_int)
+### Phase 4: Compile-time integer type (comptime_int)
 
-- [ ] Add `ComptimeInt` to `TypeKind`, `Type` constant (tag 22)
+- [ ] Add `ComptimeInt` to `TypeKind`, `Type` constant (tag 19)
 - [ ] Add `is_comptime_int()` helper, update `is_copy()`, `is_valid_encoding()`
 - [ ] Mirror `ComptimeStr` handling: cannot be interned in type pool, not a runtime type
 - [ ] Update comptime interpreter to produce `ComptimeInt` for integer expressions in comptime blocks
@@ -217,7 +192,7 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 - [ ] Update `Display`/`Debug`/`name()` to return `"comptime_int"`
 - [ ] Add spec tests for comptime_int usage and coercion
 
-### Phase 6: Polish and edge cases
+### Phase 5: Polish and edge cases
 
 - [ ] Update `Display`/`Debug` impls for new types
 - [ ] Update fuzz targets to generate programs with new types
@@ -229,26 +204,20 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 ### Positive
 
-- Full numeric parity with Rust and beyond — `f16`/`f128` match Zig's coverage
 - `usize` unlocks portable array indexing (future work)
 - Floating-point enables scientific/graphics/game workloads
 - `f16` enables ML inference and GPU interop without external conversion
-- `f128` enables high-precision scientific computation
-- 128-bit integers enable crypto and UUID operations
 
 ### Negative
 
 - Increases compiler complexity (more type variants to handle in every match)
 - Float semantics are inherently complex (NaN propagation, comparison edge cases)
 - `isize`/`usize` introduce target-dependency into the type system
-- Comptime evaluation needs promotion from `i64` to `i128` internally (straightforward)
-- 128-bit integer support may have performance implications on some platforms (not all CPUs have native i128)
 - `f16` has no hardware support on most non-GPU targets — LLVM emits software promotion to f32
-- `f128` has no hardware support on x86-64 — LLVM emits software library calls (slow)
 
 ### Neutral
 
-- The Type encoding scheme has plenty of room (tags 14–22 are unused)
+- The Type encoding scheme has plenty of room for future types
 - LLVM handles all the heavy lifting for code generation
 - No syntax changes beyond new type keywords and float literals
 
@@ -260,9 +229,7 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 3. **`isize`/`usize` as array index type**: Should array indexing require `usize`? Current arrays use integer expressions. This is a semantic change that affects existing code and should be a separate ADR.
 
-4. **128-bit alignment**: Should `i128`/`u128` be 16-byte aligned (matching some platforms) or 8-byte aligned (matching Rust on x86-64)? Defer to LLVM's target data layout.
-
-5. **Comptime float**: Should float expressions be evaluable at comptime? This adds complexity (f64 arithmetic at compile time). Could defer and only allow float literals, not comptime float math.
+4. **Comptime float**: Should float expressions be evaluable at comptime? This adds complexity (f64 arithmetic at compile time). Could defer and only allow float literals, not comptime float math.
 
 ## Future Work
 

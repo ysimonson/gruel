@@ -16,12 +16,10 @@ pub fn type_alignment(ty: Type, type_pool: &TypeInternPool) -> u64 {
         TypeKind::I16 | TypeKind::U16 => 2,
         TypeKind::I32 | TypeKind::U32 => 4,
         TypeKind::I64 | TypeKind::U64 => 8,
-        TypeKind::I128 | TypeKind::U128 => 8, // 128-bit integers: 8-byte aligned (matches Rust on x86-64)
         TypeKind::Isize | TypeKind::Usize => 8, // Pointer-sized: 8-byte aligned on 64-bit targets
         TypeKind::F16 => 2,
         TypeKind::F32 => 4,
         TypeKind::F64 => 8,
-        TypeKind::F128 => 16,
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 8,
         TypeKind::Struct(id) => {
             let def = type_pool.struct_def(id);
@@ -64,12 +62,10 @@ pub fn type_byte_size(ty: Type, type_pool: &TypeInternPool) -> u64 {
         TypeKind::I16 | TypeKind::U16 => 2,
         TypeKind::I32 | TypeKind::U32 => 4,
         TypeKind::I64 | TypeKind::U64 => 8,
-        TypeKind::I128 | TypeKind::U128 => 16,
         TypeKind::Isize | TypeKind::Usize => 8, // Pointer-sized: 8 bytes on 64-bit targets
         TypeKind::F16 => 2,
         TypeKind::F32 => 4,
         TypeKind::F64 => 8,
-        TypeKind::F128 => 16,
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 8, // 64-bit target
         TypeKind::Struct(id) => {
             // Compute LLVM non-packed struct layout: fields are placed at
@@ -157,7 +153,6 @@ pub fn gruel_type_to_llvm<'ctx>(
         TypeKind::I16 | TypeKind::U16 => Some(ctx.i16_type().into()),
         TypeKind::I32 | TypeKind::U32 => Some(ctx.i32_type().into()),
         TypeKind::I64 | TypeKind::U64 => Some(ctx.i64_type().into()),
-        TypeKind::I128 | TypeKind::U128 => Some(ctx.i128_type().into()),
         // Pointer-sized integers: i64 on all current 64-bit targets
         TypeKind::Isize | TypeKind::Usize => Some(ctx.i64_type().into()),
 
@@ -165,7 +160,6 @@ pub fn gruel_type_to_llvm<'ctx>(
         TypeKind::F16 => Some(ctx.f16_type().into()),
         TypeKind::F32 => Some(ctx.f32_type().into()),
         TypeKind::F64 => Some(ctx.f64_type().into()),
-        TypeKind::F128 => Some(ctx.f128_type().into()),
 
         // Booleans are i1 in LLVM IR.
         TypeKind::Bool => Some(ctx.bool_type().into()),

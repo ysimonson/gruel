@@ -164,10 +164,6 @@ pub enum TypeKind {
     U32,
     /// 64-bit unsigned integer
     U64,
-    /// 128-bit signed integer
-    I128,
-    /// 128-bit unsigned integer
-    U128,
     /// Pointer-sized signed integer
     Isize,
     /// Pointer-sized unsigned integer
@@ -178,8 +174,6 @@ pub enum TypeKind {
     F32,
     /// IEEE 754 binary64 (double-precision float)
     F64,
-    /// IEEE 754 binary128 (quad-precision float)
-    F128,
     /// Boolean
     Bool,
     /// The unit type (for functions that don't return a value)
@@ -214,9 +208,9 @@ pub enum TypeKind {
 /// # Encoding
 ///
 /// The u32 value uses a tag-based encoding:
-/// - Primitives (0-21): I8=0, I16=1, I32=2, I64=3, U8=4, U16=5, U32=6, U64=7,
-///   I128=8, U128=9, Isize=10, Usize=11, F16=12, F32=13, F64=14, F128=15,
-///   Bool=16, Unit=17, Error=18, Never=19, ComptimeType=20, ComptimeStr=21
+/// - Primitives (0-18): I8=0, I16=1, I32=2, I64=3, U8=4, U16=5, U32=6, U64=7,
+///   Isize=8, Usize=9, F16=10, F32=11, F64=12,
+///   Bool=13, Unit=14, Error=15, Never=16, ComptimeType=17, ComptimeStr=18
 /// - Composites: low byte is tag (TAG_STRUCT, TAG_ENUM, TAG_ARRAY, TAG_MODULE),
 ///   high 24 bits are the ID
 ///
@@ -261,14 +255,11 @@ impl std::fmt::Debug for Type {
             TypeKind::U16 => write!(f, "Type::U16"),
             TypeKind::U32 => write!(f, "Type::U32"),
             TypeKind::U64 => write!(f, "Type::U64"),
-            TypeKind::I128 => write!(f, "Type::I128"),
-            TypeKind::U128 => write!(f, "Type::U128"),
             TypeKind::Isize => write!(f, "Type::ISIZE"),
             TypeKind::Usize => write!(f, "Type::USIZE"),
             TypeKind::F16 => write!(f, "Type::F16"),
             TypeKind::F32 => write!(f, "Type::F32"),
             TypeKind::F64 => write!(f, "Type::F64"),
-            TypeKind::F128 => write!(f, "Type::F128"),
             TypeKind::Bool => write!(f, "Type::BOOL"),
             TypeKind::Unit => write!(f, "Type::UNIT"),
             TypeKind::Error => write!(f, "Type::ERROR"),
@@ -313,34 +304,28 @@ impl Type {
     pub const U32: Type = Type(6);
     /// 64-bit unsigned integer
     pub const U64: Type = Type(7);
-    /// 128-bit signed integer
-    pub const I128: Type = Type(8);
-    /// 128-bit unsigned integer
-    pub const U128: Type = Type(9);
     /// Pointer-sized signed integer
-    pub const ISIZE: Type = Type(10);
+    pub const ISIZE: Type = Type(8);
     /// Pointer-sized unsigned integer
-    pub const USIZE: Type = Type(11);
+    pub const USIZE: Type = Type(9);
     /// IEEE 754 binary16 (half-precision float)
-    pub const F16: Type = Type(12);
+    pub const F16: Type = Type(10);
     /// IEEE 754 binary32 (single-precision float)
-    pub const F32: Type = Type(13);
+    pub const F32: Type = Type(11);
     /// IEEE 754 binary64 (double-precision float)
-    pub const F64: Type = Type(14);
-    /// IEEE 754 binary128 (quad-precision float)
-    pub const F128: Type = Type(15);
+    pub const F64: Type = Type(12);
     /// Boolean
-    pub const BOOL: Type = Type(16);
+    pub const BOOL: Type = Type(13);
     /// The unit type (for functions that don't return a value)
-    pub const UNIT: Type = Type(17);
+    pub const UNIT: Type = Type(14);
     /// An error type (used during type checking to continue after errors)
-    pub const ERROR: Type = Type(18);
+    pub const ERROR: Type = Type(15);
     /// The never type - represents computations that don't return
-    pub const NEVER: Type = Type(19);
+    pub const NEVER: Type = Type(16);
     /// The comptime type - the type of types themselves
-    pub const COMPTIME_TYPE: Type = Type(20);
+    pub const COMPTIME_TYPE: Type = Type(17);
     /// The comptime string type - compile-time only string values
-    pub const COMPTIME_STR: Type = Type(21);
+    pub const COMPTIME_STR: Type = Type(18);
 }
 
 // Composite type constructors
@@ -586,7 +571,7 @@ impl Type {
             panic!(
                 "invalid Type encoding: raw value {:#010x} (tag={}, id={}). \
                  This indicates data corruption or a bug in Type construction. \
-                 Valid tags are 0-21 (primitives) or 100-105 (composites).",
+                 Valid tags are 0-18 (primitives) or 100-105 (composites).",
                 self.0,
                 self.0 & 0xFF,
                 self.0 >> 8
@@ -623,20 +608,17 @@ impl Type {
             5 => Some(TypeKind::U16),
             6 => Some(TypeKind::U32),
             7 => Some(TypeKind::U64),
-            8 => Some(TypeKind::I128),
-            9 => Some(TypeKind::U128),
-            10 => Some(TypeKind::Isize),
-            11 => Some(TypeKind::Usize),
-            12 => Some(TypeKind::F16),
-            13 => Some(TypeKind::F32),
-            14 => Some(TypeKind::F64),
-            15 => Some(TypeKind::F128),
-            16 => Some(TypeKind::Bool),
-            17 => Some(TypeKind::Unit),
-            18 => Some(TypeKind::Error),
-            19 => Some(TypeKind::Never),
-            20 => Some(TypeKind::ComptimeType),
-            21 => Some(TypeKind::ComptimeStr),
+            8 => Some(TypeKind::Isize),
+            9 => Some(TypeKind::Usize),
+            10 => Some(TypeKind::F16),
+            11 => Some(TypeKind::F32),
+            12 => Some(TypeKind::F64),
+            13 => Some(TypeKind::Bool),
+            14 => Some(TypeKind::Unit),
+            15 => Some(TypeKind::Error),
+            16 => Some(TypeKind::Never),
+            17 => Some(TypeKind::ComptimeType),
+            18 => Some(TypeKind::ComptimeStr),
             TAG_STRUCT => Some(TypeKind::Struct(StructId(self.0 >> 8))),
             TAG_ENUM => Some(TypeKind::Enum(EnumId(self.0 >> 8))),
             TAG_ARRAY => Some(TypeKind::Array(ArrayTypeId(self.0 >> 8))),
@@ -660,14 +642,11 @@ impl Type {
             TypeKind::U16 => "u16",
             TypeKind::U32 => "u32",
             TypeKind::U64 => "u64",
-            TypeKind::I128 => "i128",
-            TypeKind::U128 => "u128",
             TypeKind::Isize => "isize",
             TypeKind::Usize => "usize",
             TypeKind::F16 => "f16",
             TypeKind::F32 => "f32",
             TypeKind::F64 => "f64",
-            TypeKind::F128 => "f128",
             TypeKind::Bool => "bool",
             TypeKind::Unit => "()",
             TypeKind::Struct(_) => "<struct>",
@@ -717,10 +696,10 @@ impl Type {
     }
 
     /// Check if this type is an integer type.
-    /// Optimized: checks tag range directly (0-11 are integer types: i8..u64, i128/u128, isize/usize).
+    /// Optimized: checks tag range directly (0-9 are integer types: i8..u64, isize/usize).
     #[inline]
     pub fn is_integer(&self) -> bool {
-        self.0 <= 11
+        self.0 <= 9
     }
 
     /// Check if this is an error type.
@@ -851,23 +830,23 @@ impl Type {
     }
 
     /// Check if this is a signed integer type.
-    /// Signed integers: I8=0, I16=1, I32=2, I64=3, I128=8, Isize=10.
+    /// Signed integers: I8=0, I16=1, I32=2, I64=3, Isize=8.
     #[inline]
     pub fn is_signed(&self) -> bool {
-        self.0 <= 3 || self.0 == 8 || self.0 == 10
+        self.0 <= 3 || self.0 == 8
     }
 
     /// Check if this is a floating-point type.
-    /// Float types: F16=12, F32=13, F64=14, F128=15.
+    /// Float types: F16=10, F32=11, F64=12.
     #[inline]
     pub fn is_float(&self) -> bool {
-        self.0 >= 12 && self.0 <= 15
+        self.0 >= 10 && self.0 <= 12
     }
 
     /// Check if this is a numeric type (integer or float).
     #[inline]
     pub fn is_numeric(&self) -> bool {
-        self.0 <= 15
+        self.0 <= 12
     }
 
     /// Check if this is a Copy type (can be implicitly duplicated).
@@ -889,10 +868,10 @@ impl Type {
     pub fn is_copy(&self) -> bool {
         let tag = self.0 & 0xFF;
         match tag {
-            // Primitive Copy types (I8..Unit = 0..17, includes integers/floats/bool/unit)
-            0..=17 => true,
+            // Primitive Copy types (I8..Unit = 0..14, includes integers/floats/bool/unit)
+            0..=14 => true,
             // Error, Never, ComptimeType, ComptimeStr are Copy for convenience
-            18..=21 => true,
+            15..=18 => true,
             // Enum types are Copy (they're small discriminant values)
             TAG_ENUM => true,
             // Module types are Copy (they're just compile-time namespace references)
@@ -924,18 +903,11 @@ impl Type {
         self.0 == 3 || self.0 == 7
     }
 
-    /// Check if this is a 128-bit type (uses 128-bit operations).
-    /// Checks for I128 (8) or U128 (9).
-    #[inline]
-    pub fn is_128_bit(&self) -> bool {
-        self.0 == 8 || self.0 == 9
-    }
-
     /// Check if this is a pointer-sized type (isize or usize).
-    /// Checks for Isize (10) or Usize (11).
+    /// Checks for Isize (8) or Usize (9).
     #[inline]
     pub fn is_pointer_sized(&self) -> bool {
-        self.0 == 10 || self.0 == 11
+        self.0 == 8 || self.0 == 9
     }
 
     /// Check if this type can coerce to the target type.
@@ -949,11 +921,11 @@ impl Type {
     }
 
     /// Check if this is an unsigned integer type.
-    /// Unsigned integers: U8=4, U16=5, U32=6, U64=7, U128=9, Usize=11.
+    /// Unsigned integers: U8=4, U16=5, U32=6, U64=7, Usize=9.
     #[inline]
     #[must_use]
     pub fn is_unsigned(&self) -> bool {
-        (self.0 >= 4 && self.0 <= 7) || self.0 == 9 || self.0 == 11
+        (self.0 >= 4 && self.0 <= 7) || self.0 == 9
     }
 
     /// Check if a u64 value fits within the range of this integer type.
@@ -966,18 +938,16 @@ impl Type {
     #[must_use]
     pub fn literal_fits(&self, value: u64) -> bool {
         match self.0 {
-            0 => value <= i8::MAX as u64,   // I8
-            1 => value <= i16::MAX as u64,  // I16
-            2 => value <= i32::MAX as u64,  // I32
-            3 => value <= i64::MAX as u64,  // I64
-            4 => value <= u8::MAX as u64,   // U8
-            5 => value <= u16::MAX as u64,  // U16
-            6 => value <= u32::MAX as u64,  // U32
-            7 => true,                      // U64 - Any u64 value fits
-            8 => true,                      // I128 - Any u64 value fits in i128 positive range
-            9 => true,                      // U128 - Any u64 value fits
-            10 => value <= i64::MAX as u64, // Isize - 64-bit signed on current targets
-            11 => true,                     // Usize - 64-bit unsigned on current targets
+            0 => value <= i8::MAX as u64,  // I8
+            1 => value <= i16::MAX as u64, // I16
+            2 => value <= i32::MAX as u64, // I32
+            3 => value <= i64::MAX as u64, // I64
+            4 => value <= u8::MAX as u64,  // U8
+            5 => value <= u16::MAX as u64, // U16
+            6 => value <= u32::MAX as u64, // U32
+            7 => true,                     // U64 - Any u64 value fits
+            8 => value <= i64::MAX as u64, // Isize - 64-bit signed on current targets
+            9 => true,                     // Usize - 64-bit unsigned on current targets
             _ => false,
         }
     }
@@ -993,8 +963,7 @@ impl Type {
             1 => value <= (i16::MIN as i64).unsigned_abs(), // I16
             2 => value <= (i32::MIN as i64).unsigned_abs(), // I32
             3 => value <= (i64::MIN).unsigned_abs(),        // I64
-            8 => true,                                      // I128 - any negated u64 fits
-            10 => value <= (i64::MIN).unsigned_abs(),       // Isize - 64-bit on current targets
+            8 => value <= (i64::MIN).unsigned_abs(),        // Isize - 64-bit on current targets
             _ => false,
         }
     }
@@ -1052,8 +1021,8 @@ impl Type {
     pub fn is_valid_encoding(v: u32) -> bool {
         let tag = v & 0xFF;
         match tag {
-            // Primitive types: I8=0 through ComptimeStr=21
-            0..=21 => true,
+            // Primitive types: I8=0 through ComptimeStr=18
+            0..=18 => true,
             // Composite types with valid tags
             TAG_STRUCT | TAG_ENUM | TAG_ARRAY | TAG_PTR_CONST | TAG_PTR_MUT | TAG_MODULE => true,
             // Everything else is invalid
@@ -1751,8 +1720,8 @@ mod tests {
 
     #[test]
     fn test_is_valid_encoding_primitives() {
-        // All primitive types (0-12) are valid
-        for i in 0..=13u32 {
+        // All primitive types (0-18) are valid
+        for i in 0..=18u32 {
             assert!(
                 Type::is_valid_encoding(i),
                 "primitive tag {} should be valid",
@@ -1778,8 +1747,8 @@ mod tests {
 
     #[test]
     fn test_is_valid_encoding_invalid() {
-        // Tags between primitives and composites are invalid (22-99)
-        for tag in 22..100u32 {
+        // Tags between primitives and composites are invalid (19-99)
+        for tag in 19..100u32 {
             assert!(
                 !Type::is_valid_encoding(tag),
                 "tag {} should be invalid",
@@ -1802,7 +1771,7 @@ mod tests {
         // Valid primitives
         assert!(Type::try_from_u32(0).is_some()); // I8
         assert!(Type::try_from_u32(2).is_some()); // I32
-        assert!(Type::try_from_u32(12).is_some()); // ComptimeType
+        assert!(Type::try_from_u32(10).is_some()); // F16
 
         // Valid composites
         assert!(Type::try_from_u32(100).is_some()); // Struct(0)

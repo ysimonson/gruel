@@ -444,14 +444,11 @@ impl<'a> SemaContext<'a> {
             | TypeKind::U16
             | TypeKind::U32
             | TypeKind::U64
-            | TypeKind::I128
-            | TypeKind::U128
             | TypeKind::Isize
             | TypeKind::Usize
             | TypeKind::F16
             | TypeKind::F32
             | TypeKind::F64
-            | TypeKind::F128
             | TypeKind::Bool
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values)

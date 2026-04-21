@@ -56,7 +56,7 @@ pub enum InferType {
 
     /// A floating-point literal type.
     ///
-    /// Float literals can unify with any float type (f16, f32, f64, f128).
+    /// Float literals can unify with any float type (f16, f32, f64).
     /// If unconstrained at the end of inference, defaults to `f64`.
     FloatLiteral,
 

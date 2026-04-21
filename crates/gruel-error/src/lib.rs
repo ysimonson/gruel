@@ -308,7 +308,7 @@ pub enum PreviewFeature {
     ComptimeMeta,
     /// Consistent string interface and comptime string materialization (ADR-0045).
     ConsistentStr,
-    /// Extended numeric types: i128/u128, isize/usize, f32/f64 (ADR-0046).
+    /// Extended numeric types: isize/usize, f16/f32/f64 (ADR-0046).
     ExtendedNumericTypes,
 }
 

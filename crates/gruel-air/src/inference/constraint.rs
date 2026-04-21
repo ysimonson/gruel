@@ -40,7 +40,7 @@ pub enum Constraint {
     /// Generated for array indexing which requires non-negative indices.
     IsUnsigned(InferType, Span),
 
-    /// Type must be numeric (integer or float): τ ∈ {i8..i128, u8..u128, isize, usize, f16..f128}.
+    /// Type must be numeric (integer or float): τ ∈ {i8..i64, u8..u64, isize, usize, f16..f64}.
     ///
     /// Generated for arithmetic operators (+, -, *, /, %) which work on both
     /// integer and floating-point types.

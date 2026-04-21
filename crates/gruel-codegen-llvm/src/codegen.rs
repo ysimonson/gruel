@@ -3071,11 +3071,6 @@ fn define_function<'ctx>(
 fn is_signed_type(ty: Type) -> bool {
     matches!(
         ty.kind(),
-        TypeKind::I8
-            | TypeKind::I16
-            | TypeKind::I32
-            | TypeKind::I64
-            | TypeKind::I128
-            | TypeKind::Isize
+        TypeKind::I8 | TypeKind::I16 | TypeKind::I32 | TypeKind::I64 | TypeKind::Isize
     )
 }
