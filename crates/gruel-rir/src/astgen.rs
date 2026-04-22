@@ -983,7 +983,7 @@ impl<'a> AstGen<'a> {
             // struct field names (which must start with a letter).
             Expr::TupleIndex(ti) => {
                 let base = self.gen_expr(&ti.base);
-                let field = self.interner.get_or_intern(&ti.index.to_string());
+                let field = self.interner.get_or_intern(ti.index.to_string());
                 self.rir.add_inst(Inst {
                     data: InstData::FieldGet { base, field },
                     span: ti.span,
@@ -1156,7 +1156,7 @@ impl<'a> AstGen<'a> {
                         .iter()
                         .enumerate()
                         .map(|(i, e)| {
-                            let field_name = self.interner.get_or_intern(&i.to_string());
+                            let field_name = self.interner.get_or_intern(i.to_string());
                             let (binding_name, is_wildcard) = match &e.binding {
                                 TupleBinding::Ident(name) => (Some(name.name), false),
                                 TupleBinding::Wildcard(_) => (None, true),

@@ -3163,12 +3163,7 @@ impl<'a> Sema<'a> {
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
         // Pull element inst refs out of the extra array.
-        let elem_refs: Vec<InstRef> = self
-            .rir
-            .get_inst_refs(elems_start, elems_len)
-            .iter()
-            .copied()
-            .collect();
+        let elem_refs: Vec<InstRef> = self.rir.get_inst_refs(elems_start, elems_len).to_vec();
 
         // Analyze each element in source order.
         let mut elem_results = Vec::with_capacity(elem_refs.len());
@@ -3371,20 +3366,20 @@ impl<'a> Sema<'a> {
                     span,
                 );
                 // ADR-0048: for tuple-shaped structs, add a specific help note.
-                if struct_def.is_tuple_shaped() {
-                    if let Ok(idx) = field_name_str.parse::<u32>() {
-                        err = err.with_help(format!(
-                            "tuple index {} out of bounds: {} has {} element{}",
-                            idx,
-                            display_struct_name,
-                            struct_def.fields.len(),
-                            if struct_def.fields.len() == 1 {
-                                ""
-                            } else {
-                                "s"
-                            },
-                        ));
-                    }
+                if struct_def.is_tuple_shaped()
+                    && let Ok(idx) = field_name_str.parse::<u32>()
+                {
+                    err = err.with_help(format!(
+                        "tuple index {} out of bounds: {} has {} element{}",
+                        idx,
+                        display_struct_name,
+                        struct_def.fields.len(),
+                        if struct_def.fields.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
+                    ));
                 }
                 return Err(err);
             }

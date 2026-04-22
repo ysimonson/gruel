@@ -135,6 +135,15 @@ impl ExprInfo {
 }
 
 /// Constraint generator that walks RIR and generates type constraints.
+/// Return type of [`ConstraintGenerator::into_parts`].
+pub type ConstraintGeneratorParts = (
+    Vec<Constraint>,
+    Vec<TypeVarId>,
+    Vec<TypeVarId>,
+    HashMap<InstRef, InferType>,
+    u32,
+);
+
 ///
 /// This is Phase 1 of HM inference: constraint generation. The constraints
 /// are later solved by the `Unifier` to determine concrete types.
@@ -258,15 +267,7 @@ impl<'a> ConstraintGenerator<'a> {
     ///
     /// This is useful when you need ownership of the expression types map.
     /// The `type_var_count` can be used to pre-size the unifier's substitution for better performance.
-    pub fn into_parts(
-        self,
-    ) -> (
-        Vec<Constraint>,
-        Vec<TypeVarId>,
-        Vec<TypeVarId>,
-        HashMap<InstRef, InferType>,
-        u32,
-    ) {
+    pub fn into_parts(self) -> ConstraintGeneratorParts {
         (
             self.constraints,
             self.int_literal_vars,
