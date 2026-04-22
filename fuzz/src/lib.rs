@@ -72,7 +72,7 @@ impl<'a> Arbitrary<'a> for GruelProgram {
                     val.to_string()
                 };
                 src.push_str(&format!(
-                    "fn main() -> i32 {{\n    let x: {} = {};\n    @intCast(x)\n}}\n",
+                    "fn main() -> i32 {{\n    let x: {} = {};\n    @cast(x)\n}}\n",
                     ty, val_str
                 ));
             }
@@ -314,7 +314,7 @@ fn gen_bool_expr(
 ///
 /// Generates programs using only constructs supported by both the comptime
 /// interpreter and the runtime: i32 arithmetic, booleans, control flow,
-/// `comptime_unroll for` with `@range`, `@typeInfo`/`@field`, and `@dbg`
+/// `comptime_unroll for` with `@range`, `@type_info`/`@field`, and `@dbg`
 /// for observable output. No I/O, strings, or non-deterministic operations.
 ///
 /// The comptime path wraps the body in `comptime { ... }` with loops
@@ -331,7 +331,7 @@ pub struct ComptimeProgram {
     runtime_body: String,
 }
 
-/// A simple struct with i32 fields, used for `@typeInfo`/`@field` fuzzing.
+/// A simple struct with i32 fields, used for `@type_info`/`@field` fuzzing.
 #[derive(Debug)]
 struct ComptimeStructDef {
     name: String,
@@ -386,7 +386,7 @@ impl<'a> Arbitrary<'a> for ComptimeProgram {
         let mut runtime_body = String::new();
         let mut vars: Vec<String> = Vec::new();
 
-        // Optionally generate a struct for @typeInfo/@field testing
+        // Optionally generate a struct for @type_info/@field testing
         let struct_def = if u.ratio(1, 3)? {
             let num_fields: u8 = u.int_in_range(1..=4)?;
             let fields: Result<Vec<(String, i32)>, _> = (0..num_fields)
@@ -448,7 +448,7 @@ impl<'a> Arbitrary<'a> for ComptimeProgram {
                         comptime_body.push_str(&format!("    @dbg({});\n", expanded_expr));
                     }
                 }
-                // comptime_unroll for with @typeInfo/@field (if struct exists)
+                // comptime_unroll for with @type_info/@field (if struct exists)
                 _ => {
                     if let Some(ref sd) = struct_def {
                         let inst_name = format!("s{}", i);
@@ -464,10 +464,10 @@ impl<'a> Arbitrary<'a> for ComptimeProgram {
                             field_inits.join(", ")
                         );
 
-                        // Runtime: comptime_unroll for with @typeInfo/@field
+                        // Runtime: comptime_unroll for with @type_info/@field
                         runtime_body.push_str(&let_stmt);
                         runtime_body.push_str(&format!(
-                            "    comptime_unroll for fld in comptime {{ @typeInfo({}).fields }} {{\n",
+                            "    comptime_unroll for fld in comptime {{ @type_info({}).fields }} {{\n",
                             sd.name
                         ));
                         runtime_body

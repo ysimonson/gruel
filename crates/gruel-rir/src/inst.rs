@@ -2174,7 +2174,7 @@ pub enum InstData {
     ComptimeUnrollFor {
         /// The loop variable name
         binding: Spur,
-        /// The iterable expression (must be comptime-evaluable, e.g. @typeInfo fields)
+        /// The iterable expression (must be comptime-evaluable, e.g. @type_info fields)
         iterable: InstRef,
         /// The loop body (will be unrolled at compile time)
         body: InstRef,

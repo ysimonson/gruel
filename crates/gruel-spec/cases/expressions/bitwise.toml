@@ -260,10 +260,10 @@ spec = ["4.3a:8"]
 source = """
 fn main() -> i32 {
     let tmp: i32 = -1;
-    let x: i8 = @intCast(tmp);
+    let x: i8 = @cast(tmp);
     // Arithmetic right shift of -1 by any amount should remain -1
     let result: i8 = x >> 1;
-    @intCast(result)
+    @cast(result)
 }
 """
 exit_code = 255
@@ -274,10 +274,10 @@ spec = ["4.3a:8"]
 source = """
 fn main() -> i32 {
     let tmp: i32 = -8;
-    let x: i8 = @intCast(tmp);
+    let x: i8 = @cast(tmp);
     // Arithmetic right shift by 2: 0xF8 >> 2 = 0xFE = -2
     let result: i8 = x >> 2;
-    @intCast(result)
+    @cast(result)
 }
 """
 exit_code = 254
@@ -288,10 +288,10 @@ spec = ["4.3a:8"]
 source = """
 fn main() -> i32 {
     let tmp: i32 = -1;
-    let x: i16 = @intCast(tmp);
+    let x: i16 = @cast(tmp);
     // Arithmetic right shift of -1 by any amount should remain -1
     let result: i16 = x >> 4;
-    @intCast(result)
+    @cast(result)
 }
 """
 exit_code = 255
@@ -302,10 +302,10 @@ spec = ["4.3a:8"]
 source = """
 fn main() -> i32 {
     let tmp: i32 = -256;
-    let x: i16 = @intCast(tmp);
+    let x: i16 = @cast(tmp);
     // Arithmetic right shift by 4: 0xFF00 >> 4 = 0xFFF0 = -16
     let result: i16 = x >> 4;
-    @intCast(result)
+    @cast(result)
 }
 """
 exit_code = 240

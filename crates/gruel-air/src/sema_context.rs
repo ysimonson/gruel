@@ -209,7 +209,7 @@ pub struct SemaContext<'a> {
     pub builtin_arch_id: Option<EnumId>,
     /// EnumId of the synthetic Os enum (for @target_os intrinsic).
     pub builtin_os_id: Option<EnumId>,
-    /// EnumId of the synthetic TypeKind enum (for @typeInfo intrinsic).
+    /// EnumId of the synthetic TypeKind enum (for @type_info intrinsic).
     pub builtin_typekind_id: Option<EnumId>,
     /// Compilation target (architecture + OS).
     pub target: gruel_target::Target,

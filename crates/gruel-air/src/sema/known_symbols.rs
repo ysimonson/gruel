@@ -36,8 +36,6 @@ pub struct KnownSymbols {
     // Intrinsic names
     /// The `dbg` intrinsic symbol.
     pub dbg: Spur,
-    /// The `intCast` intrinsic symbol (deprecated, use `cast`).
-    pub int_cast: Spur,
     /// The `cast` intrinsic symbol.
     pub cast: Spur,
     /// The `panic` intrinsic symbol.
@@ -100,11 +98,11 @@ pub struct KnownSymbols {
     pub target_os: Spur,
 
     // Comptime metaprogramming intrinsics
-    /// The `compileError` intrinsic symbol.
+    /// The `compile_error` intrinsic symbol.
     pub compile_error: Spur,
-    /// The `typeInfo` type intrinsic symbol.
+    /// The `type_info` type intrinsic symbol.
     pub type_info: Spur,
-    /// The `typeName` type intrinsic symbol.
+    /// The `type_name` type intrinsic symbol.
     pub type_name: Spur,
     /// The `field` intrinsic symbol.
     pub field: Spur,
@@ -130,7 +128,6 @@ impl KnownSymbols {
         Self {
             // Intrinsic names
             dbg: interner.get_or_intern_static("dbg"),
-            int_cast: interner.get_or_intern_static("intCast"),
             cast: interner.get_or_intern_static("cast"),
             panic: interner.get_or_intern_static("panic"),
             assert: interner.get_or_intern_static("assert"),
@@ -166,9 +163,9 @@ impl KnownSymbols {
             target_os: interner.get_or_intern_static("target_os"),
 
             // Comptime metaprogramming intrinsics
-            compile_error: interner.get_or_intern_static("compileError"),
-            type_info: interner.get_or_intern_static("typeInfo"),
-            type_name: interner.get_or_intern_static("typeName"),
+            compile_error: interner.get_or_intern_static("compile_error"),
+            type_info: interner.get_or_intern_static("type_info"),
+            type_name: interner.get_or_intern_static("type_name"),
             field: interner.get_or_intern_static("field"),
 
             // For-loop intrinsics
@@ -211,7 +208,6 @@ mod tests {
 
         // Verify symbols can be resolved back to their expected strings
         assert_eq!(interner.resolve(&known.dbg), "dbg");
-        assert_eq!(interner.resolve(&known.int_cast), "intCast");
         assert_eq!(interner.resolve(&known.cast), "cast");
         assert_eq!(interner.resolve(&known.panic), "panic");
         assert_eq!(interner.resolve(&known.assert), "assert");
@@ -242,9 +238,9 @@ mod tests {
         assert_eq!(interner.resolve(&known.syscall), "syscall");
         assert_eq!(interner.resolve(&known.target_arch), "target_arch");
         assert_eq!(interner.resolve(&known.target_os), "target_os");
-        assert_eq!(interner.resolve(&known.compile_error), "compileError");
-        assert_eq!(interner.resolve(&known.type_info), "typeInfo");
-        assert_eq!(interner.resolve(&known.type_name), "typeName");
+        assert_eq!(interner.resolve(&known.compile_error), "compile_error");
+        assert_eq!(interner.resolve(&known.type_info), "type_info");
+        assert_eq!(interner.resolve(&known.type_name), "type_name");
         assert_eq!(interner.resolve(&known.field), "field");
         assert_eq!(interner.resolve(&known.range), "range");
         assert_eq!(interner.resolve(&known.string_type), "String");

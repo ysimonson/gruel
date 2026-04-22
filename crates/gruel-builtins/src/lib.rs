@@ -529,7 +529,7 @@ pub static OS_ENUM: BuiltinEnumDef = BuiltinEnumDef {
 
 /// The built-in TypeKind enum for compile-time type reflection.
 ///
-/// Variants represent different type classifications, used by `@typeInfo`.
+/// Variants represent different type classifications, used by `@type_info`.
 ///
 /// Variants:
 /// - `Struct` (index 0): Struct types

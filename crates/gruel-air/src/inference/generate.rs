@@ -645,8 +645,8 @@ impl<'a> ConstraintGenerator<'a> {
                 let intrinsic_name = self.interner.resolve(name);
                 let args = self.rir.get_inst_refs(*args_start, *args_len);
 
-                if intrinsic_name == "intCast" || intrinsic_name == "cast" {
-                    // @intCast/@cast: target type is inferred from context
+                if intrinsic_name == "cast" {
+                    // @cast: target type is inferred from context
                     // The argument must be a numeric type (checked in sema)
                     if !args.is_empty() {
                         let arg_info = self.generate(args[0], ctx);
@@ -821,13 +821,13 @@ impl<'a> ConstraintGenerator<'a> {
                 }
             }
 
-            // Type intrinsic (@size_of, @align_of, @typeName, @typeInfo)
+            // Type intrinsic (@size_of, @align_of, @type_name, @type_info)
             InstData::TypeIntrinsic { name, type_arg: _ } => {
                 let intrinsic_name = self.interner.resolve(name);
                 match intrinsic_name {
-                    "typeName" => InferType::Concrete(Type::COMPTIME_STR),
-                    "typeInfo" => {
-                        // @typeInfo returns a comptime struct — use a fresh var
+                    "type_name" => InferType::Concrete(Type::COMPTIME_STR),
+                    "type_info" => {
+                        // @type_info returns a comptime struct — use a fresh var
                         // since the actual type is determined by the comptime evaluator.
                         InferType::Var(self.fresh_var())
                     }

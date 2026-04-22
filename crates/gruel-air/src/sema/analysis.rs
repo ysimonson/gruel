@@ -3364,8 +3364,6 @@ impl<'a> Sema<'a> {
         // Use pre-interned symbol comparison instead of string comparison
         if name == known.dbg {
             self.analyze_dbg_intrinsic(air, inst_ref, &args, span, ctx)
-        } else if name == known.int_cast {
-            self.analyze_intcast_intrinsic(air, inst_ref, &args, span, ctx)
         } else if name == known.test_preview_gate {
             self.analyze_test_preview_gate_intrinsic(air, &args, span)
         } else if name == known.read_line {
@@ -3658,79 +3656,6 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, Type::UNIT))
     }
 
-    /// Analyze @intCast intrinsic.
-    fn analyze_intcast_intrinsic(
-        &mut self,
-        air: &mut Air,
-        inst_ref: InstRef,
-        args: &[RirCallArg],
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        let intrinsic_name = "intCast";
-
-        // @intCast expects exactly one argument
-        if args.len() != 1 {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicWrongArgCount {
-                    name: intrinsic_name.to_string(),
-                    expected: 1,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-
-        // Analyze the argument
-        let arg_result = self.analyze_inst(air, args[0].value, ctx)?;
-        let from_ty = arg_result.ty;
-
-        // Argument must be an integer type
-        if !from_ty.is_integer() {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
-                    name: intrinsic_name.to_string(),
-                    expected: "integer".to_string(),
-                    found: from_ty.name().to_string(),
-                })),
-                span,
-            ));
-        }
-
-        // Get the target type from HM inference
-        let target_ty = match ctx.resolved_types.get(&inst_ref).copied() {
-            Some(ty) if ty.is_integer() => ty,
-            Some(Type::ERROR) => {
-                // Error already reported during type inference
-                return Err(CompileError::new(ErrorKind::TypeAnnotationRequired, span));
-            }
-            Some(ty) => {
-                return Err(CompileError::new(
-                    ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
-                        name: intrinsic_name.to_string(),
-                        expected: "integer".to_string(),
-                        found: ty.name().to_string(),
-                    })),
-                    span,
-                ));
-            }
-            None => {
-                // Type inference couldn't determine the target type
-                return Err(CompileError::new(ErrorKind::TypeAnnotationRequired, span));
-            }
-        };
-
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::IntCast {
-                value: arg_result.air_ref,
-                from_ty,
-            },
-            ty: target_ty,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, target_ty))
-    }
-
     /// Analyze @test_preview_gate intrinsic.
     fn analyze_test_preview_gate_intrinsic(
         &mut self,
@@ -3766,9 +3691,9 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, Type::UNIT))
     }
 
-    /// Analyze @compileError intrinsic.
+    /// Analyze @compile_error intrinsic.
     ///
-    /// In the runtime analysis path, @compileError is a comptime-only intrinsic
+    /// In the runtime analysis path, @compile_error is a comptime-only intrinsic
     /// that has type `!` (never). It takes exactly one string literal argument.
     /// The actual error emission happens in the comptime interpreter.
     fn analyze_compile_error_intrinsic(
@@ -3780,7 +3705,7 @@ impl<'a> Sema<'a> {
         if args.len() != 1 {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicWrongArgCount {
-                    name: "compileError".to_string(),
+                    name: "compile_error".to_string(),
                     expected: 1,
                     found: args.len(),
                 },
@@ -3793,13 +3718,13 @@ impl<'a> Sema<'a> {
         if !matches!(&arg_inst.data, gruel_rir::InstData::StringConst(_)) {
             return Err(CompileError::new(
                 ErrorKind::ComptimeEvaluationFailed {
-                    reason: "@compileError requires a string literal argument".into(),
+                    reason: "@compile_error requires a string literal argument".into(),
                 },
                 arg_inst.span,
             ));
         }
 
-        // Type is `!` (never) — @compileError always terminates compilation
+        // Type is `!` (never) — @compile_error always terminates compilation
         let air_ref = air.add_inst(AirInst {
             data: AirInstData::UnitConst,
             ty: Type::NEVER,
@@ -5466,7 +5391,7 @@ impl<'a> Sema<'a> {
                 .map(|s| s.to_string()),
             _ => Err(CompileError::new(
                 ErrorKind::ComptimeEvaluationFailed {
-                    reason: "@compileError requires a string literal or comptime_str argument"
+                    reason: "@compile_error requires a string literal or comptime_str argument"
                         .into(),
                 },
                 arg_inst.span,
@@ -5511,13 +5436,13 @@ impl<'a> Sema<'a> {
             .unwrap_or_else(|| panic!("TypeKind variant '{variant_name}' not found")) as u32
     }
 
-    /// Evaluate `@typeName(T)` — returns the type's name as a `comptime_str`.
+    /// Evaluate `@type_name(T)` — returns the type's name as a `comptime_str`.
     fn evaluate_comptime_type_name(&mut self, ty: Type, _span: Span) -> CompileResult<ConstValue> {
         let name = self.type_pool.format_type_name(ty);
         Ok(self.alloc_comptime_str(name))
     }
 
-    /// Evaluate `@typeInfo(T)` — returns a comptime struct describing the type.
+    /// Evaluate `@type_info(T)` — returns a comptime struct describing the type.
     fn evaluate_comptime_type_info(&mut self, ty: Type, span: Span) -> CompileResult<ConstValue> {
         let typekind_enum_id = self
             .builtin_typekind_id
@@ -5572,7 +5497,7 @@ impl<'a> Sema<'a> {
             }
             _ => Err(CompileError::new(
                 ErrorKind::ComptimeEvaluationFailed {
-                    reason: format!("@typeInfo not supported for type '{}'", ty.name()),
+                    reason: format!("@type_info not supported for type '{}'", ty.name()),
                 },
                 span,
             )),
@@ -7384,8 +7309,8 @@ impl<'a> Sema<'a> {
                 args_start,
                 args_len,
             } => {
-                // @intCast/@cast are no-ops in comptime since all integers are i64.
-                if name == self.known.int_cast || name == self.known.cast {
+                // @cast is a no-op in comptime since all integers are i64.
+                if name == self.known.cast {
                     let arg_refs = self.rir.get_inst_refs(args_start, args_len);
                     if arg_refs.len() != 1 {
                         return Err(not_const(inst_span));
@@ -7410,13 +7335,13 @@ impl<'a> Sema<'a> {
                     self.comptime_log_output.push((msg, inst_span));
                     return Ok(ConstValue::Unit);
                 }
-                // @compileError emits a user-defined compile error.
+                // @compile_error emits a user-defined compile error.
                 if name == self.known.compile_error {
                     let arg_refs = self.rir.get_inst_refs(args_start, args_len);
                     if arg_refs.len() != 1 {
                         return Err(CompileError::new(
                             ErrorKind::IntrinsicWrongArgCount {
-                                name: "compileError".to_string(),
+                                name: "compile_error".to_string(),
                                 expected: 1,
                                 found: arg_refs.len(),
                             },
@@ -7538,7 +7463,7 @@ impl<'a> Sema<'a> {
                 ))
             }
 
-            // ── Type intrinsic (@size_of, @align_of, @typeName, @typeInfo) ──────
+            // ── Type intrinsic (@size_of, @align_of, @type_name, @type_info) ──────
             InstData::TypeIntrinsic { name, type_arg } => {
                 let intrinsic_name = self.interner.resolve(&name).to_string();
                 // Resolve the type argument.
@@ -7574,8 +7499,8 @@ impl<'a> Sema<'a> {
                         let slot_count = self.abi_slot_count(ty);
                         Ok(ConstValue::Integer(if slot_count == 0 { 1 } else { 8 }))
                     }
-                    "typeName" => self.evaluate_comptime_type_name(ty, inst_span),
-                    "typeInfo" => self.evaluate_comptime_type_info(ty, inst_span),
+                    "type_name" => self.evaluate_comptime_type_name(ty, inst_span),
+                    "type_info" => self.evaluate_comptime_type_info(ty, inst_span),
                     _ => Err(not_const(inst_span)),
                 }
             }

@@ -5,7 +5,7 @@ name = "Cast Intrinsic"
 description = "Tests for @cast numeric type conversions: int↔int, int↔float, float↔float, float→int."
 
 # =============================================================================
-# Integer to Integer (same as @intCast)
+# Integer to Integer (same as @cast)
 # =============================================================================
 
 [[case]]
@@ -71,7 +71,7 @@ fn main() -> i32 {
     let u: u32 = 200;
     let f: f64 = @cast(u);
     let back: u32 = @cast(f);
-    @intCast(back)
+    @cast(back)
 }
 """
 exit_code = 200
@@ -97,7 +97,7 @@ fn main() -> i32 {
     let n: i64 = 99;
     let f: f64 = @cast(n);
     let back: i64 = @cast(f);
-    @intCast(back)
+    @cast(back)
 }
 """
 exit_code = 99
@@ -216,7 +216,7 @@ source = """
 fn main() -> i32 {
     let f: f64 = 200.9;
     let n: u32 = @cast(f);
-    @intCast(n)
+    @cast(n)
 }
 """
 exit_code = 200
@@ -240,7 +240,7 @@ source = """
 fn main() -> i32 {
     let f: f64 = 127.0;
     let n: i8 = @cast(f);
-    @intCast(n)
+    @cast(n)
 }
 """
 exit_code = 127

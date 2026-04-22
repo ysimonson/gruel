@@ -2193,7 +2193,7 @@ name = "comptime_intcast"
 spec = ["4.14:45"]
 source = """
 fn cast_to_i32(x: i64) -> i32 {
-    @intCast(x)
+    @cast(x)
 }
 
 fn main() -> i32 {
@@ -2279,7 +2279,7 @@ spec = ["4.14:80", "4.14:81"]
 source = """
 fn main() -> i32 {
     let x: u64 = comptime { 100 };
-    @intCast(x)
+    @cast(x)
 }
 """
 exit_code = 100
@@ -2290,7 +2290,7 @@ spec = ["4.14:80", "4.14:81"]
 source = """
 fn main() -> i32 {
     let x: u8 = comptime { 255 };
-    @intCast(x)
+    @cast(x)
 }
 """
 exit_code = 255
@@ -2301,7 +2301,7 @@ spec = ["4.14:80", "4.14:81"]
 source = """
 fn main() -> i32 {
     let x: usize = comptime { 50 };
-    @intCast(x)
+    @cast(x)
 }
 """
 exit_code = 50

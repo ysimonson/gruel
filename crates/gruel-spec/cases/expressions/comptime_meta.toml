@@ -1,16 +1,16 @@
 # Comptime Metaprogramming Tests (ADR-0042)
 #
-# Tests for @compileError and comptime-evaluated @dbg (Phase 1).
+# Tests for @compile_error and comptime-evaluated @dbg (Phase 1).
 # @compileLog was removed in ADR-0047 in favor of phase-polymorphic @dbg.
 
 [section]
 id = "expressions.comptime_meta"
 spec_chapter = "4.14"
 name = "Comptime Metaprogramming"
-description = "Comptime diagnostics: @compileError and comptime @dbg."
+description = "Comptime diagnostics: @compile_error and comptime @dbg."
 
 # =============================================================================
-# @compileError
+# @compile_error
 # =============================================================================
 
 [[case]]
@@ -19,7 +19,7 @@ spec = ["4.14:48"]
 source = """
 fn main() -> i32 {
     comptime {
-        @compileError("something went wrong");
+        @compile_error("something went wrong");
         0
     }
 }
@@ -35,7 +35,7 @@ fn main() -> i32 {
     comptime {
         let x = 5;
         if x <= 0 {
-            @compileError("x must be positive");
+            @compile_error("x must be positive");
         }
         x + 37
     }
@@ -51,7 +51,7 @@ fn main() -> i32 {
     comptime {
         let x = 5;
         if x < 0 {
-            @compileError("negative");
+            @compile_error("negative");
         }
         x + 37
     }
@@ -65,7 +65,7 @@ spec = ["4.14:49"]
 source = """
 fn main() -> i32 {
     comptime {
-        @compileError("a", "b");
+        @compile_error("a", "b");
         0
     }
 }
@@ -79,7 +79,7 @@ spec = ["4.14:49"]
 source = """
 fn main() -> i32 {
     comptime {
-        @compileError(42);
+        @compile_error(42);
         0
     }
 }
@@ -279,7 +279,7 @@ source = """
 fn main() -> i32 {
     comptime {
         let msg = "custom error";
-        @compileError(msg);
+        @compile_error(msg);
         0
     }
 }
@@ -316,7 +316,7 @@ compile_fail = true
 error_contains = "compileLog"
 
 # =============================================================================
-# @typeName
+# @type_name
 # =============================================================================
 
 [[case]]
@@ -325,7 +325,7 @@ spec = ["4.14:60"]
 source = """
 fn main() -> i32 {
     comptime {
-        let name = @typeName(i32);
+        let name = @type_name(i32);
         if name == "i32" { 42 } else { 0 }
     }
 }
@@ -338,7 +338,7 @@ spec = ["4.14:60"]
 source = """
 fn main() -> i32 {
     comptime {
-        let name = @typeName(bool);
+        let name = @type_name(bool);
         if name == "bool" { 42 } else { 0 }
     }
 }
@@ -353,7 +353,7 @@ struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     comptime {
-        let name = @typeName(Point);
+        let name = @type_name(Point);
         if name == "Point" { 42 } else { 0 }
     }
 }
@@ -368,7 +368,7 @@ enum Color { Red, Green, Blue }
 
 fn main() -> i32 {
     comptime {
-        let name = @typeName(Color);
+        let name = @type_name(Color);
         if name == "Color" { 42 } else { 0 }
     }
 }
@@ -381,7 +381,7 @@ spec = ["4.14:61"]
 source = """
 fn main() -> i32 {
     comptime {
-        let _name = @typeName(i32);
+        let _name = @type_name(i32);
         42
     }
 }
@@ -389,7 +389,7 @@ fn main() -> i32 {
 exit_code = 42
 
 # =============================================================================
-# @typeInfo
+# @type_info
 # =============================================================================
 
 [[case]]
@@ -400,7 +400,7 @@ struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(Point);
+        let info = @type_info(Point);
         match info.kind {
             TypeKind::Struct => 42,
             _ => 0,
@@ -418,7 +418,7 @@ struct Foo { x: i32 }
 
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(Foo);
+        let info = @type_info(Foo);
         if info.name == "Foo" { 42 } else { 0 }
     }
 }
@@ -433,7 +433,7 @@ struct Trio { a: i32, b: i32, c: i32 }
 
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(Trio);
+        let info = @type_info(Trio);
         info.field_count
     }
 }
@@ -448,7 +448,7 @@ struct Pair { first: i32, second: bool }
 
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(Pair);
+        let info = @type_info(Pair);
         if info.fields[0].name == "first" && info.fields[1].name == "second" { 42 } else { 0 }
     }
 }
@@ -463,7 +463,7 @@ enum Dir { Up, Down, Left, Right }
 
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(Dir);
+        let info = @type_info(Dir);
         match info.kind {
             TypeKind::Enum => 42,
             _ => 0,
@@ -481,7 +481,7 @@ enum Color { Red, Green, Blue }
 
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(Color);
+        let info = @type_info(Color);
         info.variant_count
     }
 }
@@ -496,7 +496,7 @@ enum Color { Red, Green, Blue }
 
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(Color);
+        let info = @type_info(Color);
         if info.variants[0].name == "Red" && info.variants[2].name == "Blue" { 42 } else { 0 }
     }
 }
@@ -509,7 +509,7 @@ spec = ["4.14:64", "4.14:67"]
 source = """
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(i32);
+        let info = @type_info(i32);
         match info.kind {
             TypeKind::Int => 42,
             _ => 0,
@@ -525,7 +525,7 @@ spec = ["4.14:67"]
 source = """
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(i64);
+        let info = @type_info(i64);
         info.bits
     }
 }
@@ -538,8 +538,8 @@ spec = ["4.14:67"]
 source = """
 fn main() -> i32 {
     comptime {
-        let si = @typeInfo(i32);
-        let ui = @typeInfo(u32);
+        let si = @type_info(i32);
+        let ui = @type_info(u32);
         if si.is_signed && !ui.is_signed { 42 } else { 0 }
     }
 }
@@ -552,7 +552,7 @@ spec = ["4.14:64", "4.14:68"]
 source = """
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(bool);
+        let info = @type_info(bool);
         match info.kind {
             TypeKind::Bool => 42,
             _ => 0,
@@ -568,7 +568,7 @@ spec = ["4.14:68"]
 source = """
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(());
+        let info = @type_info(());
         match info.kind {
             TypeKind::Unit => 42,
             _ => 0,
@@ -584,7 +584,7 @@ spec = ["4.14:63"]
 source = """
 fn main() -> i32 {
     comptime {
-        let _info = @typeInfo(i32);
+        let _info = @type_info(i32);
         42
     }
 }
@@ -599,8 +599,8 @@ struct Widget { val: i32 }
 
 fn main() -> i32 {
     comptime {
-        let info = @typeInfo(Widget);
-        let name = @typeName(Widget);
+        let info = @type_info(Widget);
+        let name = @type_name(Widget);
         if info.name == name { 42 } else { 0 }
     }
 }
@@ -701,7 +701,7 @@ struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     let p = Point { x: 10, y: 20 };
     let mut total: i32 = 0;
-    comptime_unroll for field in comptime { @typeInfo(Point).fields } {
+    comptime_unroll for field in comptime { @type_info(Point).fields } {
         total = total + @field(p, field.name);
     }
     total
@@ -804,7 +804,7 @@ struct Point { x: i32, y: i32 }
 
 fn sum_fields(comptime T: type, val: T) -> i32 {
     let mut total: i32 = 0;
-    comptime_unroll for field in comptime { @typeInfo(T).fields } {
+    comptime_unroll for field in comptime { @type_info(T).fields } {
         total = total + @field(val, field.name);
     }
     total
@@ -826,7 +826,7 @@ struct Vec3 { x: i32, y: i32, z: i32 }
 fn main() -> i32 {
     let v = Vec3 { x: 10, y: 20, z: 12 };
     let mut total: i32 = 0;
-    comptime_unroll for field in comptime { @typeInfo(Vec3).fields } {
+    comptime_unroll for field in comptime { @type_info(Vec3).fields } {
         total = total + @field(v, field.name);
     }
     total
@@ -871,7 +871,7 @@ source = """
 struct Point { x: i32, y: i32 }
 
 fn get_name(comptime T: type) -> String {
-    comptime { @typeName(T) }
+    comptime { @type_name(T) }
 }
 
 fn main() -> i32 {

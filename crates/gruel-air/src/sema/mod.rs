@@ -94,7 +94,7 @@ pub struct Sema<'a> {
     pub(crate) builtin_arch_id: Option<EnumId>,
     /// EnumId of the synthetic Os enum (for @target_os intrinsic).
     pub(crate) builtin_os_id: Option<EnumId>,
-    /// EnumId of the synthetic TypeKind enum (for @typeInfo intrinsic).
+    /// EnumId of the synthetic TypeKind enum (for @type_info intrinsic).
     pub(crate) builtin_typekind_id: Option<EnumId>,
     /// Pre-interned known symbols for fast comparison.
     pub(crate) known: KnownSymbols,

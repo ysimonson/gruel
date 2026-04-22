@@ -291,7 +291,7 @@ fn main() -> i32 {
     let result: u32 = x / 100;
     // 21474836 % 256 = 20
     let low_byte: u32 = result % 256;
-    @intCast(low_byte)
+    @cast(low_byte)
 }
 """
 exit_code = 20
@@ -306,7 +306,7 @@ fn main() -> i32 {
     // Unsigned: 2147483648 % 100 = 48
     // If incorrectly using signed: -2147483648 % 100 = -48 (or something wrong)
     let result: u32 = x % 100;
-    @intCast(result)
+    @cast(result)
 }
 """
 exit_code = 48
@@ -323,7 +323,7 @@ fn main() -> i32 {
     let result: u32 = x / 1000;
     // 4294967 % 256 = 55
     let low_byte: u32 = result % 256;
-    @intCast(low_byte)
+    @cast(low_byte)
 }
 """
 exit_code = 55
@@ -338,7 +338,7 @@ fn main() -> i32 {
     // Unsigned: 4294967295 % 100 = 95
     // If incorrectly using signed: -1 % 100 = -1
     let result: u32 = x % 100;
-    @intCast(result)
+    @cast(result)
 }
 """
 exit_code = 95
