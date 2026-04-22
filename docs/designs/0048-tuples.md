@@ -213,11 +213,15 @@ Behind `PreviewFeature::Tuples` until Phase 5.
   - `PreviewFeature::Tuples` gate wired at the two entry points: `resolve_type`
     for tuple type syntax and `analyze_tuple_init` for tuple literals.
 
-- [ ] **Phase 3: Destructuring**
-  - Extend `LetPattern` / the destructuring lowering (ADR-0036) to accept positional patterns.
-  - Reuse struct destructure IR lowering: positional fields map to field reads by synthetic
-    name. Wildcards drop in place.
-  - Error on arity mismatches and incomplete patterns.
+- [x] **Phase 3: Destructuring**
+  - `let (a, b, ...) = expr;` lowered in astgen to the existing
+    `InstData::StructDestructure` with synthetic field names "0", "1", ... and
+    a sentinel `type_name = "__tuple__"`.
+  - Sema recognises the sentinel in `analyze_struct_destructure`, skips the
+    nominal-name check, and resolves the struct type from the init's inferred
+    type. `PreviewFeature::Tuples` gated here.
+  - Wildcard (`_`), `mut`, and singleton (`(x,)`) patterns all work; arity
+    mismatches surface via the existing missing-field / unknown-field paths.
 
 - [ ] **Phase 4: Diagnostics polish**
   - Pretty-print anon structs whose fields are `0..N` as tuples in type errors.

@@ -1145,20 +1145,38 @@ impl<'a> AstGen<'a> {
                         span: let_stmt.span,
                     })
                 }
-                // Phase 1 stub: Tuple destructure will be implemented in Phase 3.
-                // For now, fall through to Alloc of Unit so the crate compiles.
-                LetPattern::Tuple { .. } => {
-                    let directives = self.convert_directives(&let_stmt.directives);
-                    let (directives_start, directives_len) = self.rir.add_directives(&directives);
-                    let ty = let_stmt.ty.as_ref().map(|t| self.intern_type(t));
+                // Tuple destructure: `let (a, b, ...) = expr;` (ADR-0048).
+                //
+                // Lowered to the same RIR as struct destructure, reusing StructDestructure
+                // with synthetic field names "0", "1", ... and a sentinel type_name
+                // ("__tuple__") that sema recognises and resolves against the init's type.
+                LetPattern::Tuple { elems, .. } => {
+                    use gruel_parser::ast::TupleBinding;
+                    let rir_fields: Vec<RirDestructureField> = elems
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| {
+                            let field_name = self.interner.get_or_intern(&i.to_string());
+                            let (binding_name, is_wildcard) = match &e.binding {
+                                TupleBinding::Ident(name) => (Some(name.name), false),
+                                TupleBinding::Wildcard(_) => (None, true),
+                            };
+                            RirDestructureField {
+                                field_name,
+                                binding_name,
+                                is_wildcard,
+                                is_mut: e.is_mut,
+                            }
+                        })
+                        .collect();
+                    let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
                     let init = self.gen_expr(&let_stmt.init);
+                    let type_name = self.interner.get_or_intern_static("__tuple__");
                     self.rir.add_inst(Inst {
-                        data: InstData::Alloc {
-                            directives_start,
-                            directives_len,
-                            name: None,
-                            is_mut: let_stmt.is_mut,
-                            ty,
+                        data: InstData::StructDestructure {
+                            type_name,
+                            fields_start,
+                            fields_len,
                             init,
                         },
                         span: let_stmt.span,

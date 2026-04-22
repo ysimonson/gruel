@@ -2336,10 +2336,22 @@ impl<'a> Sema<'a> {
 
         // Resolve the struct type
         let type_name_str = self.interner.resolve(&type_name).to_string();
+        // Tuple destructure sentinel: astgen emits "__tuple__" as the type_name
+        // when desugaring `let (a, b, ...) = expr;` (ADR-0048). The actual struct
+        // type comes from inference on `init`.
+        let is_tuple_destructure = type_name_str == "__tuple__";
+        if is_tuple_destructure {
+            self.require_preview(PreviewFeature::Tuples, "tuple destructure", span)?;
+        }
+
         let struct_id = init_type.as_struct().ok_or_else(|| {
             CompileError::new(
                 ErrorKind::TypeMismatch {
-                    expected: type_name_str.clone(),
+                    expected: if is_tuple_destructure {
+                        "tuple".to_string()
+                    } else {
+                        type_name_str.clone()
+                    },
                     found: init_type.name().to_string(),
                 },
                 span,
@@ -2348,8 +2360,9 @@ impl<'a> Sema<'a> {
 
         let struct_def = self.type_pool.struct_def(struct_id);
 
-        // Validate the type name matches
-        if struct_def.name != type_name_str {
+        // Validate the type name matches (skipped for tuple destructure — the
+        // sentinel "__tuple__" doesn't correspond to a real struct name).
+        if !is_tuple_destructure && struct_def.name != type_name_str {
             return Err(CompileError::new(
                 ErrorKind::TypeMismatch {
                     expected: type_name_str,
@@ -2377,6 +2390,16 @@ impl<'a> Sema<'a> {
             }
         }
 
+        // Display name for error messages. For tuple destructures we expose the
+        // struct's actual anon name ("__anon_struct_N") rather than the "__tuple__"
+        // sentinel; the Phase 4 diagnostics pass will replace this with tuple-syntax
+        // formatting.
+        let display_name = if is_tuple_destructure {
+            struct_def.name.clone()
+        } else {
+            type_name_str.clone()
+        };
+
         // Validate: all struct fields are mentioned
         let struct_field_names: Vec<String> =
             struct_def.fields.iter().map(|f| f.name.clone()).collect();
@@ -2384,7 +2407,7 @@ impl<'a> Sema<'a> {
             if !seen_fields.contains(struct_field_name) {
                 return Err(CompileError::new(
                     ErrorKind::MissingFieldInDestructure {
-                        struct_name: type_name_str.clone(),
+                        struct_name: display_name.clone(),
                         field: struct_field_name.clone(),
                     },
                     span,
@@ -2398,7 +2421,7 @@ impl<'a> Sema<'a> {
             if struct_def.find_field(&field_name).is_none() {
                 return Err(CompileError::new(
                     ErrorKind::UnknownField {
-                        struct_name: type_name_str.clone(),
+                        struct_name: display_name.clone(),
                         field_name,
                     },
                     span,

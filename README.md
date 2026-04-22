@@ -20,6 +20,7 @@ of buck, etc.
 
 - Added for loops and first class `Range`s (ADR-0041)
 - Several new numeric primitives - `f16`/`f32`/`f64` and `isize`/`usize` (ADR-0046)
+- Tuples (ADR-0048)
 - Stabilized anonymous struct methods (ADR-0029)
 - Added struct destructuring (ADR-0036)
 - Banned partial moves to simplify analysis, especially with linear types (ADR-0036)
