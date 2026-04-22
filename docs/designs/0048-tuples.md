@@ -1,13 +1,13 @@
 ---
 id: 0048
 title: First-Class Tuples
-status: proposal
+status: implemented
 tags: [types, syntax, destructuring]
 feature-flag: tuples
 created: 2026-04-22
-accepted:
-implemented:
-spec-sections: ["3.12", "4.15"]
+accepted: 2026-04-22
+implemented: 2026-04-22
+spec-sections: ["3.12", "4.15", "5.1"]
 superseded-by:
 ---
 
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -232,14 +232,13 @@ Behind `PreviewFeature::Tuples` until Phase 5.
   - Partial-move error on a tuple field now suggests tuple destructuring
     (`let (x0, x1, ...) = ...;`) instead of the struct-literal form.
 
-- [ ] **Phase 5: Spec & stabilization**
-  - Add spec section `3.12: Tuple Types` and `4.15: Tuple Expressions`.
-  - Document `let` tuple destructuring in `05-statements`.
-  - Full spec tests (construction, access, arity mismatch, destructuring, copy/move, drop
-    order, nested tuples, tuple return types, tuple-of-tuples).
-  - UI tests for diagnostics.
-  - Traceability coverage for all normative paragraphs.
-  - When green, remove the preview gate.
+- [x] **Phase 5: Spec & stabilization**
+  - Added spec chapter `3.12: Tuple Types`, expression section `4.15: Tuple Expressions`,
+    and destructuring rules appended to `05-statements/01-let-statements.md` (5.1:21–27).
+  - 27 spec tests in `crates/gruel-spec/cases/types/tuples.toml` covering construction,
+    access, arity mismatch, destructuring, copy/move, partial-move ban, nested tuples,
+    tuple return types, and evaluation order. 100% normative coverage on the new paragraphs.
+  - `PreviewFeature::Tuples` removed; all gates lifted.
 
 ## Consequences
 

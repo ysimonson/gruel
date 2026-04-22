@@ -168,11 +168,6 @@ impl<'a> Sema<'a> {
             } else if let Some(elems) = parse_tuple_type_syntax(type_name) {
                 // Tuple type syntax: (T, U, ...) — ADR-0048.
                 // Resolve to an anonymous struct with fields "0", "1", ...
-                self.require_preview(
-                    gruel_error::PreviewFeature::Tuples,
-                    "tuple type",
-                    span,
-                )?;
                 let mut struct_fields = Vec::with_capacity(elems.len());
                 for (i, elem_str) in elems.iter().enumerate() {
                     let elem_sym = self.interner.get_or_intern(elem_str);

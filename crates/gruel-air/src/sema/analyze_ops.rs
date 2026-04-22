@@ -42,7 +42,6 @@ use crate::inst::{
 };
 use crate::scope::ScopedContext;
 use crate::types::{StructField, Type, TypeKind};
-use gruel_error::PreviewFeature;
 
 // ============================================================================
 // Place Building (ADR-0030 Phase 8)
@@ -2340,9 +2339,6 @@ impl<'a> Sema<'a> {
         // when desugaring `let (a, b, ...) = expr;` (ADR-0048). The actual struct
         // type comes from inference on `init`.
         let is_tuple_destructure = type_name_str == "__tuple__";
-        if is_tuple_destructure {
-            self.require_preview(PreviewFeature::Tuples, "tuple destructure", span)?;
-        }
 
         let struct_id = init_type.as_struct().ok_or_else(|| {
             CompileError::new(
@@ -3166,8 +3162,6 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        self.require_preview(PreviewFeature::Tuples, "tuple literal", span)?;
-
         // Pull element inst refs out of the extra array.
         let elem_refs: Vec<InstRef> = self
             .rir
