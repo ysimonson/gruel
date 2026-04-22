@@ -19,7 +19,9 @@ use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
 use chumsky::recovery::via_parser;
 use chumsky::recursive::Direct;
-use gruel_error::{CompileError, CompileErrors, ErrorKind, MultiErrorResult};
+use gruel_error::{
+    CompileError, CompileErrors, ErrorKind, MultiErrorResult, PreviewFeature, PreviewFeatures,
+};
 use gruel_lexer::TokenKind;
 use gruel_span::{FileId, Span};
 use lasso::{Spur, ThreadedRodeo};
@@ -807,255 +809,331 @@ fn pattern_parser<'src, I>() -> GruelParser<'src, I, Pattern>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    // Wildcard pattern: _
-    let wildcard =
-        just(TokenKind::Underscore).map_with(|_, e| Pattern::Wildcard(span_from_extra(e)));
+    recursive(
+        |pat: Recursive<Direct<'src, 'src, _, Pattern, ParserExtras<'src>>>| {
+            // Wildcard pattern: _
+            let wildcard =
+                just(TokenKind::Underscore).map_with(|_, e| Pattern::Wildcard(span_from_extra(e)));
 
-    // Integer literal pattern (positive or zero)
-    let int_pat = select! {
-        TokenKind::Int(n) = e => Pattern::Int(IntLit {
-            value: n,
-            span: span_from_extra(e),
-        }),
-    };
+            // Integer literal pattern (positive or zero)
+            let int_pat = select! {
+                TokenKind::Int(n) = e => Pattern::Int(IntLit {
+                    value: n,
+                    span: span_from_extra(e),
+                }),
+            };
 
-    // Negative integer literal pattern: - followed by integer
-    let neg_int_pat = just(TokenKind::Minus)
-        .then(select! { TokenKind::Int(n) => n })
-        .map_with(|(_, n), e| {
-            Pattern::NegInt(NegIntLit {
-                value: n,
-                span: span_from_extra(e),
-            })
-        });
+            // Negative integer literal pattern: - followed by integer
+            let neg_int_pat = just(TokenKind::Minus)
+                .then(select! { TokenKind::Int(n) => n })
+                .map_with(|(_, n), e| {
+                    Pattern::NegInt(NegIntLit {
+                        value: n,
+                        span: span_from_extra(e),
+                    })
+                });
 
-    // Boolean literal patterns
-    let bool_true = select! {
-        TokenKind::True = e => Pattern::Bool(BoolLit {
-            value: true,
-            span: span_from_extra(e),
-        }),
-    };
+            // Boolean literal patterns
+            let bool_true = select! {
+                TokenKind::True = e => Pattern::Bool(BoolLit {
+                    value: true,
+                    span: span_from_extra(e),
+                }),
+            };
 
-    let bool_false = select! {
-        TokenKind::False = e => Pattern::Bool(BoolLit {
-            value: false,
-            span: span_from_extra(e),
-        }),
-    };
+            let bool_false = select! {
+                TokenKind::False = e => Pattern::Bool(BoolLit {
+                    value: false,
+                    span: span_from_extra(e),
+                }),
+            };
 
-    // Parser for a single binding in a data variant pattern: `_`, `x`, or `mut x`.
-    // In Phase 1 these are the only "sub-patterns" the parser emits — nested sub-patterns
-    // open up in Phase 2. The AST uses a full `Pattern` in these slots.
-    let pattern_binding = choice((
-        just(TokenKind::Underscore).map_with(|_, e| Pattern::Wildcard(span_from_extra(e))),
-        just(TokenKind::Mut)
-            .ignore_then(ident_parser())
-            .map_with(|name, e| Pattern::Ident {
-                is_mut: true,
-                name,
-                span: span_from_extra(e),
-            }),
-        ident_parser().map_with(|name, e| Pattern::Ident {
-            is_mut: false,
-            name,
-            span: span_from_extra(e),
-        }),
-    ));
+            // A rest pattern `..`: two adjacent Dot tokens (the lexer has no DotDot).
+            // `..` is only legal inside a tuple/struct/variant sequence. ADR-0049 Phase 6.
+            let rest_token = just(TokenKind::Dot)
+                .then(just(TokenKind::Dot))
+                .map_with(|_, e| span_from_extra(e));
 
-    // Parser for optional `(binding, binding, ...)` suffix on a path pattern.
-    // Emits `Vec<TupleElemPattern>` so the AST is ready for `..` (Phase 6).
-    let bindings_suffix = pattern_binding
-        .clone()
-        .map(TupleElemPattern::Pattern)
-        .separated_by(just(TokenKind::Comma))
-        .allow_trailing()
-        .collect::<Vec<_>>()
-        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen));
+            // A leaf binding in a pattern sub-position: `_`, `x`, or `mut x`. These can
+            // still appear anywhere a full sub-pattern is legal; full sub-patterns go
+            // through `pat` (the recursive reference).
+            let leaf_binding = choice((
+                just(TokenKind::Underscore).map_with(|_, e| Pattern::Wildcard(span_from_extra(e))),
+                just(TokenKind::Mut)
+                    .ignore_then(ident_parser())
+                    .map_with(|name, e| Pattern::Ident {
+                        is_mut: true,
+                        name,
+                        span: span_from_extra(e),
+                    }),
+                ident_parser().map_with(|name, e| Pattern::Ident {
+                    is_mut: false,
+                    name,
+                    span: span_from_extra(e),
+                }),
+            ));
 
-    // Parser for a single field binding in a struct variant pattern:
-    // `field: binding` or `field` (shorthand for `field: field`).
-    let pattern_field_binding = {
-        let explicit = just(TokenKind::Mut)
-            .or_not()
-            .then(ident_parser())
-            .then_ignore(just(TokenKind::Colon))
-            .then(pattern_binding.clone())
-            .map_with(|((is_mut, field_name), sub), e| FieldPattern {
-                field_name: Some(field_name),
-                sub: Some(sub),
-                is_mut: is_mut.is_some(),
-                span: span_from_extra(e),
+            // Sub-pattern: any full pattern OR a leaf binding (as a shortcut). In match
+            // contexts we need `mut x` at the sub-pattern position, which the recursive
+            // `pat` doesn't emit (only full patterns do).
+            //
+            // Order: try the recursive pattern first (for nested Enum::V / Struct { .. } /
+            // (.., ..) shapes), then fall back to the leaf binding for bare idents,
+            // wildcards, and `mut x`. A bare ident matches both as a Pattern::Ident inside
+            // `pat` and as a leaf binding — either path yields the same AST.
+            let sub_pattern = choice((pat.clone(), leaf_binding.clone())).boxed();
+
+            // One element in a tuple / variant-tuple sequence: either `..` or a sub-pattern.
+            let tuple_elem = choice((
+                rest_token.clone().map(TupleElemPattern::Rest),
+                sub_pattern.clone().map(TupleElemPattern::Pattern),
+            ))
+            .boxed();
+
+            // `(e1, e2, ...)` tuple-like sequence body.
+            let tuple_suffix = tuple_elem
+                .clone()
+                .separated_by(just(TokenKind::Comma))
+                .allow_trailing()
+                .collect::<Vec<_>>()
+                .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen));
+
+            // Named field in a struct / struct-variant pattern: `field`, `field: sub`,
+            // `mut field`, `mut field: sub`, or the rest sentinel `..`.
+            let field_rest = rest_token.clone().map_with(|span, _e| FieldPattern {
+                field_name: None,
+                sub: None,
+                is_mut: false,
+                span,
             });
-        let shorthand =
-            just(TokenKind::Mut)
+            let field_explicit = just(TokenKind::Mut)
                 .or_not()
                 .then(ident_parser())
-                .map_with(|(is_mut, name), e| FieldPattern {
-                    field_name: Some(name),
-                    sub: None,
+                .then_ignore(just(TokenKind::Colon))
+                .then(sub_pattern.clone())
+                .map_with(|((is_mut, field_name), sub), e| FieldPattern {
+                    field_name: Some(field_name),
+                    sub: Some(sub),
                     is_mut: is_mut.is_some(),
                     span: span_from_extra(e),
                 });
-        choice((explicit, shorthand))
-    };
-
-    // Parser for optional `{ field: binding, ... }` suffix on a path pattern.
-    let struct_bindings_suffix = pattern_field_binding
-        .separated_by(just(TokenKind::Comma))
-        .allow_trailing()
-        .collect::<Vec<_>>()
-        .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace));
-
-    // Enum for the suffix on an enum variant pattern: tuple, struct, or none.
-    #[derive(Debug, Clone)]
-    enum PatternSuffix {
-        Tuple(Vec<TupleElemPattern>),
-        Struct(Vec<FieldPattern>),
-    }
-
-    let pattern_suffix = choice((
-        bindings_suffix.clone().map(PatternSuffix::Tuple),
-        struct_bindings_suffix.clone().map(PatternSuffix::Struct),
-    ));
-
-    // Self path pattern: Self::Variant, Self::Variant(binding, ...), or Self::Variant { field: binding, ... }
-    // Used inside anonymous enum methods to match on the enum type via Self
-    let self_path_pat = just(TokenKind::SelfType)
-        .ignore_then(just(TokenKind::ColonColon))
-        .ignore_then(ident_parser())
-        .then(pattern_suffix.clone().or_not())
-        .map_with(|(variant, suffix_opt), e| {
-            let span = span_from_extra(e);
-            let type_name = Ident {
-                name: e.state().syms.self_type,
-                span,
-            };
-            match suffix_opt {
-                Some(PatternSuffix::Tuple(fields)) => Pattern::DataVariant {
-                    base: None,
-                    type_name,
-                    variant,
-                    fields,
-                    span,
-                },
-                Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
-                    base: None,
-                    type_name,
-                    variant,
-                    fields,
-                    span,
-                },
-                None => Pattern::Path(PathPattern {
-                    base: None,
-                    type_name,
-                    variant,
-                    span,
-                }),
-            }
-        });
-
-    // Simple path pattern: Enum::Variant, Enum::Variant(binding, ...), or Enum::Variant { field: binding, ... }
-    let simple_path_pat = ident_parser()
-        .then_ignore(just(TokenKind::ColonColon))
-        .then(ident_parser())
-        .then(pattern_suffix.clone().or_not())
-        .map_with(|((type_name, variant), suffix_opt), e| match suffix_opt {
-            Some(PatternSuffix::Tuple(fields)) => Pattern::DataVariant {
-                base: None,
-                type_name,
-                variant,
-                fields,
-                span: span_from_extra(e),
-            },
-            Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
-                base: None,
-                type_name,
-                variant,
-                fields,
-                span: span_from_extra(e),
-            },
-            None => Pattern::Path(PathPattern {
-                base: None,
-                type_name,
-                variant,
-                span: span_from_extra(e),
-            }),
-        });
-
-    // Qualified path pattern: module.Enum::Variant or module.sub.Enum::Variant
-    // Parses: ident ("." ident)+ "::" ident
-    // where the part before "::" is module.Type and after is Variant
-    let qualified_path_pat = ident_parser()
-        .then(
-            just(TokenKind::Dot)
-                .ignore_then(ident_parser())
-                .repeated()
-                .at_least(1)
-                .collect::<Vec<_>>(),
-        )
-        .then_ignore(just(TokenKind::ColonColon))
-        .then(ident_parser())
-        .then(pattern_suffix.or_not())
-        .map_with(|(((first, mut rest), variant), suffix_opt), e| {
-            // first is the first module identifier
-            // rest contains all subsequent identifiers up to and including type_name
-            // The last element of rest is the type_name
-            let type_name = rest.pop().expect("at_least(1) guarantees non-empty");
-
-            // Build the base expression: first.rest[0].rest[1]...
-            let base_expr = if rest.is_empty() {
-                // Just `module.Type::Variant` - base is single ident
-                Expr::Ident(first)
-            } else {
-                // `a.b.c.Type::Variant` - build field access chain
-                let mut base = Expr::Ident(first);
-                for field in rest {
-                    let span = base.span().extend_to(field.span.end);
-                    base = Expr::Field(FieldExpr {
-                        base: Box::new(base),
-                        field,
-                        span,
+            let field_shorthand =
+                just(TokenKind::Mut)
+                    .or_not()
+                    .then(ident_parser())
+                    .map_with(|(is_mut, name), e| FieldPattern {
+                        field_name: Some(name),
+                        sub: None,
+                        is_mut: is_mut.is_some(),
+                        span: span_from_extra(e),
                     });
-                }
-                base
-            };
+            let field_pat = choice((field_rest, field_explicit, field_shorthand)).boxed();
 
-            match suffix_opt {
-                Some(PatternSuffix::Tuple(fields)) => Pattern::DataVariant {
-                    base: Some(Box::new(base_expr)),
-                    type_name,
-                    variant,
-                    fields,
-                    span: span_from_extra(e),
-                },
-                Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
-                    base: Some(Box::new(base_expr)),
-                    type_name,
-                    variant,
-                    fields,
-                    span: span_from_extra(e),
-                },
-                None => Pattern::Path(PathPattern {
-                    base: Some(Box::new(base_expr)),
-                    type_name,
-                    variant,
-                    span: span_from_extra(e),
-                }),
+            let struct_suffix = field_pat
+                .clone()
+                .separated_by(just(TokenKind::Comma))
+                .allow_trailing()
+                .collect::<Vec<_>>()
+                .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace));
+
+            // Enum for the suffix on an enum variant pattern: tuple, struct, or none.
+            #[derive(Debug, Clone)]
+            enum PatternSuffix {
+                Tuple(Vec<TupleElemPattern>),
+                Struct(Vec<FieldPattern>),
             }
-        });
 
-    choice((
-        wildcard.boxed(),
-        neg_int_pat.boxed(),
-        int_pat.boxed(),
-        bool_true.boxed(),
-        bool_false.boxed(),
-        // Try qualified path first (has more structure), then Self path, then simple path
-        qualified_path_pat.boxed(),
-        self_path_pat.boxed(),
-        simple_path_pat.boxed(),
-    ))
+            let pattern_suffix = choice((
+                tuple_suffix.clone().map(PatternSuffix::Tuple),
+                struct_suffix.clone().map(PatternSuffix::Struct),
+            ));
+
+            // Self path pattern: Self::Variant, Self::Variant(sub, ...), or Self::Variant { field: sub, ... }
+            let self_path_pat = just(TokenKind::SelfType)
+                .ignore_then(just(TokenKind::ColonColon))
+                .ignore_then(ident_parser())
+                .then(pattern_suffix.clone().or_not())
+                .map_with(|(variant, suffix_opt), e| {
+                    let span = span_from_extra(e);
+                    let type_name = Ident {
+                        name: e.state().syms.self_type,
+                        span,
+                    };
+                    match suffix_opt {
+                        Some(PatternSuffix::Tuple(fields)) => Pattern::DataVariant {
+                            base: None,
+                            type_name,
+                            variant,
+                            fields,
+                            span,
+                        },
+                        Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
+                            base: None,
+                            type_name,
+                            variant,
+                            fields,
+                            span,
+                        },
+                        None => Pattern::Path(PathPattern {
+                            base: None,
+                            type_name,
+                            variant,
+                            span,
+                        }),
+                    }
+                });
+
+            // IDENT (followed by `{`, `::`, or nothing): either a struct destructure,
+            // a unit/data/struct variant, or a bare ident binding.
+            //
+            // `IDENT { ... }` → Pattern::Struct
+            // `IDENT::IDENT[(...)]` / `IDENT::IDENT{ ... }` → Pattern::{Path, DataVariant, StructVariant}
+            let struct_destructure =
+                ident_parser()
+                    .then(struct_suffix.clone())
+                    .map_with(|(type_name, fields), e| Pattern::Struct {
+                        type_name,
+                        fields,
+                        span: span_from_extra(e),
+                    });
+
+            let simple_path_pat = ident_parser()
+                .then_ignore(just(TokenKind::ColonColon))
+                .then(ident_parser())
+                .then(pattern_suffix.clone().or_not())
+                .map_with(|((type_name, variant), suffix_opt), e| match suffix_opt {
+                    Some(PatternSuffix::Tuple(fields)) => Pattern::DataVariant {
+                        base: None,
+                        type_name,
+                        variant,
+                        fields,
+                        span: span_from_extra(e),
+                    },
+                    Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
+                        base: None,
+                        type_name,
+                        variant,
+                        fields,
+                        span: span_from_extra(e),
+                    },
+                    None => Pattern::Path(PathPattern {
+                        base: None,
+                        type_name,
+                        variant,
+                        span: span_from_extra(e),
+                    }),
+                });
+
+            // Qualified path pattern: module.Enum::Variant or module.sub.Enum::Variant
+            let qualified_path_pat = ident_parser()
+                .then(
+                    just(TokenKind::Dot)
+                        .ignore_then(ident_parser())
+                        .repeated()
+                        .at_least(1)
+                        .collect::<Vec<_>>(),
+                )
+                .then_ignore(just(TokenKind::ColonColon))
+                .then(ident_parser())
+                .then(pattern_suffix.or_not())
+                .map_with(|(((first, mut rest), variant), suffix_opt), e| {
+                    let type_name = rest.pop().expect("at_least(1) guarantees non-empty");
+
+                    let base_expr = if rest.is_empty() {
+                        Expr::Ident(first)
+                    } else {
+                        let mut base = Expr::Ident(first);
+                        for field in rest {
+                            let span = base.span().extend_to(field.span.end);
+                            base = Expr::Field(FieldExpr {
+                                base: Box::new(base),
+                                field,
+                                span,
+                            });
+                        }
+                        base
+                    };
+
+                    match suffix_opt {
+                        Some(PatternSuffix::Tuple(fields)) => Pattern::DataVariant {
+                            base: Some(Box::new(base_expr)),
+                            type_name,
+                            variant,
+                            fields,
+                            span: span_from_extra(e),
+                        },
+                        Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
+                            base: Some(Box::new(base_expr)),
+                            type_name,
+                            variant,
+                            fields,
+                            span: span_from_extra(e),
+                        },
+                        None => Pattern::Path(PathPattern {
+                            base: Some(Box::new(base_expr)),
+                            type_name,
+                            variant,
+                            span: span_from_extra(e),
+                        }),
+                    }
+                });
+
+            // Tuple pattern (match context or nested position): `(p1, p2, ...)` with at
+            // least one comma, or `(p,)` for a 1-tuple. `(p)` remains a parenthesised
+            // pattern — not supported here (redundant: just write `p`).
+            let tuple_pat = just(TokenKind::LParen)
+                .ignore_then(tuple_elem.clone())
+                .then_ignore(just(TokenKind::Comma))
+                .then(
+                    tuple_elem
+                        .clone()
+                        .separated_by(just(TokenKind::Comma))
+                        .allow_trailing()
+                        .collect::<Vec<_>>(),
+                )
+                .then_ignore(just(TokenKind::RParen))
+                .map_with(|(first, rest), e| {
+                    let mut elems = Vec::with_capacity(1 + rest.len());
+                    elems.push(first);
+                    elems.extend(rest);
+                    Pattern::Tuple {
+                        elems,
+                        span: span_from_extra(e),
+                    }
+                });
+
+            // Plain ident / mut-ident leaf as a top-level pattern (bare binding).
+            let ident_leaf =
+                just(TokenKind::Mut)
+                    .or_not()
+                    .then(ident_parser())
+                    .map_with(|(is_mut, name), e| Pattern::Ident {
+                        is_mut: is_mut.is_some(),
+                        name,
+                        span: span_from_extra(e),
+                    });
+
+            choice((
+                wildcard.boxed(),
+                neg_int_pat.boxed(),
+                int_pat.boxed(),
+                bool_true.boxed(),
+                bool_false.boxed(),
+                tuple_pat.boxed(),
+                // Try qualified path first (has more structure), then Self path, then
+                // simple path, then struct destructure, then bare ident. Struct destructure
+                // and simple path both start with IDENT; `IDENT::` disambiguates. Struct
+                // destructure requires `IDENT {`, a combination that doesn't conflict with
+                // the bare ident parser which is tried last.
+                qualified_path_pat.boxed(),
+                self_path_pat.boxed(),
+                simple_path_pat.boxed(),
+                struct_destructure.boxed(),
+                ident_leaf.boxed(),
+            ))
+            .boxed()
+        },
+    )
     .boxed()
 }
 
@@ -2079,112 +2157,15 @@ enum ExprFollower {
     End,
 }
 
-/// Parser for a let binding pattern (ADR-0049): an irrefutable `Pattern`.
-///
-/// In Phase 1 this produces only the flat forms that existed before: ident,
-/// wildcard, flat struct destructure, flat tuple destructure. Nesting and
-/// `..` open up in later phases.
+/// Parser for a let binding pattern (ADR-0049): delegates to the generic
+/// `pattern_parser()`. Refutability is enforced by sema (Phase 3). The
+/// post-parse preview-feature validator (`validate_preview_patterns`) rejects
+/// nested / rest shapes when `nested_patterns` is off.
 fn let_pattern_parser<'src, I>() -> GruelParser<'src, I, Pattern>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    let wildcard =
-        just(TokenKind::Underscore).map_with(|_, e| Pattern::Wildcard(span_from_extra(e)));
-
-    // A single destructure field: [mut] field_name [: (_ | new_name)]
-    let destructure_field = just(TokenKind::Mut)
-        .or_not()
-        .then(ident_parser())
-        .then(
-            just(TokenKind::Colon)
-                .ignore_then(choice((
-                    just(TokenKind::Underscore)
-                        .map_with(|_, e| Pattern::Wildcard(span_from_extra(e))),
-                    ident_parser().map_with(|name, e| Pattern::Ident {
-                        is_mut: false,
-                        name,
-                        span: span_from_extra(e),
-                    }),
-                )))
-                .or_not(),
-        )
-        .map_with(|((is_mut, field_name), sub), e| FieldPattern {
-            field_name: Some(field_name),
-            sub,
-            is_mut: is_mut.is_some(),
-            span: span_from_extra(e),
-        });
-
-    // Struct destructure: TypeName { field1, field2, ... }
-    let struct_destructure = ident_parser()
-        .then(
-            destructure_field
-                .separated_by(just(TokenKind::Comma))
-                .allow_trailing()
-                .collect::<Vec<_>>()
-                .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
-        )
-        .map_with(|(type_name, fields), e| Pattern::Struct {
-            type_name,
-            fields,
-            span: span_from_extra(e),
-        });
-
-    let ident = ident_parser().map_with(|name, e| Pattern::Ident {
-        is_mut: false,
-        name,
-        span: span_from_extra(e),
-    });
-
-    // Tuple destructure: (mut? ident | _) (, ...)+ ,? but at least one comma overall,
-    // so `(x)` is not mistaken for a tuple of one. Mirrors the tuple-type rule.
-    //
-    //   let (a, b) = t;
-    //   let (mut a, _) = t;
-    //   let (x,) = single_tuple;
-    let tuple_elem = just(TokenKind::Mut)
-        .or_not()
-        .then(choice((
-            just(TokenKind::Underscore).map_with(|_, e| Pattern::Wildcard(span_from_extra(e))),
-            ident_parser().map_with(|name, e| Pattern::Ident {
-                is_mut: false,
-                name,
-                span: span_from_extra(e),
-            }),
-        )))
-        .map(|(is_mut_tok, inner)| match (is_mut_tok, inner) {
-            (Some(_), Pattern::Ident { name, span, .. }) => {
-                TupleElemPattern::Pattern(Pattern::Ident {
-                    is_mut: true,
-                    name,
-                    span,
-                })
-            }
-            (_, p) => TupleElemPattern::Pattern(p),
-        });
-    let tuple_destructure = just(TokenKind::LParen)
-        .ignore_then(tuple_elem.clone())
-        .then_ignore(just(TokenKind::Comma))
-        .then(
-            tuple_elem
-                .separated_by(just(TokenKind::Comma))
-                .allow_trailing()
-                .collect::<Vec<_>>(),
-        )
-        .then_ignore(just(TokenKind::RParen))
-        .map_with(|(first, rest), e| {
-            let mut elems = Vec::with_capacity(1 + rest.len());
-            elems.push(first);
-            elems.extend(rest);
-            Pattern::Tuple {
-                elems,
-                span: span_from_extra(e),
-            }
-        });
-
-    // Try struct destructure first (ident followed by {), then tuple destructure (LParen),
-    // then plain ident, then wildcard.
-    choice((struct_destructure, tuple_destructure, ident, wildcard)).boxed()
+    pattern_parser()
 }
 
 /// Parser for let statements: [@directive]* let [mut] pattern [: type] = expr;
@@ -3073,6 +3054,12 @@ pub struct ChumskyParser {
     interner: ThreadedRodeo,
     /// File ID for spans in this file.
     file_id: FileId,
+    /// Preview features enabled for this parse (ADR-0005, ADR-0049).
+    ///
+    /// The parser always accepts the full grammar (including preview syntax); a
+    /// post-parse validation pass emits errors if preview-only syntax is used
+    /// without the corresponding flag.
+    preview_features: PreviewFeatures,
 }
 
 impl ChumskyParser {
@@ -3100,7 +3087,15 @@ impl ChumskyParser {
             source_len,
             interner,
             file_id,
+            preview_features: PreviewFeatures::new(),
         }
+    }
+
+    /// Set the preview features enabled for this parse. Required to use any
+    /// syntax gated behind a `--preview` flag (ADR-0005).
+    pub fn with_preview_features(mut self, features: PreviewFeatures) -> Self {
+        self.preview_features = features;
+        self
     }
 
     /// Parse the tokens into an AST, returning the AST and the interner.
@@ -3120,16 +3115,282 @@ impl ChumskyParser {
         let eoi: SimpleSpan = (self.source_len..self.source_len).into();
         let mapped = stream.map(eoi, |(tok, span)| (tok, span));
 
-        let result = ast_parser()
+        let ast = ast_parser()
             .parse_with_state(mapped, &mut state)
             .into_result()
             .map_err(|errs| {
                 let errors: Vec<CompileError> = errs.into_iter().map(convert_error).collect();
                 CompileErrors::from(errors)
-            });
+            })?;
 
-        result.map(|ast| (ast, self.interner))
+        // Post-parse preview-feature validation.
+        let mut preview_errors = Vec::new();
+        validate_preview_patterns(&ast, &self.preview_features, &mut preview_errors);
+        if !preview_errors.is_empty() {
+            return Err(CompileErrors::from(preview_errors));
+        }
+
+        Ok((ast, self.interner))
     }
+}
+
+/// Walk the AST and emit errors for preview-only pattern syntax when the
+/// corresponding preview feature isn't enabled (ADR-0049).
+fn validate_preview_patterns(
+    ast: &Ast,
+    features: &PreviewFeatures,
+    errors: &mut Vec<CompileError>,
+) {
+    if features.contains(&PreviewFeature::NestedPatterns) {
+        return;
+    }
+    for item in &ast.items {
+        validate_item(item, errors);
+    }
+}
+
+fn validate_item(item: &Item, errors: &mut Vec<CompileError>) {
+    match item {
+        Item::Function(f) => validate_expr(&f.body, errors),
+        Item::Struct(s) => {
+            for m in &s.methods {
+                validate_expr(&m.body, errors);
+            }
+        }
+        Item::Enum(e) => {
+            // EnumDecl doesn't carry methods in the AST; methods live on a wrapper.
+            // Walk variant types (nothing to validate) and move on.
+            let _ = e;
+        }
+        Item::Const(c) => validate_expr(&c.init, errors),
+        Item::DropFn(d) => validate_expr(&d.body, errors),
+        Item::Error(_) => {}
+    }
+}
+
+fn validate_block(block: &crate::ast::BlockExpr, errors: &mut Vec<CompileError>) {
+    use crate::ast::AssignTarget;
+    for stmt in &block.statements {
+        match stmt {
+            Statement::Let(l) => {
+                check_let_pattern(&l.pattern, errors);
+                validate_expr(&l.init, errors);
+            }
+            Statement::Assign(a) => {
+                validate_expr(&a.value, errors);
+                match &a.target {
+                    AssignTarget::Var(_) => {}
+                    AssignTarget::Field(f) => validate_expr(&f.base, errors),
+                    AssignTarget::Index(i) => {
+                        validate_expr(&i.base, errors);
+                        validate_expr(&i.index, errors);
+                    }
+                }
+            }
+            Statement::Expr(e) => validate_expr(e, errors),
+        }
+    }
+    validate_expr(&block.expr, errors);
+}
+
+fn validate_expr(expr: &Expr, errors: &mut Vec<CompileError>) {
+    use crate::ast::IntrinsicArg;
+    match expr {
+        Expr::Block(b) => validate_block(b, errors),
+        Expr::Match(m) => {
+            validate_expr(&m.scrutinee, errors);
+            for arm in &m.arms {
+                check_match_pattern(&arm.pattern, errors);
+                validate_expr(&arm.body, errors);
+            }
+        }
+        Expr::If(i) => {
+            validate_expr(&i.cond, errors);
+            validate_block(&i.then_block, errors);
+            if let Some(e) = &i.else_block {
+                validate_block(e, errors);
+            }
+        }
+        Expr::While(w) => {
+            validate_expr(&w.cond, errors);
+            validate_block(&w.body, errors);
+        }
+        Expr::For(f) => {
+            validate_expr(&f.iterable, errors);
+            validate_block(&f.body, errors);
+        }
+        Expr::Loop(l) => validate_block(&l.body, errors),
+        Expr::Binary(b) => {
+            validate_expr(&b.left, errors);
+            validate_expr(&b.right, errors);
+        }
+        Expr::Unary(u) => validate_expr(&u.operand, errors),
+        Expr::Call(c) => {
+            for arg in &c.args {
+                validate_expr(&arg.expr, errors);
+            }
+        }
+        Expr::IntrinsicCall(i) => {
+            for arg in &i.args {
+                if let IntrinsicArg::Expr(e) = arg {
+                    validate_expr(e, errors);
+                }
+            }
+        }
+        Expr::MethodCall(m) => {
+            validate_expr(&m.receiver, errors);
+            for arg in &m.args {
+                validate_expr(&arg.expr, errors);
+            }
+        }
+        Expr::AssocFnCall(a) => {
+            for arg in &a.args {
+                validate_expr(&arg.expr, errors);
+            }
+        }
+        Expr::Field(f) => validate_expr(&f.base, errors),
+        Expr::TupleIndex(t) => validate_expr(&t.base, errors),
+        Expr::Index(i) => {
+            validate_expr(&i.base, errors);
+            validate_expr(&i.index, errors);
+        }
+        Expr::Return(r) => {
+            if let Some(v) = &r.value {
+                validate_expr(v, errors);
+            }
+        }
+        Expr::Paren(p) => validate_expr(&p.inner, errors),
+        Expr::StructLit(s) => {
+            for f in &s.fields {
+                validate_expr(&f.value, errors);
+            }
+        }
+        Expr::EnumStructLit(s) => {
+            for f in &s.fields {
+                validate_expr(&f.value, errors);
+            }
+        }
+        Expr::ArrayLit(a) => {
+            for e in &a.elements {
+                validate_expr(e, errors);
+            }
+        }
+        Expr::Tuple(t) => {
+            for e in &t.elems {
+                validate_expr(e, errors);
+            }
+        }
+        Expr::Comptime(c) => validate_expr(&c.expr, errors),
+        Expr::ComptimeUnrollFor(_) | Expr::Checked(_) => {
+            // These contain expressions but were not previously validated for patterns.
+            // Any match/let inside is reachable through normal expression traversal if
+            // they choose to expose it; keep conservative for now.
+        }
+        Expr::TypeLit(_)
+        | Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::String(_)
+        | Expr::Bool(_)
+        | Expr::Unit(_)
+        | Expr::Ident(_)
+        | Expr::Path(_)
+        | Expr::SelfExpr(_)
+        | Expr::Break(_)
+        | Expr::Continue(_)
+        | Expr::Error(_) => {}
+    }
+}
+
+fn check_let_pattern(pat: &Pattern, errors: &mut Vec<CompileError>) {
+    // In a let, the legal flat shapes are: Wildcard, Ident, Struct (flat), Tuple (flat).
+    // Anything else — or nested sub-patterns / rest — is nested-patterns territory.
+    match pat {
+        Pattern::Wildcard(_) | Pattern::Ident { .. } => {}
+        Pattern::Struct { fields, .. } => {
+            for fp in fields {
+                check_flat_field_pattern(fp, errors);
+            }
+        }
+        Pattern::Tuple { elems, .. } => {
+            for e in elems {
+                check_flat_tuple_elem(e, errors);
+            }
+        }
+        // Pattern forms that are refutable can't appear in let anyway; sema will
+        // reject them in Phase 3. Don't duplicate that error here.
+        _ => {}
+    }
+}
+
+fn check_flat_field_pattern(fp: &FieldPattern, errors: &mut Vec<CompileError>) {
+    match (&fp.field_name, &fp.sub) {
+        (None, _) => errors.push(preview_required_err(
+            fp.span,
+            "rest pattern `..` in struct destructure",
+        )),
+        (Some(_), None) => {}
+        (Some(_), Some(Pattern::Wildcard(_))) => {}
+        (Some(_), Some(Pattern::Ident { .. })) => {}
+        (Some(_), Some(other)) => errors.push(preview_required_err(
+            other.span(),
+            "nested sub-pattern in struct destructure",
+        )),
+    }
+}
+
+fn check_flat_tuple_elem(elem: &TupleElemPattern, errors: &mut Vec<CompileError>) {
+    match elem {
+        TupleElemPattern::Rest(span) => {
+            errors.push(preview_required_err(*span, "rest pattern `..` in tuple"));
+        }
+        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => {}
+        TupleElemPattern::Pattern(Pattern::Ident { .. }) => {}
+        TupleElemPattern::Pattern(other) => errors.push(preview_required_err(
+            other.span(),
+            "nested sub-pattern in tuple destructure",
+        )),
+    }
+}
+
+fn check_match_pattern(pat: &Pattern, errors: &mut Vec<CompileError>) {
+    // Match arms previously accepted: Wildcard, Int, NegInt, Bool, Path,
+    // DataVariant/StructVariant with flat bindings. Reject tuple patterns
+    // and nested sub-patterns when the preview flag is off.
+    match pat {
+        Pattern::Tuple { span, .. } => {
+            errors.push(preview_required_err(*span, "tuple pattern in match arm"))
+        }
+        Pattern::Struct { span, .. } => errors.push(preview_required_err(
+            *span,
+            "struct destructure pattern in match arm",
+        )),
+        Pattern::DataVariant { fields, .. } => {
+            for e in fields {
+                check_flat_tuple_elem(e, errors);
+            }
+        }
+        Pattern::StructVariant { fields, .. } => {
+            for fp in fields {
+                check_flat_field_pattern(fp, errors);
+            }
+        }
+        Pattern::Wildcard(_)
+        | Pattern::Ident { .. }
+        | Pattern::Int(_)
+        | Pattern::NegInt(_)
+        | Pattern::Bool(_)
+        | Pattern::Path(_) => {}
+    }
+}
+
+fn preview_required_err(span: Span, what: &str) -> CompileError {
+    CompileError::new(
+        ErrorKind::PreviewFeatureRequired {
+            feature: PreviewFeature::NestedPatterns,
+            what: format!("{} (ADR-0049)", what),
+        },
+        span,
+    )
 }
 
 #[cfg(test)]
@@ -4613,5 +4874,188 @@ mod tests {
             },
             _ => panic!("expected Function"),
         }
+    }
+
+    // ==================== ADR-0049 Phase 2: parser shapes ====================
+    //
+    // These tests drive the parser directly with the nested_patterns preview feature
+    // enabled (bypassing the post-parse validator). They only check AST shape — sema
+    // and lowering open up in later phases.
+
+    fn parse_with_nested(source: &str) -> MultiErrorResult<ParseResult> {
+        use gruel_error::{PreviewFeature, PreviewFeatures};
+        let lexer = Lexer::new(source);
+        let (tokens, interner) = lexer.tokenize().unwrap();
+        let mut features = PreviewFeatures::new();
+        features.insert(PreviewFeature::NestedPatterns);
+        let parser = ChumskyParser::new(tokens, interner).with_preview_features(features);
+        parser
+            .parse()
+            .map(|(ast, interner)| ParseResult { ast, interner })
+    }
+
+    fn find_first_let_pattern(result: &ParseResult) -> &Pattern {
+        match &result.ast.items[0] {
+            Item::Function(f) => match &f.body {
+                Expr::Block(block) => match &block.statements[0] {
+                    Statement::Let(l) => &l.pattern,
+                    _ => panic!("expected let"),
+                },
+                _ => panic!("expected block"),
+            },
+            _ => panic!("expected function"),
+        }
+    }
+
+    fn find_first_match_arm_pattern(result: &ParseResult) -> &Pattern {
+        match &result.ast.items[0] {
+            Item::Function(f) => {
+                fn find_match(e: &Expr) -> Option<&Pattern> {
+                    match e {
+                        Expr::Block(b) => find_match(&b.expr),
+                        Expr::Match(m) => Some(&m.arms[0].pattern),
+                        _ => None,
+                    }
+                }
+                find_match(&f.body).expect("expected a match expression")
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn test_nested_let_struct_in_struct() {
+        let source = r#"
+            fn main() -> i32 {
+                let Outer { inner: Inner { x, y }, tag } = make();
+                0
+            }
+        "#;
+        let result = parse_with_nested(source).unwrap();
+        match find_first_let_pattern(&result) {
+            Pattern::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 2);
+                // inner: Inner { x, y }
+                let inner = &fields[0];
+                assert_eq!(result.get(inner.field_name.unwrap().name), "inner");
+                match inner.sub.as_ref().unwrap() {
+                    Pattern::Struct {
+                        fields: inner_fields,
+                        ..
+                    } => assert_eq!(inner_fields.len(), 2),
+                    other => panic!("expected nested Struct, got {:?}", other),
+                }
+                // tag (shorthand)
+                let tag = &fields[1];
+                assert_eq!(result.get(tag.field_name.unwrap().name), "tag");
+                assert!(tag.sub.is_none());
+            }
+            other => panic!("expected Pattern::Struct, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_nested_let_tuple_of_tuples() {
+        let source = "fn main() -> i32 { let ((a, b), c) = ((1, 2), 3); 0 }";
+        let result = parse_with_nested(source).unwrap();
+        match find_first_let_pattern(&result) {
+            Pattern::Tuple { elems, .. } => {
+                assert_eq!(elems.len(), 2);
+                match &elems[0] {
+                    TupleElemPattern::Pattern(Pattern::Tuple {
+                        elems: inner_elems, ..
+                    }) => assert_eq!(inner_elems.len(), 2),
+                    other => panic!("expected nested tuple, got {:?}", other),
+                }
+            }
+            other => panic!("expected Pattern::Tuple, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_tuple_pattern_in_match() {
+        let source = r#"
+            fn main() -> i32 {
+                match pair() {
+                    (0, 0) => 0,
+                    _ => 1,
+                }
+            }
+        "#;
+        let result = parse_with_nested(source).unwrap();
+        match find_first_match_arm_pattern(&result) {
+            Pattern::Tuple { elems, .. } => {
+                assert_eq!(elems.len(), 2);
+                for e in elems {
+                    match e {
+                        TupleElemPattern::Pattern(Pattern::Int(lit)) => {
+                            assert_eq!(lit.value, 0)
+                        }
+                        other => panic!("expected Int sub-pattern, got {:?}", other),
+                    }
+                }
+            }
+            other => panic!("expected Pattern::Tuple in match, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_rest_in_tuple() {
+        let source = "fn main() -> i32 { let (a, .., z) = quintuple(); 0 }";
+        let result = parse_with_nested(source).unwrap();
+        match find_first_let_pattern(&result) {
+            Pattern::Tuple { elems, .. } => {
+                assert_eq!(elems.len(), 3);
+                assert!(matches!(&elems[1], TupleElemPattern::Rest(_)));
+            }
+            other => panic!("expected Pattern::Tuple, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_rest_in_struct() {
+        let source = "fn main() -> i32 { let Point { x, .. } = p(); 0 }";
+        let result = parse_with_nested(source).unwrap();
+        match find_first_let_pattern(&result) {
+            Pattern::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 2);
+                assert!(fields[0].field_name.is_some());
+                assert!(fields[1].field_name.is_none()); // `..` sentinel
+            }
+            other => panic!("expected Pattern::Struct, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_preview_gate_rejects_nested_without_flag() {
+        // Without the preview flag, nested destructure must error.
+        let source = "fn main() -> i32 { let ((a, b), c) = t(); 0 }";
+        let result = parse(source);
+        assert!(result.is_err(), "expected preview error without flag");
+    }
+
+    #[test]
+    fn test_preview_gate_rejects_tuple_match_without_flag() {
+        let source = "fn main() -> i32 { match p() { (0, 0) => 0, _ => 1 } }";
+        let result = parse(source);
+        assert!(result.is_err(), "expected preview error without flag");
+    }
+
+    #[test]
+    fn test_preview_gate_rejects_rest_without_flag() {
+        let source = "fn main() -> i32 { let (a, .., z) = q(); 0 }";
+        let result = parse(source);
+        assert!(result.is_err(), "expected preview error without flag");
+    }
+
+    #[test]
+    fn test_preview_gate_accepts_flat_without_flag() {
+        // Flat pre-existing forms must continue to parse without the flag.
+        let source = "fn main() -> i32 { let (a, b) = pair(); 0 }";
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "flat tuple destructure should parse without flag"
+        );
     }
 }

@@ -475,7 +475,7 @@ ship without the preview gate since it's a bug fix, not a new feature.
   - Update Display and round-trip unit tests.
   - Register `PreviewFeature::NestedPatterns` in `gruel-error`.
 
-- [ ] **Phase 2: Parser — nested syntax**
+- [x] **Phase 2: Parser — nested syntax**
   - Make the pattern parser recursive: accept sub-patterns inside struct field
     bindings, variant field positions, and tuple elements.
   - Accept tuple patterns (`(p1, p2, ...)`, `(p,)`) in both let and match contexts.

@@ -162,7 +162,8 @@ impl<'src> CompilationUnit<'src> {
             info!(token_count = tokens.len(), "lexing complete");
 
             // Parse
-            let parser = Parser::new(tokens, interner);
+            let parser = Parser::new(tokens, interner)
+                .with_preview_features(self.options.preview_features.clone());
             let (ast, returned_interner) = parser.parse()?;
             interner = returned_interner;
 
