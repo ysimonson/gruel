@@ -1518,6 +1518,21 @@ impl<'a> ConstraintGenerator<'a> {
             // Anonymous enum type: an enum type used as a comptime value
             // This also has the ComptimeType type.
             InstData::AnonEnumType { .. } => InferType::Concrete(Type::COMPTIME_TYPE),
+
+            // Tuple lowering (ADR-0048): defer to a fresh type variable. The sema
+            // layer resolves tuples to anonymous structs during analysis; inference
+            // does not need a concrete shape here.
+            InstData::TupleInit {
+                elems_start,
+                elems_len,
+            } => {
+                let elems = self.rir.get_inst_refs(*elems_start, *elems_len);
+                for elem in elems {
+                    self.generate(elem, ctx);
+                }
+                let result_var = self.fresh_var();
+                InferType::Var(result_var)
+            }
         };
 
         // Record the type for this expression

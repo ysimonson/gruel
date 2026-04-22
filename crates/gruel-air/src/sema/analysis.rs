@@ -2421,6 +2421,12 @@ impl<'a> Sema<'a> {
                 ctx.checked_depth -= 1;
                 result
             }
+
+            // Tuple literal (ADR-0048): lower to an anon struct with fields "0", "1", ...
+            InstData::TupleInit {
+                elems_start,
+                elems_len,
+            } => self.analyze_tuple_init(air, *elems_start, *elems_len, inst.span, ctx),
         }
     }
 

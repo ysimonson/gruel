@@ -1505,6 +1505,13 @@ impl Rir {
                 methods_start: *methods_start + extra_offset,
                 methods_len: *methods_len,
             },
+            InstData::TupleInit {
+                elems_start,
+                elems_len,
+            } => InstData::TupleInit {
+                elems_start: *elems_start + extra_offset,
+                elems_len: *elems_len,
+            },
         };
 
         Inst {
@@ -1541,6 +1548,17 @@ impl Rir {
 
                 // Array init - contains InstRef array
                 InstData::ArrayInit {
+                    elems_start,
+                    elems_len,
+                } => {
+                    let start = (*elems_start + extra_offset) as usize;
+                    for i in 0..*elems_len as usize {
+                        extra[start + i] += inst_offset;
+                    }
+                }
+
+                // Tuple init - contains InstRef array (same layout as ArrayInit)
+                InstData::TupleInit {
                     elems_start,
                     elems_len,
                 } => {
@@ -2205,6 +2223,22 @@ pub enum InstData {
         methods_start: u32,
         /// Number of methods (InstRefs to FnDecl instructions)
         methods_len: u32,
+    },
+
+    /// Tuple literal: `(e0, e1, ..., eN-1)` (ADR-0048).
+    /// Lowered in sema to a StructInit against a synthesised anon struct
+    /// with field names "0", "1", ... and field types inferred from the elements.
+    /// Elements are stored as raw u32 InstRefs in the extra array.
+    ///
+    /// Tuple field access `t.N` is *not* a distinct RIR instruction; astgen
+    /// lowers it to a regular `FieldGet` whose `field` is the stringified index
+    /// interned as a Spur. Struct field names are identifiers (never start with
+    /// a digit), so synthetic tuple field names cannot collide with user code.
+    TupleInit {
+        /// Index into extra data where element InstRefs start
+        elems_start: u32,
+        /// Number of elements
+        elems_len: u32,
     },
 }
 
@@ -2951,6 +2985,20 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         write!(out, "methods: [{}]", methods_str.join(", ")).unwrap();
                     }
                     writeln!(out, " }}").unwrap();
+                }
+                // Tuple lowering (ADR-0048) — printed with the same tuple-literal syntax
+                InstData::TupleInit {
+                    elems_start,
+                    elems_len,
+                } => {
+                    let elems = self.rir.get_inst_refs(*elems_start, *elems_len);
+                    let elems_str: Vec<String> =
+                        elems.iter().map(|e| format!("{}", e)).collect();
+                    if elems.len() == 1 {
+                        writeln!(out, "tuple ({},)", elems_str[0]).unwrap();
+                    } else {
+                        writeln!(out, "tuple ({})", elems_str.join(", ")).unwrap();
+                    }
                 }
             }
         }

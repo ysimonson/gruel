@@ -201,11 +201,17 @@ Behind `PreviewFeature::Tuples` until Phase 5.
     lands — Phase 1 stubs tuple values to unit so nothing observable reaches users.)
   - Unit tests for parser + pretty-printer round-trip.
 
-- [ ] **Phase 2: RIR/AIR lowering as anon structs**
+- [x] **Phase 2: RIR/AIR lowering as anon structs**
   - In astgen, lower tuple types to anon-struct types with fields `0..N`.
-  - Lower tuple literals to anon-struct literals.
-  - Lower `t.N` to field-access with the stringified index as the field symbol.
-  - Verify structural interning deduplicates tuples correctly.
+  - Lower tuple literals to anon-struct literals (via a new `InstData::TupleInit`
+    that sema resolves to a `StructInit` against an anon struct).
+  - Lower `t.N` to field-access with the stringified index as the field symbol
+    (reuses existing `InstData::FieldGet`).
+  - Sema's `resolve_type` recognises `(T, U, ...)` syntax and creates an anon
+    struct via `find_or_create_anon_struct`, so structural interning
+    deduplicates tuples.
+  - `PreviewFeature::Tuples` gate wired at the two entry points: `resolve_type`
+    for tuple type syntax and `analyze_tuple_init` for tuple literals.
 
 - [ ] **Phase 3: Destructuring**
   - Extend `LetPattern` / the destructuring lowering (ADR-0036) to accept positional patterns.

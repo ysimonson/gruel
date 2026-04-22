@@ -962,16 +962,33 @@ impl<'a> AstGen<'a> {
                 data: InstData::UnitConst,
                 span: *span,
             }),
-            // Phase 1 stubs: Phase 2 will lower tuples to anon struct literals
-            // and tuple indexing to FieldAccess with synthetic numeric field names.
-            Expr::Tuple(tuple) => self.rir.add_inst(Inst {
-                data: InstData::UnitConst,
-                span: tuple.span,
-            }),
-            Expr::TupleIndex(ti) => self.rir.add_inst(Inst {
-                data: InstData::UnitConst,
-                span: ti.span,
-            }),
+            // Tuple literal `(e0, e1, ...)` — lowered in sema to an anon struct
+            // with field names "0", "1", ... (ADR-0048).
+            Expr::Tuple(tuple) => {
+                let elem_refs: Vec<InstRef> =
+                    tuple.elems.iter().map(|e| self.gen_expr(e)).collect();
+                let elem_u32s: Vec<u32> = elem_refs.iter().map(|r| r.as_u32()).collect();
+                let elems_start = self.rir.add_extra(&elem_u32s);
+                let elems_len = elem_refs.len() as u32;
+                self.rir.add_inst(Inst {
+                    data: InstData::TupleInit {
+                        elems_start,
+                        elems_len,
+                    },
+                    span: tuple.span,
+                })
+            }
+            // Tuple index `t.N` — lowered to a regular FieldGet whose field symbol
+            // is the stringified index. Synthetic names cannot collide with user
+            // struct field names (which must start with a letter).
+            Expr::TupleIndex(ti) => {
+                let base = self.gen_expr(&ti.base);
+                let field = self.interner.get_or_intern(&ti.index.to_string());
+                self.rir.add_inst(Inst {
+                    data: InstData::FieldGet { base, field },
+                    span: ti.span,
+                })
+            }
         }
     }
 

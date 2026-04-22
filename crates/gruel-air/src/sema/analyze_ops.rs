@@ -41,7 +41,8 @@ use crate::inst::{
     AirRef,
 };
 use crate::scope::ScopedContext;
-use crate::types::{Type, TypeKind};
+use crate::types::{StructField, Type, TypeKind};
+use gruel_error::PreviewFeature;
 
 // ============================================================================
 // Place Building (ADR-0030 Phase 8)
@@ -3126,6 +3127,73 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, struct_type))
+    }
+
+    /// Analyze a tuple literal (ADR-0048).
+    ///
+    /// Tuples are lowered to anonymous structs with field names "0", "1", ...
+    /// This reuses the existing structural dedup in `find_or_create_anon_struct`,
+    /// so two tuples with the same element types are the same struct type.
+    pub(crate) fn analyze_tuple_init(
+        &mut self,
+        air: &mut Air,
+        elems_start: u32,
+        elems_len: u32,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        self.require_preview(PreviewFeature::Tuples, "tuple literal", span)?;
+
+        // Pull element inst refs out of the extra array.
+        let elem_refs: Vec<InstRef> = self
+            .rir
+            .get_inst_refs(elems_start, elems_len)
+            .iter()
+            .copied()
+            .collect();
+
+        // Analyze each element in source order.
+        let mut elem_results = Vec::with_capacity(elem_refs.len());
+        for elem_ref in &elem_refs {
+            let result = self.analyze_inst(air, *elem_ref, ctx)?;
+            elem_results.push(result);
+        }
+
+        // Build synthetic struct fields named "0", "1", ... with the element types.
+        let struct_fields: Vec<StructField> = elem_results
+            .iter()
+            .enumerate()
+            .map(|(i, r)| StructField {
+                name: i.to_string(),
+                ty: r.ty,
+            })
+            .collect();
+
+        // Find or create the anon struct via the existing structural-dedup helper.
+        let (struct_ty, _is_new) =
+            self.find_or_create_anon_struct(&struct_fields, &[], &HashMap::new());
+        let struct_id = struct_ty
+            .as_struct()
+            .expect("find_or_create_anon_struct returned non-struct type");
+
+        // Field refs are already in declaration order (i == field_index), and source
+        // order matches. Encode both into AIR's extra array.
+        let field_u32s: Vec<u32> = elem_results.iter().map(|r| r.air_ref.as_u32()).collect();
+        let fields_start_air = air.add_extra(&field_u32s);
+        let source_order_u32s: Vec<u32> = (0..elem_results.len() as u32).collect();
+        let source_order_start = air.add_extra(&source_order_u32s);
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::StructInit {
+                struct_id,
+                fields_start: fields_start_air,
+                fields_len: elem_results.len() as u32,
+                source_order_start,
+            },
+            ty: struct_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, struct_ty))
     }
 
     /// Analyze a field access.
