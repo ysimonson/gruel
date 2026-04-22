@@ -372,6 +372,48 @@ impl Type {
     }
 }
 
+impl StructDef {
+    /// Returns true if this struct was synthesised to represent a tuple
+    /// (ADR-0048): fields named "0", "1", ..., "N-1", in order, no methods,
+    /// and the anon-struct name prefix.
+    pub fn is_tuple_shaped(&self) -> bool {
+        if !self.name.starts_with("__anon_struct_") {
+            return false;
+        }
+        if self.fields.is_empty() {
+            return false;
+        }
+        self.fields
+            .iter()
+            .enumerate()
+            .all(|(i, f)| f.name == i.to_string())
+    }
+
+    /// If this struct is tuple-shaped, render its tuple-syntax name:
+    /// `(T0, T1, ...)` for arity ≥ 2, `(T0,)` for arity 1.
+    /// The formatter is passed a callback to render each field type name.
+    pub fn tuple_display_name<F>(&self, mut fmt_ty: F) -> Option<String>
+    where
+        F: FnMut(Type) -> String,
+    {
+        if !self.is_tuple_shaped() {
+            return None;
+        }
+        let mut s = String::from("(");
+        for (i, f) in self.fields.iter().enumerate() {
+            if i > 0 {
+                s.push_str(", ");
+            }
+            s.push_str(&fmt_ty(f.ty));
+        }
+        if self.fields.len() == 1 {
+            s.push(',');
+        }
+        s.push(')');
+        Some(s)
+    }
+}
+
 /// Definition of a struct type.
 #[derive(Debug, Clone)]
 pub struct StructDef {
@@ -686,6 +728,12 @@ impl Type {
             Some(TypeKind::Struct(struct_id)) => {
                 if let Some(pool) = pool {
                     let def = pool.struct_def(struct_id);
+                    // ADR-0048: render tuple-shaped anon structs as tuples.
+                    if let Some(tuple_name) =
+                        def.tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
+                    {
+                        return tuple_name;
+                    }
                     return def.name.clone();
                 }
                 format!("<struct#{}>", struct_id.0)

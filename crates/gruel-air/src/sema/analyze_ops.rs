@@ -2390,12 +2390,13 @@ impl<'a> Sema<'a> {
             }
         }
 
-        // Display name for error messages. For tuple destructures we expose the
-        // struct's actual anon name ("__anon_struct_N") rather than the "__tuple__"
-        // sentinel; the Phase 4 diagnostics pass will replace this with tuple-syntax
-        // formatting.
+        // Display name for error messages. For tuple destructures, render in
+        // tuple syntax: `(i32, bool)` instead of the synthetic `__anon_struct_N`.
         let display_name = if is_tuple_destructure {
-            struct_def.name.clone()
+            let pool = &self.type_pool;
+            struct_def
+                .tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
+                .unwrap_or_else(|| struct_def.name.clone())
         } else {
             type_name_str.clone()
         };
@@ -3284,11 +3285,37 @@ impl<'a> Sema<'a> {
                     .mark_path_moved(&[], span);
             } else if !self.is_type_copy(field_type) {
                 // ADR-0036: Ban partial field moves. Must destructure instead.
-                let type_name = parent_type
+                // ADR-0048: for tuple-shaped structs, render tuple-syntax names
+                // and suggest tuple destructuring.
+                let parent_struct_def = parent_type
                     .as_struct()
-                    .map(|id| self.type_pool.struct_def(id).name.clone())
+                    .map(|id| self.type_pool.struct_def(id));
+                let is_tuple = parent_struct_def
+                    .as_ref()
+                    .map(|def| def.is_tuple_shaped())
+                    .unwrap_or(false);
+                let type_name = parent_struct_def
+                    .as_ref()
+                    .and_then(|def| {
+                        let pool = &self.type_pool;
+                        def.tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
+                            .or_else(|| Some(def.name.clone()))
+                    })
                     .unwrap_or_else(|| parent_type.name().to_string());
                 let field_name = self.interner.resolve(&field).to_string();
+                let help = if is_tuple {
+                    let arity = parent_struct_def
+                        .as_ref()
+                        .map(|def| def.fields.len())
+                        .unwrap_or(0);
+                    let bindings: Vec<String> = (0..arity).map(|i| format!("x{}", i)).collect();
+                    format!(
+                        "use destructuring: `let ({}) = ...;`",
+                        bindings.join(", ")
+                    )
+                } else {
+                    format!("use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`")
+                };
                 return Err(CompileError::new(
                     ErrorKind::CannotMoveField {
                         type_name: type_name.clone(),
@@ -3296,9 +3323,7 @@ impl<'a> Sema<'a> {
                     },
                     span,
                 )
-                .with_help(format!(
-                    "use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`"
-                )));
+                .with_help(help));
             }
 
             // Emit PlaceRead instruction
@@ -3337,14 +3362,38 @@ impl<'a> Sema<'a> {
         let struct_def = self.type_pool.struct_def(struct_id);
         let field_name_str = self.interner.resolve(&field).to_string();
 
-        let (field_index, struct_field) =
-            struct_def.find_field(&field_name_str).ok_or_compile_error(
-                ErrorKind::UnknownField {
-                    struct_name: struct_def.name.clone(),
-                    field_name: field_name_str.clone(),
-                },
-                span,
-            )?;
+        // ADR-0048: render tuple-shaped structs with tuple syntax in errors.
+        let display_struct_name = {
+            let pool = &self.type_pool;
+            struct_def
+                .tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
+                .unwrap_or_else(|| struct_def.name.clone())
+        };
+        let (field_index, struct_field) = match struct_def.find_field(&field_name_str) {
+            Some(f) => f,
+            None => {
+                let mut err = CompileError::new(
+                    ErrorKind::UnknownField {
+                        struct_name: display_struct_name.clone(),
+                        field_name: field_name_str.clone(),
+                    },
+                    span,
+                );
+                // ADR-0048: for tuple-shaped structs, add a specific help note.
+                if struct_def.is_tuple_shaped() {
+                    if let Ok(idx) = field_name_str.parse::<u32>() {
+                        err = err.with_help(format!(
+                            "tuple index {} out of bounds: {} has {} element{}",
+                            idx,
+                            display_struct_name,
+                            struct_def.fields.len(),
+                            if struct_def.fields.len() == 1 { "" } else { "s" },
+                        ));
+                    }
+                }
+                return Err(err);
+            }
+        };
 
         let field_type = struct_field.ty;
 

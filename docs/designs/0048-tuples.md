@@ -223,10 +223,14 @@ Behind `PreviewFeature::Tuples` until Phase 5.
   - Wildcard (`_`), `mut`, and singleton (`(x,)`) patterns all work; arity
     mismatches surface via the existing missing-field / unknown-field paths.
 
-- [ ] **Phase 4: Diagnostics polish**
-  - Pretty-print anon structs whose fields are `0..N` as tuples in type errors.
-  - Dedicated out-of-bounds-index error for tuple field access.
-  - Update the partial-move error to suggest tuple destructuring when the receiver is a tuple.
+- [x] **Phase 4: Diagnostics polish**
+  - `StructDef::is_tuple_shaped` / `tuple_display_name` render `__anon_struct_N`
+    as `(T0, T1, ...)` in user-facing error messages; wired into
+    `Type::safe_name_with_pool` and the destructure / field-get error paths.
+  - `t.N` with N out of bounds emits the existing UnknownField error decorated
+    with a help note: `tuple index N out of bounds: (...) has K elements`.
+  - Partial-move error on a tuple field now suggests tuple destructuring
+    (`let (x0, x1, ...) = ...;`) instead of the struct-literal form.
 
 - [ ] **Phase 5: Spec & stabilization**
   - Add spec section `3.12: Tuple Types` and `4.15: Tuple Expressions`.
