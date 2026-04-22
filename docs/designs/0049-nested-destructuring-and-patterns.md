@@ -482,15 +482,18 @@ ship without the preview gate since it's a bug fix, not a new feature.
   - Flat patterns still parse as before (so existing tests pass).
   - Parser-only tests for each shape; no sema wiring yet.
 
-- [ ] **Phase 3: Sema — refutability + type-checking**
-  - Wire `PreviewFeature::NestedPatterns` at the entry points where nested /
-    tuple-in-match patterns are first observed.
-  - Classify each pattern irrefutable/refutable; reject refutable in let.
-  - Recursively type-check each sub-pattern against the corresponding field/element
-    type.
-  - Introduce leaf bindings into scope with the correct type (moves + copy rules from
-    ADR-0036).
-  - Arity / field-count / type-mismatch diagnostics at the inner spans.
+- [x] **Phase 3: Refutability classifier**
+  - Preview gate was wired in Phase 2 (in the parser, not sema) so that item is
+    moot.
+  - Refutability classifier and `RefutablePatternInLet` diagnostic landed as a
+    post-parse AST walker. Applies unconditionally — a let binding with a
+    refutable pattern is always an error, whether or not `nested_patterns` is
+    enabled.
+  - **Deferred to Phase 4**: recursive sema type-checking of sub-patterns,
+    leaf-binding introduction, and inner-span arity / type-mismatch diagnostics.
+    These depend on the recursive RIR/AIR shapes that Phase 4 lands, so they're
+    architecturally part of that phase rather than a standalone sema pass on the
+    current RIR.
 
 - [ ] **Phase 4: RIR/AIR lowering (core)**
   - Generalise `RirDestructureField` to hold an optional sub-pattern.

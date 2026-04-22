@@ -3123,169 +3123,197 @@ impl ChumskyParser {
                 CompileErrors::from(errors)
             })?;
 
-        // Post-parse preview-feature validation.
-        let mut preview_errors = Vec::new();
-        validate_preview_patterns(&ast, &self.preview_features, &mut preview_errors);
-        if !preview_errors.is_empty() {
-            return Err(CompileErrors::from(preview_errors));
+        // Post-parse AST validation: refutability (always) + preview gate
+        // (only when a preview feature isn't enabled). See ADR-0049 §2, §8.
+        let mut errors = Vec::new();
+        let validator = AstValidator {
+            nested_patterns_enabled: self
+                .preview_features
+                .contains(&PreviewFeature::NestedPatterns),
+        };
+        validator.walk_ast(&ast, &mut errors);
+        if !errors.is_empty() {
+            return Err(CompileErrors::from(errors));
         }
 
         Ok((ast, self.interner))
     }
 }
 
-/// Walk the AST and emit errors for preview-only pattern syntax when the
-/// corresponding preview feature isn't enabled (ADR-0049).
-fn validate_preview_patterns(
-    ast: &Ast,
-    features: &PreviewFeatures,
-    errors: &mut Vec<CompileError>,
-) {
-    if features.contains(&PreviewFeature::NestedPatterns) {
-        return;
-    }
-    for item in &ast.items {
-        validate_item(item, errors);
+/// Post-parse AST validator for patterns (ADR-0049).
+///
+/// Two kinds of errors:
+/// 1. **Refutability**: a refutable pattern in a `let` binding is rejected,
+///    regardless of preview feature. This rule applies to every let, always.
+/// 2. **Preview gate**: nested sub-patterns, rest `..`, tuple patterns in match
+///    arms, and top-level struct destructures are rejected when
+///    `nested_patterns` isn't enabled.
+struct AstValidator {
+    nested_patterns_enabled: bool,
+}
+
+impl AstValidator {
+    fn walk_ast(&self, ast: &Ast, errors: &mut Vec<CompileError>) {
+        for item in &ast.items {
+            validate_item(item, errors, self);
+        }
     }
 }
 
-fn validate_item(item: &Item, errors: &mut Vec<CompileError>) {
+/// Classify whether a pattern is refutable. Refutable = matches only some
+/// values of its inferred type; irrefutable = matches every value.
+fn is_refutable(pat: &Pattern) -> bool {
+    match pat {
+        Pattern::Wildcard(_) => false,
+        Pattern::Ident { .. } => false,
+        Pattern::Int(_) | Pattern::NegInt(_) | Pattern::Bool(_) => true,
+        Pattern::Path(_) => true,
+        // A variant pattern can't be irrefutable without type info (we'd need
+        // to know whether it's a single-variant enum). Conservatively refutable.
+        Pattern::DataVariant { .. } | Pattern::StructVariant { .. } => true,
+        Pattern::Struct { fields, .. } => fields.iter().any(|f| {
+            // `..` and shorthand bindings are irrefutable by themselves.
+            f.sub.as_ref().is_some_and(is_refutable)
+        }),
+        Pattern::Tuple { elems, .. } => elems.iter().any(|e| match e {
+            TupleElemPattern::Pattern(p) => is_refutable(p),
+            TupleElemPattern::Rest(_) => false,
+        }),
+    }
+}
+
+fn validate_item(item: &Item, errors: &mut Vec<CompileError>, v: &AstValidator) {
     match item {
-        Item::Function(f) => validate_expr(&f.body, errors),
+        Item::Function(f) => validate_expr(&f.body, errors, v),
         Item::Struct(s) => {
             for m in &s.methods {
-                validate_expr(&m.body, errors);
+                validate_expr(&m.body, errors, v);
             }
         }
         Item::Enum(e) => {
             // EnumDecl doesn't carry methods in the AST; methods live on a wrapper.
-            // Walk variant types (nothing to validate) and move on.
             let _ = e;
         }
-        Item::Const(c) => validate_expr(&c.init, errors),
-        Item::DropFn(d) => validate_expr(&d.body, errors),
+        Item::Const(c) => validate_expr(&c.init, errors, v),
+        Item::DropFn(d) => validate_expr(&d.body, errors, v),
         Item::Error(_) => {}
     }
 }
 
-fn validate_block(block: &crate::ast::BlockExpr, errors: &mut Vec<CompileError>) {
+fn validate_block(block: &crate::ast::BlockExpr, errors: &mut Vec<CompileError>, v: &AstValidator) {
     use crate::ast::AssignTarget;
     for stmt in &block.statements {
         match stmt {
             Statement::Let(l) => {
-                check_let_pattern(&l.pattern, errors);
-                validate_expr(&l.init, errors);
+                validate_let_pattern(&l.pattern, errors, v);
+                validate_expr(&l.init, errors, v);
             }
             Statement::Assign(a) => {
-                validate_expr(&a.value, errors);
+                validate_expr(&a.value, errors, v);
                 match &a.target {
                     AssignTarget::Var(_) => {}
-                    AssignTarget::Field(f) => validate_expr(&f.base, errors),
+                    AssignTarget::Field(f) => validate_expr(&f.base, errors, v),
                     AssignTarget::Index(i) => {
-                        validate_expr(&i.base, errors);
-                        validate_expr(&i.index, errors);
+                        validate_expr(&i.base, errors, v);
+                        validate_expr(&i.index, errors, v);
                     }
                 }
             }
-            Statement::Expr(e) => validate_expr(e, errors),
+            Statement::Expr(e) => validate_expr(e, errors, v),
         }
     }
-    validate_expr(&block.expr, errors);
+    validate_expr(&block.expr, errors, v);
 }
 
-fn validate_expr(expr: &Expr, errors: &mut Vec<CompileError>) {
+fn validate_expr(expr: &Expr, errors: &mut Vec<CompileError>, v: &AstValidator) {
     use crate::ast::IntrinsicArg;
     match expr {
-        Expr::Block(b) => validate_block(b, errors),
+        Expr::Block(b) => validate_block(b, errors, v),
         Expr::Match(m) => {
-            validate_expr(&m.scrutinee, errors);
+            validate_expr(&m.scrutinee, errors, v);
             for arm in &m.arms {
-                check_match_pattern(&arm.pattern, errors);
-                validate_expr(&arm.body, errors);
+                validate_match_pattern(&arm.pattern, errors, v);
+                validate_expr(&arm.body, errors, v);
             }
         }
         Expr::If(i) => {
-            validate_expr(&i.cond, errors);
-            validate_block(&i.then_block, errors);
+            validate_expr(&i.cond, errors, v);
+            validate_block(&i.then_block, errors, v);
             if let Some(e) = &i.else_block {
-                validate_block(e, errors);
+                validate_block(e, errors, v);
             }
         }
         Expr::While(w) => {
-            validate_expr(&w.cond, errors);
-            validate_block(&w.body, errors);
+            validate_expr(&w.cond, errors, v);
+            validate_block(&w.body, errors, v);
         }
         Expr::For(f) => {
-            validate_expr(&f.iterable, errors);
-            validate_block(&f.body, errors);
+            validate_expr(&f.iterable, errors, v);
+            validate_block(&f.body, errors, v);
         }
-        Expr::Loop(l) => validate_block(&l.body, errors),
+        Expr::Loop(l) => validate_block(&l.body, errors, v),
         Expr::Binary(b) => {
-            validate_expr(&b.left, errors);
-            validate_expr(&b.right, errors);
+            validate_expr(&b.left, errors, v);
+            validate_expr(&b.right, errors, v);
         }
-        Expr::Unary(u) => validate_expr(&u.operand, errors),
+        Expr::Unary(u) => validate_expr(&u.operand, errors, v),
         Expr::Call(c) => {
             for arg in &c.args {
-                validate_expr(&arg.expr, errors);
+                validate_expr(&arg.expr, errors, v);
             }
         }
         Expr::IntrinsicCall(i) => {
             for arg in &i.args {
                 if let IntrinsicArg::Expr(e) = arg {
-                    validate_expr(e, errors);
+                    validate_expr(e, errors, v);
                 }
             }
         }
         Expr::MethodCall(m) => {
-            validate_expr(&m.receiver, errors);
+            validate_expr(&m.receiver, errors, v);
             for arg in &m.args {
-                validate_expr(&arg.expr, errors);
+                validate_expr(&arg.expr, errors, v);
             }
         }
         Expr::AssocFnCall(a) => {
             for arg in &a.args {
-                validate_expr(&arg.expr, errors);
+                validate_expr(&arg.expr, errors, v);
             }
         }
-        Expr::Field(f) => validate_expr(&f.base, errors),
-        Expr::TupleIndex(t) => validate_expr(&t.base, errors),
+        Expr::Field(f) => validate_expr(&f.base, errors, v),
+        Expr::TupleIndex(t) => validate_expr(&t.base, errors, v),
         Expr::Index(i) => {
-            validate_expr(&i.base, errors);
-            validate_expr(&i.index, errors);
+            validate_expr(&i.base, errors, v);
+            validate_expr(&i.index, errors, v);
         }
         Expr::Return(r) => {
-            if let Some(v) = &r.value {
-                validate_expr(v, errors);
+            if let Some(val) = &r.value {
+                validate_expr(val, errors, v);
             }
         }
-        Expr::Paren(p) => validate_expr(&p.inner, errors),
+        Expr::Paren(p) => validate_expr(&p.inner, errors, v),
         Expr::StructLit(s) => {
             for f in &s.fields {
-                validate_expr(&f.value, errors);
+                validate_expr(&f.value, errors, v);
             }
         }
         Expr::EnumStructLit(s) => {
             for f in &s.fields {
-                validate_expr(&f.value, errors);
+                validate_expr(&f.value, errors, v);
             }
         }
         Expr::ArrayLit(a) => {
             for e in &a.elements {
-                validate_expr(e, errors);
+                validate_expr(e, errors, v);
             }
         }
         Expr::Tuple(t) => {
             for e in &t.elems {
-                validate_expr(e, errors);
+                validate_expr(e, errors, v);
             }
         }
-        Expr::Comptime(c) => validate_expr(&c.expr, errors),
-        Expr::ComptimeUnrollFor(_) | Expr::Checked(_) => {
-            // These contain expressions but were not previously validated for patterns.
-            // Any match/let inside is reachable through normal expression traversal if
-            // they choose to expose it; keep conservative for now.
-        }
+        Expr::Comptime(c) => validate_expr(&c.expr, errors, v),
+        Expr::ComptimeUnrollFor(_) | Expr::Checked(_) => {}
         Expr::TypeLit(_)
         | Expr::Int(_)
         | Expr::Float(_)
@@ -3301,7 +3329,64 @@ fn validate_expr(expr: &Expr, errors: &mut Vec<CompileError>) {
     }
 }
 
-fn check_let_pattern(pat: &Pattern, errors: &mut Vec<CompileError>) {
+/// Validate a pattern in a let-binding position.
+///
+/// 1. If the pattern is refutable, emit a `RefutablePatternInLet` error at the
+///    refutable sub-pattern's span. This rule applies unconditionally — it's
+///    a property of the let context, not a preview-gated feature.
+/// 2. If the preview feature is off, emit preview-required errors for nested
+///    sub-patterns and `..` rest shapes.
+fn validate_let_pattern(pat: &Pattern, errors: &mut Vec<CompileError>, v: &AstValidator) {
+    if is_refutable(pat) {
+        errors.push(CompileError::new(
+            ErrorKind::RefutablePatternInLet,
+            refutable_focus_span(pat),
+        ));
+        // Still continue into preview checks so we surface both errors if both
+        // conditions hold. Tests can assert either.
+    }
+    if !v.nested_patterns_enabled {
+        check_let_pattern_preview(pat, errors);
+    }
+}
+
+/// Validate a pattern in a match-arm position. Only the preview gate applies;
+/// refutability is fine in a match arm.
+fn validate_match_pattern(pat: &Pattern, errors: &mut Vec<CompileError>, v: &AstValidator) {
+    if !v.nested_patterns_enabled {
+        check_match_pattern_preview(pat, errors);
+    }
+}
+
+/// Pick the most informative span for a refutability error: the innermost
+/// refutable sub-pattern when we can find one, otherwise the pattern's own span.
+fn refutable_focus_span(pat: &Pattern) -> Span {
+    match pat {
+        Pattern::Int(l) => l.span,
+        Pattern::NegInt(l) => l.span,
+        Pattern::Bool(l) => l.span,
+        Pattern::Path(p) => p.span,
+        Pattern::DataVariant { span, .. } | Pattern::StructVariant { span, .. } => *span,
+        Pattern::Struct { fields, .. } => fields
+            .iter()
+            .filter_map(|f| f.sub.as_ref())
+            .find(|sub| is_refutable(sub))
+            .map(refutable_focus_span)
+            .unwrap_or(pat.span()),
+        Pattern::Tuple { elems, .. } => elems
+            .iter()
+            .filter_map(|e| match e {
+                TupleElemPattern::Pattern(p) if is_refutable(p) => Some(p),
+                _ => None,
+            })
+            .next()
+            .map(refutable_focus_span)
+            .unwrap_or(pat.span()),
+        Pattern::Wildcard(_) | Pattern::Ident { .. } => pat.span(),
+    }
+}
+
+fn check_let_pattern_preview(pat: &Pattern, errors: &mut Vec<CompileError>) {
     // In a let, the legal flat shapes are: Wildcard, Ident, Struct (flat), Tuple (flat).
     // Anything else — or nested sub-patterns / rest — is nested-patterns territory.
     match pat {
@@ -3352,7 +3437,7 @@ fn check_flat_tuple_elem(elem: &TupleElemPattern, errors: &mut Vec<CompileError>
     }
 }
 
-fn check_match_pattern(pat: &Pattern, errors: &mut Vec<CompileError>) {
+fn check_match_pattern_preview(pat: &Pattern, errors: &mut Vec<CompileError>) {
     // Match arms previously accepted: Wildcard, Int, NegInt, Bool, Path,
     // DataVariant/StructVariant with flat bindings. Reject tuple patterns
     // and nested sub-patterns when the preview flag is off.
@@ -5057,5 +5142,72 @@ mod tests {
             result.is_ok(),
             "flat tuple destructure should parse without flag"
         );
+    }
+
+    // ==================== ADR-0049 Phase 3: refutability ====================
+
+    fn assert_refutable_in_let_err(result: &MultiErrorResult<ParseResult>) {
+        use gruel_error::ErrorKind;
+        let errors = result.as_ref().err().expect("expected errors");
+        let found = errors
+            .iter()
+            .any(|e| matches!(e.kind, ErrorKind::RefutablePatternInLet));
+        assert!(
+            found,
+            "expected RefutablePatternInLet in: {:?}",
+            errors
+                .iter()
+                .map(|e| e.kind.to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_refutable_int_literal_in_let() {
+        // `let 1 = x;` is refutable — literals match only one value.
+        let source = "fn main() -> i32 { let 1 = 1; 0 }";
+        assert_refutable_in_let_err(&parse(source));
+    }
+
+    #[test]
+    fn test_refutable_bool_in_let() {
+        let source = "fn main() -> i32 { let true = true; 0 }";
+        assert_refutable_in_let_err(&parse(source));
+    }
+
+    #[test]
+    fn test_refutable_enum_path_in_let() {
+        let source = "fn main() -> i32 { let Color::Red = c; 0 }";
+        assert_refutable_in_let_err(&parse(source));
+    }
+
+    #[test]
+    fn test_refutable_variant_in_let() {
+        // `let Option::Some(x) = opt;` — refutable, even though the data-variant
+        // pattern syntactically parses (requires the nested_patterns gate).
+        let source = "fn main() -> i32 { let Option::Some(x) = opt(); 0 }";
+        let result = parse_with_nested(source);
+        assert_refutable_in_let_err(&result);
+    }
+
+    #[test]
+    fn test_refutable_nested_literal_in_let() {
+        // `let (1, y) = t;` — the inner `1` makes the overall pattern refutable.
+        let source = "fn main() -> i32 { let (1, y) = t(); 0 }";
+        let result = parse_with_nested(source);
+        assert_refutable_in_let_err(&result);
+    }
+
+    #[test]
+    fn test_irrefutable_tuple_in_let() {
+        // All-irrefutable tuple is fine.
+        let source = "fn main() -> i32 { let (a, b) = t(); 0 }";
+        assert!(parse(source).is_ok());
+    }
+
+    #[test]
+    fn test_irrefutable_nested_struct_in_let() {
+        let source = "fn main() -> i32 { let Outer { inner: Inner { x, y }, tag } = make(); 0 }";
+        assert!(parse_with_nested(source).is_ok());
     }
 }

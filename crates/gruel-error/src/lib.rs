@@ -179,6 +179,12 @@ impl ErrorCode {
     pub const PREVIEW_FEATURE_REQUIRED: Self = Self(1100);
 
     // ========================================================================
+    // Pattern errors (E1300-E1399)
+    // ========================================================================
+    /// Refutable pattern used in let binding (ADR-0049).
+    pub const REFUTABLE_PATTERN_IN_LET: Self = Self(1300);
+
+    // ========================================================================
     // Comptime errors (E1200-E1299)
     // ========================================================================
     pub const COMPTIME_EVALUATION_FAILED: Self = Self(1200);
@@ -1067,6 +1073,10 @@ pub enum ErrorKind {
         what: String,
     },
 
+    // Pattern errors (ADR-0049)
+    #[error("refutable pattern in let binding: matches only a subset of possible values")]
+    RefutablePatternInLet,
+
     // Comptime errors
     #[error("comptime evaluation failed: {reason}")]
     ComptimeEvaluationFailed { reason: String },
@@ -1199,6 +1209,9 @@ impl ErrorKind {
 
             // Preview feature errors (E1100-E1199)
             ErrorKind::PreviewFeatureRequired { .. } => ErrorCode::PREVIEW_FEATURE_REQUIRED,
+
+            // Pattern errors (E1300-E1399)
+            ErrorKind::RefutablePatternInLet => ErrorCode::REFUTABLE_PATTERN_IN_LET,
 
             // Comptime errors (E1200-E1299)
             ErrorKind::ComptimeEvaluationFailed { .. } => ErrorCode::COMPTIME_EVALUATION_FAILED,
