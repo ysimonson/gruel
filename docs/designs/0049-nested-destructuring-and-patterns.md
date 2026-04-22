@@ -465,7 +465,7 @@ Behind `PreviewFeature::NestedPatterns` until Phase 7. Early phases establish th
 recursive core; Phase 6 layers in `..`. The anon-struct alias sema fix (Phase 7) can
 ship without the preview gate since it's a bug fix, not a new feature.
 
-- [ ] **Phase 1: AST unification**
+- [x] **Phase 1: AST unification**
   - Introduce the unified `Pattern` enum in `gruel-parser/src/ast.rs` with
     `TupleElemPattern` and `FieldPattern` helpers (§7). Include `TupleElemPattern::Rest`
     and the `..`-sentinel field-pattern shape from the start so Phase 6 only adds

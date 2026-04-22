@@ -650,20 +650,29 @@ pub struct MatchArm {
     pub span: Span,
 }
 
-/// A pattern in a match arm.
+/// A pattern in a let binding or match arm (ADR-0049).
+///
+/// A single recursive `Pattern` type is used in both contexts. Sema enforces
+/// refutability per context (let requires irrefutable patterns, match accepts any).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pattern {
-    /// Wildcard pattern `_` - matches anything
+    /// Wildcard pattern `_` - matches anything, irrefutable
     Wildcard(Span),
-    /// Integer literal pattern (positive or zero)
+    /// Named binding (`x` or `mut x`), irrefutable
+    Ident {
+        is_mut: bool,
+        name: Ident,
+        span: Span,
+    },
+    /// Integer literal pattern (positive or zero), refutable
     Int(IntLit),
-    /// Negative integer literal pattern (e.g., `-1`, `-42`)
+    /// Negative integer literal pattern (e.g., `-1`, `-42`), refutable
     NegInt(NegIntLit),
-    /// Boolean literal pattern
+    /// Boolean literal pattern, refutable
     Bool(BoolLit),
-    /// Path pattern (e.g., `Color::Red` for enum variant)
+    /// Path pattern (e.g., `Color::Red` for a unit enum variant), refutable
     Path(PathPattern),
-    /// Data variant pattern with bindings (e.g., `Option::Some(x)`)
+    /// Data variant pattern with positional sub-patterns (e.g., `Option::Some(x)`)
     DataVariant {
         /// Optional module prefix
         base: Option<Box<Expr>>,
@@ -671,11 +680,11 @@ pub enum Pattern {
         type_name: Ident,
         /// Variant name
         variant: Ident,
-        /// Bindings for each field
-        bindings: Vec<PatternBinding>,
+        /// Sub-patterns for each field (may include `..` via `TupleElemPattern::Rest`)
+        fields: Vec<TupleElemPattern>,
         span: Span,
     },
-    /// Struct variant pattern with named field bindings (e.g., `Shape::Circle { radius }`)
+    /// Struct variant pattern with named field sub-patterns (e.g., `Shape::Circle { radius }`)
     StructVariant {
         /// Optional module prefix
         base: Option<Box<Expr>>,
@@ -683,28 +692,58 @@ pub enum Pattern {
         type_name: Ident,
         /// Variant name
         variant: Ident,
-        /// Named field bindings
-        fields: Vec<PatternFieldBinding>,
+        /// Named field sub-patterns (may include `..` via a field with `field_name: None`)
+        fields: Vec<FieldPattern>,
+        span: Span,
+    },
+    /// Struct destructure pattern (e.g., `Point { x, y }`), irrefutable when all sub-patterns are.
+    Struct {
+        /// The struct type name (for anonymous structs, resolved via a local type alias)
+        type_name: Ident,
+        /// Named field sub-patterns (may include `..`)
+        fields: Vec<FieldPattern>,
+        span: Span,
+    },
+    /// Tuple destructure pattern (e.g., `(a, b)` or `(a, .., c)`), irrefutable when all sub-patterns are.
+    Tuple {
+        elems: Vec<TupleElemPattern>,
         span: Span,
     },
 }
 
-/// A named field binding in a struct variant pattern.
+/// One position in a tuple-like sequence (tuple pattern or data-variant fields):
+/// either a sub-pattern or the rest-pattern `..` (ADR-0049 Phase 6).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PatternFieldBinding {
-    /// The field name being matched
-    pub field_name: Ident,
-    /// The binding for this field
-    pub binding: PatternBinding,
+pub enum TupleElemPattern {
+    Pattern(Pattern),
+    /// `..` at this position; matches zero or more remaining positions.
+    Rest(Span),
 }
 
-/// A binding in a data variant pattern.
+/// A named field binding in a struct / struct-variant pattern.
+///
+/// When `field_name` is `None`, this is the `..` sentinel (ADR-0049 Phase 6).
+/// Otherwise, `sub` may be:
+/// - `None` — shorthand: `field` (binds field to a same-named local).
+/// - `Some(Pattern::Wildcard(..))` — `field: _` drops the field.
+/// - `Some(Pattern::Ident { ... })` — `field: name` renames.
+/// - `Some(other)` — recursive destructure of the field's value.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PatternBinding {
-    /// Wildcard binding (`_`)
-    Wildcard(Span),
-    /// Named binding (`x` or `mut x`)
-    Ident { is_mut: bool, name: Ident },
+pub struct FieldPattern {
+    pub field_name: Option<Ident>,
+    pub sub: Option<Pattern>,
+    /// Only meaningful for shorthand or when `sub` is `Pattern::Ident`.
+    pub is_mut: bool,
+    pub span: Span,
+}
+
+impl TupleElemPattern {
+    pub fn span(&self) -> Span {
+        match self {
+            TupleElemPattern::Pattern(p) => p.span(),
+            TupleElemPattern::Rest(s) => *s,
+        }
+    }
 }
 
 /// A negative integer literal pattern.
@@ -733,12 +772,15 @@ impl Pattern {
     pub fn span(&self) -> Span {
         match self {
             Pattern::Wildcard(span) => *span,
+            Pattern::Ident { span, .. } => *span,
             Pattern::Int(lit) => lit.span,
             Pattern::NegInt(lit) => lit.span,
             Pattern::Bool(lit) => lit.span,
             Pattern::Path(path) => path.span,
             Pattern::DataVariant { span, .. } => *span,
             Pattern::StructVariant { span, .. } => *span,
+            Pattern::Struct { span, .. } => *span,
+            Pattern::Tuple { span, .. } => *span,
         }
     }
 }
@@ -942,86 +984,19 @@ pub enum Statement {
     Expr(Expr),
 }
 
-/// A pattern in a let binding.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LetPattern {
-    /// Named binding (e.g., `x`, `_unused`)
-    Ident(Ident),
-    /// Wildcard pattern `_` - discards the value without creating a binding
-    Wildcard(Span),
-    /// Struct destructuring (e.g., `Point { x, y }`)
-    Struct {
-        type_name: Ident,
-        fields: Vec<DestructureField>,
-        span: Span,
-    },
-    /// Tuple destructuring (e.g., `(a, b)`, `(mut a, _, c)`) (ADR-0048)
-    Tuple {
-        elems: Vec<TupleBindingElem>,
-        span: Span,
-    },
-}
-
-/// One element of a tuple destructuring pattern.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TupleBindingElem {
-    pub binding: TupleBinding,
-    /// Whether the binding is `mut`. Only meaningful for `TupleBinding::Ident`.
-    pub is_mut: bool,
-}
-
-/// The kind of binding for a tuple destructure element.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TupleBinding {
-    /// Bind the element to a named local
-    Ident(Ident),
-    /// `_` — drop the element immediately (if needed)
-    Wildcard(Span),
-}
-
-/// A field binding in a struct destructure pattern.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DestructureField {
-    /// The struct field being bound
-    pub field_name: Ident,
-    /// How the field is bound
-    pub binding: DestructureBinding,
-    /// Whether the binding is mutable
-    pub is_mut: bool,
-}
-
-/// How a field is bound in a struct destructure.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DestructureBinding {
-    /// `field` — bind to same name
-    Shorthand,
-    /// `field: new_name`
-    Renamed(Ident),
-    /// `field: _`
-    Wildcard(Span),
-}
-
-impl LetPattern {
-    /// Get the span of this pattern.
-    pub fn span(&self) -> Span {
-        match self {
-            LetPattern::Ident(ident) => ident.span,
-            LetPattern::Wildcard(span) => *span,
-            LetPattern::Struct { span, .. } => *span,
-            LetPattern::Tuple { span, .. } => *span,
-        }
-    }
-}
-
 /// A let binding statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LetStatement {
     /// Directives applied to this let binding
     pub directives: Directives,
-    /// Whether the binding is mutable
+    /// Whether the binding is mutable.
+    ///
+    /// For ident patterns this is the binding's mutability. For destructuring
+    /// patterns, per-binding mutability is stored on each sub-pattern; this
+    /// top-level flag is ignored.
     pub is_mut: bool,
-    /// The binding pattern (identifier or wildcard)
-    pub pattern: LetPattern,
+    /// The binding pattern (ADR-0049). Must be irrefutable in a let statement.
+    pub pattern: Pattern,
     /// Optional type annotation
     pub ty: Option<TypeExpr>,
     /// Initializer expression
@@ -1599,6 +1574,116 @@ fn fmt_block_expr(f: &mut fmt::Formatter<'_>, block: &BlockExpr, level: usize) -
     fmt_expr(f, &block.expr, level)
 }
 
+/// Render a `Pattern` into the single-line bind-site form used by `Statement::Let`
+/// display. This is a compact diagnostic-style format, not a parse-roundtrip form.
+fn fmt_pattern(f: &mut fmt::Formatter<'_>, pat: &Pattern) -> fmt::Result {
+    match pat {
+        Pattern::Wildcard(_) => write!(f, " _"),
+        Pattern::Ident {
+            is_mut: true, name, ..
+        } => write!(f, " mut sym:{}", name.name.into_usize()),
+        Pattern::Ident { name, .. } => write!(f, " sym:{}", name.name.into_usize()),
+        Pattern::Int(lit) => write!(f, " {}", lit.value),
+        Pattern::NegInt(lit) => write!(f, " -{}", lit.value),
+        Pattern::Bool(lit) => write!(f, " {}", lit.value),
+        Pattern::Path(path) => write!(
+            f,
+            " sym:{}::sym:{}",
+            path.type_name.name.into_usize(),
+            path.variant.name.into_usize()
+        ),
+        Pattern::DataVariant {
+            type_name,
+            variant,
+            fields,
+            ..
+        } => {
+            write!(
+                f,
+                " sym:{}::sym:{}(",
+                type_name.name.into_usize(),
+                variant.name.into_usize()
+            )?;
+            for (i, elem) in fields.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ",")?;
+                }
+                fmt_tuple_elem(f, elem)?;
+            }
+            write!(f, " )")
+        }
+        Pattern::StructVariant {
+            type_name,
+            variant,
+            fields,
+            ..
+        } => {
+            write!(
+                f,
+                " sym:{}::sym:{} {{",
+                type_name.name.into_usize(),
+                variant.name.into_usize()
+            )?;
+            for (i, fld) in fields.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ",")?;
+                }
+                fmt_field_pattern(f, fld)?;
+            }
+            write!(f, " }}")
+        }
+        Pattern::Struct {
+            type_name, fields, ..
+        } => {
+            write!(f, " sym:{} {{", type_name.name.into_usize())?;
+            for (i, fld) in fields.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ",")?;
+                }
+                fmt_field_pattern(f, fld)?;
+            }
+            write!(f, " }}")
+        }
+        Pattern::Tuple { elems, .. } => {
+            write!(f, " (")?;
+            for (i, elem) in elems.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ",")?;
+                }
+                fmt_tuple_elem(f, elem)?;
+            }
+            if elems.len() == 1 {
+                write!(f, ",")?;
+            }
+            write!(f, " )")
+        }
+    }
+}
+
+fn fmt_tuple_elem(f: &mut fmt::Formatter<'_>, elem: &TupleElemPattern) -> fmt::Result {
+    match elem {
+        TupleElemPattern::Pattern(p) => fmt_pattern(f, p),
+        TupleElemPattern::Rest(_) => write!(f, " .."),
+    }
+}
+
+fn fmt_field_pattern(f: &mut fmt::Formatter<'_>, fld: &FieldPattern) -> fmt::Result {
+    match &fld.field_name {
+        None => write!(f, " .."),
+        Some(name) => {
+            if fld.is_mut {
+                write!(f, " mut")?;
+            }
+            write!(f, " sym:{}", name.name.into_usize())?;
+            if let Some(sub) = &fld.sub {
+                write!(f, ":")?;
+                fmt_pattern(f, sub)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn fmt_stmt(f: &mut fmt::Formatter<'_>, stmt: &Statement, level: usize) -> fmt::Result {
     indent(f, level)?;
     match stmt {
@@ -1607,53 +1692,7 @@ fn fmt_stmt(f: &mut fmt::Formatter<'_>, stmt: &Statement, level: usize) -> fmt::
             if let_stmt.is_mut {
                 write!(f, " mut")?;
             }
-            match &let_stmt.pattern {
-                LetPattern::Ident(ident) => write!(f, " sym:{}", ident.name.into_usize())?,
-                LetPattern::Wildcard(_) => write!(f, " _")?,
-                LetPattern::Struct {
-                    type_name, fields, ..
-                } => {
-                    write!(f, " sym:{} {{", type_name.name.into_usize())?;
-                    for (i, field) in fields.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ",")?;
-                        }
-                        if field.is_mut {
-                            write!(f, " mut")?;
-                        }
-                        write!(f, " sym:{}", field.field_name.name.into_usize())?;
-                        match &field.binding {
-                            DestructureBinding::Shorthand => {}
-                            DestructureBinding::Renamed(name) => {
-                                write!(f, ": sym:{}", name.name.into_usize())?;
-                            }
-                            DestructureBinding::Wildcard(_) => write!(f, ": _")?,
-                        }
-                    }
-                    write!(f, " }}")?;
-                }
-                LetPattern::Tuple { elems, .. } => {
-                    write!(f, " (")?;
-                    for (i, elem) in elems.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ",")?;
-                        }
-                        if elem.is_mut {
-                            write!(f, " mut")?;
-                        }
-                        match &elem.binding {
-                            TupleBinding::Ident(name) => {
-                                write!(f, " sym:{}", name.name.into_usize())?;
-                            }
-                            TupleBinding::Wildcard(_) => write!(f, " _")?,
-                        }
-                    }
-                    if elems.len() == 1 {
-                        write!(f, ",")?;
-                    }
-                    write!(f, " )")?;
-                }
-            }
+            fmt_pattern(f, &let_stmt.pattern)?;
             if let Some(ref ty) = let_stmt.ty {
                 write!(f, ": {}", ty)?;
             }

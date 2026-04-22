@@ -6,14 +6,14 @@
 use crate::ast::{
     AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget, AssocFnCallExpr, Ast,
     BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr, CheckedBlockExpr,
-    ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr, DestructureBinding,
-    DestructureField, Directive, DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr,
-    EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, FloatLit, ForExpr, Function, Ident, IfExpr,
-    IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr,
-    MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr,
-    PathPattern, Pattern, PatternBinding, PatternFieldBinding, ReturnExpr, SelfExpr, SelfParam,
-    Statement, StringLit, StructDecl, StructLitExpr, TupleBinding, TupleBindingElem, TupleExpr,
-    TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
+    ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr, Directive, DirectiveArg,
+    Directives, DropFn, EnumDecl, EnumStructLitExpr, EnumVariant, Expr, FieldDecl, FieldExpr,
+    FieldInit, FieldPattern, FloatLit, ForExpr, Function, Ident, IfExpr, IndexExpr, IntLit,
+    IntrinsicArg, IntrinsicCallExpr, Item, LetStatement, LoopExpr, MatchArm, MatchExpr, Method,
+    MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern,
+    ReturnExpr, SelfExpr, SelfParam, Statement, StringLit, StructDecl, StructLitExpr,
+    TupleElemPattern, TupleExpr, TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp,
+    UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -844,47 +844,63 @@ where
         }),
     };
 
-    // Parser for a single binding in a data variant pattern: `_`, `x`, or `mut x`
+    // Parser for a single binding in a data variant pattern: `_`, `x`, or `mut x`.
+    // In Phase 1 these are the only "sub-patterns" the parser emits — nested sub-patterns
+    // open up in Phase 2. The AST uses a full `Pattern` in these slots.
     let pattern_binding = choice((
-        just(TokenKind::Underscore).map_with(|_, e| PatternBinding::Wildcard(span_from_extra(e))),
+        just(TokenKind::Underscore).map_with(|_, e| Pattern::Wildcard(span_from_extra(e))),
         just(TokenKind::Mut)
             .ignore_then(ident_parser())
-            .map(|name| PatternBinding::Ident { is_mut: true, name }),
-        ident_parser().map(|name| PatternBinding::Ident {
+            .map_with(|name, e| Pattern::Ident {
+                is_mut: true,
+                name,
+                span: span_from_extra(e),
+            }),
+        ident_parser().map_with(|name, e| Pattern::Ident {
             is_mut: false,
             name,
+            span: span_from_extra(e),
         }),
     ));
 
-    // Parser for optional `(binding, binding, ...)` suffix on a path pattern
+    // Parser for optional `(binding, binding, ...)` suffix on a path pattern.
+    // Emits `Vec<TupleElemPattern>` so the AST is ready for `..` (Phase 6).
     let bindings_suffix = pattern_binding
         .clone()
+        .map(TupleElemPattern::Pattern)
         .separated_by(just(TokenKind::Comma))
         .allow_trailing()
         .collect::<Vec<_>>()
         .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen));
 
     // Parser for a single field binding in a struct variant pattern:
-    // `field: binding` or `field` (shorthand for `field: field`)
+    // `field: binding` or `field` (shorthand for `field: field`).
     let pattern_field_binding = {
-        let explicit = ident_parser()
+        let explicit = just(TokenKind::Mut)
+            .or_not()
+            .then(ident_parser())
             .then_ignore(just(TokenKind::Colon))
             .then(pattern_binding.clone())
-            .map(|(field_name, binding)| PatternFieldBinding {
-                field_name,
-                binding,
+            .map_with(|((is_mut, field_name), sub), e| FieldPattern {
+                field_name: Some(field_name),
+                sub: Some(sub),
+                is_mut: is_mut.is_some(),
+                span: span_from_extra(e),
             });
-        let shorthand = ident_parser().map(|name| PatternFieldBinding {
-            field_name: name,
-            binding: PatternBinding::Ident {
-                is_mut: false,
-                name,
-            },
-        });
+        let shorthand =
+            just(TokenKind::Mut)
+                .or_not()
+                .then(ident_parser())
+                .map_with(|(is_mut, name), e| FieldPattern {
+                    field_name: Some(name),
+                    sub: None,
+                    is_mut: is_mut.is_some(),
+                    span: span_from_extra(e),
+                });
         choice((explicit, shorthand))
     };
 
-    // Parser for optional `{ field: binding, ... }` suffix on a path pattern
+    // Parser for optional `{ field: binding, ... }` suffix on a path pattern.
     let struct_bindings_suffix = pattern_field_binding
         .separated_by(just(TokenKind::Comma))
         .allow_trailing()
@@ -894,8 +910,8 @@ where
     // Enum for the suffix on an enum variant pattern: tuple, struct, or none.
     #[derive(Debug, Clone)]
     enum PatternSuffix {
-        Tuple(Vec<PatternBinding>),
-        Struct(Vec<PatternFieldBinding>),
+        Tuple(Vec<TupleElemPattern>),
+        Struct(Vec<FieldPattern>),
     }
 
     let pattern_suffix = choice((
@@ -916,11 +932,11 @@ where
                 span,
             };
             match suffix_opt {
-                Some(PatternSuffix::Tuple(bindings)) => Pattern::DataVariant {
+                Some(PatternSuffix::Tuple(fields)) => Pattern::DataVariant {
                     base: None,
                     type_name,
                     variant,
-                    bindings,
+                    fields,
                     span,
                 },
                 Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
@@ -945,11 +961,11 @@ where
         .then(ident_parser())
         .then(pattern_suffix.clone().or_not())
         .map_with(|((type_name, variant), suffix_opt), e| match suffix_opt {
-            Some(PatternSuffix::Tuple(bindings)) => Pattern::DataVariant {
+            Some(PatternSuffix::Tuple(fields)) => Pattern::DataVariant {
                 base: None,
                 type_name,
                 variant,
-                bindings,
+                fields,
                 span: span_from_extra(e),
             },
             Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
@@ -1006,11 +1022,11 @@ where
             };
 
             match suffix_opt {
-                Some(PatternSuffix::Tuple(bindings)) => Pattern::DataVariant {
+                Some(PatternSuffix::Tuple(fields)) => Pattern::DataVariant {
                     base: Some(Box::new(base_expr)),
                     type_name,
                     variant,
-                    bindings,
+                    fields,
                     span: span_from_extra(e),
                 },
                 Some(PatternSuffix::Struct(fields)) => Pattern::StructVariant {
@@ -2063,15 +2079,19 @@ enum ExprFollower {
     End,
 }
 
-/// Parser for a let binding pattern: identifier, wildcard, or struct destructure.
-fn let_pattern_parser<'src, I>() -> GruelParser<'src, I, LetPattern>
+/// Parser for a let binding pattern (ADR-0049): an irrefutable `Pattern`.
+///
+/// In Phase 1 this produces only the flat forms that existed before: ident,
+/// wildcard, flat struct destructure, flat tuple destructure. Nesting and
+/// `..` open up in later phases.
+fn let_pattern_parser<'src, I>() -> GruelParser<'src, I, Pattern>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
     let wildcard =
-        just(TokenKind::Underscore).map_with(|_, e| LetPattern::Wildcard(span_from_extra(e)));
+        just(TokenKind::Underscore).map_with(|_, e| Pattern::Wildcard(span_from_extra(e)));
 
-    // A single destructure field: [mut] field_name [: binding]
+    // A single destructure field: [mut] field_name [: (_ | new_name)]
     let destructure_field = just(TokenKind::Mut)
         .or_not()
         .then(ident_parser())
@@ -2079,15 +2099,20 @@ where
             just(TokenKind::Colon)
                 .ignore_then(choice((
                     just(TokenKind::Underscore)
-                        .map_with(|_, e| DestructureBinding::Wildcard(span_from_extra(e))),
-                    ident_parser().map(DestructureBinding::Renamed),
+                        .map_with(|_, e| Pattern::Wildcard(span_from_extra(e))),
+                    ident_parser().map_with(|name, e| Pattern::Ident {
+                        is_mut: false,
+                        name,
+                        span: span_from_extra(e),
+                    }),
                 )))
                 .or_not(),
         )
-        .map(|((is_mut, field_name), binding)| DestructureField {
-            field_name,
-            binding: binding.unwrap_or(DestructureBinding::Shorthand),
+        .map_with(|((is_mut, field_name), sub), e| FieldPattern {
+            field_name: Some(field_name),
+            sub,
             is_mut: is_mut.is_some(),
+            span: span_from_extra(e),
         });
 
     // Struct destructure: TypeName { field1, field2, ... }
@@ -2099,13 +2124,17 @@ where
                 .collect::<Vec<_>>()
                 .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
         )
-        .map_with(|(type_name, fields), e| LetPattern::Struct {
+        .map_with(|(type_name, fields), e| Pattern::Struct {
             type_name,
             fields,
             span: span_from_extra(e),
         });
 
-    let ident = ident_parser().map(LetPattern::Ident);
+    let ident = ident_parser().map_with(|name, e| Pattern::Ident {
+        is_mut: false,
+        name,
+        span: span_from_extra(e),
+    });
 
     // Tuple destructure: (mut? ident | _) (, ...)+ ,? but at least one comma overall,
     // so `(x)` is not mistaken for a tuple of one. Mirrors the tuple-type rule.
@@ -2116,12 +2145,22 @@ where
     let tuple_elem = just(TokenKind::Mut)
         .or_not()
         .then(choice((
-            just(TokenKind::Underscore).map_with(|_, e| TupleBinding::Wildcard(span_from_extra(e))),
-            ident_parser().map(TupleBinding::Ident),
+            just(TokenKind::Underscore).map_with(|_, e| Pattern::Wildcard(span_from_extra(e))),
+            ident_parser().map_with(|name, e| Pattern::Ident {
+                is_mut: false,
+                name,
+                span: span_from_extra(e),
+            }),
         )))
-        .map(|(is_mut, binding)| TupleBindingElem {
-            binding,
-            is_mut: is_mut.is_some(),
+        .map(|(is_mut_tok, inner)| match (is_mut_tok, inner) {
+            (Some(_), Pattern::Ident { name, span, .. }) => {
+                TupleElemPattern::Pattern(Pattern::Ident {
+                    is_mut: true,
+                    name,
+                    span,
+                })
+            }
+            (_, p) => TupleElemPattern::Pattern(p),
         });
     let tuple_destructure = just(TokenKind::LParen)
         .ignore_then(tuple_elem.clone())
@@ -2137,7 +2176,7 @@ where
             let mut elems = Vec::with_capacity(1 + rest.len());
             elems.push(first);
             elems.extend(rest);
-            LetPattern::Tuple {
+            Pattern::Tuple {
                 elems,
                 span: span_from_extra(e),
             }
@@ -2156,7 +2195,7 @@ where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
     // Box after 2 thens to keep accumulated type short.
-    let let_head: GruelParser<I, (Directives, bool, LetPattern)> = directives_parser()
+    let let_head: GruelParser<I, (Directives, bool, Pattern)> = directives_parser()
         .then(just(TokenKind::Let).ignore_then(just(TokenKind::Mut).or_not().map(|m| m.is_some())))
         .then(let_pattern_parser())
         .map(|((d, m), p)| (d, m, p))
@@ -3231,12 +3270,10 @@ mod tests {
                         Statement::Let(let_stmt) => {
                             assert!(!let_stmt.is_mut);
                             match &let_stmt.pattern {
-                                LetPattern::Ident(ident) => {
-                                    assert_eq!(result.get(ident.name), "x")
+                                Pattern::Ident { name, .. } => {
+                                    assert_eq!(result.get(name.name), "x")
                                 }
-                                LetPattern::Wildcard(_) => panic!("expected Ident, got Wildcard"),
-                                LetPattern::Struct { .. } => panic!("expected Ident, got Struct"),
-                                LetPattern::Tuple { .. } => panic!("expected Ident, got Tuple"),
+                                other => panic!("expected Ident, got {:?}", other),
                             }
                         }
                         _ => panic!("expected Let"),
@@ -4496,6 +4533,21 @@ mod tests {
         }
     }
 
+    fn assert_tuple_ident(
+        elem: &TupleElemPattern,
+        result: &ParseResult,
+        expected: &str,
+        expected_mut: bool,
+    ) {
+        match elem {
+            TupleElemPattern::Pattern(Pattern::Ident { name, is_mut, .. }) => {
+                assert_eq!(result.get(name.name), expected);
+                assert_eq!(*is_mut, expected_mut);
+            }
+            other => panic!("expected Pattern::Ident, got {:?}", other),
+        }
+    }
+
     #[test]
     fn test_tuple_destructure_basic() {
         let result = parse("fn main() -> i32 { let (a, b) = (1, 2); a }").unwrap();
@@ -4503,21 +4555,10 @@ mod tests {
             Item::Function(f) => match &f.body {
                 Expr::Block(block) => match &block.statements[0] {
                     Statement::Let(let_stmt) => match &let_stmt.pattern {
-                        LetPattern::Tuple { elems, .. } => {
+                        Pattern::Tuple { elems, .. } => {
                             assert_eq!(elems.len(), 2);
-                            assert!(!elems[0].is_mut);
-                            match &elems[0].binding {
-                                TupleBinding::Ident(name) => {
-                                    assert_eq!(result.get(name.name), "a")
-                                }
-                                _ => panic!("expected Ident binding"),
-                            }
-                            match &elems[1].binding {
-                                TupleBinding::Ident(name) => {
-                                    assert_eq!(result.get(name.name), "b")
-                                }
-                                _ => panic!("expected Ident binding"),
-                            }
+                            assert_tuple_ident(&elems[0], &result, "a", false);
+                            assert_tuple_ident(&elems[1], &result, "b", false);
                         }
                         _ => panic!("expected Tuple pattern"),
                     },
@@ -4536,12 +4577,13 @@ mod tests {
             Item::Function(f) => match &f.body {
                 Expr::Block(block) => match &block.statements[0] {
                     Statement::Let(let_stmt) => match &let_stmt.pattern {
-                        LetPattern::Tuple { elems, .. } => {
+                        Pattern::Tuple { elems, .. } => {
                             assert_eq!(elems.len(), 2);
-                            assert!(elems[0].is_mut);
-                            assert!(!elems[1].is_mut);
-                            assert!(matches!(elems[0].binding, TupleBinding::Ident(_)));
-                            assert!(matches!(elems[1].binding, TupleBinding::Wildcard(_)));
+                            assert_tuple_ident(&elems[0], &result, "a", true);
+                            assert!(matches!(
+                                &elems[1],
+                                TupleElemPattern::Pattern(Pattern::Wildcard(_))
+                            ));
                         }
                         _ => panic!("expected Tuple pattern"),
                     },
@@ -4560,7 +4602,7 @@ mod tests {
             Item::Function(f) => match &f.body {
                 Expr::Block(block) => match &block.statements[0] {
                     Statement::Let(let_stmt) => match &let_stmt.pattern {
-                        LetPattern::Tuple { elems, .. } => {
+                        Pattern::Tuple { elems, .. } => {
                             assert_eq!(elems.len(), 1);
                         }
                         _ => panic!("expected Tuple pattern"),

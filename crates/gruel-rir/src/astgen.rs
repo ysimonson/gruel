@@ -8,11 +8,11 @@ use lasso::{Spur, ThreadedRodeo};
 /// Known type intrinsics that take a type argument rather than an expression.
 /// These intrinsics operate on types at compile time (e.g., @size_of(i32)).
 const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of", "typeName", "typeInfo"];
-use gruel_parser::ast::{ConstDecl, DestructureBinding, DropFn, PatternBinding};
+use gruel_parser::ast::{ConstDecl, DropFn, FieldPattern, TupleElemPattern};
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
-    Function, IntrinsicArg, Item, LetPattern, Method, ParamMode, Pattern, Statement, StructDecl,
-    TypeExpr, UnaryOp, ast::Visibility,
+    Function, IntrinsicArg, Item, Method, ParamMode, Pattern, Statement, StructDecl, TypeExpr,
+    UnaryOp, ast::Visibility,
 };
 
 use crate::inst::{
@@ -1013,25 +1013,11 @@ impl<'a> AstGen<'a> {
                 base,
                 type_name,
                 variant,
-                bindings,
+                fields,
                 span,
             } => {
                 let module = base.as_ref().map(|b| self.gen_expr(b));
-                let rir_bindings = bindings
-                    .iter()
-                    .map(|b| match b {
-                        PatternBinding::Wildcard(_) => RirPatternBinding {
-                            is_wildcard: true,
-                            is_mut: false,
-                            name: None,
-                        },
-                        PatternBinding::Ident { is_mut, name } => RirPatternBinding {
-                            is_wildcard: false,
-                            is_mut: *is_mut,
-                            name: Some(name.name),
-                        },
-                    })
-                    .collect();
+                let rir_bindings = fields.iter().map(tuple_elem_to_rir_binding).collect();
                 RirPattern::DataVariant {
                     module,
                     type_name: type_name.name,
@@ -1050,23 +1036,13 @@ impl<'a> AstGen<'a> {
                 let module = base.as_ref().map(|b| self.gen_expr(b));
                 let field_bindings = fields
                     .iter()
-                    .map(|fb| {
-                        let binding = match &fb.binding {
-                            PatternBinding::Wildcard(_) => RirPatternBinding {
-                                is_wildcard: true,
-                                is_mut: false,
-                                name: None,
-                            },
-                            PatternBinding::Ident { is_mut, name } => RirPatternBinding {
-                                is_wildcard: false,
-                                is_mut: *is_mut,
-                                name: Some(name.name),
-                            },
-                        };
-                        RirStructPatternBinding {
-                            field_name: fb.field_name.name,
-                            binding,
-                        }
+                    .map(|fb| RirStructPatternBinding {
+                        field_name: fb
+                            .field_name
+                            .as_ref()
+                            .expect("nested/rest field patterns not yet emitted in Phase 1")
+                            .name,
+                        binding: field_pattern_to_rir_binding(fb),
                     })
                     .collect();
                 RirPattern::StructVariant {
@@ -1076,6 +1052,15 @@ impl<'a> AstGen<'a> {
                     field_bindings,
                     span: *span,
                 }
+            }
+            // These variants can only appear inside a let-pattern (Struct, Tuple) or as
+            // top-level/nested leaves (Ident). Match-arm patterns reach this branch only
+            // if sema accepted something the Phase-1 parser wouldn't emit at this level.
+            Pattern::Ident { .. } | Pattern::Struct { .. } | Pattern::Tuple { .. } => {
+                unreachable!(
+                    "gen_pattern called on non-match Pattern variant: {:?}; these flow through gen_statement",
+                    pattern
+                );
             }
         }
     }
@@ -1113,25 +1098,12 @@ impl<'a> AstGen<'a> {
     fn gen_statement(&mut self, stmt: &Statement) -> InstRef {
         match stmt {
             Statement::Let(let_stmt) => match &let_stmt.pattern {
-                LetPattern::Struct {
+                Pattern::Struct {
                     type_name, fields, ..
                 } => {
                     let rir_fields: Vec<RirDestructureField> = fields
                         .iter()
-                        .map(|f| {
-                            let binding_name = match &f.binding {
-                                DestructureBinding::Shorthand => None,
-                                DestructureBinding::Renamed(ident) => Some(ident.name),
-                                DestructureBinding::Wildcard(_) => None,
-                            };
-                            let is_wildcard = matches!(&f.binding, DestructureBinding::Wildcard(_));
-                            RirDestructureField {
-                                field_name: f.field_name.name,
-                                binding_name,
-                                is_wildcard,
-                                is_mut: f.is_mut,
-                            }
-                        })
+                        .map(field_pattern_to_rir_destructure_field)
                         .collect();
                     let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
                     let init = self.gen_expr(&let_stmt.init);
@@ -1150,23 +1122,13 @@ impl<'a> AstGen<'a> {
                 // Lowered to the same RIR as struct destructure, reusing StructDestructure
                 // with synthetic field names "0", "1", ... and a sentinel type_name
                 // ("__tuple__") that sema recognises and resolves against the init's type.
-                LetPattern::Tuple { elems, .. } => {
-                    use gruel_parser::ast::TupleBinding;
+                Pattern::Tuple { elems, .. } => {
                     let rir_fields: Vec<RirDestructureField> = elems
                         .iter()
                         .enumerate()
                         .map(|(i, e)| {
                             let field_name = self.interner.get_or_intern(&i.to_string());
-                            let (binding_name, is_wildcard) = match &e.binding {
-                                TupleBinding::Ident(name) => (Some(name.name), false),
-                                TupleBinding::Wildcard(_) => (None, true),
-                            };
-                            RirDestructureField {
-                                field_name,
-                                binding_name,
-                                is_wildcard,
-                                is_mut: e.is_mut,
-                            }
+                            tuple_elem_to_rir_destructure_field(e, field_name)
                         })
                         .collect();
                     let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
@@ -1185,11 +1147,17 @@ impl<'a> AstGen<'a> {
                 pattern => {
                     let directives = self.convert_directives(&let_stmt.directives);
                     let (directives_start, directives_len) = self.rir.add_directives(&directives);
+                    let is_mut = match pattern {
+                        Pattern::Ident { is_mut, .. } => *is_mut || let_stmt.is_mut,
+                        _ => let_stmt.is_mut,
+                    };
                     let name = match pattern {
-                        LetPattern::Ident(ident) => Some(ident.name),
-                        LetPattern::Wildcard(_) => None,
-                        LetPattern::Struct { .. } => unreachable!(),
-                        LetPattern::Tuple { .. } => unreachable!(),
+                        Pattern::Ident { name, .. } => Some(name.name),
+                        Pattern::Wildcard(_) => None,
+                        _ => unreachable!(
+                            "Phase 1 let-statement parser only emits Ident/Wildcard/Struct/Tuple; got {:?}",
+                            pattern
+                        ),
                     };
                     let ty = let_stmt.ty.as_ref().map(|t| self.intern_type(t));
                     let init = self.gen_expr(&let_stmt.init);
@@ -1198,7 +1166,7 @@ impl<'a> AstGen<'a> {
                             directives_start,
                             directives_len,
                             name,
-                            is_mut: let_stmt.is_mut,
+                            is_mut,
                             ty,
                             init,
                         },
@@ -1244,6 +1212,123 @@ impl<'a> AstGen<'a> {
                 // The result is discarded, but we still return the InstRef
                 self.gen_expr(expr)
             }
+        }
+    }
+}
+
+/// Convert a match-arm tuple-element sub-pattern into the RIR binding shape used by
+/// `DataVariant` / `StructVariant`. Phase-1 restriction: sub-patterns are leaves
+/// (Wildcard / Ident).
+fn tuple_elem_to_rir_binding(elem: &TupleElemPattern) -> RirPatternBinding {
+    match elem {
+        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => RirPatternBinding {
+            is_wildcard: true,
+            is_mut: false,
+            name: None,
+        },
+        TupleElemPattern::Pattern(Pattern::Ident { is_mut, name, .. }) => RirPatternBinding {
+            is_wildcard: false,
+            is_mut: *is_mut,
+            name: Some(name.name),
+        },
+        TupleElemPattern::Pattern(other) => panic!(
+            "nested patterns in data variants not yet supported (Phase 1); got {:?}",
+            other
+        ),
+        TupleElemPattern::Rest(_) => {
+            panic!("rest patterns not yet supported (Phase 6)")
+        }
+    }
+}
+
+/// Convert a struct-variant field-pattern into the RIR binding shape. Phase-1
+/// restriction: sub-pattern is `None` (shorthand) or a leaf Pattern::Ident/Wildcard.
+fn field_pattern_to_rir_binding(fb: &FieldPattern) -> RirPatternBinding {
+    let name = fb
+        .field_name
+        .as_ref()
+        .expect("rest `..` field patterns not yet supported (Phase 6)");
+    match &fb.sub {
+        None => RirPatternBinding {
+            // Shorthand: `field` binds a local named `field`.
+            is_wildcard: false,
+            is_mut: fb.is_mut,
+            name: Some(name.name),
+        },
+        Some(Pattern::Wildcard(_)) => RirPatternBinding {
+            is_wildcard: true,
+            is_mut: false,
+            name: None,
+        },
+        Some(Pattern::Ident {
+            is_mut,
+            name: bind_name,
+            ..
+        }) => RirPatternBinding {
+            is_wildcard: false,
+            is_mut: fb.is_mut || *is_mut,
+            name: Some(bind_name.name),
+        },
+        Some(other) => panic!(
+            "nested patterns in struct variants not yet supported (Phase 1); got {:?}",
+            other
+        ),
+    }
+}
+
+/// Convert a FieldPattern used in a let-destructure into a `RirDestructureField`.
+fn field_pattern_to_rir_destructure_field(f: &FieldPattern) -> RirDestructureField {
+    let field_name = f
+        .field_name
+        .as_ref()
+        .expect("rest `..` field patterns not yet supported (Phase 6)");
+    let (binding_name, is_wildcard) = match &f.sub {
+        None => (None, false), // shorthand: use field name as binding name
+        Some(Pattern::Wildcard(_)) => (None, true),
+        Some(Pattern::Ident { name, .. }) => (Some(name.name), false),
+        Some(other) => panic!(
+            "nested patterns in let-destructure not yet supported (Phase 1); got {:?}",
+            other
+        ),
+    };
+    let binding_name = binding_name.or(if is_wildcard {
+        None
+    } else {
+        Some(field_name.name)
+    });
+    RirDestructureField {
+        field_name: field_name.name,
+        binding_name,
+        is_wildcard,
+        is_mut: f.is_mut,
+    }
+}
+
+/// Convert a TupleElemPattern used in a let tuple destructure into a `RirDestructureField`.
+/// Phase-1 restriction: sub-pattern is Pattern::Ident or Pattern::Wildcard.
+fn tuple_elem_to_rir_destructure_field(
+    elem: &TupleElemPattern,
+    field_name: Spur,
+) -> RirDestructureField {
+    match elem {
+        TupleElemPattern::Pattern(Pattern::Ident { is_mut, name, .. }) => RirDestructureField {
+            field_name,
+            binding_name: Some(name.name),
+            is_wildcard: false,
+            is_mut: *is_mut,
+        },
+        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => RirDestructureField {
+            field_name,
+            binding_name: None,
+            is_wildcard: true,
+            is_mut: false,
+        },
+        TupleElemPattern::Pattern(other) => panic!(
+            "nested patterns in let tuple destructure not yet supported (Phase 1); got {:?}",
+            other
+        ),
+        TupleElemPattern::Rest(_) => {
+            panic!("rest patterns not yet supported (Phase 6)")
         }
     }
 }
