@@ -160,6 +160,23 @@ impl<'a> AstGen<'a> {
                 let s = format!("ptr mut {}", pointee_name);
                 self.interner.get_or_intern(&s)
             }
+            TypeExpr::Tuple { elems, .. } => {
+                // Phase 1: just produce a canonical tuple name symbol.
+                // Phase 2 will lower tuples to anon structs with numeric field names.
+                let mut s = String::from("(");
+                for (i, elem) in elems.iter().enumerate() {
+                    if i > 0 {
+                        s.push_str(", ");
+                    }
+                    let elem_sym = self.intern_type(elem);
+                    s.push_str(self.interner.resolve(&elem_sym));
+                }
+                if elems.len() == 1 {
+                    s.push(',');
+                }
+                s.push(')');
+                self.interner.get_or_intern(&s)
+            }
         }
     }
 
@@ -926,6 +943,11 @@ impl<'a> AstGen<'a> {
                                 // Pointer types as values - use intern_type to get representation
                                 self.intern_type(&type_lit.type_expr)
                             }
+                            TypeExpr::Tuple { .. } => {
+                                // Phase 1: route through intern_type. Phase 2 will lower
+                                // tuples to anon structs and handle type-value use properly.
+                                self.intern_type(&type_lit.type_expr)
+                            }
                         };
                         self.rir.add_inst(Inst {
                             data: InstData::TypeConst { type_name },
@@ -939,6 +961,16 @@ impl<'a> AstGen<'a> {
             Expr::Error(span) => self.rir.add_inst(Inst {
                 data: InstData::UnitConst,
                 span: *span,
+            }),
+            // Phase 1 stubs: Phase 2 will lower tuples to anon struct literals
+            // and tuple indexing to FieldAccess with synthetic numeric field names.
+            Expr::Tuple(tuple) => self.rir.add_inst(Inst {
+                data: InstData::UnitConst,
+                span: tuple.span,
+            }),
+            Expr::TupleIndex(ti) => self.rir.add_inst(Inst {
+                data: InstData::UnitConst,
+                span: ti.span,
             }),
         }
     }
@@ -1096,6 +1128,25 @@ impl<'a> AstGen<'a> {
                         span: let_stmt.span,
                     })
                 }
+                // Phase 1 stub: Tuple destructure will be implemented in Phase 3.
+                // For now, fall through to Alloc of Unit so the crate compiles.
+                LetPattern::Tuple { .. } => {
+                    let directives = self.convert_directives(&let_stmt.directives);
+                    let (directives_start, directives_len) = self.rir.add_directives(&directives);
+                    let ty = let_stmt.ty.as_ref().map(|t| self.intern_type(t));
+                    let init = self.gen_expr(&let_stmt.init);
+                    self.rir.add_inst(Inst {
+                        data: InstData::Alloc {
+                            directives_start,
+                            directives_len,
+                            name: None,
+                            is_mut: let_stmt.is_mut,
+                            ty,
+                            init,
+                        },
+                        span: let_stmt.span,
+                    })
+                }
                 pattern => {
                     let directives = self.convert_directives(&let_stmt.directives);
                     let (directives_start, directives_len) = self.rir.add_directives(&directives);
@@ -1103,6 +1154,7 @@ impl<'a> AstGen<'a> {
                         LetPattern::Ident(ident) => Some(ident.name),
                         LetPattern::Wildcard(_) => None,
                         LetPattern::Struct { .. } => unreachable!(),
+                        LetPattern::Tuple { .. } => unreachable!(),
                     };
                     let ty = let_stmt.ty.as_ref().map(|t| self.intern_type(t));
                     let init = self.gen_expr(&let_stmt.init);

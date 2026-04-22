@@ -12,8 +12,8 @@ use crate::ast::{
     IndexExpr, IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetPattern, LetStatement, LoopExpr,
     MatchArm, MatchExpr, Method, MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr,
     PathPattern, Pattern, PatternBinding, PatternFieldBinding, ReturnExpr, SelfExpr, SelfParam,
-    Statement, StringLit, StructDecl, StructLitExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp,
-    UnitLit, Visibility, WhileExpr,
+    Statement, StringLit, StructDecl, StructLitExpr, TupleBinding, TupleBindingElem, TupleExpr,
+    TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -385,6 +385,30 @@ where
                 })
             });
 
+            // Tuple type: (T,) for 1-tuples, (T, U) or (T, U,) for 2+-tuples.
+            // Must be tried after unit_type (which matches `()`) but before named_type.
+            // A 1-tuple requires a trailing comma to distinguish it from parenthesised
+            // types (not currently supported). We parse: LParen <ty> Comma (<ty>,)* RParen.
+            let tuple_type = just(TokenKind::LParen)
+                .ignore_then(ty.clone())
+                .then_ignore(just(TokenKind::Comma))
+                .then(
+                    ty.clone()
+                        .separated_by(just(TokenKind::Comma))
+                        .allow_trailing()
+                        .collect::<Vec<_>>(),
+                )
+                .then_ignore(just(TokenKind::RParen))
+                .map_with(|(first, rest), e| {
+                    let mut elems = Vec::with_capacity(1 + rest.len());
+                    elems.push(first);
+                    elems.extend(rest);
+                    TypeExpr::Tuple {
+                        elems,
+                        span: span_from_extra(e),
+                    }
+                });
+
             // NOTE: Split into sub-groups to keep Choice<tuple> symbol length < 4K.
             // 9 elements of Boxed<I,TypeExpr,E> in one tuple would produce ~5K symbols on macOS.
             let types_a: GruelParser<'src, I, TypeExpr> = choice((
@@ -399,6 +423,7 @@ where
                 ptr_mut_type.boxed(),
                 primitive_type_parser().boxed(),
                 self_type.boxed(),
+                tuple_type.boxed(),
                 named_type.boxed(),
             ))
             .boxed();
@@ -1370,6 +1395,9 @@ where
 enum Suffix {
     /// Simple field access: .field
     Field(Ident),
+    /// Tuple field access: .0, .1, ... (ADR-0048).
+    /// The u32 is the index; the Span is the position of the integer literal.
+    TupleField(u32, Span),
     /// Method call with method name, arguments, and closing paren position
     MethodCall(Ident, Vec<CallArg>, u32),
     /// Index expression with the inner expression and closing bracket position
@@ -1499,6 +1527,24 @@ where
         .then_ignore(none_of([TokenKind::LParen, TokenKind::ColonColon]).rewind())
         .map(Suffix::Field);
 
+    // Tuple field access: .N where N is a non-negative integer literal (ADR-0048).
+    //
+    // Note: the lexer tokenises `0.1` / `1e10` as a single `Float` token, so
+    // `t.0.1` and `t.1e10` fail to parse as nested tuple access. Users must
+    // write `(t.0).1` for nested access. Float re-splitting in field position
+    // is deferred to a future ADR.
+    //
+    // Indices larger than u32::MAX are clamped to u32::MAX; tuples cannot have
+    // more than u32::MAX elements, so sema will report this as out-of-bounds.
+    let tuple_field_suffix = just(TokenKind::Dot)
+        .ignore_then(select! {
+            TokenKind::Int(n) = e => (n, span_from_extra(e)),
+        })
+        .map(|(n, span)| {
+            let idx = if n > u32::MAX as u64 { u32::MAX } else { n as u32 };
+            Suffix::TupleField(idx, span)
+        });
+
     let index_suffix = expr
         .delimited_by(just(TokenKind::LBracket), just(TokenKind::RBracket))
         .map_with(|index, e| Suffix::Index(index, offset_to_u32(e.span().end)));
@@ -1521,6 +1567,7 @@ where
                 qualified_struct_lit_suffix,
                 qualified_path_suffix.boxed(),
                 field_suffix.boxed(),
+                tuple_field_suffix.boxed(),
                 index_suffix.boxed(),
             ))
             .boxed()
@@ -1533,6 +1580,15 @@ where
                         base: Box::new(base),
                         field,
                         span,
+                    })
+                }
+                Suffix::TupleField(index, index_span) => {
+                    let span = base.span().extend_to(index_span.end);
+                    Expr::TupleIndex(TupleIndexExpr {
+                        base: Box::new(base),
+                        index,
+                        span,
+                        index_span,
                     })
                 }
                 Suffix::MethodCall(method, args, end) => {
@@ -1611,16 +1667,45 @@ where
         TokenKind::SelfValue = e => Expr::SelfExpr(SelfExpr { span: span_from_extra(e) }),
     };
 
-    // Parenthesized expression
-    let paren_expr = expr
-        .clone()
-        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
-        .map_with(|inner, e| {
-            Expr::Paren(ParenExpr {
-                inner: Box::new(inner),
+    // Parenthesized expression or tuple literal.
+    //
+    // `(e)`         -> ParenExpr
+    // `(e,)`        -> TupleExpr with one element
+    // `(e, f, ...)` -> TupleExpr with 2+ elements
+    // `()` is handled separately by `unit_lit` (see literal_parser).
+    //
+    // Implementation: parse `LParen expr`, then optionally `Comma expr_list`,
+    // then `RParen`. If the comma is absent we have a paren; if it's present
+    // we have a tuple (possibly 1-arity if no more elements follow).
+    let paren_or_tuple = just(TokenKind::LParen)
+        .ignore_then(expr.clone())
+        .then(
+            just(TokenKind::Comma)
+                .ignore_then(
+                    expr.clone()
+                        .separated_by(just(TokenKind::Comma))
+                        .allow_trailing()
+                        .collect::<Vec<_>>(),
+                )
+                .or_not(),
+        )
+        .then_ignore(just(TokenKind::RParen))
+        .map_with(|(first, rest), e| match rest {
+            None => Expr::Paren(ParenExpr {
+                inner: Box::new(first),
                 span: span_from_extra(e),
-            })
+            }),
+            Some(rest) => {
+                let mut elems = Vec::with_capacity(1 + rest.len());
+                elems.push(first);
+                elems.extend(rest);
+                Expr::Tuple(TupleExpr {
+                    elems,
+                    span: span_from_extra(e),
+                })
+            }
         });
+    let paren_expr = paren_or_tuple;
 
     // Block expression
     let block_expr = block_parser(expr.clone());
@@ -2018,8 +2103,46 @@ where
 
     let ident = ident_parser().map(LetPattern::Ident);
 
-    // Try struct destructure first (ident followed by {), then plain ident, then wildcard
-    struct_destructure.or(ident).or(wildcard).boxed()
+    // Tuple destructure: (mut? ident | _) (, ...)+ ,? but at least one comma overall,
+    // so `(x)` is not mistaken for a tuple of one. Mirrors the tuple-type rule.
+    //
+    //   let (a, b) = t;
+    //   let (mut a, _) = t;
+    //   let (x,) = single_tuple;
+    let tuple_elem = just(TokenKind::Mut)
+        .or_not()
+        .then(choice((
+            just(TokenKind::Underscore)
+                .map_with(|_, e| TupleBinding::Wildcard(span_from_extra(e))),
+            ident_parser().map(TupleBinding::Ident),
+        )))
+        .map(|(is_mut, binding)| TupleBindingElem {
+            binding,
+            is_mut: is_mut.is_some(),
+        });
+    let tuple_destructure = just(TokenKind::LParen)
+        .ignore_then(tuple_elem.clone())
+        .then_ignore(just(TokenKind::Comma))
+        .then(
+            tuple_elem
+                .separated_by(just(TokenKind::Comma))
+                .allow_trailing()
+                .collect::<Vec<_>>(),
+        )
+        .then_ignore(just(TokenKind::RParen))
+        .map_with(|(first, rest), e| {
+            let mut elems = Vec::with_capacity(1 + rest.len());
+            elems.push(first);
+            elems.extend(rest);
+            LetPattern::Tuple {
+                elems,
+                span: span_from_extra(e),
+            }
+        });
+
+    // Try struct destructure first (ident followed by {), then tuple destructure (LParen),
+    // then plain ident, then wildcard.
+    choice((struct_destructure, tuple_destructure, ident, wildcard)).boxed()
 }
 
 /// Parser for let statements: [@directive]* let [mut] pattern [: type] = expr;
@@ -3110,6 +3233,7 @@ mod tests {
                                 }
                                 LetPattern::Wildcard(_) => panic!("expected Ident, got Wildcard"),
                                 LetPattern::Struct { .. } => panic!("expected Ident, got Struct"),
+                                LetPattern::Tuple { .. } => panic!("expected Ident, got Tuple"),
                             }
                         }
                         _ => panic!("expected Let"),
@@ -4216,6 +4340,233 @@ mod tests {
                 }
             }
             _ => panic!("expected Struct"),
+        }
+    }
+
+    // ========================================================================
+    // Tuple parser tests (ADR-0048, phase 1)
+    // ========================================================================
+
+    #[test]
+    fn test_tuple_expr_pair() {
+        let result = parse_expr("(1, 2)").unwrap();
+        match &result.expr {
+            Expr::Tuple(t) => {
+                assert_eq!(t.elems.len(), 2);
+                match &t.elems[0] {
+                    Expr::Int(lit) => assert_eq!(lit.value, 1),
+                    _ => panic!("expected Int"),
+                }
+                match &t.elems[1] {
+                    Expr::Int(lit) => assert_eq!(lit.value, 2),
+                    _ => panic!("expected Int"),
+                }
+            }
+            other => panic!("expected Tuple, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_tuple_expr_triple_mixed() {
+        let result = parse_expr("(1, true, 3)").unwrap();
+        match &result.expr {
+            Expr::Tuple(t) => {
+                assert_eq!(t.elems.len(), 3);
+                assert!(matches!(t.elems[0], Expr::Int(_)));
+                assert!(matches!(t.elems[1], Expr::Bool(_)));
+                assert!(matches!(t.elems[2], Expr::Int(_)));
+            }
+            _ => panic!("expected Tuple"),
+        }
+    }
+
+    #[test]
+    fn test_tuple_expr_singleton_needs_trailing_comma() {
+        // (x,) is a 1-tuple
+        let result = parse_expr("(42,)").unwrap();
+        match &result.expr {
+            Expr::Tuple(t) => {
+                assert_eq!(t.elems.len(), 1);
+                assert!(matches!(t.elems[0], Expr::Int(_)));
+            }
+            _ => panic!("expected Tuple singleton"),
+        }
+    }
+
+    #[test]
+    fn test_paren_expr_without_comma_is_not_tuple() {
+        // (x) stays a parenthesised expression, not a 1-tuple
+        let result = parse_expr("(42)").unwrap();
+        assert!(matches!(result.expr, Expr::Paren(_)));
+    }
+
+    #[test]
+    fn test_unit_literal_is_not_tuple() {
+        let result = parse_expr("()").unwrap();
+        assert!(matches!(result.expr, Expr::Unit(_)));
+    }
+
+    #[test]
+    fn test_tuple_expr_trailing_comma_allowed() {
+        let result = parse_expr("(1, 2,)").unwrap();
+        match &result.expr {
+            Expr::Tuple(t) => assert_eq!(t.elems.len(), 2),
+            _ => panic!("expected Tuple"),
+        }
+    }
+
+    #[test]
+    fn test_tuple_index_zero() {
+        let result = parse_expr("t.0").unwrap();
+        match &result.expr {
+            Expr::TupleIndex(ti) => {
+                assert_eq!(ti.index, 0);
+                assert!(matches!(*ti.base, Expr::Ident(_)));
+            }
+            _ => panic!("expected TupleIndex"),
+        }
+    }
+
+    #[test]
+    fn test_tuple_index_multi_digit() {
+        let result = parse_expr("t.42").unwrap();
+        match &result.expr {
+            Expr::TupleIndex(ti) => assert_eq!(ti.index, 42),
+            _ => panic!("expected TupleIndex"),
+        }
+    }
+
+    #[test]
+    fn test_parenthesised_nested_tuple_access() {
+        // (t.0).1 works; t.0.1 doesn't because the lexer treats `0.1` as Float
+        let result = parse_expr("(t.0).1").unwrap();
+        match &result.expr {
+            Expr::TupleIndex(outer) => {
+                assert_eq!(outer.index, 1);
+                match &*outer.base {
+                    Expr::Paren(p) => match &*p.inner {
+                        Expr::TupleIndex(inner) => assert_eq!(inner.index, 0),
+                        _ => panic!("expected inner TupleIndex"),
+                    },
+                    _ => panic!("expected Paren wrapping inner access"),
+                }
+            }
+            _ => panic!("expected outer TupleIndex"),
+        }
+    }
+
+    #[test]
+    fn test_tuple_type_pair() {
+        let result = parse("fn f() -> (i32, bool) { (1, true) }").unwrap();
+        match &result.ast.items[0] {
+            Item::Function(f) => match f.return_type.as_ref().unwrap() {
+                TypeExpr::Tuple { elems, .. } => {
+                    assert_eq!(elems.len(), 2);
+                }
+                other => panic!("expected Tuple type, got {:?}", other),
+            },
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_tuple_type_singleton() {
+        let result = parse("fn f() -> (i32,) { (1,) }").unwrap();
+        match &result.ast.items[0] {
+            Item::Function(f) => match f.return_type.as_ref().unwrap() {
+                TypeExpr::Tuple { elems, .. } => assert_eq!(elems.len(), 1),
+                _ => panic!("expected Tuple type"),
+            },
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_unit_type_still_unit() {
+        let result = parse("fn f() -> () { () }").unwrap();
+        match &result.ast.items[0] {
+            Item::Function(f) => match f.return_type.as_ref().unwrap() {
+                TypeExpr::Unit(_) => {}
+                other => panic!("expected Unit type, got {:?}", other),
+            },
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_tuple_destructure_basic() {
+        let result = parse("fn main() -> i32 { let (a, b) = (1, 2); a }").unwrap();
+        match &result.ast.items[0] {
+            Item::Function(f) => match &f.body {
+                Expr::Block(block) => match &block.statements[0] {
+                    Statement::Let(let_stmt) => match &let_stmt.pattern {
+                        LetPattern::Tuple { elems, .. } => {
+                            assert_eq!(elems.len(), 2);
+                            assert!(!elems[0].is_mut);
+                            match &elems[0].binding {
+                                TupleBinding::Ident(name) => {
+                                    assert_eq!(result.get(name.name), "a")
+                                }
+                                _ => panic!("expected Ident binding"),
+                            }
+                            match &elems[1].binding {
+                                TupleBinding::Ident(name) => {
+                                    assert_eq!(result.get(name.name), "b")
+                                }
+                                _ => panic!("expected Ident binding"),
+                            }
+                        }
+                        _ => panic!("expected Tuple pattern"),
+                    },
+                    _ => panic!("expected Let"),
+                },
+                _ => panic!("expected Block"),
+            },
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_tuple_destructure_mut_and_wildcard() {
+        let result = parse("fn main() -> i32 { let (mut a, _) = (1, 2); a }").unwrap();
+        match &result.ast.items[0] {
+            Item::Function(f) => match &f.body {
+                Expr::Block(block) => match &block.statements[0] {
+                    Statement::Let(let_stmt) => match &let_stmt.pattern {
+                        LetPattern::Tuple { elems, .. } => {
+                            assert_eq!(elems.len(), 2);
+                            assert!(elems[0].is_mut);
+                            assert!(!elems[1].is_mut);
+                            assert!(matches!(elems[0].binding, TupleBinding::Ident(_)));
+                            assert!(matches!(elems[1].binding, TupleBinding::Wildcard(_)));
+                        }
+                        _ => panic!("expected Tuple pattern"),
+                    },
+                    _ => panic!("expected Let"),
+                },
+                _ => panic!("expected Block"),
+            },
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_tuple_destructure_singleton() {
+        let result = parse("fn main() -> i32 { let (x,) = (42,); x }").unwrap();
+        match &result.ast.items[0] {
+            Item::Function(f) => match &f.body {
+                Expr::Block(block) => match &block.statements[0] {
+                    Statement::Let(let_stmt) => match &let_stmt.pattern {
+                        LetPattern::Tuple { elems, .. } => {
+                            assert_eq!(elems.len(), 1);
+                        }
+                        _ => panic!("expected Tuple pattern"),
+                    },
+                    _ => panic!("expected Let"),
+                },
+                _ => panic!("expected Block"),
+            },
+            _ => panic!("expected Function"),
         }
     }
 }

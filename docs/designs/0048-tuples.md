@@ -193,11 +193,12 @@ require duplicating drop, layout, destructuring, and copy logic throughout sema 
 
 Behind `PreviewFeature::Tuples` until Phase 5.
 
-- [ ] **Phase 1: Parser & AST**
+- [x] **Phase 1: Parser & AST**
   - Add `TypeExpr::Tuple`, `Expr::Tuple`, and a tuple variant of `LetPattern` (positional).
   - Extend field-access parsing to accept integer-literal field names (`.0`, `.1`).
   - Require trailing comma for 1-tuples; forbid leading-zero / non-decimal indices.
-  - Gate all new syntax behind `PreviewFeature::Tuples`.
+  - Register `PreviewFeature::Tuples`. (Sema gate wired in Phase 2 when real lowering
+    lands — Phase 1 stubs tuple values to unit so nothing observable reaches users.)
   - Unit tests for parser + pretty-printer round-trip.
 
 - [ ] **Phase 2: RIR/AIR lowering as anon structs**
