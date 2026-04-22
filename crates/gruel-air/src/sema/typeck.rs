@@ -12,7 +12,7 @@ use lasso::Spur;
 
 use super::Sema;
 use crate::inference::InferType;
-use crate::types::{ArrayTypeId, Type, TypeKind, parse_array_type_syntax};
+use crate::types::{ArrayTypeId, Type, TypeKind, parse_array_type_syntax, parse_tuple_type_syntax};
 
 impl<'a> Sema<'a> {
     /// Get a human-readable name for a type.
@@ -165,6 +165,24 @@ impl<'a> Sema<'a> {
                 let pointee_ty = self.resolve_type(pointee_sym, span)?;
                 let ptr_type_id = self.type_pool.intern_ptr_mut_from_type(pointee_ty);
                 Ok(Type::new_ptr_mut(ptr_type_id))
+            } else if let Some(elems) = parse_tuple_type_syntax(type_name) {
+                // Tuple type syntax: (T, U, ...) — ADR-0048.
+                // Resolve to an anonymous struct with fields "0", "1", ...
+                let mut struct_fields = Vec::with_capacity(elems.len());
+                for (i, elem_str) in elems.iter().enumerate() {
+                    let elem_sym = self.interner.get_or_intern(elem_str);
+                    let elem_ty = self.resolve_type(elem_sym, span)?;
+                    struct_fields.push(crate::types::StructField {
+                        name: i.to_string(),
+                        ty: elem_ty,
+                    });
+                }
+                let (ty, _is_new) = self.find_or_create_anon_struct(
+                    &struct_fields,
+                    &[],
+                    &std::collections::HashMap::new(),
+                );
+                Ok(ty)
             } else {
                 Err(CompileError::new(
                     ErrorKind::UnknownType(type_name.to_string()),

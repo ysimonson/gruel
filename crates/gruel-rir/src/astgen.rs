@@ -160,6 +160,23 @@ impl<'a> AstGen<'a> {
                 let s = format!("ptr mut {}", pointee_name);
                 self.interner.get_or_intern(&s)
             }
+            TypeExpr::Tuple { elems, .. } => {
+                // Phase 1: just produce a canonical tuple name symbol.
+                // Phase 2 will lower tuples to anon structs with numeric field names.
+                let mut s = String::from("(");
+                for (i, elem) in elems.iter().enumerate() {
+                    if i > 0 {
+                        s.push_str(", ");
+                    }
+                    let elem_sym = self.intern_type(elem);
+                    s.push_str(self.interner.resolve(&elem_sym));
+                }
+                if elems.len() == 1 {
+                    s.push(',');
+                }
+                s.push(')');
+                self.interner.get_or_intern(&s)
+            }
         }
     }
 
@@ -926,6 +943,11 @@ impl<'a> AstGen<'a> {
                                 // Pointer types as values - use intern_type to get representation
                                 self.intern_type(&type_lit.type_expr)
                             }
+                            TypeExpr::Tuple { .. } => {
+                                // Phase 1: route through intern_type. Phase 2 will lower
+                                // tuples to anon structs and handle type-value use properly.
+                                self.intern_type(&type_lit.type_expr)
+                            }
                         };
                         self.rir.add_inst(Inst {
                             data: InstData::TypeConst { type_name },
@@ -940,6 +962,33 @@ impl<'a> AstGen<'a> {
                 data: InstData::UnitConst,
                 span: *span,
             }),
+            // Tuple literal `(e0, e1, ...)` — lowered in sema to an anon struct
+            // with field names "0", "1", ... (ADR-0048).
+            Expr::Tuple(tuple) => {
+                let elem_refs: Vec<InstRef> =
+                    tuple.elems.iter().map(|e| self.gen_expr(e)).collect();
+                let elem_u32s: Vec<u32> = elem_refs.iter().map(|r| r.as_u32()).collect();
+                let elems_start = self.rir.add_extra(&elem_u32s);
+                let elems_len = elem_refs.len() as u32;
+                self.rir.add_inst(Inst {
+                    data: InstData::TupleInit {
+                        elems_start,
+                        elems_len,
+                    },
+                    span: tuple.span,
+                })
+            }
+            // Tuple index `t.N` — lowered to a regular FieldGet whose field symbol
+            // is the stringified index. Synthetic names cannot collide with user
+            // struct field names (which must start with a letter).
+            Expr::TupleIndex(ti) => {
+                let base = self.gen_expr(&ti.base);
+                let field = self.interner.get_or_intern(&ti.index.to_string());
+                self.rir.add_inst(Inst {
+                    data: InstData::FieldGet { base, field },
+                    span: ti.span,
+                })
+            }
         }
     }
 
@@ -1096,6 +1145,43 @@ impl<'a> AstGen<'a> {
                         span: let_stmt.span,
                     })
                 }
+                // Tuple destructure: `let (a, b, ...) = expr;` (ADR-0048).
+                //
+                // Lowered to the same RIR as struct destructure, reusing StructDestructure
+                // with synthetic field names "0", "1", ... and a sentinel type_name
+                // ("__tuple__") that sema recognises and resolves against the init's type.
+                LetPattern::Tuple { elems, .. } => {
+                    use gruel_parser::ast::TupleBinding;
+                    let rir_fields: Vec<RirDestructureField> = elems
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| {
+                            let field_name = self.interner.get_or_intern(&i.to_string());
+                            let (binding_name, is_wildcard) = match &e.binding {
+                                TupleBinding::Ident(name) => (Some(name.name), false),
+                                TupleBinding::Wildcard(_) => (None, true),
+                            };
+                            RirDestructureField {
+                                field_name,
+                                binding_name,
+                                is_wildcard,
+                                is_mut: e.is_mut,
+                            }
+                        })
+                        .collect();
+                    let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
+                    let init = self.gen_expr(&let_stmt.init);
+                    let type_name = self.interner.get_or_intern_static("__tuple__");
+                    self.rir.add_inst(Inst {
+                        data: InstData::StructDestructure {
+                            type_name,
+                            fields_start,
+                            fields_len,
+                            init,
+                        },
+                        span: let_stmt.span,
+                    })
+                }
                 pattern => {
                     let directives = self.convert_directives(&let_stmt.directives);
                     let (directives_start, directives_len) = self.rir.add_directives(&directives);
@@ -1103,6 +1189,7 @@ impl<'a> AstGen<'a> {
                         LetPattern::Ident(ident) => Some(ident.name),
                         LetPattern::Wildcard(_) => None,
                         LetPattern::Struct { .. } => unreachable!(),
+                        LetPattern::Tuple { .. } => unreachable!(),
                     };
                     let ty = let_stmt.ty.as_ref().map(|t| self.intern_type(t));
                     let init = self.gen_expr(&let_stmt.init);

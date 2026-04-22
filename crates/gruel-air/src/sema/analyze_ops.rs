@@ -41,7 +41,7 @@ use crate::inst::{
     AirRef,
 };
 use crate::scope::ScopedContext;
-use crate::types::{Type, TypeKind};
+use crate::types::{StructField, Type, TypeKind};
 
 // ============================================================================
 // Place Building (ADR-0030 Phase 8)
@@ -2335,10 +2335,19 @@ impl<'a> Sema<'a> {
 
         // Resolve the struct type
         let type_name_str = self.interner.resolve(&type_name).to_string();
+        // Tuple destructure sentinel: astgen emits "__tuple__" as the type_name
+        // when desugaring `let (a, b, ...) = expr;` (ADR-0048). The actual struct
+        // type comes from inference on `init`.
+        let is_tuple_destructure = type_name_str == "__tuple__";
+
         let struct_id = init_type.as_struct().ok_or_else(|| {
             CompileError::new(
                 ErrorKind::TypeMismatch {
-                    expected: type_name_str.clone(),
+                    expected: if is_tuple_destructure {
+                        "tuple".to_string()
+                    } else {
+                        type_name_str.clone()
+                    },
                     found: init_type.name().to_string(),
                 },
                 span,
@@ -2347,8 +2356,9 @@ impl<'a> Sema<'a> {
 
         let struct_def = self.type_pool.struct_def(struct_id);
 
-        // Validate the type name matches
-        if struct_def.name != type_name_str {
+        // Validate the type name matches (skipped for tuple destructure — the
+        // sentinel "__tuple__" doesn't correspond to a real struct name).
+        if !is_tuple_destructure && struct_def.name != type_name_str {
             return Err(CompileError::new(
                 ErrorKind::TypeMismatch {
                     expected: type_name_str,
@@ -2376,6 +2386,17 @@ impl<'a> Sema<'a> {
             }
         }
 
+        // Display name for error messages. For tuple destructures, render in
+        // tuple syntax: `(i32, bool)` instead of the synthetic `__anon_struct_N`.
+        let display_name = if is_tuple_destructure {
+            let pool = &self.type_pool;
+            struct_def
+                .tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
+                .unwrap_or_else(|| struct_def.name.clone())
+        } else {
+            type_name_str.clone()
+        };
+
         // Validate: all struct fields are mentioned
         let struct_field_names: Vec<String> =
             struct_def.fields.iter().map(|f| f.name.clone()).collect();
@@ -2383,7 +2404,7 @@ impl<'a> Sema<'a> {
             if !seen_fields.contains(struct_field_name) {
                 return Err(CompileError::new(
                     ErrorKind::MissingFieldInDestructure {
-                        struct_name: type_name_str.clone(),
+                        struct_name: display_name.clone(),
                         field: struct_field_name.clone(),
                     },
                     span,
@@ -2397,7 +2418,7 @@ impl<'a> Sema<'a> {
             if struct_def.find_field(&field_name).is_none() {
                 return Err(CompileError::new(
                     ErrorKind::UnknownField {
-                        struct_name: type_name_str.clone(),
+                        struct_name: display_name.clone(),
                         field_name,
                     },
                     span,
@@ -3128,6 +3149,71 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, struct_type))
     }
 
+    /// Analyze a tuple literal (ADR-0048).
+    ///
+    /// Tuples are lowered to anonymous structs with field names "0", "1", ...
+    /// This reuses the existing structural dedup in `find_or_create_anon_struct`,
+    /// so two tuples with the same element types are the same struct type.
+    pub(crate) fn analyze_tuple_init(
+        &mut self,
+        air: &mut Air,
+        elems_start: u32,
+        elems_len: u32,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // Pull element inst refs out of the extra array.
+        let elem_refs: Vec<InstRef> = self
+            .rir
+            .get_inst_refs(elems_start, elems_len)
+            .iter()
+            .copied()
+            .collect();
+
+        // Analyze each element in source order.
+        let mut elem_results = Vec::with_capacity(elem_refs.len());
+        for elem_ref in &elem_refs {
+            let result = self.analyze_inst(air, *elem_ref, ctx)?;
+            elem_results.push(result);
+        }
+
+        // Build synthetic struct fields named "0", "1", ... with the element types.
+        let struct_fields: Vec<StructField> = elem_results
+            .iter()
+            .enumerate()
+            .map(|(i, r)| StructField {
+                name: i.to_string(),
+                ty: r.ty,
+            })
+            .collect();
+
+        // Find or create the anon struct via the existing structural-dedup helper.
+        let (struct_ty, _is_new) =
+            self.find_or_create_anon_struct(&struct_fields, &[], &HashMap::new());
+        let struct_id = struct_ty
+            .as_struct()
+            .expect("find_or_create_anon_struct returned non-struct type");
+
+        // Field refs are already in declaration order (i == field_index), and source
+        // order matches. Encode both into AIR's extra array.
+        let field_u32s: Vec<u32> = elem_results.iter().map(|r| r.air_ref.as_u32()).collect();
+        let fields_start_air = air.add_extra(&field_u32s);
+        let source_order_u32s: Vec<u32> = (0..elem_results.len() as u32).collect();
+        let source_order_start = air.add_extra(&source_order_u32s);
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::StructInit {
+                struct_id,
+                fields_start: fields_start_air,
+                fields_len: elem_results.len() as u32,
+                source_order_start,
+            },
+            ty: struct_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, struct_ty))
+    }
+
     /// Analyze a field access.
     ///
     /// Uses place-based analysis (ADR-0030) when possible for efficient code generation.
@@ -3193,11 +3279,37 @@ impl<'a> Sema<'a> {
                     .mark_path_moved(&[], span);
             } else if !self.is_type_copy(field_type) {
                 // ADR-0036: Ban partial field moves. Must destructure instead.
-                let type_name = parent_type
+                // ADR-0048: for tuple-shaped structs, render tuple-syntax names
+                // and suggest tuple destructuring.
+                let parent_struct_def = parent_type
                     .as_struct()
-                    .map(|id| self.type_pool.struct_def(id).name.clone())
+                    .map(|id| self.type_pool.struct_def(id));
+                let is_tuple = parent_struct_def
+                    .as_ref()
+                    .map(|def| def.is_tuple_shaped())
+                    .unwrap_or(false);
+                let type_name = parent_struct_def
+                    .as_ref()
+                    .and_then(|def| {
+                        let pool = &self.type_pool;
+                        def.tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
+                            .or_else(|| Some(def.name.clone()))
+                    })
                     .unwrap_or_else(|| parent_type.name().to_string());
                 let field_name = self.interner.resolve(&field).to_string();
+                let help = if is_tuple {
+                    let arity = parent_struct_def
+                        .as_ref()
+                        .map(|def| def.fields.len())
+                        .unwrap_or(0);
+                    let bindings: Vec<String> = (0..arity).map(|i| format!("x{}", i)).collect();
+                    format!(
+                        "use destructuring: `let ({}) = ...;`",
+                        bindings.join(", ")
+                    )
+                } else {
+                    format!("use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`")
+                };
                 return Err(CompileError::new(
                     ErrorKind::CannotMoveField {
                         type_name: type_name.clone(),
@@ -3205,9 +3317,7 @@ impl<'a> Sema<'a> {
                     },
                     span,
                 )
-                .with_help(format!(
-                    "use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`"
-                )));
+                .with_help(help));
             }
 
             // Emit PlaceRead instruction
@@ -3246,14 +3356,38 @@ impl<'a> Sema<'a> {
         let struct_def = self.type_pool.struct_def(struct_id);
         let field_name_str = self.interner.resolve(&field).to_string();
 
-        let (field_index, struct_field) =
-            struct_def.find_field(&field_name_str).ok_or_compile_error(
-                ErrorKind::UnknownField {
-                    struct_name: struct_def.name.clone(),
-                    field_name: field_name_str.clone(),
-                },
-                span,
-            )?;
+        // ADR-0048: render tuple-shaped structs with tuple syntax in errors.
+        let display_struct_name = {
+            let pool = &self.type_pool;
+            struct_def
+                .tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
+                .unwrap_or_else(|| struct_def.name.clone())
+        };
+        let (field_index, struct_field) = match struct_def.find_field(&field_name_str) {
+            Some(f) => f,
+            None => {
+                let mut err = CompileError::new(
+                    ErrorKind::UnknownField {
+                        struct_name: display_struct_name.clone(),
+                        field_name: field_name_str.clone(),
+                    },
+                    span,
+                );
+                // ADR-0048: for tuple-shaped structs, add a specific help note.
+                if struct_def.is_tuple_shaped() {
+                    if let Ok(idx) = field_name_str.parse::<u32>() {
+                        err = err.with_help(format!(
+                            "tuple index {} out of bounds: {} has {} element{}",
+                            idx,
+                            display_struct_name,
+                            struct_def.fields.len(),
+                            if struct_def.fields.len() == 1 { "" } else { "s" },
+                        ));
+                    }
+                }
+                return Err(err);
+            }
+        };
 
         let field_type = struct_field.ty;
 

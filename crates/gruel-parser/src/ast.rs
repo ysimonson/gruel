@@ -337,6 +337,14 @@ pub enum TypeExpr {
     PointerConst { pointee: Box<TypeExpr>, span: Span },
     /// Raw pointer to mutable data: ptr mut T
     PointerMut { pointee: Box<TypeExpr>, span: Span },
+    /// Tuple type: `(T,)`, `(T, U)`, `(T, U, V)`, ... (ADR-0048)
+    ///
+    /// `()` remains the unit type. A 1-tuple requires a trailing comma (`(T,)`)
+    /// to distinguish it from a parenthesised type.
+    Tuple {
+        elems: Vec<TypeExpr>,
+        span: Span,
+    },
 }
 
 /// A field in an anonymous struct type expression.
@@ -362,6 +370,7 @@ impl TypeExpr {
             TypeExpr::AnonymousEnum { span, .. } => *span,
             TypeExpr::PointerConst { span, .. } => *span,
             TypeExpr::PointerMut { span, .. } => *span,
+            TypeExpr::Tuple { span, .. } => *span,
         }
     }
 }
@@ -413,6 +422,19 @@ impl fmt::Display for TypeExpr {
             }
             TypeExpr::PointerConst { pointee, .. } => write!(f, "ptr const {}", pointee),
             TypeExpr::PointerMut { pointee, .. } => write!(f, "ptr mut {}", pointee),
+            TypeExpr::Tuple { elems, .. } => {
+                write!(f, "(")?;
+                for (i, elem) in elems.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                if elems.len() == 1 {
+                    write!(f, ",")?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -492,6 +514,10 @@ pub enum Expr {
     Checked(CheckedBlockExpr),
     /// Type literal expression (e.g., `i32` used as a value in generic function calls)
     TypeLit(TypeLitExpr),
+    /// Tuple literal expression (e.g., `(1, true)`, `(42,)`) (ADR-0048)
+    Tuple(TupleExpr),
+    /// Tuple index expression (e.g., `t.0`, `t.1`) (ADR-0048)
+    TupleIndex(TupleIndexExpr),
     /// Error node for recovered parse errors.
     /// Used by error recovery to continue parsing after a syntax error.
     Error(Span),
@@ -807,6 +833,27 @@ pub struct FieldInit {
     pub span: Span,
 }
 
+/// A tuple literal expression (e.g., `(1, true)`, `(42,)`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TupleExpr {
+    /// Element expressions
+    pub elems: Vec<Expr>,
+    pub span: Span,
+}
+
+/// A tuple index expression (e.g., `t.0`, `t.1`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TupleIndexExpr {
+    /// Base expression (the tuple value)
+    pub base: Box<Expr>,
+    /// Numeric index (0-based)
+    pub index: u32,
+    /// Span of the whole expression (base through the index token)
+    pub span: Span,
+    /// Span of just the index token (for diagnostics)
+    pub index_span: Span,
+}
+
 /// A field access expression (e.g., `point.x`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldExpr {
@@ -911,6 +958,28 @@ pub enum LetPattern {
         fields: Vec<DestructureField>,
         span: Span,
     },
+    /// Tuple destructuring (e.g., `(a, b)`, `(mut a, _, c)`) (ADR-0048)
+    Tuple {
+        elems: Vec<TupleBindingElem>,
+        span: Span,
+    },
+}
+
+/// One element of a tuple destructuring pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TupleBindingElem {
+    pub binding: TupleBinding,
+    /// Whether the binding is `mut`. Only meaningful for `TupleBinding::Ident`.
+    pub is_mut: bool,
+}
+
+/// The kind of binding for a tuple destructure element.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TupleBinding {
+    /// Bind the element to a named local
+    Ident(Ident),
+    /// `_` — drop the element immediately (if needed)
+    Wildcard(Span),
 }
 
 /// A field binding in a struct destructure pattern.
@@ -942,6 +1011,7 @@ impl LetPattern {
             LetPattern::Ident(ident) => ident.span,
             LetPattern::Wildcard(span) => *span,
             LetPattern::Struct { span, .. } => *span,
+            LetPattern::Tuple { span, .. } => *span,
         }
     }
 }
@@ -1120,6 +1190,8 @@ impl Expr {
             Expr::ComptimeUnrollFor(e) => e.span,
             Expr::Checked(checked_expr) => checked_expr.span,
             Expr::TypeLit(type_lit) => type_lit.span,
+            Expr::Tuple(tuple) => tuple.span,
+            Expr::TupleIndex(ti) => ti.span,
             Expr::Error(span) => *span,
         }
     }
@@ -1506,6 +1578,17 @@ fn fmt_expr(f: &mut fmt::Formatter<'_>, expr: &Expr, level: usize) -> fmt::Resul
         Expr::TypeLit(type_lit) => {
             writeln!(f, "TypeLit({})", type_lit.type_expr)
         }
+        Expr::Tuple(tuple) => {
+            writeln!(f, "Tuple[{}]", tuple.elems.len())?;
+            for elem in &tuple.elems {
+                fmt_expr(f, elem, level + 1)?;
+            }
+            Ok(())
+        }
+        Expr::TupleIndex(ti) => {
+            writeln!(f, "TupleIndex .{}", ti.index)?;
+            fmt_expr(f, &ti.base, level + 1)
+        }
         Expr::Error(span) => {
             writeln!(f, "Error({:?})", span)
         }
@@ -1551,6 +1634,27 @@ fn fmt_stmt(f: &mut fmt::Formatter<'_>, stmt: &Statement, level: usize) -> fmt::
                         }
                     }
                     write!(f, " }}")?;
+                }
+                LetPattern::Tuple { elems, .. } => {
+                    write!(f, " (")?;
+                    for (i, elem) in elems.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ",")?;
+                        }
+                        if elem.is_mut {
+                            write!(f, " mut")?;
+                        }
+                        match &elem.binding {
+                            TupleBinding::Ident(name) => {
+                                write!(f, " sym:{}", name.name.into_usize())?;
+                            }
+                            TupleBinding::Wildcard(_) => write!(f, " _")?,
+                        }
+                    }
+                    if elems.len() == 1 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, " )")?;
                 }
             }
             if let Some(ref ty) = let_stmt.ty {

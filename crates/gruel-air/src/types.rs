@@ -372,6 +372,48 @@ impl Type {
     }
 }
 
+impl StructDef {
+    /// Returns true if this struct was synthesised to represent a tuple
+    /// (ADR-0048): fields named "0", "1", ..., "N-1", in order, no methods,
+    /// and the anon-struct name prefix.
+    pub fn is_tuple_shaped(&self) -> bool {
+        if !self.name.starts_with("__anon_struct_") {
+            return false;
+        }
+        if self.fields.is_empty() {
+            return false;
+        }
+        self.fields
+            .iter()
+            .enumerate()
+            .all(|(i, f)| f.name == i.to_string())
+    }
+
+    /// If this struct is tuple-shaped, render its tuple-syntax name:
+    /// `(T0, T1, ...)` for arity ≥ 2, `(T0,)` for arity 1.
+    /// The formatter is passed a callback to render each field type name.
+    pub fn tuple_display_name<F>(&self, mut fmt_ty: F) -> Option<String>
+    where
+        F: FnMut(Type) -> String,
+    {
+        if !self.is_tuple_shaped() {
+            return None;
+        }
+        let mut s = String::from("(");
+        for (i, f) in self.fields.iter().enumerate() {
+            if i > 0 {
+                s.push_str(", ");
+            }
+            s.push_str(&fmt_ty(f.ty));
+        }
+        if self.fields.len() == 1 {
+            s.push(',');
+        }
+        s.push(')');
+        Some(s)
+    }
+}
+
 /// Definition of a struct type.
 #[derive(Debug, Clone)]
 pub struct StructDef {
@@ -686,6 +728,12 @@ impl Type {
             Some(TypeKind::Struct(struct_id)) => {
                 if let Some(pool) = pool {
                     let def = pool.struct_def(struct_id);
+                    // ADR-0048: render tuple-shaped anon structs as tuples.
+                    if let Some(tuple_name) =
+                        def.tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
+                    {
+                        return tuple_name;
+                    }
                     return def.name.clone();
                 }
                 format!("<struct#{}>", struct_id.0)
@@ -1115,9 +1163,122 @@ pub fn parse_array_type_syntax(type_name: &str) -> Option<(String, u64)> {
     Some((element_type, length))
 }
 
+/// Parse tuple type syntax "(T0, T1, ..., TN-1)" into a Vec of element-type strings.
+///
+/// Returns `None` if the input is not a tuple-shaped type name. Rules:
+/// - Must start with `(` and end with `)`.
+/// - The contents are split on commas at nesting depth 0 (respecting parens and brackets).
+/// - `()` (empty) returns `None` — unit type is handled separately as a primitive.
+/// - `(T)` (parens around a single type, no trailing comma) is not a tuple, returns `None`.
+/// - `(T,)` is a 1-tuple (single element).
+/// - Trailing comma is tolerated in 2+ arities.
+///
+/// This handles nesting correctly: `((i32, u8), bool)` returns `["(i32, u8)", "bool"]`.
+pub fn parse_tuple_type_syntax(type_name: &str) -> Option<Vec<String>> {
+    let type_name = type_name.trim();
+    if !type_name.starts_with('(') || !type_name.ends_with(')') {
+        return None;
+    }
+    let inner = type_name[1..type_name.len() - 1].trim();
+    // Empty inside `()` — that's the unit type, not a tuple.
+    if inner.is_empty() {
+        return None;
+    }
+
+    // Split on commas that are at nesting depth 0.
+    let mut parts: Vec<String> = Vec::new();
+    let mut depth_paren = 0i32;
+    let mut depth_bracket = 0i32;
+    let mut last = 0usize;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '[' => depth_bracket += 1,
+            ']' => depth_bracket -= 1,
+            ',' if depth_paren == 0 && depth_bracket == 0 => {
+                parts.push(inner[last..i].trim().to_string());
+                last = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = inner[last..].trim();
+    // If we saw no commas at all, `(T)` is a parenthesised type, not a tuple.
+    if parts.is_empty() {
+        return None;
+    }
+    // If the tail is non-empty, append it; otherwise we had a trailing comma.
+    if !tail.is_empty() {
+        parts.push(tail.to_string());
+    }
+    // All parts must be non-empty.
+    if parts.iter().any(|p| p.is_empty()) {
+        return None;
+    }
+    Some(parts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_tuple_pair() {
+        assert_eq!(
+            parse_tuple_type_syntax("(i32, bool)"),
+            Some(vec!["i32".into(), "bool".into()])
+        );
+    }
+
+    #[test]
+    fn test_parse_tuple_singleton() {
+        assert_eq!(
+            parse_tuple_type_syntax("(i32,)"),
+            Some(vec!["i32".into()])
+        );
+    }
+
+    #[test]
+    fn test_parse_tuple_triple_with_trailing_comma() {
+        assert_eq!(
+            parse_tuple_type_syntax("(i32, u8, bool,)"),
+            Some(vec!["i32".into(), "u8".into(), "bool".into()])
+        );
+    }
+
+    #[test]
+    fn test_parse_tuple_nested() {
+        assert_eq!(
+            parse_tuple_type_syntax("((i32, u8), bool)"),
+            Some(vec!["(i32, u8)".into(), "bool".into()])
+        );
+    }
+
+    #[test]
+    fn test_parse_tuple_with_array_element() {
+        assert_eq!(
+            parse_tuple_type_syntax("([i32; 3], bool)"),
+            Some(vec!["[i32; 3]".into(), "bool".into()])
+        );
+    }
+
+    #[test]
+    fn test_parse_tuple_unit_is_not_tuple() {
+        assert_eq!(parse_tuple_type_syntax("()"), None);
+    }
+
+    #[test]
+    fn test_parse_tuple_single_paren_is_not_tuple() {
+        // (i32) with no comma — parenthesised type, not a tuple
+        assert_eq!(parse_tuple_type_syntax("(i32)"), None);
+    }
+
+    #[test]
+    fn test_parse_tuple_non_tuple() {
+        assert_eq!(parse_tuple_type_syntax("i32"), None);
+        assert_eq!(parse_tuple_type_syntax("[i32; 3]"), None);
+    }
 
     // ========== Type ID tests ==========
 

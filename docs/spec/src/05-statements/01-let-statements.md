@@ -141,3 +141,45 @@ fn main() -> i32 {
     first                                // 1
 }
 ```
+
+## Tuple Destructuring
+
+{{ rule(id="5.1:21", cat="normative") }}
+
+A tuple destructuring pattern has the form `(b0, b1, ..., bN-1)`, where each `bi` is either an identifier binding (optionally preceded by `mut`) or the wildcard `_`. A 1-tuple pattern **MUST** have a trailing comma: `(b,)`.
+
+{{ rule(id="5.1:22", cat="legality-rule") }}
+
+The initializer expression **MUST** evaluate to a tuple type. The arity of the pattern **MUST** equal the arity of the tuple type; mismatched arities are a compile-time error.
+
+{{ rule(id="5.1:23", cat="normative") }}
+
+An identifier binding `x` or `mut x` introduces a new local `x` of the element's type, initialised from the element at the corresponding position. The `mut` keyword makes the binding mutable.
+
+{{ rule(id="5.1:24", cat="normative") }}
+
+A wildcard binding `_` discards the element at that position, dropping it immediately if the type has a destructor. The wildcard does not introduce a local.
+
+{{ rule(id="5.1:25", cat="normative") }}
+
+The tuple value is consumed by destructuring. After a `let (b0, ..., bN-1) = t;` statement, `t` is no longer accessible.
+
+{{ rule(id="5.1:26", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    let t = (10, 20, 30);
+    let (a, _, c) = t;        // discards the middle element
+    a + c                      // 40
+}
+```
+
+{{ rule(id="5.1:27", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    let (mut x, y) = (1, 41);
+    x = x + y;
+    x                          // 42
+}
+```
