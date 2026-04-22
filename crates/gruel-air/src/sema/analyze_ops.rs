@@ -3303,10 +3303,7 @@ impl<'a> Sema<'a> {
                         .map(|def| def.fields.len())
                         .unwrap_or(0);
                     let bindings: Vec<String> = (0..arity).map(|i| format!("x{}", i)).collect();
-                    format!(
-                        "use destructuring: `let ({}) = ...;`",
-                        bindings.join(", ")
-                    )
+                    format!("use destructuring: `let ({}) = ...;`", bindings.join(", "))
                 } else {
                     format!("use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`")
                 };
@@ -3381,7 +3378,11 @@ impl<'a> Sema<'a> {
                             idx,
                             display_struct_name,
                             struct_def.fields.len(),
-                            if struct_def.fields.len() == 1 { "" } else { "s" },
+                            if struct_def.fields.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            },
                         ));
                     }
                 }

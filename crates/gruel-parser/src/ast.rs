@@ -341,10 +341,7 @@ pub enum TypeExpr {
     ///
     /// `()` remains the unit type. A 1-tuple requires a trailing comma (`(T,)`)
     /// to distinguish it from a parenthesised type.
-    Tuple {
-        elems: Vec<TypeExpr>,
-        span: Span,
-    },
+    Tuple { elems: Vec<TypeExpr>, span: Span },
 }
 
 /// A field in an anonymous struct type expression.

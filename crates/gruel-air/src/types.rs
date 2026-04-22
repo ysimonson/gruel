@@ -1233,10 +1233,7 @@ mod tests {
 
     #[test]
     fn test_parse_tuple_singleton() {
-        assert_eq!(
-            parse_tuple_type_syntax("(i32,)"),
-            Some(vec!["i32".into()])
-        );
+        assert_eq!(parse_tuple_type_syntax("(i32,)"), Some(vec!["i32".into()]));
     }
 
     #[test]

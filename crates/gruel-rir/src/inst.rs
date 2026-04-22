@@ -2992,8 +2992,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     elems_len,
                 } => {
                     let elems = self.rir.get_inst_refs(*elems_start, *elems_len);
-                    let elems_str: Vec<String> =
-                        elems.iter().map(|e| format!("{}", e)).collect();
+                    let elems_str: Vec<String> = elems.iter().map(|e| format!("{}", e)).collect();
                     if elems.len() == 1 {
                         writeln!(out, "tuple ({},)", elems_str[0]).unwrap();
                     } else {

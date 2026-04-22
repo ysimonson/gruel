@@ -1541,7 +1541,11 @@ where
             TokenKind::Int(n) = e => (n, span_from_extra(e)),
         })
         .map(|(n, span)| {
-            let idx = if n > u32::MAX as u64 { u32::MAX } else { n as u32 };
+            let idx = if n > u32::MAX as u64 {
+                u32::MAX
+            } else {
+                n as u32
+            };
             Suffix::TupleField(idx, span)
         });
 
@@ -2112,8 +2116,7 @@ where
     let tuple_elem = just(TokenKind::Mut)
         .or_not()
         .then(choice((
-            just(TokenKind::Underscore)
-                .map_with(|_, e| TupleBinding::Wildcard(span_from_extra(e))),
+            just(TokenKind::Underscore).map_with(|_, e| TupleBinding::Wildcard(span_from_extra(e))),
             ident_parser().map(TupleBinding::Ident),
         )))
         .map(|(is_mut, binding)| TupleBindingElem {
