@@ -3541,6 +3541,11 @@ impl<'a> Sema<'a> {
             return Ok(arg_result);
         }
 
+        // If target type couldn't be inferred (unresolved type variable), require annotation
+        if target_type.is_error() {
+            return Err(CompileError::new(ErrorKind::TypeAnnotationRequired, span));
+        }
+
         // Choose the right instruction based on source/target type categories
         let data = match (source_type.is_integer(), target_type.is_integer()) {
             (true, true) => AirInstData::IntCast {
