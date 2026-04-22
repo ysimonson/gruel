@@ -538,3 +538,116 @@ fn main() -> i32 {
 }
 """
 exit_code = 43
+
+# =============================================================================
+# Nested destructuring (ADR-0049)
+# =============================================================================
+
+[[case]]
+name = "nested_destructure_struct_in_struct"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Nested struct-in-struct destructure binds inner fields (ADR-0049)"
+source = """
+struct Inner { a: i32, b: i32 }
+struct Outer { x: Inner, y: i32 }
+
+fn main() -> i32 {
+    let o = Outer { x: Inner { a: 3, b: 4 }, y: 35 };
+    let Outer { x: Inner { a, b }, y } = o;
+    a + b + y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_destructure_tuple_of_tuples"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Nested tuple-of-tuples destructure binds all leaves (ADR-0049)"
+source = """
+fn main() -> i32 {
+    let t = ((1, 2), (3, 4));
+    let ((a, b), (c, d)) = t;
+    a + b + c + d
+}
+"""
+exit_code = 10
+
+[[case]]
+name = "nested_destructure_struct_in_tuple"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Struct inside tuple destructure (ADR-0049)"
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = (Point { x: 10, y: 20 }, 12);
+    let (Point { x, y }, tag) = p;
+    x + y + tag
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_destructure_tuple_in_struct"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Tuple inside struct destructure (ADR-0049)"
+source = """
+struct Pair { xy: (i32, i32), tag: i32 }
+
+fn main() -> i32 {
+    let p = Pair { xy: (10, 20), tag: 12 };
+    let Pair { xy: (x, y), tag } = p;
+    x + y + tag
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_destructure_wildcard_leaf"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Wildcard at a nested leaf drops that leaf (ADR-0049)"
+source = """
+fn main() -> i32 {
+    let ((a, _), c) = ((10, 20), 32);
+    a + c
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "refutable_int_in_let_errors"
+spec = ["5.1:14"]
+description = "Refutable integer pattern is rejected in let (ADR-0049)"
+source = """
+fn main() -> i32 {
+    let 1 = 1;
+    0
+}
+"""
+compile_fail = true
+error_contains = "refutable pattern"
+
+[[case]]
+name = "refutable_nested_int_in_let_errors"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Refutable nested literal in let is rejected (ADR-0049)"
+source = """
+fn main() -> i32 {
+    let (1, y) = (1, 2);
+    y
+}
+"""
+compile_fail = true
+error_contains = "refutable pattern"

@@ -28,6 +28,9 @@ pub struct AstGen<'a> {
     interner: &'a ThreadedRodeo,
     /// Output RIR
     rir: Rir,
+    /// Counter for generating unique synthetic binding names when elaborating
+    /// nested destructuring patterns (ADR-0049 Phase 4).
+    nested_pat_counter: u32,
 }
 
 impl<'a> AstGen<'a> {
@@ -37,7 +40,18 @@ impl<'a> AstGen<'a> {
             ast,
             interner,
             rir: Rir::new(),
+            nested_pat_counter: 0,
         }
+    }
+
+    /// Generate a fresh synthetic symbol name for an intermediate binding in a
+    /// nested destructure. The name is interned once and used as both the
+    /// destructure-field binding_name and the `VarRef` key for the child
+    /// destructure to reference the same local.
+    fn fresh_nested_pat_name(&mut self) -> Spur {
+        let n = self.nested_pat_counter;
+        self.nested_pat_counter += 1;
+        self.interner.get_or_intern(format!("__nested_pat_{}", n))
     }
 
     /// Generate RIR from the AST.
@@ -1074,10 +1088,14 @@ impl<'a> AstGen<'a> {
             // statements + 1 for the final expression
             let mut inst_refs = Vec::with_capacity(block.statements.len() + 1);
 
-            // Generate all statements first
+            // Generate all statements first. A single statement can produce
+            // multiple RIR top-level instructions (e.g., a nested let
+            // destructure elaborated into a tree of flat StructDestructures —
+            // ADR-0049 Phase 4). Each produced InstRef becomes a block
+            // statement; sema's block scope sees them in sequence so
+            // intermediate bindings remain visible.
             for stmt in &block.statements {
-                let inst_ref = self.gen_statement(stmt);
-                inst_refs.push(inst_ref.as_u32());
+                self.gen_statement_into(stmt, &mut inst_refs);
             }
 
             // Generate the final expression
@@ -1095,54 +1113,211 @@ impl<'a> AstGen<'a> {
         }
     }
 
+    /// Lower a nested let-destructure pattern into a tree of flat
+    /// `StructDestructure` instructions plus intermediate synthetic bindings.
+    ///
+    /// For each field whose sub-pattern is itself a destructure, we emit a
+    /// fresh `__nested_pat_N` binding for the outer level and follow with a
+    /// child `emit_let_destructure` that consumes it via `VarRef`. Ownership
+    /// transfers through the tree: the outer init is consumed by the outer
+    /// destructure, each synthetic intermediate is consumed by the child
+    /// destructure.
+    ///
+    /// Emits all instructions into `out`; returns nothing. The caller is
+    /// responsible for wrapping a multi-instruction result in a Block if this
+    /// let produces more than one RIR instruction.
+    fn emit_let_destructure_into(
+        &mut self,
+        pattern: &Pattern,
+        init: InstRef,
+        span: gruel_span::Span,
+        out: &mut Vec<InstRef>,
+    ) {
+        // Build the flat destructure fields plus a side-list of child sub-patterns
+        // that need their own destructure pass.
+        let (type_name, rir_fields, child_destructures) = match pattern {
+            Pattern::Struct {
+                type_name, fields, ..
+            } => {
+                let mut rir_fields = Vec::with_capacity(fields.len());
+                let mut children: Vec<(Spur, &Pattern)> = Vec::new();
+                for fp in fields {
+                    let field_name = fp
+                        .field_name
+                        .as_ref()
+                        .expect("rest `..` field pattern is a Phase 6 feature");
+                    match &fp.sub {
+                        None => rir_fields.push(RirDestructureField {
+                            field_name: field_name.name,
+                            binding_name: Some(field_name.name),
+                            is_wildcard: false,
+                            is_mut: fp.is_mut,
+                        }),
+                        Some(Pattern::Wildcard(_)) => rir_fields.push(RirDestructureField {
+                            field_name: field_name.name,
+                            binding_name: None,
+                            is_wildcard: true,
+                            is_mut: false,
+                        }),
+                        Some(Pattern::Ident {
+                            is_mut,
+                            name: bind_name,
+                            ..
+                        }) => rir_fields.push(RirDestructureField {
+                            field_name: field_name.name,
+                            binding_name: Some(bind_name.name),
+                            is_wildcard: false,
+                            is_mut: fp.is_mut || *is_mut,
+                        }),
+                        Some(sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. })) => {
+                            let fresh = self.fresh_nested_pat_name();
+                            rir_fields.push(RirDestructureField {
+                                field_name: field_name.name,
+                                binding_name: Some(fresh),
+                                is_wildcard: false,
+                                is_mut: false,
+                            });
+                            children.push((fresh, sub));
+                        }
+                        Some(other) => panic!(
+                            "unexpected sub-pattern in let struct destructure: {:?}",
+                            other
+                        ),
+                    }
+                }
+                (type_name.name, rir_fields, children)
+            }
+            Pattern::Tuple { elems, .. } => {
+                let mut rir_fields = Vec::with_capacity(elems.len());
+                let mut children: Vec<(Spur, &Pattern)> = Vec::new();
+                for (i, elem) in elems.iter().enumerate() {
+                    let field_name = self.interner.get_or_intern(i.to_string());
+                    match elem {
+                        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => {
+                            rir_fields.push(RirDestructureField {
+                                field_name,
+                                binding_name: None,
+                                is_wildcard: true,
+                                is_mut: false,
+                            });
+                        }
+                        TupleElemPattern::Pattern(Pattern::Ident { is_mut, name, .. }) => {
+                            rir_fields.push(RirDestructureField {
+                                field_name,
+                                binding_name: Some(name.name),
+                                is_wildcard: false,
+                                is_mut: *is_mut,
+                            });
+                        }
+                        TupleElemPattern::Pattern(
+                            sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. }),
+                        ) => {
+                            let fresh = self.fresh_nested_pat_name();
+                            rir_fields.push(RirDestructureField {
+                                field_name,
+                                binding_name: Some(fresh),
+                                is_wildcard: false,
+                                is_mut: false,
+                            });
+                            children.push((fresh, sub));
+                        }
+                        TupleElemPattern::Pattern(other) => panic!(
+                            "unexpected sub-pattern in let tuple destructure: {:?}",
+                            other
+                        ),
+                        TupleElemPattern::Rest(_) => {
+                            panic!("rest pattern `..` is a Phase 6 feature")
+                        }
+                    }
+                }
+                let tuple_type_name = self.interner.get_or_intern_static("__tuple__");
+                (tuple_type_name, rir_fields, children)
+            }
+            other => panic!(
+                "emit_let_destructure called on non-destructure pattern: {:?}",
+                other
+            ),
+        };
+
+        let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
+        let outer_inst = self.rir.add_inst(Inst {
+            data: InstData::StructDestructure {
+                type_name,
+                fields_start,
+                fields_len,
+                init,
+            },
+            span,
+        });
+        out.push(outer_inst);
+
+        // Emit child destructures recursively.
+        for (binding_name, sub) in child_destructures {
+            let var_ref = self.rir.add_inst(Inst {
+                data: InstData::VarRef { name: binding_name },
+                span: sub.span(),
+            });
+            self.emit_let_destructure_into(sub, var_ref, sub.span(), out);
+        }
+    }
+
+    /// Generate RIR for a statement, appending produced top-level instruction
+    /// refs to `out`. A single AST statement can produce multiple RIR
+    /// instructions when lowering nested destructures (ADR-0049 Phase 4).
+    fn gen_statement_into(&mut self, stmt: &Statement, out: &mut Vec<u32>) {
+        if let Statement::Let(let_stmt) = stmt {
+            if matches!(
+                &let_stmt.pattern,
+                Pattern::Struct { .. } | Pattern::Tuple { .. }
+            ) {
+                let init = self.gen_expr(&let_stmt.init);
+                let mut emitted = Vec::new();
+                self.emit_let_destructure_into(
+                    &let_stmt.pattern,
+                    init,
+                    let_stmt.span,
+                    &mut emitted,
+                );
+                for r in emitted {
+                    out.push(r.as_u32());
+                }
+                return;
+            }
+        }
+        let single = self.gen_statement(stmt);
+        out.push(single.as_u32());
+    }
+
     fn gen_statement(&mut self, stmt: &Statement) -> InstRef {
         match stmt {
             Statement::Let(let_stmt) => match &let_stmt.pattern {
-                Pattern::Struct {
-                    type_name, fields, ..
-                } => {
-                    let rir_fields: Vec<RirDestructureField> = fields
-                        .iter()
-                        .map(field_pattern_to_rir_destructure_field)
-                        .collect();
-                    let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
-                    let init = self.gen_expr(&let_stmt.init);
-                    self.rir.add_inst(Inst {
-                        data: InstData::StructDestructure {
-                            type_name: type_name.name,
-                            fields_start,
-                            fields_len,
-                            init,
-                        },
-                        span: let_stmt.span,
-                    })
-                }
-                // Tuple destructure: `let (a, b, ...) = expr;` (ADR-0048).
+                // Struct / Tuple destructure patterns. Both lower to
+                // `InstData::StructDestructure`; tuple patterns use the
+                // `__tuple__` sentinel type name (ADR-0048).
                 //
-                // Lowered to the same RIR as struct destructure, reusing StructDestructure
-                // with synthetic field names "0", "1", ... and a sentinel type_name
-                // ("__tuple__") that sema recognises and resolves against the init's type.
-                Pattern::Tuple { elems, .. } => {
-                    let rir_fields: Vec<RirDestructureField> = elems
-                        .iter()
-                        .enumerate()
-                        .map(|(i, e)| {
-                            let field_name = self.interner.get_or_intern(&i.to_string());
-                            tuple_elem_to_rir_destructure_field(e, field_name)
-                        })
-                        .collect();
-                    let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
+                // Nested sub-patterns (ADR-0049) are elaborated in astgen: each
+                // nested sub-pattern position gets a synthetic intermediate
+                // binding, and a child StructDestructure is emitted against it.
+                // This keeps RIR / sema / CFG flat and reuses existing
+                // infrastructure unchanged.
+                Pattern::Struct { .. } | Pattern::Tuple { .. } => {
+                    // Destructure lets are special: they can produce multiple
+                    // top-level RIR instructions for nested patterns. Callers
+                    // that can fan out (gen_block via gen_statement_into)
+                    // handle this. Callers that can't fan out (nothing
+                    // currently) would see only the outer instruction.
                     let init = self.gen_expr(&let_stmt.init);
-                    let type_name = self.interner.get_or_intern_static("__tuple__");
-                    self.rir.add_inst(Inst {
-                        data: InstData::StructDestructure {
-                            type_name,
-                            fields_start,
-                            fields_len,
-                            init,
-                        },
-                        span: let_stmt.span,
-                    })
+                    let mut emitted = Vec::new();
+                    self.emit_let_destructure_into(
+                        &let_stmt.pattern,
+                        init,
+                        let_stmt.span,
+                        &mut emitted,
+                    );
+                    // Safe: emit_let_destructure_into always pushes at least one.
+                    *emitted
+                        .first()
+                        .expect("destructure must emit at least one instruction")
                 }
                 pattern => {
                     let directives = self.convert_directives(&let_stmt.directives);
@@ -1276,62 +1451,11 @@ fn field_pattern_to_rir_binding(fb: &FieldPattern) -> RirPatternBinding {
     }
 }
 
-/// Convert a FieldPattern used in a let-destructure into a `RirDestructureField`.
-fn field_pattern_to_rir_destructure_field(f: &FieldPattern) -> RirDestructureField {
-    let field_name = f
-        .field_name
-        .as_ref()
-        .expect("rest `..` field patterns not yet supported (Phase 6)");
-    let (binding_name, is_wildcard) = match &f.sub {
-        None => (None, false), // shorthand: use field name as binding name
-        Some(Pattern::Wildcard(_)) => (None, true),
-        Some(Pattern::Ident { name, .. }) => (Some(name.name), false),
-        Some(other) => panic!(
-            "nested patterns in let-destructure not yet supported (Phase 1); got {:?}",
-            other
-        ),
-    };
-    let binding_name = binding_name.or(if is_wildcard {
-        None
-    } else {
-        Some(field_name.name)
-    });
-    RirDestructureField {
-        field_name: field_name.name,
-        binding_name,
-        is_wildcard,
-        is_mut: f.is_mut,
-    }
-}
-
-/// Convert a TupleElemPattern used in a let tuple destructure into a `RirDestructureField`.
-/// Phase-1 restriction: sub-pattern is Pattern::Ident or Pattern::Wildcard.
-fn tuple_elem_to_rir_destructure_field(
-    elem: &TupleElemPattern,
-    field_name: Spur,
-) -> RirDestructureField {
-    match elem {
-        TupleElemPattern::Pattern(Pattern::Ident { is_mut, name, .. }) => RirDestructureField {
-            field_name,
-            binding_name: Some(name.name),
-            is_wildcard: false,
-            is_mut: *is_mut,
-        },
-        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => RirDestructureField {
-            field_name,
-            binding_name: None,
-            is_wildcard: true,
-            is_mut: false,
-        },
-        TupleElemPattern::Pattern(other) => panic!(
-            "nested patterns in let tuple destructure not yet supported (Phase 1); got {:?}",
-            other
-        ),
-        TupleElemPattern::Rest(_) => {
-            panic!("rest patterns not yet supported (Phase 6)")
-        }
-    }
-}
+// Note: the flat-lowering helpers `field_pattern_to_rir_destructure_field` and
+// `tuple_elem_to_rir_destructure_field` were superseded by
+// `AstGen::emit_let_destructure` in ADR-0049 Phase 4, which handles both flat
+// and nested destructure shapes uniformly by emitting trees of StructDestructure
+// instructions with intermediate synthetic bindings.
 
 #[cfg(test)]
 mod tests {

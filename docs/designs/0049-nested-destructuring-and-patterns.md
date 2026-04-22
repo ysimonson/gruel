@@ -495,13 +495,30 @@ ship without the preview gate since it's a bug fix, not a new feature.
     architecturally part of that phase rather than a standalone sema pass on the
     current RIR.
 
-- [ ] **Phase 4: RIR/AIR lowering (core)**
-  - Generalise `RirDestructureField` to hold an optional sub-pattern.
-  - Astgen: recursive lowering of nested let patterns into trees of field reads and
-    (for nested tuple/struct targets) child `StructDestructure` instructions.
-  - Extend `AirPattern` with `Tuple`, `Struct`, `EnumDataVariant` (with sub-patterns),
-    and `Bind` variants; update encode/decode in `inst.rs`.
-  - Sema match-arm lowering walks `Pattern` and emits the recursive `AirPattern`.
+- [x] **Phase 4a: Nested let-destructure via astgen elaboration**
+  - `AstGen::emit_let_destructure_into` recursively lowers nested let patterns
+    into a tree of flat `StructDestructure` instructions with synthetic
+    `__nested_pat_N` intermediate bindings threaded via `VarRef`. The outer
+    destructure binds each non-leaf position to a synthetic local; the child
+    destructure consumes it.
+  - `gen_block` threads through a new `gen_statement_into` that lets a single
+    AST let-statement expand to multiple top-level RIR instructions, so
+    intermediates stay visible in the block's scope.
+  - No RIR / AIR / CFG / codegen changes needed for nested let — reuses the
+    existing flat `StructDestructure` end-to-end, including the `__tuple__`
+    sentinel (ADR-0048).
+  - Spec tests (5 positive + 2 refutability error cases) cover nested
+    struct-in-struct, tuple-of-tuples, struct-in-tuple, tuple-in-struct, and
+    nested wildcard-drop.
+
+- [ ] **Phase 4b: Nested patterns in match arms (deferred)**
+  - Extend `AirPattern` with `Tuple`, `Struct`, `EnumDataVariant` (with
+    sub-patterns), and `Bind` variants; update encode/decode in `inst.rs`.
+  - Sema match-arm lowering walks `Pattern` and emits the recursive
+    `AirPattern`. Without this, nested patterns in match arms still trip the
+    astgen panic.
+  - Bundled with Phase 5 because the AIR reshape and the CFG recursive dispatch
+    are tightly coupled — the cleanest commit lands them together.
 
 - [ ] **Phase 5: CFG + codegen + exhaustiveness**
   - Recursive match-dispatch lowering: at each refutable node emit the appropriate
