@@ -7568,12 +7568,8 @@ impl<'a> Sema<'a> {
                         let slot_count = self.abi_slot_count(ty);
                         Ok(ConstValue::Integer(if slot_count == 0 { 1 } else { 8 }))
                     }
-                    "typeName" => {
-                        self.evaluate_comptime_type_name(ty, inst_span)
-                    }
-                    "typeInfo" => {
-                        self.evaluate_comptime_type_info(ty, inst_span)
-                    }
+                    "typeName" => self.evaluate_comptime_type_name(ty, inst_span),
+                    "typeInfo" => self.evaluate_comptime_type_info(ty, inst_span),
                     _ => Err(not_const(inst_span)),
                 }
             }
