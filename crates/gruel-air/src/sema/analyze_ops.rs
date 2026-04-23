@@ -2372,36 +2372,28 @@ impl<'a> Sema<'a> {
             air_arms.push((air_pattern, body_result.air_ref));
         }
 
-        // Exhaustiveness checking. When the match is non-exhaustive we
-        // compute a short list of missing patterns so the error points
-        // at specific uncovered cases (bool sides, enum variants).
-        let has_wildcard = wildcard_span.is_some();
-        let bool_true_covered = bool_true_span.is_some();
-        let bool_false_covered = bool_false_span.is_some();
-        let missing: Vec<String> = if has_wildcard {
-            Vec::new()
-        } else if scrutinee_type == Type::BOOL {
-            let mut m = Vec::new();
-            if !bool_true_covered {
-                m.push("true".to_string());
-            }
-            if !bool_false_covered {
-                m.push("false".to_string());
-            }
-            m
-        } else if let Some(enum_id) = pattern_enum_id {
-            let enum_def = self.type_pool.enum_def(enum_id);
-            enum_def
-                .variants
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| !covered_variants.contains(&(*i as u32)))
-                .map(|(_, v)| format!("{}::{}", enum_def.name, v.name))
-                .collect()
-        } else {
-            // Integer scrutinee: only a wildcard exhausts the range.
-            vec!["_".to_string()]
-        };
+        // ADR-0051 Phase 5: exhaustiveness via Maranget usefulness.
+        // Legacy per-kind tracking (bool_true_span, covered_variants, …)
+        // stays alive for duplicate-pattern diagnostics, but the
+        // not-covered check now walks the pattern tree recursively and
+        // can surface nested witnesses like `Some(None)`.
+        let _ = (
+            bool_true_span,
+            bool_false_span,
+            covered_variants,
+            pattern_enum_id,
+        );
+        let air_pattern_list: Vec<crate::inst::AirPattern> =
+            air_arms.iter().map(|(p, _)| p.clone()).collect();
+        let missing_witnesses = crate::sema::usefulness::exhaustiveness_witnesses(
+            &air_pattern_list,
+            scrutinee_type,
+            self,
+        );
+        let missing: Vec<String> = missing_witnesses
+            .iter()
+            .map(|w| crate::sema::usefulness::render_witness(w, &self.type_pool))
+            .collect();
 
         if !missing.is_empty() {
             return Err(CompileError::new(

@@ -425,7 +425,7 @@ path (Phase 4).
     elsewhere.
   - `make test` green.
 
-- [ ] **Phase 5: Recursive usefulness / exhaustiveness**
+- [x] **Phase 5: Recursive usefulness / exhaustiveness**
   - Replace the current exhaustiveness check with the Maranget
     usefulness algorithm over recursive `AirPattern`s.
   - Collect witnesses as a `Vec<AirPattern>` and format them

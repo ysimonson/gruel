@@ -1159,3 +1159,56 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# =============================================================================
+# Nested exhaustiveness witnesses (ADR-0051 Phase 5)
+# =============================================================================
+
+[[case]]
+name = "nested_witness_tuple_bool_missing_false_side"
+spec = ["4.7:23", "4.7:24"]
+description = "Non-exhaustive tuple of bools reports the missing nested shape"
+source = """
+fn main() -> i32 {
+    let t = (true, true);
+    match t {
+        (true, true) => 1,
+        (false, _) => 2,
+    }
+}
+"""
+compile_fail = true
+error_contains = "(true, false)"
+
+[[case]]
+name = "nested_witness_enum_missing_variant"
+spec = ["4.7:23", "4.7:24"]
+description = "Non-exhaustive nested enum match names the uncovered variant path"
+source = """
+enum Inner { A, B }
+enum Outer { Left(Inner), Right }
+fn main() -> i32 {
+    let o = Outer::Right;
+    match o {
+        Outer::Left(Inner::A) => 1,
+        Outer::Right => 2,
+    }
+}
+"""
+compile_fail = true
+error_contains = "Inner::B"
+
+[[case]]
+name = "nested_witness_tuple_literal_uncovered"
+spec = ["4.7:23", "4.7:24"]
+description = "Non-exhaustive tuple of ints falls back to _ for the open dimension"
+source = """
+fn main() -> i32 {
+    let t = (1, 2);
+    match t {
+        (0, 0) => 1,
+    }
+}
+"""
+compile_fail = true
+error_contains = "(_, _)"

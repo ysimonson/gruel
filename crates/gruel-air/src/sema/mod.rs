@@ -47,6 +47,7 @@ mod module_path;
 mod output;
 mod sema_ctx_builder;
 mod typeck;
+mod usefulness;
 mod visibility;
 
 // Public re-exports
