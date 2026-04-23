@@ -2146,22 +2146,42 @@ impl<'a> Sema<'a> {
             air_arms.push((air_pattern, body_result.air_ref));
         }
 
-        // Exhaustiveness checking
+        // Exhaustiveness checking. When the match is non-exhaustive we
+        // compute a short list of missing patterns so the error points
+        // at specific uncovered cases (bool sides, enum variants).
         let has_wildcard = wildcard_span.is_some();
         let bool_true_covered = bool_true_span.is_some();
         let bool_false_covered = bool_false_span.is_some();
-        let is_exhaustive = if scrutinee_type == Type::BOOL {
-            has_wildcard || (bool_true_covered && bool_false_covered)
+        let missing: Vec<String> = if has_wildcard {
+            Vec::new()
+        } else if scrutinee_type == Type::BOOL {
+            let mut m = Vec::new();
+            if !bool_true_covered {
+                m.push("true".to_string());
+            }
+            if !bool_false_covered {
+                m.push("false".to_string());
+            }
+            m
         } else if let Some(enum_id) = pattern_enum_id {
             let enum_def = self.type_pool.enum_def(enum_id);
-            has_wildcard || covered_variants.len() == enum_def.variant_count()
+            enum_def
+                .variants
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !covered_variants.contains(&(*i as u32)))
+                .map(|(_, v)| format!("{}::{}", enum_def.name, v.name))
+                .collect()
         } else {
-            // For integers, must have wildcard
-            has_wildcard
+            // Integer scrutinee: only a wildcard exhausts the range.
+            vec!["_".to_string()]
         };
 
-        if !is_exhaustive {
-            return Err(CompileError::new(ErrorKind::NonExhaustiveMatch, span));
+        if !missing.is_empty() {
+            return Err(CompileError::new(
+                ErrorKind::NonExhaustiveMatch { missing },
+                span,
+            ));
         }
 
         let final_type = result_type.unwrap_or(Type::UNIT);

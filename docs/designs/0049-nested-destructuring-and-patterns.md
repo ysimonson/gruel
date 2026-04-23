@@ -603,9 +603,14 @@ ship without the preview gate since it's a bug fix, not a new feature.
     all-refutable multi-field merge, and struct-variant merge.
 
 - [ ] **Future work still on the ADR checklist**
-  - Exhaustiveness-checker extension reporting nested-pattern witnesses
-    in diagnostics (today, missing coverage is still reported at the
-    outer-variant level).
+  - Nested-pattern witnesses in exhaustiveness diagnostics. The
+    exhaustiveness checker runs on the *elaborated* match, so for
+    shared-outer merged arms the missing patterns are reported on the
+    synthesised inner match (`match __refut_0 { ... }`) rather than
+    reconstructed as user-visible nested patterns (`Some(None)` etc.).
+    Closing this would require threading source patterns alongside the
+    elaboration or adopting the recursive `AirPattern` approach the
+    ADR originally described.
 
 ## Recently closed follow-ups
 
@@ -641,6 +646,16 @@ ship without the preview gate since it's a bug fix, not a new feature.
   tuple's arity before looking the field up. See spec tests
   `match_tuple_root_middle_rest` and
   `match_tuple_root_leading_rest_literal`.
+
+- Top-level non-exhaustive match diagnostics now list specific
+  missing patterns. `ErrorKind::NonExhaustiveMatch { missing }`
+  carries the uncovered cases and formats them as "pattern `false`
+  not covered" / "patterns `Color::Green`, `Color::Blue` not covered"
+  / "pattern `_` not covered" (for integer scrutinees). The check
+  still runs on the *elaborated* match, so shared-outer merged arms
+  emit witnesses that reference the inner match's scrutinee (the
+  synthesised `__refut_N`) rather than user-visible nested patterns;
+  that's tracked separately as future work.
 
 - [x] **Phase 6: Rest patterns (`..`) in let and match arms**
   - Parser already accepts `..` in tuple / struct / variant field lists

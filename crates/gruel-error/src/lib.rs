@@ -733,6 +733,22 @@ fn format_argument_count(expected: usize, found: usize) -> String {
     }
 }
 
+fn format_missing_witnesses(missing: &[String]) -> String {
+    if missing.is_empty() {
+        return String::new();
+    }
+    let list = missing
+        .iter()
+        .map(|w| format!("`{}`", w))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if missing.len() == 1 {
+        format!(": pattern {} not covered", list)
+    } else {
+        format!(": patterns {} not covered", list)
+    }
+}
+
 fn format_missing_fields(err: &MissingFieldsError) -> String {
     if err.missing_fields.len() == 1 {
         format!(
@@ -992,8 +1008,13 @@ pub enum ErrorKind {
     UncheckedCallRequiresChecked(String),
 
     // Match errors
-    #[error("match is not exhaustive")]
-    NonExhaustiveMatch,
+    //
+    // `missing` is a short, comma-separated list of uncovered patterns
+    // (variant names, bool cases, or `_` when no finite witness
+    // applies). Empty when the old call-sites haven't been updated yet
+    // — the base message still makes sense in that case.
+    #[error("match is not exhaustive{}", format_missing_witnesses(.missing))]
+    NonExhaustiveMatch { missing: Vec<String> },
     #[error("match expression has no arms")]
     EmptyMatch,
     #[error("cannot match on type '{0}', expected integer, bool, or enum")]
@@ -1172,7 +1193,7 @@ impl ErrorKind {
             }
 
             // Match errors (E0600-E0699)
-            ErrorKind::NonExhaustiveMatch => ErrorCode::NON_EXHAUSTIVE_MATCH,
+            ErrorKind::NonExhaustiveMatch { .. } => ErrorCode::NON_EXHAUSTIVE_MATCH,
             ErrorKind::EmptyMatch => ErrorCode::EMPTY_MATCH,
             ErrorKind::InvalidMatchType(_) => ErrorCode::INVALID_MATCH_TYPE,
 

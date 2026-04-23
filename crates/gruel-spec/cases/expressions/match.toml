@@ -443,6 +443,7 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
+error_contains = "pattern `_` not covered"
 
 [[case]]
 name = "non_exhaustive_bool_missing_false"
@@ -455,6 +456,7 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
+error_contains = "pattern `false` not covered"
 
 [[case]]
 name = "non_exhaustive_bool_missing_true"
@@ -467,6 +469,24 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
+error_contains = "pattern `true` not covered"
+
+[[case]]
+name = "non_exhaustive_enum_lists_missing_variants"
+spec = ["4.7:9", "4.7:10"]
+description = "Non-exhaustive enum match lists the specific missing variants (ADR-0049 Phase 8)"
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    let c = Color::Red;
+    match c {
+        Color::Red => 0,
+    }
+}
+"""
+compile_fail = true
+error_contains = "patterns `Color::Green`, `Color::Blue` not covered"
 
 # =============================================================================
 # Error Cases: Empty Match
