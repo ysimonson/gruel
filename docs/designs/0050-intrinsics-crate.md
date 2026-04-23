@@ -1,12 +1,12 @@
 ---
 id: 0050
 title: Centralized Intrinsics Registry
-status: proposal
+status: implemented
 tags: [refactor, infrastructure, docs]
 feature-flag: none
 created: 2026-04-22
-accepted:
-implemented:
+accepted: 2026-04-23
+implemented: 2026-04-23
 spec-sections: [4.13, 9.2]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -135,7 +135,7 @@ The hand-maintained quick-reference table in the spec is replaced by the generat
   - Wire the exporter into `website/build.sh`.
   - Add a `make check` step that runs the exporter and fails if the committed doc differs from the generated output (prevents drift).
 
-- [ ] **Phase 6: Cleanup**
+- [x] **Phase 6: Cleanup**
   - Delete now-unused fields from `KnownSymbols`.
   - Delete `TYPE_INTRINSICS` const in `astgen.rs`.
   - Collapse any remaining string-keyed intrinsic maps.

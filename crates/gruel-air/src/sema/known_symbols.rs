@@ -1,29 +1,16 @@
 //! Pre-interned known symbols for fast comparison.
 //!
 //! This module provides `KnownSymbols`, a struct that holds pre-interned `Spur`
-//! values for commonly compared strings like intrinsic names. By interning these
-//! strings once at initialization, we can compare symbols directly (integer
-//! comparison) instead of resolving to strings and doing string comparison.
+//! values for commonly compared strings together with a lookup table that maps
+//! each intrinsic's name `Spur` to its stable `IntrinsicId` from the
+//! `gruel-intrinsics` registry.
 //!
 //! # Performance
 //!
 //! Each `interner.resolve()` call involves a hash table lookup. While individual
 //! lookups are fast, the cumulative cost across many intrinsic dispatches can be
-//! significant. Pre-interning known symbols reduces intrinsic dispatch from
-//! O(string_length) to O(1).
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let known = KnownSymbols::new(interner);
-//!
-//! // Fast symbol comparison instead of string comparison
-//! if name == known.dbg {
-//!     // Handle @dbg intrinsic
-//! } else if name == known.cast {
-//!     // Handle @cast intrinsic
-//! }
-//! ```
+//! significant. Pre-interning known symbols and looking up intrinsic ids
+//! directly by `Spur` avoids repeated string resolution in hot paths.
 
 use std::collections::HashMap;
 
@@ -32,97 +19,42 @@ use lasso::{Spur, ThreadedRodeo};
 
 /// Pre-interned symbols for known strings.
 ///
-/// This struct is created once during `SemaContext` construction and provides
-/// fast symbol comparison for intrinsic dispatch and other common lookups.
+/// Created once during `SemaContext` construction. Holds a `Spur → IntrinsicId`
+/// lookup (the primary dispatch path) plus a small number of ad-hoc symbols
+/// used outside of the main intrinsic-dispatch code — intrinsics that appear
+/// by name in non-dispatch sites (comptime evaluator, address-of helpers,
+/// import resolution) and non-intrinsic symbols (`String`, `main`).
 #[derive(Debug, Clone)]
 pub struct KnownSymbols {
     /// Maps each intrinsic's interned name `Spur` to its stable `IntrinsicId`.
     /// Built from the central `gruel-intrinsics` registry at sema startup;
     /// consumers use this for id-based dispatch instead of string matching.
     pub intrinsic_ids: HashMap<Spur, IntrinsicId>,
-    // Intrinsic names
-    /// The `dbg` intrinsic symbol.
+
+    // ---- Intrinsic symbols referenced outside the main dispatcher ----
+    /// The `dbg` intrinsic symbol — used when lowering direct `dbg` calls and
+    /// by the comptime evaluator.
     pub dbg: Spur,
-    /// The `cast` intrinsic symbol.
-    pub cast: Spur,
-    /// The `panic` intrinsic symbol.
+    /// The `panic` intrinsic symbol — used when sema synthesizes a panic call.
     pub panic: Spur,
-    /// The `assert` intrinsic symbol.
+    /// The `assert` intrinsic symbol — used when sema synthesizes an assert call.
     pub assert: Spur,
-    /// The `read_line` intrinsic symbol.
-    pub read_line: Spur,
-    /// The `parse_i32` intrinsic symbol.
-    pub parse_i32: Spur,
-    /// The `parse_i64` intrinsic symbol.
-    pub parse_i64: Spur,
-    /// The `parse_u32` intrinsic symbol.
-    pub parse_u32: Spur,
-    /// The `parse_u64` intrinsic symbol.
-    pub parse_u64: Spur,
-    /// The `test_preview_gate` intrinsic symbol.
-    pub test_preview_gate: Spur,
-    /// The `import` builtin symbol.
-    pub import: Spur,
-    /// The `random_u32` intrinsic symbol.
-    pub random_u32: Spur,
-    /// The `random_u64` intrinsic symbol.
-    pub random_u64: Spur,
-
-    // Type intrinsics
-    /// The `size_of` type intrinsic symbol.
-    pub size_of: Spur,
-    /// The `align_of` type intrinsic symbol.
-    pub align_of: Spur,
-
-    // Pointer intrinsics (require unchecked block)
-    /// The `ptr_read` intrinsic symbol - reads value through pointer.
-    pub ptr_read: Spur,
-    /// The `ptr_write` intrinsic symbol - writes value through pointer.
-    pub ptr_write: Spur,
-    /// The `ptr_offset` intrinsic symbol - pointer arithmetic.
-    pub ptr_offset: Spur,
-    /// The `ptr_to_int` intrinsic symbol - converts pointer to usize.
-    pub ptr_to_int: Spur,
-    /// The `int_to_ptr` intrinsic symbol - converts usize to pointer.
-    pub int_to_ptr: Spur,
-    /// The `raw` intrinsic symbol - takes address of lvalue.
-    pub raw: Spur,
-    /// The `raw_mut` intrinsic symbol - takes mutable address of lvalue.
-    pub raw_mut: Spur,
-    /// The `null_ptr` intrinsic symbol - creates a null pointer.
-    pub null_ptr: Spur,
-    /// The `is_null` intrinsic symbol - checks if pointer is null.
-    pub is_null: Spur,
-    /// The `ptr_copy` intrinsic symbol - copies n elements between pointers.
-    pub ptr_copy: Spur,
-    /// The `syscall` intrinsic symbol - direct OS syscall.
-    pub syscall: Spur,
-
-    // Target platform intrinsics
-    /// The `target_arch` intrinsic symbol - returns target CPU architecture.
-    pub target_arch: Spur,
-    /// The `target_os` intrinsic symbol - returns target operating system.
-    pub target_os: Spur,
-
-    // Comptime metaprogramming intrinsics
-    /// The `compile_error` intrinsic symbol.
+    /// The `cast` intrinsic symbol — used by the comptime evaluator.
+    pub cast: Spur,
+    /// The `compile_error` intrinsic symbol — used by the comptime evaluator.
     pub compile_error: Spur,
-    /// The `type_info` type intrinsic symbol.
-    pub type_info: Spur,
-    /// The `type_name` type intrinsic symbol.
-    pub type_name: Spur,
-    /// The `field` intrinsic symbol.
-    pub field: Spur,
-
-    // For-loop intrinsics
-    /// The `range` intrinsic symbol.
+    /// The `range` intrinsic symbol — recognized by for-loop lowering.
     pub range: Spur,
+    /// The `raw` intrinsic symbol — address-of helper constructs AIR calls by name.
+    pub raw: Spur,
+    /// The `raw_mut` intrinsic symbol — same as `raw`, for mutable addresses.
+    pub raw_mut: Spur,
+    /// The `import` builtin symbol — used by the module-import path.
+    pub import: Spur,
 
-    // Builtin type names
+    // ---- Non-intrinsic symbols ----
     /// The `String` type name symbol.
     pub string_type: Spur,
-
-    // Special function names
     /// The `main` function name symbol.
     pub main_fn: Spur,
 }
@@ -138,55 +70,16 @@ impl KnownSymbols {
             .collect();
         Self {
             intrinsic_ids,
-            // Intrinsic names
             dbg: interner.get_or_intern_static("dbg"),
-            cast: interner.get_or_intern_static("cast"),
             panic: interner.get_or_intern_static("panic"),
             assert: interner.get_or_intern_static("assert"),
-            read_line: interner.get_or_intern_static("read_line"),
-            parse_i32: interner.get_or_intern_static("parse_i32"),
-            parse_i64: interner.get_or_intern_static("parse_i64"),
-            parse_u32: interner.get_or_intern_static("parse_u32"),
-            parse_u64: interner.get_or_intern_static("parse_u64"),
-            test_preview_gate: interner.get_or_intern_static("test_preview_gate"),
-            import: interner.get_or_intern_static("import"),
-            random_u32: interner.get_or_intern_static("random_u32"),
-            random_u64: interner.get_or_intern_static("random_u64"),
-
-            // Type intrinsics
-            size_of: interner.get_or_intern_static("size_of"),
-            align_of: interner.get_or_intern_static("align_of"),
-
-            // Pointer intrinsics
-            ptr_read: interner.get_or_intern_static("ptr_read"),
-            ptr_write: interner.get_or_intern_static("ptr_write"),
-            ptr_offset: interner.get_or_intern_static("ptr_offset"),
-            ptr_to_int: interner.get_or_intern_static("ptr_to_int"),
-            int_to_ptr: interner.get_or_intern_static("int_to_ptr"),
+            cast: interner.get_or_intern_static("cast"),
+            compile_error: interner.get_or_intern_static("compile_error"),
+            range: interner.get_or_intern_static("range"),
             raw: interner.get_or_intern_static("raw"),
             raw_mut: interner.get_or_intern_static("raw_mut"),
-            null_ptr: interner.get_or_intern_static("null_ptr"),
-            is_null: interner.get_or_intern_static("is_null"),
-            ptr_copy: interner.get_or_intern_static("ptr_copy"),
-            syscall: interner.get_or_intern_static("syscall"),
-
-            // Target platform intrinsics
-            target_arch: interner.get_or_intern_static("target_arch"),
-            target_os: interner.get_or_intern_static("target_os"),
-
-            // Comptime metaprogramming intrinsics
-            compile_error: interner.get_or_intern_static("compile_error"),
-            type_info: interner.get_or_intern_static("type_info"),
-            type_name: interner.get_or_intern_static("type_name"),
-            field: interner.get_or_intern_static("field"),
-
-            // For-loop intrinsics
-            range: interner.get_or_intern_static("range"),
-
-            // Builtin type names
+            import: interner.get_or_intern_static("import"),
             string_type: interner.get_or_intern_static("String"),
-
-            // Special function names
             main_fn: interner.get_or_intern_static("main"),
         }
     }
@@ -194,23 +87,6 @@ impl KnownSymbols {
     /// Look up an intrinsic's stable id by its interned name symbol.
     pub fn intrinsic_id(&self, sym: Spur) -> Option<IntrinsicId> {
         self.intrinsic_ids.get(&sym).copied()
-    }
-
-    /// Check if a symbol matches any of the parse intrinsics.
-    ///
-    /// Returns the parse intrinsic name as a string if it matches, or None.
-    pub fn get_parse_intrinsic_name(&self, sym: Spur) -> Option<&'static str> {
-        if sym == self.parse_i32 {
-            Some("parse_i32")
-        } else if sym == self.parse_i64 {
-            Some("parse_i64")
-        } else if sym == self.parse_u32 {
-            Some("parse_u32")
-        } else if sym == self.parse_u64 {
-            Some("parse_u64")
-        } else {
-            None
-        }
     }
 }
 
@@ -223,43 +99,15 @@ mod tests {
         let interner = ThreadedRodeo::new();
         let known = KnownSymbols::new(&interner);
 
-        // Verify symbols can be resolved back to their expected strings
         assert_eq!(interner.resolve(&known.dbg), "dbg");
-        assert_eq!(interner.resolve(&known.cast), "cast");
         assert_eq!(interner.resolve(&known.panic), "panic");
         assert_eq!(interner.resolve(&known.assert), "assert");
-        assert_eq!(interner.resolve(&known.read_line), "read_line");
-        assert_eq!(interner.resolve(&known.parse_i32), "parse_i32");
-        assert_eq!(interner.resolve(&known.parse_i64), "parse_i64");
-        assert_eq!(interner.resolve(&known.parse_u32), "parse_u32");
-        assert_eq!(interner.resolve(&known.parse_u64), "parse_u64");
-        assert_eq!(
-            interner.resolve(&known.test_preview_gate),
-            "test_preview_gate"
-        );
-        assert_eq!(interner.resolve(&known.import), "import");
-        assert_eq!(interner.resolve(&known.random_u32), "random_u32");
-        assert_eq!(interner.resolve(&known.random_u64), "random_u64");
-        assert_eq!(interner.resolve(&known.size_of), "size_of");
-        assert_eq!(interner.resolve(&known.align_of), "align_of");
-        assert_eq!(interner.resolve(&known.ptr_read), "ptr_read");
-        assert_eq!(interner.resolve(&known.ptr_write), "ptr_write");
-        assert_eq!(interner.resolve(&known.ptr_offset), "ptr_offset");
-        assert_eq!(interner.resolve(&known.ptr_to_int), "ptr_to_int");
-        assert_eq!(interner.resolve(&known.int_to_ptr), "int_to_ptr");
+        assert_eq!(interner.resolve(&known.cast), "cast");
+        assert_eq!(interner.resolve(&known.compile_error), "compile_error");
+        assert_eq!(interner.resolve(&known.range), "range");
         assert_eq!(interner.resolve(&known.raw), "raw");
         assert_eq!(interner.resolve(&known.raw_mut), "raw_mut");
-        assert_eq!(interner.resolve(&known.null_ptr), "null_ptr");
-        assert_eq!(interner.resolve(&known.is_null), "is_null");
-        assert_eq!(interner.resolve(&known.ptr_copy), "ptr_copy");
-        assert_eq!(interner.resolve(&known.syscall), "syscall");
-        assert_eq!(interner.resolve(&known.target_arch), "target_arch");
-        assert_eq!(interner.resolve(&known.target_os), "target_os");
-        assert_eq!(interner.resolve(&known.compile_error), "compile_error");
-        assert_eq!(interner.resolve(&known.type_info), "type_info");
-        assert_eq!(interner.resolve(&known.type_name), "type_name");
-        assert_eq!(interner.resolve(&known.field), "field");
-        assert_eq!(interner.resolve(&known.range), "range");
+        assert_eq!(interner.resolve(&known.import), "import");
         assert_eq!(interner.resolve(&known.string_type), "String");
         assert_eq!(interner.resolve(&known.main_fn), "main");
     }
@@ -269,36 +117,12 @@ mod tests {
         let interner = ThreadedRodeo::new();
         let known = KnownSymbols::new(&interner);
 
-        // Interning the same string should return the same Spur
+        // Interning the same string should return the same Spur.
         let dbg_sym = interner.get_or_intern("dbg");
         assert_eq!(dbg_sym, known.dbg);
 
         let main_sym = interner.get_or_intern("main");
         assert_eq!(main_sym, known.main_fn);
-    }
-
-    #[test]
-    fn get_parse_intrinsic_name() {
-        let interner = ThreadedRodeo::new();
-        let known = KnownSymbols::new(&interner);
-
-        assert_eq!(
-            known.get_parse_intrinsic_name(known.parse_i32),
-            Some("parse_i32")
-        );
-        assert_eq!(
-            known.get_parse_intrinsic_name(known.parse_i64),
-            Some("parse_i64")
-        );
-        assert_eq!(
-            known.get_parse_intrinsic_name(known.parse_u32),
-            Some("parse_u32")
-        );
-        assert_eq!(
-            known.get_parse_intrinsic_name(known.parse_u64),
-            Some("parse_u64")
-        );
-        assert_eq!(known.get_parse_intrinsic_name(known.dbg), None);
     }
 
     #[test]

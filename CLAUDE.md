@@ -581,6 +581,19 @@ When all tests pass and the feature is complete:
 
 9. **Run `make test`** to verify all tests pass and traceability is maintained
 
+### Adding a new intrinsic
+
+Intrinsics are declared once in the `gruel-intrinsics` registry (ADR-0050) and then wired through sema/codegen via the closed `IntrinsicId` enum. To add one:
+
+1. In `crates/gruel-intrinsics/src/lib.rs`:
+   - Add a variant to `IntrinsicId`.
+   - Append an `IntrinsicDef` entry to `INTRINSICS` (name, kind, category, arity, preview gate, runtime symbol if any, summary/description/examples for the generated docs).
+2. Implement the behavior:
+   - Sema: add a `match` arm for the new `IntrinsicId` in `analyze_intrinsic_impl` (and `analyze_type_intrinsic` / inference as needed) — the compiler's exhaustive matches will force this.
+   - Codegen: add the corresponding arm in `translate_intrinsic` in `gruel-codegen-llvm`.
+3. If the intrinsic has a runtime component, implement the extern in `gruel-runtime` using the symbol name given by `runtime_fn`.
+4. Run `make gen-intrinsic-docs` to regenerate `docs/generated/intrinsics-reference.md`, commit it, and then `make check` (which runs `make check-intrinsic-docs`) will fail if anyone lets the registry and the doc drift apart.
+
 ## Version Control
 
 This project uses git.
