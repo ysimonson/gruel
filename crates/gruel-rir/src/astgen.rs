@@ -15,7 +15,8 @@ use gruel_parser::{
 
 use crate::inst::{
     FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDestructureField,
-    RirDirective, RirParam, RirParamMode, RirPattern, RirPatternBinding, RirStructPatternBinding,
+    RirDirective, RirParam, RirParamMode, RirPattern, RirPatternBinding, RirStructField,
+    RirStructPatternBinding,
 };
 
 /// Generates RIR from an AST.
@@ -29,6 +30,13 @@ pub struct AstGen<'a> {
     /// Counter for generating unique synthetic binding names when elaborating
     /// nested destructuring patterns (ADR-0049 Phase 4).
     nested_pat_counter: u32,
+    /// ADR-0051 Phase 4b: when true, astgen bypasses the tuple-match
+    /// elaborator and emits `RirPattern::Tuple` / `Struct` / `Ident`
+    /// match arms directly for sema + CFG's recursive lowering path to
+    /// consume. Off by default; flipped on by a test flag wired through
+    /// the compiler pipeline. Phase 4c makes the new path the only path
+    /// and deletes the elaborators.
+    recursive_pattern_lowering: bool,
 }
 
 impl<'a> AstGen<'a> {
@@ -39,7 +47,16 @@ impl<'a> AstGen<'a> {
             interner,
             rir: Rir::new(),
             nested_pat_counter: 0,
+            recursive_pattern_lowering: false,
         }
+    }
+
+    /// Enable ADR-0051 Phase 4b's recursive pattern lowering at astgen
+    /// time. Internal compiler flag; callers pair this with
+    /// `Sema::set_recursive_pattern_lowering` so both layers follow the
+    /// same pattern shape.
+    pub fn set_recursive_pattern_lowering(&mut self, enabled: bool) {
+        self.recursive_pattern_lowering = enabled;
     }
 
     /// Generate a fresh synthetic symbol name for an intermediate binding in a
@@ -612,28 +629,33 @@ impl<'a> AstGen<'a> {
                 })
             }
             Expr::Match(match_expr) => {
-                // Top-level struct / tuple / ident patterns at the match arm
-                // root are irrefutable — for a match expression with only such
-                // an arm, elaborate the whole thing into a let-destructure
-                // around the arm body. This keeps existing RIR shapes unchanged
-                // while allowing nested pattern syntax.
+                // ADR-0051 Phase 4b: when recursive lowering is on, skip the
+                // tuple- and refutable-nested elaborators entirely — sema +
+                // CFG consume `RirPattern::Tuple` / `Struct` / `Ident` arm
+                // roots directly. We still run the single-arm irrefutable
+                // elaborator because it rewrites to a let-destructure with
+                // semantics (drop ordering, field projections) that the
+                // recursive path does not reproduce yet.
                 if let Some(elaborated) = self.try_elaborate_irrefutable_match(match_expr) {
                     return elaborated;
                 }
 
-                // Multi-arm matches with tuple patterns at the top of any arm
-                // elaborate into a let-bound scrutinee plus an if/else chain
-                // over tuple projections (ADR-0049 Phase 5a).
-                if let Some(elaborated) = self.try_elaborate_tuple_match(match_expr) {
-                    return elaborated;
-                }
+                if !self.recursive_pattern_lowering {
+                    // Multi-arm matches with tuple patterns at the top of any
+                    // arm elaborate into a let-bound scrutinee plus an
+                    // if/else chain over tuple projections (ADR-0049 Phase 5a).
+                    if let Some(elaborated) = self.try_elaborate_tuple_match(match_expr) {
+                        return elaborated;
+                    }
 
-                // Arms with refutable nested sub-patterns in variant fields
-                // (e.g., `Some(Some(v))`) elaborate into nested matches that
-                // fall back to the outer match's wildcard catch-all body
-                // (ADR-0049 Phase 5b).
-                if let Some(elaborated) = self.try_elaborate_refutable_nested_match(match_expr) {
-                    return elaborated;
+                    // Arms with refutable nested sub-patterns in variant
+                    // fields (e.g., `Some(Some(v))`) elaborate into nested
+                    // matches that fall back to the outer match's wildcard
+                    // catch-all body (ADR-0049 Phase 5b).
+                    if let Some(elaborated) = self.try_elaborate_refutable_nested_match(match_expr)
+                    {
+                        return elaborated;
+                    }
                 }
 
                 let scrutinee = self.gen_expr(&match_expr.scrutinee);
@@ -2123,11 +2145,88 @@ impl<'a> AstGen<'a> {
                     span: *span,
                 }
             }
-            // Top-level Struct/Tuple/Ident patterns are elaborated in
-            // `gen_expr` via `try_elaborate_irrefutable_match` before reaching
-            // this lowering, so a multi-arm match with one of these at the
-            // top is an unsupported shape (would need recursive CFG dispatch
-            // — Phase 5). The `nested` parameter is unused on this branch.
+            // Top-level Struct / Tuple / Ident match arms.
+            //
+            // Pre-ADR-0051 path: these are elaborated in `gen_expr` via
+            // `try_elaborate_irrefutable_match` (single-arm) or
+            // `try_elaborate_tuple_match` (multi-arm tuple) before ever
+            // reaching this function, so hitting one here means the
+            // elaborators declined and the shape is unsupported.
+            //
+            // ADR-0051 Phase 4b path: when `recursive_pattern_lowering` is
+            // on, sema + CFG consume nested arms directly. The `nested`
+            // out-param is unused for the recursive shape — we lower each
+            // sub-pattern recursively via `gen_match_arm_pattern` so any
+            // Struct / Tuple / Ident sub-pattern further down stays in the
+            // tree rather than being captured into a synthetic binding.
+            Pattern::Ident { name, is_mut, span } if self.recursive_pattern_lowering => {
+                let _ = nested;
+                RirPattern::Ident {
+                    name: name.name,
+                    is_mut: *is_mut,
+                    span: *span,
+                }
+            }
+            Pattern::Tuple { elems, span } if self.recursive_pattern_lowering => {
+                let rir_elems: Vec<RirPattern> = elems
+                    .iter()
+                    .map(|e| match e {
+                        TupleElemPattern::Pattern(p) => self.gen_match_arm_pattern(p, nested),
+                        TupleElemPattern::Rest(rest_span) => {
+                            // A `..` inside a tuple match arm needs positional
+                            // rest expansion (ADR-0049 Phase 6 semantics for
+                            // tuples specifically). Sema can handle a literal
+                            // wildcard pattern for the moment; true rest in
+                            // tuple arms is covered in a follow-up.
+                            RirPattern::Wildcard(*rest_span)
+                        }
+                    })
+                    .collect();
+                RirPattern::Tuple {
+                    elems: rir_elems,
+                    span: *span,
+                }
+            }
+            Pattern::Struct {
+                type_name,
+                fields,
+                span,
+            } if self.recursive_pattern_lowering => {
+                // AST represents `..` as a `FieldPattern` with
+                // `field_name = None`; capture that as a top-level
+                // `has_rest` boolean and drop those fields from the
+                // recursive-RIR field list.
+                let has_rest = fields.iter().any(|f| f.field_name.is_none());
+                let rir_fields: Vec<RirStructField> = fields
+                    .iter()
+                    .filter_map(|f| {
+                        let field_name = f.field_name.as_ref()?.name;
+                        let pat = match &f.sub {
+                            Some(p) => self.gen_match_arm_pattern(p, nested),
+                            None => {
+                                // Shorthand `{ x }` or `{ mut x }`: bind the
+                                // field to a local with the same name.
+                                RirPattern::Ident {
+                                    name: field_name,
+                                    is_mut: f.is_mut,
+                                    span: f.span,
+                                }
+                            }
+                        };
+                        Some(RirStructField {
+                            field_name,
+                            pattern: pat,
+                        })
+                    })
+                    .collect();
+                RirPattern::Struct {
+                    module: None,
+                    type_name: type_name.name,
+                    fields: rir_fields,
+                    has_rest,
+                    span: *span,
+                }
+            }
             Pattern::Struct { .. } | Pattern::Tuple { .. } | Pattern::Ident { .. } => {
                 let _ = nested;
                 panic!(

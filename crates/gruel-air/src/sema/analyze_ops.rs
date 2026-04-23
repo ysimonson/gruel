@@ -1421,8 +1421,16 @@ impl<'a> Sema<'a> {
         let scrutinee_result = self.analyze_inst(air, scrutinee, ctx)?;
         let scrutinee_type = scrutinee_result.ty;
 
-        // Validate that we can match on this type (integers, booleans, and enums)
-        if !scrutinee_type.is_integer() && scrutinee_type != Type::BOOL && !scrutinee_type.is_enum()
+        // Validate that we can match on this type (integers, booleans, enums;
+        // ADR-0051 Phase 4b additionally allows struct-shaped scrutinees
+        // including tuples when the recursive-pattern-lowering flag is on,
+        // since `RirPattern::Tuple` / `Struct` arms need a struct scrutinee).
+        let is_struct_like = scrutinee_type.is_struct();
+        let allow_struct = self.recursive_pattern_lowering && is_struct_like;
+        if !scrutinee_type.is_integer()
+            && scrutinee_type != Type::BOOL
+            && !scrutinee_type.is_enum()
+            && !allow_struct
         {
             return Err(CompileError::new(
                 ErrorKind::InvalidMatchType(scrutinee_type.name().to_string()),
@@ -1867,14 +1875,43 @@ impl<'a> Sema<'a> {
                         resolved_enum = Some((enum_id, variant_index as u32));
                     }
                 }
-                // ADR-0051 Phase 4a: Ident / Tuple / Struct are not yet
-                // produced by astgen. Phase 4b wires astgen and fills in
-                // proper validation here.
-                RirPattern::Ident { .. } | RirPattern::Tuple { .. } | RirPattern::Struct { .. } => {
-                    unreachable!(
-                        "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
-                         ADR-0051 Phase 4a"
-                    )
+                // ADR-0051 Phase 4b: validate new top-level arm shapes.
+                // Full structural checking (field names, arity, element
+                // types) is deferred — sema's current machinery is built
+                // around flat bindings and the rewrite is scheduled for
+                // Phase 4c once the elaboration layer is gone. Here we
+                // only sanity-check that the scrutinee's shape matches
+                // the arm kind; element-level type checking piggybacks
+                // on body analysis through the introduced bindings.
+                RirPattern::Ident { .. } => {
+                    // An Ident at arm root is an irrefutable catch-all
+                    // binding. Treat it like a wildcard for exhaustiveness
+                    // bookkeeping so the match counts as exhaustive.
+                    if wildcard_span.is_none() {
+                        wildcard_span = Some(pattern_span);
+                    }
+                }
+                RirPattern::Tuple { .. } => {
+                    if !is_struct_like {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: scrutinee_type.name().to_string(),
+                                found: "tuple".to_string(),
+                            },
+                            pattern_span,
+                        ));
+                    }
+                }
+                RirPattern::Struct { type_name, .. } => {
+                    if !is_struct_like {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: scrutinee_type.name().to_string(),
+                                found: self.interner.resolve(type_name).to_string(),
+                            },
+                            pattern_span,
+                        ));
+                    }
                 }
             }
 
@@ -2341,11 +2378,43 @@ impl<'a> Sema<'a> {
                     fields,
                 }
             }
-            RirPattern::Ident { .. } | RirPattern::Tuple { .. } | RirPattern::Struct { .. } => {
-                unreachable!(
-                    "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
-                     ADR-0051 Phase 4a; lower_pattern sees them in Phase 4b"
-                )
+            RirPattern::Ident { name, is_mut, .. } => AirPattern::Bind {
+                name: *name,
+                is_mut: *is_mut,
+                inner: None,
+            },
+            RirPattern::Tuple { elems, .. } => {
+                let air_elems: Vec<AirPattern> =
+                    elems.iter().map(|e| self.lower_pattern(e, None)).collect();
+                AirPattern::Tuple { elems: air_elems }
+            }
+            RirPattern::Struct {
+                type_name, fields, ..
+            } => {
+                // Look up the struct by name to resolve declaration-order
+                // field indices. Fall back to leaving fields in source order
+                // if the lookup fails — sema validation will surface the
+                // underlying type error.
+                let struct_id = self.structs.get(type_name).copied();
+                let field_indices: Vec<(u32, AirPattern)> = fields
+                    .iter()
+                    .filter_map(|f| {
+                        let sid = struct_id?;
+                        let def = self.type_pool.struct_def(sid);
+                        let idx = def
+                            .fields
+                            .iter()
+                            .position(|sf| sf.name == self.interner.resolve(&f.field_name))?;
+                        Some((idx as u32, self.lower_pattern(&f.pattern, None)))
+                    })
+                    .collect();
+                match struct_id {
+                    Some(sid) => AirPattern::Struct {
+                        struct_id: sid,
+                        fields: field_indices,
+                    },
+                    None => AirPattern::Wildcard,
+                }
             }
         }
     }
