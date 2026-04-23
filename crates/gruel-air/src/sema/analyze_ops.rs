@@ -20,7 +20,7 @@
 //! - `analyze_comparison` - Eq, Ne, Lt, Gt, Le, Ge
 //! - Logical And/Or are simple enough to remain inline
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
@@ -157,25 +157,6 @@ fn expanded_tuple_pattern(
         elems: new_elems,
         rest_position: None,
         span: *span,
-    }
-}
-
-/// ADR-0051 Phase 4c: whether an RIR pattern is irrefutable, i.e. matches
-/// any scrutinee value of its type. Used by exhaustiveness bookkeeping to
-/// count `(x, y)` / `Point { x, y }` / bare `x` arms as catch-alls the
-/// same way a `_` is counted.
-fn is_irrefutable_pattern(pattern: &RirPattern) -> bool {
-    match pattern {
-        RirPattern::Wildcard(_) | RirPattern::Ident { .. } => true,
-        RirPattern::Tuple { elems, .. } => elems.iter().all(is_irrefutable_pattern),
-        RirPattern::Struct { fields, .. } => {
-            fields.iter().all(|f| is_irrefutable_pattern(&f.pattern))
-        }
-        RirPattern::Int(..)
-        | RirPattern::Bool(..)
-        | RirPattern::Path { .. }
-        | RirPattern::DataVariant { .. }
-        | RirPattern::StructVariant { .. } => false,
     }
 }
 
@@ -1491,11 +1472,14 @@ impl<'a> Sema<'a> {
         // Validate that we can match on this type. Structs (including
         // tuples) are allowed because ADR-0051 `RirPattern::Tuple` /
         // `Struct` arms lower through sema + CFG cascading dispatch.
+        // `!` (Type::NEVER) is allowed too — ADR-0052 Phase 5 permits
+        // zero-arm matches on uninhabited scrutinees.
         let is_struct_like = scrutinee_type.is_struct();
         if !scrutinee_type.is_integer()
             && scrutinee_type != Type::BOOL
             && !scrutinee_type.is_enum()
             && !is_struct_like
+            && !scrutinee_type.is_never()
         {
             return Err(CompileError::new(
                 ErrorKind::InvalidMatchType(scrutinee_type.name().to_string()),
@@ -1504,18 +1488,32 @@ impl<'a> Sema<'a> {
         }
 
         let arms = self.rir.get_match_arms(arms_start, arms_len);
-        // Check for empty match
         if arms.is_empty() {
+            // ADR-0052 Phase 5: a zero-arm match is vacuously exhaustive
+            // when the scrutinee is uninhabited — either `!` directly or
+            // a zero-variant enum. CFG lowers the block with
+            // `Terminator::Unreachable`.
+            let is_empty_enum = scrutinee_type
+                .as_enum()
+                .is_some_and(|id| self.type_pool.enum_def(id).variants.is_empty());
+            if scrutinee_type.is_never() || is_empty_enum {
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Match {
+                        scrutinee: scrutinee_result.air_ref,
+                        arms_start: 0,
+                        arms_len: 0,
+                    },
+                    ty: Type::NEVER,
+                    span,
+                });
+                return Ok(AnalysisResult::new(air_ref, Type::NEVER));
+            }
             return Err(CompileError::new(ErrorKind::EmptyMatch, span));
         }
 
-        // Track patterns for exhaustiveness checking and duplicate detection
-        let mut wildcard_span: Option<Span> = None;
-        let mut bool_true_span: Option<Span> = None;
-        let mut bool_false_span: Option<Span> = None;
-        let mut seen_ints: HashMap<i64, Span> = HashMap::new();
-        let mut covered_variants: HashSet<u32> = HashSet::new();
-        let mut pattern_enum_id: Option<crate::types::EnumId> = None;
+        // Collect arm spans so the post-loop reachability check can point
+        // at the exact unreachable arm.
+        let mut arm_spans: Vec<Span> = Vec::with_capacity(arms.len());
 
         // Analyze each arm (each arm gets its own scope)
         let mut air_arms = Vec::new();
@@ -1528,55 +1526,13 @@ impl<'a> Sema<'a> {
             // in body analysis and AIR pattern conversion to avoid repeated lookups).
             let mut resolved_enum: Option<(crate::types::EnumId, u32)> = None;
 
-            // If we've seen a wildcard, everything after is unreachable
-            if let Some(first_wildcard_span) = wildcard_span {
-                let pat_str = match pattern {
-                    RirPattern::Wildcard(_) => "_".to_string(),
-                    RirPattern::Int(n, _) => n.to_string(),
-                    RirPattern::Bool(b, _) => b.to_string(),
-                    RirPattern::Path {
-                        type_name, variant, ..
-                    }
-                    | RirPattern::DataVariant {
-                        type_name, variant, ..
-                    }
-                    | RirPattern::StructVariant {
-                        type_name, variant, ..
-                    } => {
-                        format!(
-                            "{}::{}",
-                            self.interner.resolve(type_name),
-                            self.interner.resolve(variant)
-                        )
-                    }
-                    // ADR-0051 Phase 4a: Ident/Tuple/Struct are data-structure
-                    // additions only; astgen does not produce them yet.
-                    RirPattern::Ident { name, .. } => self.interner.resolve(name).to_string(),
-                    RirPattern::Tuple { .. } => "(...)".to_string(),
-                    RirPattern::Struct { type_name, .. } => {
-                        format!("{} {{ ... }}", self.interner.resolve(type_name))
-                    }
-                };
-                ctx.warnings.push(
-                    CompileWarning::new(
-                        WarningKind::UnreachablePattern(pat_str),
-                        pattern_span,
-                    )
-                    .with_label("previous wildcard pattern here", first_wildcard_span)
-                    .with_note(
-                        "this pattern will never be matched because the wildcard pattern above matches everything",
-                    ),
-                );
-            }
+            arm_spans.push(pattern_span);
 
-            // Validate pattern against scrutinee type and check for duplicates
+            // Type-only validation of literal / bool patterns; reachability
+            // is handled post-loop via Maranget.
             match pattern {
-                RirPattern::Wildcard(_) => {
-                    if wildcard_span.is_none() {
-                        wildcard_span = Some(pattern_span);
-                    }
-                }
-                RirPattern::Int(n, _) => {
+                RirPattern::Wildcard(_) => {}
+                RirPattern::Int(_, _) => {
                     if !scrutinee_type.is_integer() {
                         return Err(CompileError::new(
                             ErrorKind::TypeMismatch {
@@ -1586,25 +1542,8 @@ impl<'a> Sema<'a> {
                             pattern_span,
                         ));
                     }
-                    // Check for duplicate integer pattern
-                    if let Some(first_span) = seen_ints.get(n) {
-                        if wildcard_span.is_none() {
-                            ctx.warnings.push(
-                                CompileWarning::new(
-                                    WarningKind::UnreachablePattern(n.to_string()),
-                                    pattern_span,
-                                )
-                                .with_label("first occurrence of this pattern", *first_span)
-                                .with_note(
-                                    "this pattern will never be matched because an earlier arm already matches the same value",
-                                ),
-                            );
-                        }
-                    } else {
-                        seen_ints.insert(*n, pattern_span);
-                    }
                 }
-                RirPattern::Bool(b, _) => {
+                RirPattern::Bool(_, _) => {
                     if scrutinee_type != Type::BOOL {
                         return Err(CompileError::new(
                             ErrorKind::TypeMismatch {
@@ -1613,28 +1552,6 @@ impl<'a> Sema<'a> {
                             },
                             pattern_span,
                         ));
-                    }
-                    // Check for duplicate boolean pattern
-                    let (first_span_opt, is_true) = if *b {
-                        (&mut bool_true_span, true)
-                    } else {
-                        (&mut bool_false_span, false)
-                    };
-                    if let Some(first_span) = *first_span_opt {
-                        if wildcard_span.is_none() {
-                            ctx.warnings.push(
-                                CompileWarning::new(
-                                    WarningKind::UnreachablePattern(is_true.to_string()),
-                                    pattern_span,
-                                )
-                                .with_label("first occurrence of this pattern", first_span)
-                                .with_note(
-                                    "this pattern will never be matched because an earlier arm already matches the same value",
-                                ),
-                            );
-                        }
-                    } else {
-                        *first_span_opt = Some(pattern_span);
                     }
                 }
                 RirPattern::Path {
@@ -1691,8 +1608,6 @@ impl<'a> Sema<'a> {
                         pattern_span,
                     )?;
 
-                    covered_variants.insert(variant_index as u32);
-                    pattern_enum_id = Some(enum_id);
                     resolved_enum = Some((enum_id, variant_index as u32));
                 }
                 RirPattern::DataVariant {
@@ -1792,8 +1707,6 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    covered_variants.insert(variant_index as u32);
-                    pattern_enum_id = Some(enum_id);
                     resolved_enum = Some((enum_id, variant_index as u32));
                 }
                 RirPattern::StructVariant {
@@ -1909,8 +1822,6 @@ impl<'a> Sema<'a> {
                     // Check for missing fields (waived when `..` is present;
                     // the rest marker absorbs any unlisted fields).
                     if sv_has_rest {
-                        covered_variants.insert(variant_index as u32);
-                        pattern_enum_id = Some(enum_id);
                         resolved_enum = Some((enum_id, variant_index as u32));
                     } else {
                         let declared_field_count = variant_def.field_names.len();
@@ -1935,8 +1846,6 @@ impl<'a> Sema<'a> {
                             ));
                         }
 
-                        covered_variants.insert(variant_index as u32);
-                        pattern_enum_id = Some(enum_id);
                         resolved_enum = Some((enum_id, variant_index as u32));
                     }
                 }
@@ -1948,14 +1857,7 @@ impl<'a> Sema<'a> {
                 // only sanity-check that the scrutinee's shape matches
                 // the arm kind; element-level type checking piggybacks
                 // on body analysis through the introduced bindings.
-                RirPattern::Ident { .. } => {
-                    // An Ident at arm root is an irrefutable catch-all
-                    // binding. Treat it like a wildcard for exhaustiveness
-                    // bookkeeping so the match counts as exhaustive.
-                    if wildcard_span.is_none() {
-                        wildcard_span = Some(pattern_span);
-                    }
-                }
+                RirPattern::Ident { .. } => {}
                 RirPattern::Tuple { .. } => {
                     if !is_struct_like {
                         return Err(CompileError::new(
@@ -1965,13 +1867,6 @@ impl<'a> Sema<'a> {
                             },
                             pattern_span,
                         ));
-                    }
-                    // A tuple pattern whose every element is itself
-                    // irrefutable (Ident, Wildcard, or recursively
-                    // irrefutable Tuple / Struct) matches any scrutinee,
-                    // so it counts as a wildcard for exhaustiveness.
-                    if is_irrefutable_pattern(pattern) && wildcard_span.is_none() {
-                        wildcard_span = Some(pattern_span);
                     }
                 }
                 RirPattern::Struct { type_name, .. } => {
@@ -1983,9 +1878,6 @@ impl<'a> Sema<'a> {
                             },
                             pattern_span,
                         ));
-                    }
-                    if is_irrefutable_pattern(pattern) && wildcard_span.is_none() {
-                        wildcard_span = Some(pattern_span);
                     }
                 }
             }
@@ -2372,17 +2264,11 @@ impl<'a> Sema<'a> {
             air_arms.push((air_pattern, body_result.air_ref));
         }
 
-        // ADR-0051 Phase 5: exhaustiveness via Maranget usefulness.
-        // Legacy per-kind tracking (bool_true_span, covered_variants, …)
-        // stays alive for duplicate-pattern diagnostics, but the
-        // not-covered check now walks the pattern tree recursively and
-        // can surface nested witnesses like `Some(None)`.
-        let _ = (
-            bool_true_span,
-            bool_false_span,
-            covered_variants,
-            pattern_enum_id,
-        );
+        // ADR-0051 Phase 5 + ADR-0052 Phase 4: exhaustiveness and
+        // reachability via a single Maranget usefulness pass over the
+        // AIR pattern matrix. Non-exhaustive matches surface nested
+        // witnesses like `Some(None)`; unreachable arms fire one
+        // `UnreachablePattern` warning each.
         let air_pattern_list: Vec<crate::inst::AirPattern> =
             air_arms.iter().map(|(p, _)| p.clone()).collect();
         let missing_witnesses = crate::sema::usefulness::exhaustiveness_witnesses(
@@ -2400,6 +2286,28 @@ impl<'a> Sema<'a> {
                 ErrorKind::NonExhaustiveMatch { missing },
                 span,
             ));
+        }
+
+        // Exhaustive matches: check each arm's reachability against the
+        // preceding arms. The legacy per-literal / per-variant trackers
+        // retire here — Maranget subsumes them uniformly.
+        let reachability =
+            crate::sema::usefulness::arm_reachability(&air_pattern_list, scrutinee_type, self);
+        for (i, (reachable, arm_pattern)) in
+            reachability.iter().zip(air_pattern_list.iter()).enumerate()
+        {
+            if !*reachable {
+                let pat_str = crate::sema::usefulness::render_witness(arm_pattern, &self.type_pool);
+                ctx.warnings.push(
+                    CompileWarning::new(
+                        WarningKind::UnreachablePattern(pat_str),
+                        arm_spans[i],
+                    )
+                    .with_note(
+                        "this pattern will never be matched because earlier arms already cover every value it matches",
+                    ),
+                );
+            }
         }
 
         let final_type = result_type.unwrap_or(Type::UNIT);
@@ -2536,12 +2444,143 @@ impl<'a> Sema<'a> {
                     );
                 }
             }
-            // Wildcard / Int / Bool / Path / DataVariant / StructVariant all
-            // either bind no local (Wildcard / literals) or, for variant
-            // patterns, are handled by the pre-existing DataVariant /
-            // StructVariant extraction path above.
+            RirPattern::DataVariant { bindings, .. } => {
+                // ADR-0052: refutable nested variant sub-pattern. CFG's
+                // cascading dispatch already verified this variant's
+                // discriminant before entering the arm body, so extracting
+                // the payload here is safe. Recurse into each binding's
+                // slot (flat leaf or further nested).
+                let Some((enum_id, variant_index)) = self.resolve_enum_from_pattern(pattern) else {
+                    return;
+                };
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let variant_def = &enum_def.variants[variant_index as usize];
+                for (field_index, binding) in bindings.iter().enumerate() {
+                    let Some(field_ty) = variant_def.fields.get(field_index).copied() else {
+                        return;
+                    };
+                    let field_val = air.add_inst(AirInst {
+                        data: AirInstData::EnumPayloadGet {
+                            base: scr_air_ref,
+                            variant_index,
+                            field_index: field_index as u32,
+                        },
+                        ty: field_ty,
+                        span: pattern.span(),
+                    });
+                    self.emit_binding_setup(
+                        air,
+                        field_val,
+                        field_ty,
+                        binding,
+                        pattern.span(),
+                        ctx,
+                        storage_lives,
+                        allocs,
+                    );
+                }
+            }
+            RirPattern::StructVariant { field_bindings, .. } => {
+                let Some((enum_id, variant_index)) = self.resolve_enum_from_pattern(pattern) else {
+                    return;
+                };
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let variant_def = &enum_def.variants[variant_index as usize];
+                let rest_marker = self.interner.get_or_intern_static("..");
+                for fb in field_bindings {
+                    if fb.field_name == rest_marker {
+                        continue;
+                    }
+                    let Some(idx) = variant_def.find_field(self.interner.resolve(&fb.field_name))
+                    else {
+                        continue;
+                    };
+                    let field_ty = variant_def.fields[idx];
+                    let field_val = air.add_inst(AirInst {
+                        data: AirInstData::EnumPayloadGet {
+                            base: scr_air_ref,
+                            variant_index,
+                            field_index: idx as u32,
+                        },
+                        ty: field_ty,
+                        span: pattern.span(),
+                    });
+                    self.emit_binding_setup(
+                        air,
+                        field_val,
+                        field_ty,
+                        &fb.binding,
+                        pattern.span(),
+                        ctx,
+                        storage_lives,
+                        allocs,
+                    );
+                }
+            }
+            // Wildcard / Int / Bool / Path leaves bind no local.
             _ => {}
         }
+    }
+
+    /// ADR-0052 helper: install a single `RirPatternBinding` given the
+    /// field value already extracted. Handles wildcard, named leaf, and
+    /// nested `sub_pattern` cases uniformly with
+    /// `emit_recursive_pattern_bindings`.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_binding_setup(
+        &self,
+        air: &mut Air,
+        field_val: AirRef,
+        field_ty: Type,
+        binding: &RirPatternBinding,
+        pattern_span: Span,
+        ctx: &mut AnalysisContext,
+        storage_lives: &mut Vec<AirRef>,
+        allocs: &mut Vec<AirRef>,
+    ) {
+        if let Some(sub) = &binding.sub_pattern {
+            self.emit_recursive_pattern_bindings(
+                air,
+                field_val,
+                field_ty,
+                sub,
+                ctx,
+                storage_lives,
+                allocs,
+            );
+            return;
+        }
+        if binding.is_wildcard {
+            return;
+        }
+        let Some(name) = binding.name else {
+            return;
+        };
+        let slot = ctx.next_slot;
+        ctx.next_slot += 1;
+        storage_lives.push(air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot },
+            ty: field_ty,
+            span: pattern_span,
+        }));
+        allocs.push(air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot,
+                init: field_val,
+            },
+            ty: Type::UNIT,
+            span: pattern_span,
+        }));
+        ctx.insert_local(
+            name,
+            LocalVar {
+                slot,
+                ty: field_ty,
+                is_mut: binding.is_mut,
+                span: pattern_span,
+                allow_unused: false,
+            },
+        );
     }
 
     /// Try to resolve `(enum_id, variant_index)` for a Path / DataVariant /

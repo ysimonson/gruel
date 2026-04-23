@@ -1212,3 +1212,142 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "(_, _)"
+
+# =============================================================================
+# ADR-0052 Maranget corner-case coverage
+# =============================================================================
+
+[[case]]
+name = "deeply_nested_missing_witness"
+spec = ["4.7:23", "4.7:24"]
+description = "Deeply nested Option-chain reports the specific uncovered nested shape"
+source = """
+enum Inner { Just(i32), Nothing }
+enum Mid { Just(Inner), Nothing }
+enum Outer { Just(Mid), Nothing }
+
+fn main() -> i32 {
+    let x = Outer::Just(Mid::Just(Inner::Just(1)));
+    match x {
+        Outer::Just(Mid::Just(Inner::Just(1))) => 1,
+        Outer::Nothing => 0,
+    }
+}
+"""
+compile_fail = true
+error_contains = "Outer::Just(Mid::Nothing)"
+
+[[case]]
+name = "nested_variant_both_branches_exhaustive"
+spec = ["4.7:23", "4.7:24"]
+description = "Nested Option covers every value via two outer arms; no catch-all needed"
+source = """
+enum IntOpt { Some(i32), None }
+enum IntOptOpt { Some(IntOpt), None }
+
+fn main() -> i32 {
+    let x = IntOptOpt::Some(IntOpt::Some(42));
+    match x {
+        IntOptOpt::Some(IntOpt::Some(v)) => v,
+        IntOptOpt::Some(IntOpt::None) => 0,
+        IntOptOpt::None => -1,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_variant_missing_inner_some"
+spec = ["4.7:23", "4.7:24"]
+description = "Dropping `Some(Some(_))` reports the uncovered nested shape"
+source = """
+enum IntOpt { Some(i32), None }
+enum IntOptOpt { Some(IntOpt), None }
+
+fn main() -> i32 {
+    let x = IntOptOpt::None;
+    match x {
+        IntOptOpt::Some(IntOpt::None) => 0,
+        IntOptOpt::None => -1,
+    }
+}
+"""
+compile_fail = true
+error_contains = "IntOpt::Some"
+
+[[case]]
+name = "struct_variant_missing_field_combo"
+spec = ["4.7:23", "4.7:24"]
+description = "Struct variant with bool/bool fields reports the uncovered (false, *) combinations"
+source = """
+enum E { V { a: bool, b: bool } }
+
+fn main() -> i32 {
+    let e = E::V { a: true, b: true };
+    match e {
+        E::V { a: true, b: true } => 1,
+    }
+}
+"""
+compile_fail = true
+error_contains = "false"
+
+[[case]]
+name = "integer_scrutinee_only_wildcard_exhausts"
+spec = ["4.7:23", "4.7:24"]
+description = "Integer literal arms never exhaust by themselves; witness is `_`"
+source = """
+fn main() -> i32 {
+    let n: i32 = 0;
+    match n {
+        0 => 1,
+    }
+}
+"""
+compile_fail = true
+error_contains = "_"
+
+[[case]]
+name = "zero_arm_match_on_never_is_exhaustive"
+spec = ["4.7:23", "4.7:24"]
+description = "Zero-arm match on an uninhabited scrutinee compiles; body is unreachable at runtime"
+source = """
+fn never_ret() -> ! { @panic("nope") }
+
+fn main() -> i32 {
+    if true {
+        return 0;
+    }
+    match never_ret() { }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "zero_arm_match_on_empty_enum_is_exhaustive"
+spec = ["4.7:23", "4.7:24"]
+description = "Zero-variant enum is uninhabited; zero-arm match on one compiles"
+source = """
+enum Void { }
+
+fn main() -> i32 {
+    if true {
+        return 0;
+    }
+    let v: Void = @panic("nope");
+    match (v) { }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "zero_arm_match_on_inhabited_still_errors"
+spec = ["4.7:23", "4.7:24"]
+description = "Zero-arm match on an inhabited type stays a compile error"
+source = """
+fn main() -> i32 {
+    match (1 + 2) { }
+}
+"""
+compile_fail = true
+error_contains = "has no arms"

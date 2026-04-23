@@ -1690,10 +1690,85 @@ impl<'a> ConstraintGenerator<'a> {
                     );
                 }
             }
-            // Leaf literals and the legacy variant patterns don't
-            // introduce top-level arm bindings via this path.
+            gruel_rir::RirPattern::DataVariant {
+                type_name,
+                bindings,
+                ..
+            } => {
+                // ADR-0052: nested refutable variant sub-pattern.
+                // Resolve the enum (if possible) to thread field types
+                // through each inner binding.
+                let enum_id = self.enums.get(type_name).and_then(|ty| ty.as_enum());
+                let field_tys: Vec<InferType> = if let Some(eid) = enum_id
+                    && let Some(variant_idx) = self.resolve_variant_index(pattern)
+                {
+                    let def = self.type_pool.enum_def(eid);
+                    def.variants[variant_idx]
+                        .fields
+                        .iter()
+                        .map(|t| InferType::Concrete(*t))
+                        .collect()
+                } else {
+                    bindings
+                        .iter()
+                        .map(|_| InferType::Var(self.fresh_var()))
+                        .collect()
+                };
+                for (i, binding) in bindings.iter().enumerate() {
+                    let ty = field_tys
+                        .get(i)
+                        .cloned()
+                        .unwrap_or_else(|| InferType::Var(self.fresh_var()));
+                    self.register_binding(binding, ty, pattern.span(), ctx, added_bindings);
+                }
+            }
+            gruel_rir::RirPattern::StructVariant {
+                type_name,
+                field_bindings,
+                ..
+            } => {
+                let enum_id = self.enums.get(type_name).and_then(|ty| ty.as_enum());
+                for fb in field_bindings {
+                    let ty = if let Some(eid) = enum_id
+                        && let Some(variant_idx) = self.resolve_variant_index(pattern)
+                    {
+                        let def = self.type_pool.enum_def(eid);
+                        let variant_def = &def.variants[variant_idx];
+                        let name = self.interner.resolve(&fb.field_name);
+                        variant_def
+                            .find_field(name)
+                            .map(|idx| InferType::Concrete(variant_def.fields[idx]))
+                            .unwrap_or_else(|| InferType::Var(self.fresh_var()))
+                    } else {
+                        InferType::Var(self.fresh_var())
+                    };
+                    self.register_binding(&fb.binding, ty, pattern.span(), ctx, added_bindings);
+                }
+            }
+            // Leaf literals and Path (unit variant) introduce no
+            // additional bindings at this level.
             _ => {}
         }
+    }
+
+    /// Helper for `collect_recursive_pattern_bindings`: resolve a
+    /// DataVariant / StructVariant's variant index from the RIR shape.
+    fn resolve_variant_index(&self, pattern: &gruel_rir::RirPattern) -> Option<usize> {
+        let (type_name, variant) = match pattern {
+            gruel_rir::RirPattern::DataVariant {
+                type_name, variant, ..
+            }
+            | gruel_rir::RirPattern::StructVariant {
+                type_name, variant, ..
+            }
+            | gruel_rir::RirPattern::Path {
+                type_name, variant, ..
+            } => (*type_name, *variant),
+            _ => return None,
+        };
+        let enum_id = self.enums.get(&type_name)?.as_enum()?;
+        let def = self.type_pool.enum_def(enum_id);
+        def.find_variant(self.interner.resolve(&variant))
     }
 
     fn pattern_type(&mut self, pattern: &gruel_rir::RirPattern) -> InferType {

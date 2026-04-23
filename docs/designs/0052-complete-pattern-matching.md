@@ -1,12 +1,12 @@
 ---
 id: 0052
 title: Complete Recursive Pattern Matching
-status: proposal
+status: implemented
 tags: [patterns, pattern-matching, cfg, exhaustiveness, maranget]
 feature-flag:
 created: 2026-04-23
-accepted:
-implemented:
+accepted: 2026-04-23
+implemented: 2026-04-23
 spec-sections: ["4.7"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -307,7 +307,7 @@ which fits in the diagnostic path.
 
 ## Implementation Phases
 
-- [ ] **Phase 1: CFG enum payload projection**
+- [x] **Phase 1: CFG enum payload projection**
   - Extend `emit_pattern_test` with a `CfgValue`-scrutinee entry
     point for enum field recursion.
   - Handle `EnumDataVariant` / `EnumStructVariant` patterns with
@@ -318,7 +318,7 @@ which fits in the diagnostic path.
     refutable elaborator forced off via a temporary override (revert
     at end of phase).
 
-- [ ] **Phase 2: Move binding introduction for refutable nested arms
+- [x] **Phase 2: Move binding introduction for refutable nested arms
     into CFG**
   - CFG's cascading dispatch allocates local slots for Ident leaves
     inside variant fields (mirroring sema's existing
@@ -329,7 +329,7 @@ which fits in the diagnostic path.
   - Regression tests from ADR-0051's `nested_match_*` and
     `refutable_nested_*` suites continue to pass.
 
-- [ ] **Phase 3: Delete `try_elaborate_refutable_nested_match`**
+- [x] **Phase 3: Delete `try_elaborate_refutable_nested_match`**
   - Remove the elaborator and its helpers
     (`merge_group_single_field`, `merge_group_data_variant`,
     `merge_group_struct_variant`, `replace_refutable_nested_subs`,
@@ -340,7 +340,7 @@ which fits in the diagnostic path.
   - Update ADR-0051's open question (3) and frontmatter note about
     the remaining elaborator.
 
-- [ ] **Phase 4: Useless-arm detection via Maranget**
+- [x] **Phase 4: Useless-arm detection via Maranget**
   - Wire `usefulness::arm_reachability` into `analyze_match` and
     emit `WarningKind::UnreachablePattern` per unreachable arm.
   - Identify the first-covering arm for the label via the scan
@@ -348,13 +348,13 @@ which fits in the diagnostic path.
   - Retire the ad-hoc per-literal / per-variant duplicate detection
     once parity is confirmed on the UI-test suite.
 
-- [ ] **Phase 5: Zero-arm match on uninhabited scrutinees**
+- [x] **Phase 5: Zero-arm match on uninhabited scrutinees**
   - Relax `analyze_match`'s `EmptyMatch` gate for uninhabited
     scrutinees (per §Decision-5). Emit `Terminator::Unreachable` for
     the CFG body.
   - Inhabited zero-arm matches remain an error.
 
-- [ ] **Phase 6: Maranget corner-case test suite**
+- [x] **Phase 6: Maranget corner-case test suite**
   - Add the eleven cases listed in §Decision-6 to
     `crates/gruel-spec/cases/expressions/match.toml`. Each is either
     `compile_fail = true` with a specific `error_contains`, a
@@ -363,7 +363,7 @@ which fits in the diagnostic path.
     arm.
   - Verify via `make test`.
 
-- [ ] **Phase 7: ADR stabilisation**
+- [x] **Phase 7: ADR stabilisation**
   - Update ADR-0051's note about the remaining elaborator (the
     open question closes).
   - ADR-0052 frontmatter: `status: implemented`, dates filled in.

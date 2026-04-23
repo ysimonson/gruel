@@ -18,6 +18,22 @@ use crate::inst::{
 /// A traced place: (base, list of (projection, optional index value)).
 type TracedPlace = Option<(PlaceBase, Vec<(Projection, Option<CfgValue>)>)>;
 
+/// ADR-0052 Phase 1: a pattern is "trivial" for CFG dispatch purposes
+/// when it contributes no runtime test — it's either a wildcard or a
+/// plain binding whose inner pattern (if any) is itself trivial. Binding
+/// introduction for trivial leaves is handled by sema's arm-body setup,
+/// so CFG can skip them.
+fn is_trivial_pattern(p: &AirPattern) -> bool {
+    match p {
+        AirPattern::Wildcard => true,
+        AirPattern::Bind { inner: None, .. } => true,
+        AirPattern::Bind {
+            inner: Some(inner), ..
+        } => is_trivial_pattern(inner),
+        _ => false,
+    }
+}
+
 /// Result of lowering an expression.
 struct ExprResult {
     /// The value produced (if any - statements like Store don't produce values)
@@ -1399,6 +1415,18 @@ impl<'a> CfgBuilder<'a> {
                 };
                 let scrutinee_ty = self.air.get(*scrutinee).ty;
 
+                // ADR-0052 Phase 5: a zero-arm match on an uninhabited
+                // scrutinee is vacuously exhaustive — sema has already
+                // verified the type is `Never`. Emit an `unreachable`
+                // terminator and a diverging result so downstream
+                // control-flow analysis knows this point can't be
+                // reached.
+                if *arms_len == 0 {
+                    self.cfg
+                        .set_terminator(self.current_block, Terminator::Unreachable);
+                    return Self::diverged();
+                }
+
                 // Collect arms into a Vec for iteration
                 let arms: Vec<(AirPattern, AirRef)> =
                     self.air.get_match_arms(*arms_start, *arms_len).collect();
@@ -1420,13 +1448,21 @@ impl<'a> CfgBuilder<'a> {
                 // to select the arm block. Otherwise fall through to the
                 // existing flat-switch terminator setup below. Arm body
                 // lowering and join wiring is shared between both paths.
-                let needs_cascading = arms.iter().any(|(p, _)| {
-                    matches!(
-                        p,
-                        AirPattern::Tuple { .. }
-                            | AirPattern::Struct { .. }
-                            | AirPattern::Bind { .. }
-                    )
+                let needs_cascading = arms.iter().any(|(p, _)| match p {
+                    AirPattern::Tuple { .. }
+                    | AirPattern::Struct { .. }
+                    | AirPattern::Bind { .. } => true,
+                    // ADR-0052: enum-variant arms with non-trivial field
+                    // patterns (refutable nested shapes like `Some(0)` or
+                    // `Some(Some(v))`) need the cascading descent; the
+                    // flat switch only dispatches on the discriminant.
+                    AirPattern::EnumDataVariant { fields, .. } => {
+                        fields.iter().any(|f| !is_trivial_pattern(f))
+                    }
+                    AirPattern::EnumStructVariant { fields, .. } => {
+                        fields.iter().any(|(_, f)| !is_trivial_pattern(f))
+                    }
+                    _ => false,
                 });
                 if needs_cascading {
                     // Spill scrutinee to a temporary local so cascading
@@ -2206,16 +2242,78 @@ impl<'a> CfgBuilder<'a> {
                 self.branch_to(cond, matched, unmatched, span);
             }
             AirPattern::EnumVariant { variant_index, .. }
-            | AirPattern::EnumUnitVariant { variant_index, .. }
-            | AirPattern::EnumDataVariant { variant_index, .. }
-            | AirPattern::EnumStructVariant { variant_index, .. } => {
-                // Cascading-path enum discriminant test. Same dispatch as
-                // the flat switch, encoded as an equality here so arms
-                // compose uniformly with tuple/struct roots.
+            | AirPattern::EnumUnitVariant { variant_index, .. } => {
+                // Unit-style enum arms dispatch purely on the discriminant.
+                let disc_ty = self.enum_discriminant_type(scr_ty);
                 let val = self.read_projected(scr_slot, scr_ty, projection, span);
-                let lit = self.emit(CfgInstData::Const(*variant_index as u64), Type::I32, span);
-                let cond = self.emit(CfgInstData::Eq(val, lit), Type::BOOL, span);
+                let disc = self.emit(CfgInstData::GetDiscriminant { base: val }, disc_ty, span);
+                let lit = self.emit(CfgInstData::Const(*variant_index as u64), disc_ty, span);
+                let cond = self.emit(CfgInstData::Eq(disc, lit), Type::BOOL, span);
                 self.branch_to(cond, matched, unmatched, span);
+            }
+            AirPattern::EnumDataVariant {
+                enum_id: _,
+                variant_index,
+                fields,
+            } => {
+                // ADR-0052: if every field is a trivial leaf (Wildcard / bare
+                // Bind), sema's `emit_recursive_pattern_bindings` already
+                // handled binding setup in the arm body — CFG only needs the
+                // discriminant check. Otherwise, after the discriminant
+                // matches, recursively dispatch on each non-trivial field by
+                // projecting the enum payload.
+                let all_trivial = fields.iter().all(is_trivial_pattern);
+                let disc_ty = self.enum_discriminant_type(scr_ty);
+                let val = self.read_projected(scr_slot, scr_ty, projection, span);
+                let disc = self.emit(CfgInstData::GetDiscriminant { base: val }, disc_ty, span);
+                let lit = self.emit(CfgInstData::Const(*variant_index as u64), disc_ty, span);
+                let cond = self.emit(CfgInstData::Eq(disc, lit), Type::BOOL, span);
+                if all_trivial {
+                    self.branch_to(cond, matched, unmatched, span);
+                } else {
+                    let checked = self.cfg.new_block();
+                    self.branch_to(cond, checked, unmatched, span);
+                    self.current_block = checked;
+                    self.emit_enum_field_tests(
+                        scr_slot,
+                        scr_ty,
+                        projection,
+                        *variant_index,
+                        fields.iter().enumerate().map(|(i, p)| (i as u32, p)),
+                        matched,
+                        unmatched,
+                        span,
+                    );
+                }
+            }
+            AirPattern::EnumStructVariant {
+                enum_id: _,
+                variant_index,
+                fields,
+            } => {
+                let all_trivial = fields.iter().all(|(_, p)| is_trivial_pattern(p));
+                let disc_ty = self.enum_discriminant_type(scr_ty);
+                let val = self.read_projected(scr_slot, scr_ty, projection, span);
+                let disc = self.emit(CfgInstData::GetDiscriminant { base: val }, disc_ty, span);
+                let lit = self.emit(CfgInstData::Const(*variant_index as u64), disc_ty, span);
+                let cond = self.emit(CfgInstData::Eq(disc, lit), Type::BOOL, span);
+                if all_trivial {
+                    self.branch_to(cond, matched, unmatched, span);
+                } else {
+                    let checked = self.cfg.new_block();
+                    self.branch_to(cond, checked, unmatched, span);
+                    self.current_block = checked;
+                    self.emit_enum_field_tests(
+                        scr_slot,
+                        scr_ty,
+                        projection,
+                        *variant_index,
+                        fields.iter().map(|(idx, p)| (*idx, p)),
+                        matched,
+                        unmatched,
+                        span,
+                    );
+                }
             }
             AirPattern::Tuple { elems } => {
                 // For each element, recurse with an extended projection.
@@ -2325,6 +2423,108 @@ impl<'a> CfgBuilder<'a> {
             .cfg
             .make_place(PlaceBase::Local(scr_slot), projection.iter().copied());
         self.emit(CfgInstData::PlaceRead { place }, ty, span)
+    }
+
+    /// ADR-0052 Phase 1: after a discriminant check passes, emit the
+    /// per-field tests for a nested enum arm. Each field's sub-pattern
+    /// is dispatched against the value extracted via `EnumPayloadGet`,
+    /// spilled into a fresh temp slot so the existing projection-based
+    /// helpers apply. On any mismatch the chain jumps to `unmatched`;
+    /// the final field's matched branch lands in `matched`.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_enum_field_tests<'p, I>(
+        &mut self,
+        scr_slot: u32,
+        scr_ty: Type,
+        projection: &[Projection],
+        variant_index: u32,
+        fields: I,
+        matched: BlockId,
+        unmatched: BlockId,
+        span: gruel_span::Span,
+    ) where
+        I: IntoIterator<Item = (u32, &'p AirPattern)>,
+    {
+        let enum_id = scr_ty
+            .as_enum()
+            .expect("enum-variant pattern requires an enum scrutinee");
+        let variant_def = self.type_pool.enum_def(enum_id).variants[variant_index as usize].clone();
+
+        // Filter to non-trivial fields; trivial leaves are handled by sema's
+        // existing binding-setup walker in the arm body.
+        let non_trivial: Vec<(u32, &AirPattern)> = fields
+            .into_iter()
+            .filter(|(_, p)| !is_trivial_pattern(p))
+            .collect();
+        if non_trivial.is_empty() {
+            let (a_s, a_l) = self.cfg.push_extra(std::iter::empty::<CfgValue>());
+            self.cfg.set_terminator(
+                self.current_block,
+                Terminator::Goto {
+                    target: matched,
+                    args_start: a_s,
+                    args_len: a_l,
+                },
+            );
+            return;
+        }
+
+        // The base enum value lives in the spilled scrutinee slot; read it
+        // once per chain so EnumPayloadGet sees the original composite.
+        let base_val = self.read_projected(scr_slot, scr_ty, projection, span);
+
+        for (i, (field_index, sub_pat)) in non_trivial.iter().enumerate() {
+            let is_last = i + 1 == non_trivial.len();
+            let next = if is_last {
+                matched
+            } else {
+                self.cfg.new_block()
+            };
+            let field_ty = variant_def
+                .fields
+                .get(*field_index as usize)
+                .copied()
+                .expect("enum field index out of range for variant");
+            let field_val = self.emit(
+                CfgInstData::EnumPayloadGet {
+                    base: base_val,
+                    variant_index,
+                    field_index: *field_index,
+                },
+                field_ty,
+                span,
+            );
+            let field_slot = self.cfg.alloc_temp_local();
+            self.emit(
+                CfgInstData::StorageLive { slot: field_slot },
+                Type::UNIT,
+                span,
+            );
+            self.emit(
+                CfgInstData::Alloc {
+                    slot: field_slot,
+                    init: field_val,
+                },
+                Type::UNIT,
+                span,
+            );
+            self.emit_pattern_test(field_slot, field_ty, &[], sub_pat, next, unmatched, span);
+            if !is_last {
+                self.current_block = next;
+            }
+        }
+    }
+
+    /// ADR-0052: return the integer type used by this enum's
+    /// discriminant. Falls back to `Type::I32` for non-enum scrutinees,
+    /// which lets the caller treat the GetDiscriminant-then-Const-Eq
+    /// shape uniformly at the cost of a sanity check.
+    fn enum_discriminant_type(&self, scr_ty: Type) -> Type {
+        if let Some(enum_id) = scr_ty.as_enum() {
+            self.type_pool.enum_def(enum_id).discriminant_type()
+        } else {
+            Type::I32
+        }
     }
 
     /// Set the current block's terminator to a two-way conditional branch

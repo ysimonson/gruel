@@ -1,0 +1,72 @@
+[section]
+id = "warnings.unreachable_arms"
+name = "Unreachable Match Arm Warnings"
+description = """
+ADR-0052 Phase 4: every unreachable match arm surfaces a single
+`UnreachablePattern` warning, regardless of whether it's a duplicate
+literal, a variant shadowed by an earlier wildcard field, or a tuple
+combination already covered by preceding arms. The Maranget usefulness
+algorithm is the single source of truth for reachability.
+"""
+
+# =============================================================================
+# Redundant catch-all after exhaustive concrete arms
+# =============================================================================
+
+[[case]]
+name = "redundant_catchall_after_bool_arms"
+source = """
+fn main() -> i32 {
+    let b = true;
+    match b {
+        true => 1,
+        false => 2,
+        _ => 3,
+    }
+}
+"""
+exit_code = 1
+warning_contains = ["unreachable", "_"]
+expected_warning_count = 1
+
+# =============================================================================
+# Shadowed variant arm: `Some(_)` then `Some(5)`
+# =============================================================================
+
+[[case]]
+name = "variant_arm_shadowed_by_wildcard_field"
+source = """
+enum Opt { Some(i32), None }
+fn main() -> i32 {
+    let o = Opt::Some(1);
+    match o {
+        Opt::Some(_) => 1,
+        Opt::Some(5) => 2,
+        Opt::None => 3,
+    }
+}
+"""
+exit_code = 1
+warning_contains = ["unreachable"]
+expected_warning_count = 1
+
+# =============================================================================
+# Tuple arm overlap: `(1, 2)` already covered by `(1, _)` and `(_, 2)`
+# =============================================================================
+
+[[case]]
+name = "tuple_arm_covered_by_earlier_arms"
+source = """
+fn main() -> i32 {
+    let t = (1, 2);
+    match t {
+        (1, _) => 1,
+        (_, 2) => 2,
+        (1, 2) => 3,
+        _ => 4,
+    }
+}
+"""
+exit_code = 1
+warning_contains = ["unreachable"]
+expected_warning_count = 1

@@ -2369,6 +2369,30 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 Some(load)
             }
 
+            CfgInstData::GetDiscriminant { base } => {
+                // For data enums the LLVM layout is `{ disc, payload }`,
+                // so extract element 0; for unit-only enums the value
+                // itself is the discriminant and we just propagate it.
+                // Mirrors the discriminant-read logic in
+                // `Terminator::Switch` below.
+                let raw = self.get_value(base);
+                let scrutinee_ty = self.cfg.get_inst(base).ty;
+                let disc = if let TypeKind::Enum(id) = scrutinee_ty.kind() {
+                    let enum_def = self.type_pool.enum_def(id);
+                    if enum_def.has_data_variants() {
+                        let struct_val = raw.into_struct_value();
+                        self.builder
+                            .build_extract_value(struct_val, 0, "discrim")
+                            .expect("extract_value failed")
+                    } else {
+                        raw
+                    }
+                } else {
+                    raw
+                };
+                Some(disc)
+            }
+
             CfgInstData::StructInit {
                 struct_id,
                 fields_start,

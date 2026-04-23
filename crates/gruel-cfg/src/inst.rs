@@ -465,6 +465,18 @@ pub enum CfgInstData {
         field_index: u32,
     },
 
+    /// Extract the discriminant of an enum value as a plain integer.
+    /// For data enums the LLVM layout is `{ disc, payload_union }` and
+    /// codegen emits `extract_value 0`; for unit-only enums the value
+    /// *is* the discriminant and codegen is the identity. Used by
+    /// ADR-0052 cascading pattern dispatch when an enum arm has
+    /// refutable nested fields — the standalone discriminant check
+    /// cannot flow into a normal `Eq` against a struct value.
+    GetDiscriminant {
+        /// The enum value to inspect.
+        base: CfgValue,
+    },
+
     // Type conversion operations
     /// Integer cast: convert between integer types with runtime range check.
     /// Panics if the value cannot be represented in the target type.
@@ -1338,6 +1350,9 @@ impl Cfg {
                     "enum_payload_get {} variant={} field={}",
                     base, variant_index, field_index
                 )
+            }
+            CfgInstData::GetDiscriminant { base } => {
+                write!(f, "get_discriminant {}", base)
             }
             CfgInstData::IntCast { value, from_ty } => {
                 write!(f, "intcast {} from {}", value, from_ty.name())
