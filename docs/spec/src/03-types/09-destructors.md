@@ -232,3 +232,39 @@ drop fn FileHandle(self) {
 {{ rule(id="3.9:30", cat="informative") }}
 
 The `drop fn` syntax was chosen because it clearly indicates the purpose of the function while being distinct from regular functions and methods. The destructor is not part of any impl block because it has special calling semantics: it is invoked automatically by the compiler when values go out of scope.
+
+## Inline Destructor Syntax (ADR-0053)
+
+{{ rule(id="3.9:34", cat="syntax") }}
+
+A destructor **MAY** also be declared inline inside a struct body as a method named `drop` with the signature `fn drop(self)`:
+
+```gruel
+struct FileHandle {
+    fd: i32,
+
+    fn drop(self) {
+        close(self.fd);
+    }
+}
+```
+
+{{ rule(id="3.9:35", cat="legality-rule") }}
+
+The inline destructor **MUST** take exactly one parameter (`self`) and return the unit type. Any extra parameters, non-`self` receiver, or non-unit return type produces a compile-time error.
+
+{{ rule(id="3.9:36", cat="legality-rule") }}
+
+A type marked `@copy` or `linear` **MUST NOT** declare `fn drop`. `@copy` would risk a double-free on bitwise copy; `linear` values are never implicitly dropped, so the destructor would be unreachable.
+
+{{ rule(id="3.9:37", cat="legality-rule") }}
+
+A method named `drop` **CANNOT** be invoked directly via method-call syntax (`x.drop()`). Destructor invocation is performed solely by drop elaboration. The `drop` keyword in expression position makes such a call ungrammatical.
+
+{{ rule(id="3.9:38", cat="dynamic-semantics") }}
+
+Semantics for the inline form are identical to the top-level `drop fn` form: at most one destructor per type; the user-defined destructor runs first, followed by automatic dropping of fields in declaration order.
+
+{{ rule(id="3.9:39", cat="informative") }}
+
+Destructors on enums are reserved syntax in this spec version: the grammar permits `fn drop(self)` inside an enum body but the compiler rejects it with a diagnostic, pending the implementation of variant-dispatched destructors (ADR-0053 phase 3b).

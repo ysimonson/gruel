@@ -944,6 +944,10 @@ pub enum ErrorKind {
     /// Destructor for unknown type
     #[error("unknown type '{type_name}' in destructor")]
     DestructorUnknownType { type_name: String },
+    /// Inline `fn drop(self)` is invalid on this type (wrong signature, @copy,
+    /// linear, etc). ADR-0053.
+    #[error("invalid `fn drop` on type '{type_name}': {reason}")]
+    InvalidInlineDrop { type_name: String, reason: String },
 
     // Constant errors
     /// Duplicate constant declaration
@@ -1172,6 +1176,7 @@ impl ErrorKind {
             ErrorKind::AssocFnCalledAsMethod { .. } => ErrorCode::ASSOC_FN_CALLED_AS_METHOD,
             ErrorKind::DuplicateDestructor { .. } => ErrorCode::DUPLICATE_DESTRUCTOR,
             ErrorKind::DestructorUnknownType { .. } => ErrorCode::DESTRUCTOR_UNKNOWN_TYPE,
+            ErrorKind::InvalidInlineDrop { .. } => ErrorCode::DUPLICATE_DESTRUCTOR,
             ErrorKind::DuplicateConstant { .. } => ErrorCode::DUPLICATE_CONSTANT,
             ErrorKind::ConstExprNotSupported { .. } => ErrorCode::CONST_EXPR_NOT_SUPPORTED,
             ErrorKind::DuplicateVariant { .. } => ErrorCode::DUPLICATE_VARIANT,

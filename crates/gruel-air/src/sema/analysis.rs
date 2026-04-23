@@ -353,6 +353,28 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         }
     }
 
+    // Analyze inline `fn drop(self)` destructor bodies (ADR-0053 phase 3).
+    let inline_drops: Vec<(StructId, InstRef, Span)> = sema
+        .inline_struct_drops
+        .iter()
+        .map(|(sid, (body, span))| (*sid, *body, *span))
+        .collect();
+    for (struct_id, body, drop_span) in inline_drops {
+        let struct_def = sema.type_pool.struct_def(struct_id);
+        let type_name_str = struct_def.name.clone();
+        let full_name = format!("{}.__drop", type_name_str);
+        let struct_type = Type::new_struct(struct_id);
+
+        match sema.analyze_destructor_function(&infer_ctx, &full_name, body, drop_span, struct_type)
+        {
+            Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
+                functions_with_strings.push((analyzed, local_strings));
+                all_warnings.extend(warnings);
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+
     // Analyze destructor bodies
     for (_, inst) in sema.rir.iter() {
         if let InstData::DropFnDecl { type_name, body } = &inst.data {

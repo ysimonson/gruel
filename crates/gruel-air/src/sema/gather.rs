@@ -101,6 +101,7 @@ impl<'a> GatherOutput<'a> {
             module_registry: crate::sema_context::ModuleRegistry::new(),
             file_paths: HashMap::new(),
             param_arena: self.param_arena,
+            inline_struct_drops: HashMap::new(),
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
             anon_enum_method_sigs: HashMap::new(),

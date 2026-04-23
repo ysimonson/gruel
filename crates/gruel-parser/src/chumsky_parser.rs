@@ -47,6 +47,9 @@ pub struct PrimitiveTypeSpurs {
     pub bool: Spur,
     /// Self type keyword - used in methods to refer to the containing struct type
     pub self_type: Spur,
+    /// The identifier "drop" — recognized as a method name to define a destructor
+    /// inside a type body (ADR-0053).
+    pub drop_name: Spur,
 }
 
 impl PrimitiveTypeSpurs {
@@ -68,6 +71,7 @@ impl PrimitiveTypeSpurs {
             f64: interner.get_or_intern("f64"),
             bool: interner.get_or_intern("bool"),
             self_type: interner.get_or_intern("Self"),
+            drop_name: interner.get_or_intern("drop"),
         }
     }
 }
@@ -152,6 +156,32 @@ where
         TokenKind::Ident(name) = e => Ident {
             name,
             span: span_from_extra(e),
+        },
+    }
+    .boxed()
+}
+
+/// Parser that produces Ident for a method name.
+///
+/// Same as [`ident_parser`] except it also accepts the `drop` keyword,
+/// so that `fn drop(self)` parses as a normal method definition with
+/// name "drop". ADR-0053: the destructor is a specially-named method
+/// rather than its own item form.
+fn method_name_parser<'src, I>() -> GruelParser<'src, I, Ident>
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    select! {
+        TokenKind::Ident(name) = e => Ident {
+            name,
+            span: span_from_extra(e),
+        },
+        TokenKind::Drop = e => {
+            let state: &mut SimpleState<ParserState> = e.state();
+            Ident {
+                name: state.0.syms.drop_name,
+                span: span_from_extra(e),
+            }
         },
     }
     .boxed()
@@ -2787,8 +2817,10 @@ where
         choice((self_then_params.boxed(), just_params.boxed())).boxed();
 
     // Box the method head early to keep subsequent type accumulation short.
+    // Uses method_name_parser so that `fn drop(self)` parses as a method named "drop"
+    // (ADR-0053 destructor syntax).
     let method_head: GruelParser<I, (Directives, Ident)> = directives_parser()
-        .then(just(TokenKind::Fn).ignore_then(ident_parser()))
+        .then(just(TokenKind::Fn).ignore_then(method_name_parser()))
         .boxed();
 
     let method_params: GruelParser<I, (Option<SelfParam>, Vec<Param>)> = params_with_optional_self

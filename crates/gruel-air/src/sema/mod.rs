@@ -107,6 +107,13 @@ pub struct Sema<'a> {
     pub(crate) file_paths: HashMap<FileId, String>,
     /// Arena storage for function/method parameter data.
     pub(crate) param_arena: ParamArena,
+    /// Inline destructor bodies keyed by struct id (ADR-0053).
+    ///
+    /// Populated when a struct body contains `fn drop(self)`. The analysis pass
+    /// looks these up to run `analyze_destructor_function` against the method
+    /// body. The body's RIR InstRef is the *method body*, not a DropFnDecl.
+    /// Enum destructors are deferred to Phase 3b.
+    pub(crate) inline_struct_drops: HashMap<StructId, (gruel_rir::InstRef, gruel_span::Span)>,
     /// Method signatures for anonymous structs, used for structural equality comparison.
     pub(crate) anon_struct_method_sigs: HashMap<StructId, Vec<AnonMethodSig>>,
     /// Captured comptime values for anonymous structs.
@@ -178,6 +185,7 @@ impl<'a> Sema<'a> {
             module_registry: crate::sema_context::ModuleRegistry::new(),
             file_paths: HashMap::new(),
             param_arena: ParamArena::new(),
+            inline_struct_drops: HashMap::new(),
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
             anon_enum_method_sigs: HashMap::new(),

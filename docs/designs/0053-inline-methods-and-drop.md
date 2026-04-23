@@ -177,12 +177,20 @@ Gate the entire change behind `PreviewFeature::InlineTypeMembers`. Stabilize onc
   - Sema: extend enum registration to register methods keyed by `(EnumId, Spur)`. Resolve `Self` inside method *signatures* (body-position `Self` already works on anonymous enums but is not supported for named enums, matching named-struct behaviour). Also wire named-enum associated-function calls (`EnumName::fn(...)`) through `self.enum_methods`. Mirror the named-struct path.
   - Spec tests covering: basic method, associated function, match-on-self, preview gate. `Self`-in-body is intentionally omitted: it doesn't work on named structs either today, so adding it for enums would be a bigger change out of scope here.
 
-- [ ] **Phase 3: RIR + Sema (inline `fn drop`, all four forms)**
-  - During type registration, sema pulls any method named `drop` out of the method list and stores it in the destructor slot instead.
+- [x] **Phase 3: RIR + Sema (inline `fn drop` on structs)**
+  - Scope narrowing from the original Phase 3: **structs only** (named + anonymous). Enum destructors (named + anonymous) are deferred — the existing destructor infrastructure (`StructDef.destructor`, `collect_destructor`, `analyze_destructor_function`, CFG drop elaboration) is struct-only in its contract. Extending it to enums is a genuine semantics change beyond Phase 3's "migrate syntax + preserve ADR-0010 semantics" remit and will get its own phase.
+  - During type registration, sema pulls any method named `drop` out of the struct's method list and stores it in the existing per-struct destructor slot (`StructDef.destructor`).
   - Enforce the exact-signature rule (`fn drop(self)`, no return) and forbid direct method-call syntax `x.drop()`. Emit pointed diagnostics for each.
-  - Enforce the affine-only rule: reject `fn drop` on `@copy` structs and on `linear` structs/enums with a diagnostic that names the offending directive/modifier.
-  - Preserve existing drop-elaboration, codegen, and "user destructor runs first, then fields/variants in declaration order" semantics from ADR-0010.
-  - Spec tests covering: inline `fn drop` on named struct, named enum, anonymous struct, anonymous enum; bad-signature error; direct-call error.
+  - Enforce the affine-only rule: reject `fn drop` on `@copy` structs and on `linear` structs. (Linear enums would be caught here too once enum destructors land.)
+  - On enums (named + anonymous), for now: emit a compile error pointing at `fn drop` saying "destructors on enums are not yet supported (ADR-0053 follow-up)". This keeps the grammar honest without pretending to implement semantics that aren't there.
+  - Preserve existing drop-elaboration, codegen, and "user destructor runs first, then fields in declaration order" semantics from ADR-0010.
+  - Spec tests covering: inline `fn drop` on named struct and anonymous struct; bad-signature error; direct-call error; not-yet-supported-on-enum error.
+
+- [ ] **Phase 3b: Enum destructors (deferred)**
+  - Add `destructor: Option<String>` to `EnumDef` (mirrors `StructDef`).
+  - Extend `collect_destructor`-equivalent to accept enums.
+  - Extend drop elaboration and CFG drop-glue synthesis: user destructor runs first, then the variant-dispatch that drops owning fields of the active variant. Codegen emits `__gruel_drop_<EnumName>` whose body is the user destructor + variant match.
+  - Migrate the enum-side of the `fn drop` not-yet-supported error into real support.
 
 - [ ] **Phase 4: Remove top-level `drop fn`**
   - Delete `Item::DropFn`, its parser, `InstData::DropFnDecl`, and its sema/analysis arms.

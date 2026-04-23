@@ -933,6 +933,7 @@ impl<'a> Sema<'a> {
             }
         };
         let struct_type = Type::new_struct(struct_id);
+        let drop_name_sym = self.interner.get_or_intern("drop");
 
         let methods = self.rir.get_inst_refs(methods_start, methods_len);
         for method_ref in methods {
@@ -948,6 +949,28 @@ impl<'a> Sema<'a> {
                 ..
             } = &method_inst.data
             {
+                // ADR-0053: a method named `drop` is the struct's destructor,
+                // not a regular method. Route it through the destructor slot.
+                if *method_name == drop_name_sym {
+                    self.require_preview(
+                        gruel_error::PreviewFeature::InlineTypeMembers,
+                        "inline `fn drop(self)` destructor",
+                        method_inst.span,
+                    )?;
+                    self.register_inline_struct_drop(
+                        type_name,
+                        struct_id,
+                        method_ref,
+                        *has_self,
+                        *params_start,
+                        *params_len,
+                        *return_type,
+                        *body,
+                        method_inst.span,
+                    )?;
+                    continue;
+                }
+
                 // Use StructId in key to support anonymous struct methods
                 let key = (struct_id, *method_name);
                 if self.methods.contains_key(&key) {
@@ -992,6 +1015,98 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
+    /// Register an inline `fn drop(self)` as a struct's destructor.
+    ///
+    /// Validates the signature (must be exactly `fn drop(self)`, no extra
+    /// params, returns unit) and the type's copy/linear status (a destructor
+    /// is illegal on `@copy` and `linear` types per ADR-0053).
+    #[allow(clippy::too_many_arguments)]
+    fn register_inline_struct_drop(
+        &mut self,
+        type_name: Spur,
+        struct_id: StructId,
+        _method_ref: InstRef,
+        has_self: bool,
+        _params_start: u32,
+        params_len: u32,
+        return_type: Spur,
+        body: InstRef,
+        span: Span,
+    ) -> CompileResult<()> {
+        let type_name_str = self.interner.resolve(&type_name).to_string();
+
+        // Signature check: `fn drop(self)`, no extra params, no non-unit return.
+        if !has_self {
+            return Err(CompileError::new(
+                ErrorKind::InvalidInlineDrop {
+                    type_name: type_name_str.clone(),
+                    reason: "must take `self` — found an associated function".into(),
+                },
+                span,
+            ));
+        }
+        if params_len > 0 {
+            return Err(CompileError::new(
+                ErrorKind::InvalidInlineDrop {
+                    type_name: type_name_str.clone(),
+                    reason: "must take only `self` — extra parameters are not allowed".into(),
+                },
+                span,
+            ));
+        }
+        let ret_str = self.interner.resolve(&return_type);
+        if ret_str != "()" {
+            return Err(CompileError::new(
+                ErrorKind::InvalidInlineDrop {
+                    type_name: type_name_str.clone(),
+                    reason: format!("must return unit — found return type `{}`", ret_str),
+                },
+                span,
+            ));
+        }
+
+        // Affine-only: `@copy` structs cannot have destructors (double-free risk).
+        // `linear` structs cannot either — they are never implicitly dropped, so
+        // a destructor would be unreachable.
+        let struct_def_snapshot = self.type_pool.struct_def(struct_id);
+        if struct_def_snapshot.is_copy {
+            return Err(CompileError::new(
+                ErrorKind::InvalidInlineDrop {
+                    type_name: type_name_str.clone(),
+                    reason: "`@copy` types cannot declare `fn drop` (would double-free on copy)"
+                        .into(),
+                },
+                span,
+            ));
+        }
+        if struct_def_snapshot.is_linear {
+            return Err(CompileError::new(
+                ErrorKind::InvalidInlineDrop {
+                    type_name: type_name_str.clone(),
+                    reason: "`linear` types cannot declare `fn drop` (linear values are never implicitly dropped)".into(),
+                },
+                span,
+            ));
+        }
+
+        // Only one destructor per type.
+        let mut struct_def = struct_def_snapshot;
+        if struct_def.destructor.is_some() {
+            return Err(CompileError::new(
+                ErrorKind::DuplicateDestructor {
+                    type_name: type_name_str.clone(),
+                },
+                span,
+            ));
+        }
+        let destructor_name = format!("{}.__drop", type_name_str);
+        struct_def.destructor = Some(destructor_name);
+        self.type_pool.update_struct_def(struct_id, struct_def);
+
+        self.inline_struct_drops.insert(struct_id, (body, span));
+        Ok(())
+    }
+
     /// Collect methods defined inline in a named enum (ADR-0053).
     ///
     /// Mirrors `collect_struct_methods`: registers each method against the
@@ -1018,6 +1133,7 @@ impl<'a> Sema<'a> {
             }
         };
         let enum_type = Type::new_enum(enum_id);
+        let drop_name_sym = self.interner.get_or_intern("drop");
 
         let methods = self.rir.get_inst_refs(methods_start, methods_len);
         for method_ref in methods {
@@ -1033,6 +1149,20 @@ impl<'a> Sema<'a> {
                 ..
             } = &method_inst.data
             {
+                // ADR-0053: destructors on enums are deferred to phase 3b.
+                // Accept the syntax but reject it with a pointed diagnostic for now.
+                if *method_name == drop_name_sym {
+                    let type_name_str = self.interner.resolve(&type_name).to_string();
+                    return Err(CompileError::new(
+                        ErrorKind::InvalidInlineDrop {
+                            type_name: type_name_str,
+                            reason:
+                                "destructors on enums are not yet supported (ADR-0053 phase 3b)"
+                                    .into(),
+                        },
+                        method_inst.span,
+                    ));
+                }
                 let key = (enum_id, *method_name);
                 if self.enum_methods.contains_key(&key) {
                     let type_name_str = self.interner.resolve(&type_name).to_string();
