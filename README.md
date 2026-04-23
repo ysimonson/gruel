@@ -9,10 +9,16 @@ I think the bones of a really compelling language are there with Rue. But the
 project is not contributor-friendly. This is by design: Steve wants to
 experiment largely in isolation with some ideas, and it's apparent with e.g.
 PRs that are not getting accepted. To make it contributor friendly, and
-hopefully iterate on a language faster, this fork gets rid of as much
+hopefully iterate on a language faster, this fork originally got rid of as much
 off-the-beaten path infrastructure as possible in favor of more pedestrian
 variants: git instead of jj, just ADRs without beads workflows, cargo instead
 of buck, etc.
+
+Since then, this has been used as a basis to iterate on the language and its
+tooling. As of April 2026, Gruel is a superset of Rue, with a compiler that
+uses LLVM to produce faster code, better platform compatibility, and more
+standardized infrastructure - at the cost of slower compile times, and loss of
+freestanding/hermetic capacities.
 
 ## Differences from Rue
 
@@ -26,6 +32,7 @@ of buck, etc.
 - Banned partial moves to simplify analysis, especially with linear types (ADR-0036)
 - Enums with struct variants (ADR-0037), pattern matching (ADR-0038), and anonymous types with comptime generics support (ADR-0039)
 - Significantly expanded comptime capabilities (ADR-0040, ADR-0042, ADR-0045)
+- Significantly expanded pattern matching and destructuring capabilities (ADR-0049)
 
 ### Language Tooling
 
