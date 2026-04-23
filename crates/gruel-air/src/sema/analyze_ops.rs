@@ -2538,16 +2538,59 @@ impl<'a> Sema<'a> {
         // and set `has_rest`, which disables the "all fields required" rule
         // below and causes every unlisted field to be treated as wildcard-
         // dropped.
+        //
+        // Suffix markers: `let (a, .., b)` on an N-tuple emits `..end_N-1-i`
+        // for each suffix position. Resolve these to concrete numeric field
+        // names once the struct arity is known.
         let all_rir_fields = self.rir.get_destructure_fields(fields_start, fields_len);
+        let struct_arity = struct_def.fields.len();
         let (rir_fields, has_rest) = {
             let mut filtered = Vec::with_capacity(all_rir_fields.len());
             let mut has_rest = false;
-            for f in all_rir_fields {
-                if self.interner.resolve(&f.field_name) == ".." {
+            let mut prefix_count: usize = 0;
+            let mut suffix_count: usize = 0;
+            for mut f in all_rir_fields {
+                let name_str = self.interner.resolve(&f.field_name).to_string();
+                if name_str == ".." {
                     has_rest = true;
+                    continue;
+                }
+                if let Some(rest) = name_str.strip_prefix("..end_") {
+                    let from_end: usize = rest.parse().expect(
+                        "astgen emits well-formed ..end_N markers; parser rejects user `..end_N` field names",
+                    );
+                    if from_end >= struct_arity {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: format!("tuple of arity at least {}", from_end + 1),
+                                found: init_type.name().to_string(),
+                            },
+                            span,
+                        ));
+                    }
+                    suffix_count += 1;
+                    let idx = struct_arity - 1 - from_end;
+                    f.field_name = self.interner.get_or_intern(idx.to_string());
+                    filtered.push(f);
                 } else {
+                    prefix_count += 1;
                     filtered.push(f);
                 }
+            }
+            // Prefix + suffix must fit within the tuple: a 2-tuple
+            // matched against `(a, b, .., c, d)` would overlap prefix
+            // and suffix positions, which is nonsensical.
+            if has_rest && prefix_count + suffix_count > struct_arity {
+                return Err(CompileError::new(
+                    ErrorKind::TypeMismatch {
+                        expected: format!(
+                            "tuple of arity at least {}",
+                            prefix_count + suffix_count
+                        ),
+                        found: init_type.name().to_string(),
+                    },
+                    span,
+                ));
             }
             (filtered, has_rest)
         };

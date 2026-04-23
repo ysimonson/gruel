@@ -597,8 +597,21 @@ ship without the preview gate since it's a bug fix, not a new feature.
   - Fix the CFG-builder bug around `let` + `if-else-with-panic` so the
     tuple-root elaboration (Phase 5a) can emit a runtime `@panic`
     fallback for non-exhaustive matches.
-  - `..` in the middle of a tuple destructure (`(a, .., b)`), which
-    needs sema to resolve positions from the inferred tuple arity.
+  - `..` in the middle of a tuple-root match arm (`match t { (a, .., b)
+    => ... }`). The tuple-root match elaborator emits `FieldGet` at
+    astgen time and so needs to know positions concretely; resolving
+    from-end positions there would need the elaborator to thread the
+    inferred tuple arity through from sema.
+
+## Recently closed follow-ups
+
+- `..` in the middle of a let tuple destructure (`let (a, .., b) = t;`).
+  Astgen now emits suffix positions as `..end_N` markers; sema resolves
+  them against the inferred tuple arity and rejects
+  prefix + suffix > arity with a clear "tuple of arity at least N"
+  error. See spec tests `let_tuple_rest_middle`,
+  `let_tuple_rest_middle_multi`, `let_tuple_rest_leading`, and
+  `let_tuple_rest_middle_arity_too_small`.
 
 - [x] **Phase 6: Rest patterns (`..`) in let and match arms**
   - Parser already accepts `..` in tuple / struct / variant field lists

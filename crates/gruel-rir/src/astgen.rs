@@ -2089,22 +2089,20 @@ impl<'a> AstGen<'a> {
                 (type_name.name, rir_fields, children)
             }
             Pattern::Tuple { elems, .. } => {
-                // A `..` at the end of a tuple pattern emits the `..`
-                // marker field (ADR-0049 Phase 6). `..` in the middle of a
-                // tuple is not yet supported — the explicit positions after
-                // `..` would need sema to fill in their indices from the
-                // inferred tuple arity.
+                // Tuple destructuring with `..` at any position: elements
+                // before the `..` get their literal positional index
+                // (`"0"`, `"1"`, …); elements after the `..` get an
+                // `..end_N` marker where N is the 0-indexed distance from
+                // the end (so `(a, .., b, c)` emits `..end_1` for `b` and
+                // `..end_0` for `c`). Sema resolves the end-marker against
+                // the inferred tuple arity (ADR-0049 Phase 6).
+                let rest_pos = elems
+                    .iter()
+                    .position(|e| matches!(e, TupleElemPattern::Rest(_)));
                 let mut rir_fields = Vec::with_capacity(elems.len());
                 let mut children: Vec<(Spur, &Pattern)> = Vec::new();
-                let last_index = elems.len().saturating_sub(1);
                 for (i, elem) in elems.iter().enumerate() {
                     if let TupleElemPattern::Rest(_) = elem {
-                        if i != last_index {
-                            panic!(
-                                "rest pattern `..` in tuple must currently be at the end (ADR-0049 Phase 6); got element {}",
-                                i
-                            );
-                        }
                         rir_fields.push(RirDestructureField {
                             field_name: self.interner.get_or_intern_static(".."),
                             binding_name: None,
@@ -2113,7 +2111,14 @@ impl<'a> AstGen<'a> {
                         });
                         continue;
                     }
-                    let field_name = self.interner.get_or_intern(i.to_string());
+                    let field_name = match rest_pos {
+                        Some(rp) if i > rp => {
+                            // Suffix position: encode as distance from end.
+                            let from_end = elems.len() - 1 - i;
+                            self.interner.get_or_intern(format!("..end_{}", from_end))
+                        }
+                        _ => self.interner.get_or_intern(i.to_string()),
+                    };
                     match elem {
                         TupleElemPattern::Pattern(Pattern::Wildcard(_)) => {
                             rir_fields.push(RirDestructureField {
