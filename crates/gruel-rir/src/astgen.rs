@@ -8,11 +8,11 @@ use lasso::{Spur, ThreadedRodeo};
 /// Known type intrinsics that take a type argument rather than an expression.
 /// These intrinsics operate on types at compile time (e.g., @size_of(i32)).
 const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of", "type_name", "type_info"];
-use gruel_parser::ast::{ConstDecl, DestructureBinding, DropFn, PatternBinding};
+use gruel_parser::ast::{ConstDecl, DropFn, FieldPattern, Ident as AstIdent, TupleElemPattern};
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
-    Function, IntrinsicArg, Item, LetPattern, Method, ParamMode, Pattern, Statement, StructDecl,
-    TypeExpr, UnaryOp, ast::Visibility,
+    Function, IntrinsicArg, Item, MatchArm, MatchExpr, Method, ParamMode, Pattern, Statement,
+    StructDecl, TypeExpr, UnaryOp, ast::Visibility,
 };
 
 use crate::inst::{
@@ -28,6 +28,9 @@ pub struct AstGen<'a> {
     interner: &'a ThreadedRodeo,
     /// Output RIR
     rir: Rir,
+    /// Counter for generating unique synthetic binding names when elaborating
+    /// nested destructuring patterns (ADR-0049 Phase 4).
+    nested_pat_counter: u32,
 }
 
 impl<'a> AstGen<'a> {
@@ -37,7 +40,48 @@ impl<'a> AstGen<'a> {
             ast,
             interner,
             rir: Rir::new(),
+            nested_pat_counter: 0,
         }
+    }
+
+    /// Generate a fresh synthetic symbol name for an intermediate binding in a
+    /// nested destructure. The name is interned once and used as both the
+    /// destructure-field binding_name and the `VarRef` key for the child
+    /// destructure to reference the same local.
+    fn fresh_nested_pat_name(&mut self) -> Spur {
+        let n = self.nested_pat_counter;
+        self.nested_pat_counter += 1;
+        self.interner.get_or_intern(format!("__nested_pat_{}", n))
+    }
+
+    /// Generate a fresh synthetic symbol name for the tuple-match scrutinee
+    /// binding (ADR-0049 Phase 5a). Shares the nested-pat counter so names
+    /// are globally unique within a function.
+    fn fresh_match_scr_name(&mut self) -> Spur {
+        let n = self.nested_pat_counter;
+        self.nested_pat_counter += 1;
+        self.interner.get_or_intern(format!("__match_scr_{}", n))
+    }
+
+    /// Emit a `@panic("message")` call as a single RIR instruction with
+    /// type `Never`. Used by the tuple-match elaborator to terminate a
+    /// non-exhaustive if-chain at runtime (ADR-0049 Phase 5a).
+    fn emit_panic_call(&mut self, message: &str, span: gruel_span::Span) -> InstRef {
+        let msg = self.interner.get_or_intern(message);
+        let msg_const = self.rir.add_inst(Inst {
+            data: InstData::StringConst(msg),
+            span,
+        });
+        let (args_start, args_len) = self.rir.add_inst_refs(&[msg_const]);
+        let name = self.interner.get_or_intern_static("panic");
+        self.rir.add_inst(Inst {
+            data: InstData::Intrinsic {
+                name,
+                args_start,
+                args_len,
+            },
+            span,
+        })
     }
 
     /// Generate RIR from the AST.
@@ -570,16 +614,44 @@ impl<'a> AstGen<'a> {
                 })
             }
             Expr::Match(match_expr) => {
+                // Top-level struct / tuple / ident patterns at the match arm
+                // root are irrefutable — for a match expression with only such
+                // an arm, elaborate the whole thing into a let-destructure
+                // around the arm body. This keeps existing RIR shapes unchanged
+                // while allowing nested pattern syntax.
+                if let Some(elaborated) = self.try_elaborate_irrefutable_match(match_expr) {
+                    return elaborated;
+                }
+
+                // Multi-arm matches with tuple patterns at the top of any arm
+                // elaborate into a let-bound scrutinee plus an if/else chain
+                // over tuple projections (ADR-0049 Phase 5a).
+                if let Some(elaborated) = self.try_elaborate_tuple_match(match_expr) {
+                    return elaborated;
+                }
+
+                // Arms with refutable nested sub-patterns in variant fields
+                // (e.g., `Some(Some(v))`) elaborate into nested matches that
+                // fall back to the outer match's wildcard catch-all body
+                // (ADR-0049 Phase 5b).
+                if let Some(elaborated) = self.try_elaborate_refutable_nested_match(match_expr) {
+                    return elaborated;
+                }
+
                 let scrutinee = self.gen_expr(&match_expr.scrutinee);
-                let arms: Vec<_> = match_expr
-                    .arms
-                    .iter()
-                    .map(|arm| {
-                        let pattern = self.gen_pattern(&arm.pattern);
-                        let body = self.gen_expr(&arm.body);
-                        (pattern, body)
-                    })
-                    .collect();
+                let mut arms: Vec<(RirPattern, InstRef)> =
+                    Vec::with_capacity(match_expr.arms.len());
+                for arm in &match_expr.arms {
+                    let mut nested: Vec<(Spur, Pattern)> = Vec::new();
+                    let pattern = self.gen_match_arm_pattern(&arm.pattern, &mut nested);
+                    let body = self.gen_expr(&arm.body);
+                    let body = if nested.is_empty() {
+                        body
+                    } else {
+                        self.wrap_match_arm_body_with_destructures(body, nested, arm.body.span())
+                    };
+                    arms.push((pattern, body));
+                }
                 let (arms_start, arms_len) = self.rir.add_match_arms(&arms);
 
                 self.rir.add_inst(Inst {
@@ -992,7 +1064,1004 @@ impl<'a> AstGen<'a> {
         }
     }
 
-    fn gen_pattern(&mut self, pattern: &Pattern) -> RirPattern {
+    /// Elaborate a match expression whose single arm has an irrefutable
+    /// top-level pattern into a block containing a let-destructure over the
+    /// scrutinee plus the arm body (ADR-0049 Phase 4b).
+    ///
+    /// Covers `match x { name => body }`, `match p { Point { x, y } => body }`,
+    /// and `match t { (a, b) => body }` — single-arm matches where the pattern
+    /// binds the scrutinee without branching. For multi-arm or refutable
+    /// top-level patterns, returns `None` and the caller falls back to the
+    /// normal match lowering.
+    fn try_elaborate_irrefutable_match(
+        &mut self,
+        match_expr: &gruel_parser::MatchExpr,
+    ) -> Option<InstRef> {
+        if match_expr.arms.len() != 1 {
+            return None;
+        }
+        let arm = &match_expr.arms[0];
+        match &arm.pattern {
+            Pattern::Ident { is_mut, name, span } => {
+                // `match x { name => body }` => `{ let name = x; body }`
+                let init = self.gen_expr(&match_expr.scrutinee);
+                let alloc = self.rir.add_inst(Inst {
+                    data: InstData::Alloc {
+                        directives_start: 0,
+                        directives_len: 0,
+                        name: Some(name.name),
+                        is_mut: *is_mut,
+                        ty: None,
+                        init,
+                    },
+                    span: *span,
+                });
+                let body = self.gen_expr(&arm.body);
+                let extra_start = self.rir.add_extra(&[alloc.as_u32(), body.as_u32()]);
+                Some(self.rir.add_inst(Inst {
+                    data: InstData::Block {
+                        extra_start,
+                        len: 2,
+                    },
+                    span: match_expr.span,
+                }))
+            }
+            Pattern::Struct { .. } | Pattern::Tuple { .. }
+                if is_irrefutable_destructure(&arm.pattern) =>
+            {
+                // `match x { <pattern> => body }` => `{ let <pattern> = x; body }`
+                let init = self.gen_expr(&match_expr.scrutinee);
+                let mut stmts: Vec<u32> = Vec::new();
+                let mut emitted = Vec::new();
+                self.emit_let_destructure_into(
+                    &arm.pattern,
+                    init,
+                    arm.pattern.span(),
+                    &mut emitted,
+                );
+                for r in emitted {
+                    stmts.push(r.as_u32());
+                }
+                let body = self.gen_expr(&arm.body);
+                stmts.push(body.as_u32());
+                let extra_start = self.rir.add_extra(&stmts);
+                let len = stmts.len() as u32;
+                Some(self.rir.add_inst(Inst {
+                    data: InstData::Block { extra_start, len },
+                    span: match_expr.span,
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    /// Elaborate a match expression with refutable nested sub-patterns in
+    /// variant fields (e.g., `Some(Some(v))`) by AST rewriting: replace
+    /// each refutable sub-pattern with a synthetic `__refut_N` ident
+    /// binding, wrap the arm body in a nested match over that binding,
+    /// and reuse the outer match's trailing wildcard/ident arm body as
+    /// the nested match's fallback (ADR-0049 Phase 5b).
+    ///
+    /// Returns `None` if:
+    /// - No arm has a refutable nested sub-pattern (caller uses normal path).
+    /// - The match has no trailing wildcard/ident arm to serve as the
+    ///   fallback — that shape requires true recursive dispatch with
+    ///   decision-tree construction and is still unsupported.
+    ///
+    /// The fallback body is cloned once per elaborated arm; since match
+    /// arms are mutually exclusive, the duplicated bodies execute at most
+    /// once across all paths at runtime.
+    fn try_elaborate_refutable_nested_match(&mut self, match_expr: &MatchExpr) -> Option<InstRef> {
+        let needs = match_expr
+            .arms
+            .iter()
+            .any(|arm| pattern_has_refutable_nested_sub(&arm.pattern));
+        if !needs {
+            return None;
+        }
+
+        // Locate the last wildcard / ident catch-all arm, if any. Arms
+        // after it are unreachable and dropped from the elaboration.
+        // When there's no catch-all, the nested matches are expected to
+        // be exhaustive across their variant type (enforced by sema).
+        let catch_all_idx = match_expr
+            .arms
+            .iter()
+            .rposition(|arm| matches!(&arm.pattern, Pattern::Wildcard(_) | Pattern::Ident { .. }));
+
+        let catch_all_body: Option<Box<Expr>> =
+            catch_all_idx.map(|idx| match_expr.arms[idx].body.clone());
+
+        // Group arms by outer variant key, preserving first-occurrence
+        // order. Arms sharing an outer variant are merged into a single
+        // arm with a nested match over the refutable positions so the
+        // first arm doesn't absorb the variant and hide subsequent arms.
+        //
+        // Arms without a variant key (Path, literal) pass through at
+        // their original position.
+        let upper = catch_all_idx.unwrap_or(match_expr.arms.len());
+        let arms_before_catch: &[MatchArm] = &match_expr.arms[..upper];
+        let mut groups: Vec<((Spur, Spur), Vec<usize>)> = Vec::new();
+        for (i, arm) in arms_before_catch.iter().enumerate() {
+            if let Some(key) = outer_variant_key(&arm.pattern) {
+                if let Some((_, list)) = groups.iter_mut().find(|(k, _)| *k == key) {
+                    list.push(i);
+                } else {
+                    groups.push((key, vec![i]));
+                }
+            }
+        }
+
+        // Decide merge strategy per group; bail out to `None` for shapes
+        // we don't yet support (multi-field variants with shared outer,
+        // struct variants with shared outer, rest patterns in a merged
+        // arm) so the normal match path surfaces a clear error.
+        let mut merged: std::collections::HashMap<usize, MatchArm> =
+            std::collections::HashMap::new();
+        let mut absorbed: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for (_, idxs) in &groups {
+            if idxs.len() < 2 {
+                continue;
+            }
+            let Some(arm) =
+                self.merge_group_single_field(&match_expr.arms, idxs, catch_all_body.as_deref())
+            else {
+                return None;
+            };
+            let first = idxs[0];
+            merged.insert(first, arm);
+            for &idx in idxs.iter().skip(1) {
+                absorbed.insert(idx);
+            }
+        }
+
+        let mut new_arms: Vec<MatchArm> = Vec::with_capacity(arms_before_catch.len() + 1);
+        for (i, arm) in arms_before_catch.iter().enumerate() {
+            if absorbed.contains(&i) {
+                continue;
+            }
+            if let Some(merged_arm) = merged.remove(&i) {
+                new_arms.push(merged_arm);
+                continue;
+            }
+            if pattern_has_refutable_nested_sub(&arm.pattern) {
+                // Per-arm elaboration requires a catch-all body to use as
+                // the nested match's fallback. Without it, fall through
+                // to the normal match path (which will panic with a
+                // clear message).
+                let Some(catch_all_body_ref) = catch_all_body.as_ref() else {
+                    return None;
+                };
+                let mut subs: Vec<(Spur, Pattern)> = Vec::new();
+                let new_pattern = self.replace_refutable_nested_subs(&arm.pattern, &mut subs);
+                let mut body = (*arm.body).clone();
+                for (syn_name, sub_pattern) in subs {
+                    body = Expr::Match(MatchExpr {
+                        scrutinee: Box::new(Expr::Ident(AstIdent {
+                            name: syn_name,
+                            span: sub_pattern.span(),
+                        })),
+                        arms: vec![
+                            MatchArm {
+                                pattern: sub_pattern.clone(),
+                                body: Box::new(body),
+                                span: sub_pattern.span(),
+                            },
+                            MatchArm {
+                                pattern: Pattern::Wildcard(sub_pattern.span()),
+                                body: Box::new((**catch_all_body_ref).clone()),
+                                span: sub_pattern.span(),
+                            },
+                        ],
+                        span: sub_pattern.span(),
+                    });
+                }
+                new_arms.push(MatchArm {
+                    pattern: new_pattern,
+                    body: Box::new(body),
+                    span: arm.span,
+                });
+            } else {
+                new_arms.push(arm.clone());
+            }
+        }
+        if let Some(idx) = catch_all_idx {
+            new_arms.push(match_expr.arms[idx].clone());
+        }
+
+        let new_match = MatchExpr {
+            scrutinee: match_expr.scrutinee.clone(),
+            arms: new_arms,
+            span: match_expr.span,
+        };
+        Some(self.gen_expr(&Expr::Match(new_match)))
+    }
+
+    /// Merge arms that share a `DataVariant` or `StructVariant` outer
+    /// pattern into a single outer arm whose body is a nested `match`
+    /// over the field value(s).
+    ///
+    /// For single-field variants the nested match scrutinee is a bare
+    /// ident reference; for multi-field variants we bundle the fresh
+    /// idents into a tuple literal and the inner arm patterns become
+    /// tuples of the merged arms' sub-patterns — the nested tuple match
+    /// then flows through `try_elaborate_tuple_match` (Phase 5a).
+    ///
+    /// Struct-variant merging uses the first arm's field order as the
+    /// canonical layout and reorders each arm's sub-patterns to match.
+    /// Rest-pattern (`..`) shares, non-leaf multi-field sub-patterns,
+    /// and arms that list different field sets all return `None`.
+    fn merge_group_single_field(
+        &mut self,
+        all_arms: &[MatchArm],
+        idxs: &[usize],
+        catch_all_body: Option<&Expr>,
+    ) -> Option<MatchArm> {
+        match &all_arms[idxs[0]].pattern {
+            Pattern::DataVariant { .. } => {
+                self.merge_group_data_variant(all_arms, idxs, catch_all_body)
+            }
+            Pattern::StructVariant { .. } => {
+                self.merge_group_struct_variant(all_arms, idxs, catch_all_body)
+            }
+            _ => None,
+        }
+    }
+
+    /// Data-variant arm merging — see `merge_group_single_field`.
+    fn merge_group_data_variant(
+        &mut self,
+        all_arms: &[MatchArm],
+        idxs: &[usize],
+        catch_all_body: Option<&Expr>,
+    ) -> Option<MatchArm> {
+        let template = &all_arms[idxs[0]].pattern;
+        let (base, type_name, variant_ident, outer_span, field_count) = match template {
+            Pattern::DataVariant {
+                base,
+                type_name,
+                variant,
+                span,
+                fields,
+            } => (base.clone(), *type_name, *variant, *span, fields.len()),
+            _ => return None,
+        };
+
+        for &i in idxs {
+            match &all_arms[i].pattern {
+                Pattern::DataVariant { fields, .. } => {
+                    if fields.len() != field_count {
+                        return None;
+                    }
+                    for f in fields {
+                        match f {
+                            TupleElemPattern::Pattern(p) => {
+                                // Multi-field merging relies on Phase 5a's
+                                // tuple-root elaboration, which only supports
+                                // leaf sub-patterns. Single-field variants
+                                // bypass tuple construction so any sub-pattern
+                                // kind is fine there.
+                                if field_count > 1 && !is_leaf_sub_pattern(p) {
+                                    return None;
+                                }
+                            }
+                            TupleElemPattern::Rest(_) => return None,
+                        }
+                    }
+                }
+                _ => return None,
+            }
+        }
+
+        // Fresh ident per field position — these replace the refutable
+        // sub-patterns in the merged outer arm.
+        let fresh_idents: Vec<Spur> = (0..field_count)
+            .map(|_| self.fresh_refutable_elab_name())
+            .collect();
+
+        // Inner match arms — one per merged arm, preserving order.
+        let mut inner_arms: Vec<MatchArm> = Vec::with_capacity(idxs.len() + 1);
+        for &i in idxs {
+            let arm = &all_arms[i];
+            let fields = match &arm.pattern {
+                Pattern::DataVariant { fields, .. } => fields,
+                _ => unreachable!(),
+            };
+            let inner_pat = if field_count == 1 {
+                match &fields[0] {
+                    TupleElemPattern::Pattern(p) => p.clone(),
+                    TupleElemPattern::Rest(_) => unreachable!(),
+                }
+            } else {
+                Pattern::Tuple {
+                    elems: fields.clone(),
+                    span: arm.pattern.span(),
+                }
+            };
+            inner_arms.push(MatchArm {
+                pattern: inner_pat,
+                body: arm.body.clone(),
+                span: arm.span,
+            });
+        }
+        // When the outer match has a catch-all, mirror it as the nested
+        // match's wildcard fallback so runtime coverage is preserved.
+        // Skip when one of the merged arms is already irrefutable — its
+        // nested pattern covers every remaining value of the field
+        // type(s), and a trailing wildcard would make the if-chain
+        // elaborator trip on unreachable arms.
+        //
+        // Without a catch-all, the nested match is expected to cover
+        // every value of the field type on its own (sema enforces
+        // exhaustiveness).
+        let any_irrefutable = inner_arms
+            .iter()
+            .any(|a| is_irrefutable_destructure(&a.pattern));
+        if let Some(body) = catch_all_body {
+            if !any_irrefutable {
+                inner_arms.push(MatchArm {
+                    pattern: Pattern::Wildcard(outer_span),
+                    body: Box::new(body.clone()),
+                    span: outer_span,
+                });
+            }
+        }
+
+        let nested_scrutinee = if field_count == 1 {
+            Expr::Ident(AstIdent {
+                name: fresh_idents[0],
+                span: outer_span,
+            })
+        } else {
+            Expr::Tuple(gruel_parser::ast::TupleExpr {
+                elems: fresh_idents
+                    .iter()
+                    .map(|&n| {
+                        Expr::Ident(AstIdent {
+                            name: n,
+                            span: outer_span,
+                        })
+                    })
+                    .collect(),
+                span: outer_span,
+            })
+        };
+
+        let nested_match = Expr::Match(MatchExpr {
+            scrutinee: Box::new(nested_scrutinee),
+            arms: inner_arms,
+            span: outer_span,
+        });
+
+        let outer_fields: Vec<TupleElemPattern> = fresh_idents
+            .iter()
+            .map(|&n| {
+                TupleElemPattern::Pattern(Pattern::Ident {
+                    is_mut: false,
+                    name: AstIdent {
+                        name: n,
+                        span: outer_span,
+                    },
+                    span: outer_span,
+                })
+            })
+            .collect();
+
+        Some(MatchArm {
+            pattern: Pattern::DataVariant {
+                base,
+                type_name,
+                variant: variant_ident,
+                fields: outer_fields,
+                span: outer_span,
+            },
+            body: Box::new(nested_match),
+            span: outer_span,
+        })
+    }
+
+    /// Struct-variant arm merging — see `merge_group_single_field`.
+    /// Uses the first arm's field order as the canonical tuple layout
+    /// and looks up every other arm's fields by name to reorder them.
+    fn merge_group_struct_variant(
+        &mut self,
+        all_arms: &[MatchArm],
+        idxs: &[usize],
+        catch_all_body: Option<&Expr>,
+    ) -> Option<MatchArm> {
+        let template = &all_arms[idxs[0]].pattern;
+        let (base, type_name, variant_ident, outer_span, canonical_names) = match template {
+            Pattern::StructVariant {
+                base,
+                type_name,
+                variant,
+                span,
+                fields,
+            } => {
+                // Reject merges when the first arm has a `..` rest —
+                // proper handling would need to know the variant's full
+                // field set, which is only available in sema.
+                let mut names: Vec<Spur> = Vec::with_capacity(fields.len());
+                for fp in fields {
+                    match fp.field_name {
+                        Some(ident) => names.push(ident.name),
+                        None => return None, // `..` rest — bail
+                    }
+                }
+                (base.clone(), *type_name, *variant, *span, names)
+            }
+            _ => return None,
+        };
+        let field_count = canonical_names.len();
+
+        // Validate every arm lists the same field names (any order);
+        // multi-field merges additionally require leaf sub-patterns so
+        // Phase 5a's tuple elaboration can handle the nested match.
+        for &i in idxs {
+            match &all_arms[i].pattern {
+                Pattern::StructVariant { fields, .. } => {
+                    if fields.len() != field_count {
+                        return None;
+                    }
+                    // Check that each canonical name is listed exactly
+                    // once (no duplicates, no rest, no unknown names).
+                    let mut seen: std::collections::HashSet<Spur> =
+                        std::collections::HashSet::new();
+                    for fp in fields {
+                        let Some(ident) = fp.field_name else {
+                            return None;
+                        };
+                        if !canonical_names.contains(&ident.name) {
+                            return None;
+                        }
+                        if !seen.insert(ident.name) {
+                            return None;
+                        }
+                        if field_count > 1 {
+                            let sub_is_leaf = match &fp.sub {
+                                None => true,
+                                Some(p) => is_leaf_sub_pattern(p),
+                            };
+                            if !sub_is_leaf {
+                                return None;
+                            }
+                        }
+                    }
+                }
+                _ => return None,
+            }
+        }
+
+        let fresh_idents: Vec<Spur> = (0..field_count)
+            .map(|_| self.fresh_refutable_elab_name())
+            .collect();
+
+        // Inner arms: for each original arm, rebuild sub-patterns in
+        // canonical order.
+        let mut inner_arms: Vec<MatchArm> = Vec::with_capacity(idxs.len() + 1);
+        for &i in idxs {
+            let arm = &all_arms[i];
+            let fields = match &arm.pattern {
+                Pattern::StructVariant { fields, .. } => fields,
+                _ => unreachable!(),
+            };
+            let mut ordered_subs: Vec<Pattern> = Vec::with_capacity(field_count);
+            for canonical in &canonical_names {
+                let fp = fields
+                    .iter()
+                    .find(|fp| fp.field_name.map(|n| n.name) == Some(*canonical))
+                    .expect("validated above");
+                let sub = match &fp.sub {
+                    None => Pattern::Ident {
+                        is_mut: fp.is_mut,
+                        name: fp.field_name.expect("validated above; `..` rest rejected"),
+                        span: fp.span,
+                    },
+                    Some(p) => p.clone(),
+                };
+                ordered_subs.push(sub);
+            }
+            let inner_pat = if field_count == 1 {
+                ordered_subs.into_iter().next().unwrap()
+            } else {
+                Pattern::Tuple {
+                    elems: ordered_subs
+                        .into_iter()
+                        .map(TupleElemPattern::Pattern)
+                        .collect(),
+                    span: arm.pattern.span(),
+                }
+            };
+            inner_arms.push(MatchArm {
+                pattern: inner_pat,
+                body: arm.body.clone(),
+                span: arm.span,
+            });
+        }
+        let any_irrefutable = inner_arms
+            .iter()
+            .any(|a| is_irrefutable_destructure(&a.pattern));
+        if let Some(body) = catch_all_body {
+            if !any_irrefutable {
+                inner_arms.push(MatchArm {
+                    pattern: Pattern::Wildcard(outer_span),
+                    body: Box::new(body.clone()),
+                    span: outer_span,
+                });
+            }
+        }
+
+        let nested_scrutinee = if field_count == 1 {
+            Expr::Ident(AstIdent {
+                name: fresh_idents[0],
+                span: outer_span,
+            })
+        } else {
+            Expr::Tuple(gruel_parser::ast::TupleExpr {
+                elems: fresh_idents
+                    .iter()
+                    .map(|&n| {
+                        Expr::Ident(AstIdent {
+                            name: n,
+                            span: outer_span,
+                        })
+                    })
+                    .collect(),
+                span: outer_span,
+            })
+        };
+
+        let nested_match = Expr::Match(MatchExpr {
+            scrutinee: Box::new(nested_scrutinee),
+            arms: inner_arms,
+            span: outer_span,
+        });
+
+        let outer_fields: Vec<FieldPattern> = canonical_names
+            .iter()
+            .zip(&fresh_idents)
+            .map(|(name, &fresh)| FieldPattern {
+                field_name: Some(AstIdent {
+                    name: *name,
+                    span: outer_span,
+                }),
+                sub: Some(Pattern::Ident {
+                    is_mut: false,
+                    name: AstIdent {
+                        name: fresh,
+                        span: outer_span,
+                    },
+                    span: outer_span,
+                }),
+                is_mut: false,
+                span: outer_span,
+            })
+            .collect();
+
+        Some(MatchArm {
+            pattern: Pattern::StructVariant {
+                base,
+                type_name,
+                variant: variant_ident,
+                fields: outer_fields,
+                span: outer_span,
+            },
+            body: Box::new(nested_match),
+            span: outer_span,
+        })
+    }
+
+    /// Walk a match-arm pattern and replace each refutable sub-pattern in
+    /// a variant field with a fresh `__refut_N` ident binding, appending
+    /// `(fresh_name, sub_pattern)` to `subs` for body elaboration
+    /// (ADR-0049 Phase 5b).
+    fn replace_refutable_nested_subs(
+        &mut self,
+        pat: &Pattern,
+        subs: &mut Vec<(Spur, Pattern)>,
+    ) -> Pattern {
+        match pat {
+            Pattern::DataVariant {
+                base,
+                type_name,
+                variant,
+                fields,
+                span,
+            } => {
+                let new_fields = fields
+                    .iter()
+                    .map(|e| match e {
+                        TupleElemPattern::Pattern(sub) if is_refutable_variant_sub(sub) => {
+                            let fresh = self.fresh_refutable_elab_name();
+                            subs.push((fresh, sub.clone()));
+                            TupleElemPattern::Pattern(Pattern::Ident {
+                                is_mut: false,
+                                name: AstIdent {
+                                    name: fresh,
+                                    span: sub.span(),
+                                },
+                                span: sub.span(),
+                            })
+                        }
+                        _ => e.clone(),
+                    })
+                    .collect();
+                Pattern::DataVariant {
+                    base: base.clone(),
+                    type_name: *type_name,
+                    variant: *variant,
+                    fields: new_fields,
+                    span: *span,
+                }
+            }
+            Pattern::StructVariant {
+                base,
+                type_name,
+                variant,
+                fields,
+                span,
+            } => {
+                let new_fields = fields
+                    .iter()
+                    .map(|fp| match &fp.sub {
+                        Some(sub) if is_refutable_variant_sub(sub) => {
+                            let fresh = self.fresh_refutable_elab_name();
+                            subs.push((fresh, sub.clone()));
+                            FieldPattern {
+                                field_name: fp.field_name,
+                                sub: Some(Pattern::Ident {
+                                    is_mut: false,
+                                    name: AstIdent {
+                                        name: fresh,
+                                        span: sub.span(),
+                                    },
+                                    span: sub.span(),
+                                }),
+                                is_mut: fp.is_mut,
+                                span: fp.span,
+                            }
+                        }
+                        _ => fp.clone(),
+                    })
+                    .collect();
+                Pattern::StructVariant {
+                    base: base.clone(),
+                    type_name: *type_name,
+                    variant: *variant,
+                    fields: new_fields,
+                    span: *span,
+                }
+            }
+            _ => pat.clone(),
+        }
+    }
+
+    fn fresh_refutable_elab_name(&mut self) -> Spur {
+        let n = self.nested_pat_counter;
+        self.nested_pat_counter += 1;
+        self.interner.get_or_intern(format!("__refut_{}", n))
+    }
+
+    /// Elaborate a match expression that has any tuple-root arm into a
+    /// let-bound scrutinee plus an if/else chain on tuple projections
+    /// (ADR-0049 Phase 5a).
+    ///
+    /// Each arm becomes `(predicate, body_with_bindings)`:
+    /// - wildcard/ident tuple elements produce no predicate (idents bind via
+    ///   a prepended let);
+    /// - literal tuple elements produce an equality check against the
+    ///   projected field.
+    ///
+    /// The chain falls through to the last arm's body when no earlier arm
+    /// matches. If the last arm itself has a predicate (non-exhaustive
+    /// match), a `@panic("non-exhaustive match")` is emitted as the final
+    /// else to keep the if-chain well-typed; sema will ideally catch
+    /// non-exhaustive cases separately, but this guarantees the lowering
+    /// is always sound.
+    fn try_elaborate_tuple_match(
+        &mut self,
+        match_expr: &gruel_parser::MatchExpr,
+    ) -> Option<InstRef> {
+        if !match_expr
+            .arms
+            .iter()
+            .any(|arm| matches!(&arm.pattern, Pattern::Tuple { .. }))
+        {
+            return None;
+        }
+
+        // Non-exhaustive tuple matches get a `@panic("non-exhaustive
+        // match")` at the tail of the if-chain so the chain stays
+        // well-typed and runtime-traps on uncovered values.
+        let last_arm = match_expr
+            .arms
+            .last()
+            .expect("parser rejects empty match arms");
+        let last_is_catch_all = is_tuple_match_arm_unconditional(&last_arm.pattern);
+
+        let match_span = match_expr.span;
+
+        // Bind the scrutinee to a fresh synthetic local that each arm can read
+        // without re-evaluating side effects.
+        let scr_name = self.fresh_match_scr_name();
+        let scr_val = self.gen_expr(&match_expr.scrutinee);
+        let scr_alloc = self.rir.add_inst(Inst {
+            data: InstData::Alloc {
+                directives_start: 0,
+                directives_len: 0,
+                name: Some(scr_name),
+                is_mut: false,
+                ty: None,
+                init: scr_val,
+            },
+            span: match_span,
+        });
+
+        // Build (predicate, body) for every arm.
+        let mut arm_parts: Vec<(Option<InstRef>, InstRef)> =
+            Vec::with_capacity(match_expr.arms.len());
+        for arm in &match_expr.arms {
+            let part = self.gen_tuple_match_arm(&arm.pattern, scr_name, &arm.body, arm.span);
+            arm_parts.push(part);
+        }
+
+        // Fold the arms into an if/else chain, back to front. When the
+        // last arm is unconditional it becomes the terminating
+        // else-branch directly; otherwise we emit a `@panic` fallback
+        // and wrap the last arm in a Branch that uses it.
+        let mut iter = arm_parts.into_iter().rev();
+        let (last_pred, last_body) = iter
+            .next()
+            .expect("match_expr.arms is non-empty (parser rejects empty match)");
+        let mut result = if last_is_catch_all {
+            debug_assert!(
+                last_pred.is_none(),
+                "last-arm unconditional check implies no predicate"
+            );
+            last_body
+        } else {
+            let cond = last_pred.expect("non-catch-all last arm produces a predicate");
+            let fallback = self.emit_panic_call("non-exhaustive match", match_span);
+            self.rir.add_inst(Inst {
+                data: InstData::Branch {
+                    cond,
+                    then_block: last_body,
+                    else_block: Some(fallback),
+                },
+                span: match_span,
+            })
+        };
+
+        for (pred, body) in iter {
+            let cond = pred.expect(
+                "earlier unconditional arm → subsequent arms are unreachable; \
+                 this is caught by AST pattern-validator, so we shouldn't reach here",
+            );
+            result = self.rir.add_inst(Inst {
+                data: InstData::Branch {
+                    cond,
+                    then_block: body,
+                    else_block: Some(result),
+                },
+                span: match_span,
+            });
+        }
+
+        // Wrap the scrutinee alloc + final if-chain in a Block.
+        let extra_start = self.rir.add_extra(&[scr_alloc.as_u32(), result.as_u32()]);
+        Some(self.rir.add_inst(Inst {
+            data: InstData::Block {
+                extra_start,
+                len: 2,
+            },
+            span: match_span,
+        }))
+    }
+
+    /// Generate `(predicate, body)` for a single arm of a tuple-root match
+    /// (ADR-0049 Phase 5a). The predicate is `None` when the pattern always
+    /// matches (wildcard, ident binding, or a tuple of all-irrefutable
+    /// leaves); bindings are prepended to the body as a Block.
+    fn gen_tuple_match_arm(
+        &mut self,
+        pattern: &Pattern,
+        scr_name: Spur,
+        body: &gruel_parser::Expr,
+        arm_span: gruel_span::Span,
+    ) -> (Option<InstRef>, InstRef) {
+        match pattern {
+            Pattern::Wildcard(_) => (None, self.gen_expr(body)),
+            Pattern::Ident { is_mut, name, span } => {
+                // `name => body` binds the whole scrutinee to `name`.
+                let scr_ref = self.rir.add_inst(Inst {
+                    data: InstData::VarRef { name: scr_name },
+                    span: *span,
+                });
+                let alloc = self.rir.add_inst(Inst {
+                    data: InstData::Alloc {
+                        directives_start: 0,
+                        directives_len: 0,
+                        name: Some(name.name),
+                        is_mut: *is_mut,
+                        ty: None,
+                        init: scr_ref,
+                    },
+                    span: *span,
+                });
+                let body_inst = self.gen_expr(body);
+                let extra_start = self.rir.add_extra(&[alloc.as_u32(), body_inst.as_u32()]);
+                let block = self.rir.add_inst(Inst {
+                    data: InstData::Block {
+                        extra_start,
+                        len: 2,
+                    },
+                    span: arm_span,
+                });
+                (None, block)
+            }
+            Pattern::Tuple { elems, span } => {
+                // `..` at any position matches the remaining tuple
+                // positions with no predicate and no binding. Prefix
+                // positions (before `..`) use their literal index;
+                // suffix positions (after `..`) use the `..end_N`
+                // marker and sema resolves the concrete index once the
+                // tuple's arity is known (ADR-0049 Phase 6).
+                let rest_pos = elems
+                    .iter()
+                    .position(|e| matches!(e, TupleElemPattern::Rest(_)));
+                let mut predicates: Vec<InstRef> = Vec::new();
+                let mut bindings: Vec<u32> = Vec::new();
+                for (i, elem) in elems.iter().enumerate() {
+                    if let TupleElemPattern::Rest(_) = elem {
+                        // Rest contributes no predicate/binding.
+                        continue;
+                    }
+                    let field_name = match rest_pos {
+                        Some(rp) if i > rp => {
+                            let from_end = elems.len() - 1 - i;
+                            self.interner.get_or_intern(format!("..end_{}", from_end))
+                        }
+                        _ => self.interner.get_or_intern(i.to_string()),
+                    };
+                    let scr_ref = self.rir.add_inst(Inst {
+                        data: InstData::VarRef { name: scr_name },
+                        span: *span,
+                    });
+                    let field_get = self.rir.add_inst(Inst {
+                        data: InstData::FieldGet {
+                            base: scr_ref,
+                            field: field_name,
+                        },
+                        span: *span,
+                    });
+                    match elem {
+                        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => {
+                            // Field dropped; scrutinee alloc owns the tuple
+                            // and its destructor will release everything.
+                        }
+                        TupleElemPattern::Pattern(Pattern::Ident {
+                            is_mut,
+                            name,
+                            span: id_span,
+                        }) => {
+                            let alloc = self.rir.add_inst(Inst {
+                                data: InstData::Alloc {
+                                    directives_start: 0,
+                                    directives_len: 0,
+                                    name: Some(name.name),
+                                    is_mut: *is_mut,
+                                    ty: None,
+                                    init: field_get,
+                                },
+                                span: *id_span,
+                            });
+                            bindings.push(alloc.as_u32());
+                        }
+                        TupleElemPattern::Pattern(Pattern::Int(lit)) => {
+                            let lit_const = self.rir.add_inst(Inst {
+                                data: InstData::IntConst(lit.value),
+                                span: lit.span,
+                            });
+                            let eq = self.rir.add_inst(Inst {
+                                data: InstData::Eq {
+                                    lhs: field_get,
+                                    rhs: lit_const,
+                                },
+                                span: lit.span,
+                            });
+                            predicates.push(eq);
+                        }
+                        TupleElemPattern::Pattern(Pattern::NegInt(lit)) => {
+                            let abs_const = self.rir.add_inst(Inst {
+                                data: InstData::IntConst(lit.value),
+                                span: lit.span,
+                            });
+                            let neg_const = self.rir.add_inst(Inst {
+                                data: InstData::Neg { operand: abs_const },
+                                span: lit.span,
+                            });
+                            let eq = self.rir.add_inst(Inst {
+                                data: InstData::Eq {
+                                    lhs: field_get,
+                                    rhs: neg_const,
+                                },
+                                span: lit.span,
+                            });
+                            predicates.push(eq);
+                        }
+                        TupleElemPattern::Pattern(Pattern::Bool(lit)) => {
+                            let lit_const = self.rir.add_inst(Inst {
+                                data: InstData::BoolConst(lit.value),
+                                span: lit.span,
+                            });
+                            let eq = self.rir.add_inst(Inst {
+                                data: InstData::Eq {
+                                    lhs: field_get,
+                                    rhs: lit_const,
+                                },
+                                span: lit.span,
+                            });
+                            predicates.push(eq);
+                        }
+                        TupleElemPattern::Pattern(other) => panic!(
+                            "tuple element shape {:?} in match arm not yet supported (ADR-0049 Phase 5b)",
+                            other
+                        ),
+                        TupleElemPattern::Rest(_) => unreachable!("handled at top of loop"),
+                    }
+                }
+
+                let predicate = match predicates.len() {
+                    0 => None,
+                    _ => {
+                        let mut iter = predicates.into_iter();
+                        let mut acc = iter.next().unwrap();
+                        for p in iter {
+                            acc = self.rir.add_inst(Inst {
+                                data: InstData::And { lhs: acc, rhs: p },
+                                span: *span,
+                            });
+                        }
+                        Some(acc)
+                    }
+                };
+
+                let body_inst = self.gen_expr(body);
+                let body_block = if bindings.is_empty() {
+                    body_inst
+                } else {
+                    bindings.push(body_inst.as_u32());
+                    let extra_start = self.rir.add_extra(&bindings);
+                    let len = bindings.len() as u32;
+                    self.rir.add_inst(Inst {
+                        data: InstData::Block { extra_start, len },
+                        span: arm_span,
+                    })
+                };
+
+                (predicate, body_block)
+            }
+            other => panic!(
+                "top-level {:?} in a multi-arm tuple-root match is not yet supported (ADR-0049)",
+                other
+            ),
+        }
+    }
+
+    /// Lower a match-arm pattern to RIR, collecting nested sub-patterns for
+    /// body elaboration (ADR-0049 Phase 4b).
+    ///
+    /// When a variant field carries an irrefutable nested destructure
+    /// (`Some((a, b))`, `Some(Point { x, y })`), the sub-pattern is replaced
+    /// with a fresh synthetic binding in the RIR pattern, and the
+    /// `(fresh_name, sub_pattern)` pair is appended to `nested`. The caller
+    /// prepends a `let <sub_pattern> = <fresh_name>;` to the arm body so the
+    /// user's bindings come into scope.
+    fn gen_match_arm_pattern(
+        &mut self,
+        pattern: &Pattern,
+        nested: &mut Vec<(Spur, Pattern)>,
+    ) -> RirPattern {
         match pattern {
             Pattern::Wildcard(span) => RirPattern::Wildcard(*span),
             Pattern::Int(lit) => RirPattern::Int(lit.value as i64, lit.span),
@@ -1013,24 +2082,13 @@ impl<'a> AstGen<'a> {
                 base,
                 type_name,
                 variant,
-                bindings,
+                fields,
                 span,
             } => {
                 let module = base.as_ref().map(|b| self.gen_expr(b));
-                let rir_bindings = bindings
+                let rir_bindings = fields
                     .iter()
-                    .map(|b| match b {
-                        PatternBinding::Wildcard(_) => RirPatternBinding {
-                            is_wildcard: true,
-                            is_mut: false,
-                            name: None,
-                        },
-                        PatternBinding::Ident { is_mut, name } => RirPatternBinding {
-                            is_wildcard: false,
-                            is_mut: *is_mut,
-                            name: Some(name.name),
-                        },
-                    })
+                    .map(|elem| self.tuple_elem_to_rir_binding_or_capture(elem, nested))
                     .collect();
                 RirPattern::DataVariant {
                     module,
@@ -1048,24 +2106,21 @@ impl<'a> AstGen<'a> {
                 span,
             } => {
                 let module = base.as_ref().map(|b| self.gen_expr(b));
+                let rest_marker = self.interner.get_or_intern_static("..");
                 let field_bindings = fields
                     .iter()
                     .map(|fb| {
-                        let binding = match &fb.binding {
-                            PatternBinding::Wildcard(_) => RirPatternBinding {
-                                is_wildcard: true,
-                                is_mut: false,
-                                name: None,
-                            },
-                            PatternBinding::Ident { is_mut, name } => RirPatternBinding {
-                                is_wildcard: false,
-                                is_mut: *is_mut,
-                                name: Some(name.name),
-                            },
-                        };
+                        // For `..` rest patterns, synthesize a field_name of
+                        // the rest-marker sentinel so sema can detect it
+                        // (ADR-0049 Phase 6).
+                        let field_name = fb
+                            .field_name
+                            .as_ref()
+                            .map(|ident| ident.name)
+                            .unwrap_or(rest_marker);
                         RirStructPatternBinding {
-                            field_name: fb.field_name.name,
-                            binding,
+                            field_name,
+                            binding: self.field_pattern_to_rir_binding_or_capture(fb, nested),
                         }
                     })
                     .collect();
@@ -1077,7 +2132,152 @@ impl<'a> AstGen<'a> {
                     span: *span,
                 }
             }
+            // Top-level Struct/Tuple/Ident patterns are elaborated in
+            // `gen_expr` via `try_elaborate_irrefutable_match` before reaching
+            // this lowering, so a multi-arm match with one of these at the
+            // top is an unsupported shape (would need recursive CFG dispatch
+            // — Phase 5). The `nested` parameter is unused on this branch.
+            Pattern::Struct { .. } | Pattern::Tuple { .. } | Pattern::Ident { .. } => {
+                let _ = nested;
+                panic!(
+                    "top-level {:?} pattern in a multi-arm match is not yet supported (ADR-0049 Phase 5)",
+                    pattern
+                );
+            }
         }
+    }
+
+    /// Convert a match-arm tuple-element sub-pattern into the RIR binding shape
+    /// used by `DataVariant`. Leaves (Wildcard, Ident) convert directly; irrefutable
+    /// nested destructures (Struct, Tuple) are captured via a synthetic binding
+    /// whose name is recorded in `nested` for body elaboration (ADR-0049 Phase 4b).
+    fn tuple_elem_to_rir_binding_or_capture(
+        &mut self,
+        elem: &TupleElemPattern,
+        nested: &mut Vec<(Spur, Pattern)>,
+    ) -> RirPatternBinding {
+        match elem {
+            TupleElemPattern::Pattern(Pattern::Wildcard(_)) => RirPatternBinding {
+                is_wildcard: true,
+                is_mut: false,
+                name: None,
+            },
+            TupleElemPattern::Pattern(Pattern::Ident { is_mut, name, .. }) => RirPatternBinding {
+                is_wildcard: false,
+                is_mut: *is_mut,
+                name: Some(name.name),
+            },
+            TupleElemPattern::Pattern(sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. })) => {
+                let fresh = self.fresh_nested_pat_name();
+                nested.push((fresh, sub.clone()));
+                RirPatternBinding {
+                    is_wildcard: false,
+                    is_mut: false,
+                    name: Some(fresh),
+                }
+            }
+            TupleElemPattern::Pattern(other) => panic!(
+                "refutable nested sub-patterns in match arms not yet supported (ADR-0049 Phase 5); got {:?}",
+                other
+            ),
+            TupleElemPattern::Rest(_) => {
+                // `..` in a data-variant pattern: emit a marker binding
+                // with the sentinel name `..`. Sema detects this marker
+                // and expands it to wildcards for the remaining variant
+                // fields (ADR-0049 Phase 6).
+                RirPatternBinding {
+                    is_wildcard: true,
+                    is_mut: false,
+                    name: Some(self.interner.get_or_intern_static("..")),
+                }
+            }
+        }
+    }
+
+    /// Convert a match-arm struct-variant field-pattern into the RIR binding
+    /// shape. Same rules as `tuple_elem_to_rir_binding_or_capture`.
+    fn field_pattern_to_rir_binding_or_capture(
+        &mut self,
+        fb: &FieldPattern,
+        nested: &mut Vec<(Spur, Pattern)>,
+    ) -> RirPatternBinding {
+        // `..` in a struct-variant pattern: emit a marker binding with the
+        // sentinel name `..`. Sema recognizes it as a rest and skips the
+        // missing-fields check (ADR-0049 Phase 6).
+        let Some(name) = fb.field_name.as_ref() else {
+            return RirPatternBinding {
+                is_wildcard: true,
+                is_mut: false,
+                name: Some(self.interner.get_or_intern_static("..")),
+            };
+        };
+        match &fb.sub {
+            None => RirPatternBinding {
+                // Shorthand: `field` binds a local named `field`.
+                is_wildcard: false,
+                is_mut: fb.is_mut,
+                name: Some(name.name),
+            },
+            Some(Pattern::Wildcard(_)) => RirPatternBinding {
+                is_wildcard: true,
+                is_mut: false,
+                name: None,
+            },
+            Some(Pattern::Ident {
+                is_mut,
+                name: bind_name,
+                ..
+            }) => RirPatternBinding {
+                is_wildcard: false,
+                is_mut: fb.is_mut || *is_mut,
+                name: Some(bind_name.name),
+            },
+            Some(sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. })) => {
+                let fresh = self.fresh_nested_pat_name();
+                nested.push((fresh, sub.clone()));
+                RirPatternBinding {
+                    is_wildcard: false,
+                    is_mut: false,
+                    name: Some(fresh),
+                }
+            }
+            Some(other) => panic!(
+                "refutable nested sub-patterns in match arms not yet supported (ADR-0049 Phase 5); got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Wrap a match-arm body with let-destructure statements for each nested
+    /// sub-pattern captured during pattern lowering (ADR-0049 Phase 4b).
+    /// Each `(fresh_name, sub_pattern)` pair lowers to one or more RIR
+    /// StructDestructure instructions consuming a `VarRef` to `fresh_name`.
+    /// The original body becomes the block's value.
+    fn wrap_match_arm_body_with_destructures(
+        &mut self,
+        body: InstRef,
+        nested: Vec<(Spur, Pattern)>,
+        arm_span: gruel_span::Span,
+    ) -> InstRef {
+        let mut stmts: Vec<u32> = Vec::new();
+        for (fresh_name, sub_pattern) in nested {
+            let var_ref = self.rir.add_inst(Inst {
+                data: InstData::VarRef { name: fresh_name },
+                span: sub_pattern.span(),
+            });
+            let mut emitted = Vec::new();
+            self.emit_let_destructure_into(&sub_pattern, var_ref, sub_pattern.span(), &mut emitted);
+            for r in emitted {
+                stmts.push(r.as_u32());
+            }
+        }
+        stmts.push(body.as_u32());
+        let extra_start = self.rir.add_extra(&stmts);
+        let len = stmts.len() as u32;
+        self.rir.add_inst(Inst {
+            data: InstData::Block { extra_start, len },
+            span: arm_span,
+        })
     }
 
     fn gen_block(&mut self, block: &gruel_parser::BlockExpr) -> InstRef {
@@ -1089,10 +2289,14 @@ impl<'a> AstGen<'a> {
             // statements + 1 for the final expression
             let mut inst_refs = Vec::with_capacity(block.statements.len() + 1);
 
-            // Generate all statements first
+            // Generate all statements first. A single statement can produce
+            // multiple RIR top-level instructions (e.g., a nested let
+            // destructure elaborated into a tree of flat StructDestructures —
+            // ADR-0049 Phase 4). Each produced InstRef becomes a block
+            // statement; sema's block scope sees them in sequence so
+            // intermediate bindings remain visible.
             for stmt in &block.statements {
-                let inst_ref = self.gen_statement(stmt);
-                inst_refs.push(inst_ref.as_u32());
+                self.gen_statement_into(stmt, &mut inst_refs);
             }
 
             // Generate the final expression
@@ -1110,86 +2314,259 @@ impl<'a> AstGen<'a> {
         }
     }
 
+    /// Lower a nested let-destructure pattern into a tree of flat
+    /// `StructDestructure` instructions plus intermediate synthetic bindings.
+    ///
+    /// For each field whose sub-pattern is itself a destructure, we emit a
+    /// fresh `__nested_pat_N` binding for the outer level and follow with a
+    /// child `emit_let_destructure` that consumes it via `VarRef`. Ownership
+    /// transfers through the tree: the outer init is consumed by the outer
+    /// destructure, each synthetic intermediate is consumed by the child
+    /// destructure.
+    ///
+    /// Emits all instructions into `out`; returns nothing. The caller is
+    /// responsible for wrapping a multi-instruction result in a Block if this
+    /// let produces more than one RIR instruction.
+    fn emit_let_destructure_into(
+        &mut self,
+        pattern: &Pattern,
+        init: InstRef,
+        span: gruel_span::Span,
+        out: &mut Vec<InstRef>,
+    ) {
+        // Build the flat destructure fields plus a side-list of child sub-patterns
+        // that need their own destructure pass.
+        let (type_name, rir_fields, child_destructures) = match pattern {
+            Pattern::Struct {
+                type_name, fields, ..
+            } => {
+                let mut rir_fields = Vec::with_capacity(fields.len());
+                let mut children: Vec<(Spur, &Pattern)> = Vec::new();
+                for fp in fields {
+                    // `..` rest pattern in a struct destructure: emit a
+                    // marker field whose field_name is the sentinel `..` so
+                    // sema recognizes this and relaxes the "all fields
+                    // required" rule (ADR-0049 Phase 6).
+                    let Some(field_name) = fp.field_name.as_ref() else {
+                        rir_fields.push(RirDestructureField {
+                            field_name: self.interner.get_or_intern_static(".."),
+                            binding_name: None,
+                            is_wildcard: true,
+                            is_mut: false,
+                        });
+                        continue;
+                    };
+                    match &fp.sub {
+                        None => rir_fields.push(RirDestructureField {
+                            field_name: field_name.name,
+                            binding_name: Some(field_name.name),
+                            is_wildcard: false,
+                            is_mut: fp.is_mut,
+                        }),
+                        Some(Pattern::Wildcard(_)) => rir_fields.push(RirDestructureField {
+                            field_name: field_name.name,
+                            binding_name: None,
+                            is_wildcard: true,
+                            is_mut: false,
+                        }),
+                        Some(Pattern::Ident {
+                            is_mut,
+                            name: bind_name,
+                            ..
+                        }) => rir_fields.push(RirDestructureField {
+                            field_name: field_name.name,
+                            binding_name: Some(bind_name.name),
+                            is_wildcard: false,
+                            is_mut: fp.is_mut || *is_mut,
+                        }),
+                        Some(sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. })) => {
+                            let fresh = self.fresh_nested_pat_name();
+                            rir_fields.push(RirDestructureField {
+                                field_name: field_name.name,
+                                binding_name: Some(fresh),
+                                is_wildcard: false,
+                                is_mut: false,
+                            });
+                            children.push((fresh, sub));
+                        }
+                        Some(other) => panic!(
+                            "unexpected sub-pattern in let struct destructure: {:?}",
+                            other
+                        ),
+                    }
+                }
+                (type_name.name, rir_fields, children)
+            }
+            Pattern::Tuple { elems, .. } => {
+                // Tuple destructuring with `..` at any position: elements
+                // before the `..` get their literal positional index
+                // (`"0"`, `"1"`, …); elements after the `..` get an
+                // `..end_N` marker where N is the 0-indexed distance from
+                // the end (so `(a, .., b, c)` emits `..end_1` for `b` and
+                // `..end_0` for `c`). Sema resolves the end-marker against
+                // the inferred tuple arity (ADR-0049 Phase 6).
+                let rest_pos = elems
+                    .iter()
+                    .position(|e| matches!(e, TupleElemPattern::Rest(_)));
+                let mut rir_fields = Vec::with_capacity(elems.len());
+                let mut children: Vec<(Spur, &Pattern)> = Vec::new();
+                for (i, elem) in elems.iter().enumerate() {
+                    if let TupleElemPattern::Rest(_) = elem {
+                        rir_fields.push(RirDestructureField {
+                            field_name: self.interner.get_or_intern_static(".."),
+                            binding_name: None,
+                            is_wildcard: true,
+                            is_mut: false,
+                        });
+                        continue;
+                    }
+                    let field_name = match rest_pos {
+                        Some(rp) if i > rp => {
+                            // Suffix position: encode as distance from end.
+                            let from_end = elems.len() - 1 - i;
+                            self.interner.get_or_intern(format!("..end_{}", from_end))
+                        }
+                        _ => self.interner.get_or_intern(i.to_string()),
+                    };
+                    match elem {
+                        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => {
+                            rir_fields.push(RirDestructureField {
+                                field_name,
+                                binding_name: None,
+                                is_wildcard: true,
+                                is_mut: false,
+                            });
+                        }
+                        TupleElemPattern::Pattern(Pattern::Ident { is_mut, name, .. }) => {
+                            rir_fields.push(RirDestructureField {
+                                field_name,
+                                binding_name: Some(name.name),
+                                is_wildcard: false,
+                                is_mut: *is_mut,
+                            });
+                        }
+                        TupleElemPattern::Pattern(
+                            sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. }),
+                        ) => {
+                            let fresh = self.fresh_nested_pat_name();
+                            rir_fields.push(RirDestructureField {
+                                field_name,
+                                binding_name: Some(fresh),
+                                is_wildcard: false,
+                                is_mut: false,
+                            });
+                            children.push((fresh, sub));
+                        }
+                        TupleElemPattern::Pattern(other) => panic!(
+                            "unexpected sub-pattern in let tuple destructure: {:?}",
+                            other
+                        ),
+                        TupleElemPattern::Rest(_) => unreachable!("handled above"),
+                    }
+                }
+                let tuple_type_name = self.interner.get_or_intern_static("__tuple__");
+                (tuple_type_name, rir_fields, children)
+            }
+            other => panic!(
+                "emit_let_destructure called on non-destructure pattern: {:?}",
+                other
+            ),
+        };
+
+        let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
+        let outer_inst = self.rir.add_inst(Inst {
+            data: InstData::StructDestructure {
+                type_name,
+                fields_start,
+                fields_len,
+                init,
+            },
+            span,
+        });
+        out.push(outer_inst);
+
+        // Emit child destructures recursively.
+        for (binding_name, sub) in child_destructures {
+            let var_ref = self.rir.add_inst(Inst {
+                data: InstData::VarRef { name: binding_name },
+                span: sub.span(),
+            });
+            self.emit_let_destructure_into(sub, var_ref, sub.span(), out);
+        }
+    }
+
+    /// Generate RIR for a statement, appending produced top-level instruction
+    /// refs to `out`. A single AST statement can produce multiple RIR
+    /// instructions when lowering nested destructures (ADR-0049 Phase 4).
+    fn gen_statement_into(&mut self, stmt: &Statement, out: &mut Vec<u32>) {
+        if let Statement::Let(let_stmt) = stmt {
+            if matches!(
+                &let_stmt.pattern,
+                Pattern::Struct { .. } | Pattern::Tuple { .. }
+            ) {
+                let init = self.gen_expr(&let_stmt.init);
+                let mut emitted = Vec::new();
+                self.emit_let_destructure_into(
+                    &let_stmt.pattern,
+                    init,
+                    let_stmt.span,
+                    &mut emitted,
+                );
+                for r in emitted {
+                    out.push(r.as_u32());
+                }
+                return;
+            }
+        }
+        let single = self.gen_statement(stmt);
+        out.push(single.as_u32());
+    }
+
     fn gen_statement(&mut self, stmt: &Statement) -> InstRef {
         match stmt {
             Statement::Let(let_stmt) => match &let_stmt.pattern {
-                LetPattern::Struct {
-                    type_name, fields, ..
-                } => {
-                    let rir_fields: Vec<RirDestructureField> = fields
-                        .iter()
-                        .map(|f| {
-                            let binding_name = match &f.binding {
-                                DestructureBinding::Shorthand => None,
-                                DestructureBinding::Renamed(ident) => Some(ident.name),
-                                DestructureBinding::Wildcard(_) => None,
-                            };
-                            let is_wildcard = matches!(&f.binding, DestructureBinding::Wildcard(_));
-                            RirDestructureField {
-                                field_name: f.field_name.name,
-                                binding_name,
-                                is_wildcard,
-                                is_mut: f.is_mut,
-                            }
-                        })
-                        .collect();
-                    let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
-                    let init = self.gen_expr(&let_stmt.init);
-                    self.rir.add_inst(Inst {
-                        data: InstData::StructDestructure {
-                            type_name: type_name.name,
-                            fields_start,
-                            fields_len,
-                            init,
-                        },
-                        span: let_stmt.span,
-                    })
-                }
-                // Tuple destructure: `let (a, b, ...) = expr;` (ADR-0048).
+                // Struct / Tuple destructure patterns. Both lower to
+                // `InstData::StructDestructure`; tuple patterns use the
+                // `__tuple__` sentinel type name (ADR-0048).
                 //
-                // Lowered to the same RIR as struct destructure, reusing StructDestructure
-                // with synthetic field names "0", "1", ... and a sentinel type_name
-                // ("__tuple__") that sema recognises and resolves against the init's type.
-                LetPattern::Tuple { elems, .. } => {
-                    use gruel_parser::ast::TupleBinding;
-                    let rir_fields: Vec<RirDestructureField> = elems
-                        .iter()
-                        .enumerate()
-                        .map(|(i, e)| {
-                            let field_name = self.interner.get_or_intern(i.to_string());
-                            let (binding_name, is_wildcard) = match &e.binding {
-                                TupleBinding::Ident(name) => (Some(name.name), false),
-                                TupleBinding::Wildcard(_) => (None, true),
-                            };
-                            RirDestructureField {
-                                field_name,
-                                binding_name,
-                                is_wildcard,
-                                is_mut: e.is_mut,
-                            }
-                        })
-                        .collect();
-                    let (fields_start, fields_len) = self.rir.add_destructure_fields(&rir_fields);
+                // Nested sub-patterns (ADR-0049) are elaborated in astgen: each
+                // nested sub-pattern position gets a synthetic intermediate
+                // binding, and a child StructDestructure is emitted against it.
+                // This keeps RIR / sema / CFG flat and reuses existing
+                // infrastructure unchanged.
+                Pattern::Struct { .. } | Pattern::Tuple { .. } => {
+                    // Destructure lets are special: they can produce multiple
+                    // top-level RIR instructions for nested patterns. Callers
+                    // that can fan out (gen_block via gen_statement_into)
+                    // handle this. Callers that can't fan out (nothing
+                    // currently) would see only the outer instruction.
                     let init = self.gen_expr(&let_stmt.init);
-                    let type_name = self.interner.get_or_intern_static("__tuple__");
-                    self.rir.add_inst(Inst {
-                        data: InstData::StructDestructure {
-                            type_name,
-                            fields_start,
-                            fields_len,
-                            init,
-                        },
-                        span: let_stmt.span,
-                    })
+                    let mut emitted = Vec::new();
+                    self.emit_let_destructure_into(
+                        &let_stmt.pattern,
+                        init,
+                        let_stmt.span,
+                        &mut emitted,
+                    );
+                    // Safe: emit_let_destructure_into always pushes at least one.
+                    *emitted
+                        .first()
+                        .expect("destructure must emit at least one instruction")
                 }
                 pattern => {
                     let directives = self.convert_directives(&let_stmt.directives);
                     let (directives_start, directives_len) = self.rir.add_directives(&directives);
+                    let is_mut = match pattern {
+                        Pattern::Ident { is_mut, .. } => *is_mut || let_stmt.is_mut,
+                        _ => let_stmt.is_mut,
+                    };
                     let name = match pattern {
-                        LetPattern::Ident(ident) => Some(ident.name),
-                        LetPattern::Wildcard(_) => None,
-                        LetPattern::Struct { .. } => unreachable!(),
-                        LetPattern::Tuple { .. } => unreachable!(),
+                        Pattern::Ident { name, .. } => Some(name.name),
+                        Pattern::Wildcard(_) => None,
+                        _ => unreachable!(
+                            "Phase 1 let-statement parser only emits Ident/Wildcard/Struct/Tuple; got {:?}",
+                            pattern
+                        ),
                     };
                     let ty = let_stmt.ty.as_ref().map(|t| self.intern_type(t));
                     let init = self.gen_expr(&let_stmt.init);
@@ -1198,7 +2575,7 @@ impl<'a> AstGen<'a> {
                             directives_start,
                             directives_len,
                             name,
-                            is_mut: let_stmt.is_mut,
+                            is_mut,
                             ty,
                             init,
                         },
@@ -1247,6 +2624,114 @@ impl<'a> AstGen<'a> {
         }
     }
 }
+
+/// Whether a variant sub-pattern is a leaf that Phase 5a's tuple-root
+/// match elaborator can handle as a tuple element (ADR-0049 Phase 5b).
+/// Used when merging multi-field variant arms: the merged nested match
+/// dispatches on a tuple of the variant's fields, and Phase 5a only
+/// supports leaf elements (`Wildcard`, `Ident`, `Int`, `NegInt`, `Bool`).
+fn is_leaf_sub_pattern(pat: &Pattern) -> bool {
+    matches!(
+        pat,
+        Pattern::Wildcard(_)
+            | Pattern::Ident { .. }
+            | Pattern::Int(_)
+            | Pattern::NegInt(_)
+            | Pattern::Bool(_)
+    )
+}
+
+/// Extract the `(type_name, variant_name)` identity of a variant pattern,
+/// used by the refutable-nested elaborator to detect when multiple arms
+/// share an outer variant (ADR-0049 Phase 5b).
+fn outer_variant_key(pat: &Pattern) -> Option<(Spur, Spur)> {
+    match pat {
+        Pattern::DataVariant {
+            type_name, variant, ..
+        }
+        | Pattern::StructVariant {
+            type_name, variant, ..
+        } => Some((type_name.name, variant.name)),
+        _ => None,
+    }
+}
+
+/// Whether a variant field's sub-pattern is "refutable nested" — i.e. it
+/// would need to be checked with cascading dispatch rather than a plain
+/// field extraction. Leaves (Wildcard, Ident) and irrefutable destructures
+/// (Struct, Tuple) are not refutable nested; everything else is
+/// (ADR-0049 Phase 5b).
+fn is_refutable_variant_sub(sub: &Pattern) -> bool {
+    match sub {
+        Pattern::Wildcard(_) | Pattern::Ident { .. } => false,
+        Pattern::Struct { .. } | Pattern::Tuple { .. } => false,
+        _ => true,
+    }
+}
+
+/// Whether an arm pattern has any refutable nested sub-pattern in a
+/// variant-field position. Used to decide whether
+/// `try_elaborate_refutable_nested_match` applies (ADR-0049 Phase 5b).
+fn pattern_has_refutable_nested_sub(pat: &Pattern) -> bool {
+    match pat {
+        Pattern::DataVariant { fields, .. } => fields.iter().any(|e| match e {
+            TupleElemPattern::Pattern(sub) => is_refutable_variant_sub(sub),
+            TupleElemPattern::Rest(_) => false,
+        }),
+        Pattern::StructVariant { fields, .. } => fields.iter().any(|fp| match &fp.sub {
+            Some(sub) => is_refutable_variant_sub(sub),
+            None => false,
+        }),
+        _ => false,
+    }
+}
+
+/// Whether a top-level tuple-match arm pattern is unconditional — i.e. it
+/// matches every possible scrutinee value, so no if-condition is needed.
+/// Wildcard, Ident, or a tuple of all-irrefutable leaves qualify.
+fn is_tuple_match_arm_unconditional(pat: &Pattern) -> bool {
+    match pat {
+        Pattern::Wildcard(_) | Pattern::Ident { .. } => true,
+        Pattern::Tuple { elems, .. } => elems.iter().all(|e| match e {
+            TupleElemPattern::Pattern(p) => is_irrefutable_destructure(p),
+            TupleElemPattern::Rest(_) => true,
+        }),
+        _ => false,
+    }
+}
+
+/// Whether a pattern is irrefutable (matches every value of its type).
+///
+/// Used by `try_elaborate_irrefutable_match` to decide when a tuple / struct
+/// match arm can be lowered as a straight let-destructure. Literals and
+/// variant patterns are always refutable; wildcard, ident, and a tuple /
+/// struct whose every leaf is irrefutable are not.
+fn is_irrefutable_destructure(pat: &Pattern) -> bool {
+    match pat {
+        Pattern::Wildcard(_) | Pattern::Ident { .. } => true,
+        Pattern::Int(_) | Pattern::NegInt(_) | Pattern::Bool(_) => false,
+        Pattern::Path(_) => false,
+        Pattern::DataVariant { .. } | Pattern::StructVariant { .. } => false,
+        Pattern::Struct { fields, .. } => fields.iter().all(|f| match &f.sub {
+            None => true,
+            Some(sub) => is_irrefutable_destructure(sub),
+        }),
+        Pattern::Tuple { elems, .. } => elems.iter().all(|e| match e {
+            TupleElemPattern::Pattern(p) => is_irrefutable_destructure(p),
+            TupleElemPattern::Rest(_) => true,
+        }),
+    }
+}
+
+// Note: the flat-lowering helpers `field_pattern_to_rir_destructure_field`,
+// `tuple_elem_to_rir_destructure_field`, `tuple_elem_to_rir_binding`, and
+// `field_pattern_to_rir_binding` were superseded by
+// `AstGen::emit_let_destructure` (Phase 4) and
+// `AstGen::tuple_elem_to_rir_binding_or_capture` /
+// `AstGen::field_pattern_to_rir_binding_or_capture` (Phase 4b), which handle
+// nested destructure and variant sub-pattern shapes uniformly by emitting
+// trees of StructDestructure instructions or capturing nested sub-patterns for
+// arm-body elaboration.
 
 #[cfg(test)]
 mod tests {

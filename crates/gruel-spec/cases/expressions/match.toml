@@ -443,6 +443,7 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
+error_contains = "pattern `_` not covered"
 
 [[case]]
 name = "non_exhaustive_bool_missing_false"
@@ -455,6 +456,7 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
+error_contains = "pattern `false` not covered"
 
 [[case]]
 name = "non_exhaustive_bool_missing_true"
@@ -467,6 +469,24 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
+error_contains = "pattern `true` not covered"
+
+[[case]]
+name = "non_exhaustive_enum_lists_missing_variants"
+spec = ["4.7:9", "4.7:10"]
+description = "Non-exhaustive enum match lists the specific missing variants (ADR-0049 Phase 8)"
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    let c = Color::Red;
+    match c {
+        Color::Red => 0,
+    }
+}
+"""
+compile_fail = true
+error_contains = "patterns `Color::Green`, `Color::Blue` not covered"
 
 # =============================================================================
 # Error Cases: Empty Match
@@ -727,3 +747,414 @@ fn main() -> i32 {
 }
 """
 exit_code = 10
+
+# =============================================================================
+# Nested Patterns (ADR-0049)
+# =============================================================================
+
+[[case]]
+name = "nested_match_struct_in_data_variant"
+spec = ["4.7:23", "4.7:24"]
+description = "Irrefutable struct sub-pattern inside a data-variant field (ADR-0049)"
+source = """
+struct Point { x: i32, y: i32 }
+
+enum PointOpt {
+    Some(Point),
+    None,
+}
+
+fn main() -> i32 {
+    let o = PointOpt::Some(Point { x: 10, y: 32 });
+    match o {
+        PointOpt::Some(Point { x, y }) => x + y,
+        PointOpt::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_match_struct_in_struct_variant"
+spec = ["4.7:23", "4.7:24"]
+description = "Irrefutable struct sub-pattern inside a struct-variant field (ADR-0049)"
+source = """
+struct Inner { a: i32, b: i32 }
+
+enum Shape {
+    Rect { inner: Inner, tag: i32 },
+    None,
+}
+
+fn main() -> i32 {
+    let s = Shape::Rect { inner: Inner { a: 10, b: 20 }, tag: 12 };
+    match s {
+        Shape::Rect { inner: Inner { a, b }, tag } => a + b + tag,
+        Shape::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_match_top_level_struct_pattern"
+spec = ["4.7:23", "4.7:24"]
+description = "Top-level struct destructure pattern in a single-arm match (ADR-0049)"
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    match p {
+        Point { x, y } => x + y,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_match_wildcard_in_variant_field"
+spec = ["4.7:23", "4.7:24"]
+description = "Wildcard nested sub-pattern in a variant field drops that field (ADR-0049)"
+source = """
+struct Point { x: i32, y: i32 }
+
+enum PointOpt {
+    Some(Point),
+    None,
+}
+
+fn main() -> i32 {
+    let o = PointOpt::Some(Point { x: 42, y: 99 });
+    match o {
+        PointOpt::Some(Point { x, y: _ }) => x,
+        PointOpt::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Tuple patterns at match root (ADR-0049 Phase 5a)
+# =============================================================================
+
+[[case]]
+name = "tuple_match_root_literals"
+spec = ["4.7:23", "4.7:24"]
+description = "Tuple pattern at match root with integer literal elements (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: i32 = 0;
+    let b: i32 = 0;
+    match (a, b) {
+        (0, 0) => 42,
+        (0, _) => 1,
+        (_, 0) => 2,
+        _ => 3,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "tuple_match_root_bindings"
+spec = ["4.7:23", "4.7:24"]
+description = "Tuple pattern at match root binds elements via idents (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: i32 = 10;
+    let b: i32 = 32;
+    match (a, b) {
+        (0, 0) => 100,
+        (x, y) => x + y,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "tuple_match_root_bools"
+spec = ["4.7:23", "4.7:24"]
+description = "Tuple pattern at match root with boolean literal elements (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: bool = true;
+    let b: bool = false;
+    match (a, b) {
+        (true, true) => 0,
+        (true, false) => 42,
+        (false, true) => 2,
+        (_, _) => 3,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "tuple_match_root_non_exhaustive_panics"
+spec = ["4.7:23", "4.7:24"]
+description = "Non-exhaustive tuple-root match compiles and traps at runtime for uncovered inputs (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: i32 = 0;
+    let b: i32 = 0;
+    match (a, b) {
+        (0, 0) => 42,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "tuple_match_root_negative_literal"
+spec = ["4.7:23", "4.7:24"]
+description = "Tuple pattern at match root matches negative integer literals (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: i32 = -5;
+    let b: i32 = 47;
+    match (a, b) {
+        (-5, x) => x,
+        _ => 0,
+    }
+}
+"""
+exit_code = 47
+
+# =============================================================================
+# Rest patterns in match arms (ADR-0049 Phase 6)
+# =============================================================================
+
+[[case]]
+name = "match_data_variant_trailing_rest"
+spec = ["4.7:23", "4.7:24"]
+description = "Trailing rest `..` in data variant pattern drops unlisted fields (ADR-0049 Phase 6)"
+source = """
+enum TripleOpt {
+    Some(i32, i32, i32),
+    None,
+}
+
+fn main() -> i32 {
+    let o = TripleOpt::Some(42, 10, 20);
+    match o {
+        TripleOpt::Some(a, ..) => a,
+        TripleOpt::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "match_struct_variant_rest"
+spec = ["4.7:23", "4.7:24"]
+description = "Rest `..` in struct variant pattern drops unlisted fields (ADR-0049 Phase 6)"
+source = """
+enum Shape {
+    Rect { w: i32, h: i32, tag: i32 },
+    None,
+}
+
+fn main() -> i32 {
+    let s = Shape::Rect { w: 10, h: 20, tag: 12 };
+    match s {
+        Shape::Rect { w, .. } => w + 32,
+        Shape::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "match_tuple_root_trailing_rest"
+spec = ["4.7:23", "4.7:24"]
+description = "Trailing `..` in tuple-root match drops unlisted positions (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t = (42, 10, 20);
+    match t {
+        (0, ..) => 100,
+        (x, ..) => x,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "match_tuple_root_middle_rest"
+spec = ["4.7:23", "4.7:24"]
+description = "Rest `..` in the middle of a tuple-root match binds elements on both sides (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t: (i32, i32, i32, i32) = (10, 99, 99, 32);
+    match t {
+        (0, .., x) => x,
+        (a, .., b) => a + b,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "match_tuple_root_leading_rest_literal"
+spec = ["4.7:23", "4.7:24"]
+description = "Leading `..` with a refutable suffix compares the last element (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t: (i32, i32, i32) = (99, 99, 42);
+    match t {
+        (.., 0) => 100,
+        (.., x) => x,
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Refutable nested patterns (ADR-0049 Phase 5b)
+# =============================================================================
+
+[[case]]
+name = "refutable_nested_single_arm_catchall"
+spec = ["4.7:23", "4.7:24"]
+description = "Nested refutable variant pattern with a wildcard fallback (ADR-0049 Phase 5b)"
+source = """
+enum IntOpt { Some(i32), None }
+enum IntOptOpt { Some(IntOpt), None }
+
+fn main() -> i32 {
+    let outer = IntOptOpt::Some(IntOpt::Some(42));
+    match outer {
+        IntOptOpt::Some(IntOpt::Some(v)) => v,
+        _ => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "refutable_nested_shared_outer_merge"
+spec = ["4.7:23", "4.7:24"]
+description = "Multiple arms sharing an outer variant merge into one nested match (ADR-0049 Phase 5b)"
+source = """
+enum IntOpt { Some(i32), None }
+
+fn check(o: IntOpt) -> i32 {
+    match o {
+        IntOpt::Some(0) => 100,
+        IntOpt::Some(42) => 42,
+        _ => -1,
+    }
+}
+
+fn main() -> i32 {
+    check(IntOpt::Some(42))
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "refutable_nested_exhaustive_no_catchall"
+spec = ["4.7:23", "4.7:24"]
+description = "Exhaustive nested variants without a wildcard catch-all (ADR-0049 Phase 5b)"
+source = """
+enum IntOpt { Some(i32), None }
+enum IntOptOpt { Some(IntOpt), None }
+
+fn check(o: IntOptOpt) -> i32 {
+    match o {
+        IntOptOpt::Some(IntOpt::Some(v)) => v,
+        IntOptOpt::Some(IntOpt::None) => -1,
+        IntOptOpt::None => -2,
+    }
+}
+
+fn main() -> i32 {
+    check(IntOptOpt::Some(IntOpt::Some(42)))
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "refutable_nested_multi_field_data_variant"
+spec = ["4.7:23", "4.7:24"]
+description = "Merging arms of a multi-field data variant with refutable subs (ADR-0049 Phase 5b)"
+source = """
+enum Pair {
+    Data(i32, i32),
+    Empty,
+}
+
+fn check(p: Pair) -> i32 {
+    match p {
+        Pair::Data(0, y) => y,
+        Pair::Data(1, y) => y + 100,
+        _ => -1,
+    }
+}
+
+fn main() -> i32 {
+    let a = check(Pair::Data(0, 42));
+    let b = check(Pair::Data(1, 5));
+    let c = check(Pair::Empty);
+    a + b + c - 104
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "refutable_nested_multi_field_all_refutable"
+spec = ["4.7:23", "4.7:24"]
+description = "Multi-field variant arms with refutable subs at every position (ADR-0049 Phase 5b)"
+source = """
+enum Pair {
+    Data(i32, i32),
+    Empty,
+}
+
+fn check(p: Pair) -> i32 {
+    match p {
+        Pair::Data(0, 0) => 100,
+        Pair::Data(0, _) => 10,
+        Pair::Data(_, 0) => 20,
+        _ => -1,
+    }
+}
+
+fn main() -> i32 {
+    let a = check(Pair::Data(0, 0));
+    let b = check(Pair::Data(0, 5));
+    let c = check(Pair::Data(5, 0));
+    let d = check(Pair::Data(5, 5));
+    let e = check(Pair::Empty);
+    a + b + c + d + e - 86
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "refutable_nested_struct_variant_merge"
+spec = ["4.7:23", "4.7:24"]
+description = "Merging arms of a struct variant with refutable subs (ADR-0049 Phase 5b)"
+source = """
+enum Shape {
+    Rect { w: i32, h: i32 },
+    Empty,
+}
+
+fn check(s: Shape) -> i32 {
+    match s {
+        Shape::Rect { w: 0, h } => h,
+        Shape::Rect { w, h } => w + h,
+        _ => -1,
+    }
+}
+
+fn main() -> i32 {
+    let a = check(Shape::Rect { w: 0, h: 42 });
+    let b = check(Shape::Rect { w: 10, h: 20 });
+    let c = check(Shape::Empty);
+    a + b + c - 29
+}
+"""
+exit_code = 42

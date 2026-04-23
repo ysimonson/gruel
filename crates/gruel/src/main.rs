@@ -17,7 +17,7 @@ use gruel_compiler::{
     CompileOptions, FileId, Lexer, LinkerMode, MultiFileFormatter, OptLevel, ParsedProgram,
     PreviewFeature, PreviewFeatures, SourceFile, SourceInfo,
     compile_frontend_from_ast_with_options, compile_multi_file_with_options, generate_llvm_ir,
-    merge_symbols, parse_all_files,
+    merge_symbols,
 };
 use gruel_rir::RirPrinter;
 use gruel_target::Target;
@@ -976,7 +976,7 @@ fn handle_emit_multi_file(
 
     // Parse all files (needed for AST output or later stages)
     let mut parsed: Option<ParsedProgram> = if needs_ast || needs_later_stages {
-        match parse_all_files(sources) {
+        match gruel_compiler::parse_all_files_with_preview(sources, &options.preview_features) {
             Ok(program) => Some(program),
             Err(errors) => {
                 eprintln!("{}", formatter.format_errors(&errors));

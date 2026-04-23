@@ -245,6 +245,14 @@ pub struct ParsedProgram {
 /// let program = parse_all_files(&sources)?;
 /// ```
 pub fn parse_all_files(sources: &[SourceFile<'_>]) -> MultiErrorResult<ParsedProgram> {
+    parse_all_files_with_preview(sources, &PreviewFeatures::new())
+}
+
+/// Parse all files with an explicit set of preview features for the parser (ADR-0049).
+pub fn parse_all_files_with_preview(
+    sources: &[SourceFile<'_>],
+    preview_features: &PreviewFeatures,
+) -> MultiErrorResult<ParsedProgram> {
     // Parse all files sequentially with a shared interner
     // This ensures Spur values are consistent across files for cross-file symbol resolution
     let mut parsed_files = Vec::with_capacity(sources.len());
@@ -259,7 +267,7 @@ pub fn parse_all_files(sources: &[SourceFile<'_>]) -> MultiErrorResult<ParsedPro
         interner = returned_interner;
 
         // Parse the tokens - propagate error immediately (interner is consumed)
-        let parser = Parser::new(tokens, interner);
+        let parser = Parser::new(tokens, interner).with_preview_features(preview_features.clone());
         let (ast, returned_interner) = parser.parse()?;
         interner = returned_interner;
 
@@ -832,7 +840,7 @@ pub fn compile_frontend_with_options_full(
     // Parsing - errors here are fatal (can't continue without AST)
     let (ast, interner) = {
         let _span = info_span!("parser").entered();
-        let parser = Parser::new(tokens, interner);
+        let parser = Parser::new(tokens, interner).with_preview_features(preview_features.clone());
         let (ast, interner) = parser.parse()?;
         info!(item_count = ast.items.len(), "parsing complete");
         (ast, interner)

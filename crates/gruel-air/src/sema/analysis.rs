@@ -1800,7 +1800,21 @@ impl<'a> Sema<'a> {
             };
 
             let struct_def = self.type_pool.struct_def(struct_id);
-            let field_name_str = self.interner.resolve(field).to_string();
+            let raw_field_name_str = self.interner.resolve(field).to_string();
+            // Tuple-root match suffix marker `..end_N`: resolve to the
+            // concrete tuple index now that we know the tuple's arity
+            // (ADR-0049 Phase 6).
+            let field_name_str = if let Some(rest) = raw_field_name_str.strip_prefix("..end_") {
+                match rest.parse::<usize>() {
+                    Ok(from_end) if from_end < struct_def.fields.len() => {
+                        let idx = struct_def.fields.len() - 1 - from_end;
+                        idx.to_string()
+                    }
+                    _ => raw_field_name_str.clone(),
+                }
+            } else {
+                raw_field_name_str.clone()
+            };
 
             let (field_index, struct_field) =
                 struct_def.find_field(&field_name_str).ok_or_compile_error(

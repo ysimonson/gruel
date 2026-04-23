@@ -27,7 +27,8 @@ use gruel_error::{
     WarningKind,
 };
 use gruel_rir::{
-    InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern, RirPatternBinding,
+    InstData, InstRef, RirArgMode, RirCallArg, RirDestructureField, RirParamMode, RirPattern,
+    RirPatternBinding,
 };
 use lasso::Spur;
 
@@ -194,11 +195,32 @@ impl<'a> Sema<'a> {
                             }
                         };
 
-                        // Look up field info
+                        // Look up field info. Phase 6 emits `..end_N`
+                        // markers for suffix positions in tuple-root
+                        // match arms (`(a, .., b)`); resolve those
+                        // against the tuple's arity before normal
+                        // lookup.
                         let struct_def = self.type_pool.struct_def(struct_id);
-                        let field_name_str = self.interner.resolve(field);
+                        let field_name_str = self.interner.resolve(field).to_string();
+                        let (resolved_field, resolved_name_str) =
+                            if let Some(rest) = field_name_str.strip_prefix("..end_") {
+                                let from_end: usize = match rest.parse() {
+                                    Ok(n) => n,
+                                    Err(_) => return Ok(None),
+                                };
+                                let arity = struct_def.fields.len();
+                                if from_end >= arity {
+                                    return Ok(None);
+                                }
+                                let idx = arity - 1 - from_end;
+                                let idx_str = idx.to_string();
+                                let new_spur = self.interner.get_or_intern(&idx_str);
+                                (new_spur, idx_str)
+                            } else {
+                                (*field, field_name_str)
+                            };
                         let (field_index, struct_field) =
-                            match struct_def.find_field(field_name_str) {
+                            match struct_def.find_field(&resolved_name_str) {
                                 Some(info) => info,
                                 None => return Ok(None), // Unknown field
                             };
@@ -212,7 +234,7 @@ impl<'a> Sema<'a> {
                                 field_index: field_index as u32,
                             },
                             result_type: field_type,
-                            field_name: Some(*field),
+                            field_name: Some(resolved_field),
                         });
 
                         Ok(Some(trace))
@@ -1630,9 +1652,39 @@ impl<'a> Sema<'a> {
                         pattern_span,
                     )?;
 
-                    // Check binding count matches field count
+                    // Check binding count matches field count. A `..` rest
+                    // marker (emitted by astgen as a wildcard binding named
+                    // `..`) must appear last and accounts for any remaining
+                    // fields not otherwise listed (ADR-0049 Phase 6).
                     let field_count = enum_def.variants[variant_index].fields.len();
-                    if bindings.len() != field_count {
+                    let rest_marker = self.interner.get_or_intern_static("..");
+                    let has_rest = bindings.iter().any(|b| b.name == Some(rest_marker));
+                    if has_rest {
+                        // Require `..` at the end — any-position `..` needs
+                        // explicit positions-from-end support which is a
+                        // follow-up.
+                        let rest_at_end =
+                            bindings.last().is_some_and(|b| b.name == Some(rest_marker));
+                        if !rest_at_end {
+                            return Err(CompileError::new(
+                                ErrorKind::WrongArgumentCount {
+                                    expected: field_count,
+                                    found: bindings.len(),
+                                },
+                                pattern_span,
+                            ));
+                        }
+                        let explicit = bindings.len() - 1; // subtract the rest marker
+                        if explicit > field_count {
+                            return Err(CompileError::new(
+                                ErrorKind::WrongArgumentCount {
+                                    expected: field_count,
+                                    found: explicit,
+                                },
+                                pattern_span,
+                            ));
+                        }
+                    } else if bindings.len() != field_count {
                         return Err(CompileError::new(
                             ErrorKind::WrongArgumentCount {
                                 expected: field_count,
@@ -1720,11 +1772,21 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    // Check for unknown, duplicate, and missing fields
+                    // Check for unknown, duplicate, and missing fields.
+                    // Detect and strip a `..` rest marker (ADR-0049 Phase 6):
+                    // when present, missing fields are permitted and treated
+                    // as wildcards below.
+                    let rest_marker_sv = self.interner.get_or_intern_static("..");
+                    let sv_has_rest = field_bindings
+                        .iter()
+                        .any(|fb| fb.field_name == rest_marker_sv);
                     let mut seen_fields =
                         std::collections::HashSet::with_capacity(field_bindings.len());
                     let qualified_name = format!("{}::{}", enum_def.name, variant_name);
                     for fb in field_bindings {
+                        if fb.field_name == rest_marker_sv {
+                            continue;
+                        }
                         let field_name_str = self.interner.resolve(&fb.field_name);
                         if !seen_fields.insert(fb.field_name) {
                             return Err(CompileError::new(
@@ -1746,32 +1808,39 @@ impl<'a> Sema<'a> {
                         }
                     }
 
-                    // Check for missing fields
-                    let declared_field_count = variant_def.field_names.len();
-                    if field_bindings.len() != declared_field_count {
-                        // Find which fields are missing
-                        let missing: Vec<_> = variant_def
-                            .field_names
-                            .iter()
-                            .filter(|name| {
-                                !field_bindings.iter().any(|fb| {
-                                    self.interner.resolve(&fb.field_name) == name.as_str()
+                    // Check for missing fields (waived when `..` is present;
+                    // the rest marker absorbs any unlisted fields).
+                    if sv_has_rest {
+                        covered_variants.insert(variant_index as u32);
+                        pattern_enum_id = Some(enum_id);
+                        resolved_enum = Some((enum_id, variant_index as u32));
+                    } else {
+                        let declared_field_count = variant_def.field_names.len();
+                        if field_bindings.len() != declared_field_count {
+                            // Find which fields are missing
+                            let missing: Vec<_> = variant_def
+                                .field_names
+                                .iter()
+                                .filter(|name| {
+                                    !field_bindings.iter().any(|fb| {
+                                        self.interner.resolve(&fb.field_name) == name.as_str()
+                                    })
                                 })
-                            })
-                            .cloned()
-                            .collect();
-                        return Err(CompileError::new(
-                            ErrorKind::MissingFields(Box::new(MissingFieldsError {
-                                struct_name: qualified_name,
-                                missing_fields: missing,
-                            })),
-                            pattern_span,
-                        ));
-                    }
+                                .cloned()
+                                .collect();
+                            return Err(CompileError::new(
+                                ErrorKind::MissingFields(Box::new(MissingFieldsError {
+                                    struct_name: qualified_name,
+                                    missing_fields: missing,
+                                })),
+                                pattern_span,
+                            ));
+                        }
 
-                    covered_variants.insert(variant_index as u32);
-                    pattern_enum_id = Some(enum_id);
-                    resolved_enum = Some((enum_id, variant_index as u32));
+                        covered_variants.insert(variant_index as u32);
+                        pattern_enum_id = Some(enum_id);
+                        resolved_enum = Some((enum_id, variant_index as u32));
+                    }
                 }
             }
 
@@ -1784,27 +1853,121 @@ impl<'a> Sema<'a> {
             // Collect indexed bindings: (field_index, binding) for each field that needs extraction.
             // DataVariant: bindings are positional (field_index == position).
             // StructVariant: bindings are named, resolved to declaration-order indices.
+            // Owned storage for synthesized rest-pad bindings (ADR-0049
+            // Phase 6). `..` in a DataVariant pattern expands to wildcard
+            // bindings covering the remaining variant-field positions;
+            // since these synthetics have no source RirPatternBinding to
+            // borrow, we own them here and hand out references below.
+            // Owned storage for synthesized rest-pad bindings (ADR-0049
+            // Phase 6). `..` in a DataVariant/StructVariant pattern expands
+            // to wildcard bindings covering the remaining variant-field
+            // positions; since these synthetics have no source
+            // RirPatternBinding to borrow, we own them here and hand out
+            // references below.
+            let rest_marker_sp = self.interner.get_or_intern_static("..");
+            let rest_padding: Vec<RirPatternBinding> = match pattern {
+                RirPattern::DataVariant { bindings, .. }
+                    if bindings
+                        .last()
+                        .is_some_and(|b| b.name == Some(rest_marker_sp)) =>
+                {
+                    let (enum_id, variant_index) =
+                        resolved_enum.expect("resolved_enum set during validation");
+                    let enum_def = self.type_pool.enum_def(enum_id);
+                    let field_count = enum_def.variants[variant_index as usize].fields.len();
+                    let explicit = bindings.len() - 1;
+                    let rest_count = field_count - explicit;
+                    (0..rest_count)
+                        .map(|_| RirPatternBinding {
+                            is_wildcard: true,
+                            is_mut: false,
+                            name: None,
+                        })
+                        .collect()
+                }
+                RirPattern::StructVariant { field_bindings, .. }
+                    if field_bindings
+                        .iter()
+                        .any(|fb| fb.field_name == rest_marker_sp) =>
+                {
+                    // One wildcard per unlisted variant field.
+                    let (enum_id, variant_index) =
+                        resolved_enum.expect("resolved_enum set during validation");
+                    let enum_def = self.type_pool.enum_def(enum_id);
+                    let variant_def = &enum_def.variants[variant_index as usize];
+                    let listed: std::collections::HashSet<&str> = field_bindings
+                        .iter()
+                        .filter(|fb| fb.field_name != rest_marker_sp)
+                        .map(|fb| self.interner.resolve(&fb.field_name))
+                        .collect();
+                    variant_def
+                        .field_names
+                        .iter()
+                        .filter(|n| !listed.contains(n.as_str()))
+                        .map(|_| RirPatternBinding {
+                            is_wildcard: true,
+                            is_mut: false,
+                            name: None,
+                        })
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
             let indexed_bindings: Option<Vec<(usize, &RirPatternBinding)>> = match pattern {
                 RirPattern::DataVariant { bindings, .. } => {
-                    Some(bindings.iter().enumerate().collect())
+                    if !rest_padding.is_empty() {
+                        let explicit = bindings.len() - 1;
+                        let mut expanded: Vec<(usize, &RirPatternBinding)> = Vec::new();
+                        for (i, b) in bindings.iter().take(explicit).enumerate() {
+                            expanded.push((i, b));
+                        }
+                        for (j, b) in rest_padding.iter().enumerate() {
+                            expanded.push((explicit + j, b));
+                        }
+                        Some(expanded)
+                    } else {
+                        Some(bindings.iter().enumerate().collect())
+                    }
                 }
                 RirPattern::StructVariant { field_bindings, .. } => {
                     let (enum_id, variant_index) = resolved_enum
                         .expect("resolved_enum must be set for StructVariant patterns");
                     let enum_def = self.type_pool.enum_def(enum_id);
                     let variant_def = &enum_def.variants[variant_index as usize];
-                    Some(
-                        field_bindings
-                            .iter()
-                            .map(|fb| {
-                                let field_name = self.interner.resolve(&fb.field_name);
-                                let idx = variant_def
-                                    .find_field(field_name)
-                                    .expect("field name validated during pattern checking");
-                                (idx, &fb.binding)
-                            })
-                            .collect(),
-                    )
+                    let listed_indices: std::collections::HashSet<usize> = field_bindings
+                        .iter()
+                        .filter(|fb| fb.field_name != rest_marker_sp)
+                        .filter_map(|fb| {
+                            let name = self.interner.resolve(&fb.field_name);
+                            variant_def.find_field(name)
+                        })
+                        .collect();
+                    let mut expanded: Vec<(usize, &RirPatternBinding)> = field_bindings
+                        .iter()
+                        .filter(|fb| fb.field_name != rest_marker_sp)
+                        .map(|fb| {
+                            let field_name = self.interner.resolve(&fb.field_name);
+                            let idx = variant_def
+                                .find_field(field_name)
+                                .expect("field name validated during pattern checking");
+                            (idx, &fb.binding)
+                        })
+                        .collect();
+                    // Pad with wildcards for any unlisted fields (when `..`
+                    // is present, rest_padding has been sized to cover them).
+                    let mut rest_iter = rest_padding.iter();
+                    for (i, field_name) in variant_def.field_names.iter().enumerate() {
+                        if !listed_indices.contains(&i) {
+                            let Some(pad) = rest_iter.next() else {
+                                // Not a rest match — missing-fields check already
+                                // handled this case above.
+                                break;
+                            };
+                            let _ = field_name;
+                            expanded.push((i, pad));
+                        }
+                    }
+                    Some(expanded)
                 }
                 _ => None,
             };
@@ -1983,22 +2146,42 @@ impl<'a> Sema<'a> {
             air_arms.push((air_pattern, body_result.air_ref));
         }
 
-        // Exhaustiveness checking
+        // Exhaustiveness checking. When the match is non-exhaustive we
+        // compute a short list of missing patterns so the error points
+        // at specific uncovered cases (bool sides, enum variants).
         let has_wildcard = wildcard_span.is_some();
         let bool_true_covered = bool_true_span.is_some();
         let bool_false_covered = bool_false_span.is_some();
-        let is_exhaustive = if scrutinee_type == Type::BOOL {
-            has_wildcard || (bool_true_covered && bool_false_covered)
+        let missing: Vec<String> = if has_wildcard {
+            Vec::new()
+        } else if scrutinee_type == Type::BOOL {
+            let mut m = Vec::new();
+            if !bool_true_covered {
+                m.push("true".to_string());
+            }
+            if !bool_false_covered {
+                m.push("false".to_string());
+            }
+            m
         } else if let Some(enum_id) = pattern_enum_id {
             let enum_def = self.type_pool.enum_def(enum_id);
-            has_wildcard || covered_variants.len() == enum_def.variant_count()
+            enum_def
+                .variants
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !covered_variants.contains(&(*i as u32)))
+                .map(|(_, v)| format!("{}::{}", enum_def.name, v.name))
+                .collect()
         } else {
-            // For integers, must have wildcard
-            has_wildcard
+            // Integer scrutinee: only a wildcard exhausts the range.
+            vec!["_".to_string()]
         };
 
-        if !is_exhaustive {
-            return Err(CompileError::new(ErrorKind::NonExhaustiveMatch, span));
+        if !missing.is_empty() {
+            return Err(CompileError::new(
+                ErrorKind::NonExhaustiveMatch { missing },
+                span,
+            ));
         }
 
         let final_type = result_type.unwrap_or(Type::UNIT);
@@ -2358,18 +2541,100 @@ impl<'a> Sema<'a> {
 
         // Validate the type name matches (skipped for tuple destructure — the
         // sentinel "__tuple__" doesn't correspond to a real struct name).
-        if !is_tuple_destructure && struct_def.name != type_name_str {
-            return Err(CompileError::new(
-                ErrorKind::TypeMismatch {
-                    expected: type_name_str,
-                    found: struct_def.name.clone(),
-                },
-                span,
-            ));
+        //
+        // The pattern's `type_name` may be a local alias of an anonymous
+        // struct (ADR-0029 / ADR-0039 workflow): `let PairI32 = Pair(i32);
+        // let PairI32 { first, second } = p;`. In that case the comptime
+        // type variable resolves to the same StructId as `init_type`, and a
+        // plain name comparison would spuriously reject the destructure as
+        // `PairI32 vs __anon_struct_N`. Resolve the pattern's type name
+        // through `comptime_type_vars` first; fall back to the name
+        // comparison otherwise (ADR-0049 Phase 7).
+        if !is_tuple_destructure {
+            let resolved_struct_id = ctx
+                .comptime_type_vars
+                .get(&type_name)
+                .and_then(|ty| match ty.kind() {
+                    TypeKind::Struct(id) => Some(id),
+                    _ => None,
+                });
+            let names_match = match resolved_struct_id {
+                Some(alias_id) => alias_id == struct_id,
+                None => struct_def.name == type_name_str,
+            };
+            if !names_match {
+                return Err(CompileError::new(
+                    ErrorKind::TypeMismatch {
+                        expected: type_name_str,
+                        found: struct_def.name.clone(),
+                    },
+                    span,
+                ));
+            }
         }
 
-        // Get the destructure fields from the RIR
-        let rir_fields = self.rir.get_destructure_fields(fields_start, fields_len);
+        // Get the destructure fields from the RIR.
+        // Rest-pattern marker: astgen emits a synthetic `..` field when the
+        // user writes `Point { x, .. }` (ADR-0049 Phase 6). We strip it here
+        // and set `has_rest`, which disables the "all fields required" rule
+        // below and causes every unlisted field to be treated as wildcard-
+        // dropped.
+        //
+        // Suffix markers: `let (a, .., b)` on an N-tuple emits `..end_N-1-i`
+        // for each suffix position. Resolve these to concrete numeric field
+        // names once the struct arity is known.
+        let all_rir_fields = self.rir.get_destructure_fields(fields_start, fields_len);
+        let struct_arity = struct_def.fields.len();
+        let (rir_fields, has_rest) = {
+            let mut filtered = Vec::with_capacity(all_rir_fields.len());
+            let mut has_rest = false;
+            let mut prefix_count: usize = 0;
+            let mut suffix_count: usize = 0;
+            for mut f in all_rir_fields {
+                let name_str = self.interner.resolve(&f.field_name).to_string();
+                if name_str == ".." {
+                    has_rest = true;
+                    continue;
+                }
+                if let Some(rest) = name_str.strip_prefix("..end_") {
+                    let from_end: usize = rest.parse().expect(
+                        "astgen emits well-formed ..end_N markers; parser rejects user `..end_N` field names",
+                    );
+                    if from_end >= struct_arity {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: format!("tuple of arity at least {}", from_end + 1),
+                                found: init_type.name().to_string(),
+                            },
+                            span,
+                        ));
+                    }
+                    suffix_count += 1;
+                    let idx = struct_arity - 1 - from_end;
+                    f.field_name = self.interner.get_or_intern(idx.to_string());
+                    filtered.push(f);
+                } else {
+                    prefix_count += 1;
+                    filtered.push(f);
+                }
+            }
+            // Prefix + suffix must fit within the tuple: a 2-tuple
+            // matched against `(a, b, .., c, d)` would overlap prefix
+            // and suffix positions, which is nonsensical.
+            if has_rest && prefix_count + suffix_count > struct_arity {
+                return Err(CompileError::new(
+                    ErrorKind::TypeMismatch {
+                        expected: format!(
+                            "tuple of arity at least {}",
+                            prefix_count + suffix_count
+                        ),
+                        found: init_type.name().to_string(),
+                    },
+                    span,
+                ));
+            }
+            (filtered, has_rest)
+        };
 
         // Validate: no duplicate fields
         let mut seen_fields = std::collections::HashSet::new();
@@ -2397,18 +2662,21 @@ impl<'a> Sema<'a> {
             type_name_str.clone()
         };
 
-        // Validate: all struct fields are mentioned
+        // Validate: all struct fields are mentioned (waived when a `..` rest
+        // pattern is present — missing fields are wildcard-bound below).
         let struct_field_names: Vec<String> =
             struct_def.fields.iter().map(|f| f.name.clone()).collect();
-        for struct_field_name in &struct_field_names {
-            if !seen_fields.contains(struct_field_name) {
-                return Err(CompileError::new(
-                    ErrorKind::MissingFieldInDestructure {
-                        struct_name: display_name.clone(),
-                        field: struct_field_name.clone(),
-                    },
-                    span,
-                ));
+        if !has_rest {
+            for struct_field_name in &struct_field_names {
+                if !seen_fields.contains(struct_field_name) {
+                    return Err(CompileError::new(
+                        ErrorKind::MissingFieldInDestructure {
+                            struct_name: display_name.clone(),
+                            field: struct_field_name.clone(),
+                        },
+                        span,
+                    ));
+                }
             }
         }
 
@@ -2425,6 +2693,30 @@ impl<'a> Sema<'a> {
                 ));
             }
         }
+
+        // When `..` is present, synthesize wildcard `RirDestructureField`s for
+        // every struct field not explicitly mentioned. The subsequent
+        // alloc/drop loop treats them like any other wildcard binding, so
+        // non-copy fields get dropped at scope exit.
+        let rir_fields: Vec<RirDestructureField> = if has_rest {
+            let rest_marker = self.interner.get_or_intern_static("..");
+            let mut expanded = rir_fields;
+            for struct_field_name in &struct_field_names {
+                if !seen_fields.contains(struct_field_name) {
+                    let field_name_spur = self.interner.get_or_intern(struct_field_name);
+                    debug_assert!(field_name_spur != rest_marker);
+                    expanded.push(RirDestructureField {
+                        field_name: field_name_spur,
+                        binding_name: None,
+                        is_wildcard: true,
+                        is_mut: false,
+                    });
+                }
+            }
+            expanded
+        } else {
+            rir_fields
+        };
 
         // Emit AIR: store init into a temp, then extract each field into its own slot.
         // The temp struct slot is NOT registered with StorageLive —

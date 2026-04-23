@@ -538,3 +538,264 @@ fn main() -> i32 {
 }
 """
 exit_code = 43
+
+# =============================================================================
+# Nested destructuring (ADR-0049)
+# =============================================================================
+
+[[case]]
+name = "nested_destructure_struct_in_struct"
+spec = ["5.1:14"]
+description = "Nested struct-in-struct destructure binds inner fields (ADR-0049)"
+source = """
+struct Inner { a: i32, b: i32 }
+struct Outer { x: Inner, y: i32 }
+
+fn main() -> i32 {
+    let o = Outer { x: Inner { a: 3, b: 4 }, y: 35 };
+    let Outer { x: Inner { a, b }, y } = o;
+    a + b + y
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_destructure_tuple_of_tuples"
+spec = ["5.1:14"]
+description = "Nested tuple-of-tuples destructure binds all leaves (ADR-0049)"
+source = """
+fn main() -> i32 {
+    let t = ((1, 2), (3, 4));
+    let ((a, b), (c, d)) = t;
+    a + b + c + d
+}
+"""
+exit_code = 10
+
+[[case]]
+name = "nested_destructure_struct_in_tuple"
+spec = ["5.1:14"]
+description = "Struct inside tuple destructure (ADR-0049)"
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = (Point { x: 10, y: 20 }, 12);
+    let (Point { x, y }, tag) = p;
+    x + y + tag
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_destructure_tuple_in_struct"
+spec = ["5.1:14"]
+description = "Tuple inside struct destructure (ADR-0049)"
+source = """
+struct Pair { xy: (i32, i32), tag: i32 }
+
+fn main() -> i32 {
+    let p = Pair { xy: (10, 20), tag: 12 };
+    let Pair { xy: (x, y), tag } = p;
+    x + y + tag
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "nested_destructure_wildcard_leaf"
+spec = ["5.1:14"]
+description = "Wildcard at a nested leaf drops that leaf (ADR-0049)"
+source = """
+fn main() -> i32 {
+    let ((a, _), c) = ((10, 20), 32);
+    a + c
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "refutable_int_in_let_errors"
+spec = ["5.1:14"]
+description = "Refutable integer pattern is rejected in let (ADR-0049)"
+source = """
+fn main() -> i32 {
+    let 1 = 1;
+    0
+}
+"""
+compile_fail = true
+error_contains = "refutable pattern"
+
+[[case]]
+name = "refutable_nested_int_in_let_errors"
+spec = ["5.1:14"]
+description = "Refutable nested literal in let is rejected (ADR-0049)"
+source = """
+fn main() -> i32 {
+    let (1, y) = (1, 2);
+    y
+}
+"""
+compile_fail = true
+error_contains = "refutable pattern"
+
+# =============================================================================
+# Anonymous struct alias destructure (ADR-0049 Phase 7)
+# =============================================================================
+
+[[case]]
+name = "anon_struct_alias_destructure"
+spec = ["5.1:14"]
+description = "Let-destructure through a local alias of an anonymous struct type (ADR-0049 Phase 7)"
+source = """
+fn Pair(comptime T: type) -> type {
+    struct { first: T, second: T }
+}
+
+fn main() -> i32 {
+    let PairI32 = Pair(i32);
+    let p = PairI32 { first: 10, second: 32 };
+    let PairI32 { first, second } = p;
+    first + second
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_struct_alias_destructure_with_nested"
+spec = ["5.1:14"]
+description = "Anon-struct alias destructure combined with nested sub-pattern (ADR-0049 Phase 7)"
+source = """
+fn Pair(comptime T: type) -> type {
+    struct { first: T, second: T }
+}
+
+struct Outer { p: i32, tag: i32 }
+
+fn main() -> i32 {
+    let PairOuter = Pair(Outer);
+    let v = PairOuter {
+        first: Outer { p: 10, tag: 20 },
+        second: Outer { p: 12, tag: 0 },
+    };
+    let PairOuter { first: Outer { p: a, tag: b }, second: _ } = v;
+    a + b + 12
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_destructure_wrong_name_still_errors"
+spec = ["5.1:14"]
+description = "A genuine struct-name mismatch still produces a type error (ADR-0049 Phase 7)"
+source = """
+struct Foo { first: i32, second: i32 }
+
+fn main() -> i32 {
+    let f = Foo { first: 10, second: 32 };
+    let Bar { first, second } = f;
+    first + second
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
+
+# =============================================================================
+# Rest patterns in let destructures (ADR-0049 Phase 6)
+# =============================================================================
+
+[[case]]
+name = "let_struct_rest_drops_remaining_fields"
+spec = ["5.1:14"]
+description = "Rest pattern `..` in struct destructure drops unlisted fields (ADR-0049 Phase 6)"
+source = """
+struct Point3 { x: i32, y: i32, z: i32 }
+
+fn main() -> i32 {
+    let p = Point3 { x: 42, y: 10, z: 20 };
+    let Point3 { x, .. } = p;
+    x
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "let_struct_rest_with_non_copy_field"
+spec = ["5.1:14"]
+description = "Rest pattern `..` drops non-copy fields exactly once (ADR-0049 Phase 6)"
+source = """
+struct Config { name: String, size: i32 }
+
+fn main() -> i32 {
+    let c = Config { name: "hello", size: 42 };
+    let Config { size, .. } = c;
+    size
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "let_tuple_rest_trailing"
+spec = ["5.1:14"]
+description = "Trailing rest pattern `..` in tuple destructure drops unlisted positions (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let (a, ..) = (42, 10, 20);
+    a
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "let_tuple_rest_middle"
+spec = ["5.1:14"]
+description = "Rest `..` in the middle of a tuple binds elements on both sides (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t: (i32, i32, i32, i32) = (10, 20, 30, 32);
+    let (a, .., b) = t;
+    a + b
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "let_tuple_rest_middle_multi"
+spec = ["5.1:14"]
+description = "Multiple elements on both sides of a tuple `..` (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t: (i32, i32, i32, i32, i32) = (10, 99, 99, 20, 12);
+    let (a, _, .., c, d) = t;
+    a + c + d
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "let_tuple_rest_leading"
+spec = ["5.1:14"]
+description = "Leading `..` in a tuple binds only the suffix (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t: (i32, i32, i32) = (99, 99, 42);
+    let (.., x) = t;
+    x
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "let_tuple_rest_middle_arity_too_small"
+spec = ["5.1:14"]
+description = "Prefix + suffix count exceeding tuple arity is rejected (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t: (i32, i32) = (10, 20);
+    let (a, b, .., c, d) = t;
+    a + b + c + d
+}
+"""
+compile_fail = true
+error_contains = "tuple of arity at least 4"

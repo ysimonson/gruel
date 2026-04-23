@@ -179,6 +179,12 @@ impl ErrorCode {
     pub const PREVIEW_FEATURE_REQUIRED: Self = Self(1100);
 
     // ========================================================================
+    // Pattern errors (E1300-E1399)
+    // ========================================================================
+    /// Refutable pattern used in let binding (ADR-0049).
+    pub const REFUTABLE_PATTERN_IN_LET: Self = Self(1300);
+
+    // ========================================================================
     // Comptime errors (E1200-E1299)
     // ========================================================================
     pub const COMPTIME_EVALUATION_FAILED: Self = Self(1200);
@@ -727,6 +733,22 @@ fn format_argument_count(expected: usize, found: usize) -> String {
     }
 }
 
+fn format_missing_witnesses(missing: &[String]) -> String {
+    if missing.is_empty() {
+        return String::new();
+    }
+    let list = missing
+        .iter()
+        .map(|w| format!("`{}`", w))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if missing.len() == 1 {
+        format!(": pattern {} not covered", list)
+    } else {
+        format!(": patterns {} not covered", list)
+    }
+}
+
 fn format_missing_fields(err: &MissingFieldsError) -> String {
     if err.missing_fields.len() == 1 {
         format!(
@@ -986,8 +1008,13 @@ pub enum ErrorKind {
     UncheckedCallRequiresChecked(String),
 
     // Match errors
-    #[error("match is not exhaustive")]
-    NonExhaustiveMatch,
+    //
+    // `missing` is a short, comma-separated list of uncovered patterns
+    // (variant names, bool cases, or `_` when no finite witness
+    // applies). Empty when the old call-sites haven't been updated yet
+    // — the base message still makes sense in that case.
+    #[error("match is not exhaustive{}", format_missing_witnesses(.missing))]
+    NonExhaustiveMatch { missing: Vec<String> },
     #[error("match expression has no arms")]
     EmptyMatch,
     #[error("cannot match on type '{0}', expected integer, bool, or enum")]
@@ -1061,6 +1088,10 @@ pub enum ErrorKind {
         feature: PreviewFeature,
         what: String,
     },
+
+    // Pattern errors (ADR-0049)
+    #[error("refutable pattern in let binding: matches only a subset of possible values")]
+    RefutablePatternInLet,
 
     // Comptime errors
     #[error("comptime evaluation failed: {reason}")]
@@ -1162,7 +1193,7 @@ impl ErrorKind {
             }
 
             // Match errors (E0600-E0699)
-            ErrorKind::NonExhaustiveMatch => ErrorCode::NON_EXHAUSTIVE_MATCH,
+            ErrorKind::NonExhaustiveMatch { .. } => ErrorCode::NON_EXHAUSTIVE_MATCH,
             ErrorKind::EmptyMatch => ErrorCode::EMPTY_MATCH,
             ErrorKind::InvalidMatchType(_) => ErrorCode::INVALID_MATCH_TYPE,
 
@@ -1194,6 +1225,9 @@ impl ErrorKind {
 
             // Preview feature errors (E1100-E1199)
             ErrorKind::PreviewFeatureRequired { .. } => ErrorCode::PREVIEW_FEATURE_REQUIRED,
+
+            // Pattern errors (E1300-E1399)
+            ErrorKind::RefutablePatternInLet => ErrorCode::REFUTABLE_PATTERN_IN_LET,
 
             // Comptime errors (E1200-E1299)
             ErrorKind::ComptimeEvaluationFailed { .. } => ErrorCode::COMPTIME_EVALUATION_FAILED,

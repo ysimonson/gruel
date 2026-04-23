@@ -812,6 +812,15 @@ impl<'a> ConstraintGenerator<'a> {
                     }
                     let result_var = self.fresh_var();
                     InferType::Var(result_var)
+                } else if intrinsic_name == "panic" || intrinsic_name == "compile_error" {
+                    // @panic and @compile_error diverge — they return `Never`,
+                    // which unifies with any expected type. Without this,
+                    // `if cond { 42 } else { @panic("...") }` wrongly reports
+                    // the else-branch as Unit.
+                    for arg_ref in args.iter() {
+                        self.generate(*arg_ref, ctx);
+                    }
+                    InferType::Concrete(Type::NEVER)
                 } else {
                     // Generate constraints for arguments (they need to be processed)
                     for arg_ref in args.iter() {
