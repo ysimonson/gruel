@@ -3314,12 +3314,10 @@ mod integration_tests {
             let (tokens, interner) = lexer.tokenize().map_err(CompileErrors::from).unwrap();
             let parser = Parser::new(tokens, interner);
             let (ast, interner) = parser.parse().unwrap();
-            let mut astgen = AstGen::new(&ast, &interner);
-            astgen.set_recursive_pattern_lowering(true);
+            let astgen = AstGen::new(&ast, &interner);
             let rir = astgen.generate();
 
-            let mut sema = Sema::new(&rir, &interner, PreviewFeatures::new());
-            sema.set_recursive_pattern_lowering(true);
+            let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
             let sema_output = sema.analyze_all().unwrap();
 
             let mut count = 0;

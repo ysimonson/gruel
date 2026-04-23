@@ -184,14 +184,25 @@ pub enum RirPattern {
 }
 
 /// A binding in a data variant pattern.
+///
+/// Shapes:
+/// - `is_wildcard = true` → `_` (no binding, matches anything)
+/// - `is_wildcard = false, name = Some(x), sub_pattern = None` → `x` (bind field to `x`)
+/// - `is_wildcard = false, name = None, sub_pattern = Some(p)` → `p` (nested refutable sub-pattern, ADR-0051)
+/// - `is_wildcard = false, name = Some(x), sub_pattern = Some(p)` → `x @ p` (reserved; not yet
+///   exposed in surface syntax)
 #[derive(Debug, Clone)]
 pub struct RirPatternBinding {
     /// Whether this is a wildcard binding (`_`)
     pub is_wildcard: bool,
     /// Whether this is a mutable binding (only meaningful if not wildcard)
     pub is_mut: bool,
-    /// The binding name (None for wildcard bindings)
+    /// The binding name (None for wildcard or nested sub-pattern bindings)
     pub name: Option<Spur>,
+    /// Nested sub-pattern for refutable field matches like `Some(Ok(v))`.
+    /// When `Some`, the binding's match is `sub_pattern` recursively;
+    /// when `None`, this is a flat leaf binding.
+    pub sub_pattern: Option<Box<RirPattern>>,
 }
 
 /// A named field binding in a struct variant pattern.
@@ -226,6 +237,74 @@ impl RirPattern {
             RirPattern::Struct { span, .. } => *span,
         }
     }
+}
+
+/// Encode a `RirPatternBinding` to `out`. Layout:
+/// `[flags, name_raw, <sub_pattern_tree if flags bit 2 set>]`.
+/// Flags: bit 0 = is_wildcard, bit 1 = is_mut, bit 2 = has_sub_pattern.
+fn encode_binding(b: &RirPatternBinding, out: &mut Vec<u32>) {
+    let mut flags = if b.is_wildcard { 1u32 } else { 0 };
+    if b.is_mut {
+        flags |= 2;
+    }
+    if b.sub_pattern.is_some() {
+        flags |= 4;
+    }
+    out.push(flags);
+    out.push(b.name.map_or(u32::MAX, |s| s.into_usize() as u32));
+    if let Some(sub) = &b.sub_pattern {
+        encode_pattern_tree(sub, out);
+    }
+}
+
+/// Decode a `RirPatternBinding` from `data`, returning the binding and
+/// words consumed.
+fn decode_binding(data: &[u32]) -> (RirPatternBinding, usize) {
+    let flags = data[0];
+    let name_raw = data[1];
+    let name = if name_raw == u32::MAX {
+        None
+    } else {
+        Some(Spur::try_from_usize(name_raw as usize).unwrap())
+    };
+    let mut offset = 2;
+    let sub_pattern = if flags & 4 != 0 {
+        let (p, consumed) = decode_pattern_tree(&data[offset..]);
+        offset += consumed;
+        Some(Box::new(p))
+    } else {
+        None
+    };
+    (
+        RirPatternBinding {
+            is_wildcard: flags & 1 != 0,
+            is_mut: flags & 2 != 0,
+            name,
+            sub_pattern,
+        },
+        offset,
+    )
+}
+
+/// Encode a `RirStructPatternBinding` to `out`. Layout:
+/// `[field_name, <binding encoding>]`.
+fn encode_struct_binding(fb: &RirStructPatternBinding, out: &mut Vec<u32>) {
+    out.push(fb.field_name.into_usize() as u32);
+    encode_binding(&fb.binding, out);
+}
+
+/// Decode a `RirStructPatternBinding` from `data`, returning the binding
+/// and words consumed.
+fn decode_struct_binding(data: &[u32]) -> (RirStructPatternBinding, usize) {
+    let field_name = Spur::try_from_usize(data[0] as usize).unwrap();
+    let (binding, consumed) = decode_binding(&data[1..]);
+    (
+        RirStructPatternBinding {
+            field_name,
+            binding,
+        },
+        1 + consumed,
+    )
 }
 
 /// Encode a `RirPattern` as a self-describing tree into `out`. Unlike the
@@ -281,9 +360,7 @@ fn encode_pattern_tree(pattern: &RirPattern, out: &mut Vec<u32>) {
             out.push(variant.into_usize() as u32);
             out.push(bindings.len() as u32);
             for b in bindings {
-                let flags = if b.is_wildcard { 1u32 } else { 0 } | if b.is_mut { 2 } else { 0 };
-                out.push(flags);
-                out.push(b.name.map_or(u32::MAX, |s| s.into_usize() as u32));
+                encode_binding(b, out);
             }
         }
         RirPattern::StructVariant {
@@ -301,11 +378,7 @@ fn encode_pattern_tree(pattern: &RirPattern, out: &mut Vec<u32>) {
             out.push(variant.into_usize() as u32);
             out.push(field_bindings.len() as u32);
             for fb in field_bindings {
-                out.push(fb.field_name.into_usize() as u32);
-                let flags = if fb.binding.is_wildcard { 1u32 } else { 0 }
-                    | if fb.binding.is_mut { 2 } else { 0 };
-                out.push(flags);
-                out.push(fb.binding.name.map_or(u32::MAX, |s| s.into_usize() as u32));
+                encode_struct_binding(fb, out);
             }
         }
         RirPattern::Ident { name, is_mut, span } => {
@@ -402,19 +475,11 @@ fn decode_pattern_tree(data: &[u32]) -> (RirPattern, usize) {
         let variant = Spur::try_from_usize(data[5] as usize).unwrap();
         let n = data[6] as usize;
         let mut bindings = Vec::with_capacity(n);
-        for i in 0..n {
-            let flags = data[7 + i * 2];
-            let name_raw = data[8 + i * 2];
-            let name = if name_raw == u32::MAX {
-                None
-            } else {
-                Some(Spur::try_from_usize(name_raw as usize).unwrap())
-            };
-            bindings.push(RirPatternBinding {
-                is_wildcard: flags & 1 != 0,
-                is_mut: flags & 2 != 0,
-                name,
-            });
+        let mut offset = 7;
+        for _ in 0..n {
+            let (b, consumed) = decode_binding(&data[offset..]);
+            bindings.push(b);
+            offset += consumed;
         }
         (
             RirPattern::DataVariant {
@@ -424,7 +489,7 @@ fn decode_pattern_tree(data: &[u32]) -> (RirPattern, usize) {
                 bindings,
                 span,
             },
-            7 + 2 * n,
+            offset,
         )
     } else if kind == PatternKind::StructVariant as u32 {
         let span = Span::new(data[1], data[1] + data[2]);
@@ -438,23 +503,11 @@ fn decode_pattern_tree(data: &[u32]) -> (RirPattern, usize) {
         let variant = Spur::try_from_usize(data[5] as usize).unwrap();
         let n = data[6] as usize;
         let mut field_bindings = Vec::with_capacity(n);
-        for i in 0..n {
-            let field_name = Spur::try_from_usize(data[7 + i * 3] as usize).unwrap();
-            let flags = data[8 + i * 3];
-            let name_raw = data[9 + i * 3];
-            let name = if name_raw == u32::MAX {
-                None
-            } else {
-                Some(Spur::try_from_usize(name_raw as usize).unwrap())
-            };
-            field_bindings.push(RirStructPatternBinding {
-                field_name,
-                binding: RirPatternBinding {
-                    is_wildcard: flags & 1 != 0,
-                    is_mut: flags & 2 != 0,
-                    name,
-                },
-            });
+        let mut offset = 7;
+        for _ in 0..n {
+            let (fb, consumed) = decode_struct_binding(&data[offset..]);
+            field_bindings.push(fb);
+            offset += consumed;
         }
         (
             RirPattern::StructVariant {
@@ -464,7 +517,7 @@ fn decode_pattern_tree(data: &[u32]) -> (RirPattern, usize) {
                 field_bindings,
                 span,
             },
-            7 + 3 * n,
+            offset,
         )
     } else if kind == PatternKind::Ident as u32 {
         let span = Span::new(data[1], data[1] + data[2]);
@@ -1014,11 +1067,7 @@ impl Rir {
                     self.extra.push(body.as_u32());
                     self.extra.push(bindings.len() as u32);
                     for binding in bindings {
-                        let flags = if binding.is_wildcard { 1u32 } else { 0 }
-                            | if binding.is_mut { 2 } else { 0 };
-                        self.extra.push(flags);
-                        self.extra
-                            .push(binding.name.map_or(u32::MAX, |s| s.into_usize() as u32));
+                        encode_binding(binding, &mut self.extra);
                     }
                 }
                 RirPattern::StructVariant {
@@ -1037,12 +1086,7 @@ impl Rir {
                     self.extra.push(body.as_u32());
                     self.extra.push(field_bindings.len() as u32);
                     for fb in field_bindings {
-                        self.extra.push(fb.field_name.into_usize() as u32);
-                        let flags = if fb.binding.is_wildcard { 1u32 } else { 0 }
-                            | if fb.binding.is_mut { 2 } else { 0 };
-                        self.extra.push(flags);
-                        self.extra
-                            .push(fb.binding.name.map_or(u32::MAX, |s| s.into_usize() as u32));
+                        encode_struct_binding(fb, &mut self.extra);
                     }
                 }
                 RirPattern::Ident { name, is_mut, span } => {
@@ -1169,21 +1213,11 @@ impl Rir {
                     let body = InstRef::from_raw(self.extra[pos + 6]);
                     let bindings_len = self.extra[pos + 7] as usize;
                     let mut bindings = Vec::with_capacity(bindings_len);
-                    for i in 0..bindings_len {
-                        let flags = self.extra[pos + 8 + i * 2];
-                        let name_raw = self.extra[pos + 9 + i * 2];
-                        let is_wildcard = flags & 1 != 0;
-                        let is_mut = flags & 2 != 0;
-                        let name = if name_raw == u32::MAX {
-                            None
-                        } else {
-                            Some(Spur::try_from_usize(name_raw as usize).unwrap())
-                        };
-                        bindings.push(RirPatternBinding {
-                            is_wildcard,
-                            is_mut,
-                            name,
-                        });
+                    let mut offset = 8;
+                    for _ in 0..bindings_len {
+                        let (b, consumed) = decode_binding(&self.extra[pos + offset..]);
+                        bindings.push(b);
+                        offset += consumed;
                     }
                     arms.push((
                         RirPattern::DataVariant {
@@ -1195,7 +1229,7 @@ impl Rir {
                         },
                         body,
                     ));
-                    pos += 8 + 2 * bindings_len;
+                    pos += offset;
                 }
                 k if k == PatternKind::StructVariant as u32 => {
                     let span_start = self.extra[pos + 1];
@@ -1212,26 +1246,11 @@ impl Rir {
                     let body = InstRef::from_raw(self.extra[pos + 6]);
                     let bindings_len = self.extra[pos + 7] as usize;
                     let mut field_bindings = Vec::with_capacity(bindings_len);
-                    for i in 0..bindings_len {
-                        let field_name =
-                            Spur::try_from_usize(self.extra[pos + 8 + i * 3] as usize).unwrap();
-                        let flags = self.extra[pos + 9 + i * 3];
-                        let name_raw = self.extra[pos + 10 + i * 3];
-                        let is_wildcard = flags & 1 != 0;
-                        let is_mut = flags & 2 != 0;
-                        let name = if name_raw == u32::MAX {
-                            None
-                        } else {
-                            Some(Spur::try_from_usize(name_raw as usize).unwrap())
-                        };
-                        field_bindings.push(RirStructPatternBinding {
-                            field_name,
-                            binding: RirPatternBinding {
-                                is_wildcard,
-                                is_mut,
-                                name,
-                            },
-                        });
+                    let mut offset = 8;
+                    for _ in 0..bindings_len {
+                        let (fb, consumed) = decode_struct_binding(&self.extra[pos + offset..]);
+                        field_bindings.push(fb);
+                        offset += consumed;
                     }
                     arms.push((
                         RirPattern::StructVariant {
@@ -1243,7 +1262,7 @@ impl Rir {
                         },
                         body,
                     ));
-                    pos += 8 + 3 * bindings_len;
+                    pos += offset;
                 }
                 k if k == PatternKind::Ident as u32 => {
                     let span_start = self.extra[pos + 1];

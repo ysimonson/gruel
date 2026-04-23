@@ -397,11 +397,17 @@ path (Phase 4).
         still handles `Some(Some(x))` shapes RIR cannot yet represent
         (flat variant bindings), so it stays. Non-exhaustive tuple
         matches are now compile errors (per §Open-Questions-3).
-  - [ ] 4c part 4: extend RIR variant bindings with nested sub-patterns
-        so refutable-nested arms flow through the recursive path too;
-        then delete the remaining elaborators, `__nested_pat_N`
-        machinery, `wrap_match_arm_body_with_destructures`, the five
-        Phase 5 panics, and the runtime `@panic` injection.
+  - [x] 4c part 4: extended `RirPatternBinding` with `sub_pattern` so
+        irrefutable nested destructures (`Some(Point { x, y })`) flow
+        through the recursive lowering path directly. Deleted
+        `try_elaborate_tuple_match`, `gen_tuple_match_arm`,
+        `wrap_match_arm_body_with_destructures`,
+        `is_tuple_match_arm_unconditional`, `fresh_match_scr_name`,
+        `emit_panic_call`, and the `recursive_pattern_lowering` flag on
+        both `AstGen` and `Sema`. `try_elaborate_refutable_nested_match`
+        remains for `Some(Some(x))`-style refutable-nested variant arms
+        because CFG cascading dispatch does not yet project through
+        enum payloads for nested discriminant tests.
   - Remove the `--recursive-pattern-lowering` flag and make the
     recursive path the default.
   - Delete `try_elaborate_irrefutable_match`,

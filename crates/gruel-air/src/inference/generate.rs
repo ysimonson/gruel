@@ -993,24 +993,18 @@ impl<'a> ConstraintGenerator<'a> {
                                 if let Some(variant_idx) = enum_def.find_variant(variant_name) {
                                     let field_types = &enum_def.variants[variant_idx].fields;
                                     for (i, binding) in bindings.iter().enumerate() {
-                                        if !binding.is_wildcard
-                                            && let Some(name) = binding.name
-                                        {
-                                            let field_ty = if i < field_types.len() {
-                                                InferType::Concrete(field_types[i])
-                                            } else {
-                                                InferType::Concrete(Type::ERROR)
-                                            };
-                                            let old = ctx.locals.insert(
-                                                name,
-                                                LocalVarInfo {
-                                                    ty: field_ty,
-                                                    is_mut: binding.is_mut,
-                                                    span: pattern.span(),
-                                                },
-                                            );
-                                            added_bindings.push((name, old));
-                                        }
+                                        let field_ty = if i < field_types.len() {
+                                            InferType::Concrete(field_types[i])
+                                        } else {
+                                            InferType::Concrete(Type::ERROR)
+                                        };
+                                        self.register_binding(
+                                            binding,
+                                            field_ty,
+                                            pattern.span(),
+                                            ctx,
+                                            &mut added_bindings,
+                                        );
                                     }
                                 }
                             } else {
@@ -1018,20 +1012,15 @@ impl<'a> ConstraintGenerator<'a> {
                                 // Register bindings with fresh type variables so body
                                 // constraint generation can still resolve variable references.
                                 for binding in bindings.iter() {
-                                    if !binding.is_wildcard
-                                        && let Some(name) = binding.name
-                                    {
-                                        let var = self.fresh_var();
-                                        let old = ctx.locals.insert(
-                                            name,
-                                            LocalVarInfo {
-                                                ty: InferType::Var(var),
-                                                is_mut: binding.is_mut,
-                                                span: pattern.span(),
-                                            },
-                                        );
-                                        added_bindings.push((name, old));
-                                    }
+                                    let var = self.fresh_var();
+                                    let ty = InferType::Var(var);
+                                    self.register_binding(
+                                        binding,
+                                        ty,
+                                        pattern.span(),
+                                        ctx,
+                                        &mut added_bindings,
+                                    );
                                 }
                             }
                             added_bindings
@@ -1051,47 +1040,35 @@ impl<'a> ConstraintGenerator<'a> {
                                 if let Some(variant_idx) = enum_def.find_variant(variant_name) {
                                     let variant_def = &enum_def.variants[variant_idx];
                                     for fb in field_bindings {
-                                        if !fb.binding.is_wildcard
-                                            && let Some(name) = fb.binding.name
-                                        {
-                                            let field_name = self.interner.resolve(&fb.field_name);
-                                            let field_ty = if let Some(idx) =
-                                                variant_def.find_field(field_name)
-                                            {
+                                        let field_name = self.interner.resolve(&fb.field_name);
+                                        let field_ty =
+                                            if let Some(idx) = variant_def.find_field(field_name) {
                                                 InferType::Concrete(variant_def.fields[idx])
                                             } else {
                                                 InferType::Concrete(Type::ERROR)
                                             };
-                                            let old = ctx.locals.insert(
-                                                name,
-                                                LocalVarInfo {
-                                                    ty: field_ty,
-                                                    is_mut: fb.binding.is_mut,
-                                                    span: pattern.span(),
-                                                },
-                                            );
-                                            added_bindings.push((name, old));
-                                        }
+                                        self.register_binding(
+                                            &fb.binding,
+                                            field_ty,
+                                            pattern.span(),
+                                            ctx,
+                                            &mut added_bindings,
+                                        );
                                     }
                                 }
                             } else {
                                 // Enum not found — likely a comptime type variable.
                                 // Register bindings with fresh type variables.
                                 for fb in field_bindings {
-                                    if !fb.binding.is_wildcard
-                                        && let Some(name) = fb.binding.name
-                                    {
-                                        let var = self.fresh_var();
-                                        let old = ctx.locals.insert(
-                                            name,
-                                            LocalVarInfo {
-                                                ty: InferType::Var(var),
-                                                is_mut: fb.binding.is_mut,
-                                                span: pattern.span(),
-                                            },
-                                        );
-                                        added_bindings.push((name, old));
-                                    }
+                                    let var = self.fresh_var();
+                                    let ty = InferType::Var(var);
+                                    self.register_binding(
+                                        &fb.binding,
+                                        ty,
+                                        pattern.span(),
+                                        ctx,
+                                        &mut added_bindings,
+                                    );
                                 }
                             }
                             added_bindings
@@ -1598,6 +1575,39 @@ impl<'a> ConstraintGenerator<'a> {
     }
 
     /// Get the inferred type for a pattern.
+    /// ADR-0051 Phase 4 part 2: register a single data/struct-variant
+    /// field binding. If the binding is a flat named binding, insert it
+    /// directly. If it carries a nested `sub_pattern`, walk into it via
+    /// `collect_recursive_pattern_bindings` so nested Ident leaves
+    /// become scope entries.
+    fn register_binding(
+        &mut self,
+        binding: &gruel_rir::RirPatternBinding,
+        field_ty: InferType,
+        pattern_span: gruel_span::Span,
+        ctx: &mut ConstraintContext,
+        added_bindings: &mut Vec<(lasso::Spur, Option<LocalVarInfo>)>,
+    ) {
+        if let Some(sub) = &binding.sub_pattern {
+            self.collect_recursive_pattern_bindings(sub, field_ty, ctx, added_bindings);
+            return;
+        }
+        if binding.is_wildcard {
+            return;
+        }
+        if let Some(name) = binding.name {
+            let old = ctx.locals.insert(
+                name,
+                LocalVarInfo {
+                    ty: field_ty,
+                    is_mut: binding.is_mut,
+                    span: pattern_span,
+                },
+            );
+            added_bindings.push((name, old));
+        }
+    }
+
     /// ADR-0051 Phase 4c: walk a Tuple / Struct / Ident match-arm
     /// pattern, registering each Ident leaf in `ctx.locals` so body
     /// constraint generation resolves the variable. Field types are

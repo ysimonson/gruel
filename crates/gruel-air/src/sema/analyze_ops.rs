@@ -94,21 +94,29 @@ impl PlaceTrace {
     }
 }
 
-/// Convert a flat `RirPatternBinding` (wildcard / named) into its
-/// recursive `AirPattern` leaf form for ADR-0051 `lower_pattern`. Returns
-/// `Wildcard` for wildcard bindings and `Bind` with `inner: None` for
-/// named bindings. Until RIR is extended with nested sub-patterns (phase 4),
-/// this is always a leaf.
-fn binding_to_pattern(b: &RirPatternBinding) -> AirPattern {
+/// Convert a `RirPatternBinding` into its recursive `AirPattern` form for
+/// ADR-0051 `lower_pattern`. Wildcard bindings → `Wildcard`; simple named
+/// bindings → `Bind` leaves; bindings carrying a nested `sub_pattern` →
+/// whatever `sub_pattern` lowers to (recursively).
+fn binding_to_pattern(sema: &Sema<'_>, b: &RirPatternBinding) -> AirPattern {
+    if let Some(sub) = &b.sub_pattern {
+        // Nested sub-patterns go through the full recursive lowering. The
+        // `resolved_enum` for the sub-pattern is looked up fresh when
+        // `lower_pattern` recurses into a DataVariant / StructVariant.
+        return sema.lower_pattern(sub, sema.resolve_enum_from_pattern(sub));
+    }
     if b.is_wildcard {
         AirPattern::Wildcard
-    } else {
-        let name = b.name.expect("non-wildcard binding must have a name");
+    } else if let Some(name) = b.name {
         AirPattern::Bind {
             name,
             is_mut: b.is_mut,
             inner: None,
         }
+    } else {
+        // Shouldn't reach here — bindings with neither name nor sub_pattern
+        // and that aren't wildcards are malformed. Fall back to wildcard.
+        AirPattern::Wildcard
     }
 }
 
@@ -1480,16 +1488,14 @@ impl<'a> Sema<'a> {
         let scrutinee_result = self.analyze_inst(air, scrutinee, ctx)?;
         let scrutinee_type = scrutinee_result.ty;
 
-        // Validate that we can match on this type (integers, booleans, enums;
-        // ADR-0051 Phase 4b additionally allows struct-shaped scrutinees
-        // including tuples when the recursive-pattern-lowering flag is on,
-        // since `RirPattern::Tuple` / `Struct` arms need a struct scrutinee).
+        // Validate that we can match on this type. Structs (including
+        // tuples) are allowed because ADR-0051 `RirPattern::Tuple` /
+        // `Struct` arms lower through sema + CFG cascading dispatch.
         let is_struct_like = scrutinee_type.is_struct();
-        let allow_struct = self.recursive_pattern_lowering && is_struct_like;
         if !scrutinee_type.is_integer()
             && scrutinee_type != Type::BOOL
             && !scrutinee_type.is_enum()
-            && !allow_struct
+            && !is_struct_like
         {
             return Err(CompileError::new(
                 ErrorKind::InvalidMatchType(scrutinee_type.name().to_string()),
@@ -2022,6 +2028,7 @@ impl<'a> Sema<'a> {
                             is_wildcard: true,
                             is_mut: false,
                             name: None,
+                            sub_pattern: None,
                         })
                         .collect()
                 }
@@ -2048,6 +2055,7 @@ impl<'a> Sema<'a> {
                             is_wildcard: true,
                             is_mut: false,
                             name: None,
+                            sub_pattern: None,
                         })
                         .collect()
                 }
@@ -2136,6 +2144,22 @@ impl<'a> Sema<'a> {
                         ty: field_ty,
                         span: pattern_span,
                     });
+
+                    // ADR-0051: a binding with a nested sub-pattern recurses
+                    // directly using the extracted field value as scrutinee,
+                    // rather than materialising a slot for the whole field.
+                    if let Some(sub) = &binding.sub_pattern {
+                        self.emit_recursive_pattern_bindings(
+                            air,
+                            field_val,
+                            field_ty,
+                            sub,
+                            ctx,
+                            &mut storage_lives,
+                            &mut allocs,
+                        );
+                        continue;
+                    }
 
                     // Allocate a slot for this binding
                     let slot = ctx.next_slot;
@@ -2339,39 +2363,11 @@ impl<'a> Sema<'a> {
                 }
             });
 
-            // Convert pattern to AIR pattern. For enum patterns (Path and DataVariant),
-            // reuse the enum_id and variant_index resolved during validation.
-            let air_pattern = if self.recursive_pattern_lowering {
-                // Expand a top-level tuple `..` rest to wildcards so
-                // `lower_pattern` sees a flat element list whose positions
-                // align with the scrutinee's struct fields.
-                let expanded = expanded_tuple_pattern(pattern, &self.type_pool, scrutinee_type);
-                self.lower_pattern(&expanded, resolved_enum)
-            } else {
-                match pattern {
-                    RirPattern::Wildcard(_) => AirPattern::Wildcard,
-                    RirPattern::Int(n, _) => AirPattern::Int(*n),
-                    RirPattern::Bool(b, _) => AirPattern::Bool(*b),
-                    RirPattern::Path { .. }
-                    | RirPattern::DataVariant { .. }
-                    | RirPattern::StructVariant { .. } => {
-                        let (enum_id, variant_index) =
-                            resolved_enum.expect("resolved_enum must be set for enum patterns");
-                        AirPattern::EnumVariant {
-                            enum_id,
-                            variant_index,
-                        }
-                    }
-                    RirPattern::Ident { .. }
-                    | RirPattern::Tuple { .. }
-                    | RirPattern::Struct { .. } => {
-                        unreachable!(
-                            "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
-                             ADR-0051 Phase 4a"
-                        )
-                    }
-                }
-            };
+            // Convert pattern to AIR pattern. Expand a top-level tuple `..`
+            // rest to wildcards so `lower_pattern` sees a flat element list
+            // whose positions align with the scrutinee's struct fields.
+            let expanded = expanded_tuple_pattern(pattern, &self.type_pool, scrutinee_type);
+            let air_pattern = self.lower_pattern(&expanded, resolved_enum);
 
             air_arms.push((air_pattern, body_result.air_ref));
         }
@@ -2556,19 +2552,40 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Lower an RIR pattern to the recursive `AirPattern` shape introduced by
-    /// ADR-0051 Phase 1. Called from `analyze_match` when
-    /// `self.recursive_pattern_lowering` is set.
-    ///
-    /// Today's RIR is flat: variant patterns carry `RirPatternBinding`s with
-    /// `name + is_wildcard + is_mut` and no nested sub-pattern slot, so the
-    /// AIR tree this produces is only one level deep at each variant. Real
-    /// source-level nesting (`Some(Some(x))`) is still being elaborated away
-    /// by astgen before it reaches sema; phase 4 extends RIR and wires astgen
-    /// so those cases surface here naturally.
-    ///
-    /// `resolved_enum` carries `(enum_id, variant_index)` that the validation
-    /// pass above already computed for enum patterns.
+    /// Try to resolve `(enum_id, variant_index)` for a Path / DataVariant /
+    /// StructVariant pattern at lowering time. Used by `binding_to_pattern`
+    /// when recursively lowering a nested sub-pattern whose outer
+    /// validation pass already ran. Returns `None` for non-enum patterns
+    /// or when the enum name is unknown (caller falls back to
+    /// `AirPattern::Wildcard`).
+    pub(crate) fn resolve_enum_from_pattern(
+        &self,
+        pattern: &RirPattern,
+    ) -> Option<(crate::types::EnumId, u32)> {
+        let (type_name, variant) = match pattern {
+            RirPattern::Path {
+                type_name, variant, ..
+            }
+            | RirPattern::DataVariant {
+                type_name, variant, ..
+            }
+            | RirPattern::StructVariant {
+                type_name, variant, ..
+            } => (*type_name, *variant),
+            _ => return None,
+        };
+        let enum_id = *self.enums.get(&type_name)?;
+        let enum_def = self.type_pool.enum_def(enum_id);
+        let variant_name = self.interner.resolve(&variant);
+        let variant_index = enum_def.find_variant(variant_name)? as u32;
+        Some((enum_id, variant_index))
+    }
+
+    /// Lower an RIR pattern to the recursive `AirPattern` shape
+    /// (ADR-0051). `resolved_enum` carries `(enum_id, variant_index)`
+    /// that the validation pass already computed for enum patterns;
+    /// `None` means the pattern is not an enum arm. Nested sub-patterns
+    /// in variant bindings recurse via `binding_to_pattern`.
     pub(crate) fn lower_pattern(
         &self,
         pattern: &RirPattern,
@@ -2603,7 +2620,7 @@ impl<'a> Sema<'a> {
                     .collect();
                 let mut fields = Vec::with_capacity(field_count);
                 for b in &explicit {
-                    fields.push(binding_to_pattern(b));
+                    fields.push(binding_to_pattern(self, b));
                 }
                 while fields.len() < field_count {
                     fields.push(AirPattern::Wildcard);
@@ -2633,7 +2650,7 @@ impl<'a> Sema<'a> {
                             && self.interner.resolve(&fb.field_name) == field_name.as_str()
                     });
                     let pat = match matching {
-                        Some(fb) => binding_to_pattern(&fb.binding),
+                        Some(fb) => binding_to_pattern(self, &fb.binding),
                         None => AirPattern::Wildcard,
                     };
                     fields.push((field_idx as u32, pat));

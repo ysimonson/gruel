@@ -1041,8 +1041,7 @@ mod tests {
             let astgen = AstGen::new(&ast, &interner);
             let rir = astgen.generate();
 
-            let mut sema = Sema::new(&rir, &interner, PreviewFeatures::new());
-            sema.set_recursive_pattern_lowering(true);
+            let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
             sema.analyze_all().unwrap()
         }
 
@@ -1250,35 +1249,6 @@ mod tests {
                 }
                 other => panic!("expected EnumStructVariant, got {:?}", other),
             }
-        }
-
-        #[test]
-        fn flag_off_falls_back_to_flat_variant() {
-            // ADR-0051 Phase 4c made the recursive path the default. The
-            // flag-off legacy behaviour is still reachable — tests can
-            // call `set_recursive_pattern_lowering(false)` on both
-            // AstGen and Sema to force the pre-ADR-0051 shape. This
-            // regression check keeps that escape hatch working.
-            let lexer = Lexer::new(
-                "enum Color { Red }
-                 fn main() -> i32 {
-                     let c = Color::Red;
-                     match c { Color::Red => 1 }
-                 }",
-            );
-            let (tokens, interner) = lexer.tokenize().unwrap();
-            let parser = Parser::new(tokens, interner);
-            let (ast, interner) = parser.parse().unwrap();
-            let mut astgen = AstGen::new(&ast, &interner);
-            astgen.set_recursive_pattern_lowering(false);
-            let rir = astgen.generate();
-            let mut sema = Sema::new(&rir, &interner, PreviewFeatures::new());
-            sema.set_recursive_pattern_lowering(false);
-            let output = sema.analyze_all().unwrap();
-
-            let arms = collect_match_arms(&output);
-            assert_eq!(arms.len(), 1);
-            assert_shape(&arms[0], "EnumVariant");
         }
     }
 }

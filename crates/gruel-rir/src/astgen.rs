@@ -27,16 +27,10 @@ pub struct AstGen<'a> {
     interner: &'a ThreadedRodeo,
     /// Output RIR
     rir: Rir,
-    /// Counter for generating unique synthetic binding names when elaborating
-    /// nested destructuring patterns (ADR-0049 Phase 4).
+    /// Counter for generating unique synthetic binding names used by the
+    /// refutable-nested-match elaborator for its intermediate scrutinee
+    /// locals. Shared by `fresh_nested_pat_name`.
     nested_pat_counter: u32,
-    /// ADR-0051 Phase 4b: when true, astgen bypasses the tuple-match
-    /// elaborator and emits `RirPattern::Tuple` / `Struct` / `Ident`
-    /// match arms directly for sema + CFG's recursive lowering path to
-    /// consume. Off by default; flipped on by a test flag wired through
-    /// the compiler pipeline. Phase 4c makes the new path the only path
-    /// and deletes the elaborators.
-    recursive_pattern_lowering: bool,
 }
 
 impl<'a> AstGen<'a> {
@@ -47,56 +41,17 @@ impl<'a> AstGen<'a> {
             interner,
             rir: Rir::new(),
             nested_pat_counter: 0,
-            recursive_pattern_lowering: true,
         }
     }
 
-    /// Enable ADR-0051 Phase 4b's recursive pattern lowering at astgen
-    /// time. Internal compiler flag; callers pair this with
-    /// `Sema::set_recursive_pattern_lowering` so both layers follow the
-    /// same pattern shape.
-    pub fn set_recursive_pattern_lowering(&mut self, enabled: bool) {
-        self.recursive_pattern_lowering = enabled;
-    }
-
-    /// Generate a fresh synthetic symbol name for an intermediate binding in a
-    /// nested destructure. The name is interned once and used as both the
-    /// destructure-field binding_name and the `VarRef` key for the child
-    /// destructure to reference the same local.
+    /// Generate a fresh synthetic symbol name for an intermediate binding
+    /// used by `try_elaborate_refutable_nested_match` when rewriting
+    /// refutable-nested variant arms. Interned once and reused as both the
+    /// destructure-field binding name and the `VarRef` key.
     fn fresh_nested_pat_name(&mut self) -> Spur {
         let n = self.nested_pat_counter;
         self.nested_pat_counter += 1;
         self.interner.get_or_intern(format!("__nested_pat_{}", n))
-    }
-
-    /// Generate a fresh synthetic symbol name for the tuple-match scrutinee
-    /// binding (ADR-0049 Phase 5a). Shares the nested-pat counter so names
-    /// are globally unique within a function.
-    fn fresh_match_scr_name(&mut self) -> Spur {
-        let n = self.nested_pat_counter;
-        self.nested_pat_counter += 1;
-        self.interner.get_or_intern(format!("__match_scr_{}", n))
-    }
-
-    /// Emit a `@panic("message")` call as a single RIR instruction with
-    /// type `Never`. Used by the tuple-match elaborator to terminate a
-    /// non-exhaustive if-chain at runtime (ADR-0049 Phase 5a).
-    fn emit_panic_call(&mut self, message: &str, span: gruel_span::Span) -> InstRef {
-        let msg = self.interner.get_or_intern(message);
-        let msg_const = self.rir.add_inst(Inst {
-            data: InstData::StringConst(msg),
-            span,
-        });
-        let (args_start, args_len) = self.rir.add_inst_refs(&[msg_const]);
-        let name = self.interner.get_or_intern_static("panic");
-        self.rir.add_inst(Inst {
-            data: InstData::Intrinsic {
-                name,
-                args_start,
-                args_len,
-            },
-            span,
-        })
     }
 
     /// Generate RIR from the AST.
@@ -629,34 +584,18 @@ impl<'a> AstGen<'a> {
                 })
             }
             Expr::Match(match_expr) => {
-                // ADR-0051 Phase 4b: when recursive lowering is on, skip the
-                // tuple- and refutable-nested elaborators entirely — sema +
-                // CFG consume `RirPattern::Tuple` / `Struct` / `Ident` arm
-                // roots directly. We still run the single-arm irrefutable
-                // elaborator because it rewrites to a let-destructure with
-                // semantics (drop ordering, field projections) that the
-                // recursive path does not reproduce yet.
+                // ADR-0051: single-arm irrefutable matches still rewrite to
+                // a let-destructure so drop ordering and field projections
+                // match `let pat = scr; body` semantics exactly.
                 if let Some(elaborated) = self.try_elaborate_irrefutable_match(match_expr) {
                     return elaborated;
                 }
 
-                // Multi-arm matches with tuple patterns at the top of any
-                // arm elaborate into a let-bound scrutinee plus an if/else
-                // chain over tuple projections (ADR-0049 Phase 5a). The
-                // recursive-lowering path supersedes this; skip it when on.
-                if !self.recursive_pattern_lowering
-                    && let Some(elaborated) = self.try_elaborate_tuple_match(match_expr)
-                {
-                    return elaborated;
-                }
-
-                // Arms with refutable nested sub-patterns in variant fields
-                // (e.g., `Some(Some(v))`) elaborate into nested matches that
-                // fall back to the outer match's wildcard catch-all body
-                // (ADR-0049 Phase 5b). This elaborator still runs with the
-                // recursive-lowering flag on: RIR's flat DataVariant /
-                // StructVariant bindings do not yet carry nested sub-patterns,
-                // so the new path cannot represent `Some(Some(x))` directly.
+                // Refutable nested variant sub-patterns like `Some(Some(v))`
+                // still need the whole-match rewrite: CFG's cascading
+                // dispatch does not yet project through enum payloads for
+                // nested discriminant tests. When this elaborator returns
+                // `Some`, it has already produced the final RIR.
                 if let Some(elaborated) = self.try_elaborate_refutable_nested_match(match_expr) {
                     return elaborated;
                 }
@@ -668,11 +607,10 @@ impl<'a> AstGen<'a> {
                     let mut nested: Vec<(Spur, Pattern)> = Vec::new();
                     let pattern = self.gen_match_arm_pattern(&arm.pattern, &mut nested);
                     let body = self.gen_expr(&arm.body);
-                    let body = if nested.is_empty() {
-                        body
-                    } else {
-                        self.wrap_match_arm_body_with_destructures(body, nested, arm.body.span())
-                    };
+                    debug_assert!(
+                        nested.is_empty(),
+                        "ADR-0051: nested-pattern capture is superseded by RirPatternBinding.sub_pattern"
+                    );
                     arms.push((pattern, body));
                 }
                 let (arms_start, arms_len) = self.rir.add_match_arms(&arms);
@@ -1758,312 +1696,6 @@ impl<'a> AstGen<'a> {
         self.interner.get_or_intern(format!("__refut_{}", n))
     }
 
-    /// Elaborate a match expression that has any tuple-root arm into a
-    /// let-bound scrutinee plus an if/else chain on tuple projections
-    /// (ADR-0049 Phase 5a).
-    ///
-    /// Each arm becomes `(predicate, body_with_bindings)`:
-    /// - wildcard/ident tuple elements produce no predicate (idents bind via
-    ///   a prepended let);
-    /// - literal tuple elements produce an equality check against the
-    ///   projected field.
-    ///
-    /// The chain falls through to the last arm's body when no earlier arm
-    /// matches. If the last arm itself has a predicate (non-exhaustive
-    /// match), a `@panic("non-exhaustive match")` is emitted as the final
-    /// else to keep the if-chain well-typed; sema will ideally catch
-    /// non-exhaustive cases separately, but this guarantees the lowering
-    /// is always sound.
-    fn try_elaborate_tuple_match(
-        &mut self,
-        match_expr: &gruel_parser::MatchExpr,
-    ) -> Option<InstRef> {
-        if !match_expr
-            .arms
-            .iter()
-            .any(|arm| matches!(&arm.pattern, Pattern::Tuple { .. }))
-        {
-            return None;
-        }
-
-        // Non-exhaustive tuple matches get a `@panic("non-exhaustive
-        // match")` at the tail of the if-chain so the chain stays
-        // well-typed and runtime-traps on uncovered values.
-        let last_arm = match_expr
-            .arms
-            .last()
-            .expect("parser rejects empty match arms");
-        let last_is_catch_all = is_tuple_match_arm_unconditional(&last_arm.pattern);
-
-        let match_span = match_expr.span;
-
-        // Bind the scrutinee to a fresh synthetic local that each arm can read
-        // without re-evaluating side effects.
-        let scr_name = self.fresh_match_scr_name();
-        let scr_val = self.gen_expr(&match_expr.scrutinee);
-        let scr_alloc = self.rir.add_inst(Inst {
-            data: InstData::Alloc {
-                directives_start: 0,
-                directives_len: 0,
-                name: Some(scr_name),
-                is_mut: false,
-                ty: None,
-                init: scr_val,
-            },
-            span: match_span,
-        });
-
-        // Build (predicate, body) for every arm.
-        let mut arm_parts: Vec<(Option<InstRef>, InstRef)> =
-            Vec::with_capacity(match_expr.arms.len());
-        for arm in &match_expr.arms {
-            let part = self.gen_tuple_match_arm(&arm.pattern, scr_name, &arm.body, arm.span);
-            arm_parts.push(part);
-        }
-
-        // Fold the arms into an if/else chain, back to front. When the
-        // last arm is unconditional it becomes the terminating
-        // else-branch directly; otherwise we emit a `@panic` fallback
-        // and wrap the last arm in a Branch that uses it.
-        let mut iter = arm_parts.into_iter().rev();
-        let (last_pred, last_body) = iter
-            .next()
-            .expect("match_expr.arms is non-empty (parser rejects empty match)");
-        let mut result = if last_is_catch_all {
-            debug_assert!(
-                last_pred.is_none(),
-                "last-arm unconditional check implies no predicate"
-            );
-            last_body
-        } else {
-            let cond = last_pred.expect("non-catch-all last arm produces a predicate");
-            let fallback = self.emit_panic_call("non-exhaustive match", match_span);
-            self.rir.add_inst(Inst {
-                data: InstData::Branch {
-                    cond,
-                    then_block: last_body,
-                    else_block: Some(fallback),
-                },
-                span: match_span,
-            })
-        };
-
-        for (pred, body) in iter {
-            let cond = pred.expect(
-                "earlier unconditional arm → subsequent arms are unreachable; \
-                 this is caught by AST pattern-validator, so we shouldn't reach here",
-            );
-            result = self.rir.add_inst(Inst {
-                data: InstData::Branch {
-                    cond,
-                    then_block: body,
-                    else_block: Some(result),
-                },
-                span: match_span,
-            });
-        }
-
-        // Wrap the scrutinee alloc + final if-chain in a Block.
-        let extra_start = self.rir.add_extra(&[scr_alloc.as_u32(), result.as_u32()]);
-        Some(self.rir.add_inst(Inst {
-            data: InstData::Block {
-                extra_start,
-                len: 2,
-            },
-            span: match_span,
-        }))
-    }
-
-    /// Generate `(predicate, body)` for a single arm of a tuple-root match
-    /// (ADR-0049 Phase 5a). The predicate is `None` when the pattern always
-    /// matches (wildcard, ident binding, or a tuple of all-irrefutable
-    /// leaves); bindings are prepended to the body as a Block.
-    fn gen_tuple_match_arm(
-        &mut self,
-        pattern: &Pattern,
-        scr_name: Spur,
-        body: &gruel_parser::Expr,
-        arm_span: gruel_span::Span,
-    ) -> (Option<InstRef>, InstRef) {
-        match pattern {
-            Pattern::Wildcard(_) => (None, self.gen_expr(body)),
-            Pattern::Ident { is_mut, name, span } => {
-                // `name => body` binds the whole scrutinee to `name`.
-                let scr_ref = self.rir.add_inst(Inst {
-                    data: InstData::VarRef { name: scr_name },
-                    span: *span,
-                });
-                let alloc = self.rir.add_inst(Inst {
-                    data: InstData::Alloc {
-                        directives_start: 0,
-                        directives_len: 0,
-                        name: Some(name.name),
-                        is_mut: *is_mut,
-                        ty: None,
-                        init: scr_ref,
-                    },
-                    span: *span,
-                });
-                let body_inst = self.gen_expr(body);
-                let extra_start = self.rir.add_extra(&[alloc.as_u32(), body_inst.as_u32()]);
-                let block = self.rir.add_inst(Inst {
-                    data: InstData::Block {
-                        extra_start,
-                        len: 2,
-                    },
-                    span: arm_span,
-                });
-                (None, block)
-            }
-            Pattern::Tuple { elems, span } => {
-                // `..` at any position matches the remaining tuple
-                // positions with no predicate and no binding. Prefix
-                // positions (before `..`) use their literal index;
-                // suffix positions (after `..`) use the `..end_N`
-                // marker and sema resolves the concrete index once the
-                // tuple's arity is known (ADR-0049 Phase 6).
-                let rest_pos = elems
-                    .iter()
-                    .position(|e| matches!(e, TupleElemPattern::Rest(_)));
-                let mut predicates: Vec<InstRef> = Vec::new();
-                let mut bindings: Vec<u32> = Vec::new();
-                for (i, elem) in elems.iter().enumerate() {
-                    if let TupleElemPattern::Rest(_) = elem {
-                        // Rest contributes no predicate/binding.
-                        continue;
-                    }
-                    let field_name = match rest_pos {
-                        Some(rp) if i > rp => {
-                            let from_end = elems.len() - 1 - i;
-                            self.interner.get_or_intern(format!("..end_{}", from_end))
-                        }
-                        _ => self.interner.get_or_intern(i.to_string()),
-                    };
-                    let scr_ref = self.rir.add_inst(Inst {
-                        data: InstData::VarRef { name: scr_name },
-                        span: *span,
-                    });
-                    let field_get = self.rir.add_inst(Inst {
-                        data: InstData::FieldGet {
-                            base: scr_ref,
-                            field: field_name,
-                        },
-                        span: *span,
-                    });
-                    match elem {
-                        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => {
-                            // Field dropped; scrutinee alloc owns the tuple
-                            // and its destructor will release everything.
-                        }
-                        TupleElemPattern::Pattern(Pattern::Ident {
-                            is_mut,
-                            name,
-                            span: id_span,
-                        }) => {
-                            let alloc = self.rir.add_inst(Inst {
-                                data: InstData::Alloc {
-                                    directives_start: 0,
-                                    directives_len: 0,
-                                    name: Some(name.name),
-                                    is_mut: *is_mut,
-                                    ty: None,
-                                    init: field_get,
-                                },
-                                span: *id_span,
-                            });
-                            bindings.push(alloc.as_u32());
-                        }
-                        TupleElemPattern::Pattern(Pattern::Int(lit)) => {
-                            let lit_const = self.rir.add_inst(Inst {
-                                data: InstData::IntConst(lit.value),
-                                span: lit.span,
-                            });
-                            let eq = self.rir.add_inst(Inst {
-                                data: InstData::Eq {
-                                    lhs: field_get,
-                                    rhs: lit_const,
-                                },
-                                span: lit.span,
-                            });
-                            predicates.push(eq);
-                        }
-                        TupleElemPattern::Pattern(Pattern::NegInt(lit)) => {
-                            let abs_const = self.rir.add_inst(Inst {
-                                data: InstData::IntConst(lit.value),
-                                span: lit.span,
-                            });
-                            let neg_const = self.rir.add_inst(Inst {
-                                data: InstData::Neg { operand: abs_const },
-                                span: lit.span,
-                            });
-                            let eq = self.rir.add_inst(Inst {
-                                data: InstData::Eq {
-                                    lhs: field_get,
-                                    rhs: neg_const,
-                                },
-                                span: lit.span,
-                            });
-                            predicates.push(eq);
-                        }
-                        TupleElemPattern::Pattern(Pattern::Bool(lit)) => {
-                            let lit_const = self.rir.add_inst(Inst {
-                                data: InstData::BoolConst(lit.value),
-                                span: lit.span,
-                            });
-                            let eq = self.rir.add_inst(Inst {
-                                data: InstData::Eq {
-                                    lhs: field_get,
-                                    rhs: lit_const,
-                                },
-                                span: lit.span,
-                            });
-                            predicates.push(eq);
-                        }
-                        TupleElemPattern::Pattern(other) => panic!(
-                            "tuple element shape {:?} in match arm not yet supported (ADR-0049 Phase 5b)",
-                            other
-                        ),
-                        TupleElemPattern::Rest(_) => unreachable!("handled at top of loop"),
-                    }
-                }
-
-                let predicate = match predicates.len() {
-                    0 => None,
-                    _ => {
-                        let mut iter = predicates.into_iter();
-                        let mut acc = iter.next().unwrap();
-                        for p in iter {
-                            acc = self.rir.add_inst(Inst {
-                                data: InstData::And { lhs: acc, rhs: p },
-                                span: *span,
-                            });
-                        }
-                        Some(acc)
-                    }
-                };
-
-                let body_inst = self.gen_expr(body);
-                let body_block = if bindings.is_empty() {
-                    body_inst
-                } else {
-                    bindings.push(body_inst.as_u32());
-                    let extra_start = self.rir.add_extra(&bindings);
-                    let len = bindings.len() as u32;
-                    self.rir.add_inst(Inst {
-                        data: InstData::Block { extra_start, len },
-                        span: arm_span,
-                    })
-                };
-
-                (predicate, body_block)
-            }
-            other => panic!(
-                "top-level {:?} in a multi-arm tuple-root match is not yet supported (ADR-0049)",
-                other
-            ),
-        }
-    }
-
     /// Lower a match-arm pattern to RIR, collecting nested sub-patterns for
     /// body elaboration (ADR-0049 Phase 4b).
     ///
@@ -2148,21 +1780,10 @@ impl<'a> AstGen<'a> {
                     span: *span,
                 }
             }
-            // Top-level Struct / Tuple / Ident match arms.
-            //
-            // Pre-ADR-0051 path: these are elaborated in `gen_expr` via
-            // `try_elaborate_irrefutable_match` (single-arm) or
-            // `try_elaborate_tuple_match` (multi-arm tuple) before ever
-            // reaching this function, so hitting one here means the
-            // elaborators declined and the shape is unsupported.
-            //
-            // ADR-0051 Phase 4b path: when `recursive_pattern_lowering` is
-            // on, sema + CFG consume nested arms directly. The `nested`
-            // out-param is unused for the recursive shape — we lower each
-            // sub-pattern recursively via `gen_match_arm_pattern` so any
-            // Struct / Tuple / Ident sub-pattern further down stays in the
-            // tree rather than being captured into a synthetic binding.
-            Pattern::Ident { name, is_mut, span } if self.recursive_pattern_lowering => {
+            // Top-level Struct / Tuple / Ident match arms — sema + CFG
+            // consume them directly as `RirPattern::Tuple` / `Struct` /
+            // `Ident`, recursively lowering sub-patterns along the way.
+            Pattern::Ident { name, is_mut, span } => {
                 let _ = nested;
                 RirPattern::Ident {
                     name: name.name,
@@ -2170,7 +1791,7 @@ impl<'a> AstGen<'a> {
                     span: *span,
                 }
             }
-            Pattern::Tuple { elems, span } if self.recursive_pattern_lowering => {
+            Pattern::Tuple { elems, span } => {
                 // Record the source index of any `..` rest marker so sema
                 // can expand it to wildcards filling the scrutinee's arity
                 // (ADR-0049 Phase 6 semantics preserved). The marker is
@@ -2198,7 +1819,7 @@ impl<'a> AstGen<'a> {
                 type_name,
                 fields,
                 span,
-            } if self.recursive_pattern_lowering => {
+            } => {
                 // AST represents `..` as a `FieldPattern` with
                 // `field_name = None`; capture that as a top-level
                 // `has_rest` boolean and drop those fields from the
@@ -2234,20 +1855,13 @@ impl<'a> AstGen<'a> {
                     span: *span,
                 }
             }
-            Pattern::Struct { .. } | Pattern::Tuple { .. } | Pattern::Ident { .. } => {
-                let _ = nested;
-                panic!(
-                    "top-level {:?} pattern in a multi-arm match is not yet supported (ADR-0049 Phase 5)",
-                    pattern
-                );
-            }
         }
     }
 
-    /// Convert a match-arm tuple-element sub-pattern into the RIR binding shape
-    /// used by `DataVariant`. Leaves (Wildcard, Ident) convert directly; irrefutable
-    /// nested destructures (Struct, Tuple) are captured via a synthetic binding
-    /// whose name is recorded in `nested` for body elaboration (ADR-0049 Phase 4b).
+    /// Convert a match-arm tuple-element sub-pattern into the RIR binding
+    /// shape used by `DataVariant`. ADR-0051: any refutable/irrefutable
+    /// nested sub-pattern is stored directly on the binding's `sub_pattern`
+    /// slot; only bare names and wildcards produce flat bindings.
     fn tuple_elem_to_rir_binding_or_capture(
         &mut self,
         elem: &TupleElemPattern,
@@ -2258,25 +1872,26 @@ impl<'a> AstGen<'a> {
                 is_wildcard: true,
                 is_mut: false,
                 name: None,
+                sub_pattern: None,
             },
             TupleElemPattern::Pattern(Pattern::Ident { is_mut, name, .. }) => RirPatternBinding {
                 is_wildcard: false,
                 is_mut: *is_mut,
                 name: Some(name.name),
+                sub_pattern: None,
             },
-            TupleElemPattern::Pattern(sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. })) => {
-                let fresh = self.fresh_nested_pat_name();
-                nested.push((fresh, sub.clone()));
+            TupleElemPattern::Pattern(sub) => {
+                // Any other sub-pattern (refutable or otherwise) rides on
+                // the binding's nested sub_pattern slot. `gen_match_arm_pattern`
+                // recursively turns AST into RIR.
+                let sub_rir = self.gen_match_arm_pattern(sub, nested);
                 RirPatternBinding {
                     is_wildcard: false,
                     is_mut: false,
-                    name: Some(fresh),
+                    name: None,
+                    sub_pattern: Some(Box::new(sub_rir)),
                 }
             }
-            TupleElemPattern::Pattern(other) => panic!(
-                "refutable nested sub-patterns in match arms not yet supported (ADR-0049 Phase 5); got {:?}",
-                other
-            ),
             TupleElemPattern::Rest(_) => {
                 // `..` in a data-variant pattern: emit a marker binding
                 // with the sentinel name `..`. Sema detects this marker
@@ -2286,6 +1901,7 @@ impl<'a> AstGen<'a> {
                     is_wildcard: true,
                     is_mut: false,
                     name: Some(self.interner.get_or_intern_static("..")),
+                    sub_pattern: None,
                 }
             }
         }
@@ -2306,6 +1922,7 @@ impl<'a> AstGen<'a> {
                 is_wildcard: true,
                 is_mut: false,
                 name: Some(self.interner.get_or_intern_static("..")),
+                sub_pattern: None,
             };
         };
         match &fb.sub {
@@ -2314,11 +1931,13 @@ impl<'a> AstGen<'a> {
                 is_wildcard: false,
                 is_mut: fb.is_mut,
                 name: Some(name.name),
+                sub_pattern: None,
             },
             Some(Pattern::Wildcard(_)) => RirPatternBinding {
                 is_wildcard: true,
                 is_mut: false,
                 name: None,
+                sub_pattern: None,
             },
             Some(Pattern::Ident {
                 is_mut,
@@ -2328,53 +1947,18 @@ impl<'a> AstGen<'a> {
                 is_wildcard: false,
                 is_mut: fb.is_mut || *is_mut,
                 name: Some(bind_name.name),
+                sub_pattern: None,
             },
-            Some(sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. })) => {
-                let fresh = self.fresh_nested_pat_name();
-                nested.push((fresh, sub.clone()));
+            Some(sub) => {
+                let sub_rir = self.gen_match_arm_pattern(sub, nested);
                 RirPatternBinding {
                     is_wildcard: false,
                     is_mut: false,
-                    name: Some(fresh),
+                    name: None,
+                    sub_pattern: Some(Box::new(sub_rir)),
                 }
             }
-            Some(other) => panic!(
-                "refutable nested sub-patterns in match arms not yet supported (ADR-0049 Phase 5); got {:?}",
-                other
-            ),
         }
-    }
-
-    /// Wrap a match-arm body with let-destructure statements for each nested
-    /// sub-pattern captured during pattern lowering (ADR-0049 Phase 4b).
-    /// Each `(fresh_name, sub_pattern)` pair lowers to one or more RIR
-    /// StructDestructure instructions consuming a `VarRef` to `fresh_name`.
-    /// The original body becomes the block's value.
-    fn wrap_match_arm_body_with_destructures(
-        &mut self,
-        body: InstRef,
-        nested: Vec<(Spur, Pattern)>,
-        arm_span: gruel_span::Span,
-    ) -> InstRef {
-        let mut stmts: Vec<u32> = Vec::new();
-        for (fresh_name, sub_pattern) in nested {
-            let var_ref = self.rir.add_inst(Inst {
-                data: InstData::VarRef { name: fresh_name },
-                span: sub_pattern.span(),
-            });
-            let mut emitted = Vec::new();
-            self.emit_let_destructure_into(&sub_pattern, var_ref, sub_pattern.span(), &mut emitted);
-            for r in emitted {
-                stmts.push(r.as_u32());
-            }
-        }
-        stmts.push(body.as_u32());
-        let extra_start = self.rir.add_extra(&stmts);
-        let len = stmts.len() as u32;
-        self.rir.add_inst(Inst {
-            data: InstData::Block { extra_start, len },
-            span: arm_span,
-        })
     }
 
     fn gen_block(&mut self, block: &gruel_parser::BlockExpr) -> InstRef {
@@ -2775,20 +2359,6 @@ fn pattern_has_refutable_nested_sub(pat: &Pattern) -> bool {
         Pattern::StructVariant { fields, .. } => fields.iter().any(|fp| match &fp.sub {
             Some(sub) => is_refutable_variant_sub(sub),
             None => false,
-        }),
-        _ => false,
-    }
-}
-
-/// Whether a top-level tuple-match arm pattern is unconditional — i.e. it
-/// matches every possible scrutinee value, so no if-condition is needed.
-/// Wildcard, Ident, or a tuple of all-irrefutable leaves qualify.
-fn is_tuple_match_arm_unconditional(pat: &Pattern) -> bool {
-    match pat {
-        Pattern::Wildcard(_) | Pattern::Ident { .. } => true,
-        Pattern::Tuple { elems, .. } => elems.iter().all(|e| match e {
-            TupleElemPattern::Pattern(p) => is_irrefutable_destructure(p),
-            TupleElemPattern::Rest(_) => true,
         }),
         _ => false,
     }
