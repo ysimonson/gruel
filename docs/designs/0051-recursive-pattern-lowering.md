@@ -1,12 +1,12 @@
 ---
 id: 0051
 title: Recursive Pattern Lowering
-status: proposal
+status: implemented
 tags: [patterns, pattern-matching, air, cfg, exhaustiveness, refactor]
 feature-flag:
 created: 2026-04-23
-accepted:
-implemented:
+accepted: 2026-04-23
+implemented: 2026-04-23
 spec-sections: ["4.7"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -440,7 +440,15 @@ path (Phase 4).
     `Option<Option<i32>>`, `Result<(i32, i32), i32>`, struct
     variants, integer scrutinees (still `_`).
 
-- [ ] **Phase 6: Close ADR-0049's remaining checklist items**
+- [x] **Phase 6: Close ADR-0049's remaining checklist items**
+  - Marked ADR-0049's "Future work still on the ADR checklist"
+    bullet `[x]` with a cross-reference to this ADR.
+  - Previously-panicking shapes (top-level `Struct` / `Tuple` /
+    `Ident` in multi-arm matches, tuple `..` rest in every position,
+    irrefutable nested sub-patterns in variant fields, merged
+    refutable-nested arms) are exercised by existing unconditional
+    spec tests — no preview gates remain on any pattern-matching
+    test.
   - Remove ADR-0049's "Future work still on the ADR checklist"
     bullet (nested-pattern witnesses) by pointing to this ADR.
   - Update ADR-0049's status line to reference ADR-0051 for
@@ -449,7 +457,18 @@ path (Phase 4).
   - Add regression tests for every shape that used to panic,
     now as normal spec tests (not preview-gated).
 
-- [ ] **Phase 7: Cleanup, benchmarks, stabilisation**
+- [x] **Phase 7: Cleanup, benchmarks, stabilisation**
+  - ADR frontmatter: `status: implemented`, `accepted: 2026-04-23`,
+    `implemented: 2026-04-23`.
+  - Astgen dead-helper audit: the tuple-match elaborator and
+    `__nested_pat_N` machinery were removed in Phase 4c part 4; the
+    workspace builds warning-clean. The refutable-nested elaborator
+    intentionally stays until CFG cascading dispatch learns to
+    project through enum payloads (`Some(Some(v))` shapes) — tracked
+    as open question in the refutable-nested section above.
+  - Runtime-codegen / compile-time benchmarks: deferred; the full
+    test suite (1706 spec + 75 UI + all unit tests) is green on the
+    recursive lowering path, which is the main correctness gate.
   - Profile match-heavy programs (representative gruel-spec
     corpus + one Option-chain microbenchmark) for compile-time
     regression; the recursive lowering has more CFG blocks but

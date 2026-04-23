@@ -602,15 +602,19 @@ ship without the preview gate since it's a bug fix, not a new feature.
     exhaustive-no-catch-all shapes, multi-field data-variant merge,
     all-refutable multi-field merge, and struct-variant merge.
 
-- [ ] **Future work still on the ADR checklist**
-  - Nested-pattern witnesses in exhaustiveness diagnostics. The
-    exhaustiveness checker runs on the *elaborated* match, so for
-    shared-outer merged arms the missing patterns are reported on the
-    synthesised inner match (`match __refut_0 { ... }`) rather than
-    reconstructed as user-visible nested patterns (`Some(None)` etc.).
-    Closing this would require threading source patterns alongside the
-    elaboration or adopting the recursive `AirPattern` approach the
-    ADR originally described.
+- [x] **Future work still on the ADR checklist** — closed by
+      [ADR-0051](0051-recursive-pattern-lowering.md): the recursive
+      `AirPattern` pipeline plus the Maranget usefulness algorithm in
+      sema now emit nested witnesses like `Some(None)` and
+      `Outer::Left(Inner::B)` directly from the user's pattern tree.
+      ADR-0051 also retired the multi-arm tuple elaborator
+      (`try_elaborate_tuple_match`) and moved nested-sub-pattern
+      handling off the `__nested_pat_N` synthesis machinery onto a new
+      `RirPatternBinding.sub_pattern` slot.
+      `try_elaborate_refutable_nested_match` remains on the default
+      path — CFG cascading dispatch does not yet project through enum
+      payloads, so `Some(Some(v))`-style arms still need the
+      whole-match rewrite. See ADR-0051 for the roadmap.
 
 ## Recently closed follow-ups
 

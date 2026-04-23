@@ -1025,8 +1025,8 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // ADR-0051 Phase 2: lower_pattern produces recursive AirPattern trees
-    // when `recursive_pattern_lowering` is set on Sema.
+    // ADR-0051: lower_pattern produces recursive AirPattern trees for
+    // every match arm shape (the default path after Phase 4c).
     // ------------------------------------------------------------------
     mod recursive_pattern_lowering {
         use super::*;
