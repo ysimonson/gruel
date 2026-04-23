@@ -159,3 +159,33 @@ fn main() -> i32 {
     }
 }
 ```
+
+## Nested Patterns
+
+{{ rule(id="4.7:23", cat="normative") }}
+
+A match-arm pattern may contain sub-patterns at each binding position of a
+struct variant, tuple variant, or struct pattern. Each sub-pattern is applied
+to the field value at that position.
+
+{{ rule(id="4.7:24", cat="normative") }}
+
+Irrefutable sub-patterns (wildcards, name bindings, or nested struct/tuple
+destructures consisting only of irrefutable leaves) in a variant field
+position are allowed and introduce bindings for any named leaves; the outer
+arm's match behaviour is unchanged by the sub-pattern.
+
+{{ rule(id="4.7:25") }}
+
+```gruel
+struct Point { x: i32, y: i32 }
+enum PointOpt { Some(Point), None }
+
+fn main() -> i32 {
+    let o = PointOpt::Some(Point { x: 10, y: 32 });
+    match o {
+        PointOpt::Some(Point { x, y }) => x + y,
+        PointOpt::None => 0,
+    }
+}
+```

@@ -511,25 +511,44 @@ ship without the preview gate since it's a bug fix, not a new feature.
     struct-in-struct, tuple-of-tuples, struct-in-tuple, tuple-in-struct, and
     nested wildcard-drop.
 
-- [ ] **Phase 4b: Nested patterns in match arms (deferred)**
-  - Extend `AirPattern` with `Tuple`, `Struct`, `EnumDataVariant` (with
-    sub-patterns), and `Bind` variants; update encode/decode in `inst.rs`.
-  - Sema match-arm lowering walks `Pattern` and emits the recursive
-    `AirPattern`. Without this, nested patterns in match arms still trip the
-    astgen panic.
-  - Bundled with Phase 5 because the AIR reshape and the CFG recursive dispatch
-    are tightly coupled — the cleanest commit lands them together.
+- [x] **Phase 4b: Nested irrefutable patterns in match arms via astgen elaboration**
+  - Mirrors Phase 4a's approach: nested sub-patterns in match arms are
+    elaborated at astgen time into existing flat shapes, keeping RIR / AIR /
+    CFG untouched.
+  - `AstGen::gen_match_arm_pattern` walks each arm's pattern. For any
+    variant-field sub-pattern that is itself a `Struct` or `Tuple`
+    destructure, a fresh `__nested_pat_N` binding replaces the sub-pattern
+    in the RIR match pattern, and the sub-pattern is captured for body
+    elaboration. After the arm body is generated, it is wrapped in a Block
+    that prepends `emit_let_destructure_into` calls against `VarRef`s to
+    each synthetic binding.
+  - Top-level `Struct`, `Tuple`, and `Ident` patterns in single-arm matches
+    are elaborated in `try_elaborate_irrefutable_match`: the whole match
+    becomes `{ let <pattern> = scrutinee; body }` (or `{ let name = scr;
+    body }` for `Ident`). Multi-arm matches with a top-level
+    Struct/Tuple/Ident pattern still panic — those require recursive CFG
+    dispatch (Phase 5).
+  - Refutable nested sub-patterns (literal, unit variant, or data/struct
+    variant appearing inside a variant field position) continue to panic
+    with an explicit "ADR-0049 Phase 5" message. Those require true
+    recursive pattern dispatch and are deferred.
+  - Spec rules 4.7:23, 4.7:24, 4.7:25 document the nested-patterns
+    semantics for match arms. Four positive spec tests in
+    `expressions/match.toml` exercise struct-in-data-variant, struct-in-
+    struct-variant, top-level struct, and wildcard-in-variant-field under
+    the `nested_patterns` preview.
 
-- [ ] **Phase 5: CFG + codegen + exhaustiveness**
-  - Recursive match-dispatch lowering: at each refutable node emit the appropriate
-    switch / icmp + branch; at each irrefutable wrapper emit projections and continue.
-  - Binding materialisation at leaves (StorageLive + Store into new locals), mirroring
-    the existing ADR-0037 path for flat variant bindings.
-  - Wildcard-at-any-depth emits an immediate Drop when the leaf type has a destructor.
-  - `forget_local_slot` for the scrutinee root and for synthetic intermediates
-    consumed by sub-destructures.
-  - Extend the exhaustiveness checker to descend into sub-patterns (reuse the
-    usefulness algorithm with a recursive witness constructor).
+- [ ] **Phase 5: Tuple / refutable nested patterns + exhaustiveness**
+  - Tuple patterns at the match arm root (`match (a, b) { (0, 0) => ...,
+    _ => ... }`): needs either recursive CFG dispatch or an astgen
+    elaboration into an if-chain on tuple projections.
+  - Refutable nested sub-patterns (`Some(Some(v))`, `Some(0)`): require
+    cascading switch dispatch — cannot be elaborated to flat match without
+    arm duplication.
+  - Extend the exhaustiveness checker to consider nested pattern
+    combinations (witnesses become nested patterns in diagnostics).
+  - The ADR's originally-planned approach — recursive `AirPattern` plus
+    recursive CFG descent — remains the right direction for these shapes.
 
 - [ ] **Phase 6: Rest patterns (`..`)**
   - Parser: accept `..` inside tuple / struct / variant / data-variant element lists;

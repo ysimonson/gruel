@@ -584,16 +584,29 @@ impl<'a> AstGen<'a> {
                 })
             }
             Expr::Match(match_expr) => {
+                // Top-level struct / tuple / ident patterns at the match arm
+                // root are irrefutable — for a match expression with only such
+                // an arm, elaborate the whole thing into a let-destructure
+                // around the arm body. This keeps existing RIR shapes unchanged
+                // while allowing nested pattern syntax.
+                if let Some(elaborated) = self.try_elaborate_irrefutable_match(match_expr) {
+                    return elaborated;
+                }
+
                 let scrutinee = self.gen_expr(&match_expr.scrutinee);
-                let arms: Vec<_> = match_expr
-                    .arms
-                    .iter()
-                    .map(|arm| {
-                        let pattern = self.gen_pattern(&arm.pattern);
-                        let body = self.gen_expr(&arm.body);
-                        (pattern, body)
-                    })
-                    .collect();
+                let mut arms: Vec<(RirPattern, InstRef)> =
+                    Vec::with_capacity(match_expr.arms.len());
+                for arm in &match_expr.arms {
+                    let mut nested: Vec<(Spur, Pattern)> = Vec::new();
+                    let pattern = self.gen_match_arm_pattern(&arm.pattern, &mut nested);
+                    let body = self.gen_expr(&arm.body);
+                    let body = if nested.is_empty() {
+                        body
+                    } else {
+                        self.wrap_match_arm_body_with_destructures(body, nested, arm.body.span())
+                    };
+                    arms.push((pattern, body));
+                }
                 let (arms_start, arms_len) = self.rir.add_match_arms(&arms);
 
                 self.rir.add_inst(Inst {
@@ -1006,7 +1019,89 @@ impl<'a> AstGen<'a> {
         }
     }
 
-    fn gen_pattern(&mut self, pattern: &Pattern) -> RirPattern {
+    /// Elaborate a match expression whose single arm has an irrefutable
+    /// top-level pattern into a block containing a let-destructure over the
+    /// scrutinee plus the arm body (ADR-0049 Phase 4b).
+    ///
+    /// Covers `match x { name => body }`, `match p { Point { x, y } => body }`,
+    /// and `match t { (a, b) => body }` — single-arm matches where the pattern
+    /// binds the scrutinee without branching. For multi-arm or refutable
+    /// top-level patterns, returns `None` and the caller falls back to the
+    /// normal match lowering.
+    fn try_elaborate_irrefutable_match(
+        &mut self,
+        match_expr: &gruel_parser::MatchExpr,
+    ) -> Option<InstRef> {
+        if match_expr.arms.len() != 1 {
+            return None;
+        }
+        let arm = &match_expr.arms[0];
+        match &arm.pattern {
+            Pattern::Ident { is_mut, name, span } => {
+                // `match x { name => body }` => `{ let name = x; body }`
+                let init = self.gen_expr(&match_expr.scrutinee);
+                let alloc = self.rir.add_inst(Inst {
+                    data: InstData::Alloc {
+                        directives_start: 0,
+                        directives_len: 0,
+                        name: Some(name.name),
+                        is_mut: *is_mut,
+                        ty: None,
+                        init,
+                    },
+                    span: *span,
+                });
+                let body = self.gen_expr(&arm.body);
+                let extra_start = self.rir.add_extra(&[alloc.as_u32(), body.as_u32()]);
+                Some(self.rir.add_inst(Inst {
+                    data: InstData::Block {
+                        extra_start,
+                        len: 2,
+                    },
+                    span: match_expr.span,
+                }))
+            }
+            Pattern::Struct { .. } | Pattern::Tuple { .. } => {
+                // `match x { <pattern> => body }` => `{ let <pattern> = x; body }`
+                let init = self.gen_expr(&match_expr.scrutinee);
+                let mut stmts: Vec<u32> = Vec::new();
+                let mut emitted = Vec::new();
+                self.emit_let_destructure_into(
+                    &arm.pattern,
+                    init,
+                    arm.pattern.span(),
+                    &mut emitted,
+                );
+                for r in emitted {
+                    stmts.push(r.as_u32());
+                }
+                let body = self.gen_expr(&arm.body);
+                stmts.push(body.as_u32());
+                let extra_start = self.rir.add_extra(&stmts);
+                let len = stmts.len() as u32;
+                Some(self.rir.add_inst(Inst {
+                    data: InstData::Block { extra_start, len },
+                    span: match_expr.span,
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    /// Lower a match-arm pattern to RIR, collecting nested sub-patterns for
+    /// body elaboration (ADR-0049 Phase 4b).
+    ///
+    /// When a variant field carries an irrefutable nested destructure
+    /// (`Some((a, b))`, `Some(Point { x, y })`), the sub-pattern is replaced
+    /// with a fresh synthetic binding in the RIR pattern, and the
+    /// `(fresh_name, sub_pattern)` pair is appended to `nested`. The caller
+    /// prepends a `let <sub_pattern> = <fresh_name>;` to the arm body so the
+    /// user's bindings come into scope.
+    fn gen_match_arm_pattern(
+        &mut self,
+        pattern: &Pattern,
+        nested: &mut Vec<(Spur, Pattern)>,
+    ) -> RirPattern {
         match pattern {
             Pattern::Wildcard(span) => RirPattern::Wildcard(*span),
             Pattern::Int(lit) => RirPattern::Int(lit.value as i64, lit.span),
@@ -1031,7 +1126,10 @@ impl<'a> AstGen<'a> {
                 span,
             } => {
                 let module = base.as_ref().map(|b| self.gen_expr(b));
-                let rir_bindings = fields.iter().map(tuple_elem_to_rir_binding).collect();
+                let rir_bindings = fields
+                    .iter()
+                    .map(|elem| self.tuple_elem_to_rir_binding_or_capture(elem, nested))
+                    .collect();
                 RirPattern::DataVariant {
                     module,
                     type_name: type_name.name,
@@ -1054,9 +1152,9 @@ impl<'a> AstGen<'a> {
                         field_name: fb
                             .field_name
                             .as_ref()
-                            .expect("nested/rest field patterns not yet emitted in Phase 1")
+                            .expect("rest `..` field patterns are a Phase 6 feature")
                             .name,
-                        binding: field_pattern_to_rir_binding(fb),
+                        binding: self.field_pattern_to_rir_binding_or_capture(fb, nested),
                     })
                     .collect();
                 RirPattern::StructVariant {
@@ -1067,16 +1165,138 @@ impl<'a> AstGen<'a> {
                     span: *span,
                 }
             }
-            // These variants can only appear inside a let-pattern (Struct, Tuple) or as
-            // top-level/nested leaves (Ident). Match-arm patterns reach this branch only
-            // if sema accepted something the Phase-1 parser wouldn't emit at this level.
-            Pattern::Ident { .. } | Pattern::Struct { .. } | Pattern::Tuple { .. } => {
-                unreachable!(
-                    "gen_pattern called on non-match Pattern variant: {:?}; these flow through gen_statement",
+            // Top-level Struct/Tuple/Ident patterns are elaborated in
+            // `gen_expr` via `try_elaborate_irrefutable_match` before reaching
+            // this lowering, so a multi-arm match with one of these at the
+            // top is an unsupported shape (would need recursive CFG dispatch
+            // — Phase 5). The `nested` parameter is unused on this branch.
+            Pattern::Struct { .. } | Pattern::Tuple { .. } | Pattern::Ident { .. } => {
+                let _ = nested;
+                panic!(
+                    "top-level {:?} pattern in a multi-arm match is not yet supported (ADR-0049 Phase 5)",
                     pattern
                 );
             }
         }
+    }
+
+    /// Convert a match-arm tuple-element sub-pattern into the RIR binding shape
+    /// used by `DataVariant`. Leaves (Wildcard, Ident) convert directly; irrefutable
+    /// nested destructures (Struct, Tuple) are captured via a synthetic binding
+    /// whose name is recorded in `nested` for body elaboration (ADR-0049 Phase 4b).
+    fn tuple_elem_to_rir_binding_or_capture(
+        &mut self,
+        elem: &TupleElemPattern,
+        nested: &mut Vec<(Spur, Pattern)>,
+    ) -> RirPatternBinding {
+        match elem {
+            TupleElemPattern::Pattern(Pattern::Wildcard(_)) => RirPatternBinding {
+                is_wildcard: true,
+                is_mut: false,
+                name: None,
+            },
+            TupleElemPattern::Pattern(Pattern::Ident { is_mut, name, .. }) => RirPatternBinding {
+                is_wildcard: false,
+                is_mut: *is_mut,
+                name: Some(name.name),
+            },
+            TupleElemPattern::Pattern(sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. })) => {
+                let fresh = self.fresh_nested_pat_name();
+                nested.push((fresh, sub.clone()));
+                RirPatternBinding {
+                    is_wildcard: false,
+                    is_mut: false,
+                    name: Some(fresh),
+                }
+            }
+            TupleElemPattern::Pattern(other) => panic!(
+                "refutable nested sub-patterns in match arms not yet supported (ADR-0049 Phase 5); got {:?}",
+                other
+            ),
+            TupleElemPattern::Rest(_) => {
+                panic!("rest patterns `..` are a Phase 6 feature")
+            }
+        }
+    }
+
+    /// Convert a match-arm struct-variant field-pattern into the RIR binding
+    /// shape. Same rules as `tuple_elem_to_rir_binding_or_capture`.
+    fn field_pattern_to_rir_binding_or_capture(
+        &mut self,
+        fb: &FieldPattern,
+        nested: &mut Vec<(Spur, Pattern)>,
+    ) -> RirPatternBinding {
+        let name = fb
+            .field_name
+            .as_ref()
+            .expect("rest `..` field patterns are a Phase 6 feature");
+        match &fb.sub {
+            None => RirPatternBinding {
+                // Shorthand: `field` binds a local named `field`.
+                is_wildcard: false,
+                is_mut: fb.is_mut,
+                name: Some(name.name),
+            },
+            Some(Pattern::Wildcard(_)) => RirPatternBinding {
+                is_wildcard: true,
+                is_mut: false,
+                name: None,
+            },
+            Some(Pattern::Ident {
+                is_mut,
+                name: bind_name,
+                ..
+            }) => RirPatternBinding {
+                is_wildcard: false,
+                is_mut: fb.is_mut || *is_mut,
+                name: Some(bind_name.name),
+            },
+            Some(sub @ (Pattern::Struct { .. } | Pattern::Tuple { .. })) => {
+                let fresh = self.fresh_nested_pat_name();
+                nested.push((fresh, sub.clone()));
+                RirPatternBinding {
+                    is_wildcard: false,
+                    is_mut: false,
+                    name: Some(fresh),
+                }
+            }
+            Some(other) => panic!(
+                "refutable nested sub-patterns in match arms not yet supported (ADR-0049 Phase 5); got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Wrap a match-arm body with let-destructure statements for each nested
+    /// sub-pattern captured during pattern lowering (ADR-0049 Phase 4b).
+    /// Each `(fresh_name, sub_pattern)` pair lowers to one or more RIR
+    /// StructDestructure instructions consuming a `VarRef` to `fresh_name`.
+    /// The original body becomes the block's value.
+    fn wrap_match_arm_body_with_destructures(
+        &mut self,
+        body: InstRef,
+        nested: Vec<(Spur, Pattern)>,
+        arm_span: gruel_span::Span,
+    ) -> InstRef {
+        let mut stmts: Vec<u32> = Vec::new();
+        for (fresh_name, sub_pattern) in nested {
+            let var_ref = self.rir.add_inst(Inst {
+                data: InstData::VarRef { name: fresh_name },
+                span: sub_pattern.span(),
+            });
+            let mut emitted = Vec::new();
+            self.emit_let_destructure_into(&sub_pattern, var_ref, sub_pattern.span(), &mut emitted);
+            for r in emitted {
+                stmts.push(r.as_u32());
+            }
+        }
+        stmts.push(body.as_u32());
+        let extra_start = self.rir.add_extra(&stmts);
+        let len = stmts.len() as u32;
+        self.rir.add_inst(Inst {
+            data: InstData::Block { extra_start, len },
+            span: arm_span,
+        })
     }
 
     fn gen_block(&mut self, block: &gruel_parser::BlockExpr) -> InstRef {
@@ -1391,71 +1611,15 @@ impl<'a> AstGen<'a> {
     }
 }
 
-/// Convert a match-arm tuple-element sub-pattern into the RIR binding shape used by
-/// `DataVariant` / `StructVariant`. Phase-1 restriction: sub-patterns are leaves
-/// (Wildcard / Ident).
-fn tuple_elem_to_rir_binding(elem: &TupleElemPattern) -> RirPatternBinding {
-    match elem {
-        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => RirPatternBinding {
-            is_wildcard: true,
-            is_mut: false,
-            name: None,
-        },
-        TupleElemPattern::Pattern(Pattern::Ident { is_mut, name, .. }) => RirPatternBinding {
-            is_wildcard: false,
-            is_mut: *is_mut,
-            name: Some(name.name),
-        },
-        TupleElemPattern::Pattern(other) => panic!(
-            "nested patterns in data variants not yet supported (Phase 1); got {:?}",
-            other
-        ),
-        TupleElemPattern::Rest(_) => {
-            panic!("rest patterns not yet supported (Phase 6)")
-        }
-    }
-}
-
-/// Convert a struct-variant field-pattern into the RIR binding shape. Phase-1
-/// restriction: sub-pattern is `None` (shorthand) or a leaf Pattern::Ident/Wildcard.
-fn field_pattern_to_rir_binding(fb: &FieldPattern) -> RirPatternBinding {
-    let name = fb
-        .field_name
-        .as_ref()
-        .expect("rest `..` field patterns not yet supported (Phase 6)");
-    match &fb.sub {
-        None => RirPatternBinding {
-            // Shorthand: `field` binds a local named `field`.
-            is_wildcard: false,
-            is_mut: fb.is_mut,
-            name: Some(name.name),
-        },
-        Some(Pattern::Wildcard(_)) => RirPatternBinding {
-            is_wildcard: true,
-            is_mut: false,
-            name: None,
-        },
-        Some(Pattern::Ident {
-            is_mut,
-            name: bind_name,
-            ..
-        }) => RirPatternBinding {
-            is_wildcard: false,
-            is_mut: fb.is_mut || *is_mut,
-            name: Some(bind_name.name),
-        },
-        Some(other) => panic!(
-            "nested patterns in struct variants not yet supported (Phase 1); got {:?}",
-            other
-        ),
-    }
-}
-
-// Note: the flat-lowering helpers `field_pattern_to_rir_destructure_field` and
-// `tuple_elem_to_rir_destructure_field` were superseded by
-// `AstGen::emit_let_destructure` in ADR-0049 Phase 4, which handles both flat
-// and nested destructure shapes uniformly by emitting trees of StructDestructure
-// instructions with intermediate synthetic bindings.
+// Note: the flat-lowering helpers `field_pattern_to_rir_destructure_field`,
+// `tuple_elem_to_rir_destructure_field`, `tuple_elem_to_rir_binding`, and
+// `field_pattern_to_rir_binding` were superseded by
+// `AstGen::emit_let_destructure` (Phase 4) and
+// `AstGen::tuple_elem_to_rir_binding_or_capture` /
+// `AstGen::field_pattern_to_rir_binding_or_capture` (Phase 4b), which handle
+// nested destructure and variant sub-pattern shapes uniformly by emitting
+// trees of StructDestructure instructions or capturing nested sub-patterns for
+// arm-body elaboration.
 
 #[cfg(test)]
 mod tests {
