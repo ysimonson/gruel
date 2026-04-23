@@ -5,9 +5,7 @@
 
 use lasso::{Spur, ThreadedRodeo};
 
-/// Known type intrinsics that take a type argument rather than an expression.
-/// These intrinsics operate on types at compile time (e.g., @size_of(i32)).
-const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of", "type_name", "type_info"];
+use gruel_intrinsics::is_type_intrinsic;
 use gruel_parser::ast::{ConstDecl, DropFn, FieldPattern, Ident as AstIdent, TupleElemPattern};
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
@@ -757,9 +755,9 @@ impl<'a> AstGen<'a> {
                 let name = intrinsic.name.name; // Already a Spur
                 let intrinsic_name_str = self.interner.resolve(&name);
 
-                let is_type_intrinsic = TYPE_INTRINSICS.contains(&intrinsic_name_str);
+                let is_type = is_type_intrinsic(intrinsic_name_str);
 
-                if is_type_intrinsic && intrinsic.args.len() == 1 {
+                if is_type && intrinsic.args.len() == 1 {
                     // Handle explicit type argument
                     if let IntrinsicArg::Type(ty) = &intrinsic.args[0] {
                         let type_arg = self.intern_type(ty);

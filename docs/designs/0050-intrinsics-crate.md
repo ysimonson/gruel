@@ -112,7 +112,7 @@ The hand-maintained quick-reference table in the spec is replaced by the generat
   - Unit tests asserting (a) no duplicate names, (b) every `IntrinsicId` variant appears exactly once in the slice.
   - Crate compiles, no consumers yet.
 
-- [ ] **Phase 2: Wire RIR astgen to the registry**
+- [x] **Phase 2: Wire RIR astgen to the registry**
   - Depend on `gruel-intrinsics` from `gruel-rir`.
   - Replace hard-coded `TYPE_INTRINSICS` in `astgen.rs:10` with a registry lookup.
   - Behavior must be byte-identical — confirm with spec-test suite.
