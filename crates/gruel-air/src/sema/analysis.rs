@@ -7914,6 +7914,7 @@ impl<'a> Sema<'a> {
             // Get expected type from param
             let expected_ty = match assoc_fn.params[i].ty {
                 BuiltinParamType::U64 => Type::U64,
+                BuiltinParamType::Usize => Type::USIZE,
                 BuiltinParamType::U8 => Type::U8,
                 BuiltinParamType::Bool => Type::BOOL,
                 BuiltinParamType::SelfType => Type::new_struct(struct_id),
@@ -7938,6 +7939,7 @@ impl<'a> Sema<'a> {
         let return_ty = match assoc_fn.return_ty {
             BuiltinReturnType::Unit => Type::UNIT,
             BuiltinReturnType::U64 => Type::U64,
+            BuiltinReturnType::Usize => Type::USIZE,
             BuiltinReturnType::U8 => Type::U8,
             BuiltinReturnType::Bool => Type::BOOL,
             BuiltinReturnType::SelfType => self.builtin_air_type(struct_id),
@@ -8039,6 +8041,7 @@ impl<'a> Sema<'a> {
             // Get expected type from param
             let expected_ty = match method.params[i].ty {
                 BuiltinParamType::U64 => Type::U64,
+                BuiltinParamType::Usize => Type::USIZE,
                 BuiltinParamType::U8 => Type::U8,
                 BuiltinParamType::Bool => Type::BOOL,
                 BuiltinParamType::SelfType => Type::new_struct(method_ctx.struct_id),
@@ -8067,6 +8070,7 @@ impl<'a> Sema<'a> {
         let return_ty = match method.return_ty {
             BuiltinReturnType::Unit => Type::UNIT,
             BuiltinReturnType::U64 => Type::U64,
+            BuiltinReturnType::Usize => Type::USIZE,
             BuiltinReturnType::U8 => Type::U8,
             BuiltinReturnType::Bool => Type::BOOL,
             BuiltinReturnType::SelfType => self.builtin_air_type(method_ctx.struct_id),

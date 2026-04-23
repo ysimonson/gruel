@@ -199,6 +199,8 @@ pub struct BuiltinParam {
 pub enum BuiltinParamType {
     /// 64-bit unsigned integer
     U64,
+    /// Pointer-sized unsigned integer
+    Usize,
     /// 8-bit unsigned integer
     U8,
     /// Boolean
@@ -214,6 +216,8 @@ pub enum BuiltinReturnType {
     Unit,
     /// 64-bit unsigned integer
     U64,
+    /// Pointer-sized unsigned integer
+    Usize,
     /// 8-bit unsigned integer
     U8,
     /// Boolean (returned as u8: 0 or 1)

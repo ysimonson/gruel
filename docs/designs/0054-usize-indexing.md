@@ -81,7 +81,7 @@ Existing Gruel code that uses `u64` for indexing or length variables must be upd
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Preview flag + infrastructure**
+- [x] **Phase 1: Preview flag + infrastructure**
   - Add `PreviewFeature::UsizeIndexing` to `gruel-error` (`name()`, `adr()`, `all()`, `FromStr`).
   - Add `BuiltinParamType::Usize` and `BuiltinReturnType::Usize` in `gruel-builtins`; wire through the mapping sites in `gruel-air` (analysis.rs ~lines 7916, 7940, 8041, 8069).
   - No behavior change yet; flag exists but is inert.
