@@ -32,7 +32,7 @@ freestanding/hermetic capacities.
 - Banned partial moves to simplify analysis, especially with linear types (ADR-0036)
 - Enums with struct variants (ADR-0037), pattern matching (ADR-0038), and anonymous types with comptime generics support (ADR-0039)
 - Significantly expanded comptime capabilities (ADR-0040, ADR-0042, ADR-0045)
-- Significantly expanded pattern matching and destructuring capabilities (ADR-0049)
+- Significantly expanded pattern matching and destructuring capabilities (ADR-0049, ADR-0051, ADR-0052)
 
 ### Language Tooling
 
