@@ -383,9 +383,11 @@ path (Phase 4).
   - [x] 4a: extend RIR with `Ident` / `Tuple` / `Struct` variants and a
         self-describing tree encoding for nested sub-patterns. Additive;
         astgen still elaborates today.
-  - [ ] 4b: thread an astgen-side flag and teach astgen to produce the
-        new shapes for top-level tuple / struct / ident match roots; wire
-        sema + CFG cascading dispatch end to end behind the flag.
+  - [x] 4b part 1: thread astgen flag + sema wiring for new RIR shapes.
+  - [x] 4b part 2: CFG cascading projection + dispatch for top-level
+        Tuple / Struct / Bind arms; Bind leaves are currently transparent
+        (no storage introduced yet; Phase 4c moves binding introduction
+        into CFG).
   - [ ] 4c: delete the three elaborators, the `__nested_pat_N` machinery,
         `wrap_match_arm_body_with_destructures`, the five Phase 5 panics,
         the runtime `@panic` injection; flip the flag default.

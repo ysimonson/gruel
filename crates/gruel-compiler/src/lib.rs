@@ -3463,5 +3463,23 @@ mod integration_tests {
                 ) >= 1
             );
         }
+
+        /// Bindings inside tuple arms are NOT yet wired end to end (CFG
+        /// introduces no storage for Bind leaves today). When Phase 4c
+        /// moves binding introduction into CFG this test should start
+        /// passing; for now it documents the known limitation.
+        #[test]
+        #[ignore = "ADR-0051 Phase 4c: Bind leaves in tuple arms need CFG-level storage"]
+        fn match_tuple_with_binding_builds_cfg() {
+            let _ = compile_with_recursive(
+                "fn main() -> i32 {
+                         let t = (1, 2);
+                         match t {
+                             (a, 1) => a,
+                             _ => 0,
+                         }
+                     }",
+            );
+        }
     }
 }
