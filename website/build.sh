@@ -63,6 +63,8 @@ for adr in docs/designs/[0-9][0-9][0-9][0-9]-*.md; do
     [ -f "$adr" ] || continue
     base=$(basename "$adr" .md)
     num=${base%%-*}
+    # Skip the ADR template.
+    [ "$num" = "0000" ] && continue
     # Pull title from the YAML frontmatter's `title:` field; fall back to the
     # first H1 or the filename.
     title=$(awk '/^---$/{n++; next} n==1 && /^title:/{sub(/^title:[[:space:]]*/, ""); print; exit}' "$adr")
