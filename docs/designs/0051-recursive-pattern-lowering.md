@@ -345,7 +345,7 @@ path (Phase 4).
   - No sema / CFG wiring yet. Unit tests: round-trip encode/decode
     for every shape, including nested.
 
-- [ ] **Phase 2: Sema recursive lowering (alongside the old path)**
+- [x] **Phase 2: Sema recursive lowering (alongside the old path)**
   - Add `lower_pattern(&RirPattern) -> AirPattern` in
     `gruel-air/src/sema/analyze_ops.rs`, behind a feature-gated
     internal flag (not a user-facing preview flag — an internal

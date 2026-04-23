@@ -94,6 +94,24 @@ impl PlaceTrace {
     }
 }
 
+/// Convert a flat `RirPatternBinding` (wildcard / named) into its
+/// recursive `AirPattern` leaf form for ADR-0051 `lower_pattern`. Returns
+/// `Wildcard` for wildcard bindings and `Bind` with `inner: None` for
+/// named bindings. Until RIR is extended with nested sub-patterns (phase 4),
+/// this is always a leaf.
+fn binding_to_pattern(b: &RirPatternBinding) -> AirPattern {
+    if b.is_wildcard {
+        AirPattern::Wildcard
+    } else {
+        let name = b.name.expect("non-wildcard binding must have a name");
+        AirPattern::Bind {
+            name,
+            is_mut: b.is_mut,
+            inner: None,
+        }
+    }
+}
+
 impl<'a> Sema<'a> {
     // ========================================================================
     // Place Tracing (ADR-0030 Phase 8)
@@ -2127,18 +2145,22 @@ impl<'a> Sema<'a> {
 
             // Convert pattern to AIR pattern. For enum patterns (Path and DataVariant),
             // reuse the enum_id and variant_index resolved during validation.
-            let air_pattern = match pattern {
-                RirPattern::Wildcard(_) => AirPattern::Wildcard,
-                RirPattern::Int(n, _) => AirPattern::Int(*n),
-                RirPattern::Bool(b, _) => AirPattern::Bool(*b),
-                RirPattern::Path { .. }
-                | RirPattern::DataVariant { .. }
-                | RirPattern::StructVariant { .. } => {
-                    let (enum_id, variant_index) =
-                        resolved_enum.expect("resolved_enum must be set for enum patterns");
-                    AirPattern::EnumVariant {
-                        enum_id,
-                        variant_index,
+            let air_pattern = if self.recursive_pattern_lowering {
+                self.lower_pattern(pattern, resolved_enum)
+            } else {
+                match pattern {
+                    RirPattern::Wildcard(_) => AirPattern::Wildcard,
+                    RirPattern::Int(n, _) => AirPattern::Int(*n),
+                    RirPattern::Bool(b, _) => AirPattern::Bool(*b),
+                    RirPattern::Path { .. }
+                    | RirPattern::DataVariant { .. }
+                    | RirPattern::StructVariant { .. } => {
+                        let (enum_id, variant_index) =
+                            resolved_enum.expect("resolved_enum must be set for enum patterns");
+                        AirPattern::EnumVariant {
+                            enum_id,
+                            variant_index,
+                        }
                     }
                 }
             };
@@ -2204,6 +2226,98 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, final_type))
+    }
+
+    /// Lower an RIR pattern to the recursive `AirPattern` shape introduced by
+    /// ADR-0051 Phase 1. Called from `analyze_match` when
+    /// `self.recursive_pattern_lowering` is set.
+    ///
+    /// Today's RIR is flat: variant patterns carry `RirPatternBinding`s with
+    /// `name + is_wildcard + is_mut` and no nested sub-pattern slot, so the
+    /// AIR tree this produces is only one level deep at each variant. Real
+    /// source-level nesting (`Some(Some(x))`) is still being elaborated away
+    /// by astgen before it reaches sema; phase 4 extends RIR and wires astgen
+    /// so those cases surface here naturally.
+    ///
+    /// `resolved_enum` carries `(enum_id, variant_index)` that the validation
+    /// pass above already computed for enum patterns.
+    pub(crate) fn lower_pattern(
+        &self,
+        pattern: &RirPattern,
+        resolved_enum: Option<(crate::types::EnumId, u32)>,
+    ) -> AirPattern {
+        match pattern {
+            RirPattern::Wildcard(_) => AirPattern::Wildcard,
+            RirPattern::Int(n, _) => AirPattern::Int(*n),
+            RirPattern::Bool(b, _) => AirPattern::Bool(*b),
+            RirPattern::Path { .. } => {
+                let (enum_id, variant_index) =
+                    resolved_enum.expect("resolved_enum must be set for enum patterns");
+                AirPattern::EnumUnitVariant {
+                    enum_id,
+                    variant_index,
+                }
+            }
+            RirPattern::DataVariant { bindings, .. } => {
+                let (enum_id, variant_index) =
+                    resolved_enum.expect("resolved_enum must be set for enum patterns");
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let field_count = enum_def.variants[variant_index as usize].fields.len();
+                let rest_marker = self.interner.get_or_intern_static("..");
+
+                // Expand bindings to exactly `field_count` AirPatterns. A
+                // trailing `..` (stored as a binding whose `name` is the rest
+                // marker) is expanded to wildcard leaves covering the
+                // unlisted fields (ADR-0049 §Phase 6 behaviour, preserved).
+                let explicit: Vec<_> = bindings
+                    .iter()
+                    .filter(|b| b.name != Some(rest_marker))
+                    .collect();
+                let mut fields = Vec::with_capacity(field_count);
+                for b in &explicit {
+                    fields.push(binding_to_pattern(b));
+                }
+                while fields.len() < field_count {
+                    fields.push(AirPattern::Wildcard);
+                }
+
+                AirPattern::EnumDataVariant {
+                    enum_id,
+                    variant_index,
+                    fields,
+                }
+            }
+            RirPattern::StructVariant { field_bindings, .. } => {
+                let (enum_id, variant_index) =
+                    resolved_enum.expect("resolved_enum must be set for enum patterns");
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let variant_def = &enum_def.variants[variant_index as usize];
+                let rest_marker = self.interner.get_or_intern_static("..");
+
+                // Record explicit fields in declaration order; listed
+                // positions carry the binding's pattern, every other
+                // declared field defaults to `Wildcard` (covers both `..`
+                // and field_bindings written out of order).
+                let mut fields: Vec<(u32, AirPattern)> = Vec::new();
+                for (field_idx, field_name) in variant_def.field_names.iter().enumerate() {
+                    let matching = field_bindings.iter().find(|fb| {
+                        fb.field_name != rest_marker
+                            && self.interner.resolve(&fb.field_name) == field_name.as_str()
+                    });
+                    let pat = match matching {
+                        Some(fb) => binding_to_pattern(&fb.binding),
+                        None => AirPattern::Wildcard,
+                    };
+                    fields.push((field_idx as u32, pat));
+                }
+
+                AirPattern::EnumStructVariant {
+                    enum_id,
+                    variant_index,
+                    fields,
+                }
+            }
+        }
     }
 
     /// Analyze a return statement.

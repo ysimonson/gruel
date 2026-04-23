@@ -149,6 +149,13 @@ pub struct Sema<'a> {
     /// is still appended to `comptime_dbg_output` and a warning is still emitted.
     /// Set by the `--capture-comptime-dbg` CLI flag (used by the fuzzer).
     pub(crate) suppress_comptime_dbg_print: bool,
+    /// When true, `analyze_match` emits recursive `AirPattern` variants
+    /// (ADR-0051) via `lower_pattern` instead of the flat pre-ADR-0051
+    /// variants. Internal compiler flag used during the ADR-0051 rollout;
+    /// CFG lowering for the recursive variants ships in Phase 3, so turning
+    /// this on without the Phase 3 CFG changes will panic during CFG
+    /// construction of matches. Off by default.
+    pub(crate) recursive_pattern_lowering: bool,
 }
 
 impl<'a> Sema<'a> {
@@ -189,6 +196,7 @@ impl<'a> Sema<'a> {
             comptime_dbg_output: Vec::new(),
             comptime_log_output: Vec::new(),
             suppress_comptime_dbg_print: false,
+            recursive_pattern_lowering: false,
         }
     }
 
@@ -197,6 +205,13 @@ impl<'a> Sema<'a> {
     /// and warnings are still emitted.
     pub fn set_suppress_comptime_dbg_print(&mut self, suppress: bool) {
         self.suppress_comptime_dbg_print = suppress;
+    }
+
+    /// Enable the ADR-0051 recursive `AirPattern` lowering path. Internal
+    /// compiler flag for the Phase 2/3 rollout; off by default. See
+    /// `recursive_pattern_lowering` field doc.
+    pub fn set_recursive_pattern_lowering(&mut self, enabled: bool) {
+        self.recursive_pattern_lowering = enabled;
     }
 
     /// Perform semantic analysis on the RIR.

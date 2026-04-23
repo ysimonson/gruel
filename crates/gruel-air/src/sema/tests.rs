@@ -1023,4 +1023,257 @@ mod tests {
         assert!(stats.struct_count > 0); // At least String builtin
         assert!(stats.enum_count > 0); // The enum we added
     }
+
+    // ------------------------------------------------------------------
+    // ADR-0051 Phase 2: lower_pattern produces recursive AirPattern trees
+    // when `recursive_pattern_lowering` is set on Sema.
+    // ------------------------------------------------------------------
+    mod recursive_pattern_lowering {
+        use super::*;
+        use crate::inst::{AirInstData, AirPattern};
+
+        fn compile_with_recursive(source: &str) -> SemaOutput {
+            let lexer = Lexer::new(source);
+            let (tokens, interner) = lexer.tokenize().unwrap();
+            let parser = Parser::new(tokens, interner);
+            let (ast, interner) = parser.parse().unwrap();
+
+            let astgen = AstGen::new(&ast, &interner);
+            let rir = astgen.generate();
+
+            let mut sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+            sema.set_recursive_pattern_lowering(true);
+            sema.analyze_all().unwrap()
+        }
+
+        /// Collect all match arms across every function in the output.
+        fn collect_match_arms(output: &SemaOutput) -> Vec<AirPattern> {
+            let mut out = Vec::new();
+            for f in &output.functions {
+                let air = &f.air;
+                for (_, inst) in air.iter() {
+                    if let AirInstData::Match {
+                        arms_start,
+                        arms_len,
+                        ..
+                    } = inst.data
+                    {
+                        for (pat, _) in air.get_match_arms(arms_start, arms_len) {
+                            out.push(pat);
+                        }
+                    }
+                }
+            }
+            out
+        }
+
+        fn assert_shape(a: &AirPattern, expected_tag: &str) {
+            let got = match a {
+                AirPattern::Wildcard => "Wildcard",
+                AirPattern::Int(_) => "Int",
+                AirPattern::Bool(_) => "Bool",
+                AirPattern::EnumVariant { .. } => "EnumVariant",
+                AirPattern::EnumUnitVariant { .. } => "EnumUnitVariant",
+                AirPattern::EnumDataVariant { .. } => "EnumDataVariant",
+                AirPattern::EnumStructVariant { .. } => "EnumStructVariant",
+                AirPattern::Bind { .. } => "Bind",
+                AirPattern::Tuple { .. } => "Tuple",
+                AirPattern::Struct { .. } => "Struct",
+            };
+            assert_eq!(got, expected_tag, "pattern = {:?}", a);
+        }
+
+        #[test]
+        fn wildcard_lowers_to_wildcard() {
+            let output = compile_with_recursive("fn main() -> i32 { match 1 { _ => 0 } }");
+            let arms = collect_match_arms(&output);
+            assert_eq!(arms.len(), 1);
+            assert_shape(&arms[0], "Wildcard");
+        }
+
+        #[test]
+        fn int_literal_lowers_to_int() {
+            let output = compile_with_recursive("fn main() -> i32 { match 1 { 1 => 1, _ => 0 } }");
+            let arms = collect_match_arms(&output);
+            assert_eq!(arms.len(), 2);
+            assert!(matches!(arms[0], AirPattern::Int(1)));
+            assert_shape(&arms[1], "Wildcard");
+        }
+
+        #[test]
+        fn bool_lowers_to_bool() {
+            let output =
+                compile_with_recursive("fn main() -> i32 { match true { true => 1, false => 0 } }");
+            let arms = collect_match_arms(&output);
+            assert_eq!(arms.len(), 2);
+            assert!(matches!(arms[0], AirPattern::Bool(true)));
+            assert!(matches!(arms[1], AirPattern::Bool(false)));
+        }
+
+        #[test]
+        fn unit_variant_path_lowers_to_enum_unit_variant() {
+            let output = compile_with_recursive(
+                "enum Color { Red, Green, Blue }
+                 fn main() -> i32 {
+                     let c = Color::Red;
+                     match c {
+                         Color::Red => 1,
+                         Color::Green => 2,
+                         Color::Blue => 3,
+                     }
+                 }",
+            );
+            let arms = collect_match_arms(&output);
+            assert_eq!(arms.len(), 3);
+            for a in &arms {
+                assert_shape(a, "EnumUnitVariant");
+            }
+        }
+
+        #[test]
+        fn data_variant_bindings_lower_to_bind_leaves() {
+            let output = compile_with_recursive(
+                "enum Opt { Some(i32), None }
+                 fn main() -> i32 {
+                     let o = Opt::Some(5);
+                     match o {
+                         Opt::Some(x) => x,
+                         Opt::None => 0,
+                     }
+                 }",
+            );
+            let arms = collect_match_arms(&output);
+            assert_eq!(arms.len(), 2);
+            match &arms[0] {
+                AirPattern::EnumDataVariant { fields, .. } => {
+                    assert_eq!(fields.len(), 1);
+                    assert!(
+                        matches!(&fields[0], AirPattern::Bind { inner: None, .. }),
+                        "expected Bind leaf, got {:?}",
+                        &fields[0]
+                    );
+                }
+                other => panic!("expected EnumDataVariant, got {:?}", other),
+            }
+            assert_shape(&arms[1], "EnumUnitVariant");
+        }
+
+        #[test]
+        fn data_variant_wildcard_binding_lowers_to_wildcard() {
+            let output = compile_with_recursive(
+                "enum Opt { Some(i32), None }
+                 fn main() -> i32 {
+                     let o = Opt::Some(5);
+                     match o {
+                         Opt::Some(_) => 1,
+                         Opt::None => 0,
+                     }
+                 }",
+            );
+            let arms = collect_match_arms(&output);
+            match &arms[0] {
+                AirPattern::EnumDataVariant { fields, .. } => {
+                    assert_eq!(fields.len(), 1);
+                    assert!(matches!(&fields[0], AirPattern::Wildcard));
+                }
+                other => panic!("expected EnumDataVariant, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn data_variant_rest_expands_to_wildcards() {
+            let output = compile_with_recursive(
+                "enum Triple { T(i32, i32, i32) }
+                 fn main() -> i32 {
+                     let t = Triple::T(1, 2, 3);
+                     match t {
+                         Triple::T(x, ..) => x,
+                     }
+                 }",
+            );
+            let arms = collect_match_arms(&output);
+            match &arms[0] {
+                AirPattern::EnumDataVariant { fields, .. } => {
+                    assert_eq!(fields.len(), 3, "rest should expand to fill arity");
+                    assert!(matches!(&fields[0], AirPattern::Bind { .. }));
+                    assert!(matches!(&fields[1], AirPattern::Wildcard));
+                    assert!(matches!(&fields[2], AirPattern::Wildcard));
+                }
+                other => panic!("expected EnumDataVariant, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn struct_variant_lowers_to_enum_struct_variant_in_declaration_order() {
+            let output = compile_with_recursive(
+                "enum Shape { Circle { radius: i32 }, Square { side: i32 } }
+                 fn main() -> i32 {
+                     let s = Shape::Circle { radius: 5 };
+                     match s {
+                         Shape::Circle { radius } => radius,
+                         Shape::Square { side } => side,
+                     }
+                 }",
+            );
+            let arms = collect_match_arms(&output);
+            for a in &arms {
+                assert_shape(a, "EnumStructVariant");
+            }
+            match &arms[0] {
+                AirPattern::EnumStructVariant { fields, .. } => {
+                    assert_eq!(fields.len(), 1);
+                    assert_eq!(fields[0].0, 0, "radius is field 0");
+                    assert!(matches!(&fields[0].1, AirPattern::Bind { .. }));
+                }
+                other => panic!("expected EnumStructVariant, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn struct_variant_rest_fills_unlisted_with_wildcard() {
+            let output = compile_with_recursive(
+                "enum Pt { Coord { x: i32, y: i32 } }
+                 fn main() -> i32 {
+                     let p = Pt::Coord { x: 1, y: 2 };
+                     match p {
+                         Pt::Coord { x, .. } => x,
+                     }
+                 }",
+            );
+            let arms = collect_match_arms(&output);
+            match &arms[0] {
+                AirPattern::EnumStructVariant { fields, .. } => {
+                    assert_eq!(fields.len(), 2);
+                    // x listed → Bind; y absent → Wildcard
+                    assert!(matches!(&fields[0].1, AirPattern::Bind { .. }));
+                    assert!(matches!(&fields[1].1, AirPattern::Wildcard));
+                }
+                other => panic!("expected EnumStructVariant, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn flag_off_still_produces_flat_variant() {
+            // Regression check: without the flag, existing flat behaviour holds.
+            let lexer = Lexer::new(
+                "enum Color { Red }
+                 fn main() -> i32 {
+                     let c = Color::Red;
+                     match c { Color::Red => 1 }
+                 }",
+            );
+            let (tokens, interner) = lexer.tokenize().unwrap();
+            let parser = Parser::new(tokens, interner);
+            let (ast, interner) = parser.parse().unwrap();
+            let astgen = AstGen::new(&ast, &interner);
+            let rir = astgen.generate();
+            let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+            // Note: flag NOT set.
+            let output = sema.analyze_all().unwrap();
+
+            let arms = collect_match_arms(&output);
+            assert_eq!(arms.len(), 1);
+            assert_shape(&arms[0], "EnumVariant");
+        }
+    }
 }
