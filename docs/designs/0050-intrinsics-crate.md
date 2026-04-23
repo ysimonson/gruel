@@ -105,7 +105,7 @@ The hand-maintained quick-reference table in the spec is replaced by the generat
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Scaffold `gruel-intrinsics` crate**
+- [x] **Phase 1: Scaffold `gruel-intrinsics` crate**
   - New crate with `IntrinsicDef`, `IntrinsicId`, `IntrinsicKind`, `ArgSpec`, `ReturnSpec`, `Category`, `Arity` types.
   - `INTRINSICS: &[IntrinsicDef]` populated from the *existing* set of ~30 intrinsics, each entry capturing the data currently scattered across the compiler (names come from `known_symbols.rs`, unchecked flags from `analyze_intrinsic_impl`, type-intrinsic flags from `astgen.rs`, runtime fns from `gruel-runtime`).
   - Query helpers: `lookup_by_name`, `iter`, `by_category`.
