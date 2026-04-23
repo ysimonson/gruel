@@ -379,7 +379,8 @@ path (Phase 4).
     merged arms with `..`, multi-field merged refutables).
     Tests gated on `--recursive-pattern-lowering` until Phase 4.
 
-- [ ] **Phase 4: Cut over to the new lowering by default**
+- [x] **Phase 4: Cut over to the new lowering by default** (except
+      `try_elaborate_refutable_nested_match`; see Phase 5 for why)
   - [x] 4a: extend RIR with `Ident` / `Tuple` / `Struct` variants and a
         self-describing tree encoding for nested sub-patterns. Additive;
         astgen still elaborates today.
