@@ -14,6 +14,7 @@ use crate::scope::ScopedContext;
 use crate::types::{
     EnumId, PtrMutability, StructId, parse_array_type_syntax, parse_pointer_type_syntax,
 };
+use gruel_intrinsics::{IntrinsicId, lookup_by_name};
 use gruel_rir::{InstData, InstRef, Rir};
 use gruel_span::Span;
 use lasso::{Spur, ThreadedRodeo};
@@ -644,207 +645,171 @@ impl<'a> ConstraintGenerator<'a> {
                 args_len,
             } => {
                 let intrinsic_name = self.interner.resolve(name);
-                let args = self.rir.get_inst_refs(*args_start, *args_len);
+                let id = lookup_by_name(intrinsic_name).map(|d| d.id);
+                // Collect arg InstRefs so we can iterate without holding a
+                // borrow on self.rir across the dispatch match.
+                let arg_refs: Vec<InstRef> =
+                    self.rir.get_inst_refs(*args_start, *args_len).to_vec();
 
-                if intrinsic_name == "cast" {
-                    // @cast: target type is inferred from context
-                    // The argument must be a numeric type (checked in sema)
-                    if !args.is_empty() {
-                        let arg_info = self.generate(args[0], ctx);
-                        let _ = arg_info;
+                // Visit args in a side-effectful pass so constraints on them
+                // are emitted regardless of which intrinsic we hit below.
+                let visit_args = |this: &mut Self, ctx: &mut ConstraintContext| {
+                    for &arg_ref in arg_refs.iter() {
+                        this.generate(arg_ref, ctx);
                     }
-                    // Return type is inferred from context - create a fresh type variable
-                    let result_var = self.fresh_var();
-                    InferType::Var(result_var)
-                } else if intrinsic_name == "read_line" {
-                    // @read_line: returns String (same as string constants)
-                    if let Some(string_spur) = self.interner.get("String") {
-                        if let Some(&string_ty) = self.structs.get(&string_spur) {
-                            InferType::Concrete(string_ty)
-                        } else {
-                            // Fallback if String struct not found
-                            InferType::Concrete(Type::ERROR)
+                };
+
+                match id {
+                    Some(IntrinsicId::Cast) => {
+                        if let Some(&first) = arg_refs.first() {
+                            let _ = self.generate(first, ctx);
                         }
-                    } else {
-                        InferType::Concrete(Type::ERROR)
+                        InferType::Var(self.fresh_var())
                     }
-                } else if intrinsic_name == "parse_i32" {
-                    // @parse_i32: takes a String, returns i32
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    InferType::Concrete(Type::I32)
-                } else if intrinsic_name == "parse_i64" {
-                    // @parse_i64: takes a String, returns i64
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    InferType::Concrete(Type::I64)
-                } else if intrinsic_name == "parse_u32" {
-                    // @parse_u32: takes a String, returns u32
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    InferType::Concrete(Type::U32)
-                } else if intrinsic_name == "parse_u64" {
-                    // @parse_u64: takes a String, returns u64
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    InferType::Concrete(Type::U64)
-                } else if intrinsic_name == "random_u32" {
-                    // @random_u32: no arguments, returns u32
-                    InferType::Concrete(Type::U32)
-                } else if intrinsic_name == "random_u64" {
-                    // @random_u64: no arguments, returns u64
-                    InferType::Concrete(Type::U64)
-                } else if intrinsic_name == "syscall" {
-                    // @syscall: syscall_num and up to 6 args (all u64), returns i64
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    InferType::Concrete(Type::I64)
-                } else if intrinsic_name == "ptr_to_int" {
-                    // @ptr_to_int: takes a pointer, returns u64
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    InferType::Concrete(Type::U64)
-                } else if intrinsic_name == "ptr_write" {
-                    // @ptr_write: takes a pointer and value, returns unit
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    InferType::Concrete(Type::UNIT)
-                } else if intrinsic_name == "is_null" {
-                    // @is_null: takes a pointer, returns bool
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    InferType::Concrete(Type::BOOL)
-                } else if intrinsic_name == "ptr_read" {
-                    // @ptr_read: takes ptr const T or ptr mut T, returns T
-                    // The return type depends on the pointee type of the argument.
-                    // We create a fresh type variable that will be resolved during
-                    // semantic analysis when the actual pointer type is known.
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    let result_var = self.fresh_var();
-                    InferType::Var(result_var)
-                } else if intrinsic_name == "ptr_offset" {
-                    // @ptr_offset: takes (ptr T, i64), returns ptr T
-                    // The return type is the same as the input pointer type.
-                    // We create a fresh type variable for proper inference.
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    let result_var = self.fresh_var();
-                    InferType::Var(result_var)
-                } else if intrinsic_name == "raw" || intrinsic_name == "raw_mut" {
-                    // @raw / @raw_mut: takes a value, returns a pointer to it
-                    // The return type is ptr const T or ptr mut T where T is the argument type.
-                    // We create a fresh type variable for proper inference.
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    let result_var = self.fresh_var();
-                    InferType::Var(result_var)
-                } else if intrinsic_name == "int_to_ptr" || intrinsic_name == "null_ptr" {
-                    // @int_to_ptr / @null_ptr: returns a pointer type inferred from context
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    let result_var = self.fresh_var();
-                    InferType::Var(result_var)
-                } else if intrinsic_name == "ptr_copy" {
-                    // @ptr_copy: (dst: ptr mut T, src: ptr const T, count: u64) -> ()
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
-                    }
-                    InferType::Concrete(Type::UNIT)
-                } else if intrinsic_name == "target_arch" {
-                    // @target_arch: returns Arch enum
-                    if let Some(arch_spur) = self.interner.get("Arch") {
-                        if let Some(&arch_ty) = self.enums.get(&arch_spur) {
-                            InferType::Concrete(arch_ty)
+                    Some(IntrinsicId::ReadLine) => {
+                        if let Some(string_spur) = self.interner.get("String") {
+                            if let Some(&string_ty) = self.structs.get(&string_spur) {
+                                InferType::Concrete(string_ty)
+                            } else {
+                                InferType::Concrete(Type::ERROR)
+                            }
                         } else {
                             InferType::Concrete(Type::ERROR)
                         }
-                    } else {
-                        InferType::Concrete(Type::ERROR)
                     }
-                } else if intrinsic_name == "target_os" {
-                    // @target_os: returns Os enum
-                    if let Some(os_spur) = self.interner.get("Os") {
-                        if let Some(&os_ty) = self.enums.get(&os_spur) {
-                            InferType::Concrete(os_ty)
+                    Some(IntrinsicId::ParseI32) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::I32)
+                    }
+                    Some(IntrinsicId::ParseI64) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::I64)
+                    }
+                    Some(IntrinsicId::ParseU32) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::U32)
+                    }
+                    Some(IntrinsicId::ParseU64) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::U64)
+                    }
+                    Some(IntrinsicId::RandomU32) => InferType::Concrete(Type::U32),
+                    Some(IntrinsicId::RandomU64) => InferType::Concrete(Type::U64),
+                    Some(IntrinsicId::Syscall) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::I64)
+                    }
+                    Some(IntrinsicId::PtrToInt) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::U64)
+                    }
+                    Some(IntrinsicId::PtrWrite) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::UNIT)
+                    }
+                    Some(IntrinsicId::IsNull) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::BOOL)
+                    }
+                    Some(IntrinsicId::PtrRead) => {
+                        // Return type depends on pointee type of the argument —
+                        // resolved in sema once the concrete pointer type is known.
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
+                    Some(IntrinsicId::PtrOffset) => {
+                        // Return type matches the input pointer type.
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
+                    Some(IntrinsicId::Raw) | Some(IntrinsicId::RawMut) => {
+                        // Returns ptr const T / ptr mut T — resolved in sema.
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
+                    Some(IntrinsicId::IntToPtr) | Some(IntrinsicId::NullPtr) => {
+                        // Pointer type inferred from context.
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
+                    Some(IntrinsicId::PtrCopy) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::UNIT)
+                    }
+                    Some(IntrinsicId::TargetArch) => {
+                        if let Some(arch_spur) = self.interner.get("Arch") {
+                            if let Some(&arch_ty) = self.enums.get(&arch_spur) {
+                                InferType::Concrete(arch_ty)
+                            } else {
+                                InferType::Concrete(Type::ERROR)
+                            }
                         } else {
                             InferType::Concrete(Type::ERROR)
                         }
-                    } else {
-                        InferType::Concrete(Type::ERROR)
                     }
-                } else if intrinsic_name == "range" {
-                    // @range: takes 1-3 integer args, returns the same integer type
-                    // (used as iterable in for-in loops)
-                    if !args.is_empty() {
-                        let first = self.generate(args[0], ctx);
-                        for arg_ref in args.iter().skip(1) {
-                            let arg_info = self.generate(*arg_ref, ctx);
-                            self.add_constraint(Constraint::equal(
-                                first.ty.clone(),
-                                arg_info.ty,
-                                span,
-                            ));
+                    Some(IntrinsicId::TargetOs) => {
+                        if let Some(os_spur) = self.interner.get("Os") {
+                            if let Some(&os_ty) = self.enums.get(&os_spur) {
+                                InferType::Concrete(os_ty)
+                            } else {
+                                InferType::Concrete(Type::ERROR)
+                            }
+                        } else {
+                            InferType::Concrete(Type::ERROR)
                         }
-                        first.ty
-                    } else {
-                        InferType::Concrete(Type::ERROR)
                     }
-                } else if intrinsic_name == "field" {
-                    // @field(value, field_name): returns the type of the named field.
-                    // The field name is a comptime_str resolved at compile time, so
-                    // the return type depends on which field is accessed. Use a fresh
-                    // type variable — sema determines the concrete type.
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
+                    Some(IntrinsicId::Range) => {
+                        // @range: 1-3 integer args; returns the same integer type
+                        // (used as an iterable in for-in loops).
+                        if let Some((&first_ref, rest)) = arg_refs.split_first() {
+                            let first = self.generate(first_ref, ctx);
+                            for &arg_ref in rest {
+                                let arg_info = self.generate(arg_ref, ctx);
+                                self.add_constraint(Constraint::equal(
+                                    first.ty.clone(),
+                                    arg_info.ty,
+                                    span,
+                                ));
+                            }
+                            first.ty
+                        } else {
+                            InferType::Concrete(Type::ERROR)
+                        }
                     }
-                    let result_var = self.fresh_var();
-                    InferType::Var(result_var)
-                } else if intrinsic_name == "panic" || intrinsic_name == "compile_error" {
-                    // @panic and @compile_error diverge — they return `Never`,
-                    // which unifies with any expected type. Without this,
-                    // `if cond { 42 } else { @panic("...") }` wrongly reports
-                    // the else-branch as Unit.
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
+                    Some(IntrinsicId::Field) => {
+                        // Return type depends on which field is accessed — fresh var.
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
                     }
-                    InferType::Concrete(Type::NEVER)
-                } else {
-                    // Generate constraints for arguments (they need to be processed)
-                    for arg_ref in args.iter() {
-                        self.generate(*arg_ref, ctx);
+                    Some(IntrinsicId::Panic) | Some(IntrinsicId::CompileError) => {
+                        // Diverging intrinsics return Never so they unify with any
+                        // expected type (e.g. `if c { 42 } else { @panic("..") }`).
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::NEVER)
                     }
-                    // @dbg and other intrinsics return Unit
-                    InferType::Concrete(Type::UNIT)
+                    // Other intrinsics (@dbg, @assert, @test_preview_gate, @import)
+                    // and any unknown name return Unit. Sema handles the unknown case
+                    // with a proper diagnostic; we just pick a coherent type here.
+                    _ => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::UNIT)
+                    }
                 }
             }
 
             // Type intrinsic (@size_of, @align_of, @type_name, @type_info)
             InstData::TypeIntrinsic { name, type_arg: _ } => {
                 let intrinsic_name = self.interner.resolve(name);
-                match intrinsic_name {
-                    "type_name" => InferType::Concrete(Type::COMPTIME_STR),
-                    "type_info" => {
+                match lookup_by_name(intrinsic_name).map(|d| d.id) {
+                    Some(IntrinsicId::TypeName) => InferType::Concrete(Type::COMPTIME_STR),
+                    Some(IntrinsicId::TypeInfo) => {
                         // @type_info returns a comptime struct — use a fresh var
                         // since the actual type is determined by the comptime evaluator.
                         InferType::Var(self.fresh_var())
                     }
-                    _ => {
-                        // @size_of, @align_of return i32
-                        InferType::Concrete(Type::I32)
-                    }
+                    // @size_of, @align_of (and the fallback for unknown names)
+                    // return i32.
+                    _ => InferType::Concrete(Type::I32),
                 }
             }
 

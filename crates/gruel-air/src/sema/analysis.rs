@@ -21,6 +21,7 @@ use gruel_error::{
     CompileError, CompileErrors, CompileResult, CompileWarning, ErrorKind,
     IntrinsicTypeMismatchError, MultiErrorResult, OptionExt, PreviewFeature, WarningKind,
 };
+use gruel_intrinsics::{IntrinsicId, lookup_by_id};
 use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirDirective, RirParamMode, RirPattern,
 };
@@ -3364,6 +3365,10 @@ impl<'a> Sema<'a> {
     }
 
     /// Implementation for Intrinsic calls.
+    ///
+    /// Dispatches on the stable `IntrinsicId` resolved from the
+    /// `gruel-intrinsics` registry. The per-intrinsic analyzer functions still
+    /// live in this file; only the dispatcher changed with ADR-0050.
     pub(crate) fn analyze_intrinsic_impl(
         &mut self,
         air: &mut Air,
@@ -3373,77 +3378,75 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        let known = &self.known;
-
-        // Use pre-interned symbol comparison instead of string comparison
-        if name == known.dbg {
-            self.analyze_dbg_intrinsic(air, inst_ref, &args, span, ctx)
-        } else if name == known.test_preview_gate {
-            self.analyze_test_preview_gate_intrinsic(air, &args, span)
-        } else if name == known.read_line {
-            self.analyze_read_line_intrinsic(air, name, &args, span)
-        } else if let Some(intrinsic_name_str) = known.get_parse_intrinsic_name(name) {
-            self.analyze_parse_intrinsic(air, name, intrinsic_name_str, &args, span, ctx)
-        } else if name == known.cast {
-            self.analyze_cast_intrinsic(air, inst_ref, &args, span, ctx)
-        } else if name == known.panic {
-            self.analyze_panic_intrinsic(air, &args, span, ctx)
-        } else if name == known.assert {
-            self.analyze_assert_intrinsic(air, &args, span, ctx)
-        } else if name == known.import {
-            self.analyze_import_intrinsic(air, &args, span)
-        } else if name == known.random_u32 {
-            self.analyze_random_u32_intrinsic(air, name, &args, span)
-        } else if name == known.random_u64 {
-            self.analyze_random_u64_intrinsic(air, name, &args, span)
-        } else if name == known.ptr_read {
-            Self::require_checked_for_intrinsic(ctx, "ptr_read", span)?;
-            self.analyze_ptr_read_intrinsic(air, name, &args, span, ctx)
-        } else if name == known.ptr_write {
-            Self::require_checked_for_intrinsic(ctx, "ptr_write", span)?;
-            self.analyze_ptr_write_intrinsic(air, name, &args, span, ctx)
-        } else if name == known.ptr_offset {
-            Self::require_checked_for_intrinsic(ctx, "ptr_offset", span)?;
-            self.analyze_ptr_offset_intrinsic(air, name, &args, span, ctx)
-        } else if name == known.ptr_to_int {
-            Self::require_checked_for_intrinsic(ctx, "ptr_to_int", span)?;
-            self.analyze_ptr_to_int_intrinsic(air, name, &args, span, ctx)
-        } else if name == known.int_to_ptr {
-            Self::require_checked_for_intrinsic(ctx, "int_to_ptr", span)?;
-            self.analyze_int_to_ptr_intrinsic(air, name, inst_ref, &args, span, ctx)
-        } else if name == known.null_ptr {
-            Self::require_checked_for_intrinsic(ctx, "null_ptr", span)?;
-            self.analyze_null_ptr_intrinsic(air, name, inst_ref, &args, span, ctx)
-        } else if name == known.is_null {
-            Self::require_checked_for_intrinsic(ctx, "is_null", span)?;
-            self.analyze_is_null_intrinsic(air, name, &args, span, ctx)
-        } else if name == known.ptr_copy {
-            Self::require_checked_for_intrinsic(ctx, "ptr_copy", span)?;
-            self.analyze_ptr_copy_intrinsic(air, name, &args, span, ctx)
-        } else if name == known.raw {
-            Self::require_checked_for_intrinsic(ctx, "raw", span)?;
-            self.analyze_addr_of_intrinsic(air, &args, span, ctx, false)
-        } else if name == known.raw_mut {
-            Self::require_checked_for_intrinsic(ctx, "raw_mut", span)?;
-            self.analyze_addr_of_intrinsic(air, &args, span, ctx, true)
-        } else if name == known.syscall {
-            Self::require_checked_for_intrinsic(ctx, "syscall", span)?;
-            self.analyze_syscall_intrinsic(air, name, &args, span, ctx)
-        } else if name == known.target_arch {
-            self.analyze_target_arch_intrinsic(air, &args, span)
-        } else if name == known.target_os {
-            self.analyze_target_os_intrinsic(air, &args, span)
-        } else if name == known.compile_error {
-            self.analyze_compile_error_intrinsic(air, &args, span)
-        } else if name == known.field {
-            self.analyze_field_intrinsic(air, &args, span, ctx)
-        } else {
-            // Unknown intrinsic - resolve name for error message
+        let Some(id) = self.known.intrinsic_id(name) else {
             let intrinsic_name_str = self.interner.resolve(&name);
-            Err(CompileError::new(
+            return Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(intrinsic_name_str.to_string()),
                 span,
-            ))
+            ));
+        };
+        let def = lookup_by_id(id);
+
+        // Registry-driven gates: preview feature and unchecked-block requirement.
+        if let Some(feature) = def.preview {
+            let what = format!("@{}() intrinsic", def.name);
+            self.require_preview(feature, &what, span)?;
+        }
+        if def.requires_unchecked {
+            Self::require_checked_for_intrinsic(ctx, def.name, span)?;
+        }
+
+        match id {
+            IntrinsicId::Dbg => self.analyze_dbg_intrinsic(air, inst_ref, &args, span, ctx),
+            IntrinsicId::TestPreviewGate => {
+                self.analyze_test_preview_gate_intrinsic(air, &args, span)
+            }
+            IntrinsicId::ReadLine => self.analyze_read_line_intrinsic(air, name, &args, span),
+            IntrinsicId::ParseI32
+            | IntrinsicId::ParseI64
+            | IntrinsicId::ParseU32
+            | IntrinsicId::ParseU64 => {
+                self.analyze_parse_intrinsic(air, name, def.name, &args, span, ctx)
+            }
+            IntrinsicId::Cast => self.analyze_cast_intrinsic(air, inst_ref, &args, span, ctx),
+            IntrinsicId::Panic => self.analyze_panic_intrinsic(air, &args, span, ctx),
+            IntrinsicId::Assert => self.analyze_assert_intrinsic(air, &args, span, ctx),
+            IntrinsicId::Import => self.analyze_import_intrinsic(air, &args, span),
+            IntrinsicId::RandomU32 => self.analyze_random_u32_intrinsic(air, name, &args, span),
+            IntrinsicId::RandomU64 => self.analyze_random_u64_intrinsic(air, name, &args, span),
+            IntrinsicId::PtrRead => self.analyze_ptr_read_intrinsic(air, name, &args, span, ctx),
+            IntrinsicId::PtrWrite => self.analyze_ptr_write_intrinsic(air, name, &args, span, ctx),
+            IntrinsicId::PtrOffset => {
+                self.analyze_ptr_offset_intrinsic(air, name, &args, span, ctx)
+            }
+            IntrinsicId::PtrToInt => self.analyze_ptr_to_int_intrinsic(air, name, &args, span, ctx),
+            IntrinsicId::IntToPtr => {
+                self.analyze_int_to_ptr_intrinsic(air, name, inst_ref, &args, span, ctx)
+            }
+            IntrinsicId::NullPtr => {
+                self.analyze_null_ptr_intrinsic(air, name, inst_ref, &args, span, ctx)
+            }
+            IntrinsicId::IsNull => self.analyze_is_null_intrinsic(air, name, &args, span, ctx),
+            IntrinsicId::PtrCopy => self.analyze_ptr_copy_intrinsic(air, name, &args, span, ctx),
+            IntrinsicId::Raw => self.analyze_addr_of_intrinsic(air, &args, span, ctx, false),
+            IntrinsicId::RawMut => self.analyze_addr_of_intrinsic(air, &args, span, ctx, true),
+            IntrinsicId::Syscall => self.analyze_syscall_intrinsic(air, name, &args, span, ctx),
+            IntrinsicId::TargetArch => self.analyze_target_arch_intrinsic(air, &args, span),
+            IntrinsicId::TargetOs => self.analyze_target_os_intrinsic(air, &args, span),
+            IntrinsicId::CompileError => self.analyze_compile_error_intrinsic(air, &args, span),
+            IntrinsicId::Field => self.analyze_field_intrinsic(air, &args, span, ctx),
+            // Type intrinsics are handled via the `TypeIntrinsic` RIR node, not
+            // this path. @range is consumed as an iterable by analyze_ops. If
+            // any of these ids do reach the expression dispatcher it's a usage
+            // error, matching the pre-registry fall-through behavior.
+            IntrinsicId::SizeOf
+            | IntrinsicId::AlignOf
+            | IntrinsicId::TypeName
+            | IntrinsicId::TypeInfo
+            | IntrinsicId::Range => Err(CompileError::new(
+                ErrorKind::UnknownIntrinsic(def.name.to_string()),
+                span,
+            )),
         }
     }
 
@@ -7484,7 +7487,6 @@ impl<'a> Sema<'a> {
 
             // ── Type intrinsic (@size_of, @align_of, @type_name, @type_info) ──────
             InstData::TypeIntrinsic { name, type_arg } => {
-                let intrinsic_name = self.interner.resolve(&name).to_string();
                 // Resolve the type argument.
                 // Check comptime_type_overrides first (for generic type params like T),
                 // then comptime_type_vars from the analysis context, then fall back
@@ -7509,17 +7511,17 @@ impl<'a> Sema<'a> {
                     self.resolve_type(type_arg, inst_span)
                         .map_err(|_| not_const(inst_span))?
                 };
-                match intrinsic_name.as_str() {
-                    "size_of" => {
+                match self.known.intrinsic_id(name) {
+                    Some(IntrinsicId::SizeOf) => {
                         let slot_count = self.abi_slot_count(ty);
                         Ok(ConstValue::Integer((slot_count as i64) * 8))
                     }
-                    "align_of" => {
+                    Some(IntrinsicId::AlignOf) => {
                         let slot_count = self.abi_slot_count(ty);
                         Ok(ConstValue::Integer(if slot_count == 0 { 1 } else { 8 }))
                     }
-                    "type_name" => self.evaluate_comptime_type_name(ty, inst_span),
-                    "type_info" => self.evaluate_comptime_type_info(ty, inst_span),
+                    Some(IntrinsicId::TypeName) => self.evaluate_comptime_type_name(ty, inst_span),
+                    Some(IntrinsicId::TypeInfo) => self.evaluate_comptime_type_info(ty, inst_span),
                     _ => Err(not_const(inst_span)),
                 }
             }

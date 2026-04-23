@@ -25,14 +25,21 @@
 //! }
 //! ```
 
+use std::collections::HashMap;
+
+use gruel_intrinsics::{INTRINSICS, IntrinsicId};
 use lasso::{Spur, ThreadedRodeo};
 
 /// Pre-interned symbols for known strings.
 ///
 /// This struct is created once during `SemaContext` construction and provides
 /// fast symbol comparison for intrinsic dispatch and other common lookups.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct KnownSymbols {
+    /// Maps each intrinsic's interned name `Spur` to its stable `IntrinsicId`.
+    /// Built from the central `gruel-intrinsics` registry at sema startup;
+    /// consumers use this for id-based dispatch instead of string matching.
+    pub intrinsic_ids: HashMap<Spur, IntrinsicId>,
     // Intrinsic names
     /// The `dbg` intrinsic symbol.
     pub dbg: Spur,
@@ -125,7 +132,12 @@ impl KnownSymbols {
     ///
     /// This should be called once during `SemaContext` construction.
     pub fn new(interner: &ThreadedRodeo) -> Self {
+        let intrinsic_ids = INTRINSICS
+            .iter()
+            .map(|d| (interner.get_or_intern_static(d.name), d.id))
+            .collect();
         Self {
+            intrinsic_ids,
             // Intrinsic names
             dbg: interner.get_or_intern_static("dbg"),
             cast: interner.get_or_intern_static("cast"),
@@ -177,6 +189,11 @@ impl KnownSymbols {
             // Special function names
             main_fn: interner.get_or_intern_static("main"),
         }
+    }
+
+    /// Look up an intrinsic's stable id by its interned name symbol.
+    pub fn intrinsic_id(&self, sym: Spur) -> Option<IntrinsicId> {
+        self.intrinsic_ids.get(&sym).copied()
     }
 
     /// Check if a symbol matches any of the parse intrinsics.
@@ -285,9 +302,18 @@ mod tests {
     }
 
     #[test]
-    fn known_symbols_is_copy() {
-        // KnownSymbols should be Copy since it only contains Spur values
-        fn assert_copy<T: Copy>() {}
-        assert_copy::<KnownSymbols>();
+    fn intrinsic_id_lookup() {
+        let interner = ThreadedRodeo::new();
+        let known = KnownSymbols::new(&interner);
+
+        // Every registered intrinsic must resolve.
+        for d in INTRINSICS {
+            let sym = interner.get_or_intern(d.name);
+            assert_eq!(known.intrinsic_id(sym), Some(d.id));
+        }
+
+        // Non-intrinsic names yield None.
+        let non_intrinsic = interner.get_or_intern("definitely_not_an_intrinsic");
+        assert_eq!(known.intrinsic_id(non_intrinsic), None);
     }
 }

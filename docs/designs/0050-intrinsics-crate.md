@@ -117,7 +117,7 @@ The hand-maintained quick-reference table in the spec is replaced by the generat
   - Replace hard-coded `TYPE_INTRINSICS` in `astgen.rs:10` with a registry lookup.
   - Behavior must be byte-identical — confirm with spec-test suite.
 
-- [ ] **Phase 3: Wire Sema to the registry**
+- [x] **Phase 3: Wire Sema to the registry**
   - Replace `KnownSymbols` intrinsic fields with a `HashMap<Spur, IntrinsicId>` built at sema startup.
   - Rewrite `analyze_intrinsic_impl` (and the `analyze_type_intrinsic` side) to dispatch on `IntrinsicId` via a single exhaustive match. The per-intrinsic `analyze_*_intrinsic` fns stay put; only the dispatcher changes.
   - Replace string checks in `inference/generate.rs` with id-based checks.
