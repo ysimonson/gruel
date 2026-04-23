@@ -538,15 +538,40 @@ ship without the preview gate since it's a bug fix, not a new feature.
     struct-variant, top-level struct, and wildcard-in-variant-field under
     the `nested_patterns` preview.
 
-- [ ] **Phase 5: Tuple / refutable nested patterns + exhaustiveness**
-  - Tuple patterns at the match arm root (`match (a, b) { (0, 0) => ...,
-    _ => ... }`): needs either recursive CFG dispatch or an astgen
-    elaboration into an if-chain on tuple projections.
+- [x] **Phase 5a: Tuple patterns at match root via if-chain elaboration**
+  - `AstGen::try_elaborate_tuple_match` detects any match expression whose
+    arms include a tuple-root pattern and elaborates it into a block with
+    `let __match_scr_N = <scrutinee>` followed by a reverse-folded if/else
+    chain. Each tuple element maps to either an equality test (Int / NegInt
+    / Bool), a `let` binding (Ident), or nothing (Wildcard). Predicates at
+    one position are joined with `And` (short-circuit).
+  - Requires the final arm to be unconditional (wildcard, ident, or a tuple
+    of all-irrefutable leaves). Non-exhaustive tuple matches return `None`
+    from the elaborator so they fall through to the normal match path and
+    produce the usual "top-level Tuple not yet supported" message. A
+    runtime `@panic` fallback was implemented but disabled due to an
+    unrelated CFG-builder bug that misorders `Alloc` before a
+    `Branch`-with-`Never` else; the pragmatic choice is to ship exhaustive
+    tuple matches first.
+  - Side fix: type inference (`gruel-air/src/inference/generate.rs`) now
+    infers `@panic` and `@compile_error` as `Never` rather than `Unit`.
+    Previously, `if cond { 42 } else { @panic("...") }` type-checked as
+    `Unit`, breaking any use of `@panic` in a value-returning else. This
+    fix is independent of Phase 5a but came out of exploring the CFG bug
+    above.
+  - Spec tests (4) cover: integer literals with wildcard last arm, ident
+    bindings, bool literal exhaustion via the 2x2 matrix, and negative
+    integer literals.
+
+- [ ] **Phase 5b: Refutable nested sub-patterns + exhaustiveness**
   - Refutable nested sub-patterns (`Some(Some(v))`, `Some(0)`): require
     cascading switch dispatch — cannot be elaborated to flat match without
     arm duplication.
   - Extend the exhaustiveness checker to consider nested pattern
     combinations (witnesses become nested patterns in diagnostics).
+  - Revisit the CFG-builder bug around `let` + `if-else-with-panic` so the
+    tuple-match elaboration can emit a real `@panic` fallback for
+    non-exhaustive matches.
   - The ADR's originally-planned approach — recursive `AirPattern` plus
     recursive CFG descent — remains the right direction for these shapes.
 

@@ -821,3 +821,83 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# =============================================================================
+# Tuple patterns at match root (ADR-0049 Phase 5a)
+# =============================================================================
+
+[[case]]
+name = "tuple_match_root_literals"
+spec = ["4.7:23", "4.7:24"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Tuple pattern at match root with integer literal elements (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: i32 = 0;
+    let b: i32 = 0;
+    match (a, b) {
+        (0, 0) => 42,
+        (0, _) => 1,
+        (_, 0) => 2,
+        _ => 3,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "tuple_match_root_bindings"
+spec = ["4.7:23", "4.7:24"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Tuple pattern at match root binds elements via idents (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: i32 = 10;
+    let b: i32 = 32;
+    match (a, b) {
+        (0, 0) => 100,
+        (x, y) => x + y,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "tuple_match_root_bools"
+spec = ["4.7:23", "4.7:24"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Tuple pattern at match root with boolean literal elements (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: bool = true;
+    let b: bool = false;
+    match (a, b) {
+        (true, true) => 0,
+        (true, false) => 42,
+        (false, true) => 2,
+        (_, _) => 3,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "tuple_match_root_negative_literal"
+spec = ["4.7:23", "4.7:24"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Tuple pattern at match root matches negative integer literals (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: i32 = -5;
+    let b: i32 = 47;
+    match (a, b) {
+        (-5, x) => x,
+        _ => 0,
+    }
+}
+"""
+exit_code = 47
