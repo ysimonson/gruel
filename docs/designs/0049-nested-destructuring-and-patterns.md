@@ -575,19 +575,24 @@ ship without the preview gate since it's a bug fix, not a new feature.
   - The ADR's originally-planned approach — recursive `AirPattern` plus
     recursive CFG descent — remains the right direction for these shapes.
 
-- [ ] **Phase 6: Rest patterns (`..`)**
-  - Parser: accept `..` inside tuple / struct / variant / data-variant element lists;
-    enforce at most one per sequence and reject at the top level.
-  - Astgen: elaborate `..` into implicit `_` wildcards for skipped positions / fields
-    at the RIR level, so lower passes do not need to distinguish it. Wildcards already
-    emit the right Drop when the type is non-copy.
-  - Sema: arity accounting accepts `..` as "covers remaining" in variant and tuple
-    patterns; struct patterns with `..` waive the "all fields required" rule from
-    ADR-0036 only for that pattern.
-  - Exhaustiveness: a `..` at a position makes that position equivalent to `_` for
-    coverage.
-  - Spec-test matrix: `..` in tuples, structs, variants; nested `..`; non-copy
-    skipped fields are dropped exactly once; arity and duplicate-`..` errors.
+- [x] **Phase 6: Rest patterns (`..`) in let destructures**
+  - Parser already accepts `..` in tuple / struct / variant field lists
+    (Phase 2); Phase 6 lights them up end-to-end for `let` destructures.
+  - Astgen: in `emit_let_destructure_into`, a `..` struct-field or
+    trailing `..` tuple-element emits a synthetic `RirDestructureField`
+    with the sentinel field name `..`. The `RirDestructureField` type is
+    re-exported from `gruel-rir` so sema can synthesize new ones.
+  - Sema: `analyze_struct_destructure` strips the sentinel field, sets
+    `has_rest`, waives the "all fields required" rule, and synthesizes
+    wildcard `RirDestructureField`s for every unlisted struct field. This
+    reuses the existing alloc/drop code path so non-copy skipped fields
+    are dropped exactly once.
+  - Deferred to a future pass (still panics in astgen):
+    - `..` in the middle of a tuple destructure (`(a, .., b)`) — would
+      need sema to fill in positions from the inferred tuple arity.
+    - `..` in match-arm variant / struct-variant patterns.
+  - Spec tests: struct rest dropping integer fields, struct rest dropping
+    a non-copy String field, trailing tuple rest.
 
 - [x] **Phase 7: Anon-struct alias sema fix (no preview gate)**
   - `analyze_struct_destructure` in `gruel-air/src/sema/analyze_ops.rs` now

@@ -1658,10 +1658,19 @@ impl<'a> AstGen<'a> {
                 let mut rir_fields = Vec::with_capacity(fields.len());
                 let mut children: Vec<(Spur, &Pattern)> = Vec::new();
                 for fp in fields {
-                    let field_name = fp
-                        .field_name
-                        .as_ref()
-                        .expect("rest `..` field pattern is a Phase 6 feature");
+                    // `..` rest pattern in a struct destructure: emit a
+                    // marker field whose field_name is the sentinel `..` so
+                    // sema recognizes this and relaxes the "all fields
+                    // required" rule (ADR-0049 Phase 6).
+                    let Some(field_name) = fp.field_name.as_ref() else {
+                        rir_fields.push(RirDestructureField {
+                            field_name: self.interner.get_or_intern_static(".."),
+                            binding_name: None,
+                            is_wildcard: true,
+                            is_mut: false,
+                        });
+                        continue;
+                    };
                     match &fp.sub {
                         None => rir_fields.push(RirDestructureField {
                             field_name: field_name.name,
@@ -1704,9 +1713,30 @@ impl<'a> AstGen<'a> {
                 (type_name.name, rir_fields, children)
             }
             Pattern::Tuple { elems, .. } => {
+                // A `..` at the end of a tuple pattern emits the `..`
+                // marker field (ADR-0049 Phase 6). `..` in the middle of a
+                // tuple is not yet supported — the explicit positions after
+                // `..` would need sema to fill in their indices from the
+                // inferred tuple arity.
                 let mut rir_fields = Vec::with_capacity(elems.len());
                 let mut children: Vec<(Spur, &Pattern)> = Vec::new();
+                let last_index = elems.len().saturating_sub(1);
                 for (i, elem) in elems.iter().enumerate() {
+                    if let TupleElemPattern::Rest(_) = elem {
+                        if i != last_index {
+                            panic!(
+                                "rest pattern `..` in tuple must currently be at the end (ADR-0049 Phase 6); got element {}",
+                                i
+                            );
+                        }
+                        rir_fields.push(RirDestructureField {
+                            field_name: self.interner.get_or_intern_static(".."),
+                            binding_name: None,
+                            is_wildcard: true,
+                            is_mut: false,
+                        });
+                        continue;
+                    }
                     let field_name = self.interner.get_or_intern(i.to_string());
                     match elem {
                         TupleElemPattern::Pattern(Pattern::Wildcard(_)) => {
@@ -1741,9 +1771,7 @@ impl<'a> AstGen<'a> {
                             "unexpected sub-pattern in let tuple destructure: {:?}",
                             other
                         ),
-                        TupleElemPattern::Rest(_) => {
-                            panic!("rest pattern `..` is a Phase 6 feature")
-                        }
+                        TupleElemPattern::Rest(_) => unreachable!("handled above"),
                     }
                 }
                 let tuple_type_name = self.interner.get_or_intern_static("__tuple__");

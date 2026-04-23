@@ -714,3 +714,55 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "type mismatch"
+
+# =============================================================================
+# Rest patterns in let destructures (ADR-0049 Phase 6)
+# =============================================================================
+
+[[case]]
+name = "let_struct_rest_drops_remaining_fields"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Rest pattern `..` in struct destructure drops unlisted fields (ADR-0049 Phase 6)"
+source = """
+struct Point3 { x: i32, y: i32, z: i32 }
+
+fn main() -> i32 {
+    let p = Point3 { x: 42, y: 10, z: 20 };
+    let Point3 { x, .. } = p;
+    x
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "let_struct_rest_with_non_copy_field"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Rest pattern `..` drops non-copy fields exactly once (ADR-0049 Phase 6)"
+source = """
+struct Config { name: String, size: i32 }
+
+fn main() -> i32 {
+    let c = Config { name: "hello", size: 42 };
+    let Config { size, .. } = c;
+    size
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "let_tuple_rest_trailing"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Trailing rest pattern `..` in tuple destructure drops unlisted positions (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let (a, ..) = (42, 10, 20);
+    a
+}
+"""
+exit_code = 42

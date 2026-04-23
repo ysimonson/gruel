@@ -27,7 +27,8 @@ use gruel_error::{
     WarningKind,
 };
 use gruel_rir::{
-    InstData, InstRef, RirArgMode, RirCallArg, RirParamMode, RirPattern, RirPatternBinding,
+    InstData, InstRef, RirArgMode, RirCallArg, RirDestructureField, RirParamMode, RirPattern,
+    RirPatternBinding,
 };
 use lasso::Spur;
 
@@ -2390,8 +2391,25 @@ impl<'a> Sema<'a> {
             }
         }
 
-        // Get the destructure fields from the RIR
-        let rir_fields = self.rir.get_destructure_fields(fields_start, fields_len);
+        // Get the destructure fields from the RIR.
+        // Rest-pattern marker: astgen emits a synthetic `..` field when the
+        // user writes `Point { x, .. }` (ADR-0049 Phase 6). We strip it here
+        // and set `has_rest`, which disables the "all fields required" rule
+        // below and causes every unlisted field to be treated as wildcard-
+        // dropped.
+        let all_rir_fields = self.rir.get_destructure_fields(fields_start, fields_len);
+        let (rir_fields, has_rest) = {
+            let mut filtered = Vec::with_capacity(all_rir_fields.len());
+            let mut has_rest = false;
+            for f in all_rir_fields {
+                if self.interner.resolve(&f.field_name) == ".." {
+                    has_rest = true;
+                } else {
+                    filtered.push(f);
+                }
+            }
+            (filtered, has_rest)
+        };
 
         // Validate: no duplicate fields
         let mut seen_fields = std::collections::HashSet::new();
@@ -2419,18 +2437,21 @@ impl<'a> Sema<'a> {
             type_name_str.clone()
         };
 
-        // Validate: all struct fields are mentioned
+        // Validate: all struct fields are mentioned (waived when a `..` rest
+        // pattern is present — missing fields are wildcard-bound below).
         let struct_field_names: Vec<String> =
             struct_def.fields.iter().map(|f| f.name.clone()).collect();
-        for struct_field_name in &struct_field_names {
-            if !seen_fields.contains(struct_field_name) {
-                return Err(CompileError::new(
-                    ErrorKind::MissingFieldInDestructure {
-                        struct_name: display_name.clone(),
-                        field: struct_field_name.clone(),
-                    },
-                    span,
-                ));
+        if !has_rest {
+            for struct_field_name in &struct_field_names {
+                if !seen_fields.contains(struct_field_name) {
+                    return Err(CompileError::new(
+                        ErrorKind::MissingFieldInDestructure {
+                            struct_name: display_name.clone(),
+                            field: struct_field_name.clone(),
+                        },
+                        span,
+                    ));
+                }
             }
         }
 
@@ -2447,6 +2468,30 @@ impl<'a> Sema<'a> {
                 ));
             }
         }
+
+        // When `..` is present, synthesize wildcard `RirDestructureField`s for
+        // every struct field not explicitly mentioned. The subsequent
+        // alloc/drop loop treats them like any other wildcard binding, so
+        // non-copy fields get dropped at scope exit.
+        let rir_fields: Vec<RirDestructureField> = if has_rest {
+            let rest_marker = self.interner.get_or_intern_static("..");
+            let mut expanded = rir_fields;
+            for struct_field_name in &struct_field_names {
+                if !seen_fields.contains(struct_field_name) {
+                    let field_name_spur = self.interner.get_or_intern(struct_field_name);
+                    debug_assert!(field_name_spur != rest_marker);
+                    expanded.push(RirDestructureField {
+                        field_name: field_name_spur,
+                        binding_name: None,
+                        is_wildcard: true,
+                        is_mut: false,
+                    });
+                }
+            }
+            expanded
+        } else {
+            rir_fields
+        };
 
         // Emit AIR: store init into a temp, then extract each field into its own slot.
         // The temp struct slot is NOT registered with StorageLive —
