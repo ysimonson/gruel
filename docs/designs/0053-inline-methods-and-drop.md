@@ -172,10 +172,10 @@ Gate the entire change behind `PreviewFeature::InlineTypeMembers`. Stabilize onc
   - Keep `Item::DropFn` parseable for one pre-removal diagnostic turn that says "destructors are now declared as `fn drop(self)` inside the type body" (removed entirely in phase 4).
   - Unit tests at the parser level.
 
-- [ ] **Phase 2: RIR + Sema (named enums with methods)**
+- [x] **Phase 2: RIR + Sema (named enums with methods)**
   - RIR: emit method decls when lowering named enums; no new instruction kinds needed (reuse what ADR-0029/0039 set up for anonymous enums).
-  - Sema: extend enum registration to register methods keyed by `(EnumId, Spur)`. Resolve `Self` inside method bodies. Mirror the named-struct path.
-  - Spec tests covering: basic method, associated function, `Self::Variant`, match-on-self, comptime parity with anonymous enums.
+  - Sema: extend enum registration to register methods keyed by `(EnumId, Spur)`. Resolve `Self` inside method *signatures* (body-position `Self` already works on anonymous enums but is not supported for named enums, matching named-struct behaviour). Also wire named-enum associated-function calls (`EnumName::fn(...)`) through `self.enum_methods`. Mirror the named-struct path.
+  - Spec tests covering: basic method, associated function, match-on-self, preview gate. `Self`-in-body is intentionally omitted: it doesn't work on named structs either today, so adding it for enums would be a bigger change out of scope here.
 
 - [ ] **Phase 3: RIR + Sema (inline `fn drop`, all four forms)**
   - During type registration, sema pulls any method named `drop` out of the method list and stores it in the destructor slot instead.

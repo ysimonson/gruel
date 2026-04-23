@@ -526,6 +526,16 @@ impl<'a> Sema<'a> {
                     self.collect_struct_methods(*name, *methods_start, *methods_len, inst.span)?;
                 }
 
+                InstData::EnumDecl {
+                    name,
+                    methods_start,
+                    methods_len,
+                    ..
+                } => {
+                    // Collect methods defined inline in the enum (ADR-0053).
+                    self.collect_enum_methods(*name, *methods_start, *methods_len, inst.span)?;
+                }
+
                 InstData::DropFnDecl { type_name, .. } => {
                     self.collect_destructor(*type_name, inst.span)?;
                 }
@@ -969,6 +979,104 @@ impl<'a> Sema<'a> {
                     key,
                     MethodInfo {
                         struct_type,
+                        has_self: *has_self,
+                        params: param_range,
+                        return_type: ret_type,
+                        body: *body,
+                        span: method_inst.span,
+                        is_unchecked: *is_unchecked,
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Collect methods defined inline in a named enum (ADR-0053).
+    ///
+    /// Mirrors `collect_struct_methods`: registers each method against the
+    /// enum's `EnumId` in `self.enum_methods`, which the method-resolution
+    /// machinery already consults for anonymous enums (ADR-0039).
+    fn collect_enum_methods(
+        &mut self,
+        type_name: Spur,
+        methods_start: u32,
+        methods_len: u32,
+        span: Span,
+    ) -> CompileResult<()> {
+        if methods_len == 0 {
+            return Ok(());
+        }
+        let enum_id = match self.enums.get(&type_name) {
+            Some(id) => *id,
+            None => {
+                let type_name_str = self.interner.resolve(&type_name).to_string();
+                return Err(CompileError::new(
+                    ErrorKind::UnknownType(type_name_str),
+                    span,
+                ));
+            }
+        };
+        let enum_type = Type::new_enum(enum_id);
+
+        let methods = self.rir.get_inst_refs(methods_start, methods_len);
+        for method_ref in methods {
+            let method_inst = self.rir.get(method_ref);
+            if let InstData::FnDecl {
+                name: method_name,
+                is_unchecked,
+                params_start,
+                params_len,
+                return_type,
+                body,
+                has_self,
+                ..
+            } = &method_inst.data
+            {
+                let key = (enum_id, *method_name);
+                if self.enum_methods.contains_key(&key) {
+                    let type_name_str = self.interner.resolve(&type_name).to_string();
+                    let method_name_str = self.interner.resolve(method_name).to_string();
+                    return Err(CompileError::new(
+                        ErrorKind::DuplicateMethod {
+                            type_name: type_name_str,
+                            method_name: method_name_str,
+                        },
+                        method_inst.span,
+                    ));
+                }
+
+                let params = self.rir.get_params(*params_start, *params_len);
+                let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
+                let param_types: Vec<Type> = params
+                    .iter()
+                    .map(|p| {
+                        // `Self` inside enum method signatures resolves to the enum type.
+                        let type_str = self.interner.resolve(&p.ty);
+                        if type_str == "Self" {
+                            Ok(enum_type)
+                        } else {
+                            self.resolve_type(p.ty, method_inst.span)
+                        }
+                    })
+                    .collect::<CompileResult<Vec<_>>>()?;
+                let ret_type = {
+                    let ret_str = self.interner.resolve(return_type);
+                    if ret_str == "Self" {
+                        enum_type
+                    } else {
+                        self.resolve_type(*return_type, method_inst.span)?
+                    }
+                };
+
+                let param_range = self
+                    .param_arena
+                    .alloc_method(param_names.into_iter(), param_types.into_iter());
+
+                self.enum_methods.insert(
+                    key,
+                    MethodInfo {
+                        struct_type: enum_type,
                         has_self: *has_self,
                         params: param_range,
                         return_type: ret_type,

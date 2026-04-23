@@ -280,6 +280,79 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         }
     }
 
+    // Analyze method bodies from enum declarations (ADR-0053).
+    // Mirrors the struct-method loop above.
+    for (_, inst) in sema.rir.iter() {
+        if let InstData::EnumDecl {
+            name: type_name,
+            methods_start,
+            methods_len,
+            ..
+        } = &inst.data
+        {
+            if *methods_len == 0 {
+                continue;
+            }
+            let type_name_str = sema.interner.resolve(type_name).to_string();
+            let enum_id = match sema.enums.get(type_name) {
+                Some(id) => *id,
+                None => {
+                    errors.push(CompileError::new(
+                        ErrorKind::InternalError(format!(
+                            "enum '{}' not found in enum map during method analysis",
+                            type_name_str
+                        )),
+                        inst.span,
+                    ));
+                    continue;
+                }
+            };
+            let enum_type = Type::new_enum(enum_id);
+
+            let methods = sema.rir.get_inst_refs(*methods_start, *methods_len);
+            for method_ref in methods {
+                let method_inst = sema.rir.get(method_ref);
+                if let InstData::FnDecl {
+                    name: method_name,
+                    params_start,
+                    params_len,
+                    return_type,
+                    body,
+                    has_self,
+                    ..
+                } = &method_inst.data
+                {
+                    let method_name_str = sema.interner.resolve(method_name).to_string();
+                    let params = sema.rir.get_params(*params_start, *params_len);
+
+                    let full_name = if *has_self {
+                        format!("{}.{}", type_name_str, method_name_str)
+                    } else {
+                        format!("{}::{}", type_name_str, method_name_str)
+                    };
+
+                    match sema.analyze_method_function(
+                        &infer_ctx,
+                        &full_name,
+                        MethodBodySpec {
+                            return_type: *return_type,
+                            params: &params,
+                            body: *body,
+                            self_type: has_self.then_some(enum_type),
+                        },
+                        method_inst.span,
+                    ) {
+                        Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
+                            functions_with_strings.push((analyzed, local_strings));
+                            all_warnings.extend(warnings);
+                        }
+                        Err(e) => errors.push(e),
+                    }
+                }
+            }
+        }
+    }
+
     // Analyze destructor bodies
     for (_, inst) in sema.rir.iter() {
         if let InstData::DropFnDecl { type_name, body } = &inst.data {
@@ -3111,6 +3184,68 @@ impl<'a> Sema<'a> {
                     return Ok(AnalysisResult::new(air_ref, enum_type));
                 }
                 // Unit variant called as a function: fall through to the error path.
+            }
+
+            // Not a variant — look for an associated function on this named enum (ADR-0053).
+            let method_key = (enum_id, function);
+            if let Some(method_info) = self.enum_methods.get(&method_key).copied() {
+                ctx.referenced_methods
+                    .insert((StructId(enum_id.0), function));
+
+                if method_info.has_self {
+                    return Err(CompileError::new(
+                        ErrorKind::MethodCalledAsAssocFn {
+                            type_name: type_name_str.clone(),
+                            method_name: function_name_str.clone(),
+                        },
+                        span,
+                    ));
+                }
+
+                let method_param_types: Vec<Type> =
+                    self.param_arena.types(method_info.params).to_vec();
+                if args.len() != method_param_types.len() {
+                    return Err(CompileError::new(
+                        ErrorKind::WrongArgumentCount {
+                            expected: method_param_types.len(),
+                            found: args.len(),
+                        },
+                        span,
+                    ));
+                }
+
+                let mut extra_data = Vec::with_capacity(args.len() * 2);
+                for (i, arg) in args.iter().enumerate() {
+                    let result = self.analyze_inst(air, arg.value, ctx)?;
+                    if result.ty != method_param_types[i] {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: method_param_types[i].name().to_string(),
+                                found: result.ty.name().to_string(),
+                            },
+                            span,
+                        ));
+                    }
+                    extra_data.push(result.air_ref.as_u32());
+                    extra_data.push(AirArgMode::Normal.as_u32());
+                }
+
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let full_name = format!("{}::{}", enum_def.name, function_name_str);
+                let callee_sym = self.interner.get_or_intern(&full_name);
+
+                let args_start = air.add_extra(&extra_data);
+                let args_len = args.len() as u32;
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Call {
+                        name: callee_sym,
+                        args_start,
+                        args_len,
+                    },
+                    ty: method_info.return_type,
+                    span,
+                });
+                return Ok(AnalysisResult::new(air_ref, method_info.return_type));
             }
         }
 

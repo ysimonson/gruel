@@ -973,3 +973,145 @@ fn main() -> i32 {
 compile_fail = true
 error_contains = "duplicate field"
 
+
+# =============================================================================
+# Inline methods on named enums (ADR-0053)
+# =============================================================================
+
+[[case]]
+name = "enum_method_basic"
+spec = ["6.3:31", "6.3:33", "6.3:34"]
+preview = "inline_type_members"
+preview_should_pass = true
+source = """
+enum Opt {
+    Some(i32),
+    None,
+
+    fn or_default(self, d: i32) -> i32 {
+        match self {
+            Opt::Some(v) => v,
+            Opt::None => d,
+        }
+    }
+}
+
+fn main() -> i32 {
+    let x = Opt::Some(42);
+    x.or_default(0)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_associated_function"
+spec = ["6.3:33", "6.3:34"]
+preview = "inline_type_members"
+preview_should_pass = true
+source = """
+enum Sign {
+    Pos,
+    Neg,
+    Zero,
+
+    fn from_i32(n: i32) -> Sign {
+        if n > 0 { Sign::Pos } else if n < 0 { Sign::Neg } else { Sign::Zero }
+    }
+
+    fn to_i32(self) -> i32 {
+        match self {
+            Sign::Pos => 1,
+            Sign::Neg => -1,
+            Sign::Zero => 0,
+        }
+    }
+}
+
+fn main() -> i32 {
+    let s = Sign::from_i32(-5);
+    s.to_i32() + 43
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_multiple_methods"
+spec = ["6.3:31", "6.3:33"]
+preview = "inline_type_members"
+preview_should_pass = true
+source = """
+enum Dir {
+    N,
+    S,
+
+    fn flip(self) -> Dir {
+        match self { Dir::N => Dir::S, Dir::S => Dir::N }
+    }
+
+    fn as_i32(self) -> i32 {
+        match self { Dir::N => 1, Dir::S => -1 }
+    }
+}
+
+fn main() -> i32 {
+    let d = Dir::N.flip();
+    43 + d.as_i32()
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_method_variants_without_trailing_comma"
+spec = ["6.3:32"]
+preview = "inline_type_members"
+preview_should_pass = true
+source = """
+enum E {
+    A,
+    B
+
+    fn count(self) -> i32 { 2 }
+}
+
+fn main() -> i32 {
+    let e = E::A;
+    40 + e.count()
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "enum_duplicate_method_error"
+spec = ["6.3:35"]
+preview = "inline_type_members"
+preview_should_pass = true
+source = """
+enum E {
+    A,
+
+    fn get(self) -> i32 { 1 }
+    fn get(self) -> i32 { 2 }
+}
+
+fn main() -> i32 {
+    let e = E::A;
+    e.get()
+}
+"""
+compile_fail = true
+error_contains = "duplicate method"
+
+[[case]]
+name = "enum_methods_require_preview"
+spec = ["6.3:31"]
+source = """
+enum E {
+    A,
+    fn foo(self) -> i32 { 0 }
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "inline methods on named enums"
+

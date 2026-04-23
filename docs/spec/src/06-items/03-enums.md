@@ -318,3 +318,63 @@ fn area(s: Shape) -> i32 {
     }
 }
 ```
+
+## Inline Methods
+
+{{ rule(id="6.3:31", cat="normative") }}
+
+An enum **MAY** declare methods and associated functions inside its body, following the enum's variants.
+
+{{ rule(id="6.3:32", cat="syntax") }}
+
+```ebnf
+enum_body     = [ enum_variants ] { method_def } ;
+method_def    = [ directives ] "fn" IDENT "(" [ method_params ] ")" [ "->" type ] block ;
+method_params = method_param { "," method_param } [ "," ] ;
+method_param  = "self" | ( IDENT ":" type ) ;
+```
+
+{{ rule(id="6.3:33", cat="normative") }}
+
+A method is a function in the enum body whose first parameter is `self`. An associated function is a function in the enum body with no `self` parameter.
+
+{{ rule(id="6.3:34", cat="normative") }}
+
+Methods are invoked with dot notation: `value.method(args)`. Associated functions are invoked with path notation: `EnumName::function(args)`. Method calls are desugared to ordinary function calls with the receiver as the first argument.
+
+{{ rule(id="6.3:35", cat="legality-rule") }}
+
+Method names within a single enum **MUST** be unique. Duplicate method names produce a compile-time error.
+
+{{ rule(id="6.3:36", cat="example") }}
+
+```gruel
+enum Sign {
+    Pos,
+    Neg,
+    Zero,
+
+    fn from_i32(n: i32) -> Sign {
+        if n > 0 {
+            Sign::Pos
+        } else if n < 0 {
+            Sign::Neg
+        } else {
+            Sign::Zero
+        }
+    }
+
+    fn to_i32(self) -> i32 {
+        match self {
+            Sign::Pos => 1,
+            Sign::Neg => -1,
+            Sign::Zero => 0,
+        }
+    }
+}
+
+fn main() -> i32 {
+    let s = Sign::from_i32(-5);
+    s.to_i32()
+}
+```
