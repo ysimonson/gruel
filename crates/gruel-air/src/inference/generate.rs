@@ -1096,6 +1096,24 @@ impl<'a> ConstraintGenerator<'a> {
                             }
                             added_bindings
                         }
+                        // ADR-0051 Phase 4c: register Ident-leaf bindings for
+                        // Tuple / Struct / Ident arm roots. We walk the
+                        // pattern tree recursively, pulling field types from
+                        // the scrutinee's concrete struct definition when
+                        // available; unknown types get fresh variables so
+                        // body constraint generation still finds the binding.
+                        gruel_rir::RirPattern::Ident { .. }
+                        | gruel_rir::RirPattern::Tuple { .. }
+                        | gruel_rir::RirPattern::Struct { .. } => {
+                            let mut added_bindings = Vec::new();
+                            self.collect_recursive_pattern_bindings(
+                                pattern,
+                                scrutinee_info.ty.clone(),
+                                ctx,
+                                &mut added_bindings,
+                            );
+                            added_bindings
+                        }
                         _ => Vec::new(),
                     };
 
@@ -1580,6 +1598,94 @@ impl<'a> ConstraintGenerator<'a> {
     }
 
     /// Get the inferred type for a pattern.
+    /// ADR-0051 Phase 4c: walk a Tuple / Struct / Ident match-arm
+    /// pattern, registering each Ident leaf in `ctx.locals` so body
+    /// constraint generation resolves the variable. Field types are
+    /// pulled from the concrete struct when `scr_ty` is known; fresh
+    /// type variables take over otherwise.
+    fn collect_recursive_pattern_bindings(
+        &mut self,
+        pattern: &gruel_rir::RirPattern,
+        scr_ty: InferType,
+        ctx: &mut ConstraintContext,
+        added_bindings: &mut Vec<(lasso::Spur, Option<LocalVarInfo>)>,
+    ) {
+        match pattern {
+            gruel_rir::RirPattern::Ident { name, is_mut, span } => {
+                let old = ctx.locals.insert(
+                    *name,
+                    LocalVarInfo {
+                        ty: scr_ty,
+                        is_mut: *is_mut,
+                        span: *span,
+                    },
+                );
+                added_bindings.push((*name, old));
+            }
+            gruel_rir::RirPattern::Tuple { elems, .. } => {
+                // Try to resolve scrutinee's struct type to extract field
+                // types; fall back to fresh vars when unknown.
+                let field_tys: Vec<InferType> = match &scr_ty {
+                    InferType::Concrete(ty) => {
+                        if let Some(struct_id) = ty.as_struct() {
+                            let def = self.type_pool.struct_def(struct_id);
+                            def.fields
+                                .iter()
+                                .map(|f| InferType::Concrete(f.ty))
+                                .collect()
+                        } else {
+                            elems
+                                .iter()
+                                .map(|_| InferType::Var(self.fresh_var()))
+                                .collect()
+                        }
+                    }
+                    _ => elems
+                        .iter()
+                        .map(|_| InferType::Var(self.fresh_var()))
+                        .collect(),
+                };
+                for (i, elem) in elems.iter().enumerate() {
+                    let elem_ty = field_tys
+                        .get(i)
+                        .cloned()
+                        .unwrap_or_else(|| InferType::Var(self.fresh_var()));
+                    self.collect_recursive_pattern_bindings(elem, elem_ty, ctx, added_bindings);
+                }
+            }
+            gruel_rir::RirPattern::Struct { fields, .. } => {
+                // For named-struct roots, we need field types by name.
+                // If the scrutinee type is concrete, walk its field list.
+                let struct_id_opt = match &scr_ty {
+                    InferType::Concrete(ty) => ty.as_struct(),
+                    _ => None,
+                };
+                for rf in fields {
+                    let field_ty = if let Some(sid) = struct_id_opt {
+                        let def = self.type_pool.struct_def(sid);
+                        let name = self.interner.resolve(&rf.field_name);
+                        def.fields
+                            .iter()
+                            .find(|sf| sf.name == name)
+                            .map(|sf| InferType::Concrete(sf.ty))
+                            .unwrap_or_else(|| InferType::Var(self.fresh_var()))
+                    } else {
+                        InferType::Var(self.fresh_var())
+                    };
+                    self.collect_recursive_pattern_bindings(
+                        &rf.pattern,
+                        field_ty,
+                        ctx,
+                        added_bindings,
+                    );
+                }
+            }
+            // Leaf literals and the legacy variant patterns don't
+            // introduce top-level arm bindings via this path.
+            _ => {}
+        }
+    }
+
     fn pattern_type(&mut self, pattern: &gruel_rir::RirPattern) -> InferType {
         match pattern {
             gruel_rir::RirPattern::Wildcard(_) => {

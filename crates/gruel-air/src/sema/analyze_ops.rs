@@ -2162,6 +2162,77 @@ impl<'a> Sema<'a> {
                 });
 
                 AnalysisResult::new(combined, body_type)
+            } else if matches!(
+                pattern,
+                RirPattern::Ident { .. } | RirPattern::Tuple { .. } | RirPattern::Struct { .. }
+            ) {
+                // ADR-0051 Phase 4c: introduce bindings for Ident leaves in
+                // top-level Tuple / Struct / Ident arm patterns. Walks the
+                // pattern tree with FieldGet projections, allocates slots,
+                // emits StorageLive / Alloc, registers locals, then
+                // analyses the arm body with the bindings in scope. Wraps
+                // setup + body in a Block so CFG sees them together.
+                let mut storage_lives = Vec::new();
+                let mut allocs = Vec::new();
+                self.emit_recursive_pattern_bindings(
+                    air,
+                    scrutinee_result.air_ref,
+                    scrutinee_type,
+                    pattern,
+                    ctx,
+                    &mut storage_lives,
+                    &mut allocs,
+                );
+
+                let inner_result = self.analyze_inst(air, *body, ctx)?;
+                let body_type = inner_result.ty;
+
+                let unit = air.add_inst(AirInst {
+                    data: AirInstData::UnitConst,
+                    ty: Type::UNIT,
+                    span: pattern_span,
+                });
+                let allocs_start = air.add_extra(
+                    &allocs
+                        .iter()
+                        .map(|r: &AirRef| r.as_u32())
+                        .collect::<Vec<_>>(),
+                );
+                let inner_block = air.add_inst(AirInst {
+                    data: AirInstData::Block {
+                        stmts_start: allocs_start,
+                        stmts_len: allocs.len() as u32,
+                        value: unit,
+                    },
+                    ty: Type::UNIT,
+                    span: pattern_span,
+                });
+                let sl_start = air.add_extra(
+                    &storage_lives
+                        .iter()
+                        .map(|r: &AirRef| r.as_u32())
+                        .collect::<Vec<_>>(),
+                );
+                let setup_block = air.add_inst(AirInst {
+                    data: AirInstData::Block {
+                        stmts_start: sl_start,
+                        stmts_len: storage_lives.len() as u32,
+                        value: inner_block,
+                    },
+                    ty: Type::UNIT,
+                    span: pattern_span,
+                });
+                let stmts_start = air.add_extra(&[setup_block.as_u32()]);
+                let combined = air.add_inst(AirInst {
+                    data: AirInstData::Block {
+                        stmts_start,
+                        stmts_len: 1,
+                        value: inner_result.air_ref,
+                    },
+                    ty: body_type,
+                    span: pattern_span,
+                });
+                AnalysisResult::new(combined, body_type)
             } else {
                 // Non-data/struct variant: analyze body normally
                 self.analyze_inst(air, *body, ctx)?
@@ -2287,6 +2358,125 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, final_type))
+    }
+
+    /// ADR-0051 Phase 4c: walk a Tuple / Struct / Ident match-arm pattern
+    /// recursively and emit `FieldGet` + `StorageLive` + `Alloc` setup for
+    /// every `RirPattern::Ident` leaf, registering each as a local in the
+    /// arm scope. Non-binding leaves (`Wildcard`, `Int`, `Bool`) emit no
+    /// setup — the cascading CFG dispatch inspects them directly.
+    ///
+    /// `scr_air_ref` is the AIR value of the (possibly projected) current
+    /// focus; `scr_ty` is its type. Unknown struct lookups are treated as
+    /// no-ops — the outer type-checking already surfaced those errors.
+    pub(crate) fn emit_recursive_pattern_bindings(
+        &self,
+        air: &mut Air,
+        scr_air_ref: AirRef,
+        scr_ty: Type,
+        pattern: &RirPattern,
+        ctx: &mut AnalysisContext,
+        storage_lives: &mut Vec<AirRef>,
+        allocs: &mut Vec<AirRef>,
+    ) {
+        match pattern {
+            RirPattern::Ident { name, is_mut, span } => {
+                let slot = ctx.next_slot;
+                ctx.next_slot += 1;
+                storage_lives.push(air.add_inst(AirInst {
+                    data: AirInstData::StorageLive { slot },
+                    ty: scr_ty,
+                    span: *span,
+                }));
+                allocs.push(air.add_inst(AirInst {
+                    data: AirInstData::Alloc {
+                        slot,
+                        init: scr_air_ref,
+                    },
+                    ty: Type::UNIT,
+                    span: *span,
+                }));
+                ctx.insert_local(
+                    *name,
+                    LocalVar {
+                        slot,
+                        ty: scr_ty,
+                        is_mut: *is_mut,
+                        span: *span,
+                        allow_unused: false,
+                    },
+                );
+            }
+            RirPattern::Tuple { elems, .. } => {
+                let Some(struct_id) = scr_ty.as_struct() else {
+                    return;
+                };
+                let struct_def = self.type_pool.struct_def(struct_id);
+                for (i, elem) in elems.iter().enumerate() {
+                    let Some(field_ty) = struct_def.fields.get(i).map(|f| f.ty) else {
+                        return;
+                    };
+                    let field_val = air.add_inst(AirInst {
+                        data: AirInstData::FieldGet {
+                            base: scr_air_ref,
+                            struct_id,
+                            field_index: i as u32,
+                        },
+                        ty: field_ty,
+                        span: elem.span(),
+                    });
+                    self.emit_recursive_pattern_bindings(
+                        air,
+                        field_val,
+                        field_ty,
+                        elem,
+                        ctx,
+                        storage_lives,
+                        allocs,
+                    );
+                }
+            }
+            RirPattern::Struct { fields, .. } => {
+                let Some(struct_id) = scr_ty.as_struct() else {
+                    return;
+                };
+                let struct_def = self.type_pool.struct_def(struct_id);
+                for rf in fields {
+                    let field_name = self.interner.resolve(&rf.field_name);
+                    let Some(idx) = struct_def
+                        .fields
+                        .iter()
+                        .position(|sf| sf.name == field_name)
+                    else {
+                        continue;
+                    };
+                    let field_ty = struct_def.fields[idx].ty;
+                    let field_val = air.add_inst(AirInst {
+                        data: AirInstData::FieldGet {
+                            base: scr_air_ref,
+                            struct_id,
+                            field_index: idx as u32,
+                        },
+                        ty: field_ty,
+                        span: rf.pattern.span(),
+                    });
+                    self.emit_recursive_pattern_bindings(
+                        air,
+                        field_val,
+                        field_ty,
+                        &rf.pattern,
+                        ctx,
+                        storage_lives,
+                        allocs,
+                    );
+                }
+            }
+            // Wildcard / Int / Bool / Path / DataVariant / StructVariant all
+            // either bind no local (Wildcard / literals) or, for variant
+            // patterns, are handled by the pre-existing DataVariant /
+            // StructVariant extraction path above.
+            _ => {}
+        }
     }
 
     /// Lower an RIR pattern to the recursive `AirPattern` shape introduced by
