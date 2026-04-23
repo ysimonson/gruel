@@ -126,7 +126,12 @@ impl<'a> CfgBuilder<'a> {
                 .iter()
                 .enumerate()
                 .filter(|(i, ty)| {
-                    !func.param_modes.get(*i).copied().unwrap_or(false)
+                    !func
+                        .param_modes
+                        .get(*i)
+                        .copied()
+                        .unwrap_or_default()
+                        .is_by_ref()
                         && crate::drop_names::type_needs_drop(**ty, type_pool)
                 })
                 .map(|(i, ty)| LiveParam {

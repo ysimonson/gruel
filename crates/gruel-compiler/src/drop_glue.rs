@@ -22,8 +22,8 @@
 //! 2. Drops each element in index order (element 0 first, then 1, etc.)
 
 use gruel_air::{
-    Air, AirArgMode, AirInst, AirInstData, AirPattern, AirRef, AnalyzedFunction, StructDef, Type,
-    TypeInternPool, TypeKind,
+    Air, AirArgMode, AirInst, AirInstData, AirParamMode, AirPattern, AirRef, AnalyzedFunction,
+    StructDef, Type, TypeInternPool, TypeKind,
 };
 use gruel_cfg::drop_names;
 use gruel_span::Span;
@@ -197,7 +197,7 @@ fn create_struct_drop_glue_function(
     // param_slot_types: the struct type repeated num_param_slots times.
     // collect_param_types sees type=struct_ty at slot 0, advances by num_param_slots,
     // and emits exactly one LLVM param of the struct's aggregate type.
-    let param_modes = vec![false; num_param_slots as usize];
+    let param_modes = vec![AirParamMode::Normal; num_param_slots as usize];
     let param_slot_types = vec![struct_ty; num_param_slots as usize];
 
     AnalyzedFunction {
@@ -312,7 +312,7 @@ fn create_array_drop_glue_function(
     });
 
     // All parameters are passed by value (normal mode)
-    let param_modes = vec![false; num_param_slots as usize];
+    let param_modes = vec![AirParamMode::Normal; num_param_slots as usize];
     // Each element contributes element_slot_count slots of element_type
     let param_slot_types: Vec<Type> =
         std::iter::repeat_n(element_type, num_param_slots as usize).collect();
@@ -481,7 +481,7 @@ fn create_enum_drop_glue_function(
         span,
     });
 
-    let param_modes = vec![false; num_param_slots as usize];
+    let param_modes = vec![AirParamMode::Normal; num_param_slots as usize];
     let param_slot_types = vec![enum_ty; num_param_slots as usize];
 
     AnalyzedFunction {

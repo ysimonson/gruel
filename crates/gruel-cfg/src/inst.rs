@@ -24,7 +24,7 @@ use std::fmt;
 const _: () = assert!(std::mem::size_of::<CfgInst>() <= 48);
 const _: () = assert!(std::mem::size_of::<CfgInstData>() <= 32);
 
-use gruel_air::{EnumId, StructId, Type};
+use gruel_air::{AirParamMode, EnumId, StructId, Type};
 use gruel_span::Span;
 use lasso::{Key, Spur};
 
@@ -655,8 +655,8 @@ pub struct Cfg {
     num_params: u32,
     /// Function name
     fn_name: String,
-    /// Whether each parameter slot is inout (passed by reference)
-    param_modes: Vec<bool>,
+    /// Passing mode for each parameter slot (normal, inout, or borrow).
+    param_modes: Vec<AirParamMode>,
     /// Type of each parameter slot (parallel to param_modes).
     /// Retained here so that backends can declare function signatures even when
     /// DCE has removed unused `Param { index }` instructions from the body.
@@ -670,7 +670,7 @@ impl Cfg {
         num_locals: u32,
         num_params: u32,
         fn_name: String,
-        param_modes: Vec<bool>,
+        param_modes: Vec<AirParamMode>,
         param_types: Vec<Type>,
     ) -> Self {
         Self {
@@ -728,18 +728,36 @@ impl Cfg {
         &self.fn_name
     }
 
-    /// Get whether a parameter slot is inout.
+    /// Get the passing mode for a parameter slot.
     #[inline]
-    pub fn is_param_inout(&self, slot: u32) -> bool {
+    pub fn param_mode(&self, slot: u32) -> AirParamMode {
         self.param_modes
             .get(slot as usize)
             .copied()
-            .unwrap_or(false)
+            .unwrap_or(AirParamMode::Normal)
+    }
+
+    /// Get whether a parameter slot is inout.
+    #[inline]
+    pub fn is_param_inout(&self, slot: u32) -> bool {
+        self.param_mode(slot).is_inout()
+    }
+
+    /// Get whether a parameter slot is borrow.
+    #[inline]
+    pub fn is_param_borrow(&self, slot: u32) -> bool {
+        self.param_mode(slot).is_borrow()
+    }
+
+    /// Get whether a parameter slot is passed by reference (inout or borrow).
+    #[inline]
+    pub fn is_param_by_ref(&self, slot: u32) -> bool {
+        self.param_mode(slot).is_by_ref()
     }
 
     /// Get the parameter modes slice.
     #[inline]
-    pub fn param_modes(&self) -> &[bool] {
+    pub fn param_modes(&self) -> &[AirParamMode] {
         &self.param_modes
     }
 

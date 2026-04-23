@@ -175,6 +175,40 @@ pub enum AirParamMode {
     Borrow,
 }
 
+impl AirParamMode {
+    /// Returns true if the parameter is passed by reference (inout or borrow).
+    #[inline]
+    pub fn is_by_ref(self) -> bool {
+        matches!(self, AirParamMode::Inout | AirParamMode::Borrow)
+    }
+
+    /// Returns true if the parameter is an inout parameter.
+    #[inline]
+    pub fn is_inout(self) -> bool {
+        matches!(self, AirParamMode::Inout)
+    }
+
+    /// Returns true if the parameter is a borrow parameter.
+    #[inline]
+    pub fn is_borrow(self) -> bool {
+        matches!(self, AirParamMode::Borrow)
+    }
+}
+
+impl From<gruel_rir::RirParamMode> for AirParamMode {
+    fn from(mode: gruel_rir::RirParamMode) -> Self {
+        match mode {
+            gruel_rir::RirParamMode::Inout => AirParamMode::Inout,
+            gruel_rir::RirParamMode::Borrow => AirParamMode::Borrow,
+            // Comptime params are erased by the time they reach codegen;
+            // treat them as normal pass-by-value.
+            gruel_rir::RirParamMode::Normal | gruel_rir::RirParamMode::Comptime => {
+                AirParamMode::Normal
+            }
+        }
+    }
+}
+
 /// Argument passing mode in AIR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AirArgMode {

@@ -68,7 +68,7 @@ type RawFnAnalysis = CompileResult<(
     Air,
     u32,
     u32,
-    Vec<bool>,
+    Vec<crate::inst::AirParamMode>,
     Vec<Type>,
     Vec<CompileWarning>,
     Vec<String>,
@@ -1409,7 +1409,7 @@ impl<'a> Sema<'a> {
     ) -> RawFnAnalysis {
         let mut air = Air::new(return_type);
         let mut param_vec: Vec<ParamInfo> = Vec::new();
-        let mut param_modes: Vec<bool> = Vec::new();
+        let mut param_modes: Vec<crate::inst::AirParamMode> = Vec::new();
         let mut param_slot_types: Vec<Type> = Vec::new();
 
         // Add parameters to the param vec, tracking ABI slot offsets.
@@ -1426,7 +1426,8 @@ impl<'a> Sema<'a> {
             // Inout and Borrow parameters are passed by reference.
             // Comptime parameters are VALUE params (like `comptime n: i32`), passed by value.
             // Normal parameters are passed by value.
-            let is_by_ref = *mode == RirParamMode::Inout || *mode == RirParamMode::Borrow;
+            let air_mode: crate::inst::AirParamMode = (*mode).into();
+            let is_by_ref = air_mode.is_by_ref();
             let slot_count = if is_by_ref {
                 // By-ref parameters are always 1 slot (pointer)
                 1
@@ -1434,7 +1435,7 @@ impl<'a> Sema<'a> {
                 self.abi_slot_count(*ptype)
             };
             for _ in 0..slot_count {
-                param_modes.push(is_by_ref);
+                param_modes.push(air_mode);
                 param_slot_types.push(*ptype);
             }
             next_abi_slot += slot_count;

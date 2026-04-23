@@ -4,7 +4,7 @@
 //! - [`AnalyzedFunction`] - A single analyzed function with typed IR
 //! - [`SemaOutput`] - Complete output from analyzing a program
 
-use crate::inst::Air;
+use crate::inst::{Air, AirParamMode};
 use crate::intern_pool::TypeInternPool;
 use crate::types::Type;
 use gruel_error::CompileWarning;
@@ -20,10 +20,10 @@ pub struct AnalyzedFunction {
     /// For scalar types (i32, bool), each parameter uses 1 slot.
     /// For struct types, each field uses 1 slot (flattened ABI).
     pub num_param_slots: u32,
-    /// Whether each parameter slot is passed as inout (by reference).
+    /// Passing mode for each parameter slot (normal, inout, or borrow).
     /// Length matches num_param_slots - for struct params, all slots share
     /// the same mode as the original parameter.
-    pub param_modes: Vec<bool>,
+    pub param_modes: Vec<AirParamMode>,
     /// Type of each parameter ABI slot, parallel to `param_modes`.
     /// Preserved here so backends can declare correct function signatures
     /// even when DCE has removed unused `Param` instructions from the body.

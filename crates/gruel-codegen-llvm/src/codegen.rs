@@ -247,13 +247,14 @@ fn declare_function<'ctx>(
         ),
     );
 
-    // Add `noalias` to inout parameters. The language spec forbids aliasing
-    // between inout params (check_exclusivity), so this is sound.
+    // By-ref params (inout, borrow) get `noalias`: the language spec forbids
+    // aliasing (check_exclusivity), so this is sound. Borrow params also get
+    // `readonly` since the callee cannot mutate through them.
     let slot_to_llvm = build_slot_to_llvm_param(cfg, type_pool);
     let num_params = cfg.num_params() as usize;
     let mut i = 0usize;
     while i < num_params {
-        if cfg.is_param_inout(i as u32) {
+        if cfg.is_param_by_ref(i as u32) {
             let llvm_idx = slot_to_llvm[i];
             f.add_attribute(
                 inkwell::attributes::AttributeLoc::Param(llvm_idx),
@@ -262,6 +263,15 @@ fn declare_function<'ctx>(
                     0,
                 ),
             );
+            if cfg.is_param_borrow(i as u32) {
+                f.add_attribute(
+                    inkwell::attributes::AttributeLoc::Param(llvm_idx),
+                    ctx.create_enum_attribute(
+                        inkwell::attributes::Attribute::get_named_enum_kind_id("readonly"),
+                        0,
+                    ),
+                );
+            }
             i += 1;
         } else {
             let ty = cfg
@@ -296,7 +306,7 @@ fn collect_param_types<'ctx>(
     let mut result = Vec::new();
     let mut i = 0usize;
     while i < num_params {
-        if cfg.is_param_inout(i as u32) {
+        if cfg.is_param_by_ref(i as u32) {
             // By-reference params are always opaque pointers in LLVM IR (1 slot).
             result.push(ctx.ptr_type(inkwell::AddressSpace::default()).into());
             i += 1;
@@ -336,7 +346,7 @@ fn build_slot_to_llvm_param(cfg: &Cfg, type_pool: &TypeInternPool) -> Vec<u32> {
     let mut llvm_idx: u32 = 0;
     let mut i = 0usize;
     while i < num_params {
-        if cfg.is_param_inout(i as u32) {
+        if cfg.is_param_by_ref(i as u32) {
             table[i] = llvm_idx;
             llvm_idx += 1;
             i += 1;
@@ -980,7 +990,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             return match place.base {
                 PlaceBase::Local(slot) => self.locals.get(slot as usize).copied().flatten(),
                 PlaceBase::Param(param_slot) => {
-                    if self.cfg.is_param_inout(param_slot) {
+                    if self.cfg.is_param_by_ref(param_slot) {
                         let llvm_idx = self.slot_to_llvm_param[param_slot as usize];
                         Some(self.fn_value.get_nth_param(llvm_idx)?.into_pointer_value())
                     } else {
@@ -1000,7 +1010,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         let mut current_ptr: inkwell::values::PointerValue<'ctx> = match place.base {
             PlaceBase::Local(slot) => self.get_or_create_local(slot, base_container_ty),
             PlaceBase::Param(param_slot) => {
-                if self.cfg.is_param_inout(param_slot) {
+                if self.cfg.is_param_by_ref(param_slot) {
                     let llvm_idx = self.slot_to_llvm_param[param_slot as usize];
                     self.fn_value.get_nth_param(llvm_idx)?.into_pointer_value()
                 } else {
@@ -1377,7 +1387,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     .fn_value
                     .get_nth_param(llvm_idx)
                     .expect("param index out of range");
-                if self.cfg.is_param_inout(index) {
+                if self.cfg.is_param_by_ref(index) {
                     // By-ref param (inout or borrow): the LLVM arg is a pointer;
                     // load the value from it.
                     let llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
@@ -1755,7 +1765,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                         .expect("inout/borrow arg: slot not yet allocated");
                                     Some(inkwell::values::BasicMetadataValueEnum::from(ptr))
                                 }
-                                CfgInstData::Param { index } if self.cfg.is_param_inout(index) => {
+                                CfgInstData::Param { index } if self.cfg.is_param_by_ref(index) => {
                                     // Forwarding an inout/borrow param: pass the raw pointer.
                                     let llvm_idx = self.slot_to_llvm_param[index as usize];
                                     let ptr = self
@@ -2529,7 +2539,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let v = self.get_value(val);
                     let struct_ty = Type::new_struct(struct_id);
                     let llvm_idx = self.slot_to_llvm_param[param_slot as usize];
-                    let base_ptr = if self.cfg.is_param_inout(param_slot) {
+                    let base_ptr = if self.cfg.is_param_by_ref(param_slot) {
                         self.fn_value
                             .get_nth_param(llvm_idx)
                             .expect("param slot out of range")
@@ -2564,7 +2574,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let index_val = self.get_value(index).into_int_value();
                     self.build_bounds_check(index_val, length);
                     let llvm_idx2 = self.slot_to_llvm_param[param_slot as usize];
-                    let base_ptr = if self.cfg.is_param_inout(param_slot) {
+                    let base_ptr = if self.cfg.is_param_by_ref(param_slot) {
                         self.fn_value
                             .get_nth_param(llvm_idx2)
                             .expect("param slot out of range")
