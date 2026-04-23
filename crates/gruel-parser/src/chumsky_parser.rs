@@ -2701,7 +2701,10 @@ where
         .boxed()
 }
 
-/// Parser for enum definitions: [pub] enum Name { Variant1, Variant2, ... }
+/// Parser for enum definitions: [pub] enum Name { Variant1, Variant2, ... fn method(self) { ... } }
+///
+/// Variants come first (comma-separated), then methods (no separators needed),
+/// mirroring the struct body shape.
 fn enum_parser<'src, I>() -> GruelParser<'src, I, EnumDecl>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -2715,13 +2718,18 @@ where
         }
     });
 
+    let enum_body: GruelParser<I, (Vec<EnumVariant>, Vec<Method>)> = enum_variants_parser()
+        .then(method_parser().repeated().collect::<Vec<_>>())
+        .boxed();
+
     visibility
         .then(just(TokenKind::Enum).ignore_then(ident_parser()))
-        .then(enum_variants_parser().delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)))
-        .map_with(|((visibility, name), variants), e| EnumDecl {
+        .then(enum_body.delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)))
+        .map_with(|((visibility, name), (variants, methods)), e| EnumDecl {
             visibility,
             name,
             variants,
+            methods,
             span: span_from_extra(e),
         })
         .boxed()
@@ -3180,8 +3188,9 @@ fn validate_item(item: &Item, errors: &mut Vec<CompileError>, v: &AstValidator) 
             }
         }
         Item::Enum(e) => {
-            // EnumDecl doesn't carry methods in the AST; methods live on a wrapper.
-            let _ = e;
+            for m in &e.methods {
+                validate_expr(&m.body, errors, v);
+            }
         }
         Item::Const(c) => validate_expr(&c.init, errors, v),
         Item::DropFn(d) => validate_expr(&d.body, errors, v),
@@ -3658,6 +3667,85 @@ mod tests {
                 assert_eq!(result.get(method.directives[0].name.name), "inline");
             }
             _ => panic!("expected Struct"),
+        }
+    }
+
+    // ==================== Enum Method Parsing Tests (ADR-0053) ====================
+
+    #[test]
+    fn test_enum_without_methods_still_parses() {
+        let result = parse("enum Color { Red, Green, Blue }").unwrap();
+        match &result.ast.items[0] {
+            Item::Enum(enum_decl) => {
+                assert_eq!(enum_decl.variants.len(), 3);
+                assert!(enum_decl.methods.is_empty());
+            }
+            _ => panic!("expected Enum"),
+        }
+    }
+
+    #[test]
+    fn test_enum_with_single_method() {
+        let result =
+            parse("enum Opt { Some(i32), None, fn is_some(self) -> bool { true } }").unwrap();
+        match &result.ast.items[0] {
+            Item::Enum(enum_decl) => {
+                assert_eq!(enum_decl.variants.len(), 2);
+                assert_eq!(enum_decl.methods.len(), 1);
+                let m = &enum_decl.methods[0];
+                assert_eq!(result.get(m.name.name), "is_some");
+                assert!(m.receiver.is_some());
+            }
+            _ => panic!("expected Enum"),
+        }
+    }
+
+    #[test]
+    fn test_enum_method_without_trailing_comma_on_variants() {
+        // Methods are allowed after variants with or without a trailing comma.
+        let result = parse("enum E { A, B fn count(self) -> i32 { 2 } }").unwrap();
+        match &result.ast.items[0] {
+            Item::Enum(enum_decl) => {
+                assert_eq!(enum_decl.variants.len(), 2);
+                assert_eq!(enum_decl.methods.len(), 1);
+            }
+            _ => panic!("expected Enum"),
+        }
+    }
+
+    #[test]
+    fn test_enum_associated_function() {
+        let result = parse("enum Opt { Some(i32), None, fn zero() -> i32 { 0 } }").unwrap();
+        match &result.ast.items[0] {
+            Item::Enum(enum_decl) => {
+                let m = &enum_decl.methods[0];
+                assert_eq!(result.get(m.name.name), "zero");
+                assert!(m.receiver.is_none()); // associated function
+            }
+            _ => panic!("expected Enum"),
+        }
+    }
+
+    #[test]
+    fn test_enum_multiple_methods() {
+        let result = parse(
+            "enum E {
+                A,
+                B,
+                fn new() -> E { E::A }
+                fn is_a(self) -> bool { true }
+                fn is_b(self) -> bool { false }
+             }",
+        )
+        .unwrap();
+        match &result.ast.items[0] {
+            Item::Enum(enum_decl) => {
+                assert_eq!(enum_decl.methods.len(), 3);
+                assert!(enum_decl.methods[0].receiver.is_none());
+                assert!(enum_decl.methods[1].receiver.is_some());
+                assert!(enum_decl.methods[2].receiver.is_some());
+            }
+            _ => panic!("expected Enum"),
         }
     }
 

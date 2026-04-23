@@ -166,9 +166,9 @@ Gate the entire change behind `PreviewFeature::InlineTypeMembers`. Stabilize onc
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Parser + AST**
+- [x] **Phase 1: Parser + AST**
   - Add `EnumDecl::methods`; teach the enum body parser to accept methods after variants (reuse `method_parser_with_expr`, mirror struct body shape).
-  - Demote `drop` from keyword to identifier in the lexer, so `fn drop(self)` parses as a normal method.
+  - Demote `drop` from keyword to identifier in the lexer, so `fn drop(self)` parses as a normal method. *(Deferred to Phase 3/4 — the `drop` keyword still gates the top-level `drop fn TypeName(self)` item; demoting it now would require simultaneously rewriting the item parser. Cleanest to fold into Phase 3 when `fn drop` support lands and Phase 4 when the top-level item is removed.)*
   - Keep `Item::DropFn` parseable for one pre-removal diagnostic turn that says "destructors are now declared as `fn drop(self)` inside the type body" (removed entirely in phase 4).
   - Unit tests at the parser level.
 

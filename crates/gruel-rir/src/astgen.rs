@@ -260,12 +260,22 @@ impl<'a> AstGen<'a> {
             .collect();
         let (variants_start, variants_len) = self.rir.add_enum_variant_decls(&variants);
 
+        // Generate each method defined inline in the enum (mirrors struct handling).
+        let methods: Vec<_> = enum_decl
+            .methods
+            .iter()
+            .map(|m| self.gen_method(m))
+            .collect();
+        let (methods_start, methods_len) = self.rir.add_inst_refs(&methods);
+
         self.rir.add_inst(Inst {
             data: InstData::EnumDecl {
                 is_pub: enum_decl.visibility == Visibility::Public,
                 name,
                 variants_start,
                 variants_len,
+                methods_start,
+                methods_len,
             },
             span: enum_decl.span,
         })

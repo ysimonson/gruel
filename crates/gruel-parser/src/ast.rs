@@ -145,6 +145,19 @@ pub struct FieldDecl {
 }
 
 /// An enum declaration.
+///
+/// Like structs, enums may declare inline methods after their variants.
+///
+/// ```gruel
+/// enum Option {
+///     Some(i32),
+///     None,
+///
+///     fn is_some(self) -> bool {
+///         match self { Self::Some(_) => true, Self::None => false }
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDecl {
     /// Visibility of this enum
@@ -153,6 +166,8 @@ pub struct EnumDecl {
     pub name: Ident,
     /// Enum variants
     pub variants: Vec<EnumVariant>,
+    /// Methods defined on this enum
+    pub methods: Vec<Method>,
     /// Span covering the entire enum declaration
     pub span: Span,
 }
@@ -1224,6 +1239,9 @@ fn fmt_enum(f: &mut fmt::Formatter<'_>, e: &EnumDecl, level: usize) -> fmt::Resu
     for variant in &e.variants {
         indent(f, level + 1)?;
         writeln!(f, "Variant sym:{}", variant.name.name.into_usize())?;
+    }
+    for method in &e.methods {
+        fmt_method(f, method, level + 1)?;
     }
     Ok(())
 }

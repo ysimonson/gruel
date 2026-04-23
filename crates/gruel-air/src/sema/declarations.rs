@@ -160,7 +160,18 @@ impl<'a> Sema<'a> {
                     name,
                     variants_start,
                     variants_len,
+                    methods_len,
+                    ..
                 } => {
+                    // ADR-0053: named enum methods are a preview feature until stabilized.
+                    if *methods_len > 0 {
+                        self.require_preview(
+                            gruel_error::PreviewFeature::InlineTypeMembers,
+                            "inline methods on named enums",
+                            inst.span,
+                        )?;
+                    }
+
                     let enum_name = self.interner.resolve(name).to_string();
 
                     // Check for collision with built-in type names

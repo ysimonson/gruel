@@ -1912,11 +1912,15 @@ impl Rir {
                 name,
                 variants_start,
                 variants_len,
+                methods_start,
+                methods_len,
             } => InstData::EnumDecl {
                 is_pub: *is_pub,
                 name: *name,
                 variants_start: *variants_start + extra_offset,
                 variants_len: *variants_len,
+                methods_start: *methods_start + extra_offset,
+                methods_len: *methods_len,
             },
 
             // Array operations
@@ -2569,6 +2573,10 @@ pub enum InstData {
         variants_start: u32,
         /// Number of variants
         variants_len: u32,
+        /// Index into extra data where method refs start
+        methods_start: u32,
+        /// Number of methods
+        methods_len: u32,
     },
 
     /// Enum variant: creates a value of an enum type
@@ -3276,6 +3284,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     name,
                     variants_start,
                     variants_len,
+                    methods_start,
+                    methods_len,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(name);
@@ -3312,12 +3322,19 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                             }
                         })
                         .collect();
+                    let methods = self.rir.get_inst_refs(*methods_start, *methods_len);
+                    let methods_str: Vec<String> =
+                        methods.iter().map(|m| format!("fn {}", m)).collect();
+                    let body_parts: Vec<String> = variants_str
+                        .into_iter()
+                        .chain(methods_str.into_iter())
+                        .collect();
                     writeln!(
                         out,
                         "{}enum {} {{ {} }}",
                         pub_str,
                         name_str,
-                        variants_str.join(", ")
+                        body_parts.join(", ")
                     )
                     .unwrap();
                 }
@@ -4591,6 +4608,8 @@ mod tests {
                 name,
                 variants_start,
                 variants_len,
+                methods_start: 0,
+                methods_len: 0,
             },
             span: Span::new(0, 35),
         });
@@ -4617,6 +4636,8 @@ mod tests {
                 name,
                 variants_start,
                 variants_len,
+                methods_start: 0,
+                methods_len: 0,
             },
             span: Span::new(0, 35),
         });
