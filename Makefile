@@ -1,4 +1,5 @@
 .PHONY: test quick-test fmt fmt-check check bench crate-docs \
+        check-intrinsic-docs gen-intrinsic-docs \
         website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler \
         fuzz-structured-compiler fuzz-structured-invalid \
@@ -35,11 +36,31 @@ fmt:
 	cargo fmt --all
 
 # Check formatting without making changes (for CI).
-check:
+check: check-intrinsic-docs
 	cargo check --workspace --all-targets --exclude gruel-runtime
 	cargo check --manifest-path fuzz/Cargo.toml --all-targets
 	cargo clippy --workspace --all-targets --exclude gruel-runtime
 	cargo fmt --all -- --check
+
+# Regenerate docs/generated/intrinsics-reference.md from the gruel-intrinsics
+# registry. Run this after editing IntrinsicDef entries.
+gen-intrinsic-docs:
+	cargo run -q -p gruel-intrinsics --bin gruel-intrinsics-docs
+
+# Fail if the checked-in intrinsics reference has drifted from what the
+# registry would generate. Prevents the spec and the compiler from disagreeing.
+check-intrinsic-docs:
+	@mkdir -p target
+	@cargo run -q -p gruel-intrinsics --bin gruel-intrinsics-docs -- \
+		target/intrinsics-reference.md.generated
+	@if ! diff -u docs/generated/intrinsics-reference.md \
+		target/intrinsics-reference.md.generated >/dev/null; then \
+		echo "docs/generated/intrinsics-reference.md is out of date."; \
+		echo "Run 'make gen-intrinsic-docs' and commit the result."; \
+		diff -u docs/generated/intrinsics-reference.md \
+			target/intrinsics-reference.md.generated || true; \
+		exit 1; \
+	fi
 
 # Run benchmarks. Pass ARGS="--iterations 10" etc. to forward options.
 bench:

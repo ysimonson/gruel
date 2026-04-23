@@ -128,7 +128,7 @@ The hand-maintained quick-reference table in the spec is replaced by the generat
   - `translate_intrinsic` in `gruel-codegen-llvm` matches on `IntrinsicId`.
   - Runtime-fn name strings (`"gruel_random_u32"`, etc.) come from `def.runtime_fn`.
 
-- [ ] **Phase 5: Doc export**
+- [x] **Phase 5: Doc export**
   - Implement `render_reference_markdown()` producing the quick-reference table and per-intrinsic detail sections.
   - Add a `gruel-intrinsics` bin or `build.rs` hook that writes the generated page.
   - Replace the hand-maintained table in `docs/spec/src/04-expressions/13-intrinsics.md` with the generated content (preserving spec paragraph IDs in a handwritten header section).
