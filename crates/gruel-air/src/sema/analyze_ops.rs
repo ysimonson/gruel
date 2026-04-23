@@ -2358,14 +2358,36 @@ impl<'a> Sema<'a> {
 
         // Validate the type name matches (skipped for tuple destructure — the
         // sentinel "__tuple__" doesn't correspond to a real struct name).
-        if !is_tuple_destructure && struct_def.name != type_name_str {
-            return Err(CompileError::new(
-                ErrorKind::TypeMismatch {
-                    expected: type_name_str,
-                    found: struct_def.name.clone(),
-                },
-                span,
-            ));
+        //
+        // The pattern's `type_name` may be a local alias of an anonymous
+        // struct (ADR-0029 / ADR-0039 workflow): `let PairI32 = Pair(i32);
+        // let PairI32 { first, second } = p;`. In that case the comptime
+        // type variable resolves to the same StructId as `init_type`, and a
+        // plain name comparison would spuriously reject the destructure as
+        // `PairI32 vs __anon_struct_N`. Resolve the pattern's type name
+        // through `comptime_type_vars` first; fall back to the name
+        // comparison otherwise (ADR-0049 Phase 7).
+        if !is_tuple_destructure {
+            let resolved_struct_id = ctx
+                .comptime_type_vars
+                .get(&type_name)
+                .and_then(|ty| match ty.kind() {
+                    TypeKind::Struct(id) => Some(id),
+                    _ => None,
+                });
+            let names_match = match resolved_struct_id {
+                Some(alias_id) => alias_id == struct_id,
+                None => struct_def.name == type_name_str,
+            };
+            if !names_match {
+                return Err(CompileError::new(
+                    ErrorKind::TypeMismatch {
+                        expected: type_name_str,
+                        found: struct_def.name.clone(),
+                    },
+                    span,
+                ));
+            }
         }
 
         // Get the destructure fields from the RIR

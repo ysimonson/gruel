@@ -564,15 +564,20 @@ ship without the preview gate since it's a bug fix, not a new feature.
   - Spec-test matrix: `..` in tuples, structs, variants; nested `..`; non-copy
     skipped fields are dropped exactly once; arity and duplicate-`..` errors.
 
-- [ ] **Phase 7: Anon-struct alias sema fix (no preview gate)**
-  - In the struct-destructure type-check, resolve the pattern's `type_name` through
-    the value-scope's type aliases before comparing to the init's inferred type.
-    (Today this path produces `expected PairI32, found __anon_struct_N` for aliases
-    of anonymous structs; the match-arm path for anon enums already does the right
-    thing.)
-  - Spec tests: `let PairI32 { first, second } = p;` where `PairI32 = Pair(i32)`;
-    error diagnostics unchanged when the alias genuinely doesn't match.
-  - This is a bug fix — ships independently of the preview gate.
+- [x] **Phase 7: Anon-struct alias sema fix (no preview gate)**
+  - `analyze_struct_destructure` in `gruel-air/src/sema/analyze_ops.rs` now
+    resolves the pattern's `type_name` through `ctx.comptime_type_vars`
+    before comparing to `init_type`'s `StructId`. When the pattern name is
+    a local alias of an anonymous struct (e.g. `let PairI32 = Pair(i32);
+    let PairI32 { ... } = p;`), the alias's StructId is compared to the
+    init's StructId. If the alias isn't a comptime type var, we fall back
+    to the old name-based comparison, so genuine name mismatches still
+    error with `expected X, found Y`.
+  - Spec tests: `anon_struct_alias_destructure` (success),
+    `anon_struct_alias_destructure_with_nested` (combines with Phase 4b),
+    `struct_destructure_wrong_name_still_errors` (regression guard).
+  - Ships unconditionally — no preview gate needed, since this is a bug
+    fix for an existing workflow.
 
 - [ ] **Phase 8: Spec, tests, stabilization**
   - Revise `docs/spec/src/05-statements/01-let-statements.md` (5.1) for nested let

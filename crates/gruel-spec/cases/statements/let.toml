@@ -651,3 +651,66 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "refutable pattern"
+
+# =============================================================================
+# Anonymous struct alias destructure (ADR-0049 Phase 7)
+# =============================================================================
+
+[[case]]
+name = "anon_struct_alias_destructure"
+spec = ["5.1:14"]
+description = "Let-destructure through a local alias of an anonymous struct type (ADR-0049 Phase 7)"
+source = """
+fn Pair(comptime T: type) -> type {
+    struct { first: T, second: T }
+}
+
+fn main() -> i32 {
+    let PairI32 = Pair(i32);
+    let p = PairI32 { first: 10, second: 32 };
+    let PairI32 { first, second } = p;
+    first + second
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_struct_alias_destructure_with_nested"
+spec = ["5.1:14"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Anon-struct alias destructure combined with nested sub-pattern (ADR-0049 Phase 7)"
+source = """
+fn Pair(comptime T: type) -> type {
+    struct { first: T, second: T }
+}
+
+struct Outer { p: i32, tag: i32 }
+
+fn main() -> i32 {
+    let PairOuter = Pair(Outer);
+    let v = PairOuter {
+        first: Outer { p: 10, tag: 20 },
+        second: Outer { p: 12, tag: 0 },
+    };
+    let PairOuter { first: Outer { p: a, tag: b }, second: _ } = v;
+    a + b + 12
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "struct_destructure_wrong_name_still_errors"
+spec = ["5.1:14"]
+description = "A genuine struct-name mismatch still produces a type error (ADR-0049 Phase 7)"
+source = """
+struct Foo { first: i32, second: i32 }
+
+fn main() -> i32 {
+    let f = Foo { first: 10, second: 32 };
+    let Bar { first, second } = f;
+    first + second
+}
+"""
+compile_fail = true
+error_contains = "type mismatch"
