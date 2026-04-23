@@ -196,7 +196,7 @@ impl<'a> Sema<'a> {
             comptime_dbg_output: Vec::new(),
             comptime_log_output: Vec::new(),
             suppress_comptime_dbg_print: false,
-            recursive_pattern_lowering: false,
+            recursive_pattern_lowering: true,
         }
     }
 

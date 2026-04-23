@@ -112,6 +112,46 @@ fn binding_to_pattern(b: &RirPatternBinding) -> AirPattern {
     }
 }
 
+/// ADR-0051 Phase 4c: expand a tuple pattern's `..` rest marker into
+/// wildcards filling the scrutinee's arity. Called from sema before
+/// `lower_pattern` and `emit_recursive_pattern_bindings` so downstream
+/// code sees a flat element list with `rest_position = None`. For
+/// non-tuple patterns or tuples without rest, returns the input
+/// unchanged.
+fn expanded_tuple_pattern(
+    pattern: &RirPattern,
+    type_pool: &crate::intern_pool::TypeInternPool,
+    scr_ty: Type,
+) -> RirPattern {
+    let RirPattern::Tuple {
+        elems,
+        rest_position: Some(pos),
+        span,
+    } = pattern
+    else {
+        return pattern.clone();
+    };
+    let Some(struct_id) = scr_ty.as_struct() else {
+        return pattern.clone();
+    };
+    let arity = type_pool.struct_def(struct_id).fields.len();
+    let pos = *pos as usize;
+    let prefix_len = pos.min(elems.len());
+    let suffix_len = elems.len() - prefix_len;
+    let wildcards = arity.saturating_sub(prefix_len + suffix_len);
+    let mut new_elems = Vec::with_capacity(arity);
+    new_elems.extend(elems[..prefix_len].iter().cloned());
+    for _ in 0..wildcards {
+        new_elems.push(RirPattern::Wildcard(*span));
+    }
+    new_elems.extend(elems[prefix_len..].iter().cloned());
+    RirPattern::Tuple {
+        elems: new_elems,
+        rest_position: None,
+        span: *span,
+    }
+}
+
 /// ADR-0051 Phase 4c: whether an RIR pattern is irrefutable, i.e. matches
 /// any scrutinee value of its type. Used by exhaustiveness bookkeeping to
 /// count `(x, y)` / `Point { x, y }` / bare `x` arms as catch-alls the
@@ -2201,13 +2241,16 @@ impl<'a> Sema<'a> {
                 // emits StorageLive / Alloc, registers locals, then
                 // analyses the arm body with the bindings in scope. Wraps
                 // setup + body in a Block so CFG sees them together.
+                // Tuple `..` rest is expanded to wildcards up front so
+                // the walk maps positions to struct fields directly.
+                let expanded = expanded_tuple_pattern(pattern, &self.type_pool, scrutinee_type);
                 let mut storage_lives = Vec::new();
                 let mut allocs = Vec::new();
                 self.emit_recursive_pattern_bindings(
                     air,
                     scrutinee_result.air_ref,
                     scrutinee_type,
-                    pattern,
+                    &expanded,
                     ctx,
                     &mut storage_lives,
                     &mut allocs,
@@ -2299,7 +2342,11 @@ impl<'a> Sema<'a> {
             // Convert pattern to AIR pattern. For enum patterns (Path and DataVariant),
             // reuse the enum_id and variant_index resolved during validation.
             let air_pattern = if self.recursive_pattern_lowering {
-                self.lower_pattern(pattern, resolved_enum)
+                // Expand a top-level tuple `..` rest to wildcards so
+                // `lower_pattern` sees a flat element list whose positions
+                // align with the scrutinee's struct fields.
+                let expanded = expanded_tuple_pattern(pattern, &self.type_pool, scrutinee_type);
+                self.lower_pattern(&expanded, resolved_enum)
             } else {
                 match pattern {
                     RirPattern::Wildcard(_) => AirPattern::Wildcard,
@@ -2398,6 +2445,7 @@ impl<'a> Sema<'a> {
     /// `scr_air_ref` is the AIR value of the (possibly projected) current
     /// focus; `scr_ty` is its type. Unknown struct lookups are treated as
     /// no-ops — the outer type-checking already surfaced those errors.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_recursive_pattern_bindings(
         &self,
         air: &mut Air,

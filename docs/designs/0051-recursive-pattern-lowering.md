@@ -388,9 +388,20 @@ path (Phase 4).
         Tuple / Struct / Bind arms; Bind leaves are currently transparent
         (no storage introduced yet; Phase 4c moves binding introduction
         into CFG).
-  - [ ] 4c: delete the three elaborators, the `__nested_pat_N` machinery,
-        `wrap_match_arm_body_with_destructures`, the five Phase 5 panics,
-        the runtime `@panic` injection; flip the flag default.
+  - [x] 4c part 1: move binding introduction into sema's recursive
+        walker so `(a, 1) => a` style arms resolve end-to-end.
+  - [x] 4c part 2: exhaustiveness bookkeeping treats irrefutable
+        tuple / struct arm roots as catch-alls.
+  - [x] 4c part 3: flip the flag default to on. `try_elaborate_tuple_match`
+        no longer runs by default; `try_elaborate_refutable_nested_match`
+        still handles `Some(Some(x))` shapes RIR cannot yet represent
+        (flat variant bindings), so it stays. Non-exhaustive tuple
+        matches are now compile errors (per §Open-Questions-3).
+  - [ ] 4c part 4: extend RIR variant bindings with nested sub-patterns
+        so refutable-nested arms flow through the recursive path too;
+        then delete the remaining elaborators, `__nested_pat_N`
+        machinery, `wrap_match_arm_body_with_destructures`, the five
+        Phase 5 panics, and the runtime `@panic` injection.
   - Remove the `--recursive-pattern-lowering` flag and make the
     recursive path the default.
   - Delete `try_elaborate_irrefutable_match`,

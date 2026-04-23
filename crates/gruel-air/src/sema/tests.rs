@@ -1253,8 +1253,12 @@ mod tests {
         }
 
         #[test]
-        fn flag_off_still_produces_flat_variant() {
-            // Regression check: without the flag, existing flat behaviour holds.
+        fn flag_off_falls_back_to_flat_variant() {
+            // ADR-0051 Phase 4c made the recursive path the default. The
+            // flag-off legacy behaviour is still reachable — tests can
+            // call `set_recursive_pattern_lowering(false)` on both
+            // AstGen and Sema to force the pre-ADR-0051 shape. This
+            // regression check keeps that escape hatch working.
             let lexer = Lexer::new(
                 "enum Color { Red }
                  fn main() -> i32 {
@@ -1265,10 +1269,11 @@ mod tests {
             let (tokens, interner) = lexer.tokenize().unwrap();
             let parser = Parser::new(tokens, interner);
             let (ast, interner) = parser.parse().unwrap();
-            let astgen = AstGen::new(&ast, &interner);
+            let mut astgen = AstGen::new(&ast, &interner);
+            astgen.set_recursive_pattern_lowering(false);
             let rir = astgen.generate();
-            let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
-            // Note: flag NOT set.
+            let mut sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+            sema.set_recursive_pattern_lowering(false);
             let output = sema.analyze_all().unwrap();
 
             let arms = collect_match_arms(&output);

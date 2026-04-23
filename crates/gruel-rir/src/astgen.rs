@@ -47,12 +47,7 @@ impl<'a> AstGen<'a> {
             interner,
             rir: Rir::new(),
             nested_pat_counter: 0,
-            // ADR-0051 Phase 4c: still defaults to the legacy elaboration
-            // path. Flipping to `true` surfaces gaps still being closed
-            // (multi-position `..` expansion in tuple arms, refutable
-            // nested-arm merges). Tests opt in explicitly via
-            // `set_recursive_pattern_lowering(true)`.
-            recursive_pattern_lowering: false,
+            recursive_pattern_lowering: true,
         }
     }
 
@@ -645,22 +640,25 @@ impl<'a> AstGen<'a> {
                     return elaborated;
                 }
 
-                if !self.recursive_pattern_lowering {
-                    // Multi-arm matches with tuple patterns at the top of any
-                    // arm elaborate into a let-bound scrutinee plus an
-                    // if/else chain over tuple projections (ADR-0049 Phase 5a).
-                    if let Some(elaborated) = self.try_elaborate_tuple_match(match_expr) {
-                        return elaborated;
-                    }
+                // Multi-arm matches with tuple patterns at the top of any
+                // arm elaborate into a let-bound scrutinee plus an if/else
+                // chain over tuple projections (ADR-0049 Phase 5a). The
+                // recursive-lowering path supersedes this; skip it when on.
+                if !self.recursive_pattern_lowering
+                    && let Some(elaborated) = self.try_elaborate_tuple_match(match_expr)
+                {
+                    return elaborated;
+                }
 
-                    // Arms with refutable nested sub-patterns in variant
-                    // fields (e.g., `Some(Some(v))`) elaborate into nested
-                    // matches that fall back to the outer match's wildcard
-                    // catch-all body (ADR-0049 Phase 5b).
-                    if let Some(elaborated) = self.try_elaborate_refutable_nested_match(match_expr)
-                    {
-                        return elaborated;
-                    }
+                // Arms with refutable nested sub-patterns in variant fields
+                // (e.g., `Some(Some(v))`) elaborate into nested matches that
+                // fall back to the outer match's wildcard catch-all body
+                // (ADR-0049 Phase 5b). This elaborator still runs with the
+                // recursive-lowering flag on: RIR's flat DataVariant /
+                // StructVariant bindings do not yet carry nested sub-patterns,
+                // so the new path cannot represent `Some(Some(x))` directly.
+                if let Some(elaborated) = self.try_elaborate_refutable_nested_match(match_expr) {
+                    return elaborated;
                 }
 
                 let scrutinee = self.gen_expr(&match_expr.scrutinee);
@@ -2173,22 +2171,26 @@ impl<'a> AstGen<'a> {
                 }
             }
             Pattern::Tuple { elems, span } if self.recursive_pattern_lowering => {
-                let rir_elems: Vec<RirPattern> = elems
-                    .iter()
-                    .map(|e| match e {
-                        TupleElemPattern::Pattern(p) => self.gen_match_arm_pattern(p, nested),
-                        TupleElemPattern::Rest(rest_span) => {
-                            // A `..` inside a tuple match arm needs positional
-                            // rest expansion (ADR-0049 Phase 6 semantics for
-                            // tuples specifically). Sema can handle a literal
-                            // wildcard pattern for the moment; true rest in
-                            // tuple arms is covered in a follow-up.
-                            RirPattern::Wildcard(*rest_span)
+                // Record the source index of any `..` rest marker so sema
+                // can expand it to wildcards filling the scrutinee's arity
+                // (ADR-0049 Phase 6 semantics preserved). The marker is
+                // stripped from the RIR elems list and reconstructed in
+                // sema.
+                let mut rir_elems: Vec<RirPattern> = Vec::with_capacity(elems.len());
+                let mut rest_position: Option<u32> = None;
+                for (i, e) in elems.iter().enumerate() {
+                    match e {
+                        TupleElemPattern::Pattern(p) => {
+                            rir_elems.push(self.gen_match_arm_pattern(p, nested));
                         }
-                    })
-                    .collect();
+                        TupleElemPattern::Rest(_) => {
+                            rest_position = Some(i as u32);
+                        }
+                    }
+                }
                 RirPattern::Tuple {
                     elems: rir_elems,
+                    rest_position,
                     span: *span,
                 }
             }

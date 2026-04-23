@@ -161,10 +161,17 @@ pub enum RirPattern {
         is_mut: bool,
         span: Span,
     },
-    /// Tuple pattern `(p0, p1, ...)` (ADR-0051). Elements may be any
-    /// `RirPattern`, so `(Some(x), None)` nests variant patterns under
-    /// the tuple root.
-    Tuple { elems: Vec<RirPattern>, span: Span },
+    /// Tuple pattern `(p0, p1, ...)` (ADR-0051). `elems` carries the
+    /// explicit sub-patterns only; `rest_position` records where a `..`
+    /// rest marker appeared so sema can expand it to wildcards filling
+    /// the scrutinee's arity. `None` means no rest; `Some(i)` means the
+    /// rest was written at source index `i` (so `elems[..i]` are the
+    /// prefix and `elems[i..]` the suffix).
+    Tuple {
+        elems: Vec<RirPattern>,
+        rest_position: Option<u32>,
+        span: Span,
+    },
     /// Named-struct pattern `TypeName { field: pat, .. }` (ADR-0051).
     /// `has_rest` marks an explicit `..` trailing the field list.
     Struct {
@@ -308,10 +315,15 @@ fn encode_pattern_tree(pattern: &RirPattern, out: &mut Vec<u32>) {
             out.push(name.into_usize() as u32);
             out.push(if *is_mut { 1 } else { 0 });
         }
-        RirPattern::Tuple { elems, span } => {
+        RirPattern::Tuple {
+            elems,
+            rest_position,
+            span,
+        } => {
             out.push(PatternKind::Tuple as u32);
             out.push(span.start());
             out.push(span.len());
+            out.push(rest_position.map_or(u32::MAX, |i| i));
             out.push(elems.len() as u32);
             for elem in elems {
                 encode_pattern_tree(elem, out);
@@ -461,15 +473,28 @@ fn decode_pattern_tree(data: &[u32]) -> (RirPattern, usize) {
         (RirPattern::Ident { name, is_mut, span }, 5)
     } else if kind == PatternKind::Tuple as u32 {
         let span = Span::new(data[1], data[1] + data[2]);
-        let n = data[3] as usize;
-        let mut offset = 4;
+        let rest_raw = data[3];
+        let rest_position = if rest_raw == u32::MAX {
+            None
+        } else {
+            Some(rest_raw)
+        };
+        let n = data[4] as usize;
+        let mut offset = 5;
         let mut elems = Vec::with_capacity(n);
         for _ in 0..n {
             let (p, consumed) = decode_pattern_tree(&data[offset..]);
             elems.push(p);
             offset += consumed;
         }
-        (RirPattern::Tuple { elems, span }, offset)
+        (
+            RirPattern::Tuple {
+                elems,
+                rest_position,
+                span,
+            },
+            offset,
+        )
     } else if kind == PatternKind::Struct as u32 {
         let span = Span::new(data[1], data[1] + data[2]);
         let module_raw = data[3];
@@ -1028,11 +1053,16 @@ impl Rir {
                     self.extra.push(name.into_usize() as u32);
                     self.extra.push(if *is_mut { 1 } else { 0 });
                 }
-                RirPattern::Tuple { elems, span } => {
+                RirPattern::Tuple {
+                    elems,
+                    rest_position,
+                    span,
+                } => {
                     self.extra.push(PatternKind::Tuple as u32);
                     self.extra.push(span.start());
                     self.extra.push(span.len());
                     self.extra.push(body.as_u32());
+                    self.extra.push(rest_position.map_or(u32::MAX, |i| i));
                     self.extra.push(elems.len() as u32);
                     for elem in elems {
                         encode_pattern_tree(elem, &mut self.extra);
@@ -1230,15 +1260,28 @@ impl Rir {
                     let span_len = self.extra[pos + 2];
                     let span = Span::new(span_start, span_start + span_len);
                     let body = InstRef::from_raw(self.extra[pos + 3]);
-                    let n = self.extra[pos + 4] as usize;
+                    let rest_raw = self.extra[pos + 4];
+                    let rest_position = if rest_raw == u32::MAX {
+                        None
+                    } else {
+                        Some(rest_raw)
+                    };
+                    let n = self.extra[pos + 5] as usize;
                     let mut elems = Vec::with_capacity(n);
-                    let mut offset = 5;
+                    let mut offset = 6;
                     for _ in 0..n {
                         let (p, consumed) = decode_pattern_tree(&self.extra[pos + offset..]);
                         elems.push(p);
                         offset += consumed;
                     }
-                    arms.push((RirPattern::Tuple { elems, span }, body));
+                    arms.push((
+                        RirPattern::Tuple {
+                            elems,
+                            rest_position,
+                            span,
+                        },
+                        body,
+                    ));
                     pos += offset;
                 }
                 k if k == PatternKind::Struct as u32 => {
