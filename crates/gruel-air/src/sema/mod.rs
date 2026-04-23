@@ -111,9 +111,11 @@ pub struct Sema<'a> {
     ///
     /// Populated when a struct body contains `fn drop(self)`. The analysis pass
     /// looks these up to run `analyze_destructor_function` against the method
-    /// body. The body's RIR InstRef is the *method body*, not a DropFnDecl.
-    /// Enum destructors are deferred to Phase 3b.
+    /// body.
     pub(crate) inline_struct_drops: HashMap<StructId, (gruel_rir::InstRef, gruel_span::Span)>,
+    /// Inline destructor bodies keyed by enum id (ADR-0053 phase 3b).
+    /// Same contract as `inline_struct_drops` but for enums.
+    pub(crate) inline_enum_drops: HashMap<EnumId, (gruel_rir::InstRef, gruel_span::Span)>,
     /// Method signatures for anonymous structs, used for structural equality comparison.
     pub(crate) anon_struct_method_sigs: HashMap<StructId, Vec<AnonMethodSig>>,
     /// Captured comptime values for anonymous structs.
@@ -186,6 +188,7 @@ impl<'a> Sema<'a> {
             file_paths: HashMap::new(),
             param_arena: ParamArena::new(),
             inline_struct_drops: HashMap::new(),
+            inline_enum_drops: HashMap::new(),
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
             anon_enum_method_sigs: HashMap::new(),

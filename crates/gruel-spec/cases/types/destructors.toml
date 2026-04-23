@@ -901,18 +901,71 @@ compile_fail = true
 error_contains = "drop"
 
 [[case]]
-name = "inline_drop_on_enum_not_yet_supported"
+name = "inline_drop_on_enum"
+spec = ["3.9:39", "3.9:40"]
+description = "Inline `fn drop(self)` on an enum runs the user destructor on drop"
+source = """
+enum Resource {
+    File(i32),
+    Unused,
+
+    fn drop(self) {
+        @dbg(1);
+    }
+}
+
+fn main() -> i32 {
+    let r = Resource::File(7);
+    0
+}
+"""
+exit_code = 0
+stdout = "1\n"
+
+[[case]]
+name = "inline_drop_on_enum_user_destructor_runs_before_variant_drops"
 spec = ["3.9:39"]
+description = "User destructor runs first, then variant's owning fields are dropped in declaration order"
+source = """
+struct Inner {
+    tag: i32,
+
+    fn drop(self) {
+        @dbg(self.tag);
+    }
+}
+
+enum E {
+    Holds(Inner),
+    Empty,
+
+    fn drop(self) {
+        @dbg(999);
+    }
+}
+
+fn main() -> i32 {
+    let e = E::Holds(Inner { tag: 7 });
+    0
+}
+"""
+exit_code = 0
+stdout = "999\n7\n"
+
+[[case]]
+name = "inline_drop_on_enum_duplicate_error"
+spec = ["3.9:38", "3.9:39"]
 source = """
 enum E {
     A,
+    fn drop(self) {}
     fn drop(self) {}
 }
 
 fn main() -> i32 { 0 }
 """
 compile_fail = true
-error_contains = "not yet supported"
+error_contains = "duplicate"
 
 [[case]]
 name = "inline_drop_duplicate_error"

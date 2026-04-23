@@ -511,6 +511,9 @@ pub struct EnumDef {
     pub is_pub: bool,
     /// File ID this enum was declared in (for visibility checking)
     pub file_id: gruel_span::FileId,
+    /// User-defined destructor function name, if any (e.g., "Resource.__drop").
+    /// ADR-0053 phase 3b. Mirrors `StructDef.destructor`.
+    pub destructor: Option<String>,
 }
 
 impl EnumDef {
@@ -1760,6 +1763,7 @@ mod tests {
             variants: vec![],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
         assert_eq!(empty.variant_count(), 0);
 
@@ -1772,6 +1776,7 @@ mod tests {
             ],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
         assert_eq!(color.variant_count(), 3);
     }
@@ -1787,6 +1792,7 @@ mod tests {
             ],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
 
         assert_eq!(color.find_variant("Red"), Some(0));
@@ -1802,6 +1808,7 @@ mod tests {
             variants: vec![],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
         assert_eq!(empty.discriminant_type(), Type::NEVER);
     }
@@ -1814,6 +1821,7 @@ mod tests {
             variants: vec![EnumVariantDef::unit("A")],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
         assert_eq!(small.discriminant_type(), Type::U8);
 
@@ -1824,6 +1832,7 @@ mod tests {
                 .collect(),
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
         assert_eq!(max_u8.discriminant_type(), Type::U8);
     }
@@ -1838,6 +1847,7 @@ mod tests {
                 .collect(),
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
         assert_eq!(medium.discriminant_type(), Type::U16);
     }

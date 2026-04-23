@@ -265,6 +265,24 @@ A method named `drop` **CANNOT** be invoked directly via method-call syntax (`x.
 
 Semantics for the inline form are identical to the top-level `drop fn` form: at most one destructor per type; the user-defined destructor runs first, followed by automatic dropping of fields in declaration order.
 
-{{ rule(id="3.9:39", cat="informative") }}
+{{ rule(id="3.9:39", cat="normative") }}
 
-Destructors on enums are reserved syntax in this spec version: the grammar permits `fn drop(self)` inside an enum body but the compiler rejects it with a diagnostic, pending the implementation of variant-dispatched destructors (ADR-0053 phase 3b).
+Destructors are permitted on enums using the same `fn drop(self)` syntax. For a value of an enum type with a user destructor, drop elaboration runs the user destructor first, then dispatches on the active variant and drops each owning field of that variant in declaration order.
+
+{{ rule(id="3.9:40", cat="example") }}
+
+```gruel
+enum Resource {
+    File(i32),
+    Socket(i32),
+    Unused,
+
+    fn drop(self) {
+        match self {
+            Resource::File(fd) => close(fd),
+            Resource::Socket(fd) => close_socket(fd),
+            Resource::Unused => {},
+        }
+    }
+}
+```

@@ -186,11 +186,13 @@ Gate the entire change behind `PreviewFeature::InlineTypeMembers`. Stabilize onc
   - Preserve existing drop-elaboration, codegen, and "user destructor runs first, then fields in declaration order" semantics from ADR-0010.
   - Spec tests covering: inline `fn drop` on named struct and anonymous struct; bad-signature error; direct-call error; not-yet-supported-on-enum error.
 
-- [ ] **Phase 3b: Enum destructors (deferred)**
-  - Add `destructor: Option<String>` to `EnumDef` (mirrors `StructDef`).
-  - Extend `collect_destructor`-equivalent to accept enums.
-  - Extend drop elaboration and CFG drop-glue synthesis: user destructor runs first, then the variant-dispatch that drops owning fields of the active variant. Codegen emits `__gruel_drop_<EnumName>` whose body is the user destructor + variant match.
-  - Migrate the enum-side of the `fn drop` not-yet-supported error into real support.
+- [x] **Phase 3b: Enum destructors**
+  - Added `destructor: Option<String>` to `EnumDef` (mirrors `StructDef`).
+  - Added `register_inline_enum_drop` + `inline_enum_drops` table in sema; same signature + single-destructor rules as structs. Body analysis runs `analyze_destructor_function` with the enum type as `self`.
+  - Taught `type_needs_drop` to treat enums with user destructors as non-trivial.
+  - Extended `create_enum_drop_glue_function` to prepend a call to the user destructor before the existing variant-dispatch field drops, preserving "user first, then variant fields in declaration order" from ADR-0010.
+  - Replaced the "not yet supported" error path on enums with real registration. The `linear enum` case is automatically blocked — `linear` only applies to structs per the existing grammar.
+  - New spec rules 3.9:39–40 (enum destructor semantics + example). Three new spec tests: basic enum drop, ordering vs variant-field drops, duplicate error.
 
 - [x] **Phase 4: Scope-revised — keep top-level `drop fn` as a secondary form**
   - Decision: migrating ~25 test sources and deleting `Item::DropFn`, `drop_fn_parser`, `InstData::DropFnDecl`, and the sema arms produced no semantic change — both forms already populate the same `StructDef.destructor` slot. Dropping the migration here in favour of a follow-up ADR keeps this ADR focused on the *additive* changes (inline methods on named enums + inline `fn drop`).

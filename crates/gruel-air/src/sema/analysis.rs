@@ -375,6 +375,27 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         }
     }
 
+    // Analyze inline enum destructor bodies (ADR-0053 phase 3b).
+    let inline_enum_drops_vec: Vec<(EnumId, InstRef, Span)> = sema
+        .inline_enum_drops
+        .iter()
+        .map(|(eid, (body, span))| (*eid, *body, *span))
+        .collect();
+    for (enum_id, body, drop_span) in inline_enum_drops_vec {
+        let enum_def = sema.type_pool.enum_def(enum_id);
+        let type_name_str = enum_def.name.clone();
+        let full_name = format!("{}.__drop", type_name_str);
+        let enum_type = Type::new_enum(enum_id);
+
+        match sema.analyze_destructor_function(&infer_ctx, &full_name, body, drop_span, enum_type) {
+            Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
+                functions_with_strings.push((analyzed, local_strings));
+                all_warnings.extend(warnings);
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+
     // Analyze destructor bodies
     for (_, inst) in sema.rir.iter() {
         if let InstData::DropFnDecl { type_name, body } = &inst.data {

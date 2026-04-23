@@ -1331,6 +1331,7 @@ mod tests {
             ],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
 
         let (enum_id, is_new) = pool.register_enum(name, def.clone());
@@ -1411,6 +1412,7 @@ mod tests {
             ],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
 
         let (enum_id, _) = pool.register_enum(name, def);
@@ -1496,6 +1498,7 @@ mod tests {
             variants: vec![EnumVariantDef::unit("Red")],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
         let (enum_id, _) = pool.register_enum(enum_name, enum_def);
         let enum_ty = pool.enum_id_to_interned(enum_id);
@@ -1569,6 +1572,7 @@ mod tests {
             variants: vec![EnumVariantDef::unit("A"), EnumVariantDef::unit("B")],
             is_pub: false,
             file_id: gruel_span::FileId::DEFAULT,
+            destructor: None,
         };
         let (enum_id, _) = pool.register_enum(name, def.clone());
 
@@ -1662,6 +1666,7 @@ mod tests {
                 variants: vec![],
                 is_pub: false,
                 file_id: gruel_span::FileId::DEFAULT,
+                destructor: None,
             },
         );
 

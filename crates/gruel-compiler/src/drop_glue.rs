@@ -64,13 +64,13 @@ pub fn synthesize_drop_glue(
         drop_glue_functions.push(func);
     }
 
-    // Create drop glue for data enums with droppable fields
+    // Create drop glue for data enums with droppable fields and/or user destructors
     for enum_id in type_pool.all_enum_ids() {
         let enum_ty = Type::new_enum(enum_id);
         if !type_needs_drop(enum_ty, type_pool) {
             continue;
         }
-        let func = create_enum_drop_glue_function(enum_id, type_pool);
+        let func = create_enum_drop_glue_function(enum_id, type_pool, interner);
         drop_glue_functions.push(func);
     }
 
@@ -337,6 +337,7 @@ fn create_array_drop_glue_function(
 fn create_enum_drop_glue_function(
     enum_id: gruel_air::EnumId,
     type_pool: &TypeInternPool,
+    interner: &ThreadedRodeo,
 ) -> AnalyzedFunction {
     let enum_def = type_pool.enum_def(enum_id);
     let fn_name = format!("__gruel_drop_{}", enum_def.name);
@@ -354,6 +355,27 @@ fn create_enum_drop_glue_function(
         ty: enum_ty,
         span,
     });
+
+    // Pre-match statements: call user destructor first, if any (ADR-0053 phase 3b).
+    // The user destructor takes `self` by value and returns unit. After it runs,
+    // we dispatch on the discriminant and drop the owning fields of the active
+    // variant. This mirrors struct semantics from ADR-0010.
+    let mut pre_match_stmts: Vec<AirRef> = Vec::new();
+    if let Some(destructor_name) = &enum_def.destructor {
+        let name_spur = interner.get_or_intern(destructor_name.as_str());
+        let args_u32s = [param_ref.as_u32(), AirArgMode::Normal.as_u32()];
+        let args_start = air.add_extra(&args_u32s);
+        let call_ref = air.add_inst(AirInst {
+            data: AirInstData::Call {
+                name: name_spur,
+                args_start,
+                args_len: 1,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+        pre_match_stmts.push(call_ref);
+    }
 
     // Build one match arm per variant.
     let mut arms_data: Vec<u32> = Vec::new();
@@ -427,9 +449,34 @@ fn create_enum_drop_glue_function(
         span,
     });
 
-    // Return the match result (unit).
+    // If we have a user destructor, wrap the pre-match call(s) + match in a Block
+    // so the user destructor executes before the variant-dispatch drops.
+    let return_value = if pre_match_stmts.is_empty() {
+        match_result
+    } else {
+        pre_match_stmts.push(match_result);
+        let stmt_u32s: Vec<u32> = pre_match_stmts.iter().map(|r| r.as_u32()).collect();
+        let stmts_start = air.add_extra(&stmt_u32s);
+        let stmts_len = pre_match_stmts.len() as u32;
+        let unit_const = air.add_inst(AirInst {
+            data: AirInstData::UnitConst,
+            ty: Type::UNIT,
+            span,
+        });
+        air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start,
+                stmts_len,
+                value: unit_const,
+            },
+            ty: Type::UNIT,
+            span,
+        })
+    };
+
+    // Return unit.
     air.add_inst(AirInst {
-        data: AirInstData::Ret(Some(match_result)),
+        data: AirInstData::Ret(Some(return_value)),
         ty: Type::UNIT,
         span,
     });

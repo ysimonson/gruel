@@ -32,6 +32,9 @@ pub fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
         }
         TypeKind::Enum(id) => {
             let def = type_pool.enum_def(id);
+            if def.destructor.is_some() {
+                return true;
+            }
             def.variants
                 .iter()
                 .any(|v| v.fields.iter().any(|f| type_needs_drop(*f, type_pool)))

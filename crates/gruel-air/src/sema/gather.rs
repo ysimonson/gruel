@@ -102,6 +102,7 @@ impl<'a> GatherOutput<'a> {
             file_paths: HashMap::new(),
             param_arena: self.param_arena,
             inline_struct_drops: HashMap::new(),
+            inline_enum_drops: HashMap::new(),
             anon_struct_method_sigs: HashMap::new(),
             anon_struct_captured_values: HashMap::new(),
             anon_enum_method_sigs: HashMap::new(),

@@ -110,6 +110,7 @@ impl Sema<'_> {
             variants: variants.to_vec(),
             is_pub: false,
             file_id: gruel_span::FileId::new(0),
+            destructor: None,
         };
 
         let (enum_id, _) = self.type_pool.register_enum(name_spur, enum_def);

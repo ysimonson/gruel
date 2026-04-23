@@ -241,6 +241,7 @@ impl<'a> Sema<'a> {
                         variants,
                         is_pub: *is_pub,
                         file_id: inst.span.file_id,
+                        destructor: None,
                     };
 
                     // Register in type pool and get pool-based EnumId
@@ -1092,6 +1093,70 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
+    /// Register an inline `fn drop(self)` as an enum's destructor (ADR-0053 phase 3b).
+    ///
+    /// Mirrors `register_inline_struct_drop`. Validates the signature
+    /// (must be `fn drop(self)` returning unit, only one per type) and
+    /// stores the destructor metadata in `EnumDef.destructor`.
+    #[allow(clippy::too_many_arguments)]
+    fn register_inline_enum_drop(
+        &mut self,
+        type_name: Spur,
+        enum_id: EnumId,
+        has_self: bool,
+        params_len: u32,
+        return_type: Spur,
+        body: InstRef,
+        span: Span,
+    ) -> CompileResult<()> {
+        let type_name_str = self.interner.resolve(&type_name).to_string();
+
+        if !has_self {
+            return Err(CompileError::new(
+                ErrorKind::InvalidInlineDrop {
+                    type_name: type_name_str,
+                    reason: "must take `self` — found an associated function".into(),
+                },
+                span,
+            ));
+        }
+        if params_len > 0 {
+            return Err(CompileError::new(
+                ErrorKind::InvalidInlineDrop {
+                    type_name: type_name_str,
+                    reason: "must take only `self` — extra parameters are not allowed".into(),
+                },
+                span,
+            ));
+        }
+        let ret_str = self.interner.resolve(&return_type);
+        if ret_str != "()" {
+            return Err(CompileError::new(
+                ErrorKind::InvalidInlineDrop {
+                    type_name: type_name_str,
+                    reason: format!("must return unit — found return type `{}`", ret_str),
+                },
+                span,
+            ));
+        }
+
+        let mut enum_def = self.type_pool.enum_def(enum_id);
+        if enum_def.destructor.is_some() {
+            return Err(CompileError::new(
+                ErrorKind::DuplicateDestructor {
+                    type_name: type_name_str,
+                },
+                span,
+            ));
+        }
+        let destructor_name = format!("{}.__drop", type_name_str);
+        enum_def.destructor = Some(destructor_name);
+        self.type_pool.update_enum_def(enum_id, enum_def);
+
+        self.inline_enum_drops.insert(enum_id, (body, span));
+        Ok(())
+    }
+
     /// Collect methods defined inline in a named enum (ADR-0053).
     ///
     /// Mirrors `collect_struct_methods`: registers each method against the
@@ -1134,19 +1199,19 @@ impl<'a> Sema<'a> {
                 ..
             } = &method_inst.data
             {
-                // ADR-0053: destructors on enums are deferred to phase 3b.
-                // Accept the syntax but reject it with a pointed diagnostic for now.
+                // ADR-0053 phase 3b: a method named `drop` is the enum's destructor,
+                // not a regular method. Route it through the per-enum destructor slot.
                 if *method_name == drop_name_sym {
-                    let type_name_str = self.interner.resolve(&type_name).to_string();
-                    return Err(CompileError::new(
-                        ErrorKind::InvalidInlineDrop {
-                            type_name: type_name_str,
-                            reason:
-                                "destructors on enums are not yet supported (ADR-0053 phase 3b)"
-                                    .into(),
-                        },
+                    self.register_inline_enum_drop(
+                        type_name,
+                        enum_id,
+                        *has_self,
+                        *params_len,
+                        *return_type,
+                        *body,
                         method_inst.span,
-                    ));
+                    )?;
+                    continue;
                 }
                 let key = (enum_id, *method_name);
                 if self.enum_methods.contains_key(&key) {

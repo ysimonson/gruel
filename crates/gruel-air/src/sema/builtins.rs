@@ -84,6 +84,7 @@ impl<'a> Sema<'a> {
                 variants,
                 is_pub: true,                        // Built-in enums are always public
                 file_id: gruel_span::FileId::new(0), // Synthetic, no source file
+                destructor: None,
             };
 
             // Register in type pool and get pool-based EnumId
