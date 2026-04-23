@@ -119,3 +119,66 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "cannot find module"
+
+# =============================================================================
+# @import with comptime_str arguments
+# =============================================================================
+
+[[case]]
+name = "import_comptime_block_literal"
+spec = ["4.13:80", "4.13:100"]
+description = "@import accepts a comptime block producing a string"
+source = """
+fn main() -> i32 {
+    let _m = @import(comptime { "foo" });
+    0
+}
+"""
+aux_files = { "foo.gruel" = "pub fn f() -> i32 { 1 }" }
+exit_code = 0
+
+[[case]]
+name = "import_platform_conditional"
+spec = ["4.13:80", "4.13:100"]
+description = "@import with a platform-conditional comptime block picks one of two modules based on @target_os()"
+source = """
+fn main() -> i32 {
+    let _sys = @import(comptime {
+        if @target_os() == Os::Linux {
+            "sys_linux"
+        } else {
+            "sys_macos"
+        }
+    });
+    0
+}
+"""
+aux_files = { "sys_linux.gruel" = "pub fn f() -> i32 { 1 }", "sys_macos.gruel" = "pub fn f() -> i32 { 2 }" }
+exit_code = 0
+
+[[case]]
+name = "import_comptime_block_non_string_error"
+spec = ["4.13:84"]
+description = "@import rejects a comptime block that does not produce a string"
+source = """
+fn main() -> i32 {
+    let _m = @import(comptime { 42 });
+    0
+}
+"""
+compile_fail = true
+error_contains = "string literal"
+
+[[case]]
+name = "import_runtime_value_error"
+spec = ["4.13:84"]
+description = "@import rejects a runtime-only value; the path must be resolvable at compile time"
+source = """
+fn use_path(s: String) -> i32 {
+    let _m = @import(s);
+    0
+}
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "compile time"

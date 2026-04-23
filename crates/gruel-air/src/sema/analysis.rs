@@ -4213,19 +4213,8 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        // Get the argument instruction - it must be a string literal
-        let arg_inst = self.rir.get(args[0].value);
-        let import_path = match &arg_inst.data {
-            gruel_rir::InstData::StringConst(path_spur) => {
-                self.interner.resolve(path_spur).to_string()
-            }
-            _ => {
-                return Err(CompileError::new(
-                    ErrorKind::ImportRequiresStringLiteral,
-                    arg_inst.span,
-                ));
-            }
-        };
+        // Accept a string literal (fast path) or a comptime_str expression.
+        let import_path = self.resolve_import_path_arg(args[0].value)?;
 
         // Resolve the import path relative to the current source file
         // Resolution order (per ADR-0026):
@@ -5404,7 +5393,7 @@ impl<'a> Sema<'a> {
     }
 
     /// Resolve a `ConstValue::ComptimeStr` to its Rust string content.
-    fn resolve_comptime_str(&self, idx: u32, span: Span) -> CompileResult<&str> {
+    pub(crate) fn resolve_comptime_str(&self, idx: u32, span: Span) -> CompileResult<&str> {
         match &self.comptime_heap[idx as usize] {
             ComptimeHeapItem::String(s) => Ok(s.as_str()),
             _ => Err(CompileError::new(
@@ -6096,6 +6085,41 @@ impl<'a> Sema<'a> {
         }
     }
 
+    /// Evaluate a comptime expression at the top level, outside any function body.
+    ///
+    /// Used during Phase 2.5 const-initializer evaluation, where there is no
+    /// enclosing `AnalysisContext`. Builds a minimal stub context (no locals,
+    /// no comptime type params) and delegates to [`evaluate_comptime_block`].
+    pub(crate) fn evaluate_comptime_top_level(
+        &mut self,
+        inst_ref: InstRef,
+        span: Span,
+    ) -> CompileResult<ConstValue> {
+        let empty_params: Vec<ParamInfo> = Vec::new();
+        let empty_resolved: HashMap<InstRef, Type> = HashMap::new();
+        let stub = AnalysisContext {
+            locals: HashMap::new(),
+            params: &empty_params,
+            next_slot: 0,
+            loop_depth: 0,
+            forbid_break: None,
+            checked_depth: 0,
+            used_locals: HashSet::new(),
+            return_type: Type::UNIT,
+            scope_stack: Vec::new(),
+            resolved_types: &empty_resolved,
+            moved_vars: HashMap::new(),
+            warnings: Vec::new(),
+            local_string_table: HashMap::new(),
+            local_strings: Vec::new(),
+            comptime_type_vars: HashMap::new(),
+            comptime_value_vars: HashMap::new(),
+            referenced_functions: HashSet::new(),
+            referenced_methods: HashSet::new(),
+        };
+        self.evaluate_comptime_block(inst_ref, &stub, span)
+    }
+
     /// Evaluate a comptime expression without clearing the heap.
     ///
     /// This is used by `@field` and other intrinsics inside `comptime_unroll for` bodies
@@ -6331,6 +6355,16 @@ impl<'a> Sema<'a> {
                         let sb = self.resolve_comptime_str(b, inst_span)?;
                         Ok(ConstValue::Bool(sa == sb))
                     }
+                    (
+                        ConstValue::EnumVariant {
+                            enum_id: ae,
+                            variant_idx: av,
+                        },
+                        ConstValue::EnumVariant {
+                            enum_id: be,
+                            variant_idx: bv,
+                        },
+                    ) => Ok(ConstValue::Bool(ae == be && av == bv)),
                     _ => Err(not_const(inst_span)),
                 }
             }
@@ -6347,6 +6381,16 @@ impl<'a> Sema<'a> {
                         let sb = self.resolve_comptime_str(b, inst_span)?;
                         Ok(ConstValue::Bool(sa != sb))
                     }
+                    (
+                        ConstValue::EnumVariant {
+                            enum_id: ae,
+                            variant_idx: av,
+                        },
+                        ConstValue::EnumVariant {
+                            enum_id: be,
+                            variant_idx: bv,
+                        },
+                    ) => Ok(ConstValue::Bool(!(ae == be && av == bv))),
                     _ => Err(not_const(inst_span)),
                 }
             }
@@ -7664,6 +7708,40 @@ impl<'a> Sema<'a> {
                     let idx = self.comptime_heap.len() as u32;
                     self.comptime_heap.push(ComptimeHeapItem::Array(elements));
                     return Ok(ConstValue::Array(idx));
+                }
+                // Platform intrinsics return variants of the built-in Os/Arch enums.
+                // They are pure functions of the compile target, so the comptime
+                // interpreter can evaluate them directly.
+                if let Some(id) = self.known.intrinsic_id(name) {
+                    match id {
+                        IntrinsicId::TargetOs => {
+                            let enum_id = self
+                                .builtin_os_id
+                                .expect("Os enum not injected - internal compiler error");
+                            let variant_idx = match gruel_target::Target::host().os() {
+                                gruel_target::Os::Linux => 0,
+                                gruel_target::Os::Macos => 1,
+                            };
+                            return Ok(ConstValue::EnumVariant {
+                                enum_id,
+                                variant_idx,
+                            });
+                        }
+                        IntrinsicId::TargetArch => {
+                            let enum_id = self
+                                .builtin_arch_id
+                                .expect("Arch enum not injected - internal compiler error");
+                            let variant_idx = match gruel_target::Target::host().arch() {
+                                gruel_target::Arch::X86_64 => 0,
+                                gruel_target::Arch::Aarch64 => 1,
+                            };
+                            return Ok(ConstValue::EnumVariant {
+                                enum_id,
+                                variant_idx,
+                            });
+                        }
+                        _ => {}
+                    }
                 }
                 // Unrecognized intrinsic: surface the name in the diagnostic
                 // rather than the generic "cannot be known at compile time"

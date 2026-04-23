@@ -56,7 +56,7 @@ The following table provides a quick reference to all available intrinsics:
 | `@target_arch` | Get target architecture | none | `Arch` |
 | `@target_os` | Get target OS | none | `Os` |
 | `@range` | Construct integer range | 1-3 expressions (integers) | `Range(T)` |
-| `@import` | Import module | 1 expression (string literal) | module type |
+| `@import` | Import module | 1 expression (string literal or `comptime_str`) | module type |
 
 ## `@dbg`
 
@@ -757,7 +757,7 @@ The `@import` intrinsic imports a module from another source file.
 
 {{ rule(id="4.13:80", cat="normative") }}
 
-`@import` accepts exactly one argument, which **MUST** be a string literal specifying the module path.
+`@import` accepts exactly one argument. The argument **MUST** be either a string literal or an expression of type `comptime_str` specifying the module path. Expressions of type `comptime_str` are evaluated by the compile-time interpreter; this enables conditional imports driven by `@target_os()`, `@target_arch()`, or any other comptime-known data.
 
 {{ rule(id="4.13:81", cat="normative") }}
 
@@ -776,7 +776,7 @@ It is a compile-time error if the module path does not resolve to an existing fi
 
 {{ rule(id="4.13:84", cat="legality-rule") }}
 
-It is a compile-time error to pass a non-string-literal argument to `@import`.
+It is a compile-time error to pass an argument to `@import` that is neither a string literal nor a `comptime_str` expression. Passing a runtime value (e.g. a `String` parameter or a local bound to a runtime expression) is a compile-time error because the module path must be resolvable during semantic analysis.
 
 {{ rule(id="4.13:85") }}
 
@@ -824,6 +824,23 @@ Nested paths are supported for importing from subdirectories:
 ```gruel
 fn main() -> i32 {
     let strings = @import("utils/strings");
+    0
+}
+```
+
+{{ rule(id="4.13:100") }}
+
+A `comptime_str` argument enables platform-conditional imports. The expression is evaluated by the compile-time interpreter before module resolution:
+
+```gruel
+fn main() -> i32 {
+    let sys = @import(comptime {
+        if @target_os() == Os::Linux {
+            "sys_linux"
+        } else {
+            "sys_macos"
+        }
+    });
     0
 }
 ```

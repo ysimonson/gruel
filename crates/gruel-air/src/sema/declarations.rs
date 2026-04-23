@@ -1363,20 +1363,9 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    // Get the string literal argument
+                    // Accept a string literal or a comptime_str expression.
                     let arg_refs = self.rir.get_inst_refs(*args_start, *args_len);
-                    let arg_inst = self.rir.get(arg_refs[0]);
-                    let import_path = match &arg_inst.data {
-                        InstData::StringConst(path_spur) => {
-                            self.interner.resolve(path_spur).to_string()
-                        }
-                        _ => {
-                            return Err(CompileError::new(
-                                ErrorKind::ImportRequiresStringLiteral,
-                                arg_inst.span,
-                            ));
-                        }
-                    };
+                    let import_path = self.resolve_import_path_arg(arg_refs[0])?;
 
                     // Resolve the import path to an absolute file path
                     let resolved_path = self.resolve_import_path(&import_path, span)?;

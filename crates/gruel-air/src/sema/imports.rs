@@ -9,11 +9,13 @@
 //! module for details on how different import forms are resolved.
 
 use gruel_error::{CompileError, CompileResult, ErrorKind};
+use gruel_rir::InstRef;
 use gruel_span::Span;
 
 use crate::types::Type;
 
 use super::Sema;
+use super::context::ConstValue;
 use super::module_path::ModulePath;
 
 impl Sema<'_> {
@@ -83,20 +85,7 @@ impl Sema<'_> {
 
         // Get the argument from extra data (intrinsics use inst_refs, not call_args)
         let arg_refs = self.rir.get_inst_refs(args_start, args_len);
-        let arg_inst = self.rir.get(arg_refs[0]);
-
-        // The argument must be a string literal
-        let import_path = match &arg_inst.data {
-            gruel_rir::InstData::StringConst(path_spur) => {
-                self.interner.resolve(path_spur).to_string()
-            }
-            _ => {
-                return Err(CompileError::new(
-                    ErrorKind::ImportRequiresStringLiteral,
-                    arg_inst.span,
-                ));
-            }
-        };
+        let import_path = self.resolve_import_path_arg(arg_refs[0])?;
 
         // Resolve the import path
         let resolved_path = self.resolve_import_path_for_const(&import_path, span)?;
@@ -107,6 +96,33 @@ impl Sema<'_> {
             .get_or_create(import_path, resolved_path);
 
         Ok(Type::new_module(module_id))
+    }
+
+    /// Resolve the argument of `@import` to a concrete module-path string.
+    ///
+    /// Accepts either a bare string literal (fast path, keeps diagnostics
+    /// anchored on the literal) or any expression of type `comptime_str`, such
+    /// as a `comptime { ... }` block that selects a path based on
+    /// `@target_os()`. The comptime interpreter runs with a top-level stub
+    /// context: `@import` arguments never reference enclosing comptime type or
+    /// value parameters.
+    pub(crate) fn resolve_import_path_arg(&mut self, arg_ref: InstRef) -> CompileResult<String> {
+        let arg_inst = self.rir.get(arg_ref);
+        let arg_span = arg_inst.span;
+
+        if let gruel_rir::InstData::StringConst(path_spur) = &arg_inst.data {
+            return Ok(self.interner.resolve(path_spur).to_string());
+        }
+
+        match self.evaluate_comptime_top_level(arg_ref, arg_span)? {
+            ConstValue::ComptimeStr(idx) => {
+                Ok(self.resolve_comptime_str(idx, arg_span)?.to_string())
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::ImportRequiresStringLiteral,
+                arg_span,
+            )),
+        }
     }
 
     /// Resolve an import path for const evaluation.
