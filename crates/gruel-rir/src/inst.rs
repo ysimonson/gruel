@@ -101,6 +101,14 @@ impl RirCallArg {
 }
 
 /// A pattern in a match expression (RIR level - untyped).
+///
+/// Recursive shape introduced by ADR-0051 Phase 4: `Ident`, `Tuple`, and
+/// `Struct` variants let astgen carry source-level nesting straight to sema
+/// instead of pre-elaborating tuple/struct match roots. The existing
+/// variant-pattern shapes (`DataVariant`, `StructVariant`) are unchanged;
+/// nested sub-patterns inside variant fields still go through the
+/// elaboration layer until a follow-up RIR migration replaces their flat
+/// bindings with `RirPattern` leaves.
 #[derive(Debug, Clone)]
 pub enum RirPattern {
     /// Wildcard pattern `_` - matches anything
@@ -146,6 +154,26 @@ pub enum RirPattern {
         /// Span of the pattern
         span: Span,
     },
+    /// Name binding `x` or `mut x` (ADR-0051). Used at the arm root or as
+    /// a sub-pattern inside `Tuple` / `Struct`. Equivalent to `x @ _`.
+    Ident {
+        name: Spur,
+        is_mut: bool,
+        span: Span,
+    },
+    /// Tuple pattern `(p0, p1, ...)` (ADR-0051). Elements may be any
+    /// `RirPattern`, so `(Some(x), None)` nests variant patterns under
+    /// the tuple root.
+    Tuple { elems: Vec<RirPattern>, span: Span },
+    /// Named-struct pattern `TypeName { field: pat, .. }` (ADR-0051).
+    /// `has_rest` marks an explicit `..` trailing the field list.
+    Struct {
+        module: Option<InstRef>,
+        type_name: Spur,
+        fields: Vec<RirStructField>,
+        has_rest: bool,
+        span: Span,
+    },
 }
 
 /// A binding in a data variant pattern.
@@ -168,6 +196,14 @@ pub struct RirStructPatternBinding {
     pub binding: RirPatternBinding,
 }
 
+/// A field in an ADR-0051 `RirPattern::Struct` arm, carrying the matched
+/// field's name plus its recursive sub-pattern.
+#[derive(Debug, Clone)]
+pub struct RirStructField {
+    pub field_name: Spur,
+    pub pattern: RirPattern,
+}
+
 impl RirPattern {
     /// Get the span of this pattern.
     pub fn span(&self) -> Span {
@@ -178,7 +214,297 @@ impl RirPattern {
             RirPattern::Path { span, .. } => *span,
             RirPattern::DataVariant { span, .. } => *span,
             RirPattern::StructVariant { span, .. } => *span,
+            RirPattern::Ident { span, .. } => *span,
+            RirPattern::Tuple { span, .. } => *span,
+            RirPattern::Struct { span, .. } => *span,
         }
+    }
+}
+
+/// Encode a `RirPattern` as a self-describing tree into `out`. Unlike the
+/// per-kind top-level arm encoding, this form carries no `body_ref` and
+/// is used for nested sub-patterns inside ADR-0051 `Tuple` / `Struct`
+/// arm elements. The layout mirrors the per-kind top-level layout minus
+/// the body word, with variable-width recursion for nested patterns.
+fn encode_pattern_tree(pattern: &RirPattern, out: &mut Vec<u32>) {
+    match pattern {
+        RirPattern::Wildcard(span) => {
+            out.push(PatternKind::Wildcard as u32);
+            out.push(span.start());
+            out.push(span.len());
+        }
+        RirPattern::Int(value, span) => {
+            out.push(PatternKind::Int as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(*value as u32);
+            out.push((*value >> 32) as u32);
+        }
+        RirPattern::Bool(value, span) => {
+            out.push(PatternKind::Bool as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(if *value { 1 } else { 0 });
+        }
+        RirPattern::Path {
+            module,
+            type_name,
+            variant,
+            span,
+        } => {
+            out.push(PatternKind::Path as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(module.map_or(u32::MAX, |r| r.as_u32()));
+            out.push(type_name.into_usize() as u32);
+            out.push(variant.into_usize() as u32);
+        }
+        RirPattern::DataVariant {
+            module,
+            type_name,
+            variant,
+            bindings,
+            span,
+        } => {
+            out.push(PatternKind::DataVariant as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(module.map_or(u32::MAX, |r| r.as_u32()));
+            out.push(type_name.into_usize() as u32);
+            out.push(variant.into_usize() as u32);
+            out.push(bindings.len() as u32);
+            for b in bindings {
+                let flags = if b.is_wildcard { 1u32 } else { 0 } | if b.is_mut { 2 } else { 0 };
+                out.push(flags);
+                out.push(b.name.map_or(u32::MAX, |s| s.into_usize() as u32));
+            }
+        }
+        RirPattern::StructVariant {
+            module,
+            type_name,
+            variant,
+            field_bindings,
+            span,
+        } => {
+            out.push(PatternKind::StructVariant as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(module.map_or(u32::MAX, |r| r.as_u32()));
+            out.push(type_name.into_usize() as u32);
+            out.push(variant.into_usize() as u32);
+            out.push(field_bindings.len() as u32);
+            for fb in field_bindings {
+                out.push(fb.field_name.into_usize() as u32);
+                let flags = if fb.binding.is_wildcard { 1u32 } else { 0 }
+                    | if fb.binding.is_mut { 2 } else { 0 };
+                out.push(flags);
+                out.push(fb.binding.name.map_or(u32::MAX, |s| s.into_usize() as u32));
+            }
+        }
+        RirPattern::Ident { name, is_mut, span } => {
+            out.push(PatternKind::Ident as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(name.into_usize() as u32);
+            out.push(if *is_mut { 1 } else { 0 });
+        }
+        RirPattern::Tuple { elems, span } => {
+            out.push(PatternKind::Tuple as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(elems.len() as u32);
+            for elem in elems {
+                encode_pattern_tree(elem, out);
+            }
+        }
+        RirPattern::Struct {
+            module,
+            type_name,
+            fields,
+            has_rest,
+            span,
+        } => {
+            out.push(PatternKind::Struct as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(module.map_or(u32::MAX, |r| r.as_u32()));
+            out.push(type_name.into_usize() as u32);
+            out.push(if *has_rest { 1 } else { 0 });
+            out.push(fields.len() as u32);
+            for f in fields {
+                out.push(f.field_name.into_usize() as u32);
+                encode_pattern_tree(&f.pattern, out);
+            }
+        }
+    }
+}
+
+/// Decode a single `RirPattern` from the tree encoding in `data`,
+/// returning the pattern and how many u32 words it consumed. Unused in
+/// Phase 4a (astgen does not emit Tuple/Struct arms yet); turns live
+/// when Phase 4b wires astgen and sema consumes nested sub-patterns.
+#[allow(dead_code)]
+fn decode_pattern_tree(data: &[u32]) -> (RirPattern, usize) {
+    let kind = data[0];
+    if kind == PatternKind::Wildcard as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        (RirPattern::Wildcard(span), 3)
+    } else if kind == PatternKind::Int as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let value_lo = data[3] as i64;
+        let value_hi = data[4] as i64;
+        let value = value_lo | (value_hi << 32);
+        (RirPattern::Int(value, span), 5)
+    } else if kind == PatternKind::Bool as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let value = data[3] != 0;
+        (RirPattern::Bool(value, span), 4)
+    } else if kind == PatternKind::Path as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let module_raw = data[3];
+        let module = if module_raw == u32::MAX {
+            None
+        } else {
+            Some(InstRef::from_raw(module_raw))
+        };
+        let type_name = Spur::try_from_usize(data[4] as usize).unwrap();
+        let variant = Spur::try_from_usize(data[5] as usize).unwrap();
+        (
+            RirPattern::Path {
+                module,
+                type_name,
+                variant,
+                span,
+            },
+            6,
+        )
+    } else if kind == PatternKind::DataVariant as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let module_raw = data[3];
+        let module = if module_raw == u32::MAX {
+            None
+        } else {
+            Some(InstRef::from_raw(module_raw))
+        };
+        let type_name = Spur::try_from_usize(data[4] as usize).unwrap();
+        let variant = Spur::try_from_usize(data[5] as usize).unwrap();
+        let n = data[6] as usize;
+        let mut bindings = Vec::with_capacity(n);
+        for i in 0..n {
+            let flags = data[7 + i * 2];
+            let name_raw = data[8 + i * 2];
+            let name = if name_raw == u32::MAX {
+                None
+            } else {
+                Some(Spur::try_from_usize(name_raw as usize).unwrap())
+            };
+            bindings.push(RirPatternBinding {
+                is_wildcard: flags & 1 != 0,
+                is_mut: flags & 2 != 0,
+                name,
+            });
+        }
+        (
+            RirPattern::DataVariant {
+                module,
+                type_name,
+                variant,
+                bindings,
+                span,
+            },
+            7 + 2 * n,
+        )
+    } else if kind == PatternKind::StructVariant as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let module_raw = data[3];
+        let module = if module_raw == u32::MAX {
+            None
+        } else {
+            Some(InstRef::from_raw(module_raw))
+        };
+        let type_name = Spur::try_from_usize(data[4] as usize).unwrap();
+        let variant = Spur::try_from_usize(data[5] as usize).unwrap();
+        let n = data[6] as usize;
+        let mut field_bindings = Vec::with_capacity(n);
+        for i in 0..n {
+            let field_name = Spur::try_from_usize(data[7 + i * 3] as usize).unwrap();
+            let flags = data[8 + i * 3];
+            let name_raw = data[9 + i * 3];
+            let name = if name_raw == u32::MAX {
+                None
+            } else {
+                Some(Spur::try_from_usize(name_raw as usize).unwrap())
+            };
+            field_bindings.push(RirStructPatternBinding {
+                field_name,
+                binding: RirPatternBinding {
+                    is_wildcard: flags & 1 != 0,
+                    is_mut: flags & 2 != 0,
+                    name,
+                },
+            });
+        }
+        (
+            RirPattern::StructVariant {
+                module,
+                type_name,
+                variant,
+                field_bindings,
+                span,
+            },
+            7 + 3 * n,
+        )
+    } else if kind == PatternKind::Ident as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let name = Spur::try_from_usize(data[3] as usize).unwrap();
+        let is_mut = data[4] != 0;
+        (RirPattern::Ident { name, is_mut, span }, 5)
+    } else if kind == PatternKind::Tuple as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let n = data[3] as usize;
+        let mut offset = 4;
+        let mut elems = Vec::with_capacity(n);
+        for _ in 0..n {
+            let (p, consumed) = decode_pattern_tree(&data[offset..]);
+            elems.push(p);
+            offset += consumed;
+        }
+        (RirPattern::Tuple { elems, span }, offset)
+    } else if kind == PatternKind::Struct as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let module_raw = data[3];
+        let module = if module_raw == u32::MAX {
+            None
+        } else {
+            Some(InstRef::from_raw(module_raw))
+        };
+        let type_name = Spur::try_from_usize(data[4] as usize).unwrap();
+        let has_rest = data[5] != 0;
+        let n = data[6] as usize;
+        let mut offset = 7;
+        let mut fields = Vec::with_capacity(n);
+        for _ in 0..n {
+            let field_name = Spur::try_from_usize(data[offset] as usize).unwrap();
+            offset += 1;
+            let (pattern, consumed) = decode_pattern_tree(&data[offset..]);
+            offset += consumed;
+            fields.push(RirStructField {
+                field_name,
+                pattern,
+            });
+        }
+        (
+            RirPattern::Struct {
+                module,
+                type_name,
+                fields,
+                has_rest,
+                span,
+            },
+            offset,
+        )
+    } else {
+        panic!("Unknown pattern tree tag: {}", kind);
     }
 }
 
@@ -214,6 +540,14 @@ pub enum PatternKind {
     /// Struct variant pattern: [kind, span_start, span_len, module, type_name, variant, body, bindings_len, (field_name, flags, binding_name)...]
     /// Each field binding is 3 u32s: field_name (Spur), flags (bit0=is_wildcard, bit1=is_mut), binding_name (Spur, u32::MAX if wildcard)
     StructVariant = 5,
+    /// ADR-0051 Ident pattern: [kind, span_start, span_len, body, name, flags]
+    /// flags bit 0 = is_mut.
+    Ident = 6,
+    /// ADR-0051 Tuple pattern: [kind, span_start, span_len, body, elems_len, ...recursive_tree per elem]
+    Tuple = 7,
+    /// ADR-0051 Struct pattern: [kind, span_start, span_len, body, module_raw, type_name, has_rest, fields_len,
+    ///                           (field_name, ...recursive_tree) * fields_len]
+    Struct = 8,
 }
 
 /// Size of each pattern kind in the extra array (including body InstRef)
@@ -684,6 +1018,44 @@ impl Rir {
                         self.extra.push(flags);
                         self.extra
                             .push(fb.binding.name.map_or(u32::MAX, |s| s.into_usize() as u32));
+                    }
+                }
+                RirPattern::Ident { name, is_mut, span } => {
+                    self.extra.push(PatternKind::Ident as u32);
+                    self.extra.push(span.start());
+                    self.extra.push(span.len());
+                    self.extra.push(body.as_u32());
+                    self.extra.push(name.into_usize() as u32);
+                    self.extra.push(if *is_mut { 1 } else { 0 });
+                }
+                RirPattern::Tuple { elems, span } => {
+                    self.extra.push(PatternKind::Tuple as u32);
+                    self.extra.push(span.start());
+                    self.extra.push(span.len());
+                    self.extra.push(body.as_u32());
+                    self.extra.push(elems.len() as u32);
+                    for elem in elems {
+                        encode_pattern_tree(elem, &mut self.extra);
+                    }
+                }
+                RirPattern::Struct {
+                    module,
+                    type_name,
+                    fields,
+                    has_rest,
+                    span,
+                } => {
+                    self.extra.push(PatternKind::Struct as u32);
+                    self.extra.push(span.start());
+                    self.extra.push(span.len());
+                    self.extra.push(body.as_u32());
+                    self.extra.push(module.map_or(u32::MAX, |r| r.as_u32()));
+                    self.extra.push(type_name.into_usize() as u32);
+                    self.extra.push(if *has_rest { 1 } else { 0 });
+                    self.extra.push(fields.len() as u32);
+                    for field in fields {
+                        self.extra.push(field.field_name.into_usize() as u32);
+                        encode_pattern_tree(&field.pattern, &mut self.extra);
                     }
                 }
             }
@@ -2379,6 +2751,50 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     self.interner.resolve(type_name),
                     self.interner.resolve(variant),
                     field_strs.join(", ")
+                )
+            }
+            RirPattern::Ident { name, is_mut, .. } => {
+                let n = self.interner.resolve(name);
+                if *is_mut {
+                    format!("mut {}", n)
+                } else {
+                    n.to_string()
+                }
+            }
+            RirPattern::Tuple { elems, .. } => {
+                let parts: Vec<String> = elems.iter().map(|e| self.format_pattern(e)).collect();
+                format!("({})", parts.join(", "))
+            }
+            RirPattern::Struct {
+                module,
+                type_name,
+                fields,
+                has_rest,
+                ..
+            } => {
+                let prefix = if let Some(module_ref) = module {
+                    format!("%{}..", module_ref.as_u32())
+                } else {
+                    String::new()
+                };
+                let mut parts: Vec<String> = fields
+                    .iter()
+                    .map(|f| {
+                        format!(
+                            "{}: {}",
+                            self.interner.resolve(&f.field_name),
+                            self.format_pattern(&f.pattern)
+                        )
+                    })
+                    .collect();
+                if *has_rest {
+                    parts.push("..".to_string());
+                }
+                format!(
+                    "{}{} {{ {} }}",
+                    prefix,
+                    self.interner.resolve(type_name),
+                    parts.join(", ")
                 )
             }
         }

@@ -1476,6 +1476,13 @@ impl<'a> Sema<'a> {
                             self.interner.resolve(variant)
                         )
                     }
+                    // ADR-0051 Phase 4a: Ident/Tuple/Struct are data-structure
+                    // additions only; astgen does not produce them yet.
+                    RirPattern::Ident { name, .. } => self.interner.resolve(name).to_string(),
+                    RirPattern::Tuple { .. } => "(...)".to_string(),
+                    RirPattern::Struct { type_name, .. } => {
+                        format!("{} {{ ... }}", self.interner.resolve(type_name))
+                    }
                 };
                 ctx.warnings.push(
                     CompileWarning::new(
@@ -1860,6 +1867,15 @@ impl<'a> Sema<'a> {
                         resolved_enum = Some((enum_id, variant_index as u32));
                     }
                 }
+                // ADR-0051 Phase 4a: Ident / Tuple / Struct are not yet
+                // produced by astgen. Phase 4b wires astgen and fills in
+                // proper validation here.
+                RirPattern::Ident { .. } | RirPattern::Tuple { .. } | RirPattern::Struct { .. } => {
+                    unreachable!(
+                        "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
+                         ADR-0051 Phase 4a"
+                    )
+                }
             }
 
             // Each arm gets its own scope
@@ -2162,6 +2178,14 @@ impl<'a> Sema<'a> {
                             variant_index,
                         }
                     }
+                    RirPattern::Ident { .. }
+                    | RirPattern::Tuple { .. }
+                    | RirPattern::Struct { .. } => {
+                        unreachable!(
+                            "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
+                             ADR-0051 Phase 4a"
+                        )
+                    }
                 }
             };
 
@@ -2316,6 +2340,12 @@ impl<'a> Sema<'a> {
                     variant_index,
                     fields,
                 }
+            }
+            RirPattern::Ident { .. } | RirPattern::Tuple { .. } | RirPattern::Struct { .. } => {
+                unreachable!(
+                    "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
+                     ADR-0051 Phase 4a; lower_pattern sees them in Phase 4b"
+                )
             }
         }
     }

@@ -7152,6 +7152,18 @@ impl<'a> Sema<'a> {
                                 }
                             }
                         }
+                        // ADR-0051 Phase 4a: Ident / Tuple / Struct are not yet
+                        // produced by astgen, so comptime match evaluation does
+                        // not need to handle them yet. Phase 4b turns astgen on
+                        // and fills these in.
+                        RirPattern::Ident { .. }
+                        | RirPattern::Tuple { .. }
+                        | RirPattern::Struct { .. } => {
+                            unreachable!(
+                                "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
+                                 ADR-0051 Phase 4a"
+                            )
+                        }
                     }
                 }
 

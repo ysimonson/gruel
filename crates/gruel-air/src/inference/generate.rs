@@ -1602,6 +1602,19 @@ impl<'a> ConstraintGenerator<'a> {
                     InferType::Var(var)
                 }
             }
+            // ADR-0051 Phase 4a: data-structure only. Astgen still elaborates
+            // top-level tuple / struct / ident match arms into existing
+            // shapes, so these variants cannot reach inference yet. Phase 4b
+            // wires astgen to produce them and this arm picks up the real
+            // inference logic.
+            gruel_rir::RirPattern::Ident { .. }
+            | gruel_rir::RirPattern::Tuple { .. }
+            | gruel_rir::RirPattern::Struct { .. } => {
+                unreachable!(
+                    "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
+                     ADR-0051 Phase 4a; Phase 4b will enable them"
+                )
+            }
         }
     }
 
