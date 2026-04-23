@@ -380,6 +380,15 @@ path (Phase 4).
     Tests gated on `--recursive-pattern-lowering` until Phase 4.
 
 - [ ] **Phase 4: Cut over to the new lowering by default**
+  - [x] 4a: extend RIR with `Ident` / `Tuple` / `Struct` variants and a
+        self-describing tree encoding for nested sub-patterns. Additive;
+        astgen still elaborates today.
+  - [ ] 4b: thread an astgen-side flag and teach astgen to produce the
+        new shapes for top-level tuple / struct / ident match roots; wire
+        sema + CFG cascading dispatch end to end behind the flag.
+  - [ ] 4c: delete the three elaborators, the `__nested_pat_N` machinery,
+        `wrap_match_arm_body_with_destructures`, the five Phase 5 panics,
+        the runtime `@panic` injection; flip the flag default.
   - Remove the `--recursive-pattern-lowering` flag and make the
     recursive path the default.
   - Delete `try_elaborate_irrefutable_match`,
