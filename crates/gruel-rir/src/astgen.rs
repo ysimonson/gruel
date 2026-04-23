@@ -1255,7 +1255,21 @@ impl<'a> AstGen<'a> {
             Pattern::Tuple { elems, span } => {
                 let mut predicates: Vec<InstRef> = Vec::new();
                 let mut bindings: Vec<u32> = Vec::new();
+                let last_index = elems.len().saturating_sub(1);
                 for (i, elem) in elems.iter().enumerate() {
+                    // A trailing `..` matches the remaining positions with
+                    // no predicate and no binding — the scrutinee alloc
+                    // still owns those tuple fields, so they drop at scope
+                    // exit (ADR-0049 Phase 6).
+                    if let TupleElemPattern::Rest(_) = elem {
+                        if i != last_index {
+                            panic!(
+                                "rest pattern `..` in tuple-root match must be at the end (ADR-0049 Phase 6); got element {}",
+                                i
+                            );
+                        }
+                        continue;
+                    }
                     let field_name = self.interner.get_or_intern(i.to_string());
                     let scr_ref = self.rir.add_inst(Inst {
                         data: InstData::VarRef { name: scr_name },
@@ -1341,9 +1355,7 @@ impl<'a> AstGen<'a> {
                             "tuple element shape {:?} in match arm not yet supported (ADR-0049 Phase 5b)",
                             other
                         ),
-                        TupleElemPattern::Rest(_) => {
-                            panic!("rest patterns `..` are a Phase 6 feature")
-                        }
+                        TupleElemPattern::Rest(_) => unreachable!("handled at top of loop"),
                     }
                 }
 

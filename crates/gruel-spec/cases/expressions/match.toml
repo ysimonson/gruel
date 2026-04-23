@@ -949,3 +949,20 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+[[case]]
+name = "match_tuple_root_trailing_rest"
+spec = ["4.7:23", "4.7:24"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Trailing `..` in tuple-root match drops unlisted positions (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t = (42, 10, 20);
+    match t {
+        (0, ..) => 100,
+        (x, ..) => x,
+    }
+}
+"""
+exit_code = 42
