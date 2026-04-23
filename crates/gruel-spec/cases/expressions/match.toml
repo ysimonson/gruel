@@ -1009,3 +1009,87 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+[[case]]
+name = "refutable_nested_multi_field_data_variant"
+spec = ["4.7:23", "4.7:24"]
+description = "Merging arms of a multi-field data variant with refutable subs (ADR-0049 Phase 5b)"
+source = """
+enum Pair {
+    Data(i32, i32),
+    Empty,
+}
+
+fn check(p: Pair) -> i32 {
+    match p {
+        Pair::Data(0, y) => y,
+        Pair::Data(1, y) => y + 100,
+        _ => -1,
+    }
+}
+
+fn main() -> i32 {
+    let a = check(Pair::Data(0, 42));
+    let b = check(Pair::Data(1, 5));
+    let c = check(Pair::Empty);
+    a + b + c - 104
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "refutable_nested_multi_field_all_refutable"
+spec = ["4.7:23", "4.7:24"]
+description = "Multi-field variant arms with refutable subs at every position (ADR-0049 Phase 5b)"
+source = """
+enum Pair {
+    Data(i32, i32),
+    Empty,
+}
+
+fn check(p: Pair) -> i32 {
+    match p {
+        Pair::Data(0, 0) => 100,
+        Pair::Data(0, _) => 10,
+        Pair::Data(_, 0) => 20,
+        _ => -1,
+    }
+}
+
+fn main() -> i32 {
+    let a = check(Pair::Data(0, 0));
+    let b = check(Pair::Data(0, 5));
+    let c = check(Pair::Data(5, 0));
+    let d = check(Pair::Data(5, 5));
+    let e = check(Pair::Empty);
+    a + b + c + d + e - 86
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "refutable_nested_struct_variant_merge"
+spec = ["4.7:23", "4.7:24"]
+description = "Merging arms of a struct variant with refutable subs (ADR-0049 Phase 5b)"
+source = """
+enum Shape {
+    Rect { w: i32, h: i32 },
+    Empty,
+}
+
+fn check(s: Shape) -> i32 {
+    match s {
+        Shape::Rect { w: 0, h } => h,
+        Shape::Rect { w, h } => w + h,
+        _ => -1,
+    }
+}
+
+fn main() -> i32 {
+    let a = check(Shape::Rect { w: 0, h: 42 });
+    let b = check(Shape::Rect { w: 10, h: 20 });
+    let c = check(Shape::Empty);
+    a + b + c - 29
+}
+"""
+exit_code = 42

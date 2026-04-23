@@ -581,15 +581,26 @@ ship without the preview gate since it's a bug fix, not a new feature.
       ..., Some(None) => ..., None => ...`) are supported: the nested
       match omits the wildcard fallback and relies on sema to enforce
       exhaustiveness across the nested variant type.
+  - Multi-field data variants and struct variants with a shared outer
+    variant now merge too: the merged outer arm uses fresh idents for
+    each field, and the nested match scrutinee is a tuple literal of
+    those idents. Phase 5a's tuple-root elaborator then compiles the
+    inner tuple match. Struct variants canonicalise on the first arm's
+    field order so arms that list fields in different orders still
+    merge cleanly. Merging skips when a merged arm is already
+    irrefutable (e.g., `V(w, h)` after `V(0, h)`) so the trailing
+    wildcard fallback doesn't shadow any reachable inner arm.
   - Limitations — the elaborator returns `None` and the normal match
     path surfaces a clear "Phase 5" panic for:
-    - Multi-field variant arms with a shared outer variant, where
-      merging would require dispatch on multiple field positions.
-    - Struct-variant arms with a shared outer variant.
+    - Multi-field variants whose merged arms have non-leaf inner
+      sub-patterns (Phase 5a can't yet dispatch on nested refutables
+      inside a tuple element).
     - Single-arm refutable-nested with no catch-all and a non-mergeable
       group shape.
-  - Spec tests cover single-arm + catch-all, shared-outer merge, and
-    exhaustive-no-catch-all shapes.
+    - Shared-outer merges that involve `..` rest patterns.
+  - Spec tests cover single-arm + catch-all, shared-outer merge,
+    exhaustive-no-catch-all shapes, multi-field data-variant merge,
+    all-refutable multi-field merge, and struct-variant merge.
 
 - [ ] **Future work still on the ADR checklist**
   - Exhaustiveness-checker extension reporting nested-pattern witnesses

@@ -1256,101 +1256,373 @@ impl<'a> AstGen<'a> {
         Some(self.gen_expr(&Expr::Match(new_match)))
     }
 
-    /// Merge arms that share a single-field `DataVariant` outer pattern into
-    /// a single outer arm whose body is a nested `match` over the field
-    /// value. Returns `None` for shapes outside this scope — multi-field
-    /// variants, struct variants, or rest patterns — so the caller can
-    /// fall through to the normal match path.
+    /// Merge arms that share a `DataVariant` or `StructVariant` outer
+    /// pattern into a single outer arm whose body is a nested `match`
+    /// over the field value(s).
+    ///
+    /// For single-field variants the nested match scrutinee is a bare
+    /// ident reference; for multi-field variants we bundle the fresh
+    /// idents into a tuple literal and the inner arm patterns become
+    /// tuples of the merged arms' sub-patterns — the nested tuple match
+    /// then flows through `try_elaborate_tuple_match` (Phase 5a).
+    ///
+    /// Struct-variant merging uses the first arm's field order as the
+    /// canonical layout and reorders each arm's sub-patterns to match.
+    /// Rest-pattern (`..`) shares, non-leaf multi-field sub-patterns,
+    /// and arms that list different field sets all return `None`.
     fn merge_group_single_field(
         &mut self,
         all_arms: &[MatchArm],
         idxs: &[usize],
         catch_all_body: Option<&Expr>,
     ) -> Option<MatchArm> {
-        // Extract the shared outer variant reference + span from the
-        // first arm; subsequent arms are validated to share the same
-        // (type_name, variant) (guaranteed by grouping), single-field,
-        // non-rest shape.
+        match &all_arms[idxs[0]].pattern {
+            Pattern::DataVariant { .. } => {
+                self.merge_group_data_variant(all_arms, idxs, catch_all_body)
+            }
+            Pattern::StructVariant { .. } => {
+                self.merge_group_struct_variant(all_arms, idxs, catch_all_body)
+            }
+            _ => None,
+        }
+    }
+
+    /// Data-variant arm merging — see `merge_group_single_field`.
+    fn merge_group_data_variant(
+        &mut self,
+        all_arms: &[MatchArm],
+        idxs: &[usize],
+        catch_all_body: Option<&Expr>,
+    ) -> Option<MatchArm> {
         let template = &all_arms[idxs[0]].pattern;
-        let (base, type_name, variant_ident, outer_span) = match template {
+        let (base, type_name, variant_ident, outer_span, field_count) = match template {
             Pattern::DataVariant {
                 base,
                 type_name,
                 variant,
                 span,
-                ..
-            } => (base.clone(), *type_name, *variant, *span),
-            _ => return None, // StructVariant shared-outer merging not supported
+                fields,
+            } => (base.clone(), *type_name, *variant, *span, fields.len()),
+            _ => return None,
         };
 
         for &i in idxs {
             match &all_arms[i].pattern {
                 Pattern::DataVariant { fields, .. } => {
-                    if fields.len() != 1 {
+                    if fields.len() != field_count {
                         return None;
                     }
-                    if matches!(&fields[0], TupleElemPattern::Rest(_)) {
-                        return None;
+                    for f in fields {
+                        match f {
+                            TupleElemPattern::Pattern(p) => {
+                                // Multi-field merging relies on Phase 5a's
+                                // tuple-root elaboration, which only supports
+                                // leaf sub-patterns. Single-field variants
+                                // bypass tuple construction so any sub-pattern
+                                // kind is fine there.
+                                if field_count > 1 && !is_leaf_sub_pattern(p) {
+                                    return None;
+                                }
+                            }
+                            TupleElemPattern::Rest(_) => return None,
+                        }
                     }
                 }
                 _ => return None,
             }
         }
 
-        let fresh = self.fresh_refutable_elab_name();
+        // Fresh ident per field position — these replace the refutable
+        // sub-patterns in the merged outer arm.
+        let fresh_idents: Vec<Spur> = (0..field_count)
+            .map(|_| self.fresh_refutable_elab_name())
+            .collect();
 
         // Inner match arms — one per merged arm, preserving order.
         let mut inner_arms: Vec<MatchArm> = Vec::with_capacity(idxs.len() + 1);
         for &i in idxs {
             let arm = &all_arms[i];
-            let inner_sub = match &arm.pattern {
-                Pattern::DataVariant { fields, .. } => match &fields[0] {
-                    TupleElemPattern::Pattern(p) => p.clone(),
-                    TupleElemPattern::Rest(_) => return None,
-                },
+            let fields = match &arm.pattern {
+                Pattern::DataVariant { fields, .. } => fields,
                 _ => unreachable!(),
             };
+            let inner_pat = if field_count == 1 {
+                match &fields[0] {
+                    TupleElemPattern::Pattern(p) => p.clone(),
+                    TupleElemPattern::Rest(_) => unreachable!(),
+                }
+            } else {
+                Pattern::Tuple {
+                    elems: fields.clone(),
+                    span: arm.pattern.span(),
+                }
+            };
             inner_arms.push(MatchArm {
-                pattern: inner_sub,
+                pattern: inner_pat,
                 body: arm.body.clone(),
                 span: arm.span,
             });
         }
         // When the outer match has a catch-all, mirror it as the nested
         // match's wildcard fallback so runtime coverage is preserved.
+        // Skip when one of the merged arms is already irrefutable — its
+        // nested pattern covers every remaining value of the field
+        // type(s), and a trailing wildcard would make the if-chain
+        // elaborator trip on unreachable arms.
+        //
         // Without a catch-all, the nested match is expected to cover
         // every value of the field type on its own (sema enforces
         // exhaustiveness).
+        let any_irrefutable = inner_arms
+            .iter()
+            .any(|a| is_irrefutable_destructure(&a.pattern));
         if let Some(body) = catch_all_body {
-            inner_arms.push(MatchArm {
-                pattern: Pattern::Wildcard(outer_span),
-                body: Box::new(body.clone()),
-                span: outer_span,
-            });
+            if !any_irrefutable {
+                inner_arms.push(MatchArm {
+                    pattern: Pattern::Wildcard(outer_span),
+                    body: Box::new(body.clone()),
+                    span: outer_span,
+                });
+            }
         }
 
-        let nested_match = Expr::Match(MatchExpr {
-            scrutinee: Box::new(Expr::Ident(AstIdent {
-                name: fresh,
+        let nested_scrutinee = if field_count == 1 {
+            Expr::Ident(AstIdent {
+                name: fresh_idents[0],
                 span: outer_span,
-            })),
+            })
+        } else {
+            Expr::Tuple(gruel_parser::ast::TupleExpr {
+                elems: fresh_idents
+                    .iter()
+                    .map(|&n| {
+                        Expr::Ident(AstIdent {
+                            name: n,
+                            span: outer_span,
+                        })
+                    })
+                    .collect(),
+                span: outer_span,
+            })
+        };
+
+        let nested_match = Expr::Match(MatchExpr {
+            scrutinee: Box::new(nested_scrutinee),
             arms: inner_arms,
             span: outer_span,
         });
+
+        let outer_fields: Vec<TupleElemPattern> = fresh_idents
+            .iter()
+            .map(|&n| {
+                TupleElemPattern::Pattern(Pattern::Ident {
+                    is_mut: false,
+                    name: AstIdent {
+                        name: n,
+                        span: outer_span,
+                    },
+                    span: outer_span,
+                })
+            })
+            .collect();
 
         Some(MatchArm {
             pattern: Pattern::DataVariant {
                 base,
                 type_name,
                 variant: variant_ident,
-                fields: vec![TupleElemPattern::Pattern(Pattern::Ident {
+                fields: outer_fields,
+                span: outer_span,
+            },
+            body: Box::new(nested_match),
+            span: outer_span,
+        })
+    }
+
+    /// Struct-variant arm merging — see `merge_group_single_field`.
+    /// Uses the first arm's field order as the canonical tuple layout
+    /// and looks up every other arm's fields by name to reorder them.
+    fn merge_group_struct_variant(
+        &mut self,
+        all_arms: &[MatchArm],
+        idxs: &[usize],
+        catch_all_body: Option<&Expr>,
+    ) -> Option<MatchArm> {
+        let template = &all_arms[idxs[0]].pattern;
+        let (base, type_name, variant_ident, outer_span, canonical_names) = match template {
+            Pattern::StructVariant {
+                base,
+                type_name,
+                variant,
+                span,
+                fields,
+            } => {
+                // Reject merges when the first arm has a `..` rest —
+                // proper handling would need to know the variant's full
+                // field set, which is only available in sema.
+                let mut names: Vec<Spur> = Vec::with_capacity(fields.len());
+                for fp in fields {
+                    match fp.field_name {
+                        Some(ident) => names.push(ident.name),
+                        None => return None, // `..` rest — bail
+                    }
+                }
+                (base.clone(), *type_name, *variant, *span, names)
+            }
+            _ => return None,
+        };
+        let field_count = canonical_names.len();
+
+        // Validate every arm lists the same field names (any order);
+        // multi-field merges additionally require leaf sub-patterns so
+        // Phase 5a's tuple elaboration can handle the nested match.
+        for &i in idxs {
+            match &all_arms[i].pattern {
+                Pattern::StructVariant { fields, .. } => {
+                    if fields.len() != field_count {
+                        return None;
+                    }
+                    // Check that each canonical name is listed exactly
+                    // once (no duplicates, no rest, no unknown names).
+                    let mut seen: std::collections::HashSet<Spur> =
+                        std::collections::HashSet::new();
+                    for fp in fields {
+                        let Some(ident) = fp.field_name else {
+                            return None;
+                        };
+                        if !canonical_names.contains(&ident.name) {
+                            return None;
+                        }
+                        if !seen.insert(ident.name) {
+                            return None;
+                        }
+                        if field_count > 1 {
+                            let sub_is_leaf = match &fp.sub {
+                                None => true,
+                                Some(p) => is_leaf_sub_pattern(p),
+                            };
+                            if !sub_is_leaf {
+                                return None;
+                            }
+                        }
+                    }
+                }
+                _ => return None,
+            }
+        }
+
+        let fresh_idents: Vec<Spur> = (0..field_count)
+            .map(|_| self.fresh_refutable_elab_name())
+            .collect();
+
+        // Inner arms: for each original arm, rebuild sub-patterns in
+        // canonical order.
+        let mut inner_arms: Vec<MatchArm> = Vec::with_capacity(idxs.len() + 1);
+        for &i in idxs {
+            let arm = &all_arms[i];
+            let fields = match &arm.pattern {
+                Pattern::StructVariant { fields, .. } => fields,
+                _ => unreachable!(),
+            };
+            let mut ordered_subs: Vec<Pattern> = Vec::with_capacity(field_count);
+            for canonical in &canonical_names {
+                let fp = fields
+                    .iter()
+                    .find(|fp| fp.field_name.map(|n| n.name) == Some(*canonical))
+                    .expect("validated above");
+                let sub = match &fp.sub {
+                    None => Pattern::Ident {
+                        is_mut: fp.is_mut,
+                        name: fp.field_name.expect("validated above; `..` rest rejected"),
+                        span: fp.span,
+                    },
+                    Some(p) => p.clone(),
+                };
+                ordered_subs.push(sub);
+            }
+            let inner_pat = if field_count == 1 {
+                ordered_subs.into_iter().next().unwrap()
+            } else {
+                Pattern::Tuple {
+                    elems: ordered_subs
+                        .into_iter()
+                        .map(TupleElemPattern::Pattern)
+                        .collect(),
+                    span: arm.pattern.span(),
+                }
+            };
+            inner_arms.push(MatchArm {
+                pattern: inner_pat,
+                body: arm.body.clone(),
+                span: arm.span,
+            });
+        }
+        let any_irrefutable = inner_arms
+            .iter()
+            .any(|a| is_irrefutable_destructure(&a.pattern));
+        if let Some(body) = catch_all_body {
+            if !any_irrefutable {
+                inner_arms.push(MatchArm {
+                    pattern: Pattern::Wildcard(outer_span),
+                    body: Box::new(body.clone()),
+                    span: outer_span,
+                });
+            }
+        }
+
+        let nested_scrutinee = if field_count == 1 {
+            Expr::Ident(AstIdent {
+                name: fresh_idents[0],
+                span: outer_span,
+            })
+        } else {
+            Expr::Tuple(gruel_parser::ast::TupleExpr {
+                elems: fresh_idents
+                    .iter()
+                    .map(|&n| {
+                        Expr::Ident(AstIdent {
+                            name: n,
+                            span: outer_span,
+                        })
+                    })
+                    .collect(),
+                span: outer_span,
+            })
+        };
+
+        let nested_match = Expr::Match(MatchExpr {
+            scrutinee: Box::new(nested_scrutinee),
+            arms: inner_arms,
+            span: outer_span,
+        });
+
+        let outer_fields: Vec<FieldPattern> = canonical_names
+            .iter()
+            .zip(&fresh_idents)
+            .map(|(name, &fresh)| FieldPattern {
+                field_name: Some(AstIdent {
+                    name: *name,
+                    span: outer_span,
+                }),
+                sub: Some(Pattern::Ident {
                     is_mut: false,
                     name: AstIdent {
                         name: fresh,
                         span: outer_span,
                     },
                     span: outer_span,
-                })],
+                }),
+                is_mut: false,
+                span: outer_span,
+            })
+            .collect();
+
+        Some(MatchArm {
+            pattern: Pattern::StructVariant {
+                base,
+                type_name,
+                variant: variant_ident,
+                fields: outer_fields,
                 span: outer_span,
             },
             body: Box::new(nested_match),
@@ -2314,6 +2586,22 @@ impl<'a> AstGen<'a> {
             }
         }
     }
+}
+
+/// Whether a variant sub-pattern is a leaf that Phase 5a's tuple-root
+/// match elaborator can handle as a tuple element (ADR-0049 Phase 5b).
+/// Used when merging multi-field variant arms: the merged nested match
+/// dispatches on a tuple of the variant's fields, and Phase 5a only
+/// supports leaf elements (`Wildcard`, `Ident`, `Int`, `NegInt`, `Bool`).
+fn is_leaf_sub_pattern(pat: &Pattern) -> bool {
+    matches!(
+        pat,
+        Pattern::Wildcard(_)
+            | Pattern::Ident { .. }
+            | Pattern::Int(_)
+            | Pattern::NegInt(_)
+            | Pattern::Bool(_)
+    )
 }
 
 /// Extract the `(type_name, variant_name)` identity of a variant pattern,
