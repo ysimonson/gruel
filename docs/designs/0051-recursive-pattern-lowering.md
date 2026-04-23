@@ -362,7 +362,7 @@ path (Phase 4).
   - Unit tests: for each RIR pattern shape, assert the
     produced AIR pattern tree.
 
-- [ ] **Phase 3: CFG recursive cascading-switch lowering**
+- [x] **Phase 3: CFG recursive cascading-switch lowering**
   - Implement `lower_pattern_match(scr_place, pattern, arm_body,
     fallthrough)` in `gruel-cfg/src/build.rs` as a recursive
     descent emitting projection + switch blocks.

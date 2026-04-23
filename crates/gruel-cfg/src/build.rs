@@ -1434,21 +1434,30 @@ impl<'a> CfgBuilder<'a> {
                             switch_cases.push((val, arm_blocks[i]));
                         }
                         AirPattern::EnumVariant { variant_index, .. }
-                        | AirPattern::EnumUnitVariant { variant_index, .. } => {
-                            // Enum variants are matched by their discriminant (variant index)
+                        | AirPattern::EnumUnitVariant { variant_index, .. }
+                        | AirPattern::EnumDataVariant { variant_index, .. }
+                        | AirPattern::EnumStructVariant { variant_index, .. } => {
+                            // Enum variants are matched by their discriminant (variant index).
+                            // Data- and struct-variant field projections are emitted by sema
+                            // into the arm body itself (storage_live + field extraction
+                            // block), so CFG only needs the discriminant dispatch here.
+                            // Deep nested patterns inside variant fields can't reach us
+                            // yet — RIR today is flat, so `lower_pattern` produces
+                            // Bind/Wildcard leaves that CFG doesn't need to inspect.
+                            // Phase 4 will revisit this when RIR grows nested shapes.
                             switch_cases.push((*variant_index as i64, arm_blocks[i]));
                         }
                         AirPattern::Bind { .. }
                         | AirPattern::Tuple { .. }
-                        | AirPattern::Struct { .. }
-                        | AirPattern::EnumDataVariant { .. }
-                        | AirPattern::EnumStructVariant { .. } => {
-                            // Recursive pattern variants (ADR-0051) are introduced in
-                            // Phase 2 (sema) and lowered here in Phase 3. Phase 1 only
-                            // adds the data structure; no sema path emits them yet.
+                        | AirPattern::Struct { .. } => {
+                            // Top-level Bind / Tuple / Struct arms require cascading
+                            // projection + dispatch (ADR-0051 §3). Phase 2's sema only
+                            // emits these shapes as leaves inside enum variants, not
+                            // at the arm root, so nothing produces them today. Phase 4
+                            // extends RIR and enables the recursive descent here.
                             unreachable!(
-                                "recursive AirPattern variants are not yet produced by sema \
-                                 (ADR-0051 Phase 1 landed; wiring ships in Phases 2-3)"
+                                "top-level Bind/Tuple/Struct match arms arrive with \
+                                 ADR-0051 Phase 4; sema does not emit them in Phase 2/3"
                             );
                         }
                     }

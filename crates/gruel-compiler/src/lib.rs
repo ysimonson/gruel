@@ -3293,4 +3293,139 @@ mod integration_tests {
             assert!(file_ids.contains(&FileId::new(99)));
         }
     }
+
+    // ------------------------------------------------------------------
+    // ADR-0051 Phase 3: end-to-end sema + CFG with recursive AirPattern.
+    // Exercises the recursive lowering path on the existing flat RIR
+    // shape; phase 4 will unlock true nesting (tuple / struct match
+    // roots, nested variant fields).
+    // ------------------------------------------------------------------
+    mod recursive_cfg_lowering {
+        use super::*;
+        use gruel_cfg::CfgBuilder;
+        use gruel_rir::AstGen;
+
+        /// Run the whole pipeline (sema + CFG per function) with the
+        /// ADR-0051 recursive lowering flag enabled, panicking on any
+        /// compile error or CFG construction failure. Returns the number
+        /// of functions successfully built.
+        fn compile_with_recursive(source: &str) -> usize {
+            let lexer = Lexer::new(source);
+            let (tokens, interner) = lexer.tokenize().map_err(CompileErrors::from).unwrap();
+            let parser = Parser::new(tokens, interner);
+            let (ast, interner) = parser.parse().unwrap();
+            let astgen = AstGen::new(&ast, &interner);
+            let rir = astgen.generate();
+
+            let mut sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+            sema.set_recursive_pattern_lowering(true);
+            let sema_output = sema.analyze_all().unwrap();
+
+            let mut count = 0;
+            for func in sema_output.functions {
+                // Skip comptime-only functions.
+                if func.air.return_type() == Type::COMPTIME_TYPE {
+                    continue;
+                }
+                let _cfg_output = CfgBuilder::build(&func, &sema_output.type_pool);
+                count += 1;
+            }
+            count
+        }
+
+        #[test]
+        fn match_on_int_builds_cfg() {
+            assert!(
+                compile_with_recursive("fn main() -> i32 { match 1 { 1 => 10, 2 => 20, _ => 0 } }")
+                    >= 1
+            );
+        }
+
+        #[test]
+        fn match_on_bool_builds_cfg() {
+            assert!(
+                compile_with_recursive("fn main() -> i32 { match true { true => 1, false => 0 } }")
+                    >= 1
+            );
+        }
+
+        #[test]
+        fn match_on_unit_enum_builds_cfg() {
+            assert!(
+                compile_with_recursive(
+                    "enum Color { Red, Green, Blue }
+                 fn main() -> i32 {
+                     let c = Color::Red;
+                     match c {
+                         Color::Red => 1,
+                         Color::Green => 2,
+                         Color::Blue => 3,
+                     }
+                 }"
+                ) >= 1
+            );
+        }
+
+        #[test]
+        fn match_on_data_variant_builds_cfg() {
+            assert!(
+                compile_with_recursive(
+                    "enum Opt { Some(i32), None }
+                 fn main() -> i32 {
+                     let o = Opt::Some(5);
+                     match o {
+                         Opt::Some(x) => x,
+                         Opt::None => 0,
+                     }
+                 }"
+                ) >= 1
+            );
+        }
+
+        #[test]
+        fn match_on_struct_variant_builds_cfg() {
+            assert!(
+                compile_with_recursive(
+                    "enum Shape { Circle { radius: i32 }, Square { side: i32 } }
+                 fn main() -> i32 {
+                     let s = Shape::Circle { radius: 5 };
+                     match s {
+                         Shape::Circle { radius } => radius,
+                         Shape::Square { side } => side,
+                     }
+                 }"
+                ) >= 1
+            );
+        }
+
+        #[test]
+        fn match_with_rest_in_data_variant_builds_cfg() {
+            assert!(
+                compile_with_recursive(
+                    "enum T { Triple(i32, i32, i32) }
+                 fn main() -> i32 {
+                     let t = T::Triple(1, 2, 3);
+                     match t {
+                         T::Triple(x, ..) => x,
+                     }
+                 }"
+                ) >= 1
+            );
+        }
+
+        #[test]
+        fn match_with_rest_in_struct_variant_builds_cfg() {
+            assert!(
+                compile_with_recursive(
+                    "enum Pt { Coord { x: i32, y: i32 } }
+                 fn main() -> i32 {
+                     let p = Pt::Coord { x: 1, y: 2 };
+                     match p {
+                         Pt::Coord { x, .. } => x,
+                     }
+                 }"
+                ) >= 1
+            );
+        }
+    }
 }
