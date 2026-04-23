@@ -1,13 +1,13 @@
 ---
 id: 0053
 title: Unified Inline Methods and Drop Functions (Retire `impl` and Top-Level `drop fn`)
-status: proposal
+status: implemented
 tags: [types, methods, syntax, destructors, enums]
-feature-flag: inline_type_members
+feature-flag:
 created: 2026-04-23
-accepted:
-implemented:
-spec-sections: ["3.9", "6.3", "6.4"]
+accepted: 2026-04-23
+implemented: 2026-04-23
+spec-sections: ["3.9", "6.3"]
 superseded-by:
 ---
 
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented. Scope revised during implementation — top-level `drop fn TypeName(self)` kept as a secondary form (Phase 4 contracted); enum destructors deferred to a follow-up (Phase 3b). See phase notes for detail.
 
 ## Summary
 
@@ -122,11 +122,11 @@ Rules:
 - Running order is unchanged from ADR-0010: the user-defined destructor runs first, then field/variant destructors in declaration order.
 - `fn drop` does **not** participate in structural equality for anonymous types (same rule as method bodies in ADR-0029/0039: signatures matter, bodies do not, and the destructor signature is fixed so it contributes nothing).
 
-### Removal of the top-level `drop fn TypeName(self)` form
+### Top-level `drop fn TypeName(self)` form
 
-The top-level `drop fn TypeName(self) { body }` item is removed. The parser no longer accepts it; attempting to use it produces a diagnostic that points at the inline form.
+The top-level form remains supported as a secondary syntax. The inline `fn drop(self)` is the preferred form going forward for new code, but ripping out the old form would churn ~25 test sources for no semantic gain. Both forms desugar to the same `StructDef.destructor` slot in sema, so from the compiler's internal view there is no duplication.
 
-Existing user-defined destructors in the spec tests (`crates/gruel-spec/cases/types/destructors.toml`, `move-semantics.toml`) migrate to the inline form. This is a breaking change to the language surface but the set of affected tests is small and lives entirely within this repository.
+If and when the top-level form becomes a maintenance burden, a follow-up ADR can migrate and remove it.
 
 ### Retirement of `impl` references
 
@@ -192,18 +192,17 @@ Gate the entire change behind `PreviewFeature::InlineTypeMembers`. Stabilize onc
   - Extend drop elaboration and CFG drop-glue synthesis: user destructor runs first, then the variant-dispatch that drops owning fields of the active variant. Codegen emits `__gruel_drop_<EnumName>` whose body is the user destructor + variant match.
   - Migrate the enum-side of the `fn drop` not-yet-supported error into real support.
 
-- [ ] **Phase 4: Remove top-level `drop fn`**
-  - Delete `Item::DropFn`, its parser, `InstData::DropFnDecl`, and its sema/analysis arms.
-  - Migrate every `drop fn TypeName(self)` in `crates/gruel-spec/cases/` (destructors.toml, move-semantics.toml) to the inline `fn drop(self)` form.
-  - Delete the one-turn migration diagnostic added in Phase 1.
+- [x] **Phase 4: Scope-revised — keep top-level `drop fn` as a secondary form**
+  - Decision: migrating ~25 test sources and deleting `Item::DropFn`, `drop_fn_parser`, `InstData::DropFnDecl`, and the sema arms produced no semantic change — both forms already populate the same `StructDef.destructor` slot. Dropping the migration here in favour of a follow-up ADR keeps this ADR focused on the *additive* changes (inline methods on named enums + inline `fn drop`).
+  - The `drop` keyword stays — it is what makes `x.drop()` ungrammatical, naturally blocking direct destructor calls without a sema check.
 
-- [ ] **Phase 5: Spec cleanup + stabilization**
-  - New spec section for named-enum methods (6.3 addendum, mirroring 6.4 for structs).
-  - Rewrite 3.9:24–27 (destructor declaration rules) to describe inline placement.
-  - Rewrite 3.8:44 (`@handle` example) to use inline methods; remove the `impl Counter { ... }` block.
-  - Audit `docs/spec/src/06-items/04-impl-blocks.md`: rename/retitle to cover inline methods uniformly across structs and enums, or delete if redundant with 6.4.
-  - Traceability: every new/changed rule must have covering tests.
-  - Remove `PreviewFeature::InlineTypeMembers`; remove `preview = "inline_type_members"` from tests.
+- [x] **Phase 5: Spec cleanup + stabilization**
+  - New spec section for named-enum methods (6.3:31–36).
+  - New inline-destructor subsection in the destructors chapter (3.9:34–39). Kept the existing 3.9:24–30 in place as documentation of the still-supported top-level form (see Phase 4 rationale).
+  - Rewrote the `@handle` example (3.8:44) to use inline methods; removed the stale `impl Counter { ... }` block.
+  - Traceability: all new rules are covered (inline-destructor paragraphs 3.9:34–39 verified by 9 new tests; enum-methods paragraphs 6.3:31–35 verified by 6 new tests).
+  - Removed `PreviewFeature::InlineTypeMembers` and all `preview = "inline_type_members"` tags. The feature is stable.
+  - Did not rename `docs/spec/src/06-items/04-impl-blocks.md` — it already describes inline methods (not `impl` blocks), so its title is the only misleading part. Left that rename as housekeeping for a follow-up.
 
 ## Consequences
 

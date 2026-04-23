@@ -781,8 +781,6 @@ error_contains = "unknown type"
 [[case]]
 name = "inline_drop_on_struct"
 spec = ["3.9:34", "3.9:38"]
-preview = "inline_type_members"
-preview_should_pass = true
 description = "Inline `fn drop(self)` runs on scope exit with the same semantics as the top-level form"
 source = """
 struct Data {
@@ -804,8 +802,6 @@ stdout = "99\n"
 [[case]]
 name = "inline_drop_signature_error_extra_param"
 spec = ["3.9:35"]
-preview = "inline_type_members"
-preview_should_pass = true
 source = """
 struct Data {
     value: i32,
@@ -821,8 +817,6 @@ error_contains = "extra parameters"
 [[case]]
 name = "inline_drop_signature_error_non_unit_return"
 spec = ["3.9:35"]
-preview = "inline_type_members"
-preview_should_pass = true
 source = """
 struct Data {
     value: i32,
@@ -838,8 +832,6 @@ error_contains = "must return unit"
 [[case]]
 name = "inline_drop_signature_error_no_self"
 spec = ["3.9:35"]
-preview = "inline_type_members"
-preview_should_pass = true
 source = """
 struct Data {
     value: i32,
@@ -855,8 +847,6 @@ error_contains = "must take `self`"
 [[case]]
 name = "inline_drop_on_copy_type_error"
 spec = ["3.9:36"]
-preview = "inline_type_members"
-preview_should_pass = true
 source = """
 @copy
 struct Pt {
@@ -873,8 +863,6 @@ error_contains = "@copy"
 [[case]]
 name = "inline_drop_on_linear_type_error"
 spec = ["3.9:36"]
-preview = "inline_type_members"
-preview_should_pass = true
 source = """
 linear struct Token {
     id: i32,
@@ -895,8 +883,6 @@ error_contains = "linear"
 [[case]]
 name = "inline_drop_direct_call_error"
 spec = ["3.9:37"]
-preview = "inline_type_members"
-preview_should_pass = true
 description = "Cannot call `fn drop` directly via method syntax"
 source = """
 struct Data {
@@ -917,8 +903,6 @@ error_contains = "drop"
 [[case]]
 name = "inline_drop_on_enum_not_yet_supported"
 spec = ["3.9:39"]
-preview = "inline_type_members"
-preview_should_pass = true
 source = """
 enum E {
     A,
@@ -933,8 +917,6 @@ error_contains = "not yet supported"
 [[case]]
 name = "inline_drop_duplicate_error"
 spec = ["3.9:38"]
-preview = "inline_type_members"
-preview_should_pass = true
 source = """
 struct Data {
     value: i32,

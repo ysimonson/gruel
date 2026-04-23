@@ -207,9 +207,9 @@ The `handle` method **MUST** take exactly one parameter (`self` of the struct ty
 
 ```gruel
 @handle
-struct Counter { count: i32 }
+struct Counter {
+    count: i32,
 
-impl Counter {
     fn handle(self) -> Counter {
         Counter { count: self.count }
     }

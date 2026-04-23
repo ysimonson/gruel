@@ -160,18 +160,8 @@ impl<'a> Sema<'a> {
                     name,
                     variants_start,
                     variants_len,
-                    methods_len,
                     ..
                 } => {
-                    // ADR-0053: named enum methods are a preview feature until stabilized.
-                    if *methods_len > 0 {
-                        self.require_preview(
-                            gruel_error::PreviewFeature::InlineTypeMembers,
-                            "inline methods on named enums",
-                            inst.span,
-                        )?;
-                    }
-
                     let enum_name = self.interner.resolve(name).to_string();
 
                     // Check for collision with built-in type names
@@ -952,11 +942,6 @@ impl<'a> Sema<'a> {
                 // ADR-0053: a method named `drop` is the struct's destructor,
                 // not a regular method. Route it through the destructor slot.
                 if *method_name == drop_name_sym {
-                    self.require_preview(
-                        gruel_error::PreviewFeature::InlineTypeMembers,
-                        "inline `fn drop(self)` destructor",
-                        method_inst.span,
-                    )?;
                     self.register_inline_struct_drop(
                         type_name,
                         struct_id,
