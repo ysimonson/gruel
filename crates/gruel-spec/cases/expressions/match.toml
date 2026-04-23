@@ -960,6 +960,36 @@ fn main() -> i32 {
 """
 exit_code = 42
 
+[[case]]
+name = "match_tuple_root_middle_rest"
+spec = ["4.7:23", "4.7:24"]
+description = "Rest `..` in the middle of a tuple-root match binds elements on both sides (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t: (i32, i32, i32, i32) = (10, 99, 99, 32);
+    match t {
+        (0, .., x) => x,
+        (a, .., b) => a + b,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "match_tuple_root_leading_rest_literal"
+spec = ["4.7:23", "4.7:24"]
+description = "Leading `..` with a refutable suffix compares the last element (ADR-0049 Phase 6)"
+source = """
+fn main() -> i32 {
+    let t: (i32, i32, i32) = (99, 99, 42);
+    match t {
+        (.., 0) => 100,
+        (.., x) => x,
+    }
+}
+"""
+exit_code = 42
+
 # =============================================================================
 # Refutable nested patterns (ADR-0049 Phase 5b)
 # =============================================================================

@@ -1900,24 +1900,29 @@ impl<'a> AstGen<'a> {
                 (None, block)
             }
             Pattern::Tuple { elems, span } => {
+                // `..` at any position matches the remaining tuple
+                // positions with no predicate and no binding. Prefix
+                // positions (before `..`) use their literal index;
+                // suffix positions (after `..`) use the `..end_N`
+                // marker and sema resolves the concrete index once the
+                // tuple's arity is known (ADR-0049 Phase 6).
+                let rest_pos = elems
+                    .iter()
+                    .position(|e| matches!(e, TupleElemPattern::Rest(_)));
                 let mut predicates: Vec<InstRef> = Vec::new();
                 let mut bindings: Vec<u32> = Vec::new();
-                let last_index = elems.len().saturating_sub(1);
                 for (i, elem) in elems.iter().enumerate() {
-                    // A trailing `..` matches the remaining positions with
-                    // no predicate and no binding — the scrutinee alloc
-                    // still owns those tuple fields, so they drop at scope
-                    // exit (ADR-0049 Phase 6).
                     if let TupleElemPattern::Rest(_) = elem {
-                        if i != last_index {
-                            panic!(
-                                "rest pattern `..` in tuple-root match must be at the end (ADR-0049 Phase 6); got element {}",
-                                i
-                            );
-                        }
+                        // Rest contributes no predicate/binding.
                         continue;
                     }
-                    let field_name = self.interner.get_or_intern(i.to_string());
+                    let field_name = match rest_pos {
+                        Some(rp) if i > rp => {
+                            let from_end = elems.len() - 1 - i;
+                            self.interner.get_or_intern(format!("..end_{}", from_end))
+                        }
+                        _ => self.interner.get_or_intern(i.to_string()),
+                    };
                     let scr_ref = self.rir.add_inst(Inst {
                         data: InstData::VarRef { name: scr_name },
                         span: *span,

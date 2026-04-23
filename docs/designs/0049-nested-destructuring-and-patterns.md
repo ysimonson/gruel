@@ -606,11 +606,6 @@ ship without the preview gate since it's a bug fix, not a new feature.
   - Exhaustiveness-checker extension reporting nested-pattern witnesses
     in diagnostics (today, missing coverage is still reported at the
     outer-variant level).
-  - `..` in the middle of a tuple-root match arm (`match t { (a, .., b)
-    => ... }`). The tuple-root match elaborator emits `FieldGet` at
-    astgen time and so needs to know positions concretely; resolving
-    from-end positions there would need the elaborator to thread the
-    inferred tuple arity through from sema.
 
 ## Recently closed follow-ups
 
@@ -637,6 +632,15 @@ ship without the preview gate since it's a bug fix, not a new feature.
   current block) — the previous CFG ordering bug is resolved. Running
   an uncovered input traps at runtime (exit 133 / SIGILL) via LLVM's
   `unreachable` instruction.
+
+- `..` in the middle / leading of a tuple-root match arm (`match t {
+  (a, .., b) => ..., (.., 0) => ..., ... }`). The tuple-root
+  elaborator now emits `FieldGet` with a `..end_N` field-name marker
+  for suffix positions; sema's place-trace helper and
+  `analyze_inst_for_projection` both resolve the marker against the
+  tuple's arity before looking the field up. See spec tests
+  `match_tuple_root_middle_rest` and
+  `match_tuple_root_leading_rest_literal`.
 
 - [x] **Phase 6: Rest patterns (`..`) in let and match arms**
   - Parser already accepts `..` in tuple / struct / variant field lists

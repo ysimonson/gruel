@@ -195,11 +195,32 @@ impl<'a> Sema<'a> {
                             }
                         };
 
-                        // Look up field info
+                        // Look up field info. Phase 6 emits `..end_N`
+                        // markers for suffix positions in tuple-root
+                        // match arms (`(a, .., b)`); resolve those
+                        // against the tuple's arity before normal
+                        // lookup.
                         let struct_def = self.type_pool.struct_def(struct_id);
-                        let field_name_str = self.interner.resolve(field);
+                        let field_name_str = self.interner.resolve(field).to_string();
+                        let (resolved_field, resolved_name_str) =
+                            if let Some(rest) = field_name_str.strip_prefix("..end_") {
+                                let from_end: usize = match rest.parse() {
+                                    Ok(n) => n,
+                                    Err(_) => return Ok(None),
+                                };
+                                let arity = struct_def.fields.len();
+                                if from_end >= arity {
+                                    return Ok(None);
+                                }
+                                let idx = arity - 1 - from_end;
+                                let idx_str = idx.to_string();
+                                let new_spur = self.interner.get_or_intern(&idx_str);
+                                (new_spur, idx_str)
+                            } else {
+                                (*field, field_name_str)
+                            };
                         let (field_index, struct_field) =
-                            match struct_def.find_field(field_name_str) {
+                            match struct_def.find_field(&resolved_name_str) {
                                 Some(info) => info,
                                 None => return Ok(None), // Unknown field
                             };
@@ -213,7 +234,7 @@ impl<'a> Sema<'a> {
                                 field_index: field_index as u32,
                             },
                             result_type: field_type,
-                            field_name: Some(*field),
+                            field_name: Some(resolved_field),
                         });
 
                         Ok(Some(trace))
