@@ -333,7 +333,7 @@ lowering alongside the old one so the compiler keeps working
 throughout. The switchover is a single edit in `gen_expr`'s match
 path (Phase 4).
 
-- [ ] **Phase 1: Recursive `AirPattern` + encoding**
+- [x] **Phase 1: Recursive `AirPattern` + encoding**
   - Extend `AirPattern` in `crates/gruel-air/src/inst.rs` with
     `Tuple`, `Struct`, `EnumDataVariant`, `EnumStructVariant`,
     `EnumUnitVariant`, `Bind` variants. Keep `Wildcard`, `Int`,

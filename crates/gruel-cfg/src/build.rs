@@ -1433,9 +1433,23 @@ impl<'a> CfgBuilder<'a> {
                             let val = if *b { 1 } else { 0 };
                             switch_cases.push((val, arm_blocks[i]));
                         }
-                        AirPattern::EnumVariant { variant_index, .. } => {
+                        AirPattern::EnumVariant { variant_index, .. }
+                        | AirPattern::EnumUnitVariant { variant_index, .. } => {
                             // Enum variants are matched by their discriminant (variant index)
                             switch_cases.push((*variant_index as i64, arm_blocks[i]));
+                        }
+                        AirPattern::Bind { .. }
+                        | AirPattern::Tuple { .. }
+                        | AirPattern::Struct { .. }
+                        | AirPattern::EnumDataVariant { .. }
+                        | AirPattern::EnumStructVariant { .. } => {
+                            // Recursive pattern variants (ADR-0051) are introduced in
+                            // Phase 2 (sema) and lowered here in Phase 3. Phase 1 only
+                            // adds the data structure; no sema path emits them yet.
+                            unreachable!(
+                                "recursive AirPattern variants are not yet produced by sema \
+                                 (ADR-0051 Phase 1 landed; wiring ships in Phases 2-3)"
+                            );
                         }
                     }
                 }

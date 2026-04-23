@@ -253,19 +253,61 @@ impl fmt::Display for AirCallArg {
 }
 
 /// A pattern in a match expression (AIR level - typed).
+///
+/// Recursive shape introduced by ADR-0051. `Wildcard`, `Int`, `Bool`, and
+/// `EnumVariant` are the flat variants produced by the pre-ADR-0051 sema
+/// path; `Bind`, `Tuple`, `Struct`, `EnumDataVariant`, `EnumStructVariant`,
+/// and `EnumUnitVariant` are the recursive variants produced by the new
+/// lowering. During Phases 1-3 both encodings coexist; Phase 4 drops the
+/// flat `EnumVariant`.
 #[derive(Debug, Clone)]
 pub enum AirPattern {
-    /// Wildcard pattern `_` - matches anything
+    /// Wildcard pattern `_` - matches anything, binds nothing.
     Wildcard,
-    /// Integer literal pattern (can be positive or negative)
+    /// Integer literal pattern (can be positive or negative).
     Int(i64),
-    /// Boolean literal pattern
+    /// Boolean literal pattern.
     Bool(bool),
-    /// Enum variant pattern (e.g., Color::Red)
+    /// Legacy flat enum-variant pattern produced by the pre-ADR-0051
+    /// lowering path. Kept for backward compatibility until Phase 4.
     EnumVariant {
-        /// The enum type ID
         enum_id: crate::types::EnumId,
-        /// The variant index (0-based)
+        variant_index: u32,
+    },
+    /// Bind the scrutinee (or its projection) to a local. `inner` is the
+    /// sub-pattern applied to the same value; `None` is a bare binding,
+    /// `Some(p)` is `name @ p` (not yet exposed in surface syntax).
+    Bind {
+        name: lasso::Spur,
+        is_mut: bool,
+        inner: Option<Box<AirPattern>>,
+    },
+    /// Tuple dispatch; `elems[i]` applies to projection `i`.
+    Tuple { elems: Vec<AirPattern> },
+    /// Named-struct dispatch. Unlisted fields (from `..`) become explicit
+    /// `Wildcard` entries at sema lowering time.
+    Struct {
+        struct_id: StructId,
+        fields: Vec<(u32, AirPattern)>,
+    },
+    /// Enum data-variant dispatch. `fields[i]` applies to positional
+    /// field `i` of the variant.
+    EnumDataVariant {
+        enum_id: crate::types::EnumId,
+        variant_index: u32,
+        fields: Vec<AirPattern>,
+    },
+    /// Enum struct-variant dispatch. Same shape as `Struct` but tagged by
+    /// variant.
+    EnumStructVariant {
+        enum_id: crate::types::EnumId,
+        variant_index: u32,
+        fields: Vec<(u32, AirPattern)>,
+    },
+    /// Unit enum variant. Recursive-lowering counterpart of the legacy
+    /// `EnumVariant`.
+    EnumUnitVariant {
+        enum_id: crate::types::EnumId,
         variant_index: u32,
     },
 }
@@ -275,42 +317,235 @@ const PATTERN_WILDCARD: u32 = 0;
 const PATTERN_INT: u32 = 1;
 const PATTERN_BOOL: u32 = 2;
 const PATTERN_ENUM_VARIANT: u32 = 3;
+const PATTERN_BIND: u32 = 4;
+const PATTERN_TUPLE: u32 = 5;
+const PATTERN_STRUCT: u32 = 6;
+const PATTERN_ENUM_DATA: u32 = 7;
+const PATTERN_ENUM_STRUCT: u32 = 8;
+const PATTERN_ENUM_UNIT: u32 = 9;
 
 impl AirPattern {
-    /// Encode this pattern to the extra array, returning the number of u32s written.
-    /// Format:
-    /// - Wildcard: [tag, body_ref] = 2 words
-    /// - Int: [tag, body_ref, lo, hi] = 4 words (i64 as two u32s)
-    /// - Bool: [tag, body_ref, value] = 3 words
-    /// - EnumVariant: [tag, body_ref, enum_id, variant_index] = 4 words
+    /// Encode this arm as `[body_ref, ...pattern_tree]` appended to `out`.
+    /// The pattern tree is self-describing: decoding consumes exactly the
+    /// words this function produced (see `decode_pattern_tree`).
     pub fn encode(&self, body: AirRef, out: &mut Vec<u32>) {
-        match self {
-            AirPattern::Wildcard => {
-                out.push(PATTERN_WILDCARD);
-                out.push(body.as_u32());
-            }
-            AirPattern::Int(n) => {
-                out.push(PATTERN_INT);
-                out.push(body.as_u32());
-                // Encode i64 as two u32s (low, high)
-                out.push(*n as u32);
-                out.push((*n >> 32) as u32);
-            }
-            AirPattern::Bool(b) => {
-                out.push(PATTERN_BOOL);
-                out.push(body.as_u32());
-                out.push(if *b { 1 } else { 0 });
-            }
-            AirPattern::EnumVariant {
-                enum_id,
-                variant_index,
-            } => {
-                out.push(PATTERN_ENUM_VARIANT);
-                out.push(body.as_u32());
-                out.push(enum_id.0);
-                out.push(*variant_index);
+        out.push(body.as_u32());
+        encode_pattern_tree(self, out);
+    }
+}
+
+fn encode_pattern_tree(pattern: &AirPattern, out: &mut Vec<u32>) {
+    match pattern {
+        AirPattern::Wildcard => out.push(PATTERN_WILDCARD),
+        AirPattern::Int(n) => {
+            out.push(PATTERN_INT);
+            out.push(*n as u32);
+            out.push((*n >> 32) as u32);
+        }
+        AirPattern::Bool(b) => {
+            out.push(PATTERN_BOOL);
+            out.push(if *b { 1 } else { 0 });
+        }
+        AirPattern::EnumVariant {
+            enum_id,
+            variant_index,
+        } => {
+            out.push(PATTERN_ENUM_VARIANT);
+            out.push(enum_id.0);
+            out.push(*variant_index);
+        }
+        AirPattern::Bind {
+            name,
+            is_mut,
+            inner,
+        } => {
+            out.push(PATTERN_BIND);
+            out.push(name.into_usize() as u32);
+            let flags = (if *is_mut { 1u32 } else { 0 }) | (if inner.is_some() { 2u32 } else { 0 });
+            out.push(flags);
+            if let Some(inner) = inner {
+                encode_pattern_tree(inner, out);
             }
         }
+        AirPattern::Tuple { elems } => {
+            out.push(PATTERN_TUPLE);
+            out.push(elems.len() as u32);
+            for e in elems {
+                encode_pattern_tree(e, out);
+            }
+        }
+        AirPattern::Struct { struct_id, fields } => {
+            out.push(PATTERN_STRUCT);
+            out.push(struct_id.0);
+            out.push(fields.len() as u32);
+            for (idx, p) in fields {
+                out.push(*idx);
+                encode_pattern_tree(p, out);
+            }
+        }
+        AirPattern::EnumDataVariant {
+            enum_id,
+            variant_index,
+            fields,
+        } => {
+            out.push(PATTERN_ENUM_DATA);
+            out.push(enum_id.0);
+            out.push(*variant_index);
+            out.push(fields.len() as u32);
+            for p in fields {
+                encode_pattern_tree(p, out);
+            }
+        }
+        AirPattern::EnumStructVariant {
+            enum_id,
+            variant_index,
+            fields,
+        } => {
+            out.push(PATTERN_ENUM_STRUCT);
+            out.push(enum_id.0);
+            out.push(*variant_index);
+            out.push(fields.len() as u32);
+            for (idx, p) in fields {
+                out.push(*idx);
+                encode_pattern_tree(p, out);
+            }
+        }
+        AirPattern::EnumUnitVariant {
+            enum_id,
+            variant_index,
+        } => {
+            out.push(PATTERN_ENUM_UNIT);
+            out.push(enum_id.0);
+            out.push(*variant_index);
+        }
+    }
+}
+
+/// Decode a single pattern tree from `data`, returning the pattern and
+/// the number of u32s consumed.
+fn decode_pattern_tree(data: &[u32]) -> (AirPattern, usize) {
+    let tag = data[0];
+    match tag {
+        PATTERN_WILDCARD => (AirPattern::Wildcard, 1),
+        PATTERN_INT => {
+            let lo = data[1] as i64;
+            let hi = (data[2] as i64) << 32;
+            (AirPattern::Int(lo | hi), 3)
+        }
+        PATTERN_BOOL => (AirPattern::Bool(data[1] != 0), 2),
+        PATTERN_ENUM_VARIANT => {
+            let enum_id = crate::types::EnumId(data[1]);
+            let variant_index = data[2];
+            (
+                AirPattern::EnumVariant {
+                    enum_id,
+                    variant_index,
+                },
+                3,
+            )
+        }
+        PATTERN_BIND => {
+            let name = lasso::Spur::try_from_usize(data[1] as usize)
+                .expect("invalid Spur encoding in pattern");
+            let flags = data[2];
+            let is_mut = (flags & 1) != 0;
+            let has_inner = (flags & 2) != 0;
+            let mut offset = 3;
+            let inner = if has_inner {
+                let (p, consumed) = decode_pattern_tree(&data[offset..]);
+                offset += consumed;
+                Some(Box::new(p))
+            } else {
+                None
+            };
+            (
+                AirPattern::Bind {
+                    name,
+                    is_mut,
+                    inner,
+                },
+                offset,
+            )
+        }
+        PATTERN_TUPLE => {
+            let n = data[1] as usize;
+            let mut offset = 2;
+            let mut elems = Vec::with_capacity(n);
+            for _ in 0..n {
+                let (p, consumed) = decode_pattern_tree(&data[offset..]);
+                elems.push(p);
+                offset += consumed;
+            }
+            (AirPattern::Tuple { elems }, offset)
+        }
+        PATTERN_STRUCT => {
+            let struct_id = StructId(data[1]);
+            let n = data[2] as usize;
+            let mut offset = 3;
+            let mut fields = Vec::with_capacity(n);
+            for _ in 0..n {
+                let field_index = data[offset];
+                offset += 1;
+                let (p, consumed) = decode_pattern_tree(&data[offset..]);
+                offset += consumed;
+                fields.push((field_index, p));
+            }
+            (AirPattern::Struct { struct_id, fields }, offset)
+        }
+        PATTERN_ENUM_DATA => {
+            let enum_id = crate::types::EnumId(data[1]);
+            let variant_index = data[2];
+            let n = data[3] as usize;
+            let mut offset = 4;
+            let mut fields = Vec::with_capacity(n);
+            for _ in 0..n {
+                let (p, consumed) = decode_pattern_tree(&data[offset..]);
+                offset += consumed;
+                fields.push(p);
+            }
+            (
+                AirPattern::EnumDataVariant {
+                    enum_id,
+                    variant_index,
+                    fields,
+                },
+                offset,
+            )
+        }
+        PATTERN_ENUM_STRUCT => {
+            let enum_id = crate::types::EnumId(data[1]);
+            let variant_index = data[2];
+            let n = data[3] as usize;
+            let mut offset = 4;
+            let mut fields = Vec::with_capacity(n);
+            for _ in 0..n {
+                let field_index = data[offset];
+                offset += 1;
+                let (p, consumed) = decode_pattern_tree(&data[offset..]);
+                offset += consumed;
+                fields.push((field_index, p));
+            }
+            (
+                AirPattern::EnumStructVariant {
+                    enum_id,
+                    variant_index,
+                    fields,
+                },
+                offset,
+            )
+        }
+        PATTERN_ENUM_UNIT => {
+            let enum_id = crate::types::EnumId(data[1]);
+            let variant_index = data[2];
+            (
+                AirPattern::EnumUnitVariant {
+                    enum_id,
+                    variant_index,
+                },
+                3,
+            )
+        }
+        _ => panic!("invalid pattern tag: {}", tag),
     }
 }
 
@@ -329,36 +564,90 @@ impl Iterator for MatchArmIterator<'_> {
         }
         self.remaining -= 1;
 
-        let tag = self.data[0];
-        let body = AirRef::from_raw(self.data[1]);
-
-        let (pattern, advance) = match tag {
-            PATTERN_WILDCARD => (AirPattern::Wildcard, 2),
-            PATTERN_INT => {
-                let lo = self.data[2] as i64;
-                let hi = (self.data[3] as i64) << 32;
-                (AirPattern::Int(lo | hi), 4)
-            }
-            PATTERN_BOOL => {
-                let b = self.data[2] != 0;
-                (AirPattern::Bool(b), 3)
-            }
-            PATTERN_ENUM_VARIANT => {
-                let enum_id = crate::types::EnumId(self.data[2]);
-                let variant_index = self.data[3];
-                (
-                    AirPattern::EnumVariant {
-                        enum_id,
-                        variant_index,
-                    },
-                    4,
-                )
-            }
-            _ => panic!("invalid pattern tag: {}", tag),
-        };
-
-        self.data = &self.data[advance..];
+        let body = AirRef::from_raw(self.data[0]);
+        let (pattern, consumed) = decode_pattern_tree(&self.data[1..]);
+        self.data = &self.data[1 + consumed..];
         Some((pattern, body))
+    }
+}
+
+impl fmt::Display for AirPattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AirPattern::Wildcard => write!(f, "_"),
+            AirPattern::Int(n) => write!(f, "{}", n),
+            AirPattern::Bool(b) => write!(f, "{}", b),
+            AirPattern::EnumVariant {
+                enum_id,
+                variant_index,
+            }
+            | AirPattern::EnumUnitVariant {
+                enum_id,
+                variant_index,
+            } => write!(f, "enum#{}::{}", enum_id.0, variant_index),
+            AirPattern::Bind {
+                name,
+                is_mut,
+                inner,
+            } => {
+                if *is_mut {
+                    write!(f, "mut ")?;
+                }
+                write!(f, "${}", name.into_usize())?;
+                if let Some(inner) = inner {
+                    write!(f, " @ {}", inner)?;
+                }
+                Ok(())
+            }
+            AirPattern::Tuple { elems } => {
+                write!(f, "(")?;
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", e)?;
+                }
+                write!(f, ")")
+            }
+            AirPattern::Struct { struct_id, fields } => {
+                write!(f, "struct#{} {{ ", struct_id.0)?;
+                for (i, (idx, p)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, ".{}: {}", idx, p)?;
+                }
+                write!(f, " }}")
+            }
+            AirPattern::EnumDataVariant {
+                enum_id,
+                variant_index,
+                fields,
+            } => {
+                write!(f, "enum#{}::{}(", enum_id.0, variant_index)?;
+                for (i, p) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", p)?;
+                }
+                write!(f, ")")
+            }
+            AirPattern::EnumStructVariant {
+                enum_id,
+                variant_index,
+                fields,
+            } => {
+                write!(f, "enum#{}::{} {{ ", enum_id.0, variant_index)?;
+                for (i, (idx, p)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, ".{}: {}", idx, p)?;
+                }
+                write!(f, " }}")
+            }
+        }
     }
 }
 
@@ -1123,16 +1412,7 @@ impl fmt::Display for Air {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        let pat_str = match pat {
-                            AirPattern::Wildcard => "_".to_string(),
-                            AirPattern::Int(n) => n.to_string(),
-                            AirPattern::Bool(b) => b.to_string(),
-                            AirPattern::EnumVariant {
-                                enum_id,
-                                variant_index,
-                            } => format!("enum#{}::{}", enum_id.0, variant_index),
-                        };
-                        write!(f, "{} => {}", pat_str, body)?;
+                        write!(f, "{} => {}", pat, body)?;
                     }
                     writeln!(f, " }}")?;
                 }
@@ -1474,5 +1754,220 @@ mod tests {
         let retrieved = air.get(inst_ref);
         assert!(matches!(retrieved.data, AirInstData::Const(42)));
         assert_eq!(retrieved.ty, Type::I32);
+    }
+
+    // ADR-0051 Phase 1: round-trip encode/decode coverage for every
+    // AirPattern shape, including nested recursive ones.
+    mod pattern_encoding {
+        use super::*;
+        use crate::types::EnumId;
+        use lasso::{Key, Spur};
+
+        fn roundtrip(pattern: AirPattern) {
+            let body = AirRef::from_raw(0xDEAD_BEEF);
+            let mut buf = Vec::new();
+            pattern.encode(body, &mut buf);
+            let mut iter = MatchArmIterator {
+                data: &buf,
+                remaining: 1,
+            };
+            let (decoded, decoded_body) = iter.next().expect("one arm");
+            assert_eq!(decoded_body.as_u32(), body.as_u32());
+            assert!(iter.next().is_none(), "exactly one arm consumed");
+            // Re-encode the decoded pattern and check bytes match.
+            let mut buf2 = Vec::new();
+            decoded.encode(body, &mut buf2);
+            assert_eq!(buf, buf2, "round-trip differs; pattern = {:?}", pattern);
+        }
+
+        fn spur(n: usize) -> Spur {
+            Spur::try_from_usize(n).unwrap()
+        }
+
+        #[test]
+        fn wildcard() {
+            roundtrip(AirPattern::Wildcard);
+        }
+
+        #[test]
+        fn int_positive_and_negative() {
+            roundtrip(AirPattern::Int(42));
+            roundtrip(AirPattern::Int(-1));
+            roundtrip(AirPattern::Int(i64::MIN));
+            roundtrip(AirPattern::Int(i64::MAX));
+        }
+
+        #[test]
+        fn bool_both() {
+            roundtrip(AirPattern::Bool(true));
+            roundtrip(AirPattern::Bool(false));
+        }
+
+        #[test]
+        fn enum_variant_legacy() {
+            roundtrip(AirPattern::EnumVariant {
+                enum_id: EnumId(7),
+                variant_index: 3,
+            });
+        }
+
+        #[test]
+        fn enum_unit_variant() {
+            roundtrip(AirPattern::EnumUnitVariant {
+                enum_id: EnumId(7),
+                variant_index: 3,
+            });
+        }
+
+        #[test]
+        fn bind_bare() {
+            roundtrip(AirPattern::Bind {
+                name: spur(5),
+                is_mut: false,
+                inner: None,
+            });
+            roundtrip(AirPattern::Bind {
+                name: spur(5),
+                is_mut: true,
+                inner: None,
+            });
+        }
+
+        #[test]
+        fn bind_at_inner() {
+            roundtrip(AirPattern::Bind {
+                name: spur(9),
+                is_mut: false,
+                inner: Some(Box::new(AirPattern::Int(7))),
+            });
+        }
+
+        #[test]
+        fn tuple_flat_and_nested() {
+            roundtrip(AirPattern::Tuple {
+                elems: vec![
+                    AirPattern::Int(1),
+                    AirPattern::Wildcard,
+                    AirPattern::Bool(true),
+                ],
+            });
+            roundtrip(AirPattern::Tuple {
+                elems: vec![
+                    AirPattern::Tuple {
+                        elems: vec![AirPattern::Int(1), AirPattern::Int(2)],
+                    },
+                    AirPattern::Wildcard,
+                ],
+            });
+        }
+
+        #[test]
+        fn struct_pattern() {
+            roundtrip(AirPattern::Struct {
+                struct_id: StructId(2),
+                fields: vec![
+                    (0, AirPattern::Int(1)),
+                    (1, AirPattern::Wildcard),
+                    (2, AirPattern::Bool(false)),
+                ],
+            });
+        }
+
+        #[test]
+        fn enum_data_variant_nested() {
+            // Some(Some(42))
+            roundtrip(AirPattern::EnumDataVariant {
+                enum_id: EnumId(1),
+                variant_index: 0,
+                fields: vec![AirPattern::EnumDataVariant {
+                    enum_id: EnumId(1),
+                    variant_index: 0,
+                    fields: vec![AirPattern::Int(42)],
+                }],
+            });
+        }
+
+        #[test]
+        fn enum_struct_variant_nested() {
+            roundtrip(AirPattern::EnumStructVariant {
+                enum_id: EnumId(3),
+                variant_index: 1,
+                fields: vec![
+                    (0, AirPattern::Int(5)),
+                    (
+                        1,
+                        AirPattern::Bind {
+                            name: spur(11),
+                            is_mut: false,
+                            inner: None,
+                        },
+                    ),
+                ],
+            });
+        }
+
+        #[test]
+        fn multiple_arms_round_trip() {
+            // Ensure sequential decode tracks variable-width arms correctly.
+            let arms = vec![
+                (AirPattern::Int(1), AirRef::from_raw(10)),
+                (
+                    AirPattern::Tuple {
+                        elems: vec![AirPattern::Int(1), AirPattern::Wildcard],
+                    },
+                    AirRef::from_raw(11),
+                ),
+                (AirPattern::Wildcard, AirRef::from_raw(12)),
+                (
+                    AirPattern::EnumDataVariant {
+                        enum_id: EnumId(0),
+                        variant_index: 0,
+                        fields: vec![AirPattern::Bind {
+                            name: spur(1),
+                            is_mut: false,
+                            inner: None,
+                        }],
+                    },
+                    AirRef::from_raw(13),
+                ),
+            ];
+            let mut buf = Vec::new();
+            for (p, b) in &arms {
+                p.encode(*b, &mut buf);
+            }
+            let iter = MatchArmIterator {
+                data: &buf,
+                remaining: arms.len(),
+            };
+            let decoded: Vec<_> = iter.collect();
+            assert_eq!(decoded.len(), arms.len());
+            for ((orig_p, orig_b), (dec_p, dec_b)) in arms.iter().zip(decoded.iter()) {
+                assert_eq!(orig_b.as_u32(), dec_b.as_u32());
+                // Compare by re-encoding (patterns are not PartialEq).
+                let mut a = Vec::new();
+                let mut b = Vec::new();
+                orig_p.encode(AirRef::from_raw(0), &mut a);
+                dec_p.encode(AirRef::from_raw(0), &mut b);
+                assert_eq!(a, b);
+            }
+        }
+
+        #[test]
+        fn display_renders_surface_shapes() {
+            let p = AirPattern::EnumDataVariant {
+                enum_id: EnumId(2),
+                variant_index: 0,
+                fields: vec![AirPattern::EnumUnitVariant {
+                    enum_id: EnumId(2),
+                    variant_index: 1,
+                }],
+            };
+            assert_eq!(format!("{}", p), "enum#2::0(enum#2::1)");
+
+            let t = AirPattern::Tuple {
+                elems: vec![AirPattern::Int(1), AirPattern::Wildcard],
+            };
+            assert_eq!(format!("{}", t), "(1, _)");
+        }
     }
 }
