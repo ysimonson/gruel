@@ -575,24 +575,35 @@ ship without the preview gate since it's a bug fix, not a new feature.
   - The ADR's originally-planned approach — recursive `AirPattern` plus
     recursive CFG descent — remains the right direction for these shapes.
 
-- [x] **Phase 6: Rest patterns (`..`) in let destructures**
+- [x] **Phase 6: Rest patterns (`..`) in let and match arms**
   - Parser already accepts `..` in tuple / struct / variant field lists
-    (Phase 2); Phase 6 lights them up end-to-end for `let` destructures.
-  - Astgen: in `emit_let_destructure_into`, a `..` struct-field or
-    trailing `..` tuple-element emits a synthetic `RirDestructureField`
-    with the sentinel field name `..`. The `RirDestructureField` type is
-    re-exported from `gruel-rir` so sema can synthesize new ones.
-  - Sema: `analyze_struct_destructure` strips the sentinel field, sets
-    `has_rest`, waives the "all fields required" rule, and synthesizes
-    wildcard `RirDestructureField`s for every unlisted struct field. This
-    reuses the existing alloc/drop code path so non-copy skipped fields
-    are dropped exactly once.
+    (Phase 2); Phase 6 lights them up end-to-end in both `let` destructures
+    and match-arm variant patterns.
+  - Astgen:
+    - `emit_let_destructure_into`: struct `..` field and trailing tuple
+      `..` element emit a synthetic `RirDestructureField` whose
+      `field_name` is the sentinel `..`.
+    - `tuple_elem_to_rir_binding_or_capture` /
+      `field_pattern_to_rir_binding_or_capture`: a `..` in a
+      data-variant or struct-variant pattern emits a
+      `RirPatternBinding { is_wildcard: true, name: Some("..") }`
+      marker (plus `field_name = ".."` for struct variants).
+    - `RirDestructureField` is re-exported from `gruel-rir`.
+  - Sema:
+    - `analyze_struct_destructure`: strip the sentinel field, set
+      `has_rest`, waive the "all fields required" rule, synthesize
+      wildcard `RirDestructureField`s for every unlisted struct field.
+    - `analyze_match` (DataVariant + StructVariant arms): strip the
+      rest marker, validate position (data-variant: must be last), and
+      synthesize wildcard `RirPatternBinding`s for every unlisted
+      variant field position. The existing alloc/drop path handles
+      extraction and drops non-copy unlisted fields exactly once.
   - Deferred to a future pass (still panics in astgen):
     - `..` in the middle of a tuple destructure (`(a, .., b)`) — would
       need sema to fill in positions from the inferred tuple arity.
-    - `..` in match-arm variant / struct-variant patterns.
   - Spec tests: struct rest dropping integer fields, struct rest dropping
-    a non-copy String field, trailing tuple rest.
+    a non-copy String field, trailing tuple rest, trailing data-variant
+    rest, struct-variant rest.
 
 - [x] **Phase 7: Anon-struct alias sema fix (no preview gate)**
   - `analyze_struct_destructure` in `gruel-air/src/sema/analyze_ops.rs` now

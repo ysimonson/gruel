@@ -1442,15 +1442,22 @@ impl<'a> AstGen<'a> {
                 span,
             } => {
                 let module = base.as_ref().map(|b| self.gen_expr(b));
+                let rest_marker = self.interner.get_or_intern_static("..");
                 let field_bindings = fields
                     .iter()
-                    .map(|fb| RirStructPatternBinding {
-                        field_name: fb
+                    .map(|fb| {
+                        // For `..` rest patterns, synthesize a field_name of
+                        // the rest-marker sentinel so sema can detect it
+                        // (ADR-0049 Phase 6).
+                        let field_name = fb
                             .field_name
                             .as_ref()
-                            .expect("rest `..` field patterns are a Phase 6 feature")
-                            .name,
-                        binding: self.field_pattern_to_rir_binding_or_capture(fb, nested),
+                            .map(|ident| ident.name)
+                            .unwrap_or(rest_marker);
+                        RirStructPatternBinding {
+                            field_name,
+                            binding: self.field_pattern_to_rir_binding_or_capture(fb, nested),
+                        }
                     })
                     .collect();
                 RirPattern::StructVariant {
@@ -1510,7 +1517,15 @@ impl<'a> AstGen<'a> {
                 other
             ),
             TupleElemPattern::Rest(_) => {
-                panic!("rest patterns `..` are a Phase 6 feature")
+                // `..` in a data-variant pattern: emit a marker binding
+                // with the sentinel name `..`. Sema detects this marker
+                // and expands it to wildcards for the remaining variant
+                // fields (ADR-0049 Phase 6).
+                RirPatternBinding {
+                    is_wildcard: true,
+                    is_mut: false,
+                    name: Some(self.interner.get_or_intern_static("..")),
+                }
             }
         }
     }
@@ -1522,10 +1537,16 @@ impl<'a> AstGen<'a> {
         fb: &FieldPattern,
         nested: &mut Vec<(Spur, Pattern)>,
     ) -> RirPatternBinding {
-        let name = fb
-            .field_name
-            .as_ref()
-            .expect("rest `..` field patterns are a Phase 6 feature");
+        // `..` in a struct-variant pattern: emit a marker binding with the
+        // sentinel name `..`. Sema recognizes it as a rest and skips the
+        // missing-fields check (ADR-0049 Phase 6).
+        let Some(name) = fb.field_name.as_ref() else {
+            return RirPatternBinding {
+                is_wildcard: true,
+                is_mut: false,
+                name: Some(self.interner.get_or_intern_static("..")),
+            };
+        };
         match &fb.sub {
             None => RirPatternBinding {
                 // Shorthand: `field` binds a local named `field`.

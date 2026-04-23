@@ -1631,9 +1631,39 @@ impl<'a> Sema<'a> {
                         pattern_span,
                     )?;
 
-                    // Check binding count matches field count
+                    // Check binding count matches field count. A `..` rest
+                    // marker (emitted by astgen as a wildcard binding named
+                    // `..`) must appear last and accounts for any remaining
+                    // fields not otherwise listed (ADR-0049 Phase 6).
                     let field_count = enum_def.variants[variant_index].fields.len();
-                    if bindings.len() != field_count {
+                    let rest_marker = self.interner.get_or_intern_static("..");
+                    let has_rest = bindings.iter().any(|b| b.name == Some(rest_marker));
+                    if has_rest {
+                        // Require `..` at the end — any-position `..` needs
+                        // explicit positions-from-end support which is a
+                        // follow-up.
+                        let rest_at_end =
+                            bindings.last().is_some_and(|b| b.name == Some(rest_marker));
+                        if !rest_at_end {
+                            return Err(CompileError::new(
+                                ErrorKind::WrongArgumentCount {
+                                    expected: field_count,
+                                    found: bindings.len(),
+                                },
+                                pattern_span,
+                            ));
+                        }
+                        let explicit = bindings.len() - 1; // subtract the rest marker
+                        if explicit > field_count {
+                            return Err(CompileError::new(
+                                ErrorKind::WrongArgumentCount {
+                                    expected: field_count,
+                                    found: explicit,
+                                },
+                                pattern_span,
+                            ));
+                        }
+                    } else if bindings.len() != field_count {
                         return Err(CompileError::new(
                             ErrorKind::WrongArgumentCount {
                                 expected: field_count,
@@ -1721,11 +1751,21 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    // Check for unknown, duplicate, and missing fields
+                    // Check for unknown, duplicate, and missing fields.
+                    // Detect and strip a `..` rest marker (ADR-0049 Phase 6):
+                    // when present, missing fields are permitted and treated
+                    // as wildcards below.
+                    let rest_marker_sv = self.interner.get_or_intern_static("..");
+                    let sv_has_rest = field_bindings
+                        .iter()
+                        .any(|fb| fb.field_name == rest_marker_sv);
                     let mut seen_fields =
                         std::collections::HashSet::with_capacity(field_bindings.len());
                     let qualified_name = format!("{}::{}", enum_def.name, variant_name);
                     for fb in field_bindings {
+                        if fb.field_name == rest_marker_sv {
+                            continue;
+                        }
                         let field_name_str = self.interner.resolve(&fb.field_name);
                         if !seen_fields.insert(fb.field_name) {
                             return Err(CompileError::new(
@@ -1747,32 +1787,39 @@ impl<'a> Sema<'a> {
                         }
                     }
 
-                    // Check for missing fields
-                    let declared_field_count = variant_def.field_names.len();
-                    if field_bindings.len() != declared_field_count {
-                        // Find which fields are missing
-                        let missing: Vec<_> = variant_def
-                            .field_names
-                            .iter()
-                            .filter(|name| {
-                                !field_bindings.iter().any(|fb| {
-                                    self.interner.resolve(&fb.field_name) == name.as_str()
+                    // Check for missing fields (waived when `..` is present;
+                    // the rest marker absorbs any unlisted fields).
+                    if sv_has_rest {
+                        covered_variants.insert(variant_index as u32);
+                        pattern_enum_id = Some(enum_id);
+                        resolved_enum = Some((enum_id, variant_index as u32));
+                    } else {
+                        let declared_field_count = variant_def.field_names.len();
+                        if field_bindings.len() != declared_field_count {
+                            // Find which fields are missing
+                            let missing: Vec<_> = variant_def
+                                .field_names
+                                .iter()
+                                .filter(|name| {
+                                    !field_bindings.iter().any(|fb| {
+                                        self.interner.resolve(&fb.field_name) == name.as_str()
+                                    })
                                 })
-                            })
-                            .cloned()
-                            .collect();
-                        return Err(CompileError::new(
-                            ErrorKind::MissingFields(Box::new(MissingFieldsError {
-                                struct_name: qualified_name,
-                                missing_fields: missing,
-                            })),
-                            pattern_span,
-                        ));
-                    }
+                                .cloned()
+                                .collect();
+                            return Err(CompileError::new(
+                                ErrorKind::MissingFields(Box::new(MissingFieldsError {
+                                    struct_name: qualified_name,
+                                    missing_fields: missing,
+                                })),
+                                pattern_span,
+                            ));
+                        }
 
-                    covered_variants.insert(variant_index as u32);
-                    pattern_enum_id = Some(enum_id);
-                    resolved_enum = Some((enum_id, variant_index as u32));
+                        covered_variants.insert(variant_index as u32);
+                        pattern_enum_id = Some(enum_id);
+                        resolved_enum = Some((enum_id, variant_index as u32));
+                    }
                 }
             }
 
@@ -1785,27 +1832,121 @@ impl<'a> Sema<'a> {
             // Collect indexed bindings: (field_index, binding) for each field that needs extraction.
             // DataVariant: bindings are positional (field_index == position).
             // StructVariant: bindings are named, resolved to declaration-order indices.
+            // Owned storage for synthesized rest-pad bindings (ADR-0049
+            // Phase 6). `..` in a DataVariant pattern expands to wildcard
+            // bindings covering the remaining variant-field positions;
+            // since these synthetics have no source RirPatternBinding to
+            // borrow, we own them here and hand out references below.
+            // Owned storage for synthesized rest-pad bindings (ADR-0049
+            // Phase 6). `..` in a DataVariant/StructVariant pattern expands
+            // to wildcard bindings covering the remaining variant-field
+            // positions; since these synthetics have no source
+            // RirPatternBinding to borrow, we own them here and hand out
+            // references below.
+            let rest_marker_sp = self.interner.get_or_intern_static("..");
+            let rest_padding: Vec<RirPatternBinding> = match pattern {
+                RirPattern::DataVariant { bindings, .. }
+                    if bindings
+                        .last()
+                        .is_some_and(|b| b.name == Some(rest_marker_sp)) =>
+                {
+                    let (enum_id, variant_index) =
+                        resolved_enum.expect("resolved_enum set during validation");
+                    let enum_def = self.type_pool.enum_def(enum_id);
+                    let field_count = enum_def.variants[variant_index as usize].fields.len();
+                    let explicit = bindings.len() - 1;
+                    let rest_count = field_count - explicit;
+                    (0..rest_count)
+                        .map(|_| RirPatternBinding {
+                            is_wildcard: true,
+                            is_mut: false,
+                            name: None,
+                        })
+                        .collect()
+                }
+                RirPattern::StructVariant { field_bindings, .. }
+                    if field_bindings
+                        .iter()
+                        .any(|fb| fb.field_name == rest_marker_sp) =>
+                {
+                    // One wildcard per unlisted variant field.
+                    let (enum_id, variant_index) =
+                        resolved_enum.expect("resolved_enum set during validation");
+                    let enum_def = self.type_pool.enum_def(enum_id);
+                    let variant_def = &enum_def.variants[variant_index as usize];
+                    let listed: std::collections::HashSet<&str> = field_bindings
+                        .iter()
+                        .filter(|fb| fb.field_name != rest_marker_sp)
+                        .map(|fb| self.interner.resolve(&fb.field_name))
+                        .collect();
+                    variant_def
+                        .field_names
+                        .iter()
+                        .filter(|n| !listed.contains(n.as_str()))
+                        .map(|_| RirPatternBinding {
+                            is_wildcard: true,
+                            is_mut: false,
+                            name: None,
+                        })
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
             let indexed_bindings: Option<Vec<(usize, &RirPatternBinding)>> = match pattern {
                 RirPattern::DataVariant { bindings, .. } => {
-                    Some(bindings.iter().enumerate().collect())
+                    if !rest_padding.is_empty() {
+                        let explicit = bindings.len() - 1;
+                        let mut expanded: Vec<(usize, &RirPatternBinding)> = Vec::new();
+                        for (i, b) in bindings.iter().take(explicit).enumerate() {
+                            expanded.push((i, b));
+                        }
+                        for (j, b) in rest_padding.iter().enumerate() {
+                            expanded.push((explicit + j, b));
+                        }
+                        Some(expanded)
+                    } else {
+                        Some(bindings.iter().enumerate().collect())
+                    }
                 }
                 RirPattern::StructVariant { field_bindings, .. } => {
                     let (enum_id, variant_index) = resolved_enum
                         .expect("resolved_enum must be set for StructVariant patterns");
                     let enum_def = self.type_pool.enum_def(enum_id);
                     let variant_def = &enum_def.variants[variant_index as usize];
-                    Some(
-                        field_bindings
-                            .iter()
-                            .map(|fb| {
-                                let field_name = self.interner.resolve(&fb.field_name);
-                                let idx = variant_def
-                                    .find_field(field_name)
-                                    .expect("field name validated during pattern checking");
-                                (idx, &fb.binding)
-                            })
-                            .collect(),
-                    )
+                    let listed_indices: std::collections::HashSet<usize> = field_bindings
+                        .iter()
+                        .filter(|fb| fb.field_name != rest_marker_sp)
+                        .filter_map(|fb| {
+                            let name = self.interner.resolve(&fb.field_name);
+                            variant_def.find_field(name)
+                        })
+                        .collect();
+                    let mut expanded: Vec<(usize, &RirPatternBinding)> = field_bindings
+                        .iter()
+                        .filter(|fb| fb.field_name != rest_marker_sp)
+                        .map(|fb| {
+                            let field_name = self.interner.resolve(&fb.field_name);
+                            let idx = variant_def
+                                .find_field(field_name)
+                                .expect("field name validated during pattern checking");
+                            (idx, &fb.binding)
+                        })
+                        .collect();
+                    // Pad with wildcards for any unlisted fields (when `..`
+                    // is present, rest_padding has been sized to cover them).
+                    let mut rest_iter = rest_padding.iter();
+                    for (i, field_name) in variant_def.field_names.iter().enumerate() {
+                        if !listed_indices.contains(&i) {
+                            let Some(pad) = rest_iter.next() else {
+                                // Not a rest match — missing-fields check already
+                                // handled this case above.
+                                break;
+                            };
+                            let _ = field_name;
+                            expanded.push((i, pad));
+                        }
+                    }
+                    Some(expanded)
                 }
                 _ => None,
             };

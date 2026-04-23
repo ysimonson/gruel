@@ -901,3 +901,51 @@ fn main() -> i32 {
 }
 """
 exit_code = 47
+
+# =============================================================================
+# Rest patterns in match arms (ADR-0049 Phase 6)
+# =============================================================================
+
+[[case]]
+name = "match_data_variant_trailing_rest"
+spec = ["4.7:23", "4.7:24"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Trailing rest `..` in data variant pattern drops unlisted fields (ADR-0049 Phase 6)"
+source = """
+enum TripleOpt {
+    Some(i32, i32, i32),
+    None,
+}
+
+fn main() -> i32 {
+    let o = TripleOpt::Some(42, 10, 20);
+    match o {
+        TripleOpt::Some(a, ..) => a,
+        TripleOpt::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "match_struct_variant_rest"
+spec = ["4.7:23", "4.7:24"]
+preview = "nested_patterns"
+preview_should_pass = true
+description = "Rest `..` in struct variant pattern drops unlisted fields (ADR-0049 Phase 6)"
+source = """
+enum Shape {
+    Rect { w: i32, h: i32, tag: i32 },
+    None,
+}
+
+fn main() -> i32 {
+    let s = Shape::Rect { w: 10, h: 20, tag: 12 };
+    match s {
+        Shape::Rect { w, .. } => w + 32,
+        Shape::None => 0,
+    }
+}
+"""
+exit_code = 42
