@@ -112,6 +112,25 @@ fn binding_to_pattern(b: &RirPatternBinding) -> AirPattern {
     }
 }
 
+/// ADR-0051 Phase 4c: whether an RIR pattern is irrefutable, i.e. matches
+/// any scrutinee value of its type. Used by exhaustiveness bookkeeping to
+/// count `(x, y)` / `Point { x, y }` / bare `x` arms as catch-alls the
+/// same way a `_` is counted.
+fn is_irrefutable_pattern(pattern: &RirPattern) -> bool {
+    match pattern {
+        RirPattern::Wildcard(_) | RirPattern::Ident { .. } => true,
+        RirPattern::Tuple { elems, .. } => elems.iter().all(is_irrefutable_pattern),
+        RirPattern::Struct { fields, .. } => {
+            fields.iter().all(|f| is_irrefutable_pattern(&f.pattern))
+        }
+        RirPattern::Int(..)
+        | RirPattern::Bool(..)
+        | RirPattern::Path { .. }
+        | RirPattern::DataVariant { .. }
+        | RirPattern::StructVariant { .. } => false,
+    }
+}
+
 impl<'a> Sema<'a> {
     // ========================================================================
     // Place Tracing (ADR-0030 Phase 8)
@@ -1901,6 +1920,13 @@ impl<'a> Sema<'a> {
                             pattern_span,
                         ));
                     }
+                    // A tuple pattern whose every element is itself
+                    // irrefutable (Ident, Wildcard, or recursively
+                    // irrefutable Tuple / Struct) matches any scrutinee,
+                    // so it counts as a wildcard for exhaustiveness.
+                    if is_irrefutable_pattern(pattern) && wildcard_span.is_none() {
+                        wildcard_span = Some(pattern_span);
+                    }
                 }
                 RirPattern::Struct { type_name, .. } => {
                     if !is_struct_like {
@@ -1911,6 +1937,9 @@ impl<'a> Sema<'a> {
                             },
                             pattern_span,
                         ));
+                    }
+                    if is_irrefutable_pattern(pattern) && wildcard_span.is_none() {
+                        wildcard_span = Some(pattern_span);
                     }
                 }
             }

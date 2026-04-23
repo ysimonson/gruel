@@ -47,6 +47,11 @@ impl<'a> AstGen<'a> {
             interner,
             rir: Rir::new(),
             nested_pat_counter: 0,
+            // ADR-0051 Phase 4c: still defaults to the legacy elaboration
+            // path. Flipping to `true` surfaces gaps still being closed
+            // (multi-position `..` expansion in tuple arms, refutable
+            // nested-arm merges). Tests opt in explicitly via
+            // `set_recursive_pattern_lowering(true)`.
             recursive_pattern_lowering: false,
         }
     }
