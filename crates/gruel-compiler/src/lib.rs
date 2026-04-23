@@ -3314,7 +3314,8 @@ mod integration_tests {
             let (tokens, interner) = lexer.tokenize().map_err(CompileErrors::from).unwrap();
             let parser = Parser::new(tokens, interner);
             let (ast, interner) = parser.parse().unwrap();
-            let astgen = AstGen::new(&ast, &interner);
+            let mut astgen = AstGen::new(&ast, &interner);
+            astgen.set_recursive_pattern_lowering(true);
             let rir = astgen.generate();
 
             let mut sema = Sema::new(&rir, &interner, PreviewFeatures::new());
@@ -3424,6 +3425,41 @@ mod integration_tests {
                          Pt::Coord { x, .. } => x,
                      }
                  }"
+                ) >= 1
+            );
+        }
+
+        #[test]
+        fn match_tuple_literal_root_builds_cfg() {
+            // ADR-0051 Phase 4b: top-level tuple pattern with literal
+            // leaves. Previously this shape would have gone through the
+            // astgen tuple-match elaborator; with the flag on it lowers
+            // via recursive AirPattern::Tuple + CFG cascading dispatch.
+            assert!(
+                compile_with_recursive(
+                    "fn main() -> i32 {
+                         let t = (1, 2);
+                         match t {
+                             (1, 2) => 3,
+                             _ => 0,
+                         }
+                     }"
+                ) >= 1
+            );
+        }
+
+        #[test]
+        fn match_tuple_bool_mix_builds_cfg() {
+            assert!(
+                compile_with_recursive(
+                    "fn main() -> i32 {
+                         let t = (true, 5);
+                         match t {
+                             (true, 5) => 1,
+                             (false, _) => 2,
+                             _ => 0,
+                         }
+                     }"
                 ) >= 1
             );
         }

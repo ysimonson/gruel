@@ -1397,6 +1397,7 @@ impl<'a> CfgBuilder<'a> {
                 let Some(scrutinee_val) = self.lower_value(*scrutinee) else {
                     return Self::diverged();
                 };
+                let scrutinee_ty = self.air.get(*scrutinee).ty;
 
                 // Collect arms into a Vec for iteration
                 let arms: Vec<(AirPattern, AirRef)> =
@@ -1412,6 +1413,85 @@ impl<'a> CfgBuilder<'a> {
                     .map(|(_, body)| self.air.get(*body).ty)
                     .find(|ty| !ty.is_never())
                     .unwrap_or(Type::NEVER);
+
+                // ADR-0051 Phase 4b part 2: if any arm uses a recursive
+                // pattern shape that can't be dispatched by a single flat
+                // switch, emit cascading projection + conditional branches
+                // to select the arm block. Otherwise fall through to the
+                // existing flat-switch terminator setup below. Arm body
+                // lowering and join wiring is shared between both paths.
+                let needs_cascading = arms.iter().any(|(p, _)| {
+                    matches!(
+                        p,
+                        AirPattern::Tuple { .. }
+                            | AirPattern::Struct { .. }
+                            | AirPattern::Bind { .. }
+                    )
+                });
+                if needs_cascading {
+                    // Spill scrutinee to a temporary local so cascading
+                    // sub-tests can re-read field projections multiple times.
+                    let scr_slot = self.cfg.alloc_temp_local();
+                    self.emit(
+                        CfgInstData::StorageLive { slot: scr_slot },
+                        Type::UNIT,
+                        span,
+                    );
+                    self.emit(
+                        CfgInstData::Alloc {
+                            slot: scr_slot,
+                            init: scrutinee_val,
+                        },
+                        Type::UNIT,
+                        span,
+                    );
+
+                    // Pre-create test blocks and an unreachable fallback for
+                    // the no-match case. Sema has already checked
+                    // exhaustiveness, so reaching the fallback is a bug.
+                    let test_blocks: Vec<_> =
+                        (0..arms.len()).map(|_| self.cfg.new_block()).collect();
+                    let fallback = self.cfg.new_block();
+                    self.cfg.set_terminator(fallback, Terminator::Unreachable);
+
+                    // Goto current_block → test_blocks[0].
+                    let (a_s, a_l) = self.cfg.push_extra(std::iter::empty::<CfgValue>());
+                    self.cfg.set_terminator(
+                        self.current_block,
+                        Terminator::Goto {
+                            target: test_blocks[0],
+                            args_start: a_s,
+                            args_len: a_l,
+                        },
+                    );
+
+                    for (i, (pattern, _)) in arms.iter().enumerate() {
+                        let fallthrough = test_blocks.get(i + 1).copied().unwrap_or(fallback);
+                        self.current_block = test_blocks[i];
+                        self.emit_pattern_test(
+                            scr_slot,
+                            scrutinee_ty,
+                            &[],
+                            pattern,
+                            arm_blocks[i],
+                            fallthrough,
+                            span,
+                        );
+                    }
+
+                    // Arm body lowering + join wiring happens at the shared
+                    // site below. Fake a default value for `default_block`
+                    // and skip the switch terminator so the rest of the
+                    // match handler runs as-is.
+                    return self.lower_match_arm_bodies_and_join(
+                        &arms,
+                        &arm_blocks,
+                        join_block,
+                        result_type,
+                        air_ref,
+                        span,
+                    );
+                }
 
                 // Create the switch terminator
                 // Build cases: for each arm, check pattern and jump to corresponding block
@@ -2079,6 +2159,271 @@ impl<'a> CfgBuilder<'a> {
         ExprResult {
             value: None,
             continuation: Continuation::Diverged,
+        }
+    }
+
+    /// ADR-0051 Phase 4b part 2: emit the test for `pattern` against the
+    /// scrutinee spilled into `scr_slot`, following `projection` to reach
+    /// the current focused value. Terminates `self.current_block` with a
+    /// `Goto(matched)` for an unconditional match or a `Branch` for a
+    /// conditional one. `unmatched` is used for the false side of
+    /// conditional branches. `scr_ty` is the type of the (projected)
+    /// value currently in focus.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_pattern_test(
+        &mut self,
+        scr_slot: u32,
+        scr_ty: Type,
+        projection: &[Projection],
+        pattern: &AirPattern,
+        matched: BlockId,
+        unmatched: BlockId,
+        span: gruel_span::Span,
+    ) {
+        match pattern {
+            AirPattern::Wildcard => {
+                // Unconditional match.
+                let (a_s, a_l) = self.cfg.push_extra(std::iter::empty::<CfgValue>());
+                self.cfg.set_terminator(
+                    self.current_block,
+                    Terminator::Goto {
+                        target: matched,
+                        args_start: a_s,
+                        args_len: a_l,
+                    },
+                );
+            }
+            AirPattern::Int(n) => {
+                let val = self.read_projected(scr_slot, scr_ty, projection, span);
+                let lit = self.emit(CfgInstData::Const(*n as u64), scr_ty, span);
+                let cond = self.emit(CfgInstData::Eq(val, lit), Type::BOOL, span);
+                self.branch_to(cond, matched, unmatched, span);
+            }
+            AirPattern::Bool(b) => {
+                let val = self.read_projected(scr_slot, scr_ty, projection, span);
+                let lit = self.emit(CfgInstData::BoolConst(*b), Type::BOOL, span);
+                let cond = self.emit(CfgInstData::Eq(val, lit), Type::BOOL, span);
+                self.branch_to(cond, matched, unmatched, span);
+            }
+            AirPattern::EnumVariant { variant_index, .. }
+            | AirPattern::EnumUnitVariant { variant_index, .. }
+            | AirPattern::EnumDataVariant { variant_index, .. }
+            | AirPattern::EnumStructVariant { variant_index, .. } => {
+                // Cascading-path enum discriminant test. Same dispatch as
+                // the flat switch, encoded as an equality here so arms
+                // compose uniformly with tuple/struct roots.
+                let val = self.read_projected(scr_slot, scr_ty, projection, span);
+                let lit = self.emit(CfgInstData::Const(*variant_index as u64), Type::I32, span);
+                let cond = self.emit(CfgInstData::Eq(val, lit), Type::BOOL, span);
+                self.branch_to(cond, matched, unmatched, span);
+            }
+            AirPattern::Tuple { elems } => {
+                // For each element, recurse with an extended projection.
+                // Intermediate blocks chain the successful element tests;
+                // a failed test at any element branches straight to
+                // `unmatched` without testing the rest.
+                let struct_id = scr_ty
+                    .as_struct()
+                    .expect("AirPattern::Tuple scrutinee must be struct-shaped");
+                let struct_def = self.type_pool.struct_def(struct_id);
+                let field_tys: Vec<Type> = struct_def.fields.iter().map(|f| f.ty).collect();
+                for (i, elem) in elems.iter().enumerate() {
+                    let is_last = i + 1 == elems.len();
+                    let next = if is_last {
+                        matched
+                    } else {
+                        self.cfg.new_block()
+                    };
+                    let mut sub_proj: Vec<Projection> = projection.to_vec();
+                    sub_proj.push(Projection::Field {
+                        struct_id,
+                        field_index: i as u32,
+                    });
+                    let field_ty = field_tys
+                        .get(i)
+                        .copied()
+                        .expect("tuple pattern arity mismatches scrutinee");
+                    self.emit_pattern_test(
+                        scr_slot, field_ty, &sub_proj, elem, next, unmatched, span,
+                    );
+                    if !is_last {
+                        self.current_block = next;
+                    }
+                }
+            }
+            AirPattern::Struct { struct_id, fields } => {
+                for (i, (field_index, sub_pat)) in fields.iter().enumerate() {
+                    let is_last = i + 1 == fields.len();
+                    let next = if is_last {
+                        matched
+                    } else {
+                        self.cfg.new_block()
+                    };
+                    let mut sub_proj: Vec<Projection> = projection.to_vec();
+                    sub_proj.push(Projection::Field {
+                        struct_id: *struct_id,
+                        field_index: *field_index,
+                    });
+                    let field_ty = self
+                        .type_pool
+                        .struct_def(*struct_id)
+                        .fields
+                        .get(*field_index as usize)
+                        .map(|f| f.ty)
+                        .expect("struct pattern field index out of range");
+                    self.emit_pattern_test(
+                        scr_slot, field_ty, &sub_proj, sub_pat, next, unmatched, span,
+                    );
+                    if !is_last {
+                        self.current_block = next;
+                    }
+                }
+            }
+            AirPattern::Bind { inner, .. } => {
+                // Bind leaves are purely informational for CFG today — the
+                // sema extraction path still emits `StorageLive` + field
+                // extraction into the arm body for DataVariant /
+                // StructVariant arms, and top-level irrefutable Ident arms
+                // never hit this function (their scope lives in the arm
+                // body via sema / astgen). Phase 4c will move binding
+                // introduction into CFG so we can delete sema's inline
+                // extraction and unify both paths; for now, treat Bind as
+                // a transparent wrapper around its inner pattern.
+                match inner {
+                    Some(inner_pat) => {
+                        self.emit_pattern_test(
+                            scr_slot, scr_ty, projection, inner_pat, matched, unmatched, span,
+                        );
+                    }
+                    None => {
+                        // `x` bare binding acts like `_` for dispatch.
+                        let (a_s, a_l) = self.cfg.push_extra(std::iter::empty::<CfgValue>());
+                        self.cfg.set_terminator(
+                            self.current_block,
+                            Terminator::Goto {
+                                target: matched,
+                                args_start: a_s,
+                                args_len: a_l,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Read the scrutinee value at `scr_slot` with the given projection,
+    /// producing a `CfgValue` of type `ty`.
+    fn read_projected(
+        &mut self,
+        scr_slot: u32,
+        ty: Type,
+        projection: &[Projection],
+        span: gruel_span::Span,
+    ) -> CfgValue {
+        let place = self
+            .cfg
+            .make_place(PlaceBase::Local(scr_slot), projection.iter().copied());
+        self.emit(CfgInstData::PlaceRead { place }, ty, span)
+    }
+
+    /// Set the current block's terminator to a two-way conditional branch
+    /// with empty block arguments on both sides. Helper for
+    /// `emit_pattern_test`.
+    fn branch_to(
+        &mut self,
+        cond: CfgValue,
+        then_block: BlockId,
+        else_block: BlockId,
+        _span: gruel_span::Span,
+    ) {
+        let (then_args_start, then_args_len) = self.cfg.push_extra(std::iter::empty::<CfgValue>());
+        let (else_args_start, else_args_len) = self.cfg.push_extra(std::iter::empty::<CfgValue>());
+        self.cfg.set_terminator(
+            self.current_block,
+            Terminator::Branch {
+                cond,
+                then_block,
+                then_args_start,
+                then_args_len,
+                else_block,
+                else_args_start,
+                else_args_len,
+            },
+        );
+    }
+
+    /// ADR-0051 Phase 4b part 2: shared arm-body lowering + join wiring.
+    /// Called by both the flat-switch and cascading-dispatch paths of the
+    /// `AirInstData::Match` handler after arm selection has been wired.
+    fn lower_match_arm_bodies_and_join(
+        &mut self,
+        arms: &[(AirPattern, AirRef)],
+        arm_blocks: &[BlockId],
+        join_block: BlockId,
+        result_type: Type,
+        air_ref: AirRef,
+        _span: gruel_span::Span,
+    ) -> ExprResult {
+        let mut all_diverged = true;
+        let mut arm_results = Vec::new();
+
+        for (i, (_, body)) in arms.iter().enumerate() {
+            self.current_block = arm_blocks[i];
+            let body_result = self.lower_inst(*body);
+            let exit_block = self.current_block;
+            let diverged = matches!(body_result.continuation, Continuation::Diverged);
+            if !diverged {
+                all_diverged = false;
+            }
+            arm_results.push((exit_block, body_result, diverged));
+        }
+
+        if all_diverged {
+            self.cfg.set_terminator(join_block, Terminator::Unreachable);
+            return ExprResult {
+                value: None,
+                continuation: Continuation::Diverged,
+            };
+        }
+
+        let result_param = if result_type != Type::UNIT && result_type != Type::NEVER {
+            Some(self.cfg.add_block_param(join_block, result_type))
+        } else {
+            None
+        };
+
+        for (exit_block, body_result, diverged) in arm_results {
+            if !diverged {
+                let args: Vec<CfgValue> = if let Some(val) = body_result.value {
+                    if result_param.is_some() {
+                        vec![val]
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                };
+                let (args_start, args_len) = self.cfg.push_extra(args);
+                self.cfg.set_terminator(
+                    exit_block,
+                    Terminator::Goto {
+                        target: join_block,
+                        args_start,
+                        args_len,
+                    },
+                );
+            }
+        }
+
+        self.current_block = join_block;
+        if let Some(param) = result_param {
+            self.cache(air_ref, param);
+        }
+
+        ExprResult {
+            value: result_param,
+            continuation: Continuation::Continues,
         }
     }
 

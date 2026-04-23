@@ -1602,18 +1602,17 @@ impl<'a> ConstraintGenerator<'a> {
                     InferType::Var(var)
                 }
             }
-            // ADR-0051 Phase 4a: data-structure only. Astgen still elaborates
-            // top-level tuple / struct / ident match arms into existing
-            // shapes, so these variants cannot reach inference yet. Phase 4b
-            // wires astgen to produce them and this arm picks up the real
-            // inference logic.
+            // ADR-0051 Phase 4b: top-level Ident / Tuple / Struct arms
+            // don't constrain the scrutinee's type on their own — inference
+            // ties them to the scrutinee through a fresh type variable. For
+            // Struct arms whose `type_name` resolves to a known struct we
+            // could tighten this, but the arm's internal field patterns
+            // unify against the scrutinee's struct type elsewhere.
             gruel_rir::RirPattern::Ident { .. }
             | gruel_rir::RirPattern::Tuple { .. }
             | gruel_rir::RirPattern::Struct { .. } => {
-                unreachable!(
-                    "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
-                     ADR-0051 Phase 4a; Phase 4b will enable them"
-                )
+                let var = self.fresh_var();
+                InferType::Var(var)
             }
         }
     }

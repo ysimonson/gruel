@@ -1215,6 +1215,71 @@ impl Rir {
                     ));
                     pos += 8 + 3 * bindings_len;
                 }
+                k if k == PatternKind::Ident as u32 => {
+                    let span_start = self.extra[pos + 1];
+                    let span_len = self.extra[pos + 2];
+                    let span = Span::new(span_start, span_start + span_len);
+                    let body = InstRef::from_raw(self.extra[pos + 3]);
+                    let name = Spur::try_from_usize(self.extra[pos + 4] as usize).unwrap();
+                    let is_mut = self.extra[pos + 5] != 0;
+                    arms.push((RirPattern::Ident { name, is_mut, span }, body));
+                    pos += 6;
+                }
+                k if k == PatternKind::Tuple as u32 => {
+                    let span_start = self.extra[pos + 1];
+                    let span_len = self.extra[pos + 2];
+                    let span = Span::new(span_start, span_start + span_len);
+                    let body = InstRef::from_raw(self.extra[pos + 3]);
+                    let n = self.extra[pos + 4] as usize;
+                    let mut elems = Vec::with_capacity(n);
+                    let mut offset = 5;
+                    for _ in 0..n {
+                        let (p, consumed) = decode_pattern_tree(&self.extra[pos + offset..]);
+                        elems.push(p);
+                        offset += consumed;
+                    }
+                    arms.push((RirPattern::Tuple { elems, span }, body));
+                    pos += offset;
+                }
+                k if k == PatternKind::Struct as u32 => {
+                    let span_start = self.extra[pos + 1];
+                    let span_len = self.extra[pos + 2];
+                    let span = Span::new(span_start, span_start + span_len);
+                    let body = InstRef::from_raw(self.extra[pos + 3]);
+                    let module_raw = self.extra[pos + 4];
+                    let module = if module_raw == u32::MAX {
+                        None
+                    } else {
+                        Some(InstRef::from_raw(module_raw))
+                    };
+                    let type_name = Spur::try_from_usize(self.extra[pos + 5] as usize).unwrap();
+                    let has_rest = self.extra[pos + 6] != 0;
+                    let n = self.extra[pos + 7] as usize;
+                    let mut fields = Vec::with_capacity(n);
+                    let mut offset = 8;
+                    for _ in 0..n {
+                        let field_name =
+                            Spur::try_from_usize(self.extra[pos + offset] as usize).unwrap();
+                        offset += 1;
+                        let (pattern, consumed) = decode_pattern_tree(&self.extra[pos + offset..]);
+                        offset += consumed;
+                        fields.push(RirStructField {
+                            field_name,
+                            pattern,
+                        });
+                    }
+                    arms.push((
+                        RirPattern::Struct {
+                            module,
+                            type_name,
+                            fields,
+                            has_rest,
+                            span,
+                        },
+                        body,
+                    ));
+                    pos += offset;
+                }
                 _ => panic!("Unknown pattern kind: {}", kind),
             }
         }
