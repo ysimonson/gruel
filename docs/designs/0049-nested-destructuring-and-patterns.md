@@ -604,10 +604,8 @@ ship without the preview gate since it's a bug fix, not a new feature.
 
 - [ ] **Future work still on the ADR checklist**
   - Exhaustiveness-checker extension reporting nested-pattern witnesses
-    in diagnostics.
-  - Fix the CFG-builder bug around `let` + `if-else-with-panic` so the
-    tuple-root elaboration (Phase 5a) can emit a runtime `@panic`
-    fallback for non-exhaustive matches.
+    in diagnostics (today, missing coverage is still reported at the
+    outer-variant level).
   - `..` in the middle of a tuple-root match arm (`match t { (a, .., b)
     => ... }`). The tuple-root match elaborator emits `FieldGet` at
     astgen time and so needs to know positions concretely; resolving
@@ -623,6 +621,22 @@ ship without the preview gate since it's a bug fix, not a new feature.
   error. See spec tests `let_tuple_rest_middle`,
   `let_tuple_rest_middle_multi`, `let_tuple_rest_leading`, and
   `let_tuple_rest_middle_arity_too_small`.
+
+- Multi-field data variants and struct variants with a shared outer
+  variant now merge: `match x { V(0, y) => ..., V(1, y) => ..., _ =>
+  ... }` and `match s { Shape::Rect { w: 0, h } => ..., Shape::Rect
+  { w, h } => ..., _ => ... }` both go through Phase 5b's merged
+  elaboration (tupling the variant's fields so Phase 5a can handle the
+  inner match). Merges skip when a merged arm is irrefutable so the
+  trailing wildcard doesn't shadow anything.
+
+- Non-exhaustive tuple-root matches now compile. The tuple-root
+  elaborator emits a `@panic("non-exhaustive match")` for the
+  fall-through arm, and the CFG builder now marks `Never`-typed
+  intrinsics as diverging (emitting an `Unreachable` terminator for the
+  current block) — the previous CFG ordering bug is resolved. Running
+  an uncovered input traps at runtime (exit 133 / SIGILL) via LLVM's
+  `unreachable` instruction.
 
 - [x] **Phase 6: Rest patterns (`..`) in let and match arms**
   - Parser already accepts `..` in tuple / struct / variant field lists

@@ -871,6 +871,21 @@ fn main() -> i32 {
 exit_code = 42
 
 [[case]]
+name = "tuple_match_root_non_exhaustive_panics"
+spec = ["4.7:23", "4.7:24"]
+description = "Non-exhaustive tuple-root match compiles and traps at runtime for uncovered inputs (ADR-0049 Phase 5a)"
+source = """
+fn main() -> i32 {
+    let a: i32 = 0;
+    let b: i32 = 0;
+    match (a, b) {
+        (0, 0) => 42,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
 name = "tuple_match_root_negative_literal"
 spec = ["4.7:23", "4.7:24"]
 description = "Tuple pattern at match root matches negative integer literals (ADR-0049 Phase 5a)"

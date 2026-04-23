@@ -798,6 +798,16 @@ impl<'a> CfgBuilder<'a> {
                     span,
                 );
                 self.cache(air_ref, value);
+                // Diverging intrinsics (e.g. `@panic`, `@compile_error`)
+                // have `Never` type and never return. Mark the current
+                // block unreachable so the Branch / Block lowerings don't
+                // try to wire up a follow-up goto, and so codegen can
+                // emit an `unreachable` terminator.
+                if ty.is_never() {
+                    self.cfg
+                        .set_terminator(self.current_block, Terminator::Unreachable);
+                    return Self::diverged();
+                }
                 ExprResult {
                     value: Some(value),
                     continuation: Continuation::Continues,

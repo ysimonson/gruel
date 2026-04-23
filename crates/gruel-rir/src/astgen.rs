@@ -63,6 +63,27 @@ impl<'a> AstGen<'a> {
         self.interner.get_or_intern(format!("__match_scr_{}", n))
     }
 
+    /// Emit a `@panic("message")` call as a single RIR instruction with
+    /// type `Never`. Used by the tuple-match elaborator to terminate a
+    /// non-exhaustive if-chain at runtime (ADR-0049 Phase 5a).
+    fn emit_panic_call(&mut self, message: &str, span: gruel_span::Span) -> InstRef {
+        let msg = self.interner.get_or_intern(message);
+        let msg_const = self.rir.add_inst(Inst {
+            data: InstData::StringConst(msg),
+            span,
+        });
+        let (args_start, args_len) = self.rir.add_inst_refs(&[msg_const]);
+        let name = self.interner.get_or_intern_static("panic");
+        self.rir.add_inst(Inst {
+            data: InstData::Intrinsic {
+                name,
+                args_start,
+                args_len,
+            },
+            span,
+        })
+    }
+
     /// Generate RIR from the AST.
     pub fn generate(mut self) -> Rir {
         for item in &self.ast.items {
@@ -1749,17 +1770,14 @@ impl<'a> AstGen<'a> {
             return None;
         }
 
-        // Require an unconditional final arm (wildcard, ident, or a tuple of
-        // all-irrefutable leaves). Non-exhaustive tuple matches need a
-        // runtime fallback (`@panic`) which triggers a separate CFG
-        // ordering bug, so we don't handle them in this phase.
+        // Non-exhaustive tuple matches get a `@panic("non-exhaustive
+        // match")` at the tail of the if-chain so the chain stays
+        // well-typed and runtime-traps on uncovered values.
         let last_arm = match_expr
             .arms
             .last()
             .expect("parser rejects empty match arms");
-        if !is_tuple_match_arm_unconditional(&last_arm.pattern) {
-            return None;
-        }
+        let last_is_catch_all = is_tuple_match_arm_unconditional(&last_arm.pattern);
 
         let match_span = match_expr.span;
 
@@ -1787,18 +1805,32 @@ impl<'a> AstGen<'a> {
             arm_parts.push(part);
         }
 
-        // Fold the arms into an if/else chain, back to front. The last arm is
-        // guaranteed to have no predicate (validated above), so it becomes the
-        // terminating else-branch.
+        // Fold the arms into an if/else chain, back to front. When the
+        // last arm is unconditional it becomes the terminating
+        // else-branch directly; otherwise we emit a `@panic` fallback
+        // and wrap the last arm in a Branch that uses it.
         let mut iter = arm_parts.into_iter().rev();
         let (last_pred, last_body) = iter
             .next()
             .expect("match_expr.arms is non-empty (parser rejects empty match)");
-        debug_assert!(
-            last_pred.is_none(),
-            "last arm unconditional (checked above)"
-        );
-        let mut result = last_body;
+        let mut result = if last_is_catch_all {
+            debug_assert!(
+                last_pred.is_none(),
+                "last-arm unconditional check implies no predicate"
+            );
+            last_body
+        } else {
+            let cond = last_pred.expect("non-catch-all last arm produces a predicate");
+            let fallback = self.emit_panic_call("non-exhaustive match", match_span);
+            self.rir.add_inst(Inst {
+                data: InstData::Branch {
+                    cond,
+                    then_block: last_body,
+                    else_block: Some(fallback),
+                },
+                span: match_span,
+            })
+        };
 
         for (pred, body) in iter {
             let cond = pred.expect(
