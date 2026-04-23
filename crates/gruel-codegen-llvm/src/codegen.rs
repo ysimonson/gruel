@@ -9,6 +9,7 @@ use gruel_cfg::{
     BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator, drop_names,
 };
 use gruel_error::{CompileError, CompileResult, ErrorKind};
+use gruel_intrinsics::{IntrinsicId, lookup_by_name};
 use inkwell::FloatPredicate;
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
@@ -2572,32 +2573,49 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
     /// Translate a CFG intrinsic call into LLVM IR.
     ///
     /// Returns the result value (or `None` for unit-returning intrinsics like `@dbg`).
+    ///
+    /// Dispatches on the stable `IntrinsicId` resolved from the
+    /// `gruel-intrinsics` registry (ADR-0050). Runtime extern symbols come from
+    /// the registry's `runtime_fn` field where applicable.
     fn translate_intrinsic(
         &mut self,
         ty: Type,
         name_str: &str,
         args: &[CfgValue],
     ) -> Option<BasicValueEnum<'ctx>> {
-        match name_str {
+        let id = match lookup_by_name(name_str).map(|d| d.id) {
+            Some(id) => id,
+            None => {
+                // Unknown name — same fall-through semantics as the legacy match.
+                return gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero());
+            }
+        };
+        match id {
             // ---- Random number generation ----
-            "random_u32" => {
+            IntrinsicId::RandomU32 => {
+                let runtime_fn = lookup_by_name("random_u32")
+                    .and_then(|d| d.runtime_fn)
+                    .expect("random_u32 has a runtime symbol");
                 let fn_ty = self.ctx.i32_type().fn_type(&[], false);
                 let f = self
                     .module
-                    .get_function("__gruel_random_u32")
-                    .unwrap_or_else(|| self.module.add_function("__gruel_random_u32", fn_ty, None));
+                    .get_function(runtime_fn)
+                    .unwrap_or_else(|| self.module.add_function(runtime_fn, fn_ty, None));
                 self.builder
                     .build_call(f, &[], "rand")
                     .unwrap()
                     .try_as_basic_value()
                     .basic()
             }
-            "random_u64" => {
+            IntrinsicId::RandomU64 => {
+                let runtime_fn = lookup_by_name("random_u64")
+                    .and_then(|d| d.runtime_fn)
+                    .expect("random_u64 has a runtime symbol");
                 let fn_ty = self.ctx.i64_type().fn_type(&[], false);
                 let f = self
                     .module
-                    .get_function("__gruel_random_u64")
-                    .unwrap_or_else(|| self.module.add_function("__gruel_random_u64", fn_ty, None));
+                    .get_function(runtime_fn)
+                    .unwrap_or_else(|| self.module.add_function(runtime_fn, fn_ty, None));
                 self.builder
                     .build_call(f, &[], "rand")
                     .unwrap()
@@ -2606,7 +2624,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- Debug print ----
-            "dbg" => {
+            IntrinsicId::Dbg => {
                 let i64_ty = self.ctx.i64_type();
                 let void_noarg_ty = self.ctx.void_type().fn_type(&[], false);
                 let space_fn = self
@@ -2705,7 +2723,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- Pointer operations ----
-            "ptr_read" => {
+            IntrinsicId::PtrRead => {
                 let ptr_val = args[0];
                 let ptr = self.get_value(ptr_val).into_pointer_value();
                 let result_llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
@@ -2716,7 +2734,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         .unwrap(),
                 )
             }
-            "ptr_write" => {
+            IntrinsicId::PtrWrite => {
                 let ptr_val = args[0];
                 let written_val = args[1];
                 let ptr = self.get_value(ptr_val).into_pointer_value();
@@ -2724,7 +2742,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 self.builder.build_store(ptr, v).unwrap();
                 None
             }
-            "ptr_offset" => {
+            IntrinsicId::PtrOffset => {
                 let ptr_val = args[0];
                 let offset_val = args[1];
                 let ptr = self.get_value(ptr_val).into_pointer_value();
@@ -2750,7 +2768,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 };
                 Some(result_ptr.into())
             }
-            "ptr_to_int" => {
+            IntrinsicId::PtrToInt => {
                 let ptr_val = args[0];
                 let ptr = self.get_value(ptr_val).into_pointer_value();
                 let i64_ty = self.ctx.i64_type();
@@ -2761,7 +2779,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         .into(),
                 )
             }
-            "int_to_ptr" => {
+            IntrinsicId::IntToPtr => {
                 let addr_val = args[0];
                 let addr = self.get_value(addr_val).into_int_value();
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
@@ -2772,11 +2790,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         .into(),
                 )
             }
-            "null_ptr" => {
+            IntrinsicId::NullPtr => {
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 Some(ptr_ty.const_null().into())
             }
-            "is_null" => {
+            IntrinsicId::IsNull => {
                 let ptr_val = args[0];
                 let ptr = self.get_value(ptr_val).into_pointer_value();
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
@@ -2797,7 +2815,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         .into(),
                 )
             }
-            "ptr_copy" => {
+            IntrinsicId::PtrCopy => {
                 let dst_val = args[0];
                 let src_val = args[1];
                 let count_val = args[2];
@@ -2859,7 +2877,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- Address-of (raw pointer to any lvalue) ----
-            "raw" | "raw_mut" => {
+            IntrinsicId::Raw | IntrinsicId::RawMut => {
                 let lvalue_val = args[0];
                 let lvalue_inst = self.cfg.get_inst(lvalue_val).clone();
                 match lvalue_inst.data {
@@ -2884,29 +2902,28 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- String parsing intrinsics ----
-            "parse_i32" | "parse_i64" | "parse_u32" | "parse_u64" => {
+            IntrinsicId::ParseI32
+            | IntrinsicId::ParseI64
+            | IntrinsicId::ParseU32
+            | IntrinsicId::ParseU64 => {
                 // @parse_*(s: String) -> integer
-                // Extract ptr and len from the String struct, then call __gruel_parse_*
+                // Extract ptr and len from the String struct, then call __gruel_parse_*.
+                // The runtime symbol comes from the registry (def.runtime_fn).
+                let runtime_fn = lookup_by_name(name_str)
+                    .and_then(|d| d.runtime_fn)
+                    .expect("parse_* intrinsics declare a runtime symbol");
+                let is_32_bit = matches!(id, IntrinsicId::ParseI32 | IntrinsicId::ParseU32);
                 let str_val = self.get_value(args[0]);
                 let (ptr, len) = self.extract_str_ptr_len(str_val);
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let i64_ty = self.ctx.i64_type();
-                let (runtime_fn, ret_llvm_ty): (&str, inkwell::types::BasicMetadataTypeEnum<'ctx>) =
-                    match name_str {
-                        "parse_i32" => ("__gruel_parse_i32", self.ctx.i32_type().into()),
-                        "parse_i64" => ("__gruel_parse_i64", i64_ty.into()),
-                        "parse_u32" => ("__gruel_parse_u32", self.ctx.i32_type().into()),
-                        "parse_u64" => ("__gruel_parse_u64", i64_ty.into()),
-                        _ => unreachable!(),
-                    };
-                let fn_ty_ret = match name_str {
-                    "parse_i32" | "parse_u32" => self
-                        .ctx
+                let fn_ty_ret = if is_32_bit {
+                    self.ctx
                         .i32_type()
-                        .fn_type(&[ptr_ty.into(), i64_ty.into()], false),
-                    _ => i64_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false),
+                        .fn_type(&[ptr_ty.into(), i64_ty.into()], false)
+                } else {
+                    i64_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false)
                 };
-                let _ = ret_llvm_ty; // suppress unused warning
                 let f = self
                     .module
                     .get_function(runtime_fn)
@@ -2919,7 +2936,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- Read line from stdin ----
-            "read_line" => {
+            IntrinsicId::ReadLine => {
                 // @read_line() -> String
                 // Allocate space for the String struct on the stack, call __gruel_read_line(out_ptr),
                 // then load the resulting struct.
@@ -2941,10 +2958,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let fn_ty = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+                let runtime_fn = lookup_by_name("read_line")
+                    .and_then(|d| d.runtime_fn)
+                    .expect("read_line has a runtime symbol");
                 let f = self
                     .module
-                    .get_function("__gruel_read_line")
-                    .unwrap_or_else(|| self.module.add_function("__gruel_read_line", fn_ty, None));
+                    .get_function(runtime_fn)
+                    .unwrap_or_else(|| self.module.add_function(runtime_fn, fn_ty, None));
                 self.builder.build_call(f, &[sret_ptr.into()], "").unwrap();
 
                 // Load the String struct from the sret alloca.
@@ -2956,7 +2976,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- Raw syscall ----
-            "syscall" => {
+            IntrinsicId::Syscall => {
                 let i64_ty = self.ctx.i64_type();
                 // Build argument values (all u64, first is syscall number)
                 let arg_vals: Vec<_> = args

@@ -124,7 +124,7 @@ The hand-maintained quick-reference table in the spec is replaced by the generat
   - Update `require_checked_for_intrinsic` calls to read `requires_unchecked` from the registry (eliminating the hard-coded list).
   - Preview-feature gating uses `def.preview` instead of ad-hoc calls.
 
-- [ ] **Phase 4: Wire codegen to the registry**
+- [x] **Phase 4: Wire codegen to the registry**
   - `translate_intrinsic` in `gruel-codegen-llvm` matches on `IntrinsicId`.
   - Runtime-fn name strings (`"gruel_random_u32"`, etc.) come from `def.runtime_fn`.
 
