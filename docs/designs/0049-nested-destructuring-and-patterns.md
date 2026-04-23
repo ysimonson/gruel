@@ -563,17 +563,42 @@ ship without the preview gate since it's a bug fix, not a new feature.
     bindings, bool literal exhaustion via the 2x2 matrix, and negative
     integer literals.
 
-- [ ] **Phase 5b: Refutable nested sub-patterns + exhaustiveness**
-  - Refutable nested sub-patterns (`Some(Some(v))`, `Some(0)`): require
-    cascading switch dispatch — cannot be elaborated to flat match without
-    arm duplication.
-  - Extend the exhaustiveness checker to consider nested pattern
-    combinations (witnesses become nested patterns in diagnostics).
-  - Revisit the CFG-builder bug around `let` + `if-else-with-panic` so the
-    tuple-match elaboration can emit a real `@panic` fallback for
-    non-exhaustive matches.
-  - The ADR's originally-planned approach — recursive `AirPattern` plus
-    recursive CFG descent — remains the right direction for these shapes.
+- [x] **Phase 5b: Refutable nested patterns via AST rewriting**
+  - `AstGen::try_elaborate_refutable_nested_match` handles arms with
+    refutable nested sub-patterns in variant fields (`Some(Some(v))`,
+    `Some(0)`). Elaboration strategy:
+    - Group arms by outer variant key `(type_name, variant_name)`.
+    - For groups with multiple arms sharing an outer variant (e.g.,
+      `Some(0) => ..., Some(42) => ..., _ => ...`), merge them into a
+      single outer arm `Some(__refut_N)` whose body is a nested match
+      over the field value containing every arm's inner sub-pattern.
+      The outer catch-all body (if any) is replicated as the nested
+      match's wildcard fallback.
+    - For groups with a single arm, elaborate per-arm: replace each
+      refutable sub with a fresh `__refut_N` ident and wrap the body
+      in a nested match whose fallback is the outer catch-all.
+    - Exhaustive matches without a catch-all (e.g., `Some(Some(v)) =>
+      ..., Some(None) => ..., None => ...`) are supported: the nested
+      match omits the wildcard fallback and relies on sema to enforce
+      exhaustiveness across the nested variant type.
+  - Limitations — the elaborator returns `None` and the normal match
+    path surfaces a clear "Phase 5" panic for:
+    - Multi-field variant arms with a shared outer variant, where
+      merging would require dispatch on multiple field positions.
+    - Struct-variant arms with a shared outer variant.
+    - Single-arm refutable-nested with no catch-all and a non-mergeable
+      group shape.
+  - Spec tests cover single-arm + catch-all, shared-outer merge, and
+    exhaustive-no-catch-all shapes.
+
+- [ ] **Future work still on the ADR checklist**
+  - Exhaustiveness-checker extension reporting nested-pattern witnesses
+    in diagnostics.
+  - Fix the CFG-builder bug around `let` + `if-else-with-panic` so the
+    tuple-root elaboration (Phase 5a) can emit a runtime `@panic`
+    fallback for non-exhaustive matches.
+  - `..` in the middle of a tuple destructure (`(a, .., b)`), which
+    needs sema to resolve positions from the inferred tuple arity.
 
 - [x] **Phase 6: Rest patterns (`..`) in let and match arms**
   - Parser already accepts `..` in tuple / struct / variant field lists

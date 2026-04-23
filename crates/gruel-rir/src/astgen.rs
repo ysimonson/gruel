@@ -8,11 +8,11 @@ use lasso::{Spur, ThreadedRodeo};
 /// Known type intrinsics that take a type argument rather than an expression.
 /// These intrinsics operate on types at compile time (e.g., @size_of(i32)).
 const TYPE_INTRINSICS: &[&str] = &["size_of", "align_of", "typeName", "typeInfo"];
-use gruel_parser::ast::{ConstDecl, DropFn, FieldPattern, TupleElemPattern};
+use gruel_parser::ast::{ConstDecl, DropFn, FieldPattern, Ident as AstIdent, TupleElemPattern};
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
-    Function, IntrinsicArg, Item, Method, ParamMode, Pattern, Statement, StructDecl, TypeExpr,
-    UnaryOp, ast::Visibility,
+    Function, IntrinsicArg, Item, MatchArm, MatchExpr, Method, ParamMode, Pattern, Statement,
+    StructDecl, TypeExpr, UnaryOp, ast::Visibility,
 };
 
 use crate::inst::{
@@ -609,6 +609,14 @@ impl<'a> AstGen<'a> {
                     return elaborated;
                 }
 
+                // Arms with refutable nested sub-patterns in variant fields
+                // (e.g., `Some(Some(v))`) elaborate into nested matches that
+                // fall back to the outer match's wildcard catch-all body
+                // (ADR-0049 Phase 5b).
+                if let Some(elaborated) = self.try_elaborate_refutable_nested_match(match_expr) {
+                    return elaborated;
+                }
+
                 let scrutinee = self.gen_expr(&match_expr.scrutinee);
                 let mut arms: Vec<(RirPattern, InstRef)> =
                     Vec::with_capacity(match_expr.arms.len());
@@ -1104,6 +1112,341 @@ impl<'a> AstGen<'a> {
             }
             _ => None,
         }
+    }
+
+    /// Elaborate a match expression with refutable nested sub-patterns in
+    /// variant fields (e.g., `Some(Some(v))`) by AST rewriting: replace
+    /// each refutable sub-pattern with a synthetic `__refut_N` ident
+    /// binding, wrap the arm body in a nested match over that binding,
+    /// and reuse the outer match's trailing wildcard/ident arm body as
+    /// the nested match's fallback (ADR-0049 Phase 5b).
+    ///
+    /// Returns `None` if:
+    /// - No arm has a refutable nested sub-pattern (caller uses normal path).
+    /// - The match has no trailing wildcard/ident arm to serve as the
+    ///   fallback — that shape requires true recursive dispatch with
+    ///   decision-tree construction and is still unsupported.
+    ///
+    /// The fallback body is cloned once per elaborated arm; since match
+    /// arms are mutually exclusive, the duplicated bodies execute at most
+    /// once across all paths at runtime.
+    fn try_elaborate_refutable_nested_match(&mut self, match_expr: &MatchExpr) -> Option<InstRef> {
+        let needs = match_expr
+            .arms
+            .iter()
+            .any(|arm| pattern_has_refutable_nested_sub(&arm.pattern));
+        if !needs {
+            return None;
+        }
+
+        // Locate the last wildcard / ident catch-all arm, if any. Arms
+        // after it are unreachable and dropped from the elaboration.
+        // When there's no catch-all, the nested matches are expected to
+        // be exhaustive across their variant type (enforced by sema).
+        let catch_all_idx = match_expr
+            .arms
+            .iter()
+            .rposition(|arm| matches!(&arm.pattern, Pattern::Wildcard(_) | Pattern::Ident { .. }));
+
+        let catch_all_body: Option<Box<Expr>> =
+            catch_all_idx.map(|idx| match_expr.arms[idx].body.clone());
+
+        // Group arms by outer variant key, preserving first-occurrence
+        // order. Arms sharing an outer variant are merged into a single
+        // arm with a nested match over the refutable positions so the
+        // first arm doesn't absorb the variant and hide subsequent arms.
+        //
+        // Arms without a variant key (Path, literal) pass through at
+        // their original position.
+        let upper = catch_all_idx.unwrap_or(match_expr.arms.len());
+        let arms_before_catch: &[MatchArm] = &match_expr.arms[..upper];
+        let mut groups: Vec<((Spur, Spur), Vec<usize>)> = Vec::new();
+        for (i, arm) in arms_before_catch.iter().enumerate() {
+            if let Some(key) = outer_variant_key(&arm.pattern) {
+                if let Some((_, list)) = groups.iter_mut().find(|(k, _)| *k == key) {
+                    list.push(i);
+                } else {
+                    groups.push((key, vec![i]));
+                }
+            }
+        }
+
+        // Decide merge strategy per group; bail out to `None` for shapes
+        // we don't yet support (multi-field variants with shared outer,
+        // struct variants with shared outer, rest patterns in a merged
+        // arm) so the normal match path surfaces a clear error.
+        let mut merged: std::collections::HashMap<usize, MatchArm> =
+            std::collections::HashMap::new();
+        let mut absorbed: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for (_, idxs) in &groups {
+            if idxs.len() < 2 {
+                continue;
+            }
+            let Some(arm) =
+                self.merge_group_single_field(&match_expr.arms, idxs, catch_all_body.as_deref())
+            else {
+                return None;
+            };
+            let first = idxs[0];
+            merged.insert(first, arm);
+            for &idx in idxs.iter().skip(1) {
+                absorbed.insert(idx);
+            }
+        }
+
+        let mut new_arms: Vec<MatchArm> = Vec::with_capacity(arms_before_catch.len() + 1);
+        for (i, arm) in arms_before_catch.iter().enumerate() {
+            if absorbed.contains(&i) {
+                continue;
+            }
+            if let Some(merged_arm) = merged.remove(&i) {
+                new_arms.push(merged_arm);
+                continue;
+            }
+            if pattern_has_refutable_nested_sub(&arm.pattern) {
+                // Per-arm elaboration requires a catch-all body to use as
+                // the nested match's fallback. Without it, fall through
+                // to the normal match path (which will panic with a
+                // clear message).
+                let Some(catch_all_body_ref) = catch_all_body.as_ref() else {
+                    return None;
+                };
+                let mut subs: Vec<(Spur, Pattern)> = Vec::new();
+                let new_pattern = self.replace_refutable_nested_subs(&arm.pattern, &mut subs);
+                let mut body = (*arm.body).clone();
+                for (syn_name, sub_pattern) in subs {
+                    body = Expr::Match(MatchExpr {
+                        scrutinee: Box::new(Expr::Ident(AstIdent {
+                            name: syn_name,
+                            span: sub_pattern.span(),
+                        })),
+                        arms: vec![
+                            MatchArm {
+                                pattern: sub_pattern.clone(),
+                                body: Box::new(body),
+                                span: sub_pattern.span(),
+                            },
+                            MatchArm {
+                                pattern: Pattern::Wildcard(sub_pattern.span()),
+                                body: Box::new((**catch_all_body_ref).clone()),
+                                span: sub_pattern.span(),
+                            },
+                        ],
+                        span: sub_pattern.span(),
+                    });
+                }
+                new_arms.push(MatchArm {
+                    pattern: new_pattern,
+                    body: Box::new(body),
+                    span: arm.span,
+                });
+            } else {
+                new_arms.push(arm.clone());
+            }
+        }
+        if let Some(idx) = catch_all_idx {
+            new_arms.push(match_expr.arms[idx].clone());
+        }
+
+        let new_match = MatchExpr {
+            scrutinee: match_expr.scrutinee.clone(),
+            arms: new_arms,
+            span: match_expr.span,
+        };
+        Some(self.gen_expr(&Expr::Match(new_match)))
+    }
+
+    /// Merge arms that share a single-field `DataVariant` outer pattern into
+    /// a single outer arm whose body is a nested `match` over the field
+    /// value. Returns `None` for shapes outside this scope — multi-field
+    /// variants, struct variants, or rest patterns — so the caller can
+    /// fall through to the normal match path.
+    fn merge_group_single_field(
+        &mut self,
+        all_arms: &[MatchArm],
+        idxs: &[usize],
+        catch_all_body: Option<&Expr>,
+    ) -> Option<MatchArm> {
+        // Extract the shared outer variant reference + span from the
+        // first arm; subsequent arms are validated to share the same
+        // (type_name, variant) (guaranteed by grouping), single-field,
+        // non-rest shape.
+        let template = &all_arms[idxs[0]].pattern;
+        let (base, type_name, variant_ident, outer_span) = match template {
+            Pattern::DataVariant {
+                base,
+                type_name,
+                variant,
+                span,
+                ..
+            } => (base.clone(), *type_name, *variant, *span),
+            _ => return None, // StructVariant shared-outer merging not supported
+        };
+
+        for &i in idxs {
+            match &all_arms[i].pattern {
+                Pattern::DataVariant { fields, .. } => {
+                    if fields.len() != 1 {
+                        return None;
+                    }
+                    if matches!(&fields[0], TupleElemPattern::Rest(_)) {
+                        return None;
+                    }
+                }
+                _ => return None,
+            }
+        }
+
+        let fresh = self.fresh_refutable_elab_name();
+
+        // Inner match arms — one per merged arm, preserving order.
+        let mut inner_arms: Vec<MatchArm> = Vec::with_capacity(idxs.len() + 1);
+        for &i in idxs {
+            let arm = &all_arms[i];
+            let inner_sub = match &arm.pattern {
+                Pattern::DataVariant { fields, .. } => match &fields[0] {
+                    TupleElemPattern::Pattern(p) => p.clone(),
+                    TupleElemPattern::Rest(_) => return None,
+                },
+                _ => unreachable!(),
+            };
+            inner_arms.push(MatchArm {
+                pattern: inner_sub,
+                body: arm.body.clone(),
+                span: arm.span,
+            });
+        }
+        // When the outer match has a catch-all, mirror it as the nested
+        // match's wildcard fallback so runtime coverage is preserved.
+        // Without a catch-all, the nested match is expected to cover
+        // every value of the field type on its own (sema enforces
+        // exhaustiveness).
+        if let Some(body) = catch_all_body {
+            inner_arms.push(MatchArm {
+                pattern: Pattern::Wildcard(outer_span),
+                body: Box::new(body.clone()),
+                span: outer_span,
+            });
+        }
+
+        let nested_match = Expr::Match(MatchExpr {
+            scrutinee: Box::new(Expr::Ident(AstIdent {
+                name: fresh,
+                span: outer_span,
+            })),
+            arms: inner_arms,
+            span: outer_span,
+        });
+
+        Some(MatchArm {
+            pattern: Pattern::DataVariant {
+                base,
+                type_name,
+                variant: variant_ident,
+                fields: vec![TupleElemPattern::Pattern(Pattern::Ident {
+                    is_mut: false,
+                    name: AstIdent {
+                        name: fresh,
+                        span: outer_span,
+                    },
+                    span: outer_span,
+                })],
+                span: outer_span,
+            },
+            body: Box::new(nested_match),
+            span: outer_span,
+        })
+    }
+
+    /// Walk a match-arm pattern and replace each refutable sub-pattern in
+    /// a variant field with a fresh `__refut_N` ident binding, appending
+    /// `(fresh_name, sub_pattern)` to `subs` for body elaboration
+    /// (ADR-0049 Phase 5b).
+    fn replace_refutable_nested_subs(
+        &mut self,
+        pat: &Pattern,
+        subs: &mut Vec<(Spur, Pattern)>,
+    ) -> Pattern {
+        match pat {
+            Pattern::DataVariant {
+                base,
+                type_name,
+                variant,
+                fields,
+                span,
+            } => {
+                let new_fields = fields
+                    .iter()
+                    .map(|e| match e {
+                        TupleElemPattern::Pattern(sub) if is_refutable_variant_sub(sub) => {
+                            let fresh = self.fresh_refutable_elab_name();
+                            subs.push((fresh, sub.clone()));
+                            TupleElemPattern::Pattern(Pattern::Ident {
+                                is_mut: false,
+                                name: AstIdent {
+                                    name: fresh,
+                                    span: sub.span(),
+                                },
+                                span: sub.span(),
+                            })
+                        }
+                        _ => e.clone(),
+                    })
+                    .collect();
+                Pattern::DataVariant {
+                    base: base.clone(),
+                    type_name: *type_name,
+                    variant: *variant,
+                    fields: new_fields,
+                    span: *span,
+                }
+            }
+            Pattern::StructVariant {
+                base,
+                type_name,
+                variant,
+                fields,
+                span,
+            } => {
+                let new_fields = fields
+                    .iter()
+                    .map(|fp| match &fp.sub {
+                        Some(sub) if is_refutable_variant_sub(sub) => {
+                            let fresh = self.fresh_refutable_elab_name();
+                            subs.push((fresh, sub.clone()));
+                            FieldPattern {
+                                field_name: fp.field_name,
+                                sub: Some(Pattern::Ident {
+                                    is_mut: false,
+                                    name: AstIdent {
+                                        name: fresh,
+                                        span: sub.span(),
+                                    },
+                                    span: sub.span(),
+                                }),
+                                is_mut: fp.is_mut,
+                                span: fp.span,
+                            }
+                        }
+                        _ => fp.clone(),
+                    })
+                    .collect();
+                Pattern::StructVariant {
+                    base: base.clone(),
+                    type_name: *type_name,
+                    variant: *variant,
+                    fields: new_fields,
+                    span: *span,
+                }
+            }
+            _ => pat.clone(),
+        }
+    }
+
+    fn fresh_refutable_elab_name(&mut self) -> Spur {
+        let n = self.nested_pat_counter;
+        self.nested_pat_counter += 1;
+        self.interner.get_or_intern(format!("__refut_{}", n))
     }
 
     /// Elaborate a match expression that has any tuple-root arm into a
@@ -1965,6 +2308,51 @@ impl<'a> AstGen<'a> {
                 self.gen_expr(expr)
             }
         }
+    }
+}
+
+/// Extract the `(type_name, variant_name)` identity of a variant pattern,
+/// used by the refutable-nested elaborator to detect when multiple arms
+/// share an outer variant (ADR-0049 Phase 5b).
+fn outer_variant_key(pat: &Pattern) -> Option<(Spur, Spur)> {
+    match pat {
+        Pattern::DataVariant {
+            type_name, variant, ..
+        }
+        | Pattern::StructVariant {
+            type_name, variant, ..
+        } => Some((type_name.name, variant.name)),
+        _ => None,
+    }
+}
+
+/// Whether a variant field's sub-pattern is "refutable nested" — i.e. it
+/// would need to be checked with cascading dispatch rather than a plain
+/// field extraction. Leaves (Wildcard, Ident) and irrefutable destructures
+/// (Struct, Tuple) are not refutable nested; everything else is
+/// (ADR-0049 Phase 5b).
+fn is_refutable_variant_sub(sub: &Pattern) -> bool {
+    match sub {
+        Pattern::Wildcard(_) | Pattern::Ident { .. } => false,
+        Pattern::Struct { .. } | Pattern::Tuple { .. } => false,
+        _ => true,
+    }
+}
+
+/// Whether an arm pattern has any refutable nested sub-pattern in a
+/// variant-field position. Used to decide whether
+/// `try_elaborate_refutable_nested_match` applies (ADR-0049 Phase 5b).
+fn pattern_has_refutable_nested_sub(pat: &Pattern) -> bool {
+    match pat {
+        Pattern::DataVariant { fields, .. } => fields.iter().any(|e| match e {
+            TupleElemPattern::Pattern(sub) => is_refutable_variant_sub(sub),
+            TupleElemPattern::Rest(_) => false,
+        }),
+        Pattern::StructVariant { fields, .. } => fields.iter().any(|fp| match &fp.sub {
+            Some(sub) => is_refutable_variant_sub(sub),
+            None => false,
+        }),
+        _ => false,
     }
 }
 
