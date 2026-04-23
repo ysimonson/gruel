@@ -19,9 +19,7 @@ use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
 use chumsky::recovery::via_parser;
 use chumsky::recursive::Direct;
-use gruel_error::{
-    CompileError, CompileErrors, ErrorKind, MultiErrorResult, PreviewFeature, PreviewFeatures,
-};
+use gruel_error::{CompileError, CompileErrors, ErrorKind, MultiErrorResult, PreviewFeatures};
 use gruel_lexer::TokenKind;
 use gruel_span::{FileId, Span};
 use lasso::{Spur, ThreadedRodeo};
@@ -2158,9 +2156,9 @@ enum ExprFollower {
 }
 
 /// Parser for a let binding pattern (ADR-0049): delegates to the generic
-/// `pattern_parser()`. Refutability is enforced by sema (Phase 3). The
-/// post-parse preview-feature validator (`validate_preview_patterns`) rejects
-/// nested / rest shapes when `nested_patterns` is off.
+/// `pattern_parser()`. Refutability is enforced by sema (Phase 3).
+/// Nested pattern shapes are accepted unconditionally after Phase 8
+/// stabilization.
 fn let_pattern_parser<'src, I>() -> GruelParser<'src, I, Pattern>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -3123,14 +3121,11 @@ impl ChumskyParser {
                 CompileErrors::from(errors)
             })?;
 
-        // Post-parse AST validation: refutability (always) + preview gate
-        // (only when a preview feature isn't enabled). See ADR-0049 §2, §8.
+        // Post-parse AST validation: refutability in let-bindings
+        // (unconditional per ADR-0049 §2). The nested-patterns preview
+        // gate was removed at stabilization (Phase 8).
         let mut errors = Vec::new();
-        let validator = AstValidator {
-            nested_patterns_enabled: self
-                .preview_features
-                .contains(&PreviewFeature::NestedPatterns),
-        };
+        let validator = AstValidator;
         validator.walk_ast(&ast, &mut errors);
         if !errors.is_empty() {
             return Err(CompileErrors::from(errors));
@@ -3140,17 +3135,11 @@ impl ChumskyParser {
     }
 }
 
-/// Post-parse AST validator for patterns (ADR-0049).
-///
-/// Two kinds of errors:
-/// 1. **Refutability**: a refutable pattern in a `let` binding is rejected,
-///    regardless of preview feature. This rule applies to every let, always.
-/// 2. **Preview gate**: nested sub-patterns, rest `..`, tuple patterns in match
-///    arms, and top-level struct destructures are rejected when
-///    `nested_patterns` isn't enabled.
-struct AstValidator {
-    nested_patterns_enabled: bool,
-}
+/// Post-parse AST validator for patterns (ADR-0049): rejects refutable
+/// patterns in `let` bindings. Formerly also gated nested syntax behind
+/// the `nested_patterns` preview feature — that gate was removed when
+/// ADR-0049 stabilized (Phase 8).
+struct AstValidator;
 
 impl AstValidator {
     fn walk_ast(&self, ast: &Ast, errors: &mut Vec<CompileError>) {
@@ -3336,27 +3325,18 @@ fn validate_expr(expr: &Expr, errors: &mut Vec<CompileError>, v: &AstValidator) 
 ///    a property of the let context, not a preview-gated feature.
 /// 2. If the preview feature is off, emit preview-required errors for nested
 ///    sub-patterns and `..` rest shapes.
-fn validate_let_pattern(pat: &Pattern, errors: &mut Vec<CompileError>, v: &AstValidator) {
+fn validate_let_pattern(pat: &Pattern, errors: &mut Vec<CompileError>, _v: &AstValidator) {
     if is_refutable(pat) {
         errors.push(CompileError::new(
             ErrorKind::RefutablePatternInLet,
             refutable_focus_span(pat),
         ));
-        // Still continue into preview checks so we surface both errors if both
-        // conditions hold. Tests can assert either.
-    }
-    if !v.nested_patterns_enabled {
-        check_let_pattern_preview(pat, errors);
     }
 }
 
-/// Validate a pattern in a match-arm position. Only the preview gate applies;
-/// refutability is fine in a match arm.
-fn validate_match_pattern(pat: &Pattern, errors: &mut Vec<CompileError>, v: &AstValidator) {
-    if !v.nested_patterns_enabled {
-        check_match_pattern_preview(pat, errors);
-    }
-}
+/// Validate a pattern in a match-arm position. Formerly preview-gated;
+/// now a no-op since ADR-0049 is stabilized.
+fn validate_match_pattern(_pat: &Pattern, _errors: &mut Vec<CompileError>, _v: &AstValidator) {}
 
 /// Pick the most informative span for a refutability error: the innermost
 /// refutable sub-pattern when we can find one, otherwise the pattern's own span.
@@ -3386,97 +3366,11 @@ fn refutable_focus_span(pat: &Pattern) -> Span {
     }
 }
 
-fn check_let_pattern_preview(pat: &Pattern, errors: &mut Vec<CompileError>) {
-    // In a let, the legal flat shapes are: Wildcard, Ident, Struct (flat), Tuple (flat).
-    // Anything else — or nested sub-patterns / rest — is nested-patterns territory.
-    match pat {
-        Pattern::Wildcard(_) | Pattern::Ident { .. } => {}
-        Pattern::Struct { fields, .. } => {
-            for fp in fields {
-                check_flat_field_pattern(fp, errors);
-            }
-        }
-        Pattern::Tuple { elems, .. } => {
-            for e in elems {
-                check_flat_tuple_elem(e, errors);
-            }
-        }
-        // Pattern forms that are refutable can't appear in let anyway; sema will
-        // reject them in Phase 3. Don't duplicate that error here.
-        _ => {}
-    }
-}
-
-fn check_flat_field_pattern(fp: &FieldPattern, errors: &mut Vec<CompileError>) {
-    match (&fp.field_name, &fp.sub) {
-        (None, _) => errors.push(preview_required_err(
-            fp.span,
-            "rest pattern `..` in struct destructure",
-        )),
-        (Some(_), None) => {}
-        (Some(_), Some(Pattern::Wildcard(_))) => {}
-        (Some(_), Some(Pattern::Ident { .. })) => {}
-        (Some(_), Some(other)) => errors.push(preview_required_err(
-            other.span(),
-            "nested sub-pattern in struct destructure",
-        )),
-    }
-}
-
-fn check_flat_tuple_elem(elem: &TupleElemPattern, errors: &mut Vec<CompileError>) {
-    match elem {
-        TupleElemPattern::Rest(span) => {
-            errors.push(preview_required_err(*span, "rest pattern `..` in tuple"));
-        }
-        TupleElemPattern::Pattern(Pattern::Wildcard(_)) => {}
-        TupleElemPattern::Pattern(Pattern::Ident { .. }) => {}
-        TupleElemPattern::Pattern(other) => errors.push(preview_required_err(
-            other.span(),
-            "nested sub-pattern in tuple destructure",
-        )),
-    }
-}
-
-fn check_match_pattern_preview(pat: &Pattern, errors: &mut Vec<CompileError>) {
-    // Match arms previously accepted: Wildcard, Int, NegInt, Bool, Path,
-    // DataVariant/StructVariant with flat bindings. Reject tuple patterns
-    // and nested sub-patterns when the preview flag is off.
-    match pat {
-        Pattern::Tuple { span, .. } => {
-            errors.push(preview_required_err(*span, "tuple pattern in match arm"))
-        }
-        Pattern::Struct { span, .. } => errors.push(preview_required_err(
-            *span,
-            "struct destructure pattern in match arm",
-        )),
-        Pattern::DataVariant { fields, .. } => {
-            for e in fields {
-                check_flat_tuple_elem(e, errors);
-            }
-        }
-        Pattern::StructVariant { fields, .. } => {
-            for fp in fields {
-                check_flat_field_pattern(fp, errors);
-            }
-        }
-        Pattern::Wildcard(_)
-        | Pattern::Ident { .. }
-        | Pattern::Int(_)
-        | Pattern::NegInt(_)
-        | Pattern::Bool(_)
-        | Pattern::Path(_) => {}
-    }
-}
-
-fn preview_required_err(span: Span, what: &str) -> CompileError {
-    CompileError::new(
-        ErrorKind::PreviewFeatureRequired {
-            feature: PreviewFeature::NestedPatterns,
-            what: format!("{} (ADR-0049)", what),
-        },
-        span,
-    )
-}
+// The former `check_let_pattern_preview`, `check_flat_field_pattern`,
+// `check_flat_tuple_elem`, `check_match_pattern_preview`, and
+// `preview_required_err` helpers were removed when ADR-0049 stabilized
+// (Phase 8). Nested patterns are now always accepted by the parser;
+// refutability in `let` remains enforced by `validate_let_pattern`.
 
 #[cfg(test)]
 mod tests {
@@ -4961,19 +4855,16 @@ mod tests {
         }
     }
 
-    // ==================== ADR-0049 Phase 2: parser shapes ====================
+    // ==================== ADR-0049: nested pattern shapes ====================
     //
-    // These tests drive the parser directly with the nested_patterns preview feature
-    // enabled (bypassing the post-parse validator). They only check AST shape — sema
-    // and lowering open up in later phases.
+    // These tests drive the parser on nested pattern shapes. Previously the
+    // post-parse validator gated them behind the `nested_patterns` preview
+    // feature; now the feature is stabilized so parsing just works.
 
     fn parse_with_nested(source: &str) -> MultiErrorResult<ParseResult> {
-        use gruel_error::{PreviewFeature, PreviewFeatures};
         let lexer = Lexer::new(source);
         let (tokens, interner) = lexer.tokenize().unwrap();
-        let mut features = PreviewFeatures::new();
-        features.insert(PreviewFeature::NestedPatterns);
-        let parser = ChumskyParser::new(tokens, interner).with_preview_features(features);
+        let parser = ChumskyParser::new(tokens, interner);
         parser
             .parse()
             .map(|(ast, interner)| ParseResult { ast, interner })
@@ -5111,36 +5002,19 @@ mod tests {
         }
     }
 
+    // Post-stabilization note (ADR-0049 Phase 8): the former
+    // `test_preview_gate_rejects_*` tests checked that the nested-pattern
+    // syntax was rejected without the preview flag. Nested patterns now
+    // parse unconditionally, so those tests were removed. Coverage of the
+    // parsed AST shapes lives in the `parse_with_nested` tests above.
     #[test]
-    fn test_preview_gate_rejects_nested_without_flag() {
-        // Without the preview flag, nested destructure must error.
-        let source = "fn main() -> i32 { let ((a, b), c) = t(); 0 }";
-        let result = parse(source);
-        assert!(result.is_err(), "expected preview error without flag");
-    }
-
-    #[test]
-    fn test_preview_gate_rejects_tuple_match_without_flag() {
-        let source = "fn main() -> i32 { match p() { (0, 0) => 0, _ => 1 } }";
-        let result = parse(source);
-        assert!(result.is_err(), "expected preview error without flag");
-    }
-
-    #[test]
-    fn test_preview_gate_rejects_rest_without_flag() {
-        let source = "fn main() -> i32 { let (a, .., z) = q(); 0 }";
-        let result = parse(source);
-        assert!(result.is_err(), "expected preview error without flag");
-    }
-
-    #[test]
-    fn test_preview_gate_accepts_flat_without_flag() {
-        // Flat pre-existing forms must continue to parse without the flag.
+    fn test_flat_tuple_destructure_still_parses() {
+        // Flat pre-existing forms must continue to parse.
         let source = "fn main() -> i32 { let (a, b) = pair(); 0 }";
         let result = parse(source);
         assert!(
             result.is_ok(),
-            "flat tuple destructure should parse without flag"
+            "flat tuple destructure should parse unconditionally"
         );
     }
 
@@ -5184,7 +5058,7 @@ mod tests {
     #[test]
     fn test_refutable_variant_in_let() {
         // `let Option::Some(x) = opt;` — refutable, even though the data-variant
-        // pattern syntactically parses (requires the nested_patterns gate).
+        // pattern syntactically parses (stable after ADR-0049 Phase 8).
         let source = "fn main() -> i32 { let Option::Some(x) = opt(); 0 }";
         let result = parse_with_nested(source);
         assert_refutable_in_let_err(&result);

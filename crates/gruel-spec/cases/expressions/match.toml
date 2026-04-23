@@ -735,8 +735,6 @@ exit_code = 10
 [[case]]
 name = "nested_match_struct_in_data_variant"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Irrefutable struct sub-pattern inside a data-variant field (ADR-0049)"
 source = """
 struct Point { x: i32, y: i32 }
@@ -759,8 +757,6 @@ exit_code = 42
 [[case]]
 name = "nested_match_struct_in_struct_variant"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Irrefutable struct sub-pattern inside a struct-variant field (ADR-0049)"
 source = """
 struct Inner { a: i32, b: i32 }
@@ -783,8 +779,6 @@ exit_code = 42
 [[case]]
 name = "nested_match_top_level_struct_pattern"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Top-level struct destructure pattern in a single-arm match (ADR-0049)"
 source = """
 struct Point { x: i32, y: i32 }
@@ -801,8 +795,6 @@ exit_code = 42
 [[case]]
 name = "nested_match_wildcard_in_variant_field"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Wildcard nested sub-pattern in a variant field drops that field (ADR-0049)"
 source = """
 struct Point { x: i32, y: i32 }
@@ -829,8 +821,6 @@ exit_code = 42
 [[case]]
 name = "tuple_match_root_literals"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Tuple pattern at match root with integer literal elements (ADR-0049 Phase 5a)"
 source = """
 fn main() -> i32 {
@@ -849,8 +839,6 @@ exit_code = 42
 [[case]]
 name = "tuple_match_root_bindings"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Tuple pattern at match root binds elements via idents (ADR-0049 Phase 5a)"
 source = """
 fn main() -> i32 {
@@ -867,8 +855,6 @@ exit_code = 42
 [[case]]
 name = "tuple_match_root_bools"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Tuple pattern at match root with boolean literal elements (ADR-0049 Phase 5a)"
 source = """
 fn main() -> i32 {
@@ -887,8 +873,6 @@ exit_code = 42
 [[case]]
 name = "tuple_match_root_negative_literal"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Tuple pattern at match root matches negative integer literals (ADR-0049 Phase 5a)"
 source = """
 fn main() -> i32 {
@@ -909,8 +893,6 @@ exit_code = 47
 [[case]]
 name = "match_data_variant_trailing_rest"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Trailing rest `..` in data variant pattern drops unlisted fields (ADR-0049 Phase 6)"
 source = """
 enum TripleOpt {
@@ -931,8 +913,6 @@ exit_code = 42
 [[case]]
 name = "match_struct_variant_rest"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Rest `..` in struct variant pattern drops unlisted fields (ADR-0049 Phase 6)"
 source = """
 enum Shape {
@@ -953,8 +933,6 @@ exit_code = 42
 [[case]]
 name = "match_tuple_root_trailing_rest"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Trailing `..` in tuple-root match drops unlisted positions (ADR-0049 Phase 6)"
 source = """
 fn main() -> i32 {
@@ -974,8 +952,6 @@ exit_code = 42
 [[case]]
 name = "refutable_nested_single_arm_catchall"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Nested refutable variant pattern with a wildcard fallback (ADR-0049 Phase 5b)"
 source = """
 enum IntOpt { Some(i32), None }
@@ -994,8 +970,6 @@ exit_code = 42
 [[case]]
 name = "refutable_nested_shared_outer_merge"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Multiple arms sharing an outer variant merge into one nested match (ADR-0049 Phase 5b)"
 source = """
 enum IntOpt { Some(i32), None }
@@ -1017,8 +991,6 @@ exit_code = 42
 [[case]]
 name = "refutable_nested_exhaustive_no_catchall"
 spec = ["4.7:23", "4.7:24"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Exhaustive nested variants without a wildcard catch-all (ADR-0049 Phase 5b)"
 source = """
 enum IntOpt { Some(i32), None }

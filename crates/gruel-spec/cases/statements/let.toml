@@ -546,8 +546,6 @@ exit_code = 43
 [[case]]
 name = "nested_destructure_struct_in_struct"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Nested struct-in-struct destructure binds inner fields (ADR-0049)"
 source = """
 struct Inner { a: i32, b: i32 }
@@ -564,8 +562,6 @@ exit_code = 42
 [[case]]
 name = "nested_destructure_tuple_of_tuples"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Nested tuple-of-tuples destructure binds all leaves (ADR-0049)"
 source = """
 fn main() -> i32 {
@@ -579,8 +575,6 @@ exit_code = 10
 [[case]]
 name = "nested_destructure_struct_in_tuple"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Struct inside tuple destructure (ADR-0049)"
 source = """
 struct Point { x: i32, y: i32 }
@@ -596,8 +590,6 @@ exit_code = 42
 [[case]]
 name = "nested_destructure_tuple_in_struct"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Tuple inside struct destructure (ADR-0049)"
 source = """
 struct Pair { xy: (i32, i32), tag: i32 }
@@ -613,8 +605,6 @@ exit_code = 42
 [[case]]
 name = "nested_destructure_wildcard_leaf"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Wildcard at a nested leaf drops that leaf (ADR-0049)"
 source = """
 fn main() -> i32 {
@@ -640,8 +630,6 @@ error_contains = "refutable pattern"
 [[case]]
 name = "refutable_nested_int_in_let_errors"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Refutable nested literal in let is rejected (ADR-0049)"
 source = """
 fn main() -> i32 {
@@ -677,8 +665,6 @@ exit_code = 42
 [[case]]
 name = "anon_struct_alias_destructure_with_nested"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Anon-struct alias destructure combined with nested sub-pattern (ADR-0049 Phase 7)"
 source = """
 fn Pair(comptime T: type) -> type {
@@ -722,8 +708,6 @@ error_contains = "type mismatch"
 [[case]]
 name = "let_struct_rest_drops_remaining_fields"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Rest pattern `..` in struct destructure drops unlisted fields (ADR-0049 Phase 6)"
 source = """
 struct Point3 { x: i32, y: i32, z: i32 }
@@ -739,8 +723,6 @@ exit_code = 42
 [[case]]
 name = "let_struct_rest_with_non_copy_field"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Rest pattern `..` drops non-copy fields exactly once (ADR-0049 Phase 6)"
 source = """
 struct Config { name: String, size: i32 }
@@ -756,8 +738,6 @@ exit_code = 42
 [[case]]
 name = "let_tuple_rest_trailing"
 spec = ["5.1:14"]
-preview = "nested_patterns"
-preview_should_pass = true
 description = "Trailing rest pattern `..` in tuple destructure drops unlisted positions (ADR-0049 Phase 6)"
 source = """
 fn main() -> i32 {

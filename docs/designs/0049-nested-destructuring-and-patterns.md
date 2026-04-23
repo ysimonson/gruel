@@ -1,12 +1,12 @@
 ---
 id: 0049
 title: Nested Destructuring and Pattern Matching
-status: proposal
+status: implemented
 tags: [syntax, patterns, destructuring, pattern-matching, tuples]
 feature-flag: nested_patterns
 created: 2026-04-22
-accepted:
-implemented:
+accepted: 2026-04-22
+implemented: 2026-04-22
 spec-sections: ["4.7", "5.1"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -645,17 +645,22 @@ ship without the preview gate since it's a bug fix, not a new feature.
   - Ships unconditionally — no preview gate needed, since this is a bug
     fix for an existing workflow.
 
-- [ ] **Phase 8: Spec, tests, stabilization**
-  - Revise `docs/spec/src/05-statements/01-let-statements.md` (5.1) for nested let
-    patterns and `..` in let.
-  - Revise `docs/spec/src/04-expressions/07-match-expressions.md` (4.7) for tuple
-    patterns, nested variant patterns, and `..`.
-  - Full spec-test matrix covering everything above plus: nested witnesses in
-    exhaustiveness errors, move/copy/drop interactions at depth, `mut` at depth.
-  - UI tests for the new diagnostic wording.
-  - Run traceability (`cargo run -p gruel-spec -- --traceability`).
-  - Remove `PreviewFeature::NestedPatterns` and all `preview` / `preview_should_pass`
-    fields from the new tests.
+- [x] **Phase 8: Spec, tests, stabilization**
+  - Removed `PreviewFeature::NestedPatterns` from `gruel-error`,
+    tore out the `AstValidator::nested_patterns_enabled` field and the
+    preview-gate helpers (`check_let_pattern_preview`,
+    `check_flat_field_pattern`, `check_flat_tuple_elem`,
+    `check_match_pattern_preview`, `preview_required_err`) in
+    `gruel-parser/src/chumsky_parser.rs`.
+  - Stripped `preview = "nested_patterns"` and `preview_should_pass = true`
+    from every spec test in `expressions/match.toml` and
+    `statements/let.toml`; those tests now run unconditionally.
+  - Spec rules 4.7:23, 4.7:24 (and the 4.7:25 example) added in Phase
+    4b and spec 5.1:14 (Phase 4a) cover the nested-pattern semantics
+    for match arms and let destructures. Traceability remains at 100%
+    normative coverage.
+  - ADR frontmatter: `status: implemented`, `accepted: 2026-04-22`,
+    `implemented: 2026-04-22`.
 
 ## Consequences
 
