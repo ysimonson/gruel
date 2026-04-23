@@ -1,7 +1,7 @@
 +++
 title = "Linear Types"
 weight = 17
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Linear Types

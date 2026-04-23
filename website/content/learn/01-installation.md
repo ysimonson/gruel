@@ -1,7 +1,7 @@
 +++
 title = "Installation"
 weight = 1
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Installation

@@ -1,7 +1,7 @@
 +++
 title = "Putting It Together"
 weight = 10
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Putting It Together
@@ -124,13 +124,13 @@ The [GitHub repository](https://github.com/ysimonson/gruel) has more examples in
 
 You've learned the fundamentals of Gruel! The next chapters cover more features:
 
-- [Methods](/tutorial/11-methods/) — dot-syntax operations on structs using `impl` blocks
-- [Strings](/tutorial/12-strings/) — the `String` type with heap allocation and automatic cleanup
-- [Input and Parsing](/tutorial/13-input-and-parsing/) — reading user input and converting strings to numbers
-- [Comptime and Generics](/tutorial/14-comptime/) — compile-time evaluation and generic functions
-- [Modules](/tutorial/15-modules/) — splitting code across multiple files with `@import`
-- [Linear Types](/tutorial/16-linear-types/) — must-consume types and explicit duplication with `@handle`
-- [Unchecked Code and Raw Pointers](/tutorial/17-unchecked/) — `checked` blocks, raw pointers, and syscalls
+- [Methods](/learn/11-methods/) — dot-syntax operations on structs using `impl` blocks
+- [Strings](/learn/12-strings/) — the `String` type with heap allocation and automatic cleanup
+- [Input and Parsing](/learn/13-input-and-parsing/) — reading user input and converting strings to numbers
+- [Comptime and Generics](/learn/14-comptime/) — compile-time evaluation and generic functions
+- [Modules](/learn/15-modules/) — splitting code across multiple files with `@import`
+- [Linear Types](/learn/16-linear-types/) — must-consume types and explicit duplication with `@handle`
+- [Unchecked Code and Raw Pointers](/learn/17-unchecked/) — `checked` blocks, raw pointers, and syscalls
 
 For the complete language reference, read the [Language Specification](/spec/).
 

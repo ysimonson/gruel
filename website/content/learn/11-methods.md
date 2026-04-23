@@ -1,7 +1,7 @@
 +++
 title = "Methods"
 weight = 11
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Methods

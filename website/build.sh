@@ -30,6 +30,60 @@ else
     find website/content/spec -name "*.md" -exec sed -i 's|@/\([0-9]\)|@/spec/\1|g' {} \;
 fi
 
+# Copy the generated intrinsics reference into the website. It's generated
+# from the gruel-intrinsics registry (see ADR-0050) and committed under
+# docs/generated/; `make check-intrinsic-docs` enforces it stays in sync.
+echo "Copying intrinsics reference..."
+mkdir -p website/content/learn/references
+INTRINSICS_DST=website/content/learn/references/intrinsics.md
+{
+    cat <<'EOF'
++++
+title = "Intrinsics"
+weight = 1
+template = "learn/page.html"
++++
+
+EOF
+    # Skip the auto-generated HTML comment and rewrite the ADR link to point
+    # at the ADR page we render under references/adrs/.
+    tail -n +2 docs/generated/intrinsics-reference.md \
+        | sed -e 's|(\.\./designs/\([0-9][0-9][0-9][0-9]\)-\([^)]*\)\.md)|(@/learn/references/adrs/\1-\2.md)|g'
+} > "$INTRINSICS_DST"
+
+# Copy ADRs. Each ADR becomes a page under references/adrs/. The section
+# index is authored in-tree (see content/learn/references/adrs/_index.md);
+# we just copy the individual ADR files.
+echo "Copying ADRs..."
+mkdir -p website/content/learn/references/adrs
+# Clear any previously-copied ADR pages (keep _index.md).
+find website/content/learn/references/adrs -maxdepth 1 -name '*.md' \
+    ! -name '_index.md' -delete
+for adr in docs/designs/[0-9][0-9][0-9][0-9]-*.md; do
+    [ -f "$adr" ] || continue
+    base=$(basename "$adr" .md)
+    num=${base%%-*}
+    # Pull title from the YAML frontmatter's `title:` field; fall back to the
+    # first H1 or the filename.
+    title=$(awk '/^---$/{n++; next} n==1 && /^title:/{sub(/^title:[[:space:]]*/, ""); print; exit}' "$adr")
+    if [ -z "$title" ]; then
+        title=$(grep -m1 '^# ' "$adr" | sed -e 's/^# *//' -e 's/^ADR-[0-9]*: *//')
+    fi
+    if [ -z "$title" ]; then
+        title="$base"
+    fi
+    # Escape double quotes for TOML.
+    title_esc=${title//\"/\\\"}
+    dst="website/content/learn/references/adrs/${base}.md"
+    {
+        printf '+++\ntitle = "ADR-%s: %s"\nweight = %s\ntemplate = "learn/page.html"\n+++\n\n' \
+            "$num" "$title_esc" "$((10#$num))"
+        # Strip the YAML frontmatter block; the remaining markdown renders as
+        # the page body.
+        awk 'BEGIN{n=0} /^---$/ && n<2 {n++; next} n>=2' "$adr"
+    } > "$dst"
+done
+
 # Generate benchmark charts for each platform
 echo "Generating benchmark charts..."
 BENCHMARKS_DIR="$ROOT/website/static/benchmarks"

@@ -1,7 +1,7 @@
 +++
 title = "Comptime and Generics"
 weight = 15
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Comptime and Generics

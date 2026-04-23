@@ -1,7 +1,7 @@
 +++
 title = "Strings"
 weight = 12
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Strings
@@ -133,7 +133,7 @@ fn main() -> i32 {
 
 ## Custom Destructors
 
-If your struct holds a String or other resource that needs cleanup, you can define a custom destructor with `drop fn`. See [Destructors](/tutorial/destructors/) for details on drop semantics, drop order, and how to write your own.
+If your struct holds a String or other resource that needs cleanup, you can define a custom destructor with `drop fn`. See [Destructors](/learn/destructors/) for details on drop semantics, drop order, and how to write your own.
 
 ## Pre-allocating Capacity
 

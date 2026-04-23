@@ -1,7 +1,7 @@
 +++
 title = "Control Flow"
 weight = 5
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Control Flow

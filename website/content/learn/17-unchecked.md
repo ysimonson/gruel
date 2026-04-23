@@ -1,7 +1,7 @@
 +++
 title = "Unchecked Code and Raw Pointers"
 weight = 18
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Unchecked Code and Raw Pointers

@@ -1,7 +1,7 @@
 +++
 title = "Arrays"
 weight = 6
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Arrays

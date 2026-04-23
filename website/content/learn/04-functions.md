@@ -1,7 +1,7 @@
 +++
 title = "Functions"
 weight = 4
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Functions

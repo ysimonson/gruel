@@ -1,7 +1,7 @@
 +++
 title = "Enums"
 weight = 8
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Enums
@@ -325,7 +325,7 @@ fn main() -> i32 {
 }
 ```
 
-This is the idiomatic way to build reusable sum types in Gruel. See [Comptime and Generics](/tutorial/14-comptime/) for more on comptime.
+This is the idiomatic way to build reusable sum types in Gruel. See [Comptime and Generics](/learn/14-comptime/) for more on comptime.
 
 ## Example: Simple State Machine
 

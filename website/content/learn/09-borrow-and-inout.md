@@ -1,7 +1,7 @@
 +++
 title = "Borrow and Inout"
 weight = 9
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Borrow and Inout Parameters

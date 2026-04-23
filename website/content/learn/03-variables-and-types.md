@@ -1,7 +1,7 @@
 +++
 title = "Variables and Types"
 weight = 3
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Variables and Types

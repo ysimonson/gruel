@@ -1,7 +1,7 @@
 +++
 title = "Hello, World"
 weight = 2
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Hello, World

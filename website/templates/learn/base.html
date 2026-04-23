@@ -8,20 +8,20 @@
     <aside class="spec-sidebar">
         <div class="spec-sidebar-inner">
             <div class="spec-sidebar-header">
-                <a href="{{ get_url(path='tutorial') }}" class="spec-title">Learn Gruel</a>
+                <a href="{{ get_url(path='learn') }}" class="spec-title">Learn Gruel</a>
             </div>
             <nav class="spec-nav">
-                {% set tutorial_section = get_section(path="tutorial/_index.md") %}
+                {% set learn_section = get_section(path="learn/_index.md") %}
                 {% set current = page.permalink | default(value=section.permalink) | default(value="") %}
-                {{ self::render_nav(section=tutorial_section, current_path=current) }}
+                {{ self::render_nav(section=learn_section, current_path=current) }}
             </nav>
         </div>
     </aside>
 
     {# Main content #}
     <div class="spec-main">
-        <article class="spec-content tutorial-content">
-            {% block tutorial_content %}{% endblock %}
+        <article class="spec-content learn-content">
+            {% block learn_content %}{% endblock %}
         </article>
 
         {# Prev/Next navigation #}
@@ -47,7 +47,7 @@
 </div>
 {% endblock %}
 
-{# Recursive macro for navigation #}
+{# Recursive macro for navigation - mirrors spec/base.html so subsections render #}
 {% macro render_nav(section, current_path) %}
 <ul class="spec-nav-list">
     {% for pg in section.pages %}
@@ -55,6 +55,18 @@
         <a href="{{ pg.permalink }}" class="spec-nav-link {% if pg.permalink == current_path %}active{% endif %}">
             {{ pg.title }}
         </a>
+    </li>
+    {% endfor %}
+
+    {% for sub_path in section.subsections | sort %}
+        {% set sub = get_section(path=sub_path) %}
+    <li class="spec-nav-section">
+        <a href="{{ sub.permalink }}" class="spec-nav-section-title {% if current_path is starting_with(sub.permalink) %}active{% endif %}">
+            {{ sub.title }}
+        </a>
+        {% if current_path is starting_with(sub.permalink) %}
+        {{ self::render_nav(section=sub, current_path=current_path) }}
+        {% endif %}
     </li>
     {% endfor %}
 </ul>

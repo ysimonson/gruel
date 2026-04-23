@@ -1,7 +1,7 @@
 +++
 title = "Destructors"
 weight = 13
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Destructors

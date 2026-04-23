@@ -1,7 +1,7 @@
 +++
 title = "Modules"
 weight = 16
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Modules

@@ -1,7 +1,7 @@
 +++
 title = "Structs"
 weight = 7
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Structs

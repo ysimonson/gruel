@@ -1,7 +1,7 @@
 +++
 title = "Input and Parsing"
 weight = 14
-template = "tutorial/page.html"
+template = "learn/page.html"
 +++
 
 # Input and Parsing
