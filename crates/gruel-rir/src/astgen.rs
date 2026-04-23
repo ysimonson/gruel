@@ -1203,11 +1203,8 @@ impl<'a> AstGen<'a> {
             if idxs.len() < 2 {
                 continue;
             }
-            let Some(arm) =
-                self.merge_group_single_field(&match_expr.arms, idxs, catch_all_body.as_deref())
-            else {
-                return None;
-            };
+            let arm =
+                self.merge_group_single_field(&match_expr.arms, idxs, catch_all_body.as_deref())?;
             let first = idxs[0];
             merged.insert(first, arm);
             for &idx in idxs.iter().skip(1) {
@@ -1229,9 +1226,7 @@ impl<'a> AstGen<'a> {
                 // the nested match's fallback. Without it, fall through
                 // to the normal match path (which will panic with a
                 // clear message).
-                let Some(catch_all_body_ref) = catch_all_body.as_ref() else {
-                    return None;
-                };
+                let catch_all_body_ref = catch_all_body.as_ref()?;
                 let mut subs: Vec<(Spur, Pattern)> = Vec::new();
                 let new_pattern = self.replace_refutable_nested_subs(&arm.pattern, &mut subs);
                 let mut body = (*arm.body).clone();
@@ -1397,14 +1392,14 @@ impl<'a> AstGen<'a> {
         let any_irrefutable = inner_arms
             .iter()
             .any(|a| is_irrefutable_destructure(&a.pattern));
-        if let Some(body) = catch_all_body {
-            if !any_irrefutable {
-                inner_arms.push(MatchArm {
-                    pattern: Pattern::Wildcard(outer_span),
-                    body: Box::new(body.clone()),
-                    span: outer_span,
-                });
-            }
+        if let Some(body) = catch_all_body
+            && !any_irrefutable
+        {
+            inner_arms.push(MatchArm {
+                pattern: Pattern::Wildcard(outer_span),
+                body: Box::new(body.clone()),
+                span: outer_span,
+            });
         }
 
         let nested_scrutinee = if field_count == 1 {
@@ -1508,9 +1503,7 @@ impl<'a> AstGen<'a> {
                     let mut seen: std::collections::HashSet<Spur> =
                         std::collections::HashSet::new();
                     for fp in fields {
-                        let Some(ident) = fp.field_name else {
-                            return None;
-                        };
+                        let ident = fp.field_name?;
                         if !canonical_names.contains(&ident.name) {
                             return None;
                         }
@@ -1581,14 +1574,14 @@ impl<'a> AstGen<'a> {
         let any_irrefutable = inner_arms
             .iter()
             .any(|a| is_irrefutable_destructure(&a.pattern));
-        if let Some(body) = catch_all_body {
-            if !any_irrefutable {
-                inner_arms.push(MatchArm {
-                    pattern: Pattern::Wildcard(outer_span),
-                    body: Box::new(body.clone()),
-                    span: outer_span,
-                });
-            }
+        if let Some(body) = catch_all_body
+            && !any_irrefutable
+        {
+            inner_arms.push(MatchArm {
+                pattern: Pattern::Wildcard(outer_span),
+                body: Box::new(body.clone()),
+                span: outer_span,
+            });
         }
 
         let nested_scrutinee = if field_count == 1 {
@@ -2499,24 +2492,19 @@ impl<'a> AstGen<'a> {
     /// refs to `out`. A single AST statement can produce multiple RIR
     /// instructions when lowering nested destructures (ADR-0049 Phase 4).
     fn gen_statement_into(&mut self, stmt: &Statement, out: &mut Vec<u32>) {
-        if let Statement::Let(let_stmt) = stmt {
-            if matches!(
+        if let Statement::Let(let_stmt) = stmt
+            && matches!(
                 &let_stmt.pattern,
                 Pattern::Struct { .. } | Pattern::Tuple { .. }
-            ) {
-                let init = self.gen_expr(&let_stmt.init);
-                let mut emitted = Vec::new();
-                self.emit_let_destructure_into(
-                    &let_stmt.pattern,
-                    init,
-                    let_stmt.span,
-                    &mut emitted,
-                );
-                for r in emitted {
-                    out.push(r.as_u32());
-                }
-                return;
+            )
+        {
+            let init = self.gen_expr(&let_stmt.init);
+            let mut emitted = Vec::new();
+            self.emit_let_destructure_into(&let_stmt.pattern, init, let_stmt.span, &mut emitted);
+            for r in emitted {
+                out.push(r.as_u32());
             }
+            return;
         }
         let single = self.gen_statement(stmt);
         out.push(single.as_u32());
@@ -2662,11 +2650,13 @@ fn outer_variant_key(pat: &Pattern) -> Option<(Spur, Spur)> {
 /// (Struct, Tuple) are not refutable nested; everything else is
 /// (ADR-0049 Phase 5b).
 fn is_refutable_variant_sub(sub: &Pattern) -> bool {
-    match sub {
-        Pattern::Wildcard(_) | Pattern::Ident { .. } => false,
-        Pattern::Struct { .. } | Pattern::Tuple { .. } => false,
-        _ => true,
-    }
+    !matches!(
+        sub,
+        Pattern::Wildcard(_)
+            | Pattern::Ident { .. }
+            | Pattern::Struct { .. }
+            | Pattern::Tuple { .. }
+    )
 }
 
 /// Whether an arm pattern has any refutable nested sub-pattern in a

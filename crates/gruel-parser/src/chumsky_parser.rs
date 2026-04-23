@@ -883,7 +883,7 @@ where
 
             // One element in a tuple / variant-tuple sequence: either `..` or a sub-pattern.
             let tuple_elem = choice((
-                rest_token.clone().map(TupleElemPattern::Rest),
+                rest_token.map(TupleElemPattern::Rest),
                 sub_pattern.clone().map(TupleElemPattern::Pattern),
             ))
             .boxed();
@@ -898,7 +898,7 @@ where
 
             // Named field in a struct / struct-variant pattern: `field`, `field: sub`,
             // `mut field`, `mut field: sub`, or the rest sentinel `..`.
-            let field_rest = rest_token.clone().map_with(|span, _e| FieldPattern {
+            let field_rest = rest_token.map_with(|span, _e| FieldPattern {
                 field_name: None,
                 sub: None,
                 is_mut: false,
@@ -5022,7 +5022,7 @@ mod tests {
 
     fn assert_refutable_in_let_err(result: &MultiErrorResult<ParseResult>) {
         use gruel_error::ErrorKind;
-        let errors = result.as_ref().err().expect("expected errors");
+        let errors = result.as_ref().expect_err("expected errors");
         let found = errors
             .iter()
             .any(|e| matches!(e.kind, ErrorKind::RefutablePatternInLet));
