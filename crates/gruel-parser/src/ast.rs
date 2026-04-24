@@ -530,6 +530,8 @@ pub enum Expr {
     Tuple(TupleExpr),
     /// Tuple index expression (e.g., `t.0`, `t.1`) (ADR-0048)
     TupleIndex(TupleIndexExpr),
+    /// Anonymous function expression (e.g., `fn(x: i32) -> i32 { x + 1 }`) (ADR-0055)
+    AnonFn(AnonFnExpr),
     /// Error node for recovered parse errors.
     /// Used by error recovery to continue parsing after a syntax error.
     Error(Span),
@@ -895,6 +897,23 @@ pub struct TupleExpr {
     pub span: Span,
 }
 
+/// An anonymous function expression (e.g., `fn(x: i32) -> i32 { x + 1 }`).
+///
+/// ADR-0055: desugars to an anonymous struct with a single `__call` method
+/// and is instantiated as an empty struct literal. Each `AnonFn` site produces
+/// a distinct type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnonFnExpr {
+    /// Parameters (all require type annotations, like named functions).
+    pub params: Vec<Param>,
+    /// Return type (None means implicit unit `()`, same as named functions).
+    pub return_type: Option<TypeExpr>,
+    /// Function body (always a block).
+    pub body: BlockExpr,
+    /// Span covering the entire `fn(...) { ... }` expression.
+    pub span: Span,
+}
+
 /// A tuple index expression (e.g., `t.0`, `t.1`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupleIndexExpr {
@@ -1179,6 +1198,7 @@ impl Expr {
             Expr::TypeLit(type_lit) => type_lit.span,
             Expr::Tuple(tuple) => tuple.span,
             Expr::TupleIndex(ti) => ti.span,
+            Expr::AnonFn(anon_fn) => anon_fn.span,
             Expr::Error(span) => *span,
         }
     }
@@ -1578,6 +1598,20 @@ fn fmt_expr(f: &mut fmt::Formatter<'_>, expr: &Expr, level: usize) -> fmt::Resul
         Expr::TupleIndex(ti) => {
             writeln!(f, "TupleIndex .{}", ti.index)?;
             fmt_expr(f, &ti.base, level + 1)
+        }
+        Expr::AnonFn(anon_fn) => {
+            writeln!(f, "AnonFn (params: {})", anon_fn.params.len())?;
+            for param in &anon_fn.params {
+                indent(f, level + 1)?;
+                writeln!(f, "Param(sym:{})", param.name.name.into_usize())?;
+            }
+            if let Some(ret) = &anon_fn.return_type {
+                indent(f, level + 1)?;
+                writeln!(f, "Return -> {:?}", ret)?;
+            }
+            indent(f, level + 1)?;
+            writeln!(f, "Body")?;
+            fmt_block_expr(f, &anon_fn.body, level + 2)
         }
         Expr::Error(span) => {
             writeln!(f, "Error({:?})", span)

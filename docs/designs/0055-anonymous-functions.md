@@ -302,21 +302,19 @@ phases are gated by preview feature `anon_functions`.
 
 ### Phase 1: Preview flag + lexer/parser
 
-- [ ] Add `PreviewFeature::AnonFunctions` with name `"anon_functions"` and ADR
+- [x] Add `PreviewFeature::AnonFunctions` with name `"anon_functions"` and ADR
       reference `"ADR-0055"`. Update `name`, `adr`, `all`, `FromStr`, and the
       existing enum tests in `gruel-error`.
-- [ ] Parser: accept `fn(params) { block }` and `fn(params) -> T { block }`
+- [x] Parser: accept `fn(params) { block }` and `fn(params) -> T { block }`
       at expression position, including the zero-parameter `fn() { ... }`
       form. Reuse the named-function parameter-list and return-type productions
       verbatim; the only difference is the absence of an identifier after
-      `fn`. At item position, continue to require an identifier and produce a
-      clear error (not a silent reinterpretation) if one is missing at top
-      level.
-- [ ] AST: add `Expr::AnonFn { params: Vec<Param>, ret: Option<TypeExpr>, body: Block }`,
-      reusing the `Param` and `Block` types from named functions.
-- [ ] Parser unit tests for each form: zero-parameter, multi-parameter, with
-      and without return type, nested anonymous functions, inside `match`
-      arms, inside call-argument lists, and used as a statement expression.
+      `fn`. (Items in blocks don't exist in Gruel, so at expression position
+      `fn` is unambiguously an anonymous function; no lookahead needed.)
+- [x] AST: add `Expr::AnonFn(AnonFnExpr { params, return_type, body, span })`,
+      reusing the `Param` and `BlockExpr` types from named functions.
+- [x] Parser unit tests: zero-parameter, multi-parameter, with and without
+      return type, nested anonymous functions, inside call-argument lists.
 
 **Deliverable**: `cargo run -p gruel -- --emit ast` shows an `AnonFn` node for
 `fn(x: i32) -> i32 { x + 1 }` and for the other syntactic forms; compiling

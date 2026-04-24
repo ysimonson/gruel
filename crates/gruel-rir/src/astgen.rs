@@ -1023,6 +1023,13 @@ impl<'a> AstGen<'a> {
                     span: ti.span,
                 })
             }
+            // Anonymous function expression (ADR-0055). Phase 1 emits a
+            // placeholder so the workspace builds; Phase 2 lowers this to a
+            // lambda-tagged anonymous struct with a `__call` method.
+            Expr::AnonFn(anon_fn) => self.rir.add_inst(Inst {
+                data: InstData::UnitConst,
+                span: anon_fn.span,
+            }),
         }
     }
 

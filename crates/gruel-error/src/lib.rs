@@ -307,6 +307,9 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// Anonymous function expressions (closures-as-structs).
+    /// See ADR-0055.
+    AnonFunctions,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -326,6 +329,7 @@ impl PreviewFeature {
     pub fn name(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
+            PreviewFeature::AnonFunctions => "anon_functions",
         }
     }
 
@@ -333,12 +337,13 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::AnonFunctions => "ADR-0055",
         }
     }
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra]
+        &[PreviewFeature::TestInfra, PreviewFeature::AnonFunctions]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -361,6 +366,7 @@ impl std::str::FromStr for PreviewFeature {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "test_infra" => Ok(PreviewFeature::TestInfra),
+            "anon_functions" => Ok(PreviewFeature::AnonFunctions),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1919,7 +1925,16 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, anon_functions");
+    }
+
+    #[test]
+    fn test_preview_feature_anon_functions() {
+        let feature: PreviewFeature = "anon_functions".parse().unwrap();
+        assert_eq!(feature, PreviewFeature::AnonFunctions);
+        assert_eq!(feature.name(), "anon_functions");
+        assert_eq!(feature.adr(), "ADR-0055");
+        assert!(PreviewFeature::all().contains(&PreviewFeature::AnonFunctions));
     }
 
     // ========================================================================

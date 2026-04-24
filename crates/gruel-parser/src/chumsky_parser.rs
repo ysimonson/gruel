@@ -4,13 +4,13 @@
 //! with Pratt parsing for expression precedence.
 
 use crate::ast::{
-    AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget, AssocFnCallExpr, Ast,
-    BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr, CheckedBlockExpr,
-    ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr, Directive, DirectiveArg,
-    Directives, DropFn, EnumDecl, EnumStructLitExpr, EnumVariant, Expr, FieldDecl, FieldExpr,
-    FieldInit, FieldPattern, FloatLit, ForExpr, Function, Ident, IfExpr, IndexExpr, IntLit,
-    IntrinsicArg, IntrinsicCallExpr, Item, LetStatement, LoopExpr, MatchArm, MatchExpr, Method,
-    MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern,
+    AnonFnExpr, AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget,
+    AssocFnCallExpr, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr,
+    CheckedBlockExpr, ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr, Directive,
+    DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr, EnumVariant, Expr, FieldDecl,
+    FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function, Ident, IfExpr, IndexExpr,
+    IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetStatement, LoopExpr, MatchArm, MatchExpr,
+    Method, MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern,
     ReturnExpr, SelfExpr, SelfParam, Statement, StringLit, StructDecl, StructLitExpr,
     TupleElemPattern, TupleExpr, TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp,
     UnitLit, Visibility, WhileExpr,
@@ -2015,6 +2015,29 @@ where
             })
         });
 
+    // Anonymous function expression (ADR-0055): fn(params) -> ret { body }
+    //
+    // Reuses the named-function production verbatim, minus the identifier. At
+    // expression position `fn` is unambiguous — it is never otherwise an
+    // expression starter — so this does not conflict with anything.
+    let anon_fn_expr: GruelParser<'src, I, Expr> = just(TokenKind::Fn)
+        .ignore_then(params_parser().delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)))
+        .then(just(TokenKind::Arrow).ignore_then(type_parser()).or_not())
+        .then(block_parser(expr.clone()))
+        .map_with(|((params, return_type), body), e| {
+            let body_block = match body {
+                Expr::Block(b) => b,
+                _ => unreachable!("block_parser always returns Expr::Block"),
+            };
+            Expr::AnonFn(AnonFnExpr {
+                params,
+                return_type,
+                body: body_block,
+                span: span_from_extra(e),
+            })
+        })
+        .boxed();
+
     // Anonymous enum type as expression: enum { Variant, Variant(T), ... fn method(...) { ... } ... }
     // This enables comptime type construction like:
     //   fn Option(comptime T: type) -> type { enum { Some(T), None } }
@@ -2148,6 +2171,7 @@ where
         array_lit.boxed(),
         anon_struct_type_expr.boxed(),
         anon_enum_type_expr.boxed(),
+        anon_fn_expr,
         type_lit_expr.boxed(),
         call_and_access_parser(expr.clone()),
         paren_expr.boxed(),
@@ -3343,6 +3367,7 @@ fn validate_expr(expr: &Expr, errors: &mut Vec<CompileError>, v: &AstValidator) 
             }
         }
         Expr::Comptime(c) => validate_expr(&c.expr, errors, v),
+        Expr::AnonFn(a) => validate_block(&a.body, errors, v),
         Expr::ComptimeUnrollFor(_) | Expr::Checked(_) => {}
         Expr::TypeLit(_)
         | Expr::Int(_)
@@ -5203,5 +5228,82 @@ mod tests {
     fn test_irrefutable_nested_struct_in_let() {
         let source = "fn main() -> i32 { let Outer { inner: Inner { x, y }, tag } = make(); 0 }";
         assert!(parse_with_nested(source).is_ok());
+    }
+
+    // ========================================================================
+    // ADR-0055: anonymous function expressions
+    // ========================================================================
+
+    #[test]
+    fn test_anon_fn_single_param_with_return() {
+        let result = parse_expr("fn(x: i32) -> i32 { x + 1 }").unwrap();
+        match &result.expr {
+            Expr::AnonFn(anon) => {
+                assert_eq!(anon.params.len(), 1);
+                assert_eq!(result.get(anon.params[0].name.name), "x");
+                assert!(anon.return_type.is_some());
+            }
+            other => panic!("expected AnonFn, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_anon_fn_zero_param_no_return() {
+        let result = parse_expr("fn() { 0 }").unwrap();
+        match result.expr {
+            Expr::AnonFn(anon) => {
+                assert!(anon.params.is_empty());
+                assert!(anon.return_type.is_none());
+            }
+            other => panic!("expected AnonFn, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_anon_fn_multi_param() {
+        let result = parse_expr("fn(x: i32, y: i32) -> i32 { x + y }").unwrap();
+        match &result.expr {
+            Expr::AnonFn(anon) => {
+                assert_eq!(anon.params.len(), 2);
+                assert_eq!(result.get(anon.params[0].name.name), "x");
+                assert_eq!(result.get(anon.params[1].name.name), "y");
+            }
+            other => panic!("expected AnonFn, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_anon_fn_in_call_arg() {
+        // Anonymous function as a call argument, exercising the grammar inside
+        // an argument list.
+        let result = parse_expr("apply(fn(x: i32) -> i32 { x * 2 }, 3)").unwrap();
+        match result.expr {
+            Expr::Call(call) => {
+                assert_eq!(call.args.len(), 2);
+                assert!(matches!(call.args[0].expr, Expr::AnonFn(_)));
+            }
+            other => panic!("expected Call, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_anon_fn_nested() {
+        // An anonymous function whose body returns another anonymous function.
+        let result = parse_expr("fn() { fn(x: i32) -> i32 { x } }").unwrap();
+        match result.expr {
+            Expr::AnonFn(outer) => {
+                assert!(matches!(*outer.body.expr, Expr::AnonFn(_)));
+            }
+            other => panic!("expected AnonFn, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_named_fn_at_top_level_still_works() {
+        // Regression: adding `fn(` at expression position must not break the
+        // `fn name(...)` item-level form.
+        let result = parse("fn main() -> i32 { 0 }").unwrap();
+        assert_eq!(result.ast.items.len(), 1);
+        assert!(matches!(result.ast.items[0], Item::Function(_)));
     }
 }
