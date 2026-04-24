@@ -112,9 +112,13 @@ impl<'a> Sema<'a> {
             .collect();
 
         // Build method signatures with InferType for constraint generation
+        // Exclude method-level-generic methods (ADR-0055); inference falls
+        // back to a fresh type var for those and specialization handles the
+        // concrete body analysis.
         let method_sigs: HashMap<(StructId, Spur), MethodSig> = self
             .methods
             .iter()
+            .filter(|(_, info)| !info.is_generic)
             .map(|((struct_id, method_name), info)| {
                 (
                     (*struct_id, *method_name),

@@ -74,10 +74,18 @@ impl<'a> Sema<'a> {
             .map(|(name, id)| (*name, Type::new_enum(*id)))
             .collect();
 
-        // Build method signatures with InferType for constraint generation
+        // Build method signatures with InferType for constraint generation.
+        // Method-level-generic methods (ADR-0055) are excluded: their stored
+        // `return_type` is a `COMPTIME_TYPE` placeholder, and their param
+        // types may reference unresolved method-level type params. The
+        // inference pass falls back to fresh type variables for calls to
+        // these methods, and the specialized bodies (synthesized by
+        // `specialize::create_specialized_method`) are analyzed separately
+        // with the concrete substitutions in place.
         let method_sigs: HashMap<(StructId, Spur), MethodSig> = self
             .methods
             .iter()
+            .filter(|(_, info)| !info.is_generic)
             .map(|((struct_id, method_name), info)| {
                 (
                     (*struct_id, *method_name),
@@ -991,19 +999,37 @@ impl<'a> Sema<'a> {
                     .collect();
                 let is_method_generic = !method_type_param_names.is_empty();
 
+                // Helper: does a type symbol mention any of our method-level
+                // type param names? Covers bare `T`, compound `[T; N]`,
+                // `ptr const T`, etc. — check via the comptime-substitution
+                // resolver using a sentinel substitution.
+                let references_method_type_param = |ty_sym: Spur, sema: &mut Self| -> bool {
+                    if method_type_param_names.contains(&ty_sym) {
+                        return true;
+                    }
+                    let subst: std::collections::HashMap<Spur, Type> = method_type_param_names
+                        .iter()
+                        .map(|&n| (n, Type::I32))
+                        .collect();
+                    let with_subst = sema.resolve_type_for_comptime_with_subst(ty_sym, &subst);
+                    let without_subst =
+                        sema.resolve_type_for_comptime_with_subst(ty_sym, &HashMap::new());
+                    with_subst.is_some() && without_subst.is_none()
+                };
+
                 let param_types: Vec<Type> = params
                     .iter()
                     .map(|p| {
-                        if p.is_comptime && p.ty == type_sym {
-                            Ok(Type::COMPTIME_TYPE)
-                        } else if method_type_param_names.contains(&p.ty) {
+                        if (p.is_comptime && p.ty == type_sym)
+                            || references_method_type_param(p.ty, self)
+                        {
                             Ok(Type::COMPTIME_TYPE)
                         } else {
                             self.resolve_type(p.ty, method_inst.span)
                         }
                     })
                     .collect::<CompileResult<Vec<_>>>()?;
-                let ret_type = if method_type_param_names.contains(return_type) {
+                let ret_type = if references_method_type_param(*return_type, self) {
                     Type::COMPTIME_TYPE
                 } else {
                     self.resolve_type(*return_type, method_inst.span)?

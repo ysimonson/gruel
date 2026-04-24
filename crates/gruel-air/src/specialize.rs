@@ -221,11 +221,20 @@ fn rewrite_call_generic(air: &mut Air, specializations: &HashMap<SpecializationK
 }
 
 /// Generate a mangled name for a specialized function.
+///
+/// `Type::name()` returns generic placeholders like `"<struct>"` for struct
+/// and enum types, which would collide across different structs — so we also
+/// append the raw `Type` discriminant, which is unique per type. Primitive
+/// types get their normal name for readability.
 fn mangle_specialized_name(base_name: &str, type_args: &[Type]) -> String {
     let mut mangled = base_name.to_string();
     for ty in type_args {
         mangled.push_str("__");
         mangled.push_str(ty.name());
+        // Disambiguate compound types (structs, enums, arrays) whose
+        // `name()` is a generic placeholder.
+        mangled.push('#');
+        mangled.push_str(&ty.as_u32().to_string());
     }
     mangled
 }

@@ -3123,11 +3123,19 @@ impl<'a> Sema<'a> {
                 }
             }
 
-            // Substitute the return type if it's a method-level type param.
-            // For example, `fn apply(self, comptime U: type, f: F) -> U`
-            // with `w.apply(i32, f)` needs the return type to resolve to i32.
+            // Substitute the return type if it references any method-level
+            // type params. Handles the simple case `-> U` (look up in the
+            // substitution map) as well as compound cases like `-> [U; N]`
+            // and `-> ptr const U` (recursive resolution via
+            // `resolve_type_for_comptime_with_subst`).
             let return_type_sub = if let Some(&ty) = type_subst.get(&method_return_type_sym) {
                 ty
+            } else if return_type_for_call == Type::COMPTIME_TYPE {
+                match self.resolve_type_for_comptime_with_subst(method_return_type_sym, &type_subst)
+                {
+                    Some(ty) => ty,
+                    None => return_type_for_call,
+                }
             } else {
                 return_type_for_call
             };
@@ -8682,6 +8690,25 @@ impl<'a> Sema<'a> {
                     .map(|p| p.name)
                     .collect();
 
+                // Build a "sentinel" map that assigns a concrete type to each
+                // method-level type param, used to detect whether a given
+                // type symbol references any of them (including through
+                // array / pointer / tuple wrappers).
+                let sentinel_subst: std::collections::HashMap<Spur, Type> = method_type_param_names
+                    .iter()
+                    .map(|&n| (n, Type::I32))
+                    .collect();
+                let references_method_type_param = |sema: &mut Self, ty_sym: Spur| -> bool {
+                    if method_type_param_names.contains(&ty_sym) {
+                        return true;
+                    }
+                    let with = sema.resolve_type_for_comptime_with_subst(ty_sym, &sentinel_subst);
+                    // Also include the caller's type_subst so `T` from the
+                    // outer generic still resolves in the "without" baseline.
+                    let without = sema.resolve_type_for_comptime_with_subst(ty_sym, type_subst);
+                    with.is_some() && without.is_none()
+                };
+
                 for p in params {
                     let type_str = self.interner.resolve(&p.ty);
                     let resolved_ty = if type_str == "Self" {
@@ -8689,8 +8716,9 @@ impl<'a> Sema<'a> {
                     } else if p.is_comptime && p.ty == type_sym {
                         // `comptime X: type` param — placeholder until call.
                         Type::COMPTIME_TYPE
-                    } else if method_type_param_names.contains(&p.ty) {
-                        // Declared type is a method-level comptime type param.
+                    } else if references_method_type_param(self, p.ty) {
+                        // Declared type is (or contains) a method-level
+                        // comptime type param.
                         Type::COMPTIME_TYPE
                     } else {
                         self.resolve_type_for_comptime_with_subst(p.ty, type_subst)?
@@ -8701,7 +8729,7 @@ impl<'a> Sema<'a> {
                 let ret_type_str = self.interner.resolve(return_type);
                 let ret_type = if ret_type_str == "Self" {
                     struct_type
-                } else if method_type_param_names.contains(return_type) {
+                } else if references_method_type_param(self, *return_type) {
                     Type::COMPTIME_TYPE
                 } else {
                     self.resolve_type_for_comptime_with_subst(*return_type, type_subst)?
