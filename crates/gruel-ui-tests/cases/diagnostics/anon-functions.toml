@@ -1,0 +1,39 @@
+[section]
+id = "diagnostics.anon-functions"
+name = "Anonymous Function Diagnostics"
+description = "Error messages for anonymous function misuse (ADR-0055)."
+
+# =============================================================================
+# Preview gating
+# =============================================================================
+
+[[case]]
+name = "anon_fn_without_preview_flag"
+source = """
+fn main() -> i32 {
+    let f = fn(x: i32) -> i32 { x + 1 };
+    f(41)
+}
+"""
+compile_fail = true
+error_contains = ["requires preview feature", "anon_functions"]
+
+# =============================================================================
+# Runtime capture rejection
+# =============================================================================
+
+# The current diagnostic is the generic `UndefinedVariable` message; a
+# lambda-specific "cannot capture runtime locals" message is tracked as a
+# follow-up in ADR-0055.
+[[case]]
+name = "anon_fn_references_runtime_local"
+preview = "anon_functions"
+source = """
+fn main() -> i32 {
+    let step = 5;
+    let f = fn(x: i32) -> i32 { x + step };
+    f(37)
+}
+"""
+compile_fail = true
+error_contains = ["undefined variable", "step"]

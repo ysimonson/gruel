@@ -1,0 +1,191 @@
+[section]
+id = "expressions.anon_functions"
+spec_chapter = "4.16"
+name = "Anonymous Functions"
+description = "Anonymous function expressions: `fn(params) -> ret { body }` (ADR-0055)."
+
+# =============================================================================
+# Syntax and basic evaluation
+# =============================================================================
+
+[[case]]
+name = "anon_fn_single_param"
+spec = ["4.16:1", "4.16:2", "4.16:3", "4.16:5", "4.16:6"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let f = fn(x: i32) -> i32 { x + 1 };
+    f(41)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_fn_zero_params"
+spec = ["4.16:1", "4.16:6"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let f = fn() -> i32 { 42 };
+    f()
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_fn_multiple_params"
+spec = ["4.16:1", "4.16:6"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let add = fn(x: i32, y: i32) -> i32 { x + y };
+    add(20, 22)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "anon_fn_omitted_return_type_defaults_to_unit"
+spec = ["4.16:2"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let f = fn(x: i32) { let _ = x + 1; };
+    f(10);
+    42
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Per-site type uniqueness (4.16:5)
+# =============================================================================
+
+[[case]]
+name = "anon_fn_two_same_signature_different_bodies"
+spec = ["4.16:5", "4.16:6"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let f = fn(x: i32) -> i32 { x + 1 };
+    let g = fn(x: i32) -> i32 { x * 2 };
+    f(10) + g(10)
+}
+"""
+# 11 + 20 = 31
+exit_code = 31
+
+# =============================================================================
+# Call-sugar (4.16:6)
+# =============================================================================
+
+[[case]]
+name = "anon_fn_explicit_call_method_also_works"
+spec = ["4.16:3", "4.16:6"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let f = fn(x: i32) -> i32 { x + 1 };
+    f.__call(41)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "named_struct_with_call_method_is_callable"
+spec = ["4.16:6"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+struct Incr {
+    fn __call(self, x: i32) -> i32 { x + 1 }
+}
+fn main() -> i32 {
+    let i: Incr = Incr {};
+    i(41)
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Nesting
+# =============================================================================
+
+[[case]]
+name = "anon_fn_nested"
+spec = ["4.16:1", "4.16:6"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let outer = fn() -> i32 {
+        let inner = fn(x: i32) -> i32 { x + 1 };
+        inner(41)
+    };
+    outer()
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Capture — what's allowed (4.16:7)
+# =============================================================================
+
+[[case]]
+name = "anon_fn_can_reference_module_items"
+spec = ["4.16:7"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+fn helper(x: i32) -> i32 { x + 1 }
+fn main() -> i32 {
+    let f = fn(x: i32) -> i32 { helper(x) };
+    f(41)
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Capture — what's rejected (4.16:8)
+# =============================================================================
+
+[[case]]
+name = "anon_fn_cannot_capture_runtime_local"
+spec = ["4.16:8"]
+preview = "anon_functions"
+preview_should_pass = true
+compile_fail = true
+# The current diagnostic is the generic UndefinedVariable error; a
+# lambda-specific diagnostic is polish work tracked in ADR-0055.
+error_contains = "undefined variable"
+source = """
+fn main() -> i32 {
+    let step = 5;
+    let f = fn(x: i32) -> i32 { x + step };
+    f(37)
+}
+"""
+
+# =============================================================================
+# Preview gating — without --preview the feature rejects at the first use
+# =============================================================================
+
+# Note: This case intentionally has no `preview` field so it runs without the
+# flag and verifies the preview gate fires correctly.
+[[case]]
+name = "anon_fn_requires_preview"
+spec = ["4.16:3"]
+source = """
+fn main() -> i32 {
+    let f = fn(x: i32) -> i32 { x + 1 };
+    f(41)
+}
+"""
+compile_fail = true
+error_contains = "requires preview feature"
