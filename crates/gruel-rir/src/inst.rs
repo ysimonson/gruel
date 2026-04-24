@@ -2015,6 +2015,9 @@ impl Rir {
                 elems_start: *elems_start + extra_offset,
                 elems_len: *elems_len,
             },
+            InstData::AnonFnValue { method } => InstData::AnonFnValue {
+                method: renumber(*method),
+            },
         };
 
         Inst {
@@ -2236,7 +2239,8 @@ impl Rir {
                 | InstData::ComptimeUnrollFor { .. }
                 | InstData::Checked { .. }
                 | InstData::TypeConst { .. }
-                | InstData::StructDestructure { .. } => {}
+                | InstData::StructDestructure { .. }
+                | InstData::AnonFnValue { .. } => {}
             }
         }
     }
@@ -2746,6 +2750,16 @@ pub enum InstData {
         elems_start: u32,
         /// Number of elements
         elems_len: u32,
+    },
+
+    /// Anonymous function value (ADR-0055). Lowered in sema to a fresh
+    /// lambda-tagged anon struct with zero fields and one `__call` method,
+    /// then instantiated as an empty StructInit. The struct type is unique
+    /// per-site — sema skips structural dedup for lambda-origin structs so
+    /// two same-signature `fn(...)` expressions produce distinct types.
+    AnonFnValue {
+        /// InstRef to the FnDecl for the synthesized `__call` method.
+        method: InstRef,
     },
 }
 
@@ -3558,6 +3572,10 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     } else {
                         writeln!(out, "tuple ({})", elems_str.join(", ")).unwrap();
                     }
+                }
+                // Anonymous function value (ADR-0055) — prints as "anon_fn call=<method ref>"
+                InstData::AnonFnValue { method } => {
+                    writeln!(out, "anon_fn call={}", method).unwrap();
                 }
             }
         }

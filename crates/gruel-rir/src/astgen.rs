@@ -6,7 +6,9 @@
 use lasso::{Spur, ThreadedRodeo};
 
 use gruel_intrinsics::is_type_intrinsic;
-use gruel_parser::ast::{ConstDecl, DropFn, FieldPattern, TupleElemPattern};
+use gruel_parser::ast::{
+    BlockExpr, ConstDecl, Directives, DropFn, FieldPattern, Ident, SelfParam, TupleElemPattern,
+};
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
     Function, IntrinsicArg, Item, Method, ParamMode, Pattern, Statement, StructDecl, TypeExpr,
@@ -1023,13 +1025,40 @@ impl<'a> AstGen<'a> {
                     span: ti.span,
                 })
             }
-            // Anonymous function expression (ADR-0055). Phase 1 emits a
-            // placeholder so the workspace builds; Phase 2 lowers this to a
-            // lambda-tagged anonymous struct with a `__call` method.
-            Expr::AnonFn(anon_fn) => self.rir.add_inst(Inst {
-                data: InstData::UnitConst,
-                span: anon_fn.span,
-            }),
+            // Anonymous function expression (ADR-0055): desugar to a lambda-
+            // origin anonymous struct with one `__call` method, and produce an
+            // empty instance of it.
+            //
+            // Strategy: synthesize a `Method { name: "__call", receiver: self,
+            // params, return_type, body }`, run it through the normal
+            // `gen_method` to get a FnDecl InstRef, then emit `AnonFnValue`
+            // referencing that method. Sema creates the actual struct type
+            // and instantiates it; Phase 3 makes each site unique.
+            Expr::AnonFn(anon_fn) => {
+                let call_name_sym = self.interner.get_or_intern_static("__call");
+                let call_ident = Ident {
+                    name: call_name_sym,
+                    span: anon_fn.span,
+                };
+                let synth_method = Method {
+                    directives: Directives::new(),
+                    name: call_ident,
+                    receiver: Some(SelfParam { span: anon_fn.span }),
+                    params: anon_fn.params.clone(),
+                    return_type: anon_fn.return_type.clone(),
+                    body: Expr::Block(BlockExpr {
+                        statements: anon_fn.body.statements.clone(),
+                        expr: anon_fn.body.expr.clone(),
+                        span: anon_fn.body.span,
+                    }),
+                    span: anon_fn.span,
+                };
+                let method_ref = self.gen_method(&synth_method);
+                self.rir.add_inst(Inst {
+                    data: InstData::AnonFnValue { method: method_ref },
+                    span: anon_fn.span,
+                })
+            }
         }
     }
 
@@ -2900,5 +2929,88 @@ mod tests {
             rir.find_function(set_sym).is_some(),
             "Should find 'set' method"
         );
+    }
+
+    // ========================================================================
+    // ADR-0055 Phase 2: anonymous function RIR lowering
+    // ========================================================================
+
+    #[test]
+    fn test_anon_fn_lowers_to_call_method_and_value() {
+        // `fn(x: i32) -> i32 { x + 1 }` should produce an internal FnDecl
+        // named `__call` plus an `AnonFnValue` referring to it.
+        let (rir, interner) = gen_rir("fn main() -> i32 { fn(x: i32) -> i32 { x + 1 }; 0 }");
+
+        let call_sym = interner.get("__call").expect("__call should be interned");
+
+        // Locate the synthesized __call method.
+        let mut found_call = None;
+        let mut found_anon_fn_value = None;
+        for (i, inst) in rir.iter() {
+            match &inst.data {
+                InstData::FnDecl { name, has_self, .. } if *name == call_sym => {
+                    assert!(*has_self, "synthesized __call must have self receiver");
+                    found_call = Some(i);
+                }
+                InstData::AnonFnValue { method } => {
+                    found_anon_fn_value = Some((i, *method));
+                }
+                _ => {}
+            }
+        }
+
+        let call_ref = found_call.expect("expected a FnDecl named __call in RIR");
+        let (_, value_method) = found_anon_fn_value.expect("expected an AnonFnValue in RIR");
+        assert_eq!(
+            value_method, call_ref,
+            "AnonFnValue must point at the synthesized __call FnDecl"
+        );
+    }
+
+    #[test]
+    fn test_anon_fn_two_sites_each_get_their_own_call_method() {
+        // Two distinct anonymous-function expressions produce two distinct
+        // __call FnDecl instructions (one per site), even with matching
+        // signatures. This is important for Phase 3's uniqueness work — each
+        // site's body must survive into RIR separately.
+        let (rir, interner) = gen_rir(
+            "fn main() -> i32 {
+                fn(x: i32) -> i32 { x + 1 };
+                fn(x: i32) -> i32 { x * 2 };
+                0
+            }",
+        );
+        let call_sym = interner.get("__call").expect("__call should be interned");
+        let count = rir
+            .iter()
+            .filter(|(_, inst)| matches!(&inst.data, InstData::FnDecl { name, .. } if *name == call_sym))
+            .count();
+        assert_eq!(
+            count, 2,
+            "each fn(...) site should produce its own __call FnDecl"
+        );
+    }
+
+    #[test]
+    fn test_anon_fn_zero_params_lowers() {
+        let (rir, interner) = gen_rir("fn main() -> i32 { fn() -> i32 { 7 }; 0 }");
+        let call_sym = interner.get("__call").expect("__call should be interned");
+        let call_inst = rir.iter().find_map(|(_, inst)| {
+            if let InstData::FnDecl {
+                name,
+                params_len,
+                has_self,
+                ..
+            } = &inst.data
+                && *name == call_sym
+            {
+                Some((*params_len, *has_self))
+            } else {
+                None
+            }
+        });
+        let (params_len, has_self) = call_inst.expect("expected __call FnDecl");
+        assert_eq!(params_len, 0);
+        assert!(has_self);
     }
 }

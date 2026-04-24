@@ -322,19 +322,31 @@ does *not* yet succeed.
 
 ### Phase 2: RIR lowering to synthetic anonymous struct
 
-- [ ] Extend `InstData::AnonStructType` (or add a sibling) with an
-      `origin: AnonStructOrigin { Explicit, Lambda }` tag.
-- [ ] RIR: lower `Expr::AnonFn { params, ret, body }` to the sequence:
-      (a) a lambda-tagged anonymous struct type with one method
-      `fn __call(self, <params>) -> <ret> { <body> }`,
-      (b) an empty struct-literal construction of that type.
-- [ ] Ensure the lowered struct preserves the source span of the original
-      `fn(...)` expression so error messages point at the user's source, not
-      the synthesized struct.
-- [ ] RIR unit tests verifying the shape of the lowering.
+- [x] Add a sibling RIR instruction `InstData::AnonFnValue { method: InstRef }`
+      rather than extending `AnonStructType` with an origin tag — the method
+      is the only piece of the lambda that lives in the extra array, so an
+      explicit variant stays simpler. "Lambda origin" is implicit in the
+      variant.
+- [x] RIR: lower `Expr::AnonFn { params, return_type, body }` by synthesizing
+      a `Method { name: "__call", receiver: self, params, return_type, body }`,
+      running it through `gen_method` to get a FnDecl `InstRef`, and emitting
+      `AnonFnValue { method }` pointing at it.
+- [x] Sema stub in analysis.rs + analyze_ops.rs: resolve the FnDecl's
+      signature, call `find_or_create_anon_struct` with zero fields and the
+      `__call` signature, register the `__call` method on the resulting
+      struct, and emit an empty `AirInstData::StructInit`. (Phase 2 still uses
+      structural dedup — two same-signature lambdas collide; Phase 3 flips
+      that.)
+- [x] Inference-side handling in `gruel-air/src/inference/generate.rs`: defer
+      to a fresh type variable (same approach as `TupleInit`).
+- [x] Preserve the `fn(...)` source span on all synthesized instructions.
+- [x] RIR unit tests verifying shape, per-site body preservation, and the
+      zero-parameter form.
 
 **Deliverable**: RIR for `fn(x: i32) -> i32 { x + 1 }` matches a hand-written
-`struct { fn __call(self, x: i32) -> i32 { x + 1 } } {}`.
+`struct { fn __call(self, x: i32) -> i32 { x + 1 } } {}` (confirmed via
+`--emit rir`). End-to-end: `fn main() -> i32 { let f = fn(x: i32) -> i32 { x + 1 }; f.__call(41) }`
+compiles and runs, returning 42.
 
 ### Phase 3: Sema — uniqueness, call-sugar, runtime-capture check
 

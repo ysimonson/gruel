@@ -2559,6 +2559,14 @@ impl<'a> Sema<'a> {
                 elems_start,
                 elems_len,
             } => self.analyze_tuple_init(air, *elems_start, *elems_len, inst.span, ctx),
+
+            // Anonymous function value (ADR-0055): synthesize a fresh anon
+            // struct with zero fields and one `__call` method, then emit an
+            // empty StructInit against it. Phase 2 uses the normal structural-
+            // dedup path; Phase 3 makes each lambda site unique.
+            InstData::AnonFnValue { method } => {
+                self.analyze_anon_fn_value(air, *method, inst.span, ctx)
+            }
         }
     }
 
@@ -8536,6 +8544,87 @@ impl<'a> Sema<'a> {
             }
         }
         Some(())
+    }
+
+    /// Register the single synthesized `__call` method on a lambda-origin
+    /// anonymous struct (ADR-0055).
+    ///
+    /// Unlike `register_anon_struct_methods_for_comptime_with_subst`, we take
+    /// the method InstRef directly rather than reading it from the RIR extra
+    /// array, and there is no comptime-parameter substitution to apply — the
+    /// parent function's comptime substitutions have already baked into the
+    /// method body during astgen.
+    pub(crate) fn register_anon_fn_call_method(
+        &mut self,
+        struct_id: StructId,
+        struct_type: Type,
+        method_ref: InstRef,
+        span: Span,
+    ) -> CompileResult<()> {
+        let method_inst = self.rir.get(method_ref);
+        let (method_name, is_unchecked, params_start, params_len, return_type, body, has_self) =
+            match &method_inst.data {
+                InstData::FnDecl {
+                    name,
+                    is_unchecked,
+                    params_start,
+                    params_len,
+                    return_type,
+                    body,
+                    has_self,
+                    ..
+                } => (
+                    *name,
+                    *is_unchecked,
+                    *params_start,
+                    *params_len,
+                    *return_type,
+                    *body,
+                    *has_self,
+                ),
+                _ => unreachable!("AnonFnValue method must be a FnDecl"),
+            };
+
+        let key = (struct_id, method_name);
+        if self.methods.contains_key(&key) {
+            return Ok(());
+        }
+
+        let params = self.rir.get_params(params_start, params_len);
+        let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
+        let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
+        for p in params {
+            let type_str = self.interner.resolve(&p.ty);
+            let resolved = if type_str == "Self" {
+                struct_type
+            } else {
+                self.resolve_type(p.ty, span)?
+            };
+            param_types.push(resolved);
+        }
+
+        let ret_type_str = self.interner.resolve(&return_type);
+        let ret_ty = if ret_type_str == "Self" {
+            struct_type
+        } else {
+            self.resolve_type(return_type, span)?
+        };
+
+        let param_range = self.param_arena.alloc_method(param_names, param_types);
+
+        self.methods.insert(
+            key,
+            MethodInfo {
+                struct_type,
+                has_self,
+                params: param_range,
+                return_type: ret_ty,
+                body,
+                span: method_inst.span,
+                is_unchecked,
+            },
+        );
+        Ok(())
     }
 
     /// Register methods for an anonymous enum created via comptime with type substitution.

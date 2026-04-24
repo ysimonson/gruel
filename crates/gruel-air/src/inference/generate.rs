@@ -1514,6 +1514,15 @@ impl<'a> ConstraintGenerator<'a> {
                 let result_var = self.fresh_var();
                 InferType::Var(result_var)
             }
+
+            // Anonymous function value (ADR-0055): sema lowers to a fresh anon
+            // struct with a `__call` method, then emits a StructInit against
+            // that struct. Inference defers to a fresh type variable here —
+            // analysis.rs supplies the concrete struct type.
+            InstData::AnonFnValue { .. } => {
+                let result_var = self.fresh_var();
+                InferType::Var(result_var)
+            }
         };
 
         // Record the type for this expression

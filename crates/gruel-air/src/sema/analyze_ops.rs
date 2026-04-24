@@ -4029,6 +4029,87 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, struct_ty))
     }
 
+    /// Analyze an anonymous function value (ADR-0055).
+    ///
+    /// Desugars `fn(params) -> ret { body }` into:
+    /// - a fresh anon struct with 0 fields and a single `__call` method
+    /// - an empty `StructInit` against that struct
+    ///
+    /// Phase 2 uses the normal structural-dedup path, so two same-signature
+    /// anonymous functions will collide (known limitation); Phase 3 adds
+    /// lambda-origin tagging so each site is unique.
+    pub(crate) fn analyze_anon_fn_value(
+        &mut self,
+        air: &mut Air,
+        method_ref: InstRef,
+        span: Span,
+        _ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        use gruel_error::PreviewFeature;
+
+        // Preview gate.
+        self.require_preview(PreviewFeature::AnonFunctions, "anonymous functions", span)?;
+
+        // Extract the `__call` method signature from the FnDecl the parser
+        // synthesized for us.
+        let method_inst = self.rir.get(method_ref);
+        let (call_name, param_types_syms, return_type_sym, has_self) = match &method_inst.data {
+            InstData::FnDecl {
+                name,
+                params_start,
+                params_len,
+                return_type,
+                has_self,
+                ..
+            } => {
+                let params = self.rir.get_params(*params_start, *params_len);
+                let param_types: Vec<Spur> = params.iter().map(|p| p.ty).collect();
+                (*name, param_types, *return_type, *has_self)
+            }
+            _ => unreachable!("AnonFnValue method must be a FnDecl (invariant set by astgen)"),
+        };
+
+        let method_sig = super::AnonMethodSig {
+            name: call_name,
+            has_self,
+            param_types: param_types_syms,
+            return_type: return_type_sym,
+        };
+
+        // Synthesize an anon struct with 0 fields and this single method.
+        let struct_fields: Vec<StructField> = Vec::new();
+        let (struct_ty, is_new) = self.find_or_create_anon_struct(
+            &struct_fields,
+            std::slice::from_ref(&method_sig),
+            &HashMap::new(),
+        );
+        let struct_id = struct_ty
+            .as_struct()
+            .expect("find_or_create_anon_struct returned non-struct type");
+
+        // Register the __call method on the struct so it is callable.
+        if is_new {
+            self.register_anon_fn_call_method(struct_id, struct_ty, method_ref, span)?;
+        }
+
+        // Emit an empty StructInit — the struct has no fields, so both the
+        // field array and the source-order array are zero-length.
+        let fields_start = air.add_extra(&[]);
+        let source_order_start = air.add_extra(&[]);
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::StructInit {
+                struct_id,
+                fields_start,
+                fields_len: 0,
+                source_order_start,
+            },
+            ty: struct_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, struct_ty))
+    }
+
     /// Analyze a field access.
     ///
     /// Uses place-based analysis (ADR-0030) when possible for efficient code generation.
