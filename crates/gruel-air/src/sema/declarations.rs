@@ -973,16 +973,47 @@ impl<'a> Sema<'a> {
 
                 let params = self.rir.get_params(*params_start, *params_len);
                 let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
+                let param_modes: Vec<RirParamMode> = params.iter().map(|p| p.mode).collect();
+                let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
+
+                // Detect method-level comptime type parameters (e.g.,
+                // `fn apply(self, comptime F: type, f: F) -> T`). When
+                // present, the method is generic at the method level — its
+                // param types that reference those names (`f: F`) and its
+                // return type cannot be fully resolved until the method is
+                // specialized at a call site. Mirrors the top-level
+                // generic-function treatment above.
+                let type_sym = self.interner.get_or_intern("type");
+                let method_type_param_names: Vec<Spur> = params
+                    .iter()
+                    .filter(|p| p.is_comptime && p.ty == type_sym)
+                    .map(|p| p.name)
+                    .collect();
+                let is_method_generic = !method_type_param_names.is_empty();
+
                 let param_types: Vec<Type> = params
                     .iter()
-                    .map(|p| self.resolve_type(p.ty, method_inst.span))
+                    .map(|p| {
+                        if p.is_comptime && p.ty == type_sym {
+                            Ok(Type::COMPTIME_TYPE)
+                        } else if method_type_param_names.contains(&p.ty) {
+                            Ok(Type::COMPTIME_TYPE)
+                        } else {
+                            self.resolve_type(p.ty, method_inst.span)
+                        }
+                    })
                     .collect::<CompileResult<Vec<_>>>()?;
-                let ret_type = self.resolve_type(*return_type, method_inst.span)?;
+                let ret_type = if method_type_param_names.contains(return_type) {
+                    Type::COMPTIME_TYPE
+                } else {
+                    self.resolve_type(*return_type, method_inst.span)?
+                };
 
-                // Allocate method parameters in the arena
-                let param_range = self
-                    .param_arena
-                    .alloc_method(param_names.into_iter(), param_types.into_iter());
+                // Allocate method parameters in the arena, preserving mode
+                // and comptime flags so specialization can pick them up.
+                let param_range =
+                    self.param_arena
+                        .alloc(param_names, param_types, param_modes, param_comptime);
 
                 self.methods.insert(
                     key,
@@ -994,6 +1025,8 @@ impl<'a> Sema<'a> {
                         body: *body,
                         span: method_inst.span,
                         is_unchecked: *is_unchecked,
+                        is_generic: is_method_generic,
+                        return_type_sym: *return_type,
                     },
                 );
             }
@@ -1263,6 +1296,10 @@ impl<'a> Sema<'a> {
                         body: *body,
                         span: method_inst.span,
                         is_unchecked: *is_unchecked,
+                        // Enum methods do not yet support method-level
+                        // comptime type params (ADR-0055 defers that path).
+                        is_generic: false,
+                        return_type_sym: *return_type,
                     },
                 );
             }

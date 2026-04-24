@@ -57,6 +57,15 @@ pub struct MethodInfo {
     pub span: Span,
     /// Whether this method is marked `unchecked` (can only be called from checked blocks)
     pub is_unchecked: bool,
+    /// True if this method has its own comptime type parameters (e.g.,
+    /// `fn apply(self, comptime F: type, f: F) -> T`). Such methods are
+    /// generic at the method level (independent of the enclosing function's
+    /// comptime params) and their bodies are only analyzed at specialization.
+    pub is_generic: bool,
+    /// Return-type symbol as written in source. Preserved (as well as the
+    /// resolved `return_type` above) so that generic-method specialization
+    /// can substitute method-level comptime type params in the return type.
+    pub return_type_sym: lasso::Spur,
 }
 
 /// Method signature for anonymous struct structural equality comparison.

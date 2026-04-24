@@ -3423,13 +3423,21 @@ impl<'a> Sema<'a> {
                 }
             }
 
-            let air_ref = air.add_inst(AirInst {
-                data: AirInstData::Param {
-                    index: param_info.abi_slot,
-                },
-                ty,
-                span,
-            });
+            // Zero-sized parameter types (e.g. empty structs used as ZST
+            // callables) take no ABI slot. Emit a synthetic zero-value
+            // instead of a `Param { index }` that would be out-of-range at
+            // codegen time.
+            let air_ref = if self.abi_slot_count(ty) == 0 {
+                self.emit_zst_value(air, ty, span)
+            } else {
+                air.add_inst(AirInst {
+                    data: AirInstData::Param {
+                        index: param_info.abi_slot,
+                    },
+                    ty,
+                    span,
+                })
+            };
             return Ok(AnalysisResult::new(air_ref, ty));
         }
 
@@ -4120,6 +4128,40 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, struct_ty))
     }
 
+    /// Materialize a zero-sized value of the given type as AIR. Used for
+    /// ZST parameters (empty-struct callables, `()`, and similar) where
+    /// emitting an ABI `Param` would dereference a non-existent slot at
+    /// codegen time.
+    fn emit_zst_value(&mut self, air: &mut Air, ty: Type, span: Span) -> crate::inst::AirRef {
+        match ty.kind() {
+            TypeKind::Struct(struct_id) => {
+                let fields_start = air.add_extra(&[]);
+                let source_order_start = air.add_extra(&[]);
+                air.add_inst(AirInst {
+                    data: AirInstData::StructInit {
+                        struct_id,
+                        fields_start,
+                        fields_len: 0,
+                        source_order_start,
+                    },
+                    ty,
+                    span,
+                })
+            }
+            _ => {
+                // Unit, Never, and other non-struct ZSTs: fall back to a
+                // unit constant. Never-typed values are produced via
+                // divergence, not via VarRef, so this branch in practice
+                // only fires for Unit and related marker types.
+                air.add_inst(AirInst {
+                    data: AirInstData::UnitConst,
+                    ty,
+                    span,
+                })
+            }
+        }
+    }
+
     /// ADR-0055 call-sugar: rewrite `f(args)` as `f.__call(args)` when `f` is
     /// a local or parameter whose type is a struct with a `__call` method.
     ///
@@ -4205,16 +4247,29 @@ impl<'a> Sema<'a> {
         ctx.used_locals.insert(receiver_name);
 
         let receiver_air_ref = match source {
-            ReceiverSource::Local(slot) => air.add_inst(AirInst {
-                data: AirInstData::Load { slot },
-                ty: receiver_ty,
-                span,
-            }),
-            ReceiverSource::Param(abi_slot) => air.add_inst(AirInst {
-                data: AirInstData::Param { index: abi_slot },
-                ty: receiver_ty,
-                span,
-            }),
+            ReceiverSource::Local(slot) => {
+                if self.abi_slot_count(receiver_ty) == 0 {
+                    // ZST local — no slot to load from, materialize zero.
+                    self.emit_zst_value(air, receiver_ty, span)
+                } else {
+                    air.add_inst(AirInst {
+                        data: AirInstData::Load { slot },
+                        ty: receiver_ty,
+                        span,
+                    })
+                }
+            }
+            ReceiverSource::Param(abi_slot) => {
+                if self.abi_slot_count(receiver_ty) == 0 {
+                    self.emit_zst_value(air, receiver_ty, span)
+                } else {
+                    air.add_inst(AirInst {
+                        data: AirInstData::Param { index: abi_slot },
+                        ty: receiver_ty,
+                        span,
+                    })
+                }
+            }
         };
 
         // Look up the method so we can pass its info through unchanged.

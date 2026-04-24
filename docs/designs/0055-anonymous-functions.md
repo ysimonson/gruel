@@ -374,34 +374,47 @@ compiles and runs, returning 42.
 runs; runtime capture is a compile error (generic `UndefinedVariable`
 diagnostic for now, to be refined in a follow-up).
 
-### Phase 4: End-to-end codegen validation
+### Phase 4: End-to-end codegen validation + generic higher-order methods
 
-- [x] No codegen changes required: anonymous functions desugar into existing
-      struct + method machinery, which the LLVM backend already handles.
-- [x] End-to-end smoke tests (via scratch programs) cover:
-      * single-parameter lambda called via call-sugar;
-      * two same-signature lambdas with different bodies in the same program
-        — each runs its own body, confirming per-site type uniqueness;
-      * zero-parameter lambda `fn() -> i32 { ... }()`;
-      * nested lambdas (a lambda whose body returns another lambda's result).
-- [ ] **Deferred**: generic higher-order method `apply(self, comptime U: type,
-      comptime F: type, f: F) -> U`. The three routes to this — (a) inline
-      method inside `fn Wrap(comptime T: type) -> type`, (b) method on a
-      named struct, (c) free function with `comptime F: type` — each hit
-      pre-existing bugs unrelated to ADR-0055: comptime evaluation of
-      outer-function returning `type` rejects methods with second-order
-      comptime params; named structs don't resolve method-level `comptime F:
-      type` (ADR-0029 Open Question #3 was resolved for *anonymous* struct
-      methods only); and ZST struct args passed through wrapper functions
-      panic the LLVM backend at the ABI boundary. These are orthogonal
-      follow-up issues. The Phase 4 deliverable is descoped to "end-to-end
-      codegen works for lambda creation, uniqueness, call-sugar, and
-      nesting" — all verified.
+- [x] No codegen changes required for the lambda desugaring itself:
+      anonymous functions compile via existing struct + method machinery.
+- [x] End-to-end smoke tests cover single-parameter lambdas, two
+      same-signature lambdas with different bodies, zero-parameter lambdas,
+      and nested lambdas. All compile and run correctly.
+- [x] Second-order-comptime-on-methods (was the first listed limitation):
+      inline methods inside `fn Wrap(comptime T: type) -> type` (and named
+      struct methods) can now take their own `comptime F: type` parameter.
+      Fix had three parts:
+      * Method registration (`register_anon_struct_methods_for_comptime_with_subst`
+        and `collect_struct_methods`) uses `Type::COMPTIME_TYPE` as a
+        placeholder for method-level comptime type params and for any later
+        param whose declared type references one, mirroring the top-level
+        generic-fn path in `declarations.rs`.
+      * `MethodInfo` gains `is_generic` + `return_type_sym`. Method body
+        analysis skips generic methods (defers to specialization). Method
+        call sites emit `CallGeneric` with type args when `is_generic` is
+        true; call sites accept type arguments as type literals, struct/enum
+        names, or comptime type variables.
+      * `specialize.rs` gained `create_specialized_method` and a
+        `resolve_method_name` helper that treats `"Struct.method"` mangled
+        names as methods when no matching top-level function exists.
+- [x] ZST parameter codegen (second part of the same limitation): reading
+      an empty-struct parameter no longer emits an out-of-range `Param
+      { index }`. `analyze_var_ref` and the call-sugar emitter route zero-
+      ABI-slot params through a new `emit_zst_value` helper that
+      materializes an empty `StructInit` (or `()` for unit-like ZSTs).
+- [x] Spec test `generic_method_takes_named_callable` covers the full
+      pipeline: named-callable struct with `__call`, generic `apply` method
+      on an anon struct, call site with explicit type argument.
+- [ ] **Still deferred**: passing an anonymous function *directly* to
+      `apply(comptime F: type, f: F)` requires inferring `F` from the value
+      argument's type, because anonymous-function types are unnameable. See
+      Open Question 1 ("Inferring parameter types from context"). Users who
+      need this today can define a named `struct X { fn __call(...) }` and
+      pass `apply(X, X {})` — verified working.
 
-**Deliverable (revised)**: `let f = fn(x: i32) -> i32 { x + 1 }; let g = fn(x: i32) -> i32 { x * 2 }; f(10) + g(10)`
-compiles and runs, returning 31. Nested lambdas compile and run. The generic
-`apply(f)` shape requires follow-up work on method-generic comptime support
-and ZST ABI, tracked outside this ADR.
+**Deliverable**: lambdas compose end-to-end; generic higher-order methods
+compile and run when the callable's type is nameable at the call site.
 
 ### Phase 5: Specification and tests
 

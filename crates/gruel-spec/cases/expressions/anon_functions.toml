@@ -173,6 +173,40 @@ fn main() -> i32 {
 """
 
 # =============================================================================
+# Generic higher-order methods (ADR-0055 Phase 4 follow-up)
+# =============================================================================
+
+# Named-callable struct passed through a generic method that takes
+# `comptime F: type, f: F`. Exercises the second-order-comptime-on-methods
+# path in registration + specialization, plus the ZST-ABI path for empty
+# struct callables.
+[[case]]
+name = "generic_method_takes_named_callable"
+spec = ["4.16:3", "4.16:6"]
+preview = "anon_functions"
+preview_should_pass = true
+source = """
+struct Doubler {
+    fn __call(self, x: i32) -> i32 { x * 2 }
+}
+fn Wrap(comptime T: type) -> type {
+    struct {
+        value: T,
+        fn apply(self, comptime F: type, f: F) -> T {
+            f(self.value)
+        }
+    }
+}
+fn main() -> i32 {
+    let W = Wrap(i32);
+    let w: W = W { value: 21 };
+    let d: Doubler = Doubler {};
+    w.apply(Doubler, d)
+}
+"""
+exit_code = 42
+
+# =============================================================================
 # Preview gating — without --preview the feature rejects at the first use
 # =============================================================================
 

@@ -20,8 +20,8 @@ use gruel_span::Span;
 use lasso::{Spur, ThreadedRodeo};
 
 use crate::inst::{Air, AirInstData};
-use crate::sema::{AnalyzedFunction, FunctionInfo, InferenceContext, Sema, SemaOutput};
-use crate::types::Type;
+use crate::sema::{AnalyzedFunction, FunctionInfo, InferenceContext, MethodInfo, Sema, SemaOutput};
+use crate::types::{StructId, Type};
 
 /// A key for a specialized function: (base_function_name, type_arguments).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -75,28 +75,64 @@ pub fn specialize(
 
     // Phase 3: Create specialized function bodies by re-analyzing with type substitution
     for (key, info) in &specializations {
-        let base_info = match sema.functions.get(&key.base_name) {
-            Some(info) => *info,
-            None => {
-                let func_name = interner.resolve(&key.base_name);
-                return Err(CompileError::new(
-                    ErrorKind::UndefinedFunction(func_name.to_string()),
-                    info.call_site_span,
-                ));
-            }
-        };
-        let specialized_func = create_specialized_function(
-            sema,
-            infer_ctx,
-            key,
-            info.mangled_name,
-            &base_info,
-            interner,
-        )?;
-        output.functions.push(specialized_func);
+        if let Some(fn_info) = sema.functions.get(&key.base_name) {
+            let base_info = *fn_info;
+            let specialized_func = create_specialized_function(
+                sema,
+                infer_ctx,
+                key,
+                info.mangled_name,
+                &base_info,
+                interner,
+            )?;
+            output.functions.push(specialized_func);
+            continue;
+        }
+
+        // Fall back: the name might refer to a generic method encoded as
+        // "StructName.methodName" (ADR-0055 — method-level comptime type
+        // params). Try to split and resolve as a method.
+        if let Some((struct_id, method_name_sym)) =
+            resolve_method_name(sema, interner, key.base_name)
+            && let Some(method_info) = sema.methods.get(&(struct_id, method_name_sym)).copied()
+        {
+            let specialized_func = create_specialized_method(
+                sema,
+                infer_ctx,
+                key,
+                info.mangled_name,
+                struct_id,
+                &method_info,
+                interner,
+            )?;
+            output.functions.push(specialized_func);
+            continue;
+        }
+
+        let func_name = interner.resolve(&key.base_name);
+        return Err(CompileError::new(
+            ErrorKind::UndefinedFunction(func_name.to_string()),
+            info.call_site_span,
+        ));
     }
 
     Ok(())
+}
+
+/// Parse a "StructName.methodName" mangled name into a (StructId, method Spur).
+/// Returns None if the name does not match the pattern or the struct is
+/// unknown.
+fn resolve_method_name(
+    sema: &Sema<'_>,
+    interner: &ThreadedRodeo,
+    name: Spur,
+) -> Option<(StructId, Spur)> {
+    let name_str = interner.resolve(&name);
+    let (struct_str, method_str) = name_str.rsplit_once('.')?;
+    let struct_sym = interner.get(struct_str)?;
+    let struct_id = *sema.structs.get(&struct_sym)?;
+    let method_sym = interner.get(method_str)?;
+    Some((struct_id, method_sym))
 }
 
 /// Collect all specializations needed from a function's AIR.
@@ -290,6 +326,135 @@ fn create_specialized_function(
         param_slot_types,
         is_destructor: false,
     })
+}
+
+/// Create a specialized method by re-analyzing the body with the method-
+/// level type substitution (ADR-0055).
+///
+/// Unlike `create_specialized_function`, the synthesized function has a
+/// `self` receiver prepended to its parameter list (from the struct's type).
+fn create_specialized_method(
+    sema: &mut Sema<'_>,
+    infer_ctx: &InferenceContext,
+    key: &SpecializationKey,
+    specialized_name: Spur,
+    _struct_id: StructId,
+    base_info: &MethodInfo,
+    interner: &ThreadedRodeo,
+) -> CompileResult<AnalyzedFunction> {
+    let specialized_name_str = interner.resolve(&specialized_name).to_string();
+
+    let param_names = sema.param_arena.names(base_info.params).to_vec();
+    let param_types = sema.param_arena.types(base_info.params).to_vec();
+    let param_modes = sema.param_arena.modes(base_info.params).to_vec();
+    let param_comptime = sema.param_arena.comptime(base_info.params).to_vec();
+
+    // Build method-level type substitution from comptime type params ->
+    // concrete type args (positional, in the order the comptime params
+    // appear).
+    let mut type_subst: HashMap<Spur, Type> = HashMap::new();
+    let mut type_arg_idx = 0;
+    for (i, is_comptime) in param_comptime.iter().enumerate() {
+        if *is_comptime && type_arg_idx < key.type_args.len() {
+            type_subst.insert(param_names[i], key.type_args[type_arg_idx]);
+            type_arg_idx += 1;
+        }
+    }
+    // Methods also need `Self` for the receiver — wire it through so struct-
+    // literal expressions `Self { ... }` inside the method body still resolve.
+    let self_sym = interner.get_or_intern("Self");
+    type_subst.insert(self_sym, base_info.struct_type);
+
+    // Substitute the return type if it references a method-level type param.
+    let return_type = if let Some(&ty) = type_subst.get(&base_info.return_type_sym) {
+        ty
+    } else if base_info.return_type == Type::COMPTIME_TYPE {
+        // Unknown comptime return — fall back to the stored type.
+        base_info.return_type
+    } else {
+        base_info.return_type
+    };
+
+    // Build specialized param list: prepend self, drop comptime params,
+    // substitute type-param references.
+    let mut specialized_params: Vec<(Spur, Type, RirParamMode)> = Vec::new();
+    if base_info.has_self {
+        let self_val_sym = interner.get_or_intern("self");
+        specialized_params.push((self_val_sym, base_info.struct_type, RirParamMode::Normal));
+    }
+    for i in 0..param_names.len() {
+        if param_comptime[i] {
+            continue;
+        }
+        let name = param_names[i];
+        let ty = param_types[i];
+        let mode = param_modes[i];
+        let concrete_ty = if ty == Type::COMPTIME_TYPE {
+            substitute_method_param_type(sema, base_info, name, &type_subst).unwrap_or(ty)
+        } else {
+            ty
+        };
+        specialized_params.push((name, concrete_ty, mode));
+    }
+
+    let (
+        air,
+        num_locals,
+        num_param_slots,
+        modes_result,
+        param_slot_types,
+        _warnings,
+        _local_strings,
+        _ref_fns,
+        _ref_meths,
+    ) = sema.analyze_specialized_function(
+        infer_ctx,
+        return_type,
+        &specialized_params,
+        base_info.body,
+        &type_subst,
+    )?;
+
+    Ok(AnalyzedFunction {
+        name: specialized_name_str,
+        air,
+        num_locals,
+        num_param_slots,
+        param_modes: modes_result,
+        param_slot_types,
+        is_destructor: false,
+    })
+}
+
+/// Like `substitute_param_type` but for method bodies: walks the RIR to find
+/// the FnDecl matching `base_info.body` and resolves param type refs using
+/// `type_subst`.
+fn substitute_method_param_type(
+    sema: &Sema<'_>,
+    base_info: &MethodInfo,
+    param_name: Spur,
+    type_subst: &HashMap<Spur, Type>,
+) -> Option<Type> {
+    for (_, inst) in sema.rir.iter() {
+        if let gruel_rir::InstData::FnDecl {
+            body,
+            params_start,
+            params_len,
+            ..
+        } = &inst.data
+            && *body == base_info.body
+        {
+            let params = sema.rir.get_params(*params_start, *params_len);
+            for param in params {
+                if param.name == param_name
+                    && let Some(&concrete) = type_subst.get(&param.ty)
+                {
+                    return Some(concrete);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Substitute a parameter's type using the type substitution map.
