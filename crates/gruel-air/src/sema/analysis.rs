@@ -1210,7 +1210,7 @@ impl<'a> Sema<'a> {
     ///
     /// Under `usize_indexing` the builtin exposes `usize`; otherwise it falls
     /// back to `u64` for source compatibility while the feature is gated.
-    fn usize_or_u64_compat(&self) -> Type {
+    pub(crate) fn usize_or_u64_compat(&self) -> Type {
         if self
             .preview_features
             .contains(&PreviewFeature::UsizeIndexing)
@@ -1218,6 +1218,21 @@ impl<'a> Sema<'a> {
             Type::USIZE
         } else {
             Type::U64
+        }
+    }
+
+    /// Resolve `@size_of` / `@align_of` result type.
+    ///
+    /// Under `usize_indexing` the intrinsics return `usize`; otherwise they
+    /// return `i32` for source compatibility while the feature is gated.
+    pub(crate) fn usize_or_i32_compat(&self) -> Type {
+        if self
+            .preview_features
+            .contains(&PreviewFeature::UsizeIndexing)
+        {
+            Type::USIZE
+        } else {
+            Type::I32
         }
     }
 
@@ -9125,7 +9140,8 @@ impl<'a> Sema<'a> {
     }
 
     /// Analyze @ptr_copy intrinsic: copies n elements from src to dst.
-    /// Signature: @ptr_copy(dst: ptr mut T, src: ptr const T, count: u64) -> ()
+    /// Signature: @ptr_copy(dst: ptr mut T, src: ptr const T, count: usize) -> ()
+    /// (count is `u64` when the `usize_indexing` preview feature is disabled.)
     fn analyze_ptr_copy_intrinsic(
         &mut self,
         air: &mut Air,
@@ -9215,12 +9231,13 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        // count must be u64
-        if count_type != Type::U64 && !count_type.is_error() && !count_type.is_never() {
+        // count must be `usize` (or `u64` when the preview feature is off).
+        let expected_count_ty = self.usize_or_u64_compat();
+        if count_type != expected_count_ty && !count_type.is_error() && !count_type.is_never() {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "ptr_copy".to_string(),
-                    expected: "u64".to_string(),
+                    expected: expected_count_ty.name().to_string(),
                     found: self.format_type_name(count_type),
                 })),
                 span,

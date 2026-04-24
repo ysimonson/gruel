@@ -42,8 +42,8 @@ The following table provides a quick reference to all available intrinsics:
 | Intrinsic | Purpose | Arguments | Return Type |
 |-----------|---------|-----------|-------------|
 | `@dbg` | Print debug output | 0+ expressions (phase-dependent types) | `()` |
-| `@size_of` | Get type size in bytes | 1 type | `i32` |
-| `@align_of` | Get type alignment in bytes | 1 type | `i32` |
+| `@size_of` | Get type size in bytes | 1 type | `usize` |
+| `@align_of` | Get type alignment in bytes | 1 type | `usize` |
 | `@intCast` | Convert between integer types | 1 expression (integer) | inferred integer type |
 | `@cast` | Convert between numeric types | 1 expression (numeric) | inferred numeric type |
 | `@read_line` | Read line from stdin | none | `String` |
@@ -156,7 +156,7 @@ The `@size_of` intrinsic returns the size of a type in bytes.
 
 {{ rule(id="4.13:14", cat="normative") }}
 
-The return type of `@size_of` is `i32`.
+The return type of `@size_of` is `usize`.
 
 {{ rule(id="4.13:15", cat="normative") }}
 
@@ -166,7 +166,8 @@ The value returned by `@size_of` is determined at compile time.
 
 ```gruel
 fn main() -> i32 {
-    @size_of(i32)     // 8 (one 8-byte slot)
+    let n: usize = @size_of(i32);   // 8 (one 8-byte slot)
+    @cast(n)
 }
 ```
 
@@ -176,7 +177,8 @@ fn main() -> i32 {
 struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
-    @size_of(Point)   // 16 (two 8-byte slots)
+    let n: usize = @size_of(Point); // 16 (two 8-byte slots)
+    @cast(n)
 }
 ```
 
@@ -192,7 +194,7 @@ The `@align_of` intrinsic returns the alignment of a type in bytes.
 
 {{ rule(id="4.13:20", cat="normative") }}
 
-The return type of `@align_of` is `i32`.
+The return type of `@align_of` is `usize`.
 
 {{ rule(id="4.13:21", cat="normative") }}
 
@@ -206,7 +208,8 @@ All types in Gruel currently have 8-byte alignment.
 
 ```gruel
 fn main() -> i32 {
-    @align_of(i32)    // 8
+    let a: usize = @align_of(i32);  // 8
+    @cast(a)
 }
 ```
 

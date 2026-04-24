@@ -195,7 +195,7 @@ let r = @random_u64();
 
 ### `@size_of`
 
-`@size_of(T)` returns `sizeof(T)` as `i32`, evaluated at compile time.
+`@size_of(T)` returns `sizeof(T)` as `usize`, evaluated at compile time.
 
 
 **Examples:**
@@ -206,7 +206,7 @@ let r = @random_u64();
 
 ### `@align_of`
 
-`@align_of(T)` returns the required alignment of `T` as `i32`, evaluated at compile time.
+`@align_of(T)` returns the required alignment of `T` as `usize`, evaluated at compile time.
 
 
 **Examples:**

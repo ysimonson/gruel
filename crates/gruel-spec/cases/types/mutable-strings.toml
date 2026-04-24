@@ -725,3 +725,36 @@ fn main() -> i32 {
 }
 """
 exit_code = 0
+
+# =============================================================================
+# usize length (ADR-0054, preview)
+# =============================================================================
+
+[[case]]
+name = "string_len_returns_usize_under_preview"
+spec = ["3.10:10"]
+preview = "usize_indexing"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hello";
+    let n: usize = s.len();
+    let arr: [i32; 5] = [1, 2, 3, 4, 5];
+    arr[n - 1]
+}
+"""
+exit_code = 5
+
+[[case]]
+name = "string_capacity_returns_usize_under_preview"
+spec = ["3.10:11"]
+preview = "usize_indexing"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let s = "hi";
+    let _c: usize = s.capacity();
+    0
+}
+"""
+exit_code = 0

@@ -5423,12 +5423,13 @@ impl<'a> Sema<'a> {
             }
         };
 
+        let result_ty = self.usize_or_i32_compat();
         let air_ref = air.add_inst(AirInst {
             data: AirInstData::Const(value),
-            ty: Type::I32,
+            ty: result_ty,
             span,
         });
-        Ok(AnalysisResult::new(air_ref, Type::I32))
+        Ok(AnalysisResult::new(air_ref, result_ty))
     }
 
     // ========================================================================

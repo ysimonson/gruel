@@ -736,3 +736,64 @@ fn main() -> i32 {
 }
 """
 exit_code = 5
+
+# =============================================================================
+# usize indexing (ADR-0054, preview)
+# =============================================================================
+
+[[case]]
+name = "usize_index_happy_path"
+spec = ["7.1:7"]
+preview = "usize_indexing"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [10, 20, 12];
+    let i: usize = 2;
+    arr[i]
+}
+"""
+exit_code = 12
+
+[[case]]
+name = "usize_index_literal_infers_usize"
+spec = ["7.1:7"]
+preview = "usize_indexing"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [10, 20, 12];
+    arr[0] + arr[1] + arr[2]
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "usize_index_rejects_u64"
+spec = ["7.1:7"]
+preview = "usize_indexing"
+preview_should_pass = true
+compile_fail = true
+error_contains = "expected usize"
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [10, 20, 12];
+    let i: u64 = 0;
+    arr[i]
+}
+"""
+
+[[case]]
+name = "usize_index_cast_from_u64"
+spec = ["7.1:7"]
+preview = "usize_indexing"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [10, 20, 12];
+    let raw: u64 = 2;
+    let i: usize = @cast(raw);
+    arr[i]
+}
+"""
+exit_code = 12

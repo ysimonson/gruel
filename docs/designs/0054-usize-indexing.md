@@ -97,16 +97,16 @@ Existing Gruel code that uses `u64` for indexing or length variables must be upd
   - Runtime extern signatures in `gruel-runtime` stay as `uint64_t` (same layout).
   - Update spec sections covering `String` methods.
 
-- [ ] **Phase 4: `@size_of` / `@align_of` return `usize`**
+- [x] **Phase 4: `@size_of` / `@align_of` return `usize`**
   - Change return type in `gruel-intrinsics` registry.
   - Update sema (`analyze_type_intrinsic`) and the comptime evaluator (`ConstValue::Integer` path in analysis.rs ~7784) — values are already integers, only the stamped type changes.
   - Update spec section covering these intrinsics and any spec tests that assert `i32` return.
   - Regenerate `docs/generated/intrinsics-reference.md` (`make gen-intrinsic-docs`).
 
-- [ ] **Phase 5: Size-parameter intrinsics require `usize`**
+- [x] **Phase 5: Size-parameter intrinsics require `usize`**
   - In analysis.rs, change the `Type::U64` checks for count/size parameters (lines ~8936, 9170, 9290 — `@memcpy`, `@memset`, raw-pointer ops) to require `Type::USIZE`.
 
-- [ ] **Phase 6: Migrate existing Gruel code under the flag**
+- [x] **Phase 6: Migrate existing Gruel code under the flag**
   - Update spec tests in `crates/gruel-spec/cases/` that currently use `u64` indices or `u64` lengths (`arrays/fixed.toml:294`, `runtime/bounds.toml:17,33,146`, plus any tests that call `.len()` / `.capacity()` and bind the result). Tests should pass with `--preview usize_indexing`.
   - Update scratch examples / benchmarks in `crates/gruel-benchmarks` and anywhere else that indexes with `u64`.
   - Add new spec tests covering: `usize` index happy path, `u32` index rejected (with error-message check), literal-in-index inferred as `usize`, `String::len()` returning `usize`.

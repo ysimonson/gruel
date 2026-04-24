@@ -817,8 +817,17 @@ impl<'a> ConstraintGenerator<'a> {
                         // since the actual type is determined by the comptime evaluator.
                         InferType::Var(self.fresh_var())
                     }
-                    // @size_of, @align_of (and the fallback for unknown names)
-                    // return i32.
+                    Some(IntrinsicId::SizeOf) | Some(IntrinsicId::AlignOf) => {
+                        // @size_of / @align_of return `usize` under the
+                        // `usize_indexing` preview feature, `i32` otherwise.
+                        let ty = if self.usize_indexing {
+                            Type::USIZE
+                        } else {
+                            Type::I32
+                        };
+                        InferType::Concrete(ty)
+                    }
+                    // Fallback for unknown names.
                     _ => InferType::Concrete(Type::I32),
                 }
             }

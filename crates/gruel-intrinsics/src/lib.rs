@@ -319,7 +319,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         preview: None,
         runtime_fn: None,
         summary: "Size of a type in bytes.",
-        description: "`@size_of(T)` returns `sizeof(T)` as `i32`, evaluated at compile time.",
+        description: "`@size_of(T)` returns `sizeof(T)` as `usize`, evaluated at compile time.",
         examples: &["@size_of(i64)"],
     },
     IntrinsicDef {
@@ -331,7 +331,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         preview: None,
         runtime_fn: None,
         summary: "Alignment of a type in bytes.",
-        description: "`@align_of(T)` returns the required alignment of `T` as `i32`, evaluated at compile time.",
+        description: "`@align_of(T)` returns the required alignment of `T` as `usize`, evaluated at compile time.",
         examples: &["@align_of(i64)"],
     },
     IntrinsicDef {
