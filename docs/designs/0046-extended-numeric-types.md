@@ -227,7 +227,7 @@ No implicit numeric coercions — all cross-type conversions require explicit ca
 
 2. **NaN boxing or special NaN handling**: Should Gruel expose `NaN`/`Infinity` as named constants, or require `0.0 / 0.0`-style construction? (Suggest: add `f32::NAN`, `f64::INFINITY` etc. as associated constants in a future ADR.)
 
-3. **`isize`/`usize` as array index type**: Should array indexing require `usize`? Current arrays use integer expressions. This is a semantic change that affects existing code and should be a separate ADR.
+3. **`isize`/`usize` as array index type**: Should array indexing require `usize`? Current arrays use integer expressions. This is a semantic change that affects existing code and should be a separate ADR. *Resolved by ADR-0054: array indexing and size/length APIs now require `usize`.*
 
 4. **Comptime float**: Should float expressions be evaluable at comptime? This adds complexity (f64 arithmetic at compile time). Could defer and only allow float literals, not comptime float math.
 

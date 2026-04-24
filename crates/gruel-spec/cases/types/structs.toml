@@ -89,7 +89,7 @@ name = "scalar_size_8_bytes"
 spec = ["3.6:8"]
 source = """
 fn main() -> i32 {
-    @size_of(i32)
+    let __n: usize = @size_of(i32); @cast(__n)
 }
 """
 exit_code = 8
@@ -99,7 +99,7 @@ name = "bool_size_8_bytes"
 spec = ["3.6:8"]
 source = """
 fn main() -> i32 {
-    @size_of(bool)
+    let __n: usize = @size_of(bool); @cast(__n)
 }
 """
 exit_code = 8
@@ -109,7 +109,7 @@ name = "unit_size_zero"
 spec = ["3.0:2", "3.0:3", "3.3:4"]
 source = """
 fn main() -> i32 {
-    @size_of(())
+    let __n: usize = @size_of(()); @cast(__n)
 }
 """
 exit_code = 0
@@ -121,7 +121,7 @@ source = """
 struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     // Two fields, each 8 bytes = 16 bytes total
-    @size_of(Point)
+    let __n: usize = @size_of(Point); @cast(__n)
 }
 """
 exit_code = 16
@@ -133,7 +133,7 @@ source = """
 struct Triple { a: i32, b: i32, c: i32 }
 fn main() -> i32 {
     // Three fields, each 8 bytes = 24 bytes
-    @size_of(Triple)
+    let __n: usize = @size_of(Triple); @cast(__n)
 }
 """
 exit_code = 24
@@ -146,7 +146,7 @@ struct Point { x: i32, y: i32 }
 struct Line { start: Point, end: Point }
 fn main() -> i32 {
     // Two Points, each 16 bytes = 32 bytes
-    @size_of(Line)
+    let __n: usize = @size_of(Line); @cast(__n)
 }
 """
 exit_code = 32
@@ -157,7 +157,7 @@ spec = ["3.6:12"]
 source = """
 struct Point { x: i32, y: i32 }
 fn main() -> i32 {
-    @align_of(Point)
+    let __a: usize = @align_of(Point); @cast(__a)
 }
 """
 exit_code = 8
@@ -167,7 +167,7 @@ name = "scalar_alignment_8_bytes"
 spec = ["3.6:12"]
 source = """
 fn main() -> i32 {
-    @align_of(i64)
+    let __a: usize = @align_of(i64); @cast(__a)
 }
 """
 exit_code = 8
@@ -194,7 +194,7 @@ spec = ["3.6:13", "3.0:2"]
 source = """
 struct Empty {}
 fn main() -> i32 {
-    @size_of(Empty)
+    let __n: usize = @size_of(Empty); @cast(__n)
 }
 """
 exit_code = 0
@@ -205,7 +205,7 @@ spec = ["3.6:12", "3.0:4"]
 source = """
 struct Empty {}
 fn main() -> i32 {
-    @align_of(Empty)
+    let __a: usize = @align_of(Empty); @cast(__a)
 }
 """
 exit_code = 1
@@ -244,7 +244,7 @@ struct Empty {}
 struct Container { value: i32, marker: Empty }
 fn main() -> i32 {
     // Empty field contributes 0 bytes, so size is just value's 8 bytes
-    @size_of(Container)
+    let __n: usize = @size_of(Container); @cast(__n)
 }
 """
 exit_code = 8
@@ -256,7 +256,7 @@ source = """
 struct Empty {}
 struct AlsoEmpty { e: Empty }
 fn main() -> i32 {
-    @size_of(AlsoEmpty)
+    let __n: usize = @size_of(AlsoEmpty); @cast(__n)
 }
 """
 exit_code = 0

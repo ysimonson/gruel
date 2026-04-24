@@ -258,7 +258,7 @@ source = """
 fn main() -> i32 {
     let src: [i32; 3] = [10, 20, 30];
     let mut dst: [i32; 3] = [0, 0, 0];
-    let count: u64 = 3;
+    let count: usize = 3;
     let s: ptr const i32 = checked { @raw(src[0]) };
     let d: ptr mut i32 = checked { @raw_mut(dst[0]) };
     checked { @ptr_copy(d, s, count) };
@@ -274,7 +274,7 @@ source = """
 fn main() -> i32 {
     let src: [i32; 4] = [5, 10, 15, 20];
     let mut dst: [i32; 4] = [0, 0, 0, 0];
-    let count: u64 = 2;
+    let count: usize = 2;
     let s: ptr const i32 = checked { @raw(src[0]) };
     let d: ptr mut i32 = checked { @raw_mut(dst[0]) };
     checked { @ptr_copy(d, s, count) };
@@ -290,7 +290,7 @@ source = """
 fn main() -> i32 {
     let src: [i32; 2] = [10, 20];
     let mut dst: [i32; 2] = [1, 2];
-    let count: u64 = 0;
+    let count: usize = 0;
     let s: ptr const i32 = checked { @raw(src[0]) };
     let d: ptr mut i32 = checked { @raw_mut(dst[0]) };
     checked { @ptr_copy(d, s, count) };

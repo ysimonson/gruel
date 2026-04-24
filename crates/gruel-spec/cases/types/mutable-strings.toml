@@ -22,8 +22,8 @@ fn main() -> i32 {
     let l = s.len();
     let c = s.capacity();
     // Literal has cap=0, len=5
-    let five: u64 = 5;
-    let zero: u64 = 0;
+    let five: usize = 5;
+    let zero: usize = 0;
     if l == five && c == zero { 0 } else { 1 }
 }
 """
@@ -37,7 +37,7 @@ source = """
 fn main() -> i32 {
     let s = "hello world";
     // capacity == 0 means read-only memory (literal)
-    let zero: u64 = 0;
+    let zero: usize = 0;
     if s.capacity() == zero { 0 } else { 1 }
 }
 """
@@ -101,7 +101,7 @@ spec = ["3.10:8", "3.10:9"]
 description = "String::with_capacity() pre-allocates"
 source = """
 fn main() -> i32 {
-    let cap: u64 = 100;
+    let cap: usize = 100;
     let s = String::with_capacity(cap);
     if s.capacity() >= cap { 0 } else { 1 }
 }
@@ -119,7 +119,7 @@ description = "len() returns byte length of string literal"
 source = """
 fn main() -> i32 {
     let s = "hello";
-    let five: u64 = 5;
+    let five: usize = 5;
     if s.len() == five { 0 } else { 1 }
 }
 """
@@ -132,7 +132,7 @@ description = "len() returns 0 for empty string"
 source = """
 fn main() -> i32 {
     let s = "";
-    let zero: u64 = 0;
+    let zero: usize = 0;
     if s.len() == zero && s.is_empty() { 0 } else { 1 }
 }
 """
@@ -145,7 +145,7 @@ description = "capacity() returns 0 for string literal"
 source = """
 fn main() -> i32 {
     let s = "hello";
-    let zero: u64 = 0;
+    let zero: usize = 0;
     if s.capacity() == zero { 0 } else { 1 }
 }
 """
@@ -185,8 +185,8 @@ fn main() -> i32 {
     let len = s.len();
     let empty = s.is_empty();
     let cap = s.capacity();
-    let five: u64 = 5;
-    let zero: u64 = 0;
+    let five: usize = 5;
+    let zero: usize = 0;
     if len == five && !empty && cap == zero { 0 } else { 1 }
 }
 """
@@ -204,7 +204,7 @@ source = """
 fn main() -> i32 {
     let mut s = String::new();
     s.push_str("hello");
-    let five: u64 = 5;
+    let five: usize = 5;
     if s.len() == five { 0 } else { 1 }
 }
 """
@@ -219,7 +219,7 @@ fn main() -> i32 {
     let mut s = String::new();
     s.push_str("hello");
     s.push_str(" world");
-    let eleven: u64 = 11;
+    let eleven: usize = 11;
     if s.len() == eleven { 0 } else { 1 }
 }
 """
@@ -235,7 +235,7 @@ fn main() -> i32 {
     s.push_str("hello");
     let exclaim: u8 = 33;  // '!'
     s.push(exclaim);
-    let six: u64 = 6;
+    let six: usize = 6;
     if s.len() == six { 0 } else { 1 }
 }
 """
@@ -247,7 +247,7 @@ spec = ["3.10:17", "3.10:19"]
 description = "clear() removes content but retains capacity"
 source = """
 fn main() -> i32 {
-    let cap: u64 = 100;
+    let cap: usize = 100;
     let mut s = String::with_capacity(cap);
     s.push_str("hello");
     let cap_before = s.capacity();
@@ -265,9 +265,9 @@ source = """
 fn main() -> i32 {
     let mut s = String::new();
     s.push_str("hi");
-    let additional: u64 = 100;
+    let additional: usize = 100;
     s.reserve(additional);
-    let min_cap: u64 = 102;
+    let min_cap: usize = 102;
     if s.capacity() >= min_cap { 0 } else { 1 }
 }
 """
@@ -299,8 +299,8 @@ source = """
 fn main() -> i32 {
     let mut s = "hello";
     s.push_str("!");
-    let zero: u64 = 0;
-    let six: u64 = 6;
+    let zero: usize = 0;
+    let six: usize = 6;
     if s.capacity() > zero && s.len() == six { 0 } else { 1 }
 }
 """
@@ -313,7 +313,7 @@ description = "Unmodified literal has zero capacity"
 source = """
 fn main() -> i32 {
     let s = "hello";
-    let zero: u64 = 0;
+    let zero: usize = 0;
     if s.capacity() == zero { 0 } else { 1 }
 }
 """
@@ -368,8 +368,8 @@ fn main() -> i32 {
     let mut b = a.clone();
     b.push_str("!");
     // a should still be "hello", b should be "hello!"
-    let five: u64 = 5;
-    let six: u64 = 6;
+    let five: usize = 5;
+    let six: usize = 6;
     if a.len() == five && b.len() == six { 0 } else { 1 }
 }
 """
@@ -384,7 +384,7 @@ fn main() -> i32 {
     let a = "hello";
     let b = a.clone();
     let c = a.clone();  // a still valid after first clone
-    let five: u64 = 5;
+    let five: usize = 5;
     if a.len() == five && b.len() == five && c.len() == five { 0 } else { 1 }
 }
 """
@@ -421,7 +421,7 @@ name = "string_destructor_literal"
 spec = ["3.10:29", "3.10:30"]
 description = "Literal strings (cap=0) are not freed"
 source = """
-fn use_literal() -> u64 {
+fn use_literal() -> usize {
     let s = "hello";
     // s is a literal, no heap to free
     // When s goes out of scope, destructor should be a no-op (cap=0)
@@ -430,7 +430,7 @@ fn use_literal() -> u64 {
 
 fn main() -> i32 {
     let len = use_literal();
-    let five: u64 = 5;
+    let five: usize = 5;
     if len == five { 0 } else { 1 }
 }
 """
@@ -455,7 +455,7 @@ fn main() -> i32 {
     let i: u8 = 105;  // 'i'
     s.push(h);
     s.push(i);
-    let two: u64 = 2;
+    let two: usize = 2;
     if s.len() == two { 0 } else { 1 }
 }
 """
@@ -478,7 +478,7 @@ fn main() -> i32 {
     let exclaim: u8 = 33;  // '!'
     msg.push(exclaim);
     // "Hello, world!" is 13 bytes
-    let thirteen: u64 = 13;
+    let thirteen: usize = 13;
     if msg.len() == thirteen { 0 } else { 1 }
 }
 """
@@ -727,14 +727,12 @@ fn main() -> i32 {
 exit_code = 0
 
 # =============================================================================
-# usize length (ADR-0054, preview)
+# usize length (ADR-0054)
 # =============================================================================
 
 [[case]]
-name = "string_len_returns_usize_under_preview"
+name = "string_len_returns_usize"
 spec = ["3.10:10"]
-preview = "usize_indexing"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = "hello";
@@ -746,10 +744,8 @@ fn main() -> i32 {
 exit_code = 5
 
 [[case]]
-name = "string_capacity_returns_usize_under_preview"
+name = "string_capacity_returns_usize"
 spec = ["3.10:11"]
-preview = "usize_indexing"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = "hi";

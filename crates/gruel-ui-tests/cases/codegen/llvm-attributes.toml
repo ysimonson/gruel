@@ -52,7 +52,7 @@ asm_contains = ["@llvm.expect.i1(i1 %ovf_flag, i1 false)"]
 [[case]]
 name = "bounds_check_has_expect"
 source = """
-fn get(arr: [i32; 3], idx: u64) -> i32 { arr[idx] }
+fn get(arr: [i32; 3], idx: usize) -> i32 { arr[idx] }
 fn main() -> i32 { let a = [10, 20, 30]; get(a, 1) }
 """
 asm_contains = ["@llvm.expect.i1(i1 %bchk, i1 true)"]

@@ -291,7 +291,7 @@ exit_code = 10
 name = "array_param_access_index"
 spec = ["7.1:22", "7.1:23"]
 source = """
-fn get_element(arr: [i32; 4], idx: u64) -> i32 {
+fn get_element(arr: [i32; 4], idx: usize) -> i32 {
     arr[idx]
 }
 
@@ -738,14 +738,12 @@ fn main() -> i32 {
 exit_code = 5
 
 # =============================================================================
-# usize indexing (ADR-0054, preview)
+# usize indexing (ADR-0054)
 # =============================================================================
 
 [[case]]
 name = "usize_index_happy_path"
 spec = ["7.1:7"]
-preview = "usize_indexing"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 12];
@@ -758,8 +756,6 @@ exit_code = 12
 [[case]]
 name = "usize_index_literal_infers_usize"
 spec = ["7.1:7"]
-preview = "usize_indexing"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 12];
@@ -771,8 +767,6 @@ exit_code = 42
 [[case]]
 name = "usize_index_rejects_u64"
 spec = ["7.1:7"]
-preview = "usize_indexing"
-preview_should_pass = true
 compile_fail = true
 error_contains = "expected usize"
 source = """
@@ -786,8 +780,6 @@ fn main() -> i32 {
 [[case]]
 name = "usize_index_cast_from_u64"
 spec = ["7.1:7"]
-preview = "usize_indexing"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 12];

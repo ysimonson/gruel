@@ -1206,36 +1206,6 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Resolve a `Usize`-typed builtin slot to the concrete Gruel type.
-    ///
-    /// Under `usize_indexing` the builtin exposes `usize`; otherwise it falls
-    /// back to `u64` for source compatibility while the feature is gated.
-    pub(crate) fn usize_or_u64_compat(&self) -> Type {
-        if self
-            .preview_features
-            .contains(&PreviewFeature::UsizeIndexing)
-        {
-            Type::USIZE
-        } else {
-            Type::U64
-        }
-    }
-
-    /// Resolve `@size_of` / `@align_of` result type.
-    ///
-    /// Under `usize_indexing` the intrinsics return `usize`; otherwise they
-    /// return `i32` for source compatibility while the feature is gated.
-    pub(crate) fn usize_or_i32_compat(&self) -> Type {
-        if self
-            .preview_features
-            .contains(&PreviewFeature::UsizeIndexing)
-        {
-            Type::USIZE
-        } else {
-            Type::I32
-        }
-    }
-
     /// Check that we are inside a `checked` block.
     /// Returns an error if `checked_depth` is zero.
     fn require_checked_for_intrinsic(
@@ -1622,11 +1592,7 @@ impl<'a> Sema<'a> {
             &infer_ctx.enum_method_sigs,
             &self.type_pool,
         )
-        .with_type_subst(type_subst)
-        .with_usize_indexing(
-            self.preview_features
-                .contains(&PreviewFeature::UsizeIndexing),
-        );
+        .with_type_subst(type_subst);
 
         // Build parameter map for constraint context.
         // Convert Type to InferType so arrays are represented structurally.
@@ -2013,25 +1979,12 @@ impl<'a> Sema<'a> {
 
             let (element_type, length) = self.type_pool.array_def(array_type_id);
 
-            // Index must be an unsigned integer (or `usize` under `usize_indexing`).
+            // Index must be `usize` (ADR-0054).
             let index_result = self.analyze_inst(air, *index, ctx)?;
-            let usize_indexing = self
-                .preview_features
-                .contains(&PreviewFeature::UsizeIndexing);
-            let index_ok = if usize_indexing {
-                index_result.ty == Type::USIZE || index_result.ty.is_error()
-            } else {
-                index_result.ty.is_unsigned() || index_result.ty.is_error()
-            };
-            if !index_ok {
-                let expected = if usize_indexing {
-                    "usize".to_string()
-                } else {
-                    "unsigned integer type".to_string()
-                };
+            if index_result.ty != Type::USIZE && !index_result.ty.is_error() {
                 return Err(CompileError::new(
                     ErrorKind::TypeMismatch {
-                        expected,
+                        expected: "usize".to_string(),
                         found: index_result.ty.name().to_string(),
                     },
                     self.rir.get(*index).span,
@@ -2815,25 +2768,12 @@ impl<'a> Sema<'a> {
                 }
             };
 
-            // Analyze index
+            // Analyze index. Must be `usize` (ADR-0054).
             let index_result = self.analyze_inst(air, index, ctx)?;
-            let usize_indexing = self
-                .preview_features
-                .contains(&PreviewFeature::UsizeIndexing);
-            let index_ok = if usize_indexing {
-                index_result.ty == Type::USIZE || index_result.ty.is_error()
-            } else {
-                index_result.ty.is_unsigned() || index_result.ty.is_error()
-            };
-            if !index_ok {
-                let expected = if usize_indexing {
-                    "usize".to_string()
-                } else {
-                    "unsigned integer type".to_string()
-                };
+            if index_result.ty != Type::USIZE && !index_result.ty.is_error() {
                 return Err(CompileError::new(
                     ErrorKind::TypeMismatch {
-                        expected,
+                        expected: "usize".to_string(),
                         found: index_result.ty.name().to_string(),
                     },
                     self.rir.get(index).span,
@@ -7974,7 +7914,7 @@ impl<'a> Sema<'a> {
             // Get expected type from param
             let expected_ty = match assoc_fn.params[i].ty {
                 BuiltinParamType::U64 => Type::U64,
-                BuiltinParamType::Usize => self.usize_or_u64_compat(),
+                BuiltinParamType::Usize => Type::USIZE,
                 BuiltinParamType::U8 => Type::U8,
                 BuiltinParamType::Bool => Type::BOOL,
                 BuiltinParamType::SelfType => Type::new_struct(struct_id),
@@ -7999,7 +7939,7 @@ impl<'a> Sema<'a> {
         let return_ty = match assoc_fn.return_ty {
             BuiltinReturnType::Unit => Type::UNIT,
             BuiltinReturnType::U64 => Type::U64,
-            BuiltinReturnType::Usize => self.usize_or_u64_compat(),
+            BuiltinReturnType::Usize => Type::USIZE,
             BuiltinReturnType::U8 => Type::U8,
             BuiltinReturnType::Bool => Type::BOOL,
             BuiltinReturnType::SelfType => self.builtin_air_type(struct_id),
@@ -8101,7 +8041,7 @@ impl<'a> Sema<'a> {
             // Get expected type from param
             let expected_ty = match method.params[i].ty {
                 BuiltinParamType::U64 => Type::U64,
-                BuiltinParamType::Usize => self.usize_or_u64_compat(),
+                BuiltinParamType::Usize => Type::USIZE,
                 BuiltinParamType::U8 => Type::U8,
                 BuiltinParamType::Bool => Type::BOOL,
                 BuiltinParamType::SelfType => Type::new_struct(method_ctx.struct_id),
@@ -8130,7 +8070,7 @@ impl<'a> Sema<'a> {
         let return_ty = match method.return_ty {
             BuiltinReturnType::Unit => Type::UNIT,
             BuiltinReturnType::U64 => Type::U64,
-            BuiltinReturnType::Usize => self.usize_or_u64_compat(),
+            BuiltinReturnType::Usize => Type::USIZE,
             BuiltinReturnType::U8 => Type::U8,
             BuiltinReturnType::Bool => Type::BOOL,
             BuiltinReturnType::SelfType => self.builtin_air_type(method_ctx.struct_id),
@@ -9141,7 +9081,6 @@ impl<'a> Sema<'a> {
 
     /// Analyze @ptr_copy intrinsic: copies n elements from src to dst.
     /// Signature: @ptr_copy(dst: ptr mut T, src: ptr const T, count: usize) -> ()
-    /// (count is `u64` when the `usize_indexing` preview feature is disabled.)
     fn analyze_ptr_copy_intrinsic(
         &mut self,
         air: &mut Air,
@@ -9231,13 +9170,12 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        // count must be `usize` (or `u64` when the preview feature is off).
-        let expected_count_ty = self.usize_or_u64_compat();
-        if count_type != expected_count_ty && !count_type.is_error() && !count_type.is_never() {
+        // count must be `usize` (ADR-0054).
+        if count_type != Type::USIZE && !count_type.is_error() && !count_type.is_never() {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "ptr_copy".to_string(),
-                    expected: expected_count_ty.name().to_string(),
+                    expected: "usize".to_string(),
                     found: self.format_type_name(count_type),
                 })),
                 span,

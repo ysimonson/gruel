@@ -131,7 +131,8 @@ name = "zero_length_array_size"
 spec = ["3.5:4", "3.0:2", "3.0:3"]
 source = """
 fn main() -> i32 {
-    @size_of([i32; 0])
+    let n: usize = @size_of([i32; 0]);
+    @cast(n)
 }
 """
 exit_code = 0
@@ -141,7 +142,8 @@ name = "zero_length_array_alignment"
 spec = ["3.5:4", "3.0:4"]
 source = """
 fn main() -> i32 {
-    @align_of([i32; 0])
+    let a: usize = @align_of([i32; 0]);
+    @cast(a)
 }
 """
 exit_code = 1

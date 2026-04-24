@@ -2980,15 +2980,15 @@ mod integration_tests {
 
         #[test]
         fn size_of_intrinsic() {
-            // @size_of returns i32
-            let src = "fn main() -> i32 { @size_of(i32) }";
+            // @size_of returns usize
+            let src = "fn main() -> i32 { let n: usize = @size_of(i32); @cast(n) }";
             assert!(compile_to_air(src).is_ok());
         }
 
         #[test]
         fn align_of_intrinsic() {
-            // @align_of returns i32
-            let src = "fn main() -> i32 { @align_of(i64) }";
+            // @align_of returns usize
+            let src = "fn main() -> i32 { let n: usize = @align_of(i64); @cast(n) }";
             assert!(compile_to_air(src).is_ok());
         }
     }

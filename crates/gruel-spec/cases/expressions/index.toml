@@ -40,7 +40,7 @@ spec = ["4.11:4"]
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 30];
-    let i: u64 = 1;
+    let i: usize = 1;
     arr[i]
 }
 """
@@ -68,7 +68,7 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
-error_contains = "unsigned"
+error_contains = "usize"
 
 # =============================================================================
 # Result Type is Element Type
@@ -111,7 +111,7 @@ spec = ["4.11:8", "4.11:9"]
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 30];
-    let i: u64 = 5;
+    let i: usize = 5;
     arr[i]
 }
 """

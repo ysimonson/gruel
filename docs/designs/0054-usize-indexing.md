@@ -1,12 +1,12 @@
 ---
 id: 0054
 title: Use usize for Indexing
-status: proposal
+status: implemented
 tags: [types, indexing, ergonomics]
 feature-flag: usize_indexing
 created: 2026-04-23
-accepted:
-implemented:
+accepted: 2026-04-23
+implemented: 2026-04-23
 spec-sections: ["3.1", "7.1", "3.7"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -111,7 +111,7 @@ Existing Gruel code that uses `u64` for indexing or length variables must be upd
   - Update scratch examples / benchmarks in `crates/gruel-benchmarks` and anywhere else that indexes with `u64`.
   - Add new spec tests covering: `usize` index happy path, `u32` index rejected (with error-message check), literal-in-index inferred as `usize`, `String::len()` returning `usize`.
 
-- [ ] **Phase 7: Stabilize**
+- [x] **Phase 7: Stabilize**
   - Once phases 2–6 are green, remove the `require_preview(UsizeIndexing, ...)` gate.
   - Delete the old `is_unsigned()`-accepting path and the `u64` literal-in-index default.
   - Remove `PreviewFeature::UsizeIndexing`.

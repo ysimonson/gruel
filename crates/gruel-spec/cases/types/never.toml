@@ -160,7 +160,7 @@ name = "never_size_zero"
 spec = ["3.4:9", "3.0:2", "3.0:3"]
 source = """
 fn main() -> i32 {
-    @size_of(!)
+    let __n: usize = @size_of(!); @cast(__n)
 }
 """
 exit_code = 0
@@ -170,7 +170,7 @@ name = "never_alignment_one"
 spec = ["3.4:9", "3.0:4"]
 source = """
 fn main() -> i32 {
-    @align_of(!)
+    let __a: usize = @align_of(!); @cast(__a)
 }
 """
 exit_code = 1
