@@ -44,6 +44,14 @@ use crate::inst::{
 use crate::scope::ScopedContext;
 use crate::types::{StructField, Type, TypeKind};
 
+/// Source of a receiver for ADR-0055 call-sugar. The call-sugar path needs
+/// to emit a load from either a local slot or a parameter ABI slot, so we
+/// distinguish them here.
+enum ReceiverSource {
+    Local(u32),
+    Param(u32),
+}
+
 // ============================================================================
 // Place Building (ADR-0030 Phase 8)
 // ============================================================================
@@ -4113,11 +4121,11 @@ impl<'a> Sema<'a> {
     }
 
     /// ADR-0055 call-sugar: rewrite `f(args)` as `f.__call(args)` when `f` is
-    /// a local whose type is a struct with a `__call` method.
+    /// a local or parameter whose type is a struct with a `__call` method.
     ///
-    /// Returns `None` if `name` is not a local or its type has no `__call`
-    /// method — the caller should fall through to the normal function-lookup
-    /// path. `Some(result)` means we handled the call (successfully or not).
+    /// Returns `None` if `name` is not such a binding — the caller should fall
+    /// through to the normal function-lookup path. `Some(result)` means we
+    /// handled the call (successfully or not).
     fn try_analyze_call_sugar(
         &mut self,
         air: &mut Air,
@@ -4127,18 +4135,21 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> Option<CompileResult<AnalysisResult>> {
-        // Only consider locals for now; parameters and comptime vars can be
-        // extended later if needed.
-        let local = ctx.locals.get(&name)?;
-        let receiver_ty = local.ty;
-        let receiver_slot = local.slot;
+        // Resolve `name` to a receiver, checking locals first (they shadow
+        // parameters in all contexts).
+        let (receiver_ty, source) = if let Some(local) = ctx.locals.get(&name) {
+            (local.ty, ReceiverSource::Local(local.slot))
+        } else if let Some(param) = ctx.params.iter().find(|p| p.name == name) {
+            (param.ty, ReceiverSource::Param(param.abi_slot))
+        } else {
+            return None;
+        };
 
         let struct_id = match receiver_ty.kind() {
             TypeKind::Struct(id) => id,
             _ => return None,
         };
 
-        // Look for a `__call` method on this struct.
         let call_sym = self.interner.get("__call")?;
         if !self.methods.contains_key(&(struct_id, call_sym)) {
             return None;
@@ -4148,7 +4159,7 @@ impl<'a> Sema<'a> {
             air,
             name,
             receiver_ty,
-            receiver_slot,
+            source,
             struct_id,
             call_sym,
             args_start,
@@ -4166,7 +4177,7 @@ impl<'a> Sema<'a> {
         air: &mut Air,
         receiver_name: Spur,
         receiver_ty: Type,
-        receiver_slot: u32,
+        source: ReceiverSource,
         struct_id: crate::types::StructId,
         call_sym: Spur,
         args_start: u32,
@@ -4193,13 +4204,18 @@ impl<'a> Sema<'a> {
         }
         ctx.used_locals.insert(receiver_name);
 
-        let receiver_air_ref = air.add_inst(AirInst {
-            data: AirInstData::Load {
-                slot: receiver_slot,
-            },
-            ty: receiver_ty,
-            span,
-        });
+        let receiver_air_ref = match source {
+            ReceiverSource::Local(slot) => air.add_inst(AirInst {
+                data: AirInstData::Load { slot },
+                ty: receiver_ty,
+                span,
+            }),
+            ReceiverSource::Param(abi_slot) => air.add_inst(AirInst {
+                data: AirInstData::Param { index: abi_slot },
+                ty: receiver_ty,
+                span,
+            }),
+        };
 
         // Look up the method so we can pass its info through unchanged.
         let method_info = self
