@@ -38,8 +38,8 @@ use gruel_span::Span;
 use super::Sema;
 use super::context::{AnalysisContext, AnalysisResult, LocalVar};
 use crate::inst::{
-    Air, AirCallArg, AirInst, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef, AirProjection,
-    AirRef,
+    Air, AirArgMode, AirCallArg, AirInst, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef,
+    AirProjection, AirRef,
 };
 use crate::scope::ScopedContext;
 use crate::types::{StructField, Type, TypeKind};
@@ -4076,21 +4076,23 @@ impl<'a> Sema<'a> {
             return_type: return_type_sym,
         };
 
-        // Synthesize an anon struct with 0 fields and this single method.
+        // Synthesize a *unique* anon struct with 0 fields and this single
+        // method. Each `fn(...)` source site must produce a distinct type —
+        // two same-signature anonymous functions with different bodies would
+        // otherwise dedup into the same type and the compiler would not be
+        // able to tell which body to call.
         let struct_fields: Vec<StructField> = Vec::new();
-        let (struct_ty, is_new) = self.find_or_create_anon_struct(
+        let struct_ty = self.create_unique_anon_struct(
             &struct_fields,
             std::slice::from_ref(&method_sig),
             &HashMap::new(),
         );
         let struct_id = struct_ty
             .as_struct()
-            .expect("find_or_create_anon_struct returned non-struct type");
+            .expect("create_unique_anon_struct returned non-struct type");
 
-        // Register the __call method on the struct so it is callable.
-        if is_new {
-            self.register_anon_fn_call_method(struct_id, struct_ty, method_ref, span)?;
-        }
+        // Register the __call method on the new struct so it is callable.
+        self.register_anon_fn_call_method(struct_id, struct_ty, method_ref, span)?;
 
         // Emit an empty StructInit — the struct has no fields, so both the
         // field array and the source-order array are zero-length.
@@ -4108,6 +4110,170 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, struct_ty))
+    }
+
+    /// ADR-0055 call-sugar: rewrite `f(args)` as `f.__call(args)` when `f` is
+    /// a local whose type is a struct with a `__call` method.
+    ///
+    /// Returns `None` if `name` is not a local or its type has no `__call`
+    /// method — the caller should fall through to the normal function-lookup
+    /// path. `Some(result)` means we handled the call (successfully or not).
+    fn try_analyze_call_sugar(
+        &mut self,
+        air: &mut Air,
+        name: Spur,
+        args_start: u32,
+        args_len: u32,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> Option<CompileResult<AnalysisResult>> {
+        // Only consider locals for now; parameters and comptime vars can be
+        // extended later if needed.
+        let local = ctx.locals.get(&name)?;
+        let receiver_ty = local.ty;
+        let receiver_slot = local.slot;
+
+        let struct_id = match receiver_ty.kind() {
+            TypeKind::Struct(id) => id,
+            _ => return None,
+        };
+
+        // Look for a `__call` method on this struct.
+        let call_sym = self.interner.get("__call")?;
+        if !self.methods.contains_key(&(struct_id, call_sym)) {
+            return None;
+        }
+
+        Some(self.emit_call_sugar(
+            air,
+            name,
+            receiver_ty,
+            receiver_slot,
+            struct_id,
+            call_sym,
+            args_start,
+            args_len,
+            span,
+            ctx,
+        ))
+    }
+
+    /// Emit the AIR for a successful call-sugar rewrite. Factored out of
+    /// `try_analyze_call_sugar` so that function can stay a simple predicate.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_call_sugar(
+        &mut self,
+        air: &mut Air,
+        receiver_name: Spur,
+        receiver_ty: Type,
+        receiver_slot: u32,
+        struct_id: crate::types::StructId,
+        call_sym: Spur,
+        args_start: u32,
+        args_len: u32,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // Emit the receiver load, tracking move/use state the same way
+        // `analyze_var_ref` does for ordinary VarRef expressions.
+        let receiver_name_str = self.interner.resolve(&receiver_name).to_string();
+        if let Some(move_state) = ctx.moved_vars.get(&receiver_name)
+            && let Some(moved_span) = move_state.is_any_part_moved()
+        {
+            return Err(
+                CompileError::new(ErrorKind::UseAfterMove(receiver_name_str), span)
+                    .with_label("value moved here", moved_span),
+            );
+        }
+        if !self.is_type_copy(receiver_ty) {
+            ctx.moved_vars
+                .entry(receiver_name)
+                .or_default()
+                .mark_path_moved(&[], span);
+        }
+        ctx.used_locals.insert(receiver_name);
+
+        let receiver_air_ref = air.add_inst(AirInst {
+            data: AirInstData::Load {
+                slot: receiver_slot,
+            },
+            ty: receiver_ty,
+            span,
+        });
+
+        // Look up the method so we can pass its info through unchanged.
+        let method_info = self
+            .methods
+            .get(&(struct_id, call_sym))
+            .expect("__call method was present in the predicate");
+        let return_type = method_info.return_type;
+        let method_param_types = self.param_arena.types(method_info.params).to_vec();
+        let is_unchecked = method_info.is_unchecked;
+        let has_self = method_info.has_self;
+
+        // `__call` must be a method (has self) — we enforce it in astgen, but
+        // defensive check keeps the failure mode clear for user-defined
+        // callable types.
+        if !has_self {
+            let struct_name = self.type_pool.struct_def(struct_id).name.clone();
+            return Err(CompileError::new(
+                ErrorKind::AssocFnCalledAsMethod {
+                    type_name: struct_name,
+                    function_name: "__call".to_string(),
+                },
+                span,
+            ));
+        }
+
+        if is_unchecked && ctx.checked_depth == 0 {
+            let struct_name = self.type_pool.struct_def(struct_id).name.clone();
+            return Err(CompileError::new(
+                ErrorKind::UncheckedCallRequiresChecked(format!("{}.__call", struct_name)),
+                span,
+            ));
+        }
+
+        let args = self.rir.get_call_args(args_start, args_len);
+        if args.len() != method_param_types.len() {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: method_param_types.len(),
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        self.check_exclusive_access(&args, span)?;
+
+        let mut air_args = vec![AirCallArg {
+            value: receiver_air_ref,
+            mode: AirArgMode::Normal,
+        }];
+        air_args.extend(self.analyze_call_args(air, &args, ctx)?);
+
+        let struct_name_str = self.type_pool.struct_def(struct_id).name.clone();
+        let call_name = format!("{}.__call", struct_name_str);
+        let call_name_sym = self.interner.get_or_intern(&call_name);
+
+        let mut extra_data = Vec::with_capacity(air_args.len() * 2);
+        for arg in &air_args {
+            extra_data.push(arg.value.as_u32());
+            extra_data.push(arg.mode.as_u32());
+        }
+        let args_len_u32 = air_args.len() as u32;
+        let args_start_air = air.add_extra(&extra_data);
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Call {
+                name: call_name_sym,
+                args_start: args_start_air,
+                args_len: args_len_u32,
+            },
+            ty: return_type,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, return_type))
     }
 
     /// Analyze a field access.
@@ -5123,6 +5289,19 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        // ADR-0055 call-sugar: if `name` is a local variable (not a function)
+        // and its type has a `__call` method, rewrite `f(args)` as
+        // `f.__call(args)`. We do this *before* the function lookup so a
+        // normal function with the same name takes precedence (today there is
+        // no overlap because items and locals share a namespace, but keeping
+        // the ordering explicit avoids surprises if that changes).
+        if !self.functions.contains_key(&name)
+            && let Some(sugar_result) =
+                self.try_analyze_call_sugar(air, name, args_start, args_len, span, ctx)
+        {
+            return sugar_result;
+        }
+
         // Look up the function
         let fn_name_str = self.interner.resolve(&name).to_string();
         let fn_info = self

@@ -147,4 +147,59 @@ impl Sema<'_> {
         // Return with is_new=true
         (Type::new_struct(struct_id), true)
     }
+
+    /// Create a fresh anonymous struct that *bypasses* structural
+    /// deduplication (ADR-0055). Each call returns a distinct type even if
+    /// another anon struct with identical fields/methods/captures exists.
+    ///
+    /// Used for anonymous-function values: two source-level `fn(...)`
+    /// expressions with identical signatures must still be different types,
+    /// since their bodies differ. Rather than adding a second axis to the
+    /// dedup key, we simply skip dedup for these sites.
+    ///
+    /// The method signature and captured values are still recorded for the
+    /// new struct so that method lookup and method-registration machinery
+    /// behave exactly as they would for a deduped anon struct.
+    pub(crate) fn create_unique_anon_struct(
+        &mut self,
+        fields: &[StructField],
+        method_sigs: &[AnonMethodSig],
+        captured_values: &HashMap<Spur, ConstValue>,
+    ) -> Type {
+        let struct_id = self.type_pool.reserve_struct_id();
+
+        let name = format!("__anon_struct_{}", struct_id.0);
+        let name_spur = self.interner.get_or_intern(&name);
+
+        let is_copy = fields.iter().all(|f| f.ty.is_copy_in_pool(&self.type_pool));
+
+        let struct_def = StructDef {
+            name,
+            fields: fields.to_vec(),
+            is_copy,
+            is_handle: false,
+            is_linear: false,
+            destructor: None,
+            is_builtin: false,
+            is_pub: false,
+            file_id: gruel_span::FileId::new(0),
+        };
+
+        self.type_pool
+            .complete_struct_registration(struct_id, name_spur, struct_def);
+
+        if !method_sigs.is_empty() {
+            self.anon_struct_method_sigs
+                .insert(struct_id, method_sigs.to_vec());
+        }
+
+        if !captured_values.is_empty() {
+            self.anon_struct_captured_values
+                .insert(struct_id, captured_values.clone());
+        }
+
+        self.structs.insert(name_spur, struct_id);
+
+        Type::new_struct(struct_id)
+    }
 }
