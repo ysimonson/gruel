@@ -43,7 +43,14 @@ Array elements are accessed using bracket notation `arr[index]`.
 
 {{ rule(id="7.1:7", cat="legality-rule") }}
 
-The index **MUST** be an integer type.
+The index **MUST** have type `usize`. Integer literals in index position infer to `usize`. Converting a fixed-width integer to `usize` requires an explicit `@cast` in a `usize`-typed context.
+
+```gruel
+fn get(arr: [i32; 3], raw: u32) -> i32 {
+    let i: usize = @cast(raw);
+    arr[i]
+}
+```
 
 {{ rule(id="7.1:8") }}
 

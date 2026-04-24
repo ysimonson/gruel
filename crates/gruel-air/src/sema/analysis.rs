@@ -1592,7 +1592,11 @@ impl<'a> Sema<'a> {
             &infer_ctx.enum_method_sigs,
             &self.type_pool,
         )
-        .with_type_subst(type_subst);
+        .with_type_subst(type_subst)
+        .with_usize_indexing(
+            self.preview_features
+                .contains(&PreviewFeature::UsizeIndexing),
+        );
 
         // Build parameter map for constraint context.
         // Convert Type to InferType so arrays are represented structurally.
@@ -1979,12 +1983,25 @@ impl<'a> Sema<'a> {
 
             let (element_type, length) = self.type_pool.array_def(array_type_id);
 
-            // Index must be an unsigned integer
+            // Index must be an unsigned integer (or `usize` under `usize_indexing`).
             let index_result = self.analyze_inst(air, *index, ctx)?;
-            if !index_result.ty.is_unsigned() && !index_result.ty.is_error() {
+            let usize_indexing = self
+                .preview_features
+                .contains(&PreviewFeature::UsizeIndexing);
+            let index_ok = if usize_indexing {
+                index_result.ty == Type::USIZE || index_result.ty.is_error()
+            } else {
+                index_result.ty.is_unsigned() || index_result.ty.is_error()
+            };
+            if !index_ok {
+                let expected = if usize_indexing {
+                    "usize".to_string()
+                } else {
+                    "unsigned integer type".to_string()
+                };
                 return Err(CompileError::new(
                     ErrorKind::TypeMismatch {
-                        expected: "unsigned integer type".to_string(),
+                        expected,
                         found: index_result.ty.name().to_string(),
                     },
                     self.rir.get(*index).span,
@@ -2770,10 +2787,23 @@ impl<'a> Sema<'a> {
 
             // Analyze index
             let index_result = self.analyze_inst(air, index, ctx)?;
-            if !index_result.ty.is_unsigned() && !index_result.ty.is_error() {
+            let usize_indexing = self
+                .preview_features
+                .contains(&PreviewFeature::UsizeIndexing);
+            let index_ok = if usize_indexing {
+                index_result.ty == Type::USIZE || index_result.ty.is_error()
+            } else {
+                index_result.ty.is_unsigned() || index_result.ty.is_error()
+            };
+            if !index_ok {
+                let expected = if usize_indexing {
+                    "usize".to_string()
+                } else {
+                    "unsigned integer type".to_string()
+                };
                 return Err(CompileError::new(
                     ErrorKind::TypeMismatch {
-                        expected: "unsigned integer type".to_string(),
+                        expected,
                         found: index_result.ty.name().to_string(),
                     },
                     self.rir.get(index).span,

@@ -4,12 +4,21 @@ mod tests {
     use crate::inst::{AirInstData, AirRef};
     use crate::sema::{Sema, SemaOutput};
     use crate::types::Type;
-    use gruel_error::{CompileErrors, ErrorKind, MultiErrorResult, PreviewFeatures};
+    use gruel_error::{
+        CompileErrors, ErrorKind, MultiErrorResult, PreviewFeature, PreviewFeatures,
+    };
     use gruel_lexer::Lexer;
     use gruel_parser::Parser;
     use gruel_rir::AstGen;
 
     fn compile_to_air(source: &str) -> MultiErrorResult<SemaOutput> {
+        compile_to_air_with_preview(source, PreviewFeatures::new())
+    }
+
+    fn compile_to_air_with_preview(
+        source: &str,
+        preview_features: PreviewFeatures,
+    ) -> MultiErrorResult<SemaOutput> {
         let lexer = Lexer::new(source);
         let (tokens, interner) = lexer.tokenize().map_err(CompileErrors::from_error)?;
         let parser = Parser::new(tokens, interner);
@@ -18,7 +27,7 @@ mod tests {
         let astgen = AstGen::new(&ast, &interner);
         let rir = astgen.generate();
 
-        let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+        let sema = Sema::new(&rir, &interner, preview_features);
         sema.analyze_all()
     }
 
@@ -811,6 +820,54 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(output.functions[0].air.return_type(), Type::I32);
+    }
+
+    #[test]
+    fn test_array_index_requires_usize_under_preview() {
+        // With `usize_indexing`, a u64-typed index should be rejected.
+        let mut preview = PreviewFeatures::new();
+        preview.insert(PreviewFeature::UsizeIndexing);
+        let result = compile_to_air_with_preview(
+            "fn main() -> i32 {
+                let arr: [i32; 3] = [1, 2, 3];
+                let i: u64 = 1;
+                arr[i]
+            }",
+            preview,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_array_index_accepts_usize_under_preview() {
+        let mut preview = PreviewFeatures::new();
+        preview.insert(PreviewFeature::UsizeIndexing);
+        let output = compile_to_air_with_preview(
+            "fn main() -> i32 {
+                let arr: [i32; 3] = [1, 2, 3];
+                let i: usize = 1;
+                arr[i]
+            }",
+            preview,
+        )
+        .unwrap();
+        assert_eq!(output.functions[0].air.return_type(), Type::I32);
+    }
+
+    #[test]
+    fn test_array_index_literal_infers_usize_under_preview() {
+        // Integer literals in index context should infer to usize under preview.
+        let mut preview = PreviewFeatures::new();
+        preview.insert(PreviewFeature::UsizeIndexing);
+        let output = compile_to_air_with_preview(
+            "fn main() -> i32 {
+                let arr: [i32; 3] = [1, 2, 3];
+                arr[1]
+            }",
+            preview,
+        )
+        .unwrap();
         assert_eq!(output.functions[0].air.return_type(), Type::I32);
     }
 

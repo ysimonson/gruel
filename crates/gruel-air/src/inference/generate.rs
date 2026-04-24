@@ -180,6 +180,8 @@ pub struct ConstraintGenerator<'a> {
     type_subst: Option<&'a HashMap<Spur, Type>>,
     /// Type intern pool for creating pointer and array types during constraint generation.
     type_pool: &'a TypeInternPool,
+    /// When true, array indices are required to be `usize` (ADR-0054).
+    usize_indexing: bool,
 }
 
 impl<'a> ConstraintGenerator<'a> {
@@ -210,7 +212,15 @@ impl<'a> ConstraintGenerator<'a> {
             float_literal_vars: Vec::new(),
             type_subst: None,
             type_pool,
+            usize_indexing: false,
         }
+    }
+
+    /// Enable the `usize_indexing` preview feature (ADR-0054): array indices must
+    /// be `usize`, and integer literals in index position default to `usize`.
+    pub fn with_usize_indexing(mut self, enabled: bool) -> Self {
+        self.usize_indexing = enabled;
+        self
     }
 
     /// Set type substitutions for `Self` and type parameters (builder pattern).
@@ -1252,8 +1262,17 @@ impl<'a> ConstraintGenerator<'a> {
             InstData::IndexGet { base, index } => {
                 let base_info = self.generate(*base, ctx);
                 let index_info = self.generate(*index, ctx);
-                // Index must be an unsigned integer type
-                self.add_constraint(Constraint::is_unsigned(index_info.ty, index_info.span));
+                if self.usize_indexing {
+                    // Index must be exactly `usize` (ADR-0054).
+                    self.add_constraint(Constraint::equal(
+                        InferType::Concrete(Type::USIZE),
+                        index_info.ty.clone(),
+                        index_info.span,
+                    ));
+                } else {
+                    // Index must be an unsigned integer type
+                    self.add_constraint(Constraint::is_unsigned(index_info.ty, index_info.span));
+                }
 
                 // Extract element type from array type.
                 // If base is InferType::Array, we can get the element type directly.
@@ -1273,8 +1292,17 @@ impl<'a> ConstraintGenerator<'a> {
             InstData::IndexSet { base, index, value } => {
                 let base_info = self.generate(*base, ctx);
                 let index_info = self.generate(*index, ctx);
-                // Index must be an unsigned integer type
-                self.add_constraint(Constraint::is_unsigned(index_info.ty, index_info.span));
+                if self.usize_indexing {
+                    // Index must be exactly `usize` (ADR-0054).
+                    self.add_constraint(Constraint::equal(
+                        InferType::Concrete(Type::USIZE),
+                        index_info.ty.clone(),
+                        index_info.span,
+                    ));
+                } else {
+                    // Index must be an unsigned integer type
+                    self.add_constraint(Constraint::is_unsigned(index_info.ty, index_info.span));
+                }
 
                 let value_info = self.generate(*value, ctx);
 

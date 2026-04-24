@@ -86,7 +86,7 @@ Existing Gruel code that uses `u64` for indexing or length variables must be upd
   - Add `BuiltinParamType::Usize` and `BuiltinReturnType::Usize` in `gruel-builtins`; wire through the mapping sites in `gruel-air` (analysis.rs ~lines 7916, 7940, 8041, 8069).
   - No behavior change yet; flag exists but is inert.
 
-- [ ] **Phase 2: Enforce `usize` on array indexing**
+- [x] **Phase 2: Enforce `usize` on array indexing**
   - In `analyze_inst_for_projection` and `analyze_index_set_impl` (`gruel-air/src/sema/analysis.rs`), replace the `is_unsigned()` check with a `== Type::USIZE` check, gated behind `require_preview(UsizeIndexing, ...)`.
   - Make integer literals in index position infer to `usize` instead of `u64` when the flag is on.
   - Update the two existing tests (`test_array_index_type_must_be_unsigned` → still passes, `test_array_index_literal_infers_u64` → rename + assert `usize`).
