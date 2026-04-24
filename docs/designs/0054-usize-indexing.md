@@ -92,7 +92,7 @@ Existing Gruel code that uses `u64` for indexing or length variables must be upd
   - Update the two existing tests (`test_array_index_type_must_be_unsigned` → still passes, `test_array_index_literal_infers_u64` → rename + assert `usize`).
   - Update spec section 7.1:7 from "MUST be an integer type" (currently loose) to "MUST be of type `usize`". Add a note on literal inference and a `@cast` migration example.
 
-- [ ] **Phase 3: Size/length builtins return `usize`**
+- [x] **Phase 3: Size/length builtins return `usize`**
   - Update `String::len`, `String::capacity`, `String::with_capacity` in `gruel-builtins/src/lib.rs` to use `Usize`.
   - Runtime extern signatures in `gruel-runtime` stay as `uint64_t` (same layout).
   - Update spec sections covering `String` methods.

@@ -1206,6 +1206,21 @@ impl<'a> Sema<'a> {
         }
     }
 
+    /// Resolve a `Usize`-typed builtin slot to the concrete Gruel type.
+    ///
+    /// Under `usize_indexing` the builtin exposes `usize`; otherwise it falls
+    /// back to `u64` for source compatibility while the feature is gated.
+    fn usize_or_u64_compat(&self) -> Type {
+        if self
+            .preview_features
+            .contains(&PreviewFeature::UsizeIndexing)
+        {
+            Type::USIZE
+        } else {
+            Type::U64
+        }
+    }
+
     /// Check that we are inside a `checked` block.
     /// Returns an error if `checked_depth` is zero.
     fn require_checked_for_intrinsic(
@@ -7944,7 +7959,7 @@ impl<'a> Sema<'a> {
             // Get expected type from param
             let expected_ty = match assoc_fn.params[i].ty {
                 BuiltinParamType::U64 => Type::U64,
-                BuiltinParamType::Usize => Type::USIZE,
+                BuiltinParamType::Usize => self.usize_or_u64_compat(),
                 BuiltinParamType::U8 => Type::U8,
                 BuiltinParamType::Bool => Type::BOOL,
                 BuiltinParamType::SelfType => Type::new_struct(struct_id),
@@ -7969,7 +7984,7 @@ impl<'a> Sema<'a> {
         let return_ty = match assoc_fn.return_ty {
             BuiltinReturnType::Unit => Type::UNIT,
             BuiltinReturnType::U64 => Type::U64,
-            BuiltinReturnType::Usize => Type::USIZE,
+            BuiltinReturnType::Usize => self.usize_or_u64_compat(),
             BuiltinReturnType::U8 => Type::U8,
             BuiltinReturnType::Bool => Type::BOOL,
             BuiltinReturnType::SelfType => self.builtin_air_type(struct_id),
@@ -8071,7 +8086,7 @@ impl<'a> Sema<'a> {
             // Get expected type from param
             let expected_ty = match method.params[i].ty {
                 BuiltinParamType::U64 => Type::U64,
-                BuiltinParamType::Usize => Type::USIZE,
+                BuiltinParamType::Usize => self.usize_or_u64_compat(),
                 BuiltinParamType::U8 => Type::U8,
                 BuiltinParamType::Bool => Type::BOOL,
                 BuiltinParamType::SelfType => Type::new_struct(method_ctx.struct_id),
@@ -8100,7 +8115,7 @@ impl<'a> Sema<'a> {
         let return_ty = match method.return_ty {
             BuiltinReturnType::Unit => Type::UNIT,
             BuiltinReturnType::U64 => Type::U64,
-            BuiltinReturnType::Usize => Type::USIZE,
+            BuiltinReturnType::Usize => self.usize_or_u64_compat(),
             BuiltinReturnType::U8 => Type::U8,
             BuiltinReturnType::Bool => Type::BOOL,
             BuiltinReturnType::SelfType => self.builtin_air_type(method_ctx.struct_id),

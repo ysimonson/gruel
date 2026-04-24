@@ -55,7 +55,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.10:8", cat="normative") }}
 
-`String::with_capacity(cap: u64)` returns an empty string with pre-allocated capacity for `cap` bytes.
+`String::with_capacity(cap: usize)` returns an empty string with pre-allocated capacity for `cap` bytes.
 
 {{ rule(id="3.10:9", cat="example") }}
 
@@ -71,11 +71,11 @@ fn main() -> i32 {
 
 {{ rule(id="3.10:10", cat="normative") }}
 
-`fn len(borrow self) -> u64` returns the length of the string in bytes.
+`fn len(borrow self) -> usize` returns the length of the string in bytes.
 
 {{ rule(id="3.10:11", cat="normative") }}
 
-`fn capacity(borrow self) -> u64` returns the allocated capacity of the string. Returns zero for string literals.
+`fn capacity(borrow self) -> usize` returns the allocated capacity of the string. Returns zero for string literals.
 
 {{ rule(id="3.10:12", cat="normative") }}
 
@@ -114,7 +114,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.10:18", cat="normative") }}
 
-`fn reserve(inout self, additional: u64)` ensures the string has capacity for at least `additional` more bytes.
+`fn reserve(inout self, additional: usize)` ensures the string has capacity for at least `additional` more bytes.
 
 {{ rule(id="3.10:19", cat="informative") }}
 

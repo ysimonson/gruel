@@ -363,7 +363,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             name: "with_capacity",
             params: &[BuiltinParam {
                 name: "capacity",
-                ty: BuiltinParamType::U64,
+                ty: BuiltinParamType::Usize,
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__with_capacity",
@@ -375,14 +375,14 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             name: "len",
             receiver_mode: ReceiverMode::ByRef,
             params: &[],
-            return_ty: BuiltinReturnType::U64,
+            return_ty: BuiltinReturnType::Usize,
             runtime_fn: "String__len",
         },
         BuiltinMethod {
             name: "capacity",
             receiver_mode: ReceiverMode::ByRef,
             params: &[],
-            return_ty: BuiltinReturnType::U64,
+            return_ty: BuiltinReturnType::Usize,
             runtime_fn: "String__capacity",
         },
         BuiltinMethod {
@@ -472,7 +472,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             receiver_mode: ReceiverMode::ByMutRef,
             params: &[BuiltinParam {
                 name: "additional",
-                ty: BuiltinParamType::U64,
+                ty: BuiltinParamType::Usize,
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__reserve",
