@@ -12,7 +12,9 @@
 use std::collections::{HashMap, HashSet};
 
 use gruel_builtins::is_reserved_type_name;
-use gruel_error::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
+use gruel_error::{
+    CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, PreviewFeature, ice,
+};
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_span::Span;
 use lasso::Spur;
@@ -160,6 +162,55 @@ impl<'a> Sema<'a> {
     /// This creates name → ID mappings for all enums and structs in a single pass,
     /// allowing types to reference each other in any order. Struct definitions are
     /// created with placeholder empty fields that will be filled in during phase 2.
+    /// Validate `interface` declarations (ADR-0056).
+    ///
+    /// Phase 1 only: every `interface` decl requires the `interfaces` preview
+    /// feature, and method names within each interface must be unique.
+    /// Conformance, vtable layout, and runtime/comptime usage land in later
+    /// phases.
+    pub(crate) fn validate_interface_decls(&mut self) -> CompileResult<()> {
+        for (_, inst) in self.rir.iter() {
+            if let InstData::InterfaceDecl {
+                name,
+                methods_start,
+                methods_len,
+                ..
+            } = &inst.data
+            {
+                self.require_preview(
+                    PreviewFeature::Interfaces,
+                    "interface declarations",
+                    inst.span,
+                )?;
+
+                // Reject duplicate method-signature names inside the same
+                // interface. The same name appearing twice would create
+                // ambiguous slot lookup later.
+                let mut seen: HashSet<Spur> = HashSet::new();
+                let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
+                for method_ref in method_refs {
+                    let m = self.rir.get(method_ref);
+                    if let InstData::InterfaceMethodSig {
+                        name: method_name, ..
+                    } = &m.data
+                        && !seen.insert(*method_name)
+                    {
+                        let iface_name = self.interner.resolve(name).to_string();
+                        let method_name_str = self.interner.resolve(method_name).to_string();
+                        return Err(CompileError::new(
+                            ErrorKind::DuplicateMethod {
+                                type_name: format!("interface `{}`", iface_name),
+                                method_name: method_name_str,
+                            },
+                            m.span,
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn register_type_names(&mut self) -> CompileResult<()> {
         for (_, inst) in self.rir.iter() {
             match &inst.data {

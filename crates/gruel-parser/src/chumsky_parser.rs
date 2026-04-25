@@ -9,11 +9,11 @@ use crate::ast::{
     CheckedBlockExpr, ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr, Directive,
     DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr, EnumVariant, Expr, FieldDecl,
     FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function, Ident, IfExpr, IndexExpr,
-    IntLit, IntrinsicArg, IntrinsicCallExpr, Item, LetStatement, LoopExpr, MatchArm, MatchExpr,
-    Method, MethodCallExpr, NegIntLit, Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern,
-    ReturnExpr, SelfExpr, SelfParam, Statement, StringLit, StructDecl, StructLitExpr,
-    TupleElemPattern, TupleExpr, TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp,
-    UnitLit, Visibility, WhileExpr,
+    IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item, LetStatement, LoopExpr, MatchArm,
+    MatchExpr, Method, MethodCallExpr, MethodSig, NegIntLit, Param, ParamMode, ParenExpr, PathExpr,
+    PathPattern, Pattern, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit, StructDecl,
+    StructLitExpr, TupleElemPattern, TupleExpr, TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr,
+    UnaryOp, UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -2956,6 +2956,83 @@ where
 }
 
 /// Parser for top-level items (functions, structs, enums, drop fns, and consts)
+/// Parser for interface method signatures: `fn name(self [, params]) [-> Type];`
+///
+/// No body and no associated functions (no-`self` methods) are accepted in
+/// MVP. Receiver is plain `self` only — `inout self` and `borrow self` are
+/// future work, parallel to method definitions which also only support
+/// by-value `self` today.
+fn interface_method_sig_parser<'src, I>() -> GruelParser<'src, I, MethodSig>
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    let self_param = just(TokenKind::SelfValue).map_with(|_, e| SelfParam {
+        span: span_from_extra(e),
+    });
+
+    let extra_params = just(TokenKind::Comma)
+        .ignore_then(params_parser())
+        .or_not()
+        .map(|opt| opt.unwrap_or_default());
+
+    let receiver_and_params: GruelParser<I, (SelfParam, Vec<Param>)> = self_param
+        .then(extra_params)
+        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
+        .boxed();
+
+    just(TokenKind::Fn)
+        .ignore_then(method_name_parser())
+        .then(receiver_and_params)
+        .then(just(TokenKind::Arrow).ignore_then(type_parser()).or_not())
+        .then_ignore(just(TokenKind::Semi))
+        .map_with(|((name, (receiver, params)), return_type), e| MethodSig {
+            name,
+            receiver,
+            params,
+            return_type,
+            span: span_from_extra(e),
+        })
+        .boxed()
+}
+
+/// Parser for interface declarations (ADR-0056):
+///
+/// ```text
+/// [pub] interface Name {
+///     fn method(self [, params]) [-> RetType];
+///     ...
+/// }
+/// ```
+fn interface_parser<'src, I>() -> GruelParser<'src, I, InterfaceDecl>
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    let visibility = just(TokenKind::Pub).or_not().map(|opt| {
+        if opt.is_some() {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        }
+    });
+
+    let body = interface_method_sig_parser()
+        .repeated()
+        .collect::<Vec<_>>()
+        .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace))
+        .boxed();
+
+    visibility
+        .then(just(TokenKind::Interface).ignore_then(ident_parser()))
+        .then(body)
+        .map_with(|((visibility, name), methods), e| InterfaceDecl {
+            visibility,
+            name,
+            methods,
+            span: span_from_extra(e),
+        })
+        .boxed()
+}
+
 fn item_parser<'src, I>() -> GruelParser<'src, I, Item>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -2964,6 +3041,7 @@ where
         function_parser().map(Item::Function).boxed(),
         struct_parser().map(Item::Struct).boxed(),
         enum_parser().map(Item::Enum).boxed(),
+        interface_parser().map(Item::Interface).boxed(),
         drop_fn_parser().map(Item::DropFn).boxed(),
         const_parser().map(Item::Const).boxed(),
     ))
@@ -2982,6 +3060,7 @@ where
         just(TokenKind::Fn).ignored().boxed(),
         just(TokenKind::Struct).ignored().boxed(),
         just(TokenKind::Enum).ignored().boxed(),
+        just(TokenKind::Interface).ignored().boxed(),
         just(TokenKind::Drop).ignored().boxed(),
         just(TokenKind::Const).ignored().boxed(),
     ))
@@ -3250,6 +3329,7 @@ fn validate_item(item: &Item, errors: &mut Vec<CompileError>, v: &AstValidator) 
         }
         Item::Const(c) => validate_expr(&c.init, errors, v),
         Item::DropFn(d) => validate_expr(&d.body, errors, v),
+        Item::Interface(_) => {}
         Item::Error(_) => {}
     }
 }
@@ -3490,6 +3570,7 @@ mod tests {
             },
             Item::Struct(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Enum(_) => panic!("parse_expr helper should only be used with functions"),
+            Item::Interface(_) => panic!("parse_expr helper should only be used with functions"),
             Item::DropFn(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Const(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Error(_) => panic!("parse_expr helper should only be used with functions"),
@@ -3519,6 +3600,7 @@ mod tests {
             }
             Item::Struct(_) => panic!("expected Function"),
             Item::Enum(_) => panic!("expected Function"),
+            Item::Interface(_) => panic!("expected Function"),
             Item::DropFn(_) => panic!("expected Function"),
             Item::Const(_) => panic!("expected Function"),
             Item::Error(_) => panic!("expected Function"),
@@ -3589,6 +3671,7 @@ mod tests {
             },
             Item::Struct(_) => panic!("expected Function"),
             Item::Enum(_) => panic!("expected Function"),
+            Item::Interface(_) => panic!("expected Function"),
             Item::DropFn(_) => panic!("expected Function"),
             Item::Const(_) => panic!("expected Function"),
             Item::Error(_) => panic!("expected Function"),

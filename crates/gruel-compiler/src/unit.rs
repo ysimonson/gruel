@@ -317,6 +317,10 @@ impl<'src> CompilationUnit<'src> {
                             );
                         }
                     }
+                    Item::Interface(_) => {
+                        // Interfaces (ADR-0056) are validated in Sema; cross-file
+                        // duplicate detection is added in Phase 2.
+                    }
                     Item::DropFn(_) | Item::Const(_) => {
                         // Validated in Sema
                     }

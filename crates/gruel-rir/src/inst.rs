@@ -1906,6 +1906,30 @@ impl Rir {
                 value: renumber(*value),
             },
 
+            // Interface declarations - method-sig refs in extra
+            InstData::InterfaceDecl {
+                is_pub,
+                name,
+                methods_start,
+                methods_len,
+            } => InstData::InterfaceDecl {
+                is_pub: *is_pub,
+                name: *name,
+                methods_start: *methods_start + extra_offset,
+                methods_len: *methods_len,
+            },
+            InstData::InterfaceMethodSig {
+                name,
+                params_start,
+                params_len,
+                return_type,
+            } => InstData::InterfaceMethodSig {
+                name: *name,
+                params_start: *params_start + extra_offset,
+                params_len: *params_len,
+                return_type: *return_type,
+            },
+
             // Enum operations
             InstData::EnumDecl {
                 is_pub,
@@ -2098,6 +2122,18 @@ impl Rir {
                     }
                 }
 
+                // Interface decl - contains InstRef array for method signatures
+                InstData::InterfaceDecl {
+                    methods_start,
+                    methods_len,
+                    ..
+                } => {
+                    let start = (*methods_start + extra_offset) as usize;
+                    for i in 0..*methods_len as usize {
+                        extra[start + i] += inst_offset;
+                    }
+                }
+
                 // Anonymous struct type - contains InstRef array for methods
                 InstData::AnonStructType {
                     methods_start,
@@ -2234,6 +2270,7 @@ impl Rir {
                 | InstData::IndexGet { .. }
                 | InstData::IndexSet { .. }
                 | InstData::TypeIntrinsic { .. }
+                | InstData::InterfaceMethodSig { .. }
                 | InstData::DropFnDecl { .. }
                 | InstData::Comptime { .. }
                 | InstData::ComptimeUnrollFor { .. }
@@ -2662,6 +2699,37 @@ pub enum InstData {
         args_start: u32,
         /// Number of arguments
         args_len: u32,
+    },
+
+    /// Interface declaration (ADR-0056): a structurally typed set of method
+    /// requirements.
+    ///
+    /// Method signatures are stored as InstRefs to `InterfaceMethodSig`
+    /// instructions in the inst-refs extra array.
+    InterfaceDecl {
+        /// Whether this interface is public.
+        is_pub: bool,
+        /// Interface name.
+        name: Spur,
+        /// Start of method-sig inst refs in extra data.
+        methods_start: u32,
+        /// Number of method signatures.
+        methods_len: u32,
+    },
+
+    /// A single method signature inside an `InterfaceDecl`.
+    ///
+    /// No body. The receiver is always `self` for now (Phase 1) — `inout
+    /// self` and `borrow self` are future work.
+    InterfaceMethodSig {
+        /// Method name.
+        name: Spur,
+        /// Start of params in extra data (excluding self).
+        params_start: u32,
+        /// Number of explicit parameters.
+        params_len: u32,
+        /// Return type symbol (`()` if none was written).
+        return_type: Spur,
     },
 
     /// User-defined destructor declaration: drop fn TypeName(self) { ... }
@@ -3438,6 +3506,55 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         self.interner.resolve(type_name),
                         self.interner.resolve(function),
                         Self::format_call_args(&args)
+                    )
+                    .unwrap();
+                }
+
+                // Interfaces
+                InstData::InterfaceDecl {
+                    is_pub,
+                    name,
+                    methods_start,
+                    methods_len,
+                } => {
+                    let pub_str = if *is_pub { "pub " } else { "" };
+                    let name_str = self.interner.resolve(name);
+                    let methods = self.rir.get_inst_refs(*methods_start, *methods_len);
+                    let method_refs: Vec<String> =
+                        methods.iter().map(|m| format!("{}", m)).collect();
+                    writeln!(
+                        out,
+                        "{}interface {} {{ {} }}",
+                        pub_str,
+                        name_str,
+                        method_refs.join(", ")
+                    )
+                    .unwrap();
+                }
+                InstData::InterfaceMethodSig {
+                    name,
+                    params_start,
+                    params_len,
+                    return_type,
+                } => {
+                    let params = self.rir.get_params(*params_start, *params_len);
+                    let params_str: Vec<String> = params
+                        .iter()
+                        .map(|p| {
+                            format!(
+                                "{}: {}",
+                                self.interner.resolve(&p.name),
+                                self.interner.resolve(&p.ty)
+                            )
+                        })
+                        .collect();
+                    writeln!(
+                        out,
+                        "interface_method_sig {}(self{}{}) -> {}",
+                        self.interner.resolve(name),
+                        if params.is_empty() { "" } else { ", " },
+                        params_str.join(", "),
+                        self.interner.resolve(return_type)
                     )
                     .unwrap();
                 }

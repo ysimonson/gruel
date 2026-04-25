@@ -2211,9 +2211,11 @@ impl<'a> Sema<'a> {
             }
 
             // Declaration no-ops (produce Unit in expression context)
-            InstData::DropFnDecl { .. } | InstData::FnDecl { .. } | InstData::ConstDecl { .. } => {
-                self.analyze_decl_noop(air, inst_ref, ctx)
-            }
+            InstData::DropFnDecl { .. }
+            | InstData::FnDecl { .. }
+            | InstData::ConstDecl { .. }
+            | InstData::InterfaceDecl { .. }
+            | InstData::InterfaceMethodSig { .. } => self.analyze_decl_noop(air, inst_ref, ctx),
 
             // Comptime block expression
             InstData::Comptime { expr } => {

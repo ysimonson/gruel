@@ -148,6 +148,8 @@ pub enum LogosTokenKind {
     Struct,
     #[token("enum")]
     Enum,
+    #[token("interface")]
+    Interface,
     #[token("drop")]
     Drop,
     #[token("linear")]
@@ -343,6 +345,7 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::False => TokenKind::False,
             LogosTokenKind::Struct => TokenKind::Struct,
             LogosTokenKind::Enum => TokenKind::Enum,
+            LogosTokenKind::Interface => TokenKind::Interface,
             LogosTokenKind::Drop => TokenKind::Drop,
             LogosTokenKind::Linear => TokenKind::Linear,
             LogosTokenKind::SelfValue => TokenKind::SelfValue,

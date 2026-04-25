@@ -224,6 +224,12 @@ impl<'a> Sema<'a> {
         self.register_type_names().map_err(CompileErrors::from)?;
         self.resolve_declarations().map_err(CompileErrors::from)?;
 
+        // Validate interface declarations (ADR-0056) — gates them behind the
+        // `interfaces` preview feature and rejects duplicate method names.
+        // Real conformance / dispatch wiring lands in later phases.
+        self.validate_interface_decls()
+            .map_err(CompileErrors::from)?;
+
         // Phase 2.5: Evaluate const initializers (e.g., const x = @import(...))
         self.evaluate_const_initializers()
             .map_err(CompileErrors::from)?;

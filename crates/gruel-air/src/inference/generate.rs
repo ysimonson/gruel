@@ -1305,6 +1305,8 @@ impl<'a> ConstraintGenerator<'a> {
             InstData::FnDecl { .. }
             | InstData::StructDecl { .. }
             | InstData::EnumDecl { .. }
+            | InstData::InterfaceDecl { .. }
+            | InstData::InterfaceMethodSig { .. }
             | InstData::DropFnDecl { .. }
             | InstData::ConstDecl { .. } => InferType::Concrete(Type::UNIT),
 

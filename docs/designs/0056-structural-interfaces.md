@@ -289,7 +289,7 @@ Each phase ends in a committable, runnable state with the preview flag
 `interfaces` enabled. Phases 1–4 can ship sequentially; spec/tests are folded
 into each phase but the formal spec chapter lands in Phase 5.
 
-- [ ] **Phase 1: Parsing and RIR**
+- [x] **Phase 1: Parsing and RIR**
   - Add `interface` keyword to `gruel-lexer`.
   - Parse `InterfaceDecl` items in `gruel-parser`; reject method bodies and
     associated functions with a clear diagnostic.

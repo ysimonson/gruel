@@ -67,6 +67,9 @@ pub enum Item {
     Function(Function),
     Struct(StructDecl),
     Enum(EnumDecl),
+    /// Interface declaration (ADR-0056) - a structurally typed set of method
+    /// requirements.
+    Interface(InterfaceDecl),
     DropFn(DropFn),
     /// Constant declaration (e.g., `const math = @import("math");`)
     Const(ConstDecl),
@@ -202,6 +205,50 @@ pub struct EnumVariantField {
     /// Field type
     pub ty: TypeExpr,
     /// Span covering the field
+    pub span: Span,
+}
+
+/// An interface declaration (ADR-0056).
+///
+/// Interfaces are structurally typed sets of method requirements. A type
+/// conforms to an interface iff its method set covers every method signature
+/// required here.
+///
+/// ```gruel
+/// interface Drop {
+///     fn drop(self);
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceDecl {
+    /// Visibility (currently always private; module-system support is future
+    /// work).
+    pub visibility: Visibility,
+    /// Interface name
+    pub name: Ident,
+    /// Required method signatures, in declaration order. The order is
+    /// significant: it determines vtable slot indices in the runtime
+    /// dispatch path (Phase 4).
+    pub methods: Vec<MethodSig>,
+    /// Span covering the entire interface declaration
+    pub span: Span,
+}
+
+/// A method signature inside an interface declaration.
+///
+/// No body and no associated functions (no-`self`) are allowed in MVP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodSig {
+    /// Method name
+    pub name: Ident,
+    /// The receiver. Required (associated functions are not yet allowed in
+    /// interfaces).
+    pub receiver: SelfParam,
+    /// Method parameters (excluding self)
+    pub params: Vec<Param>,
+    /// Return type (None means implicit unit `()`)
+    pub return_type: Option<TypeExpr>,
+    /// Span covering the entire signature (`fn name(...) -> R;`)
     pub span: Span,
 }
 
@@ -1213,6 +1260,7 @@ impl fmt::Display for Ast {
                 Item::Function(func) => fmt_function(f, func, 0)?,
                 Item::Struct(s) => fmt_struct(f, s, 0)?,
                 Item::Enum(e) => fmt_enum(f, e, 0)?,
+                Item::Interface(i) => fmt_interface(f, i, 0)?,
                 Item::DropFn(drop_fn) => fmt_drop_fn(f, drop_fn, 0)?,
                 Item::Const(c) => fmt_const(f, c, 0)?,
                 Item::Error(span) => writeln!(f, "Error({:?})", span)?,
@@ -1280,6 +1328,28 @@ fn fmt_const(f: &mut fmt::Formatter<'_>, c: &ConstDecl, level: usize) -> fmt::Re
     }
     writeln!(f)?;
     fmt_expr(f, &c.init, level + 1)?;
+    Ok(())
+}
+
+fn fmt_interface(f: &mut fmt::Formatter<'_>, iface: &InterfaceDecl, level: usize) -> fmt::Result {
+    indent(f, level)?;
+    if iface.visibility == Visibility::Public {
+        write!(f, "pub ")?;
+    }
+    writeln!(f, "Interface sym:{}", iface.name.name.into_usize())?;
+    for sig in &iface.methods {
+        indent(f, level + 1)?;
+        write!(f, "MethodSig sym:{}(self", sig.name.name.into_usize())?;
+        for param in &sig.params {
+            write!(f, ", ")?;
+            fmt_param(f, param)?;
+        }
+        write!(f, ")")?;
+        if let Some(ref ret) = sig.return_type {
+            write!(f, " -> {}", ret)?;
+        }
+        writeln!(f)?;
+    }
     Ok(())
 }
 

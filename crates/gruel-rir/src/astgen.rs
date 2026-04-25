@@ -75,6 +75,9 @@ impl<'a> AstGen<'a> {
             Item::Enum(enum_decl) => {
                 self.gen_enum(enum_decl);
             }
+            Item::Interface(iface) => {
+                self.gen_interface(iface);
+            }
             Item::DropFn(drop_fn) => {
                 self.gen_drop_fn(drop_fn);
             }
@@ -280,6 +283,56 @@ impl<'a> AstGen<'a> {
                 methods_len,
             },
             span: enum_decl.span,
+        })
+    }
+
+    fn gen_interface(&mut self, iface: &gruel_parser::ast::InterfaceDecl) -> InstRef {
+        use gruel_parser::ast::Visibility;
+
+        // Emit one InterfaceMethodSig instruction per declared method, then
+        // an InterfaceDecl that points to them via inst-refs.
+        let method_refs: Vec<InstRef> = iface
+            .methods
+            .iter()
+            .map(|sig| {
+                let name = sig.name.name;
+                let return_type = match &sig.return_type {
+                    Some(ty) => self.intern_type(ty),
+                    None => self.interner.get_or_intern("()"),
+                };
+                let params: Vec<_> = sig
+                    .params
+                    .iter()
+                    .map(|p| RirParam {
+                        name: p.name.name,
+                        ty: self.intern_type(&p.ty),
+                        mode: self.convert_param_mode(p.mode),
+                        is_comptime: p.is_comptime,
+                    })
+                    .collect();
+                let (params_start, params_len) = self.rir.add_params(&params);
+
+                self.rir.add_inst(Inst {
+                    data: InstData::InterfaceMethodSig {
+                        name,
+                        params_start,
+                        params_len,
+                        return_type,
+                    },
+                    span: sig.span,
+                })
+            })
+            .collect();
+        let (methods_start, methods_len) = self.rir.add_inst_refs(&method_refs);
+
+        self.rir.add_inst(Inst {
+            data: InstData::InterfaceDecl {
+                is_pub: iface.visibility == Visibility::Public,
+                name: iface.name.name,
+                methods_start,
+                methods_len,
+            },
+            span: iface.span,
         })
     }
 

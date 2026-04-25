@@ -466,6 +466,11 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
                         );
                     }
                 }
+                Item::Interface(_) => {
+                    // Interfaces (ADR-0056) are validated in Sema. Cross-file
+                    // duplicate detection is added when interfaces become a
+                    // namespace alongside structs/enums in Phase 2.
+                }
                 Item::DropFn(_) | Item::Const(_) => {
                     // Drop fns and const declarations are validated in Sema, not here.
                     // Const declarations are checked for duplicates in the declarations phase.
@@ -629,6 +634,10 @@ pub fn validate_and_generate_rir_parallel(
                             },
                         );
                     }
+                }
+                Item::Interface(_) => {
+                    // Interfaces (ADR-0056) are validated in Sema; cross-file
+                    // duplicate detection is added in Phase 2.
                 }
                 Item::DropFn(_) | Item::Const(_) => {
                     // Validated in Sema
