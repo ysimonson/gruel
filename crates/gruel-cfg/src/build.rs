@@ -2169,6 +2169,14 @@ impl<'a> CfgBuilder<'a> {
                     continuation: Continuation::Continues,
                 }
             }
+
+            AirInstData::MakeInterfaceRef { .. } => {
+                // ADR-0056 Phase 4c: the AIR variant exists but sema does
+                // not yet emit it (sema reports "Phase 4d not yet
+                // implemented" before reaching this point). Phase 4d adds
+                // the CFG + codegen lowering.
+                unreachable!("MakeInterfaceRef should not reach CFG until ADR-0056 Phase 4d");
+            }
         }
     }
 

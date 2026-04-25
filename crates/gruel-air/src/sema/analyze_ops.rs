@@ -5515,6 +5515,28 @@ impl<'a> Sema<'a> {
         // Analyze all arguments
         let air_args = self.analyze_call_args(air, &args, ctx)?;
 
+        // ADR-0056 Phase 4c: for any argument whose corresponding parameter
+        // has an interface type, run a structural conformance check against
+        // the argument's concrete type. If conformance succeeds we currently
+        // surface a "Phase 4d not yet implemented" error; emitting a real
+        // `MakeInterfaceRef` and lowering it lands in Phase 4d.
+        for (i, (arg_air, param_ty)) in air_args.iter().zip(param_types.iter()).enumerate() {
+            if let crate::types::TypeKind::Interface(iface_id) = param_ty.kind() {
+                let arg_ty = air.get(arg_air.value).ty;
+                let arg_span = self.rir.get(args[i].value).span;
+                self.check_conforms(arg_ty, iface_id, arg_span)?;
+                return Err(CompileError::new(
+                    ErrorKind::InternalError(
+                        "interface runtime dispatch (fat-pointer codegen) is not yet \
+                         implemented (ADR-0056 Phase 4d). The conformance check passes; \
+                         use `comptime T: I` for a working alternative."
+                            .to_string(),
+                    ),
+                    arg_span,
+                ));
+            }
+        }
+
         // Handle generic function calls differently
         if is_generic {
             // Separate type arguments from runtime arguments

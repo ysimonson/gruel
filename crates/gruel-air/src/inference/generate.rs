@@ -618,14 +618,27 @@ impl<'a> ConstraintGenerator<'a> {
                         // Return the declared return type (error will be caught in sema)
                         func.return_type.clone()
                     } else {
-                        // Generate constraints for each argument
+                        // Generate constraints for each argument.
+                        // ADR-0056: skip the equality constraint when the
+                        // parameter type is an interface — sema applies
+                        // structural conformance (not equality) and inserts
+                        // a `MakeInterfaceRef` coercion at the call site.
                         for (arg, param_ty) in args.iter().zip(func.param_types.iter()) {
                             let arg_info = self.generate(arg.value, ctx);
-                            self.add_constraint(Constraint::equal(
-                                arg_info.ty,
-                                param_ty.clone(),
-                                arg_info.span,
-                            ));
+                            let is_iface = matches!(
+                                param_ty,
+                                InferType::Concrete(t) if matches!(
+                                    t.kind(),
+                                    crate::types::TypeKind::Interface(_)
+                                )
+                            );
+                            if !is_iface {
+                                self.add_constraint(Constraint::equal(
+                                    arg_info.ty,
+                                    param_ty.clone(),
+                                    arg_info.span,
+                                ));
+                            }
                         }
                         func.return_type.clone()
                     }

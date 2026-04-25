@@ -1381,6 +1381,24 @@ pub enum AirInstData {
         /// The slot that becomes dead
         slot: u32,
     },
+
+    /// Coerce a concrete value to an interface fat pointer (ADR-0056).
+    ///
+    /// `value` is a place of concrete type `Foo`. The result is a fat
+    /// pointer `(data: &Foo, vtable: &VTable_Foo_Iface)`. Codegen (Phase 4d)
+    /// materializes the data pointer and the vtable global.
+    ///
+    /// The result type (`AirInst.ty`) is `Type::new_interface(interface_id)`.
+    MakeInterfaceRef {
+        /// The concrete value being coerced. Must be a place expression
+        /// (parameter ref, var ref, etc.) — codegen takes its address.
+        value: AirRef,
+        /// The concrete struct ID of `value`. Used by codegen to locate the
+        /// `(struct_id, interface_id)` vtable.
+        struct_id: crate::types::StructId,
+        /// The target interface.
+        interface_id: crate::types::InterfaceId,
+    },
 }
 
 impl fmt::Display for AirRef {
@@ -1707,6 +1725,17 @@ impl fmt::Display for Air {
                 }
                 AirInstData::StorageDead { slot } => {
                     writeln!(f, "storage_dead ${}", slot)?;
+                }
+                AirInstData::MakeInterfaceRef {
+                    value,
+                    struct_id,
+                    interface_id,
+                } => {
+                    writeln!(
+                        f,
+                        "make_interface_ref {} (struct=#{}, iface=#{})",
+                        value, struct_id.0, interface_id.0
+                    )?;
                 }
             }
         }

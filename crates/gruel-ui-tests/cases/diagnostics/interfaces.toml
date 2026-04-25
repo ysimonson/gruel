@@ -48,3 +48,28 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = ["borrow t: Greeter"]
+
+# Phase 4c: at the call site, passing a non-conforming type produces a
+# structured "does not conform to interface" error before the compiler
+# even tries to reach the (still-unimplemented) Phase 4d codegen path.
+[[case]]
+name = "interface_call_site_conformance_failure"
+preview = "interfaces"
+source = """
+interface Greeter {
+    fn greet(self);
+}
+
+struct Foo {}
+
+fn use_it(borrow t: Greeter) {
+}
+
+fn main() -> i32 {
+    let f = Foo {};
+    use_it(borrow f);
+    0
+}
+"""
+compile_fail = true
+error_contains = ["does not conform", "missing method", "greet"]

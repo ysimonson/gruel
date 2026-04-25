@@ -3329,6 +3329,29 @@ impl<'a> Sema<'a> {
         // Analyze arguments
         let air_args = self.analyze_call_args(air, &args, ctx)?;
 
+        // ADR-0056 Phase 4c: for any argument whose corresponding parameter
+        // has an interface type, run a structural conformance check against
+        // the argument's concrete type. If conformance succeeds we currently
+        // surface "Phase 4d not yet implemented" — emitting a real
+        // `MakeInterfaceRef` is wired in Phase 4d alongside codegen.
+        let param_types_owned: Vec<Type> = self.param_arena.types(fn_info.params).to_vec();
+        for (i, (arg_air, param_ty)) in air_args.iter().zip(param_types_owned.iter()).enumerate() {
+            if let crate::types::TypeKind::Interface(iface_id) = param_ty.kind() {
+                let arg_ty = air.get(arg_air.value).ty;
+                let arg_span = self.rir.get(args[i].value).span;
+                self.check_conforms(arg_ty, iface_id, arg_span)?;
+                return Err(CompileError::new(
+                    ErrorKind::InternalError(
+                        "interface runtime dispatch (fat-pointer codegen) is not yet \
+                         implemented (ADR-0056 Phase 4d). The conformance check passes; \
+                         use `comptime T: I` for a working alternative."
+                            .to_string(),
+                    ),
+                    arg_span,
+                ));
+            }
+        }
+
         let return_type = fn_info.return_type;
 
         // Encode call args

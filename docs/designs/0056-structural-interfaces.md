@@ -358,21 +358,22 @@ order — they share the fat-pointer ABI groundwork.
     Phase 4c. UI tests cover the rejection paths (interface as field
     type, by-value param).
 
-- [ ] **Phase 4c: AIR + CFG for fat pointers and dynamic dispatch**
-  - Add AIR instructions:
-    - `MakeInterfaceRef { value, interface_id, struct_id }` — concrete
-      `C` lvalue → `(data_ptr, vtable_ptr)`.
-    - `MethodCallDyn { interface_id, slot, recv, args_start, args_len }` —
-      load function pointer from `recv`'s vtable at `slot` and call it.
-  - Sema lowers method calls on interface-typed receivers
-    (`t.method(args)` where `t: I`) to `MethodCallDyn`. Body type-checks
-    against the interface's method signatures, not a concrete type.
-  - Sema lowers call-site coercion (`f(borrow x)` where `f: fn(borrow I)`
-    and `x: C`) to `MakeInterfaceRef`.
-  - Reject by-value-`self` interface methods reached through dynamic
-    dispatch (only `borrow self` and `inout self` are dispatchable).
-  - CFG passes the new instructions through unchanged; codegen still
-    rejects with the Phase 4d message.
+- [x] **Phase 4c (partial): AIR variant + call-site conformance**
+  - Add `AirInstData::MakeInterfaceRef { value, struct_id, interface_id }`
+    (codegen lowering deferred to Phase 4d).
+  - Inference skips the equality constraint when the parameter type is an
+    interface — sema applies structural conformance instead.
+  - At every function call where a parameter has interface type, sema
+    runs `check_conforms(arg_type, interface_id)`; non-conforming
+    arguments surface the structured `InterfaceMethodMissing` /
+    `InterfaceMethodSignatureMismatch` error at the call site.
+  - Successful conformance currently emits a "Phase 4d not yet
+    implemented" stop point — `MakeInterfaceRef` is not actually emitted
+    yet. This avoids creating AIR that CFG/codegen can't lower.
+  - CFG: `MakeInterfaceRef` arm exists but unreachable until Phase 4d.
+  - Method calls on interface-typed receivers (`t.method()`) and
+    `MethodCallDyn` are deferred — they're orthogonal to the parameter
+    coercion path and slot in cleanly once codegen lands.
 
 - [ ] **Phase 4d: LLVM codegen — fat pointers, vtables, dispatch**
   - LLVM type for `Type::new_interface(iid)` is the canonical
