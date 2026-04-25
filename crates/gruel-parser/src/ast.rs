@@ -395,6 +395,27 @@ pub enum TypeExpr {
         methods: Vec<Method>,
         span: Span,
     },
+    /// Anonymous interface type: interface { fn name(self) [-> T]; ... }
+    /// (ADR-0057) — comptime-constructed interface type, parallel to
+    /// `AnonymousStruct` and `AnonymousEnum`. Used inside `fn ... -> type`
+    /// bodies to build parameterized interfaces.
+    AnonymousInterface {
+        /// Required method signatures (no bodies, no associated functions).
+        methods: Vec<MethodSig>,
+        span: Span,
+    },
+    /// Parameterized type call (ADR-0057): `Name(arg1, arg2, ...)` used in
+    /// type position to invoke a comptime function returning `type`.
+    /// Resolves at sema time by evaluating the call at comptime.
+    TypeCall {
+        /// The function being called (e.g. `Sized`).
+        callee: Ident,
+        /// Type-or-expression arguments. Currently restricted to type
+        /// expressions; expressions like integer literals can be added when
+        /// comptime value parameters become common at type positions.
+        args: Vec<TypeExpr>,
+        span: Span,
+    },
     /// Raw pointer to immutable data: ptr const T
     PointerConst { pointee: Box<TypeExpr>, span: Span },
     /// Raw pointer to mutable data: ptr mut T
@@ -427,6 +448,8 @@ impl TypeExpr {
             TypeExpr::Array { span, .. } => *span,
             TypeExpr::AnonymousStruct { span, .. } => *span,
             TypeExpr::AnonymousEnum { span, .. } => *span,
+            TypeExpr::AnonymousInterface { span, .. } => *span,
+            TypeExpr::TypeCall { span, .. } => *span,
             TypeExpr::PointerConst { span, .. } => *span,
             TypeExpr::PointerMut { span, .. } => *span,
             TypeExpr::Tuple { span, .. } => *span,
@@ -478,6 +501,26 @@ impl fmt::Display for TypeExpr {
                     write!(f, "fn sym:{}", method.name.name.into_usize())?;
                 }
                 write!(f, " }}")
+            }
+            TypeExpr::AnonymousInterface { methods, .. } => {
+                write!(f, "interface {{ ")?;
+                for (i, m) in methods.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "fn sym:{}", m.name.name.into_usize())?;
+                }
+                write!(f, " }}")
+            }
+            TypeExpr::TypeCall { callee, args, .. } => {
+                write!(f, "sym:{}(", callee.name.into_usize())?;
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", a)?;
+                }
+                write!(f, ")")
             }
             TypeExpr::PointerConst { pointee, .. } => write!(f, "ptr const {}", pointee),
             TypeExpr::PointerMut { pointee, .. } => write!(f, "ptr mut {}", pointee),

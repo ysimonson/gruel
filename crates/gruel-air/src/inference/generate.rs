@@ -1323,6 +1323,12 @@ impl<'a> ConstraintGenerator<'a> {
             | InstData::DropFnDecl { .. }
             | InstData::ConstDecl { .. } => InferType::Concrete(Type::UNIT),
 
+            // ADR-0057: anonymous interface type expressions yield a
+            // comptime type value (parallel to AnonStructType /
+            // AnonEnumType, which are typed COMPTIME_TYPE elsewhere via
+            // their dedicated arms).
+            InstData::AnonInterfaceType { .. } => InferType::Concrete(Type::COMPTIME_TYPE),
+
             // Method call: receiver.method(args)
             InstData::MethodCall {
                 receiver,

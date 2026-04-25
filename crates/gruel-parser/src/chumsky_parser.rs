@@ -403,6 +403,24 @@ where
                     span: span_from_extra(e),
                 });
 
+            // Parameterized type call (ADR-0057): `Name(arg1, arg2, ...)`
+            // in type position. Resolves at sema time by evaluating the
+            // call as a comptime expression returning `type`.
+            let type_call = ident_parser()
+                .then(
+                    ty.clone()
+                        .separated_by(just(TokenKind::Comma))
+                        .allow_trailing()
+                        .at_least(1)
+                        .collect::<Vec<_>>()
+                        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)),
+                )
+                .map_with(|(callee, args), e| TypeExpr::TypeCall {
+                    callee,
+                    args,
+                    span: span_from_extra(e),
+                });
+
             // Named type: user-defined types like MyStruct
             let named_type = ident_parser().map(TypeExpr::Named);
 
@@ -454,6 +472,10 @@ where
                 primitive_type_parser().boxed(),
                 self_type.boxed(),
                 tuple_type.boxed(),
+                // type_call must come before named_type — they share the
+                // ident prefix, but type_call requires the trailing
+                // `(...)` whereas named_type matches a bare ident.
+                type_call.boxed(),
                 named_type.boxed(),
             ))
             .boxed();
@@ -2063,6 +2085,22 @@ where
             })
         });
 
+    // Anonymous interface type as expression (ADR-0057):
+    //   interface { fn name(self [, params]) [-> RetType]; ... }
+    // Used inside `fn ... -> type` bodies to build parameterized
+    // interfaces.
+    let anon_interface_type_expr = just(TokenKind::Interface)
+        .ignore_then(just(TokenKind::LBrace))
+        .ignore_then(interface_method_sig_parser().repeated().collect::<Vec<_>>())
+        .then_ignore(just(TokenKind::RBrace))
+        .map_with(|methods, e| {
+            let span = span_from_extra(e);
+            Expr::TypeLit(TypeLitExpr {
+                type_expr: TypeExpr::AnonymousInterface { methods, span },
+                span,
+            })
+        });
+
     // Self type expression: Self { field: value } (struct literal with Self as type)
     // This enables constructing instances of anonymous struct types from methods
     let self_type_expr = just(TokenKind::SelfType)
@@ -2171,6 +2209,7 @@ where
         array_lit.boxed(),
         anon_struct_type_expr.boxed(),
         anon_enum_type_expr.boxed(),
+        anon_interface_type_expr.boxed(),
         anon_fn_expr,
         type_lit_expr.boxed(),
         call_and_access_parser(expr.clone()),

@@ -33,6 +33,7 @@ mod airgen;
 mod analysis;
 mod analyze_ops;
 mod anon_enums;
+mod anon_interfaces;
 mod anon_structs;
 mod builtins;
 mod conformance;

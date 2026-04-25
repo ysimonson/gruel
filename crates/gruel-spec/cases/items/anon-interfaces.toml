@@ -1,0 +1,100 @@
+# Anonymous interface tests (ADR-0057).
+
+[section]
+id = "items.anon-interfaces"
+spec_chapter = "6.6"
+name = "Anonymous Interfaces"
+description = "Comptime-constructed interface types (ADR-0057)."
+
+# Constructing an anonymous interface inside a `fn ... -> type` body and
+# binding it to a local compiles end-to-end.
+[[case]]
+name = "anon_iface_construction"
+spec = ["6.6:1", "6.6:2"]
+source = """
+fn Sized() -> type {
+    interface { fn size(self) -> i32; }
+}
+
+fn main() -> i32 {
+    let S = Sized();
+    7
+}
+"""
+exit_code = 7
+
+# Anonymous interface parameterized over a type — used as a runtime
+# parameter type via the `Sized(i32)` syntax.
+[[case]]
+name = "anon_iface_runtime_dispatch"
+spec = ["6.6:3", "6.6:4", "6.6:6"]
+source = """
+fn Sized(comptime T: type) -> type {
+    interface { fn size(self) -> T; }
+}
+
+struct Box {
+    fn size(self) -> i32 { 42 }
+}
+
+fn use_sized(borrow s: Sized(i32)) -> i32 {
+    s.size()
+}
+
+fn main() -> i32 {
+    let b = Box {};
+    use_sized(borrow b)
+}
+"""
+exit_code = 42
+
+# Two distinct conforming types, both flowing through the same
+# parameterized interface, exercise vtable dedup and dispatch.
+[[case]]
+name = "anon_iface_two_conformers"
+spec = ["6.6:3"]
+source = """
+fn Sized(comptime T: type) -> type {
+    interface { fn size(self) -> T; }
+}
+
+struct One {
+    fn size(self) -> i32 { 1 }
+}
+
+struct Five {
+    fn size(self) -> i32 { 5 }
+}
+
+fn use_sized(borrow s: Sized(i32)) -> i32 {
+    s.size()
+}
+
+fn main() -> i32 {
+    let a = One {};
+    let b = Five {};
+    use_sized(borrow a) + use_sized(borrow b)
+}
+"""
+exit_code = 6
+
+# Anonymous interface as a struct field type / return type is rejected
+# (same restriction as named interfaces).
+[[case]]
+name = "anon_iface_as_field_type_rejected"
+spec = ["6.6:5"]
+source = """
+fn Sized(comptime T: type) -> type {
+    interface { fn size(self) -> T; }
+}
+
+struct Holder {
+    s: Sized(i32),
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "Sized(i32)"

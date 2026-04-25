@@ -12,7 +12,10 @@ use lasso::Spur;
 
 use super::Sema;
 use crate::inference::InferType;
-use crate::types::{ArrayTypeId, Type, TypeKind, parse_array_type_syntax, parse_tuple_type_syntax};
+use crate::types::{
+    ArrayTypeId, Type, TypeKind, parse_array_type_syntax, parse_tuple_type_syntax,
+    parse_type_call_syntax,
+};
 
 impl<'a> Sema<'a> {
     /// Get a human-readable name for a type.
@@ -199,6 +202,70 @@ impl<'a> Sema<'a> {
                 "`{}` is an interface, not a value type. Use `comptime T: {}` for compile-time generics, or `borrow t: {}` / `inout t: {}` in a parameter position for runtime dispatch.",
                 type_name, type_name, type_name, type_name
             )))
+        } else if let Some((callee_name, arg_strs)) = parse_type_call_syntax(type_name) {
+            // ADR-0057: parameterized type call `Name(arg1, arg2, ...)` in
+            // type position. Evaluate the callee at comptime with the
+            // resolved arguments substituted in for its comptime params.
+            let callee_sym = self.interner.get_or_intern(&callee_name);
+            let fn_info = match self.functions.get(&callee_sym).copied() {
+                Some(info) => info,
+                None => {
+                    return Err(CompileError::new(
+                        ErrorKind::UnknownType(type_name.to_string()),
+                        span,
+                    )
+                    .with_help(format!(
+                        "`{}` is not a function in scope. Parameterized type calls require a `fn ... -> type` declaration.",
+                        callee_name
+                    )));
+                }
+            };
+            // Resolve each argument to a Type. Args are themselves type
+            // expressions, so we recursively resolve them.
+            let mut arg_types: Vec<Type> = Vec::with_capacity(arg_strs.len());
+            for arg_str in &arg_strs {
+                let arg_sym = self.interner.get_or_intern(arg_str);
+                let arg_ty = self.resolve_type(arg_sym, span)?;
+                arg_types.push(arg_ty);
+            }
+            // Build a substitution map from the callee's comptime param
+            // names to the resolved argument types. The arg list must
+            // match the comptime-typed param list in count.
+            let param_comptime = self.param_arena.comptime(fn_info.params).to_vec();
+            let param_names = self.param_arena.names(fn_info.params).to_vec();
+            let comptime_param_names: Vec<lasso::Spur> = param_names
+                .iter()
+                .zip(param_comptime.iter())
+                .filter_map(|(n, &c)| if c { Some(*n) } else { None })
+                .collect();
+            if comptime_param_names.len() != arg_types.len() {
+                return Err(CompileError::new(
+                    ErrorKind::WrongArgumentCount {
+                        expected: comptime_param_names.len(),
+                        found: arg_types.len(),
+                    },
+                    span,
+                ));
+            }
+            let mut subst: std::collections::HashMap<lasso::Spur, Type> =
+                std::collections::HashMap::new();
+            for (n, t) in comptime_param_names.iter().zip(arg_types.iter()) {
+                subst.insert(*n, *t);
+            }
+            // Evaluate the function body at comptime with the substitution.
+            // The body must produce a `Type` value.
+            let value_subst: std::collections::HashMap<lasso::Spur, super::ConstValue> =
+                std::collections::HashMap::new();
+            match self.try_evaluate_const_with_subst(fn_info.body, &subst, &value_subst) {
+                Some(super::ConstValue::Type(t)) => Ok(t),
+                _ => Err(
+                    CompileError::new(ErrorKind::UnknownType(type_name.to_string()), span)
+                        .with_help(format!(
+                            "`{}` did not evaluate to a `type` value at compile time.",
+                            type_name
+                        )),
+                ),
+            }
         } else {
             // Check for array type syntax: [T; N]
             if let Some((element_type, length)) = parse_array_type_syntax(type_name) {

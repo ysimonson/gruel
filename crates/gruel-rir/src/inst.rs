@@ -2032,6 +2032,13 @@ impl Rir {
                 methods_start: *methods_start + extra_offset,
                 methods_len: *methods_len,
             },
+            InstData::AnonInterfaceType {
+                methods_start,
+                methods_len,
+            } => InstData::AnonInterfaceType {
+                methods_start: *methods_start + extra_offset,
+                methods_len: *methods_len,
+            },
             InstData::TupleInit {
                 elems_start,
                 elems_len,
@@ -2127,6 +2134,17 @@ impl Rir {
                     methods_start,
                     methods_len,
                     ..
+                } => {
+                    let start = (*methods_start + extra_offset) as usize;
+                    for i in 0..*methods_len as usize {
+                        extra[start + i] += inst_offset;
+                    }
+                }
+
+                // Anonymous interface type - contains InstRef array for method signatures
+                InstData::AnonInterfaceType {
+                    methods_start,
+                    methods_len,
                 } => {
                     let start = (*methods_start + extra_offset) as usize;
                     for i in 0..*methods_len as usize {
@@ -2801,6 +2819,19 @@ pub enum InstData {
         /// Index into extra data where method InstRefs start
         methods_start: u32,
         /// Number of methods (InstRefs to FnDecl instructions)
+        methods_len: u32,
+    },
+
+    /// Anonymous interface type (ADR-0057): an interface type used as a
+    /// value expression inside a comptime function body.
+    ///
+    /// The methods are stored as InstRefs to `InterfaceMethodSig` instructions
+    /// in the inst-refs extra array, mirroring `InterfaceDecl` for named
+    /// interfaces.
+    AnonInterfaceType {
+        /// Index into extra data where method-sig inst refs start.
+        methods_start: u32,
+        /// Number of method signatures.
         methods_len: u32,
     },
 
@@ -3693,6 +3724,15 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 // Anonymous function value (ADR-0055) — prints as "anon_fn call=<method ref>"
                 InstData::AnonFnValue { method } => {
                     writeln!(out, "anon_fn call={}", method).unwrap();
+                }
+                // Anonymous interface type (ADR-0057)
+                InstData::AnonInterfaceType {
+                    methods_start,
+                    methods_len,
+                } => {
+                    let methods = self.rir.get_inst_refs(*methods_start, *methods_len);
+                    let refs: Vec<String> = methods.iter().map(|m| format!("{}", m)).collect();
+                    writeln!(out, "anon_interface_type {{ {} }}", refs.join(", ")).unwrap();
                 }
             }
         }

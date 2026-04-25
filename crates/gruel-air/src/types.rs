@@ -1218,6 +1218,56 @@ pub fn parse_pointer_type_syntax(type_name: &str) -> Option<(String, PtrMutabili
     }
 }
 
+/// Parse a type-call syntax like `"Name(arg1, arg2)"` (ADR-0057). Returns
+/// `(callee_name, [arg_strs])` if `s` matches the pattern, else `None`.
+///
+/// Argument splitting is paren/bracket aware so nested type calls like
+/// `Outer(Inner(i32))` and `Pair([i32; 4], i64)` parse correctly.
+pub fn parse_type_call_syntax(s: &str) -> Option<(String, Vec<String>)> {
+    let s = s.trim();
+    if !s.ends_with(')') {
+        return None;
+    }
+    let open = s.find('(')?;
+    let callee = s[..open].trim().to_string();
+    if callee.is_empty() {
+        return None;
+    }
+    // The callee must be an identifier (no whitespace, no special chars).
+    if !callee.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    let inner = &s[open + 1..s.len() - 1];
+    let mut args: Vec<String> = Vec::new();
+    let mut depth: i32 = 0;
+    let mut current = String::new();
+    for ch in inner.chars() {
+        match ch {
+            '(' | '[' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' | ']' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                args.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        args.push(trimmed.to_string());
+    }
+    if args.is_empty() {
+        return None;
+    }
+    Some((callee, args))
+}
+
 /// Parse array type syntax "[T; N]" and return (element_type_str, length).
 ///
 /// This handles nested arrays correctly by tracking bracket depth.

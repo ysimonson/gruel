@@ -196,6 +196,38 @@ impl<'a> AstGen<'a> {
                 s.push(')');
                 self.interner.get_or_intern(&s)
             }
+            TypeExpr::AnonymousInterface { methods, .. } => {
+                // ADR-0057: anonymous interfaces only appear inline in
+                // comptime type expressions (`interface { ... }`). The
+                // canonical name encodes method names so distinct shapes
+                // get distinct symbols.
+                let mut s = String::from("interface { ");
+                for (i, m) in methods.iter().enumerate() {
+                    if i > 0 {
+                        s.push_str(", ");
+                    }
+                    let mname = self.interner.resolve(&m.name.name);
+                    s.push_str(mname);
+                }
+                s.push_str(" }");
+                self.interner.get_or_intern(&s)
+            }
+            TypeExpr::TypeCall { callee, args, .. } => {
+                // ADR-0057: `Name(arg, ...)` in type position. The canonical
+                // name encodes the callee plus stringified args so distinct
+                // parameterizations get distinct symbols.
+                let mut s = String::from(self.interner.resolve(&callee.name));
+                s.push('(');
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        s.push_str(", ");
+                    }
+                    let arg_sym = self.intern_type(a);
+                    s.push_str(self.interner.resolve(&arg_sym));
+                }
+                s.push(')');
+                self.interner.get_or_intern(&s)
+            }
         }
     }
 
@@ -968,6 +1000,51 @@ impl<'a> AstGen<'a> {
                             span: type_lit.span,
                         })
                     }
+                    TypeExpr::AnonymousInterface { methods, .. } => {
+                        // ADR-0057: build an `AnonInterfaceType` instruction
+                        // carrying one `InterfaceMethodSig` per declared
+                        // method. Mirrors the gen_interface flow for named
+                        // interfaces but without the enclosing
+                        // `InterfaceDecl`.
+                        let method_refs: Vec<InstRef> = methods
+                            .iter()
+                            .map(|sig| {
+                                let name = sig.name.name;
+                                let return_type = match &sig.return_type {
+                                    Some(ty) => self.intern_type(ty),
+                                    None => self.interner.get_or_intern("()"),
+                                };
+                                let params: Vec<_> = sig
+                                    .params
+                                    .iter()
+                                    .map(|p| RirParam {
+                                        name: p.name.name,
+                                        ty: self.intern_type(&p.ty),
+                                        mode: self.convert_param_mode(p.mode),
+                                        is_comptime: p.is_comptime,
+                                    })
+                                    .collect();
+                                let (params_start, params_len) = self.rir.add_params(&params);
+                                self.rir.add_inst(Inst {
+                                    data: InstData::InterfaceMethodSig {
+                                        name,
+                                        params_start,
+                                        params_len,
+                                        return_type,
+                                    },
+                                    span: sig.span,
+                                })
+                            })
+                            .collect();
+                        let (methods_start, methods_len) = self.rir.add_inst_refs(&method_refs);
+                        self.rir.add_inst(Inst {
+                            data: InstData::AnonInterfaceType {
+                                methods_start,
+                                methods_len,
+                            },
+                            span: type_lit.span,
+                        })
+                    }
                     TypeExpr::AnonymousEnum {
                         variants, methods, ..
                     } => {
@@ -1025,11 +1102,20 @@ impl<'a> AstGen<'a> {
                                 // For now, use a placeholder
                                 self.interner.get_or_intern_static("array")
                             }
-                            TypeExpr::AnonymousStruct { .. } | TypeExpr::AnonymousEnum { .. } => {
+                            TypeExpr::AnonymousStruct { .. }
+                            | TypeExpr::AnonymousEnum { .. }
+                            | TypeExpr::AnonymousInterface { .. } => {
                                 unreachable!("handled above")
                             }
                             TypeExpr::PointerConst { .. } | TypeExpr::PointerMut { .. } => {
                                 // Pointer types as values - use intern_type to get representation
+                                self.intern_type(&type_lit.type_expr)
+                            }
+                            TypeExpr::TypeCall { .. } => {
+                                // ADR-0057: parameterized type call as a
+                                // type literal. Route through intern_type;
+                                // sema's `resolve_type` evaluates the call
+                                // at comptime when the symbol is consumed.
                                 self.intern_type(&type_lit.type_expr)
                             }
                             TypeExpr::Tuple { .. } => {

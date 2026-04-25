@@ -2490,6 +2490,35 @@ impl<'a> Sema<'a> {
                 Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE))
             }
 
+            // Anonymous interface type (ADR-0057): an interface type
+            // constructed at comptime, e.g.
+            // `interface { fn size(self) -> T }` inside a `fn ... -> type`
+            // body. Resolves the method-signature types under the current
+            // substitution map (none here — see the comptime evaluator path
+            // for substituted resolution), then either dedupes against an
+            // existing structurally-equal interface or registers a new
+            // `InterfaceDef` and returns its id as a `Type::COMPTIME_TYPE`
+            // value.
+            InstData::AnonInterfaceType {
+                methods_start,
+                methods_len,
+            } => {
+                let req = self.build_anon_interface_def(
+                    *methods_start,
+                    *methods_len,
+                    inst.span,
+                    &std::collections::HashMap::new(),
+                )?;
+                let iface_id = self.find_or_create_anon_interface(req);
+                let iface_ty = Type::new_interface(iface_id);
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::TypeConst(iface_ty),
+                    ty: Type::COMPTIME_TYPE,
+                    span: inst.span,
+                });
+                Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE))
+            }
+
             // Anonymous enum type: an enum type constructed at comptime
             // (e.g., `enum { Some(T), None, fn method(self) -> bool { ... } }` in a comptime function)
             InstData::AnonEnumType {
@@ -5057,6 +5086,24 @@ impl<'a> Sema<'a> {
                 Some(ConstValue::Type(struct_ty))
             }
 
+            // Anonymous interface type (ADR-0057): evaluate to a comptime
+            // type value carrying the freshly-built (or deduped) InterfaceId.
+            InstData::AnonInterfaceType {
+                methods_start,
+                methods_len,
+            } => {
+                let methods = self
+                    .build_anon_interface_def(
+                        *methods_start,
+                        *methods_len,
+                        inst.span,
+                        &HashMap::new(),
+                    )
+                    .ok()?;
+                let iface_id = self.find_or_create_anon_interface(methods);
+                Some(ConstValue::Type(Type::new_interface(iface_id)))
+            }
+
             // Anonymous enum type: evaluate to a comptime type value
             InstData::AnonEnumType {
                 variants_start,
@@ -5490,6 +5537,22 @@ impl<'a> Sema<'a> {
                     }
                 }
                 Some(ConstValue::Type(struct_ty))
+            }
+
+            // Anonymous interface type with substitution (ADR-0057):
+            // resolve method-sig types under `type_subst` (and the regular
+            // comptime-resolver path for `T` references) before deduping.
+            // `value_subst` is unused — interfaces have no captured values.
+            InstData::AnonInterfaceType {
+                methods_start,
+                methods_len,
+            } => {
+                let methods = self
+                    .build_anon_interface_def(*methods_start, *methods_len, inst.span, type_subst)
+                    .ok()?;
+                let _ = value_subst;
+                let iface_id = self.find_or_create_anon_interface(methods);
+                Some(ConstValue::Type(Type::new_interface(iface_id)))
             }
 
             // Anonymous enum type: evaluate to a comptime type value with substitution
