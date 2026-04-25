@@ -46,6 +46,11 @@ fn build_module<'ctx>(
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    interface_defs: &[gruel_air::InterfaceDef],
+    interface_vtables: &std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
 ) -> CompileResult<Module<'ctx>> {
     let module = context.create_module("gruel_module");
     let builder = context.create_builder();
@@ -82,6 +87,48 @@ fn build_module<'ctx>(
         .map(|(cfg, fv)| (cfg.fn_name(), *fv))
         .collect();
 
+    // ADR-0056 Phase 4d-extended: emit one vtable global per
+    // `(StructId, InterfaceId)` pair. The vtable holds function pointers
+    // for each interface method, in declaration order.
+    let mut vtable_map: HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>> =
+        HashMap::new();
+    for (&(struct_id, interface_id), witness) in interface_vtables.iter() {
+        let iface_def = &interface_defs[interface_id.0 as usize];
+        let n_methods = iface_def.methods.len();
+        let ptr_ty = context.ptr_type(inkwell::AddressSpace::default());
+        let array_ty = ptr_ty.array_type(n_methods.max(1) as u32);
+
+        // Resolve each interface slot to the conforming type's LLVM
+        // function pointer.
+        let mut slots: Vec<inkwell::values::PointerValue<'ctx>> = Vec::with_capacity(n_methods);
+        if n_methods == 0 {
+            // Empty interface → emit a single null slot so the array has
+            // a non-zero length (LLVM can be picky about zero-length
+            // global arrays).
+            slots.push(ptr_ty.const_null());
+        } else {
+            for (i, req) in iface_def.methods.iter().enumerate() {
+                let (_concrete_struct_id, _method_sym) = witness[i];
+                // Function name: `StructName.method`.
+                let struct_name = type_pool.struct_def(struct_id).name.clone();
+                let mangled = format!("{}.{}", struct_name, req.name);
+                let fn_ptr = match fn_map.get(mangled.as_str()) {
+                    Some(fv) => fv.as_global_value().as_pointer_value(),
+                    None => ptr_ty.const_null(),
+                };
+                slots.push(fn_ptr);
+            }
+        }
+
+        let init = ptr_ty.const_array(&slots);
+        let vtbl_name = format!("__vtable__s{}__i{}", struct_id.0, interface_id.0);
+        let global = module.add_global(array_ty, None, &vtbl_name);
+        global.set_constant(true);
+        global.set_linkage(inkwell::module::Linkage::Private);
+        global.set_initializer(&init);
+        vtable_map.insert((struct_id, interface_id), global);
+    }
+
     // Define each function body.
     for (cfg, fn_value) in &declared {
         define_function(
@@ -95,6 +142,8 @@ fn build_module<'ctx>(
             &string_globals,
             interner,
             &fn_map,
+            &vtable_map,
+            interface_defs,
         )?;
     }
 
@@ -146,15 +195,26 @@ pub fn generate(
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    interface_defs: &[gruel_air::InterfaceDef],
+    interface_vtables: &std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
     opt_level: OptLevel,
 ) -> CompileResult<Vec<u8>> {
     LlvmTarget::initialize_native(&InitializationConfig::default())
         .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
 
     let context = Context::create();
-    let module = build_module(&context, functions, type_pool, strings, interner)?;
-
-    // Set up a TargetMachine for the host.
+    let module = build_module(
+        &context,
+        functions,
+        type_pool,
+        strings,
+        interner,
+        interface_defs,
+        interface_vtables,
+    )?;
     let target_triple = TargetMachine::get_default_triple();
     let llvm_target = LlvmTarget::from_triple(&target_triple)
         .map_err(|e| llvm_error(format!("failed to get LLVM target: {}", e)))?;
@@ -189,10 +249,23 @@ pub fn generate_ir(
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    interface_defs: &[gruel_air::InterfaceDef],
+    interface_vtables: &std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
     opt_level: OptLevel,
 ) -> CompileResult<String> {
     let context = Context::create();
-    let module = build_module(&context, functions, type_pool, strings, interner)?;
+    let module = build_module(
+        &context,
+        functions,
+        type_pool,
+        strings,
+        interner,
+        interface_defs,
+        interface_vtables,
+    )?;
 
     if opt_level != OptLevel::O0 {
         // generate_ir needs a TargetMachine to run passes. We do a lightweight
@@ -410,6 +483,11 @@ struct FnCodegen<'ctx, 'a> {
     /// single aggregate value, so `Param { index: abi_slot }` must be translated
     /// to `fn_value.get_nth_param(slot_to_llvm_param[abi_slot])`.
     slot_to_llvm_param: Vec<u32>,
+    /// (StructId, InterfaceId) → vtable global. Populated once at module
+    /// build time and shared across all functions.
+    vtable_map: &'a HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
+    /// Interface definitions for vtable layout (slot count per interface).
+    interface_defs: &'a [gruel_air::InterfaceDef],
 }
 
 impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
@@ -425,6 +503,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         string_globals: &'a [GlobalValue<'ctx>],
         interner: &'a ThreadedRodeo,
         fn_map: &'a HashMap<&'a str, FunctionValue<'ctx>>,
+        vtable_map: &'a HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
+        interface_defs: &'a [gruel_air::InterfaceDef],
     ) -> Self {
         let value_count = cfg.value_count();
         let num_locals = cfg.num_locals() as usize;
@@ -456,6 +536,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             phi_nodes: vec![None; value_count],
             param_allocas: vec![None; num_params],
             slot_to_llvm_param,
+            vtable_map,
+            interface_defs,
         }
     }
 
@@ -2617,12 +2699,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 // and no storage. The data pointer is never dereferenced for
                 // such types, so a null pointer is a valid placeholder.
                 let source_llvm_ty = gruel_type_to_llvm(source_ty, self.ctx, self.type_pool);
-                let data_ptr: inkwell::values::PointerValue<'ctx> = if source_llvm_ty.is_none() {
-                    self.ctx
+                let data_ptr: inkwell::values::PointerValue<'ctx> = match source_llvm_ty {
+                    None => self
+                        .ctx
                         .ptr_type(inkwell::AddressSpace::default())
-                        .const_null()
-                } else {
-                    match source_inst.data {
+                        .const_null(),
+                    Some(llvm_ty) => match source_inst.data {
                         CfgInstData::Load { slot } => self
                             .locals
                             .get(slot as usize)
@@ -2647,25 +2729,28 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         _ => {
                             // Materialize an alloca and store the value into
                             // it.
-                            let llvm_ty = source_llvm_ty.unwrap();
                             let ptr = self.build_entry_alloca(llvm_ty, "iface.tmp");
                             let v = self.get_value(value);
                             self.builder.build_store(ptr, v).unwrap();
                             ptr
                         }
-                    }
+                    },
                 };
 
-                // ADR-0056 Phase 4d MVP: the vtable pointer is a per-(struct,
-                // interface) global constant. For empty interfaces it carries
-                // no methods; passing a null pointer is sufficient because no
-                // dispatch happens. Phase 4d-extended will emit a real
-                // `[N x ptr]` constant when interfaces gain methods.
-                let _ = (struct_id, interface_id);
+                // ADR-0056 Phase 4d-extended: the vtable pointer is the
+                // address of a per-(struct, interface) global emitted by
+                // build_module. Falls back to null if (somehow) the pair
+                // isn't in the map, which shouldn't happen in well-formed
+                // sema output but keeps codegen robust.
                 let vtable_ptr = self
-                    .ctx
-                    .ptr_type(inkwell::AddressSpace::default())
-                    .const_null();
+                    .vtable_map
+                    .get(&(struct_id, interface_id))
+                    .map(|g| g.as_pointer_value())
+                    .unwrap_or_else(|| {
+                        self.ctx
+                            .ptr_type(inkwell::AddressSpace::default())
+                            .const_null()
+                    });
 
                 let iface_struct_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
                     .expect("interface type must have LLVM representation")
@@ -2680,6 +2765,97 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     .build_insert_value(with_data, vtable_ptr, 1, "iface.vt")
                     .unwrap();
                 Some(with_vtbl.into_struct_value().into())
+            }
+
+            CfgInstData::MethodCallDyn {
+                interface_id,
+                slot,
+                recv,
+                args_start,
+                args_len,
+            } => {
+                // ADR-0056 Phase 4d-extended: dynamic dispatch through the
+                // fat pointer's vtable. Steps:
+                //   1. Extract data_ptr (field 0) and vtable_ptr (field 1)
+                //      from the receiver fat pointer struct.
+                //   2. GEP into vtable[slot] to get the function pointer
+                //      address; load the pointer.
+                //   3. Construct an indirect-call function type from the
+                //      interface's method signature: first arg is `ptr`
+                //      (the data pointer), then the additional args.
+                //   4. Call indirectly.
+                //
+                // For Phase 4d-ext MVP, the conforming type's method
+                // signature is required to be the same shape as the
+                // interface's signature (minus the `self` substitution).
+                // We model `self` as a `ptr` at the LLVM ABI: the callee's
+                // first LLVM parameter is the data pointer.
+                let recv_val = self.get_value(recv).into_struct_value();
+                let data_ptr = self
+                    .builder
+                    .build_extract_value(recv_val, 0, "iface.data")
+                    .unwrap()
+                    .into_pointer_value();
+                let vtable_ptr = self
+                    .builder
+                    .build_extract_value(recv_val, 1, "iface.vt")
+                    .unwrap()
+                    .into_pointer_value();
+
+                let iface_def = &self.interface_defs[interface_id.0 as usize];
+                let req = &iface_def.methods[slot as usize];
+                let n_methods = iface_def.methods.len().max(1) as u32;
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let array_ty = ptr_ty.array_type(n_methods);
+
+                // GEP into the vtable: vtable[slot] is a `ptr`.
+                let zero = self.ctx.i32_type().const_zero();
+                let slot_idx = self.ctx.i32_type().const_int(slot as u64, false);
+                let slot_ptr = unsafe {
+                    self.builder
+                        .build_gep(array_ty, vtable_ptr, &[zero, slot_idx], "vt.slot")
+                        .expect("build_gep failed")
+                };
+                let fn_ptr = self
+                    .builder
+                    .build_load(ptr_ty, slot_ptr, "vt.fn")
+                    .unwrap()
+                    .into_pointer_value();
+
+                // Build the function type. First arg is `ptr` (the data
+                // pointer carrying the receiver). Subsequent args follow
+                // the interface's declared parameter types.
+                let mut llvm_param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                    Vec::with_capacity(req.param_types.len() + 1);
+                llvm_param_types.push(ptr_ty.into());
+                for pty in req.param_types.iter() {
+                    if let Some(ll) = gruel_type_to_llvm_param(*pty, self.ctx, self.type_pool) {
+                        llvm_param_types.push(ll);
+                    }
+                }
+                let ret_llvm = gruel_type_to_llvm(req.return_type, self.ctx, self.type_pool);
+                let fn_type = match ret_llvm {
+                    Some(t) => t.fn_type(&llvm_param_types, false),
+                    None => self.ctx.void_type().fn_type(&llvm_param_types, false),
+                };
+
+                // Gather the additional args (already lowered into the
+                // call_args extra array by the CFG builder).
+                let cfg_args = self.cfg.get_call_args(args_start, args_len);
+                let mut llvm_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
+                    Vec::with_capacity(cfg_args.len() + 1);
+                llvm_args.push(data_ptr.into());
+                for arg in cfg_args {
+                    let v = self.get_value(arg.value);
+                    llvm_args.push(v.into());
+                }
+
+                let call_site = self
+                    .builder
+                    .build_indirect_call(fn_type, fn_ptr, &llvm_args, "iface.dispatch")
+                    .unwrap();
+
+                call_site.try_as_basic_value().basic()
             }
         };
 
@@ -3350,6 +3526,8 @@ fn define_function<'ctx>(
     string_globals: &[GlobalValue<'ctx>],
     interner: &ThreadedRodeo,
     fn_map: &HashMap<&str, FunctionValue<'ctx>>,
+    vtable_map: &HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
+    interface_defs: &[gruel_air::InterfaceDef],
 ) -> CompileResult<()> {
     let mut fn_gen = FnCodegen::new(
         cfg,
@@ -3362,6 +3540,8 @@ fn define_function<'ctx>(
         string_globals,
         interner,
         fn_map,
+        vtable_map,
+        interface_defs,
     );
     fn_gen.translate()
 }

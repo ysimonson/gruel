@@ -5525,22 +5525,24 @@ impl<'a> Sema<'a> {
                 let arg_air = air_args[i].value;
                 let arg_ty = air.get(arg_air).ty;
                 let arg_span = self.rir.get(args[i].value).span;
-                let _witness = self.check_conforms(arg_ty, iface_id, arg_span)?;
+                let witness = self.check_conforms(arg_ty, iface_id, arg_span)?;
                 let struct_id = match arg_ty.kind() {
                     crate::types::TypeKind::Struct(id) => id,
                     _ => {
                         return Err(CompileError::new(
                             ErrorKind::TypeMismatch {
-                                expected: format!("type conforming to interface"),
+                                expected: "type conforming to interface".to_string(),
                                 found: arg_ty.name().to_string(),
                             },
                             arg_span,
                         ));
                     }
                 };
-                // Record the (struct, interface) pair so codegen can emit a
-                // vtable for it.
-                self.interface_vtables_needed.insert((struct_id, iface_id));
+                // Record the (struct, interface) pair plus the conformance
+                // witness so codegen can emit a vtable.
+                self.interface_vtables_needed
+                    .entry((struct_id, iface_id))
+                    .or_insert(witness.slot_methods);
                 let coerced = air.add_inst(AirInst {
                     data: AirInstData::MakeInterfaceRef {
                         value: arg_air,

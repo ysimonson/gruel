@@ -1399,6 +1399,29 @@ pub enum AirInstData {
         /// The target interface.
         interface_id: crate::types::InterfaceId,
     },
+
+    /// Dynamic-dispatch method call on an interface receiver (ADR-0056).
+    ///
+    /// `recv` is a value of type `Type::new_interface(iid)` (a fat pointer).
+    /// Codegen loads function-pointer slot `slot` from `recv`'s vtable and
+    /// calls it, passing `recv.data_ptr` as the receiver and the regular
+    /// `args` afterwards.
+    ///
+    /// The result type is the interface method's declared return type.
+    MethodCallDyn {
+        /// The interface being dispatched on (used to type the vtable).
+        interface_id: crate::types::InterfaceId,
+        /// The vtable slot index (corresponds to the method's declaration
+        /// order in the interface).
+        slot: u32,
+        /// The fat-pointer receiver (must have type `Type::new_interface(iid)`).
+        recv: AirRef,
+        /// Start of additional args (excluding the receiver) in the extra
+        /// array. Encoded as `[value, mode]` pairs like ordinary `Call`.
+        args_start: u32,
+        /// Number of additional args.
+        args_len: u32,
+    },
 }
 
 impl fmt::Display for AirRef {
@@ -1735,6 +1758,19 @@ impl fmt::Display for Air {
                         f,
                         "make_interface_ref {} (struct=#{}, iface=#{})",
                         value, struct_id.0, interface_id.0
+                    )?;
+                }
+                AirInstData::MethodCallDyn {
+                    interface_id,
+                    slot,
+                    recv,
+                    args_len,
+                    ..
+                } => {
+                    writeln!(
+                        f,
+                        "method_call_dyn iface=#{} slot={} recv={} (+{} args)",
+                        interface_id.0, slot, recv, args_len
                     )?;
                 }
             }

@@ -64,11 +64,13 @@ impl<'a> Sema<'a> {
             TypeKind::ComptimeType | TypeKind::ComptimeStr => true,
             // Pointer types are Copy (they're just addresses)
             TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => true,
-            // Interface types: not Copy at runtime — they're either erased
-            // before codegen (comptime constraint) or carry a vtable pointer
-            // and follow the underlying type's affineness (runtime dispatch,
-            // Phase 4). Treat as non-Copy.
-            TypeKind::Interface(_) => false,
+            // Interface types (ADR-0056): the fat pointer is two pointer-
+            // sized values. Bitwise-copying it is safe — it just produces a
+            // second reference to the same underlying data via the data
+            // pointer, which is the same ownership posture as the original
+            // borrow. Treating as Copy lets the receiver be used as a method
+            // call argument without triggering "move out of borrow" errors.
+            TypeKind::Interface(_) => true,
         }
     }
 

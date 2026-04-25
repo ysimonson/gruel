@@ -2170,6 +2170,55 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
+            AirInstData::MethodCallDyn {
+                interface_id,
+                slot,
+                recv,
+                args_start,
+                args_len,
+            } => {
+                // Lower the receiver and the additional args.
+                let Some(recv_val) = self.lower_value(*recv) else {
+                    return Self::diverged();
+                };
+
+                let air_call_args: Vec<_> =
+                    self.air.get_call_args(*args_start, *args_len).collect();
+                let mut arg_vals = Vec::new();
+                for arg in &air_call_args {
+                    let Some(value) = self.lower_value(arg.value) else {
+                        return Self::diverged();
+                    };
+                    arg_vals.push(CfgCallArg {
+                        value,
+                        mode: CfgArgMode::from(arg.mode),
+                    });
+                }
+                for arg in &air_call_args {
+                    if arg.mode == AirArgMode::Normal {
+                        self.forget_consumed_value(arg.value);
+                    }
+                }
+
+                let (cfg_args_start, cfg_args_len) = self.cfg.push_call_args(arg_vals);
+                let value = self.emit(
+                    CfgInstData::MethodCallDyn {
+                        interface_id: *interface_id,
+                        slot: *slot,
+                        recv: recv_val,
+                        args_start: cfg_args_start,
+                        args_len: cfg_args_len,
+                    },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
             AirInstData::MakeInterfaceRef {
                 value,
                 struct_id,

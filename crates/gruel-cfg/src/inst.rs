@@ -551,6 +551,16 @@ pub enum CfgInstData {
         /// The target interface.
         interface_id: gruel_air::InterfaceId,
     },
+
+    /// Dynamic-dispatch method call (ADR-0056). Args (excluding the receiver)
+    /// are stored in the call_args extra array at `[args_start..+args_len]`.
+    MethodCallDyn {
+        interface_id: gruel_air::InterfaceId,
+        slot: u32,
+        recv: CfgValue,
+        args_start: u32,
+        args_len: u32,
+    },
 }
 
 /// Block terminator - how control leaves a basic block.
@@ -1429,6 +1439,19 @@ impl Cfg {
                     f,
                     "make_interface_ref {} (struct=#{}, iface=#{})",
                     value, struct_id.0, interface_id.0
+                )
+            }
+            CfgInstData::MethodCallDyn {
+                interface_id,
+                slot,
+                recv,
+                args_len,
+                ..
+            } => {
+                write!(
+                    f,
+                    "method_call_dyn iface=#{} slot={} recv={} (+{} args)",
+                    interface_id.0, slot, recv, args_len
                 )
             }
         }

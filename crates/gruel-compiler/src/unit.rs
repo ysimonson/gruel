@@ -93,6 +93,17 @@ pub struct CompilationUnit<'src> {
     strings: Option<Vec<String>>,
     /// Warnings collected during compilation.
     warnings: Vec<CompileWarning>,
+    /// Interface definitions (ADR-0056), indexed by InterfaceId.0.
+    interface_defs: Option<Vec<gruel_air::InterfaceDef>>,
+    /// (StructId, InterfaceId) → conformance witness; codegen uses this to
+    /// emit one vtable global per pair.
+    #[allow(clippy::type_complexity)]
+    interface_vtables: Option<
+        std::collections::HashMap<
+            (gruel_air::StructId, gruel_air::InterfaceId),
+            Vec<(gruel_air::StructId, lasso::Spur)>,
+        >,
+    >,
 }
 
 impl<'src> CompilationUnit<'src> {
@@ -124,6 +135,8 @@ impl<'src> CompilationUnit<'src> {
             type_pool: None,
             strings: None,
             warnings: Vec::new(),
+            interface_defs: None,
+            interface_vtables: None,
         }
     }
 
@@ -428,6 +441,8 @@ impl<'src> CompilationUnit<'src> {
         self.strings = Some(sema_output.strings);
         self.warnings.extend(sema_output.warnings);
         self.warnings.extend(cfg_warnings);
+        self.interface_defs = Some(sema_output.interface_defs);
+        self.interface_vtables = Some(sema_output.interface_vtables);
 
         Ok(())
     }
@@ -491,11 +506,23 @@ impl<'src> CompilationUnit<'src> {
         let strings = self.strings.as_ref().expect("strings not available");
         let interner = self.interner.as_ref().expect("interner not available");
 
+        let empty_iface_defs: Vec<gruel_air::InterfaceDef> = Vec::new();
+        let empty_iface_vtables: std::collections::HashMap<
+            (gruel_air::StructId, gruel_air::InterfaceId),
+            Vec<(gruel_air::StructId, lasso::Spur)>,
+        > = std::collections::HashMap::new();
+        let interface_defs = self.interface_defs.as_ref().unwrap_or(&empty_iface_defs);
+        let interface_vtables = self
+            .interface_vtables
+            .as_ref()
+            .unwrap_or(&empty_iface_vtables);
         compile_backend(
             functions,
             type_pool,
             strings,
             interner,
+            interface_defs,
+            interface_vtables,
             &self.options,
             &self.warnings,
         )

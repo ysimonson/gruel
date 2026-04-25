@@ -473,8 +473,9 @@ impl<'a> SemaContext<'a> {
             TypeKind::Module(_) => true,
             // Pointer types are Copy (they're just addresses)
             TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => true,
-            // Interface types: see Sema::is_type_copy.
-            TypeKind::Interface(_) => false,
+            // Interface types: see Sema::is_type_copy. The fat pointer is
+            // bitwise-Copy.
+            TypeKind::Interface(_) => true,
         }
     }
 

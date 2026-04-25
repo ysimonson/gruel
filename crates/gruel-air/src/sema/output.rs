@@ -6,8 +6,10 @@
 
 use crate::inst::{Air, AirParamMode};
 use crate::intern_pool::TypeInternPool;
-use crate::types::Type;
+use crate::types::{InterfaceDef, InterfaceId, StructId, Type};
 use gruel_error::CompileWarning;
+use lasso::Spur;
+use std::collections::HashMap;
 
 /// Result of analyzing a function.
 #[derive(Debug)]
@@ -50,4 +52,13 @@ pub struct SemaOutput {
     pub type_pool: TypeInternPool,
     /// Lines of `@dbg` output collected during comptime evaluation.
     pub comptime_dbg_output: Vec<String>,
+    /// Interface definitions (ADR-0056), indexed by `InterfaceId.0`. Codegen
+    /// uses these to know each interface's method count and slot order when
+    /// emitting vtables.
+    pub interface_defs: Vec<InterfaceDef>,
+    /// Vtable witnesses keyed by `(struct_id, interface_id)`. The witness is
+    /// the conforming type's method-key list in interface declaration order;
+    /// codegen looks each one up in the function map to build the vtable
+    /// global.
+    pub interface_vtables: HashMap<(StructId, InterfaceId), Vec<(StructId, Spur)>>,
 }

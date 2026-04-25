@@ -42,9 +42,22 @@ pub fn generate(
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    interface_defs: &[gruel_air::InterfaceDef],
+    interface_vtables: &std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
     opt_level: OptLevel,
 ) -> CompileResult<Vec<u8>> {
-    codegen::generate(functions, type_pool, strings, interner, opt_level)
+    codegen::generate(
+        functions,
+        type_pool,
+        strings,
+        interner,
+        interface_defs,
+        interface_vtables,
+        opt_level,
+    )
 }
 
 /// Generate LLVM textual IR from a collection of function CFGs.
@@ -57,7 +70,20 @@ pub fn generate_ir(
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    interface_defs: &[gruel_air::InterfaceDef],
+    interface_vtables: &std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
     opt_level: OptLevel,
 ) -> CompileResult<String> {
-    codegen::generate_ir(functions, type_pool, strings, interner, opt_level)
+    codegen::generate_ir(
+        functions,
+        type_pool,
+        strings,
+        interner,
+        interface_defs,
+        interface_vtables,
+        opt_level,
+    )
 }

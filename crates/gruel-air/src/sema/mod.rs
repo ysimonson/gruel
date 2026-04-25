@@ -93,9 +93,12 @@ pub struct Sema<'a> {
     /// (methods). Looked up at specialization time to drive `check_conforms`.
     pub(crate) comptime_interface_bounds: HashMap<(Spur, Spur), InterfaceId>,
     /// (StructId, InterfaceId) pairs that need a vtable emitted (ADR-0056
-    /// Phase 4d). Populated by sema when a runtime coercion is detected; consumed
-    /// by codegen to emit one `@__vtable__C__I` global per pair.
-    pub(crate) interface_vtables_needed: std::collections::HashSet<(StructId, InterfaceId)>,
+    /// Phase 4d). Populated by sema when a runtime coercion is detected;
+    /// consumed by codegen to emit one `@__vtable__C__I` global per pair.
+    /// The value is the conformance witness — the conforming type's method
+    /// keys in interface declaration order, ready for codegen to look up the
+    /// LLVM function.
+    pub(crate) interface_vtables_needed: HashMap<(StructId, InterfaceId), Vec<(StructId, Spur)>>,
     /// Method table: maps (struct_id, method_name) to method info
     pub(crate) methods: HashMap<(StructId, Spur), MethodInfo>,
     /// Enum method table: maps (enum_id, method_name) to method info
@@ -192,7 +195,7 @@ impl<'a> Sema<'a> {
             interfaces: HashMap::new(),
             interface_defs: Vec::new(),
             comptime_interface_bounds: HashMap::new(),
-            interface_vtables_needed: std::collections::HashSet::new(),
+            interface_vtables_needed: HashMap::new(),
             methods: HashMap::new(),
             enum_methods: HashMap::new(),
             constants: HashMap::new(),

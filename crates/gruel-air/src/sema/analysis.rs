@@ -674,6 +674,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         warnings: all_warnings,
         type_pool: sema.type_pool.clone(),
         comptime_dbg_output: std::mem::take(&mut sema.comptime_dbg_output),
+        interface_defs: sema.interface_defs.clone(),
+        interface_vtables: sema.interface_vtables_needed.clone(),
     };
 
     // Run specialization pass to rewrite CallGeneric instructions to Call
@@ -1166,6 +1168,8 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
         warnings: all_warnings,
         type_pool: sema.type_pool.clone(),
         comptime_dbg_output: std::mem::take(&mut sema.comptime_dbg_output),
+        interface_defs: sema.interface_defs.clone(),
+        interface_vtables: sema.interface_vtables_needed.clone(),
     };
 
     // Run specialization pass to rewrite CallGeneric instructions to Call
@@ -2942,6 +2946,87 @@ impl<'a> Sema<'a> {
                     name: call_name_sym,
                     args_start,
                     args_len,
+                },
+                ty: return_type,
+                span,
+            });
+            return Ok(AnalysisResult::new(air_ref, return_type));
+        }
+
+        // ADR-0056 Phase 4d-extended: dispatch method calls on interface
+        // receivers dynamically via the vtable. The body type-checks against
+        // the interface's declared signature (not against any concrete
+        // implementor).
+        if let TypeKind::Interface(iface_id) = receiver_type.kind() {
+            // Interface dispatch passes the data pointer to the dispatched
+            // method without copying or moving the underlying value, so the
+            // receiver behaves like a borrow at the move-checker level.
+            // Undo any move that `analyze_inst` may have recorded for the
+            // root variable.
+            if let Some(var) = receiver_var {
+                ctx.moved_vars.remove(&var);
+            }
+            let iface_def = self.interface_defs[iface_id.0 as usize].clone();
+            let (slot, req) = iface_def
+                .find_method(&method_name_str)
+                .map(|(s, r)| (s, r.clone()))
+                .ok_or_compile_error(
+                    ErrorKind::UndefinedMethod {
+                        type_name: format!("interface `{}`", iface_def.name),
+                        method_name: method_name_str.clone(),
+                    },
+                    span,
+                )?;
+
+            // Argument count check.
+            if args.len() != req.param_types.len() {
+                return Err(CompileError::new(
+                    ErrorKind::WrongArgumentCount {
+                        expected: req.param_types.len(),
+                        found: args.len(),
+                    },
+                    span,
+                ));
+            }
+
+            self.check_exclusive_access(&args, span)?;
+
+            let air_args = self.analyze_call_args(air, &args, ctx)?;
+
+            // Type-check each arg against the interface's declared param type.
+            for (i, (arg_air, expected_ty)) in
+                air_args.iter().zip(req.param_types.iter()).enumerate()
+            {
+                let actual_ty = air.get(arg_air.value).ty;
+                if actual_ty != *expected_ty {
+                    let arg_span = self.rir.get(args[i].value).span;
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: expected_ty.name().to_string(),
+                            found: actual_ty.name().to_string(),
+                        },
+                        arg_span,
+                    ));
+                }
+            }
+
+            // Encode args (excluding the receiver) into the extra array.
+            let mut extra_data = Vec::with_capacity(air_args.len() * 2);
+            for arg in &air_args {
+                extra_data.push(arg.value.as_u32());
+                extra_data.push(arg.mode.as_u32());
+            }
+            let dyn_args_start = air.add_extra(&extra_data);
+            let dyn_args_len = air_args.len() as u32;
+
+            let return_type = req.return_type;
+            let air_ref = air.add_inst(AirInst {
+                data: AirInstData::MethodCallDyn {
+                    interface_id: iface_id,
+                    slot: slot as u32,
+                    recv: receiver_result.air_ref,
+                    args_start: dyn_args_start,
+                    args_len: dyn_args_len,
                 },
                 ty: return_type,
                 span,

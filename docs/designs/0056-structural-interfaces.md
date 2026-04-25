@@ -375,23 +375,29 @@ order — they share the fat-pointer ABI groundwork.
     `MethodCallDyn` are deferred — they're orthogonal to the parameter
     coercion path and slot in cleanly once codegen lands.
 
-- [x] **Phase 4d (partial): fat-pointer codegen for non-method interfaces**
+- [x] **Phase 4d: full runtime dispatch — fat pointers, vtables, dispatch**
   - LLVM type for `Type::new_interface(iid)` is the canonical
     `{ ptr, ptr }` struct (data + vtable). `is_param_by_ref` returns
     `false` for interface-typed params: the fat pointer is by-value at
-    the LLVM ABI; the borrow lives in the data field.
-  - `abi_slot_count` returns 2 for interface types.
-  - `MakeInterfaceRef` lowers to a fat-pointer struct value: data field
-    is the source value's address (alloca-spilled if needed); vtable
-    field is currently a null pointer (sufficient for empty interfaces).
-  - End-to-end runnable: empty-interface programs with `borrow t: I`
-    parameters compile and execute, passing a real fat pointer through.
-  - Spec tests for empty-interface end-to-end (passing) and by-value
-    rejection (still rejected).
-  - Deferred to Phase 4d-extended: real vtable globals (per
-    `(StructId, InterfaceId)` pair, with function pointers for each
-    interface method); `MethodCallDyn` lowering; method calls on
-    interface-typed receivers (`t.method()` where `t: I`).
+    the LLVM ABI; the borrow lives in the data field. `abi_slot_count`
+    returns 2.
+  - Vtable globals: `build_module` emits one
+    `@__vtable__s<S>__i<I> = constant [N x ptr]` per `(StructId,
+    InterfaceId)` pair recorded by sema, with function pointers in
+    interface declaration order.
+  - `MakeInterfaceRef` lowers to `{ &arg, &VTABLE_S_I }`.
+  - `MethodCallDyn` (new AIR/CFG variant) lowers to GEP-into-vtable +
+    load + indirect call. Receiver `data_ptr` is passed as the implicit
+    first argument; subsequent args follow.
+  - Interface receivers are `@copy` (the fat pointer is two pointers —
+    bitwise-copying it is sound and lets `t.method()` work without
+    "move out of borrow" complaints).
+  - End-to-end runnable: programs that pass concrete structs through
+    `borrow t: I` parameters AND invoke methods via the vtable now
+    compile and execute correctly. Distinct conforming types route to
+    distinct vtables.
+  - Three new spec tests pass end-to-end: empty-interface borrow,
+    method dispatch, two-types dispatch.
 
 - [ ] **Phase 4e: stabilization polish**
   - Improve diagnostic for "interface used as field type" / "interface used

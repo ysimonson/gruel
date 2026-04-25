@@ -782,6 +782,14 @@ pub struct CompileState {
     pub warnings: Vec<CompileWarning>,
     /// Lines of `@dbg` output collected during comptime evaluation.
     pub comptime_dbg_output: Vec<String>,
+    /// Interface definitions (ADR-0056), indexed by InterfaceId.0.
+    pub interface_defs: Vec<gruel_air::InterfaceDef>,
+    /// (StructId, InterfaceId) → conformance witness; codegen uses this to
+    /// emit one vtable global per pair.
+    pub interface_vtables: std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
 }
 
 /// Output from successful compilation.
@@ -980,6 +988,8 @@ pub fn compile_frontend_from_ast_with_options_full(
         strings: sema_output.strings,
         warnings,
         comptime_dbg_output: sema_output.comptime_dbg_output,
+        interface_defs: sema_output.interface_defs,
+        interface_vtables: sema_output.interface_vtables,
     })
 }
 
@@ -1091,6 +1101,8 @@ pub fn compile_frontend_from_rir_with_file_paths(
         strings: sema_output.strings,
         warnings,
         comptime_dbg_output: sema_output.comptime_dbg_output,
+        interface_defs: sema_output.interface_defs,
+        interface_vtables: sema_output.interface_vtables,
     })
 }
 
@@ -1113,6 +1125,14 @@ pub struct CompileStateFromRir {
     pub warnings: Vec<CompileWarning>,
     /// Lines of `@dbg` output collected during comptime evaluation.
     pub comptime_dbg_output: Vec<String>,
+    /// Interface definitions (ADR-0056), indexed by InterfaceId.0.
+    pub interface_defs: Vec<gruel_air::InterfaceDef>,
+    /// (StructId, InterfaceId) → conformance witness; codegen uses this to
+    /// emit one vtable global per pair.
+    pub interface_vtables: std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
 }
 
 /// Compile source code to an ELF binary.
@@ -1301,11 +1321,17 @@ fn link_system_with_warnings(
 ///
 /// This function is used by `CompilationUnit::compile()` and the legacy
 /// compile functions.
+#[allow(clippy::too_many_arguments)]
 pub fn compile_backend(
     functions: &[FunctionWithCfg],
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    interface_defs: &[gruel_air::InterfaceDef],
+    interface_vtables: &std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
     options: &CompileOptions,
     warnings: &[CompileWarning],
 ) -> MultiErrorResult<CompileOutput> {
@@ -1317,7 +1343,16 @@ pub fn compile_backend(
             CompileErrors::from(CompileError::without_span(ErrorKind::NoMainFunction))
         })?;
 
-    generate_llvm_objects_and_link(functions, type_pool, strings, interner, options, warnings)
+    generate_llvm_objects_and_link(
+        functions,
+        type_pool,
+        strings,
+        interner,
+        interface_defs,
+        interface_vtables,
+        options,
+        warnings,
+    )
 }
 
 /// Generate a single LLVM object file from all functions and link it.
@@ -1326,20 +1361,33 @@ pub fn compile_backend(
 /// the LLVM backend compiles all functions into a single LLVM module and emits
 /// one object file. Linking always uses the system linker because LLVM emits
 /// platform-native object formats (ELF on Linux, Mach-O on macOS).
+#[allow(clippy::too_many_arguments)]
 fn generate_llvm_objects_and_link(
     functions: &[FunctionWithCfg],
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    interface_defs: &[gruel_air::InterfaceDef],
+    interface_vtables: &std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
     options: &CompileOptions,
     warnings: &[CompileWarning],
 ) -> MultiErrorResult<CompileOutput> {
     let _span = info_span!("codegen", backend = "llvm").entered();
 
     let cfgs: Vec<&Cfg> = functions.iter().map(|f| &f.cfg).collect();
-    let object_bytes =
-        gruel_codegen_llvm::generate(&cfgs, type_pool, strings, interner, options.opt_level)
-            .map_err(CompileErrors::from)?;
+    let object_bytes = gruel_codegen_llvm::generate(
+        &cfgs,
+        type_pool,
+        strings,
+        interner,
+        interface_defs,
+        interface_vtables,
+        options.opt_level,
+    )
+    .map_err(CompileErrors::from)?;
 
     // LLVM produces a single object file; wrap it as a one-element slice.
     let object_files = vec![object_bytes];
@@ -1362,10 +1410,23 @@ pub fn generate_llvm_ir(
     type_pool: &TypeInternPool,
     strings: &[String],
     interner: &ThreadedRodeo,
+    interface_defs: &[gruel_air::InterfaceDef],
+    interface_vtables: &std::collections::HashMap<
+        (gruel_air::StructId, gruel_air::InterfaceId),
+        Vec<(gruel_air::StructId, lasso::Spur)>,
+    >,
     opt_level: OptLevel,
 ) -> CompileResult<String> {
     let cfgs: Vec<&Cfg> = functions.iter().map(|f| &f.cfg).collect();
-    gruel_codegen_llvm::generate_ir(&cfgs, type_pool, strings, interner, opt_level)
+    gruel_codegen_llvm::generate_ir(
+        &cfgs,
+        type_pool,
+        strings,
+        interner,
+        interface_defs,
+        interface_vtables,
+        opt_level,
+    )
 }
 
 // ============================================================================

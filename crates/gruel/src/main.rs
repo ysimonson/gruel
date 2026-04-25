@@ -1090,6 +1090,8 @@ fn handle_emit_multi_file(
                         &state.type_pool,
                         &state.strings,
                         &state.interner,
+                        &state.interface_defs,
+                        &state.interface_vtables,
                         options.opt_level,
                     ) {
                         Ok(ir) => print!("{}", ir),

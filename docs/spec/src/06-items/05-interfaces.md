@@ -139,3 +139,38 @@ fn main() -> i32 {
     0
 }
 ```
+
+{{ rule(id="6.5:16", cat="dynamic-semantics") }}
+
+A method call on an interface receiver loads the function pointer from
+the receiver's vtable at the slot determined by the method's declaration
+order in the interface, then calls it with the receiver's data pointer
+as the implicit first argument followed by the explicit arguments. The
+result is the return value of the dispatched function.
+
+{{ rule(id="6.5:17", cat="example") }}
+
+```gruel
+// Compiled with --preview interfaces
+interface Counter {
+    fn count(self) -> i32;
+}
+
+struct One {
+    fn count(self) -> i32 { 1 }
+}
+
+struct Five {
+    fn count(self) -> i32 { 5 }
+}
+
+fn invoke(borrow t: Counter) -> i32 {
+    t.count()
+}
+
+fn main() -> i32 {
+    let a = One {};
+    let b = Five {};
+    invoke(borrow a) + invoke(borrow b)  // 6
+}
+```

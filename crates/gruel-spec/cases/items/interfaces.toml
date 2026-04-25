@@ -245,6 +245,67 @@ fn main() -> i32 {
 """
 exit_code = 30
 
+# Phase 4d-extended: dynamic dispatch end-to-end. `t.greet()` where t is an
+# interface receiver dispatches through the vtable to the conforming type's
+# method.
+[[case]]
+name = "interface_runtime_dispatch_basic"
+spec = ["6.5:16", "6.5:17"]
+preview = "interfaces"
+preview_should_pass = true
+source = """
+interface Greeter {
+    fn greet(self);
+}
+
+struct Foo {
+    fn greet(self) {}
+}
+
+fn invoke(borrow t: Greeter) {
+    t.greet();
+}
+
+fn main() -> i32 {
+    let f = Foo {};
+    invoke(borrow f);
+    99
+}
+"""
+exit_code = 99
+
+# Two distinct conforming types, dispatched dynamically. Result confirms each
+# call routes to the right concrete method.
+[[case]]
+name = "interface_runtime_dispatch_two_types"
+spec = ["6.5:16"]
+preview = "interfaces"
+preview_should_pass = true
+source = """
+interface Counter {
+    fn count(self) -> i32;
+}
+
+struct One {
+    fn count(self) -> i32 { 1 }
+}
+
+struct Five {
+    fn count(self) -> i32 { 5 }
+}
+
+fn invoke(borrow t: Counter) -> i32 {
+    t.count()
+}
+
+fn main() -> i32 {
+    let a = One {};
+    let b = Five {};
+    invoke(borrow a) + invoke(borrow b)
+}
+"""
+exit_code = 6
+
 # By-value `t: I` is rejected with a tailored message.
 [[case]]
 name = "interface_runtime_by_value_rejected"
