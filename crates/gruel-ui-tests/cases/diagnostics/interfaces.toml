@@ -6,15 +6,20 @@ description = "Error messages around interface usage (ADR-0056)."
 # When a user tries to use an interface as a runtime parameter type before
 # Phase 4 ships, the diagnostic should redirect them to the comptime path
 # that does work today.
+# Interfaces are accepted in `borrow t: I` / `inout t: I` parameter positions
+# (Phase 4b). They are still rejected as struct field types, return types, and
+# local-binding types — those contexts get a tailored error redirecting to
+# the comptime path or the borrow-mode parameter form.
 [[case]]
-name = "interface_as_runtime_type_redirects_to_comptime"
+name = "interface_as_field_type_redirects"
 preview = "interfaces"
 source = """
 interface Greeter {
     fn greet(self);
 }
 
-fn use_it(borrow t: Greeter) {
+struct Holder {
+    g: Greeter,
 }
 
 fn main() -> i32 {
@@ -22,4 +27,24 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
-error_contains = ["is an interface", "comptime T: Greeter"]
+error_contains = ["is an interface"]
+
+# By-value `t: I` (no borrow mode) is rejected with a tailored message
+# pointing at `borrow t: I` / `inout t: I`.
+[[case]]
+name = "interface_by_value_param_rejected"
+preview = "interfaces"
+source = """
+interface Greeter {
+    fn greet(self);
+}
+
+fn use_it(t: Greeter) {
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = ["borrow t: Greeter"]

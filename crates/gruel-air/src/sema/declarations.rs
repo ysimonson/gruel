@@ -478,12 +478,16 @@ impl<'a> Sema<'a> {
     /// are created on-demand via the thread-safe `TypeInternPool` during function
     /// body analysis.
     pub(crate) fn resolve_declarations(&mut self) -> CompileResult<()> {
+        // Interfaces (ADR-0056) must be registered before struct/enum field
+        // and method-param resolution so that:
+        //   - using an interface name as a struct field type produces a
+        //     helpful diagnostic redirecting to the comptime path
+        //   - `comptime T: SomeInterface` bounds are recognized when
+        //     functions and methods are gathered
+        //   - `borrow t: SomeInterface` parameter types resolve correctly
+        self.validate_interface_decls()?;
         self.resolve_struct_fields()?;
         self.resolve_enum_variant_fields()?;
-        // Interfaces (ADR-0056) must be registered before
-        // `resolve_remaining_declarations` so that `comptime T: SomeInterface`
-        // bounds are recognized when functions and methods are gathered.
-        self.validate_interface_decls()?;
         self.resolve_remaining_declarations()?;
         Ok(())
     }
@@ -1038,8 +1042,11 @@ impl<'a> Sema<'a> {
                     // Use ComptimeType as a placeholder - actual type determined at specialization
                     Ok(Type::COMPTIME_TYPE)
                 } else {
-                    // Regular params OR comptime VALUE params (comptime n: i32)
-                    self.resolve_type(p.ty, span)
+                    // Regular params OR comptime VALUE params (comptime n: i32).
+                    // `resolve_param_type` accepts interface names for borrow/inout
+                    // modes (ADR-0056 Phase 4) and otherwise delegates to
+                    // `resolve_type`.
+                    self.resolve_param_type(p.ty, p.mode, span)
                 }
             })
             .collect::<CompileResult<Vec<_>>>()?;
@@ -1213,7 +1220,7 @@ impl<'a> Sema<'a> {
                         {
                             Ok(Type::COMPTIME_TYPE)
                         } else {
-                            self.resolve_type(p.ty, method_inst.span)
+                            self.resolve_param_type(p.ty, p.mode, method_inst.span)
                         }
                     })
                     .collect::<CompileResult<Vec<_>>>()?;

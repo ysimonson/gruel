@@ -341,20 +341,22 @@ order — they share the fat-pointer ABI groundwork.
     Phase 4.
   - UI test under `diagnostics/interfaces.toml` pins this guidance.
 
-- [ ] **Phase 4b: sema accepts interface-typed parameters**
-  - Extend `resolve_type` to accept interface names *only* when the param
-    mode is `inout` or `borrow` (top-level functions and methods).
-  - Reject by-value `t: I` with a tailored error pointing at `borrow t: I`.
-  - At call sites where the parameter type is `Type::new_interface(iid)`,
-    run `check_conforms(arg_type, iid)`; on success, record the
-    `(StructId, InterfaceId)` pair on a side-table for later vtable
-    emission. On failure, surface the conformance error at the call site.
-  - Codegen reaches the interface type and currently returns `None` for
-    LLVM lowering — Phase 4b leaves this as an explicit "Phase 4c: not yet
-    implemented in codegen" error so users get a clean message rather than
-    a downstream codegen ICE.
-  - Tests (preview, not-yet-passing): function declaration + call site
-    accepted at sema; codegen still fails with the Phase 4c message.
+- [x] **Phase 4b: sema accepts interface-typed parameters**
+  - New `resolve_param_type` accepts interface names when the parameter
+    mode is `inout` or `borrow`; the general `resolve_type` path rejects
+    them with a tailored diagnostic redirecting to either the comptime
+    path (`comptime T: I`) or the borrow form.
+  - Reject by-value `t: I` with a tailored error pointing at `borrow t:
+    I` / `inout t: I`.
+  - `validate_interface_decls` now runs *before* struct/enum field
+    resolution so the helpful interface-as-field-type error fires
+    correctly.
+  - Functions with empty bodies and `borrow t: I` parameters compile
+    end-to-end (the parameter is unused, so codegen emits a zero-param
+    LLVM function).
+  - Call-site coercion (passing a concrete type) is **not** done — that's
+    Phase 4c. UI tests cover the rejection paths (interface as field
+    type, by-value param).
 
 - [ ] **Phase 4c: AIR + CFG for fat pointers and dynamic dispatch**
   - Add AIR instructions:

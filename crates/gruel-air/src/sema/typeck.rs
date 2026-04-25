@@ -115,6 +115,45 @@ impl<'a> Sema<'a> {
             _ => InferType::Concrete(ty),
         }
     }
+    /// Resolve a parameter type symbol, accepting interface names when the
+    /// parameter mode is `inout` or `borrow` (ADR-0056 Phase 4).
+    ///
+    /// Outside of parameter positions, callers should use `resolve_type`
+    /// directly — interfaces are not yet legal as field types, return
+    /// types, or local-binding types.
+    pub(crate) fn resolve_param_type(
+        &mut self,
+        type_sym: Spur,
+        mode: gruel_rir::RirParamMode,
+        span: Span,
+    ) -> CompileResult<Type> {
+        if let Some(&interface_id) = self.interfaces.get(&type_sym) {
+            self.require_preview(
+                gruel_error::PreviewFeature::Interfaces,
+                "interface types in parameter positions",
+                span,
+            )?;
+            match mode {
+                gruel_rir::RirParamMode::Inout | gruel_rir::RirParamMode::Borrow => {
+                    Ok(Type::new_interface(interface_id))
+                }
+                _ => {
+                    let name = self.interner.resolve(&type_sym).to_string();
+                    Err(CompileError::new(
+                        ErrorKind::UnknownType(name.clone()),
+                        span,
+                    )
+                    .with_help(format!(
+                        "interface-typed parameters require a borrow mode: use `borrow t: {}` or `inout t: {}`. By-value `t: {}` is not supported (ADR-0056).",
+                        name, name, name
+                    )))
+                }
+            }
+        } else {
+            self.resolve_type(type_sym, span)
+        }
+    }
+
     /// Resolve a type symbol to a Type.
     ///
     /// Handles array types with the syntax "[T; N]".
@@ -150,16 +189,18 @@ impl<'a> Sema<'a> {
         } else if let Some(&enum_id) = self.enums.get(&type_sym) {
             Ok(Type::new_enum(enum_id))
         } else if self.interfaces.contains_key(&type_sym) {
-            // ADR-0056: interfaces are not yet usable as runtime types.
-            // The comptime path (`comptime T: I`) works today; runtime
-            // dispatch via fat pointers is Phase 4 of ADR-0056.
+            // ADR-0056: interfaces are usable as RUNTIME types only in
+            // parameter positions with `borrow`/`inout` mode (Phase 4).
+            // The general `resolve_type` path rejects them — callers that
+            // accept them (`collect_function_signature` / method gather)
+            // call `resolve_param_type` instead.
             Err(CompileError::new(
                 ErrorKind::UnknownType(type_name.to_string()),
                 span,
             )
             .with_help(format!(
-                "`{}` is an interface, not a runtime type. Use `comptime T: {}` to take any type that conforms to `{}` (monomorphized). Runtime dispatch via `borrow t: {}` / `inout t: {}` is not yet implemented (ADR-0056 Phase 4).",
-                type_name, type_name, type_name, type_name, type_name
+                "`{}` is an interface, not a value type. Use `comptime T: {}` for compile-time generics, or `borrow t: {}` / `inout t: {}` in a parameter position for runtime dispatch.",
+                type_name, type_name, type_name, type_name
             )))
         } else {
             // Check for array type syntax: [T; N]

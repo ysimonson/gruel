@@ -1247,11 +1247,12 @@ impl<'a> Sema<'a> {
     ) -> AnalyzedFnResult {
         let ret_type = self.resolve_type(return_type, span)?;
 
-        // Resolve parameter types and modes
+        // Resolve parameter types and modes. Use `resolve_param_type` so
+        // interface-typed parameters (ADR-0056 Phase 4) resolve correctly.
         let param_info: Vec<(Spur, Type, RirParamMode)> = params
             .iter()
             .map(|p| {
-                let ty = self.resolve_type(p.ty, span)?;
+                let ty = self.resolve_param_type(p.ty, p.mode, span)?;
                 Ok((p.name, ty, p.mode))
             })
             .collect::<CompileResult<Vec<_>>>()?;
@@ -1308,9 +1309,10 @@ impl<'a> Sema<'a> {
             param_info.push((self_sym, struct_type, RirParamMode::Normal));
         }
 
-        // Add regular parameters with their modes
+        // Add regular parameters with their modes. Use `resolve_param_type`
+        // for ADR-0056 interface-typed parameters.
         for p in spec.params.iter() {
-            let ty = self.resolve_type(p.ty, span)?;
+            let ty = self.resolve_param_type(p.ty, p.mode, span)?;
             param_info.push((p.name, ty, p.mode));
         }
 
