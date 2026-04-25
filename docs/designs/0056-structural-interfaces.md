@@ -330,7 +330,9 @@ into each phase but the formal spec chapter lands in Phase 5.
     method resolution that checks the body once against the interface
     instead of per-specialization. Tracked in ADR Open Questions.
 
-- [ ] **Phase 4: Runtime dynamic dispatch**
+- [ ] **Phase 4: Runtime dynamic dispatch** (not yet started — needs a
+      dedicated session; see Phase 4a below for the diagnostic landed in the
+      meantime.)
   - Sema: accept `inout t: I` and `borrow t: I` parameter forms; reject
     by-value `t: I`. Reject by-value-`self` method calls through interface
     typed receivers.
@@ -349,6 +351,12 @@ into each phase but the formal spec chapter lands in Phase 5.
   - Tests: dynamic dispatch against several conforming types; mixed comptime
     and runtime usage of the same interface; vtable deduplication (golden
     AIR/asm test).
+
+- [x] **Phase 4a (interim): improved diagnostic**
+  - When a parameter type names a registered interface, the unknown-type
+    error now includes a help line redirecting users to the comptime path
+    (`comptime T: I`) and noting that runtime dispatch is Phase 4.
+  - UI test under `diagnostics/interfaces.toml` pins this guidance.
 
 - [ ] **Phase 5: Specification, traceability, and stabilization**
   - New spec chapter (suggested 4.17 or section 6.5 — pick during writing)

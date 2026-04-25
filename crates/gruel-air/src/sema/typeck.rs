@@ -149,6 +149,18 @@ impl<'a> Sema<'a> {
             Ok(Type::new_struct(struct_id))
         } else if let Some(&enum_id) = self.enums.get(&type_sym) {
             Ok(Type::new_enum(enum_id))
+        } else if self.interfaces.contains_key(&type_sym) {
+            // ADR-0056: interfaces are not yet usable as runtime types.
+            // The comptime path (`comptime T: I`) works today; runtime
+            // dispatch via fat pointers is Phase 4 of ADR-0056.
+            Err(CompileError::new(
+                ErrorKind::UnknownType(type_name.to_string()),
+                span,
+            )
+            .with_help(format!(
+                "`{}` is an interface, not a runtime type. Use `comptime T: {}` to take any type that conforms to `{}` (monomorphized). Runtime dispatch via `borrow t: {}` / `inout t: {}` is not yet implemented (ADR-0056 Phase 4).",
+                type_name, type_name, type_name, type_name, type_name
+            )))
         } else {
             // Check for array type syntax: [T; N]
             if let Some((element_type, length)) = parse_array_type_syntax(type_name) {

@@ -1,0 +1,25 @@
+[section]
+id = "diagnostics.interfaces"
+name = "Interface Diagnostics"
+description = "Error messages around interface usage (ADR-0056)."
+
+# When a user tries to use an interface as a runtime parameter type before
+# Phase 4 ships, the diagnostic should redirect them to the comptime path
+# that does work today.
+[[case]]
+name = "interface_as_runtime_type_redirects_to_comptime"
+preview = "interfaces"
+source = """
+interface Greeter {
+    fn greet(self);
+}
+
+fn use_it(borrow t: Greeter) {
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = ["is an interface", "comptime T: Greeter"]
