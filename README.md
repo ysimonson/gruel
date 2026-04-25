@@ -26,8 +26,11 @@ freestanding/hermetic capacities.
 
 - Added for loops and first class `Range`s (ADR-0041)
 - Several new numeric primitives - `f16`/`f32`/`f64` and `isize`/`usize` (ADR-0046)
+- Use of `usize` for indexing (ADR-0054)
 - Tuples (ADR-0048)
+- Anonymous functions (ADR-0055)
 - Stabilized anonymous struct methods (ADR-0029)
+- All struct/enum methods, including destructors, are inlined - there are no `impl` blocks (ADR-0053)
 - Added struct destructuring (ADR-0036)
 - Banned partial moves to simplify analysis, especially with linear types (ADR-0036)
 - Enums with struct variants (ADR-0037), pattern matching (ADR-0038), and anonymous types with comptime generics support (ADR-0039)
