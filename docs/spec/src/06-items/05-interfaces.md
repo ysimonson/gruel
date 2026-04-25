@@ -6,10 +6,12 @@ template = "spec/page.html"
 
 # Interfaces
 
-> This chapter is provisional. Interfaces are a preview feature gated behind
-> `--preview interfaces` (ADR-0056). Phase 1 introduces the declaration syntax
-> only; conformance, comptime constraints, and runtime dispatch are
-> specified as later phases land.
+Interfaces are structurally typed sets of method requirements (ADR-0056).
+A type *conforms* to an interface when its method set covers every
+required signature; conformance is checked at use sites and is never
+declared up front. Interfaces are usable both as comptime constraints
+(monomorphized) and as runtime parameter types behind a borrowing mode
+(dynamically dispatched through a vtable).
 
 {{ rule(id="6.5:1", cat="normative") }}
 
@@ -34,16 +36,9 @@ or analysis time.
 Method names within a single interface declaration must be unique. Two method
 signatures with the same name in the same interface are a compile error.
 
-{{ rule(id="6.5:5", cat="legality-rule") }}
-
-Interface declarations require the `interfaces` preview feature. A program
-that contains an `interface` declaration without `--preview interfaces`
-enabled is rejected at compile time.
-
-{{ rule(id="6.5:6", cat="example") }}
+{{ rule(id="6.5:5", cat="example") }}
 
 ```gruel
-// Compiled with --preview interfaces
 interface Drop {
     fn drop(self);
 }

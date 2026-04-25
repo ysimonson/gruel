@@ -29,6 +29,7 @@ freestanding/hermetic capacities.
 - Use of `usize` for indexing (ADR-0054)
 - Tuples (ADR-0048)
 - Anonymous functions (ADR-0055)
+- Go-like structurally typed interfaces (ADR-0056)
 - Stabilized anonymous struct methods (ADR-0029)
 - All struct/enum methods, including destructors, are inlined - there are no `impl` blocks (ADR-0053)
 - Added struct destructuring (ADR-0036)

@@ -263,7 +263,7 @@ impl<'a> Sema<'a> {
 mod tests {
     use super::*;
     use crate::sema::Sema;
-    use gruel_error::{PreviewFeature, PreviewFeatures};
+    use gruel_error::PreviewFeatures;
     use gruel_lexer::Lexer;
     use gruel_parser::Parser;
     use gruel_rir::AstGen;
@@ -284,8 +284,7 @@ mod tests {
         let rir = Box::leak(Box::new(rir));
         let interner = Box::leak(Box::new(interner));
 
-        let mut preview = PreviewFeatures::new();
-        preview.insert(PreviewFeature::Interfaces);
+        let preview = PreviewFeatures::new();
         let mut sema = Sema::new(rir, interner, preview);
         sema.inject_builtin_types();
         sema.register_type_names().unwrap();

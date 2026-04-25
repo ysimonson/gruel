@@ -3,16 +3,12 @@ id = "diagnostics.interfaces"
 name = "Interface Diagnostics"
 description = "Error messages around interface usage (ADR-0056)."
 
-# When a user tries to use an interface as a runtime parameter type before
-# Phase 4 ships, the diagnostic should redirect them to the comptime path
-# that does work today.
-# Interfaces are accepted in `borrow t: I` / `inout t: I` parameter positions
-# (Phase 4b). They are still rejected as struct field types, return types, and
-# local-binding types — those contexts get a tailored error redirecting to
-# the comptime path or the borrow-mode parameter form.
+# Interfaces are accepted in `borrow t: I` / `inout t: I` parameter
+# positions. They are rejected as struct field types, return types, and
+# local-binding types — those contexts get a tailored error redirecting
+# to the comptime path or the borrow-mode parameter form.
 [[case]]
 name = "interface_as_field_type_redirects"
-preview = "interfaces"
 source = """
 interface Greeter {
     fn greet(self);
@@ -33,7 +29,6 @@ error_contains = ["is an interface"]
 # pointing at `borrow t: I` / `inout t: I`.
 [[case]]
 name = "interface_by_value_param_rejected"
-preview = "interfaces"
 source = """
 interface Greeter {
     fn greet(self);
@@ -49,12 +44,30 @@ fn main() -> i32 {
 compile_fail = true
 error_contains = ["borrow t: Greeter"]
 
-# Phase 4c: at the call site, passing a non-conforming type produces a
-# structured "does not conform to interface" error before the compiler
-# even tries to reach the (still-unimplemented) Phase 4d codegen path.
+# Interface used as a function return type is rejected with the same
+# redirecting diagnostic as the field-type case.
+[[case]]
+name = "interface_as_return_type_redirects"
+source = """
+interface Greeter {
+    fn greet(self);
+}
+
+fn make() -> Greeter {
+    @unreachable("not implemented");
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = ["is an interface"]
+
+# At the call site, passing a non-conforming type produces a structured
+# "does not conform to interface" error.
 [[case]]
 name = "interface_call_site_conformance_failure"
-preview = "interfaces"
 source = """
 interface Greeter {
     fn greet(self);

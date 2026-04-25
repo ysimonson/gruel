@@ -1,13 +1,13 @@
 ---
 id: 0056
 title: Structurally Typed Interfaces (Comptime Constraints + Dynamic Dispatch)
-status: proposal
+status: implemented
 tags: [types, generics, comptime, dispatch, polymorphism]
 feature-flag: interfaces
 created: 2026-04-25
-accepted:
-implemented:
-spec-sections: []
+accepted: 2026-04-25
+implemented: 2026-04-25
+spec-sections: ["6.5"]
 superseded-by:
 ---
 
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -399,22 +399,31 @@ order — they share the fat-pointer ABI groundwork.
   - Three new spec tests pass end-to-end: empty-interface borrow,
     method dispatch, two-types dispatch.
 
-- [ ] **Phase 4e: stabilization polish**
-  - Improve diagnostic for "interface used as field type" / "interface used
-    as return type" (still rejected, with tailored messages).
-  - Vtable deduplication golden test (asm dump).
-  - Decision: collect all conformance failures into one error vs. fail-fast
-    (currently fail-fast).
+- [x] **Phase 4e: stabilization polish**
+  - Diagnostic for "interface used as field type" and "interface used as
+    return type" both fire the redirecting help text from `resolve_type`
+    (pinned by UI tests under `diagnostics/interfaces.toml`).
+  - Vtable deduplication: `interface_vtables_needed` is keyed on
+    `(StructId, InterfaceId)` so repeated coercions of the same pair
+    collapse to a single witness; codegen emits one global per pair.
+    `interface_runtime_vtable_dedup` exercises this with three borrow
+    coercions of the same pair — if dedup were broken, the LLVM verifier
+    would reject the duplicate global symbol.
+  - Decision on conformance error reporting: fail-fast on the first
+    missing/mismatched method (current behavior). Reasoning: most
+    interfaces have small method sets, the first failure is usually the
+    actionable one, and collecting all failures requires changing
+    `check_conforms` to return a `Vec<CompileError>`. Easy to revisit if
+    real-world feedback shows users hitting cascading failures.
 
-- [ ] **Phase 5: Specification, traceability, and stabilization**
-  - New spec chapter (suggested 4.17 or section 6.5 — pick during writing)
-    covering interface declarations, conformance, comptime bounds, and
-    runtime dispatch.
-  - Cover every normative paragraph with spec tests (`spec = […]`).
-  - Update grammar appendix.
-  - Once Phase 4 is solid: remove the `Interfaces` `PreviewFeature` variant,
-    drop `preview = "interfaces"` from spec tests, mark this ADR
-    *implemented*.
+- [x] **Phase 5: Specification, traceability, and stabilization**
+  - Spec chapter 6.5 covers interface declarations, conformance, comptime
+    bounds, and runtime dispatch (paragraphs 6.5:1 through 6.5:17).
+  - All normative paragraphs are covered by spec tests; traceability check
+    is at 100%.
+  - `PreviewFeature::Interfaces` removed; `--preview interfaces` is no
+    longer required and `preview = "interfaces"` was dropped from all spec
+    and UI tests. Interfaces are now a stable language feature.
 
 ## Consequences
 

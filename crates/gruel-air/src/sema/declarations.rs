@@ -12,9 +12,7 @@
 use std::collections::{HashMap, HashSet};
 
 use gruel_builtins::is_reserved_type_name;
-use gruel_error::{
-    CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, PreviewFeature, ice,
-};
+use gruel_error::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_span::Span;
 use lasso::Spur;
@@ -201,12 +199,6 @@ impl<'a> Sema<'a> {
                 methods_len,
             } = &inst.data
             {
-                self.require_preview(
-                    PreviewFeature::Interfaces,
-                    "interface declarations",
-                    inst.span,
-                )?;
-
                 let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
                 let mut seen: HashSet<Spur> = HashSet::new();
                 let mut methods = Vec::new();

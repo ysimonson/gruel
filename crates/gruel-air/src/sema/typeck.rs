@@ -130,11 +130,6 @@ impl<'a> Sema<'a> {
         span: Span,
     ) -> CompileResult<Type> {
         if let Some(&interface_id) = self.interfaces.get(&type_sym) {
-            self.require_preview(
-                gruel_error::PreviewFeature::Interfaces,
-                "interface types in parameter positions",
-                span,
-            )?;
             match mode {
                 gruel_rir::RirParamMode::Inout | gruel_rir::RirParamMode::Borrow => {
                     Ok(Type::new_interface(interface_id))

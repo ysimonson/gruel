@@ -1,8 +1,7 @@
-# Interface Declaration Tests (ADR-0056, Phase 1)
+# Interface Declaration Tests (ADR-0056)
 #
-# Interfaces are gated behind the `interfaces` preview feature. Phase 1
-# covers parsing, RIR shape, duplicate-method detection, and the preview
-# gate. Conformance and dispatch land in later phases.
+# Stable interfaces: structural conformance, comptime constraints, and
+# runtime dispatch via fat-pointer vtables.
 
 [section]
 id = "items.interfaces"
@@ -10,13 +9,11 @@ spec_chapter = "6.5"
 name = "Interfaces"
 description = "Structurally typed interface declarations (ADR-0056)."
 
-# An interface declaration with no methods compiles when the preview feature
-# is enabled. main returns 42 to confirm the rest of the pipeline still runs.
+# An interface declaration with no methods compiles. main returns 42 to
+# confirm the rest of the pipeline still runs.
 [[case]]
 name = "interface_empty"
 spec = ["6.5:1", "6.5:2"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Marker {
 }
@@ -30,9 +27,7 @@ exit_code = 42
 # A single-method interface parses and compiles end-to-end.
 [[case]]
 name = "interface_single_method"
-spec = ["6.5:1", "6.5:2", "6.5:6"]
-preview = "interfaces"
-preview_should_pass = true
+spec = ["6.5:1", "6.5:2", "6.5:5"]
 source = """
 interface Drop {
     fn drop(self);
@@ -48,8 +43,6 @@ exit_code = 7
 [[case]]
 name = "interface_multi_method"
 spec = ["6.5:1", "6.5:2"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Shape {
     fn area(self) -> i32;
@@ -63,44 +56,10 @@ fn main() -> i32 {
 """
 exit_code = 1
 
-# Without --preview interfaces the declaration is rejected.
-[[case]]
-name = "interface_requires_preview"
-spec = ["6.5:5"]
-source = """
-interface Drop {
-    fn drop(self);
-}
-
-fn main() -> i32 {
-    0
-}
-"""
-compile_fail = true
-error_contains = "interfaces"
-
-# The rejection error mentions the --preview help text.
-[[case]]
-name = "interface_preview_error_help"
-spec = ["6.5:5"]
-source = """
-interface Drop {
-    fn drop(self);
-}
-
-fn main() -> i32 {
-    0
-}
-"""
-compile_fail = true
-error_contains = "--preview interfaces"
-
 # Method signatures with a block body are rejected.
 [[case]]
 name = "interface_method_body_rejected"
 spec = ["6.5:3"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Bad {
     fn whatever(self) { 0 }
@@ -120,8 +79,6 @@ compile_fail = true
 [[case]]
 name = "interface_comptime_bound_basic"
 spec = ["6.5:7", "6.5:8", "6.5:9", "6.5:10"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Greeter {
     fn greet(self);
@@ -147,8 +104,6 @@ exit_code = 13
 [[case]]
 name = "interface_comptime_missing_method"
 spec = ["6.5:8"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Greeter {
     fn greet(self);
@@ -171,8 +126,6 @@ error_contains = "does not conform"
 [[case]]
 name = "interface_comptime_wrong_return"
 spec = ["6.5:8"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Reader {
     fn read(self, n: i32) -> i32;
@@ -202,8 +155,6 @@ error_contains = "wrong signature"
 [[case]]
 name = "interface_runtime_borrow_empty"
 spec = ["6.5:11", "6.5:12", "6.5:13", "6.5:14", "6.5:15"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Marker {}
 
@@ -224,8 +175,6 @@ exit_code = 77
 [[case]]
 name = "interface_runtime_borrow_nonempty_struct"
 spec = ["6.5:11", "6.5:14"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Marker {}
 
@@ -251,8 +200,6 @@ exit_code = 30
 [[case]]
 name = "interface_runtime_dispatch_basic"
 spec = ["6.5:16", "6.5:17"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Greeter {
     fn greet(self);
@@ -274,13 +221,41 @@ fn main() -> i32 {
 """
 exit_code = 99
 
+# Phase 4e polish: the same (StructId, InterfaceId) coercion appearing
+# multiple times must work — codegen deduplicates the vtable global. This
+# test exercises that path indirectly: if dedup fails, build_module's
+# add_global call would attempt to insert a duplicate symbol and the LLVM
+# verifier would reject the module.
+[[case]]
+name = "interface_runtime_vtable_dedup"
+spec = ["6.5:14"]
+source = """
+interface Counter {
+    fn count(self) -> i32;
+}
+
+struct One {
+    fn count(self) -> i32 { 1 }
+}
+
+fn invoke(borrow t: Counter) -> i32 {
+    t.count()
+}
+
+fn main() -> i32 {
+    let a = One {};
+    let b = One {};
+    let c = One {};
+    invoke(borrow a) + invoke(borrow b) + invoke(borrow c)
+}
+"""
+exit_code = 3
+
 # Two distinct conforming types, dispatched dynamically. Result confirms each
 # call routes to the right concrete method.
 [[case]]
 name = "interface_runtime_dispatch_two_types"
 spec = ["6.5:16"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Counter {
     fn count(self) -> i32;
@@ -310,8 +285,6 @@ exit_code = 6
 [[case]]
 name = "interface_runtime_by_value_rejected"
 spec = ["6.5:12"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Marker {}
 
@@ -330,8 +303,6 @@ error_contains = ["borrow t: Marker"]
 [[case]]
 name = "interface_comptime_two_types"
 spec = ["6.5:9"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Counter {
     fn count(self) -> i32;
@@ -359,8 +330,6 @@ exit_code = 11
 [[case]]
 name = "interface_duplicate_method"
 spec = ["6.5:4"]
-preview = "interfaces"
-preview_should_pass = true
 source = """
 interface Bad {
     fn foo(self);
