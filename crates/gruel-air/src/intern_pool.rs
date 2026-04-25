@@ -919,6 +919,7 @@ impl TypeInternPool {
             TypeKind::PtrConst(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::PtrMut(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::Module(_) => panic!("Cannot intern module types"),
+            TypeKind::Interface(_) => panic!("Cannot intern interface types"),
             TypeKind::ComptimeType => panic!("Cannot intern comptime types"),
             TypeKind::ComptimeStr => panic!("Cannot intern comptime_str types"),
             TypeKind::ComptimeInt => panic!("Cannot intern comptime_int types"),
@@ -1060,7 +1061,8 @@ impl TypeInternPool {
             | TypeKind::Array(_)
             | TypeKind::PtrConst(_)
             | TypeKind::PtrMut(_)
-            | TypeKind::Module(_) => None,
+            | TypeKind::Module(_)
+            | TypeKind::Interface(_) => None,
             // Comptime-only types cannot be interned for runtime
             TypeKind::ComptimeType | TypeKind::ComptimeStr | TypeKind::ComptimeInt => None,
         }
@@ -1163,6 +1165,11 @@ impl TypeInternPool {
                 format!("ptr mut {}", self.format_type_name(pointee))
             }
             TypeKind::Module(_) => "<module>".to_string(),
+            // Interface names are stored on `Sema::interfaces`, not in the
+            // type pool. Caller-side error messages should resolve them via
+            // `Sema`; this fallback is for cases where only the pool is
+            // available.
+            TypeKind::Interface(id) => format!("<interface#{}>", id.0),
         }
     }
 }

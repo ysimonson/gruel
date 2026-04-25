@@ -64,6 +64,11 @@ impl<'a> Sema<'a> {
             TypeKind::ComptimeType | TypeKind::ComptimeStr => true,
             // Pointer types are Copy (they're just addresses)
             TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => true,
+            // Interface types: not Copy at runtime — they're either erased
+            // before codegen (comptime constraint) or carry a vtable pointer
+            // and follow the underlying type's affineness (runtime dispatch,
+            // Phase 4). Treat as non-Copy.
+            TypeKind::Interface(_) => false,
         }
     }
 
@@ -380,6 +385,10 @@ impl<'a> Sema<'a> {
             TypeKind::Module(_) => 0,
             // Pointer types take 1 slot (64-bit address)
             TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 1,
+            // Interface types: comptime usage is erased before codegen.
+            // Runtime usage (Phase 4) introduces a fat pointer, but until
+            // then no code path should hit this — return 0 as a placeholder.
+            TypeKind::Interface(_) => 0,
         }
     }
 }

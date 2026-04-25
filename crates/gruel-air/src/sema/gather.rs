@@ -88,6 +88,8 @@ impl<'a> GatherOutput<'a> {
             functions: self.functions,
             structs: self.structs,
             enums: self.enums,
+            interfaces: HashMap::new(),
+            interface_defs: Vec::new(),
             methods: self.methods,
             enum_methods: HashMap::new(),
             constants: self.constants,

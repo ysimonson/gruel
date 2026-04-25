@@ -298,7 +298,7 @@ into each phase but the formal spec chapter lands in Phase 5.
   - Tests: parser-only spec tests verifying the AST/RIR shape and rejection
     of method bodies / associated fns.
 
-- [ ] **Phase 2: AIR representation and conformance check**
+- [x] **Phase 2: AIR representation and conformance check**
   - Add `TypeKind::Interface(InterfaceId)` and `InterfaceDef` in
     `gruel-air/src/types.rs`. Plumb through intern pool / printers /
     `Type::new_interface`.

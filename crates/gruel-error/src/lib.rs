@@ -179,6 +179,12 @@ impl ErrorCode {
     pub const PREVIEW_FEATURE_REQUIRED: Self = Self(1100);
 
     // ========================================================================
+    // Interface conformance errors (ADR-0056) (E1400-E1499)
+    // ========================================================================
+    pub const INTERFACE_METHOD_MISSING: Self = Self(1400);
+    pub const INTERFACE_METHOD_SIGNATURE_MISMATCH: Self = Self(1401);
+
+    // ========================================================================
     // Pattern errors (E1300-E1399)
     // ========================================================================
     /// Refutable pattern used in let binding (ADR-0049).
@@ -310,6 +316,25 @@ pub enum PreviewFeature {
     /// Structurally typed interfaces (ADR-0056). Comptime constraints and
     /// runtime dynamic dispatch via fat pointers.
     Interfaces,
+}
+
+/// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceMethodMissingData {
+    pub type_name: String,
+    pub interface_name: String,
+    pub method_name: String,
+    pub expected_signature: String,
+}
+
+/// Boxed payload for [`ErrorKind::InterfaceMethodSignatureMismatch`] (ADR-0056).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceMethodSignatureMismatchData {
+    pub type_name: String,
+    pub interface_name: String,
+    pub method_name: String,
+    pub expected_signature: String,
+    pub found_signature: String,
 }
 
 /// Error returned when parsing a preview feature name fails.
@@ -1099,6 +1124,25 @@ pub enum ErrorKind {
         what: String,
     },
 
+    // Interface conformance errors (ADR-0056)
+    /// Type does not provide a method required by an interface.
+    #[error(
+        "type `{}` does not conform to interface `{}`: missing method `{}`",
+        .0.type_name,
+        .0.interface_name,
+        .0.method_name
+    )]
+    InterfaceMethodMissing(Box<InterfaceMethodMissingData>),
+    /// Type provides a method but with a signature that does not match the
+    /// interface requirement.
+    #[error(
+        "type `{}` does not conform to interface `{}`: method `{}` has the wrong signature",
+        .0.type_name,
+        .0.interface_name,
+        .0.method_name
+    )]
+    InterfaceMethodSignatureMismatch(Box<InterfaceMethodSignatureMismatchData>),
+
     // Pattern errors (ADR-0049)
     #[error("refutable pattern in let binding: matches only a subset of possible values")]
     RefutablePatternInLet,
@@ -1236,6 +1280,10 @@ impl ErrorKind {
 
             // Preview feature errors (E1100-E1199)
             ErrorKind::PreviewFeatureRequired { .. } => ErrorCode::PREVIEW_FEATURE_REQUIRED,
+            ErrorKind::InterfaceMethodMissing { .. } => ErrorCode::INTERFACE_METHOD_MISSING,
+            ErrorKind::InterfaceMethodSignatureMismatch { .. } => {
+                ErrorCode::INTERFACE_METHOD_SIGNATURE_MISMATCH
+            }
 
             // Pattern errors (E1300-E1399)
             ErrorKind::RefutablePatternInLet => ErrorCode::REFUTABLE_PATTERN_IN_LET,

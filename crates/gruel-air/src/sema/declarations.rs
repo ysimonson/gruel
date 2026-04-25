@@ -21,7 +21,10 @@ use lasso::Spur;
 
 use super::{ConstInfo, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::inference::{FunctionSig, MethodSig};
-use crate::types::{EnumDef, EnumId, EnumVariantDef, StructDef, StructField, StructId, Type};
+use crate::types::{
+    EnumDef, EnumId, EnumVariantDef, InterfaceDef, InterfaceId, InterfaceMethodReq, StructDef,
+    StructField, StructId, Type,
+};
 
 impl<'a> Sema<'a> {
     /// Build an `InferenceContext` from the collected type information.
@@ -162,19 +165,40 @@ impl<'a> Sema<'a> {
     /// This creates name → ID mappings for all enums and structs in a single pass,
     /// allowing types to reference each other in any order. Struct definitions are
     /// created with placeholder empty fields that will be filled in during phase 2.
-    /// Validate `interface` declarations (ADR-0056).
+    /// Validate and register `interface` declarations (ADR-0056).
     ///
-    /// Phase 1 only: every `interface` decl requires the `interfaces` preview
-    /// feature, and method names within each interface must be unique.
-    /// Conformance, vtable layout, and runtime/comptime usage land in later
-    /// phases.
+    /// - Gates each declaration behind the `interfaces` preview feature.
+    /// - Rejects duplicate method names within a single interface.
+    /// - Rejects collisions between interface names and existing structs/enums
+    ///   (and other interfaces).
+    /// - Resolves each method signature's parameter and return types and
+    ///   stores an `InterfaceDef` on `Sema`.
+    ///
+    /// Conformance and dispatch wiring land in later phases.
     pub(crate) fn validate_interface_decls(&mut self) -> CompileResult<()> {
+        // Two-pass walk: first collect raw decls (snapshotting RIR data so we
+        // can mutate Sema while resolving types), then register each one.
+        struct RawIface {
+            name: Spur,
+            is_pub: bool,
+            file_id: gruel_span::FileId,
+            decl_span: Span,
+            methods: Vec<RawIfaceMethod>,
+        }
+        struct RawIfaceMethod {
+            name: Spur,
+            params: Vec<(Spur, Spur)>, // (param_name, type_symbol)
+            return_type_sym: Spur,
+            span: Span,
+        }
+
+        let mut raw: Vec<RawIface> = Vec::new();
         for (_, inst) in self.rir.iter() {
             if let InstData::InterfaceDecl {
+                is_pub,
                 name,
                 methods_start,
                 methods_len,
-                ..
             } = &inst.data
             {
                 self.require_preview(
@@ -183,31 +207,95 @@ impl<'a> Sema<'a> {
                     inst.span,
                 )?;
 
-                // Reject duplicate method-signature names inside the same
-                // interface. The same name appearing twice would create
-                // ambiguous slot lookup later.
-                let mut seen: HashSet<Spur> = HashSet::new();
                 let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
+                let mut seen: HashSet<Spur> = HashSet::new();
+                let mut methods = Vec::new();
                 for method_ref in method_refs {
                     let m = self.rir.get(method_ref);
                     if let InstData::InterfaceMethodSig {
-                        name: method_name, ..
+                        name: method_name,
+                        params_start,
+                        params_len,
+                        return_type,
                     } = &m.data
-                        && !seen.insert(*method_name)
                     {
-                        let iface_name = self.interner.resolve(name).to_string();
-                        let method_name_str = self.interner.resolve(method_name).to_string();
-                        return Err(CompileError::new(
-                            ErrorKind::DuplicateMethod {
-                                type_name: format!("interface `{}`", iface_name),
-                                method_name: method_name_str,
-                            },
-                            m.span,
-                        ));
+                        if !seen.insert(*method_name) {
+                            let iface_name = self.interner.resolve(name).to_string();
+                            let method_name_str = self.interner.resolve(method_name).to_string();
+                            return Err(CompileError::new(
+                                ErrorKind::DuplicateMethod {
+                                    type_name: format!("interface `{}`", iface_name),
+                                    method_name: method_name_str,
+                                },
+                                m.span,
+                            ));
+                        }
+                        let params = self
+                            .rir
+                            .get_params(*params_start, *params_len)
+                            .into_iter()
+                            .map(|p| (p.name, p.ty))
+                            .collect();
+                        methods.push(RawIfaceMethod {
+                            name: *method_name,
+                            params,
+                            return_type_sym: *return_type,
+                            span: m.span,
+                        });
                     }
                 }
+
+                raw.push(RawIface {
+                    name: *name,
+                    is_pub: *is_pub,
+                    file_id: inst.span.file_id,
+                    decl_span: inst.span,
+                    methods,
+                });
             }
         }
+
+        for r in raw {
+            // Reject collision with existing structs/enums/interfaces.
+            let name_str = self.interner.resolve(&r.name).to_string();
+            if self.structs.contains_key(&r.name)
+                || self.enums.contains_key(&r.name)
+                || self.interfaces.contains_key(&r.name)
+            {
+                return Err(CompileError::new(
+                    ErrorKind::DuplicateTypeDefinition {
+                        type_name: format!("interface `{}`", name_str),
+                    },
+                    r.decl_span,
+                ));
+            }
+
+            // Resolve each method's parameter and return types.
+            let mut resolved_methods = Vec::with_capacity(r.methods.len());
+            for m in &r.methods {
+                let mut param_types = Vec::with_capacity(m.params.len());
+                for (_pname, ty_sym) in &m.params {
+                    let ty = self.resolve_type(*ty_sym, m.span)?;
+                    param_types.push(ty);
+                }
+                let return_type = self.resolve_type(m.return_type_sym, m.span)?;
+                resolved_methods.push(InterfaceMethodReq {
+                    name: self.interner.resolve(&m.name).to_string(),
+                    param_types,
+                    return_type,
+                });
+            }
+
+            let id = InterfaceId(self.interface_defs.len() as u32);
+            self.interface_defs.push(InterfaceDef {
+                name: name_str,
+                methods: resolved_methods,
+                is_pub: r.is_pub,
+                file_id: r.file_id,
+            });
+            self.interfaces.insert(r.name, id);
+        }
+
         Ok(())
     }
 

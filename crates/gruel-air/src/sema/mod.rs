@@ -35,6 +35,7 @@ mod analyze_ops;
 mod anon_enums;
 mod anon_structs;
 mod builtins;
+mod conformance;
 mod context;
 mod declarations;
 mod file_paths;
@@ -67,7 +68,7 @@ use lasso::{Spur, ThreadedRodeo};
 
 use crate::intern_pool::TypeInternPool;
 use crate::param_arena::ParamArena;
-use crate::types::{EnumId, StructId, Type};
+use crate::types::{EnumId, InterfaceDef, InterfaceId, StructId, Type};
 
 use context::ComptimeHeapItem;
 
@@ -81,6 +82,10 @@ pub struct Sema<'a> {
     pub(crate) structs: HashMap<Spur, StructId>,
     /// Enum table: maps enum name symbols to their EnumId
     pub(crate) enums: HashMap<Spur, EnumId>,
+    /// Interface table: maps interface name symbols to InterfaceId (ADR-0056).
+    pub(crate) interfaces: HashMap<Spur, InterfaceId>,
+    /// Definitions for each interface. Indexed by InterfaceId.0.
+    pub(crate) interface_defs: Vec<InterfaceDef>,
     /// Method table: maps (struct_id, method_name) to method info
     pub(crate) methods: HashMap<(StructId, Spur), MethodInfo>,
     /// Enum method table: maps (enum_id, method_name) to method info
@@ -174,6 +179,8 @@ impl<'a> Sema<'a> {
             functions: HashMap::new(),
             structs: HashMap::new(),
             enums: HashMap::new(),
+            interfaces: HashMap::new(),
+            interface_defs: Vec::new(),
             methods: HashMap::new(),
             enum_methods: HashMap::new(),
             constants: HashMap::new(),

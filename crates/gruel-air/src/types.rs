@@ -116,6 +116,28 @@ impl PtrMutTypeId {
     }
 }
 
+/// A unique identifier for an interface declaration (ADR-0056).
+///
+/// Mirrors `StructId` / `EnumId`: the inner value is a pool index into
+/// `TypeInternPool`. Interfaces are nominal in the sense that two `interface`
+/// declarations with the same name still produce distinct IDs (and we reject
+/// that at gather time); structural conformance happens at the *use* site
+/// against this nominal ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct InterfaceId(pub u32);
+
+impl InterfaceId {
+    #[inline]
+    pub fn from_pool_index(pool_index: u32) -> Self {
+        InterfaceId(pool_index)
+    }
+
+    #[inline]
+    pub fn pool_index(self) -> u32 {
+        self.0
+    }
+}
+
 /// A unique identifier for a module (imported file).
 ///
 /// Modules are created by `@import("path.gruel")` and represent the public
@@ -182,6 +204,10 @@ pub enum TypeKind {
     Struct(StructId),
     /// User-defined enum type
     Enum(EnumId),
+    /// User-defined interface type (ADR-0056). Used both as the bound on a
+    /// `comptime T: I` parameter and (Phase 4) as a runtime type behind a
+    /// borrowing parameter.
+    Interface(InterfaceId),
     /// Fixed-size array type: [T; N]
     Array(ArrayTypeId),
     /// Raw pointer to immutable data: ptr const T
@@ -275,6 +301,7 @@ impl std::fmt::Debug for Type {
             TypeKind::PtrConst(id) => write!(f, "Type::new_ptr_const(PtrConstTypeId({}))", id.0),
             TypeKind::PtrMut(id) => write!(f, "Type::new_ptr_mut(PtrMutTypeId({}))", id.0),
             TypeKind::Module(id) => write!(f, "Type::new_module(ModuleId({}))", id.0),
+            TypeKind::Interface(id) => write!(f, "Type::new_interface(InterfaceId({}))", id.0),
         }
     }
 }
@@ -288,6 +315,7 @@ const TAG_ARRAY: u32 = 102;
 const TAG_MODULE: u32 = 103;
 const TAG_PTR_CONST: u32 = 104;
 const TAG_PTR_MUT: u32 = 105;
+const TAG_INTERFACE: u32 = 106;
 
 // Primitive type constants
 impl Type {
@@ -370,6 +398,12 @@ impl Type {
     pub const fn new_module(id: ModuleId) -> Type {
         Type(TAG_MODULE | (id.0 << 8))
     }
+
+    /// Create an interface type from an InterfaceId.
+    #[inline]
+    pub const fn new_interface(id: InterfaceId) -> Type {
+        Type(TAG_INTERFACE | (id.0 << 8))
+    }
 }
 
 impl StructDef {
@@ -411,6 +445,56 @@ impl StructDef {
         }
         s.push(')');
         Some(s)
+    }
+}
+
+/// Definition of an interface (ADR-0056).
+///
+/// Stores the resolved method-signature requirements. The order of `methods`
+/// is significant: it is the vtable slot order used by the runtime-dispatch
+/// path (Phase 4). It also controls error reporting, where missing methods
+/// are listed in declaration order.
+///
+/// `is_pub` and `file_id` are populated now and consumed in later phases
+/// (visibility checks during cross-module conformance) — `#[allow(dead_code)]`
+/// keeps them in shape until then.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct InterfaceDef {
+    /// Interface name (as written in source).
+    pub name: String,
+    /// Required method signatures, in declaration order.
+    pub methods: Vec<InterfaceMethodReq>,
+    /// Whether this interface is public (module-system future work).
+    pub is_pub: bool,
+    /// File ID this interface was declared in.
+    pub file_id: gruel_span::FileId,
+}
+
+/// A single required method signature inside an `InterfaceDef`.
+///
+/// Phase 1 / 2 only carry `self` (by-value receiver). `inout self` and
+/// `borrow self` land alongside ADR-0008 / ADR-0013 receiver-mode work for
+/// methods generally.
+#[derive(Debug, Clone)]
+pub struct InterfaceMethodReq {
+    /// Method name.
+    pub name: String,
+    /// Resolved parameter types in declaration order (excluding `self`).
+    pub param_types: Vec<Type>,
+    /// Resolved return type.
+    pub return_type: Type,
+}
+
+impl InterfaceDef {
+    /// Find a required method by name. Returns its slot index plus the
+    /// requirement. Used by later phases for vtable lookup.
+    #[allow(dead_code)]
+    pub fn find_method(&self, name: &str) -> Option<(usize, &InterfaceMethodReq)> {
+        self.methods
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.name == name)
     }
 }
 
@@ -676,6 +760,7 @@ impl Type {
             TAG_PTR_CONST => Some(TypeKind::PtrConst(PtrConstTypeId(self.0 >> 8))),
             TAG_PTR_MUT => Some(TypeKind::PtrMut(PtrMutTypeId(self.0 >> 8))),
             TAG_MODULE => Some(TypeKind::Module(ModuleId(self.0 >> 8))),
+            TAG_INTERFACE => Some(TypeKind::Interface(InterfaceId(self.0 >> 8))),
             _ => None,
         }
     }
@@ -706,6 +791,7 @@ impl Type {
             TypeKind::PtrConst(_) => "<ptr const>",
             TypeKind::PtrMut(_) => "<ptr mut>",
             TypeKind::Module(_) => "<module>",
+            TypeKind::Interface(_) => "<interface>",
             TypeKind::Error => "<error>",
             TypeKind::Never => "!",
             TypeKind::ComptimeType => "type",

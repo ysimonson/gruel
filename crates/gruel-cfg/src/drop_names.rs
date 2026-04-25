@@ -127,5 +127,6 @@ pub fn type_name_component(ty: Type, type_pool: &TypeInternPool) -> String {
             let pointee = type_pool.ptr_mut_def(id);
             format!("ptr_mut_{}", type_name_component(pointee, type_pool))
         }
+        TypeKind::Interface(id) => format!("interface{}", id.0),
     }
 }
