@@ -262,10 +262,24 @@ fn create_specialized_function(
     // Build the type substitution map: comptime param name -> concrete Type
     let mut type_subst: HashMap<Spur, Type> = HashMap::new();
     let mut type_arg_idx = 0;
+    let param_names_owned: Vec<Spur> = param_names.to_vec();
     for (i, is_comptime) in param_comptime.iter().enumerate() {
         if *is_comptime && type_arg_idx < key.type_args.len() {
             type_subst.insert(param_names[i], key.type_args[type_arg_idx]);
             type_arg_idx += 1;
+        }
+    }
+
+    // ADR-0056: for any comptime param with an interface bound, verify that
+    // the supplied concrete type structurally conforms to the interface.
+    for p in &param_names_owned {
+        if let Some(iid) = sema
+            .comptime_interface_bounds
+            .get(&(key.base_name, *p))
+            .copied()
+            && let Some(&concrete) = type_subst.get(p)
+        {
+            sema.check_conforms(concrete, iid, base_info.span)?;
         }
     }
 
@@ -373,6 +387,23 @@ fn create_specialized_method(
     // literal expressions `Self { ... }` inside the method body still resolve.
     let self_sym = interner.get_or_intern("Self");
     type_subst.insert(self_sym, base_info.struct_type);
+
+    // ADR-0056: enforce interface bounds on comptime type params at
+    // specialization time. The bound table is keyed by "StructName.method";
+    // re-derive that key here from `key.base_name` (which already encodes the
+    // method-mangled name; the bound was inserted under the unmangled
+    // "StructName.method" form, so reconstruct it).
+    let owner_for_bounds = key.base_name;
+    for p in &param_names {
+        if let Some(iid) = sema
+            .comptime_interface_bounds
+            .get(&(owner_for_bounds, *p))
+            .copied()
+            && let Some(&concrete) = type_subst.get(p)
+        {
+            sema.check_conforms(concrete, iid, base_info.span)?;
+        }
+    }
 
     // Substitute the return type if it references a method-level type param.
     let return_type = if let Some(&ty) = type_subst.get(&base_info.return_type_sym) {

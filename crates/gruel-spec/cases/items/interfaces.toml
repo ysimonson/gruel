@@ -112,6 +112,117 @@ fn main() -> i32 {
 """
 compile_fail = true
 
+# =============================================================================
+# Comptime constraint usage (Phase 3)
+# =============================================================================
+
+# `comptime T: I` accepts a conforming concrete type and monomorphizes.
+[[case]]
+name = "interface_comptime_bound_basic"
+spec = ["6.5:7", "6.5:8", "6.5:9", "6.5:10"]
+preview = "interfaces"
+preview_should_pass = true
+source = """
+interface Greeter {
+    fn greet(self);
+}
+
+struct Foo {
+    fn greet(self) {}
+}
+
+fn use_greeter(comptime T: Greeter, t: T) {
+    t.greet();
+}
+
+fn main() -> i32 {
+    use_greeter(Foo, Foo {});
+    13
+}
+"""
+exit_code = 13
+
+# A type missing the required method is rejected at the call site, even if
+# the generic body never calls the method.
+[[case]]
+name = "interface_comptime_missing_method"
+spec = ["6.5:8"]
+preview = "interfaces"
+preview_should_pass = true
+source = """
+interface Greeter {
+    fn greet(self);
+}
+
+struct Foo {}
+
+fn use_greeter(comptime T: Greeter, t: T) {
+}
+
+fn main() -> i32 {
+    use_greeter(Foo, Foo {});
+    0
+}
+"""
+compile_fail = true
+error_contains = "does not conform"
+
+# Wrong return type is rejected.
+[[case]]
+name = "interface_comptime_wrong_return"
+spec = ["6.5:8"]
+preview = "interfaces"
+preview_should_pass = true
+source = """
+interface Reader {
+    fn read(self, n: i32) -> i32;
+}
+
+struct Buf {
+    fn read(self, n: i32) -> i64 { 0 }
+}
+
+fn use_reader(comptime T: Reader, t: T) {
+}
+
+fn main() -> i32 {
+    use_reader(Buf, Buf {});
+    0
+}
+"""
+compile_fail = true
+error_contains = "wrong signature"
+
+# Two distinct concrete types both flowing through the same generic
+# function each get their own specialization.
+[[case]]
+name = "interface_comptime_two_types"
+spec = ["6.5:9"]
+preview = "interfaces"
+preview_should_pass = true
+source = """
+interface Counter {
+    fn count(self) -> i32;
+}
+
+struct One {
+    fn count(self) -> i32 { 1 }
+}
+
+struct Ten {
+    fn count(self) -> i32 { 10 }
+}
+
+fn pick(comptime T: Counter, t: T) -> i32 {
+    t.count()
+}
+
+fn main() -> i32 {
+    pick(One, One {}) + pick(Ten, Ten {})
+}
+"""
+exit_code = 11
+
 # Duplicate method names within one interface are rejected.
 [[case]]
 name = "interface_duplicate_method"

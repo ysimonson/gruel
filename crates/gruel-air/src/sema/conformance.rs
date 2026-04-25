@@ -289,8 +289,9 @@ mod tests {
         let mut sema = Sema::new(rir, interner, preview);
         sema.inject_builtin_types();
         sema.register_type_names().unwrap();
+        // resolve_declarations now runs validate_interface_decls internally
+        // (between struct/enum field resolution and method gathering).
         sema.resolve_declarations().unwrap();
-        sema.validate_interface_decls().unwrap();
         sema
     }
 

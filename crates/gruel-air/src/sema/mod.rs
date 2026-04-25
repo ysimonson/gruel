@@ -86,6 +86,12 @@ pub struct Sema<'a> {
     pub(crate) interfaces: HashMap<Spur, InterfaceId>,
     /// Definitions for each interface. Indexed by InterfaceId.0.
     pub(crate) interface_defs: Vec<InterfaceDef>,
+    /// Interface bounds on comptime type parameters (ADR-0056 Phase 3).
+    ///
+    /// Keyed by `(owner, param_name)` where `owner` is either a function
+    /// name (top-level functions) or a `"StructName.method"` interned spur
+    /// (methods). Looked up at specialization time to drive `check_conforms`.
+    pub(crate) comptime_interface_bounds: HashMap<(Spur, Spur), InterfaceId>,
     /// Method table: maps (struct_id, method_name) to method info
     pub(crate) methods: HashMap<(StructId, Spur), MethodInfo>,
     /// Enum method table: maps (enum_id, method_name) to method info
@@ -181,6 +187,7 @@ impl<'a> Sema<'a> {
             enums: HashMap::new(),
             interfaces: HashMap::new(),
             interface_defs: Vec::new(),
+            comptime_interface_bounds: HashMap::new(),
             methods: HashMap::new(),
             enum_methods: HashMap::new(),
             constants: HashMap::new(),
@@ -227,15 +234,11 @@ impl<'a> Sema<'a> {
         self.inject_builtin_types();
 
         // Phase 1: Register type names
-        // Phase 2: Resolve all declarations
+        // Phase 2: Resolve all declarations (this also validates interface
+        // declarations between struct/enum field resolution and function
+        // gathering — ADR-0056).
         self.register_type_names().map_err(CompileErrors::from)?;
         self.resolve_declarations().map_err(CompileErrors::from)?;
-
-        // Validate interface declarations (ADR-0056) — gates them behind the
-        // `interfaces` preview feature and rejects duplicate method names.
-        // Real conformance / dispatch wiring lands in later phases.
-        self.validate_interface_decls()
-            .map_err(CompileErrors::from)?;
 
         // Phase 2.5: Evaluate const initializers (e.g., const x = @import(...))
         self.evaluate_const_initializers()

@@ -316,21 +316,19 @@ into each phase but the formal spec chapter lands in Phase 5.
   - Tests: positive and negative conformance — missing method, wrong arity,
     wrong return type, wrong self-mode, etc.
 
-- [ ] **Phase 3: Comptime constraint usage (`comptime T: I`)**
+- [x] **Phase 3: Comptime constraint usage (`comptime T: I`)**
   - Extend the comptime parameter bound representation to allow an interface
     in addition to `type`.
   - Parser: `comptime T: SomeInterface` parses as a bounded type param.
   - Specialization (`gruel-air/src/specialize.rs`): when binding `T`, run the
-    conformance check against the concrete type. On success, attach the
-    witness to the specialization context so that method calls on `T` inside
-    the body resolve to the witness's concrete methods. On failure, emit a
+    conformance check against the concrete type. On failure, emit a
     call-site error.
-  - Method resolution inside generic bodies: when `T` is interface-bounded,
-    `t.method()` typechecks against the interface's signatures (so the body
-    is checked once, not per specialization, for any method also listed in
-    the interface).
   - Tests: monomorphization with interface bound, conformance failure at the
-    call site, methods on `T` resolving correctly per specialization.
+    call site (missing method, wrong return type), distinct specializations
+    per concrete type.
+  - Deferred (still works correctly via per-specialization re-checking):
+    method resolution that checks the body once against the interface
+    instead of per-specialization. Tracked in ADR Open Questions.
 
 - [ ] **Phase 4: Runtime dynamic dispatch**
   - Sema: accept `inout t: I` and `borrow t: I` parameter forms; reject

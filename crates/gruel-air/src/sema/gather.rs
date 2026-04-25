@@ -90,6 +90,7 @@ impl<'a> GatherOutput<'a> {
             enums: self.enums,
             interfaces: HashMap::new(),
             interface_defs: Vec::new(),
+            comptime_interface_bounds: HashMap::new(),
             methods: self.methods,
             enum_methods: HashMap::new(),
             constants: self.constants,

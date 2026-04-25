@@ -48,3 +48,47 @@ interface Drop {
     fn drop(self);
 }
 ```
+
+## Comptime Constraints
+
+{{ rule(id="6.5:7", cat="normative") }}
+
+An interface name may appear in place of `type` as the bound on a comptime
+type parameter: `comptime T: I`. At every call site, the concrete type bound
+to `T` must structurally conform to `I`.
+
+{{ rule(id="6.5:8", cat="legality-rule") }}
+
+Conformance is checked at the call site. The concrete type `C` conforms to
+interface `I` iff for every method signature `fn name(self [, params]) [-> R]`
+in `I`, type `C` has a method with the same name, the same parameter types
+in declaration order, and the same return type. Any missing method or
+signature mismatch is a compile error at the call site.
+
+{{ rule(id="6.5:9", cat="dynamic-semantics") }}
+
+Comptime constraint usage is fully erased at codegen. Each call site
+monomorphizes the function for the concrete type that satisfies the bound;
+no vtable or fat pointer is materialized.
+
+{{ rule(id="6.5:10", cat="example") }}
+
+```gruel
+// Compiled with --preview interfaces
+interface Greeter {
+    fn greet(self);
+}
+
+struct Foo {
+    fn greet(self) {}
+}
+
+fn use_greeter(comptime T: Greeter, t: T) {
+    t.greet();
+}
+
+fn main() -> i32 {
+    use_greeter(Foo, Foo {});
+    0
+}
+```

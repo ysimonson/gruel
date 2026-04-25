@@ -480,6 +480,10 @@ impl<'a> Sema<'a> {
     pub(crate) fn resolve_declarations(&mut self) -> CompileResult<()> {
         self.resolve_struct_fields()?;
         self.resolve_enum_variant_fields()?;
+        // Interfaces (ADR-0056) must be registered before
+        // `resolve_remaining_declarations` so that `comptime T: SomeInterface`
+        // bounds are recognized when functions and methods are gathered.
+        self.validate_interface_decls()?;
         self.resolve_remaining_declarations()?;
         Ok(())
     }
@@ -988,26 +992,46 @@ impl<'a> Sema<'a> {
         let param_modes: Vec<RirParamMode> = params.iter().map(|p| p.mode).collect();
 
         // Check if this function has any comptime TYPE parameters (not value parameters).
-        // A type parameter is a comptime param where the type is `type`.
-        // - `comptime T: type` -> type parameter (is_generic = true)
-        // - `comptime n: i32` -> value parameter (is_generic = false)
+        // A type parameter is a comptime param whose declared type is either:
+        // - `type` (unbounded): `comptime T: type`
+        // - a registered interface name (ADR-0056): `comptime T: SomeInterface`
+        //
+        // Both cases erase the parameter at codegen and substitute the
+        // concrete type at specialization. Interface-bounded parameters
+        // additionally trigger a conformance check at the call site.
         let type_sym = self.interner.get_or_intern("type");
-        let is_generic = params.iter().any(|p| p.is_comptime && p.ty == type_sym);
+        // Pre-compute per-param flags so the closure doesn't need to borrow
+        // `self` (which conflicts with the resolve_type call below).
+        let is_type_param: Vec<bool> = params
+            .iter()
+            .map(|p| p.is_comptime && (p.ty == type_sym || self.interfaces.contains_key(&p.ty)))
+            .collect();
+        let is_generic = is_type_param.iter().any(|b| *b);
 
-        // Collect type parameter names (comptime parameters whose type is `type`)
+        // Collect type parameter names.
         let type_param_names: Vec<Spur> = params
             .iter()
-            .filter(|p| p.is_comptime && p.ty == type_sym)
-            .map(|p| p.name)
+            .zip(is_type_param.iter())
+            .filter_map(|(p, &b)| if b { Some(p.name) } else { None })
             .collect();
 
+        // Record any interface bounds for use at specialization time.
+        for p in params.iter() {
+            if p.is_comptime
+                && let Some(iid) = self.interfaces.get(&p.ty).copied()
+            {
+                self.comptime_interface_bounds.insert((name, p.name), iid);
+            }
+        }
+
         // For generic functions, we defer type resolution of type parameters until specialization.
-        // We use Type::COMPTIME_TYPE as a placeholder for comptime T: type parameters.
+        // We use Type::COMPTIME_TYPE as a placeholder for comptime type parameters.
         let param_types: Vec<Type> = params
             .iter()
-            .map(|p| {
-                if p.is_comptime && p.ty == type_sym {
-                    // For comptime TYPE parameters (comptime T: type), the type is `type`
+            .zip(is_type_param.iter())
+            .map(|(p, &is_tp)| {
+                if is_tp {
+                    // comptime type parameter (bound = `type` or an interface)
                     Ok(Type::COMPTIME_TYPE)
                 } else if type_param_names.contains(&p.ty) {
                     // This parameter's type is a type parameter (e.g., `x: T` where T is comptime)
@@ -1130,13 +1154,38 @@ impl<'a> Sema<'a> {
                 // return type cannot be fully resolved until the method is
                 // specialized at a call site. Mirrors the top-level
                 // generic-function treatment above.
+                //
+                // ADR-0056: an interface-bounded comptime parameter
+                // (`comptime T: SomeInterface`) is also a type parameter; we
+                // record the bound for the conformance check at the call
+                // site. The method-key is encoded as "StructName.method" to
+                // share the bound side-table with top-level functions.
                 let type_sym = self.interner.get_or_intern("type");
                 let method_type_param_names: Vec<Spur> = params
                     .iter()
-                    .filter(|p| p.is_comptime && p.ty == type_sym)
+                    .filter(|p| {
+                        p.is_comptime && (p.ty == type_sym || self.interfaces.contains_key(&p.ty))
+                    })
                     .map(|p| p.name)
                     .collect();
                 let is_method_generic = !method_type_param_names.is_empty();
+
+                // Record interface bounds for this method.
+                if !method_type_param_names.is_empty() {
+                    let owner_str = format!(
+                        "{}.{}",
+                        self.interner.resolve(&type_name),
+                        self.interner.resolve(method_name)
+                    );
+                    let owner = self.interner.get_or_intern(&owner_str);
+                    for p in params.iter() {
+                        if p.is_comptime
+                            && let Some(iid) = self.interfaces.get(&p.ty).copied()
+                        {
+                            self.comptime_interface_bounds.insert((owner, p.name), iid);
+                        }
+                    }
+                }
 
                 // Helper: does a type symbol mention any of our method-level
                 // type param names? Covers bare `T`, compound `[T; N]`,
