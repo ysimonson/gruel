@@ -11,8 +11,6 @@ description = "Anonymous function expressions: `fn(params) -> ret { body }` (ADR
 [[case]]
 name = "anon_fn_single_param"
 spec = ["4.16:1", "4.16:2", "4.16:3", "4.16:5", "4.16:6"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f = fn(x: i32) -> i32 { x + 1 };
@@ -24,8 +22,6 @@ exit_code = 42
 [[case]]
 name = "anon_fn_zero_params"
 spec = ["4.16:1", "4.16:6"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f = fn() -> i32 { 42 };
@@ -37,8 +33,6 @@ exit_code = 42
 [[case]]
 name = "anon_fn_multiple_params"
 spec = ["4.16:1", "4.16:6"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let add = fn(x: i32, y: i32) -> i32 { x + y };
@@ -50,8 +44,6 @@ exit_code = 42
 [[case]]
 name = "anon_fn_omitted_return_type_defaults_to_unit"
 spec = ["4.16:2"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f = fn(x: i32) { let _ = x + 1; };
@@ -68,8 +60,6 @@ exit_code = 42
 [[case]]
 name = "anon_fn_two_same_signature_different_bodies"
 spec = ["4.16:5", "4.16:6"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f = fn(x: i32) -> i32 { x + 1 };
@@ -87,8 +77,6 @@ exit_code = 31
 [[case]]
 name = "anon_fn_explicit_call_method_also_works"
 spec = ["4.16:3", "4.16:6"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let f = fn(x: i32) -> i32 { x + 1 };
@@ -100,8 +88,6 @@ exit_code = 42
 [[case]]
 name = "named_struct_with_call_method_is_callable"
 spec = ["4.16:6"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 struct Incr {
     fn __call(self, x: i32) -> i32 { x + 1 }
@@ -120,8 +106,6 @@ exit_code = 42
 [[case]]
 name = "anon_fn_nested"
 spec = ["4.16:1", "4.16:6"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let outer = fn() -> i32 {
@@ -140,8 +124,6 @@ exit_code = 42
 [[case]]
 name = "anon_fn_can_reference_module_items"
 spec = ["4.16:7"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 fn helper(x: i32) -> i32 { x + 1 }
 fn main() -> i32 {
@@ -158,8 +140,6 @@ exit_code = 42
 [[case]]
 name = "anon_fn_cannot_capture_runtime_local"
 spec = ["4.16:8"]
-preview = "anon_functions"
-preview_should_pass = true
 compile_fail = true
 # The current diagnostic is the generic UndefinedVariable error; a
 # lambda-specific diagnostic is polish work tracked in ADR-0055.
@@ -173,7 +153,61 @@ fn main() -> i32 {
 """
 
 # =============================================================================
-# Generic higher-order methods (ADR-0055 Phase 4 follow-up)
+# Comptime type-arg inference (ADR-0055 Phase 4)
+# =============================================================================
+
+# When a method takes `comptime F: type, f: F`, the user can omit F and the
+# compiler infers it from f's value type. This makes lambdas usable directly
+# at the call site without naming their (anonymous) struct type.
+[[case]]
+name = "generic_method_infers_comptime_from_value_arg"
+spec = ["4.16:6"]
+source = """
+fn Pair(comptime T: type) -> type {
+    struct {
+        a: T,
+        b: T,
+        fn map_sum(self, comptime F: type, f: F) -> T {
+            f(self.a) + f(self.b)
+        }
+    }
+}
+fn main() -> i32 {
+    let P = Pair(i32);
+    let p: P = P { a: 10, b: 20 };
+    // F is inferred from the lambda's struct type.
+    p.map_sum(fn(x: i32) -> i32 { x + 1 })
+}
+"""
+exit_code = 32
+
+# Two distinct lambda sites at the same call shape — each call infers a
+# different F and monomorphizes independently.
+[[case]]
+name = "generic_method_inference_two_distinct_sites"
+spec = ["4.16:5", "4.16:6"]
+source = """
+fn Pair(comptime T: type) -> type {
+    struct {
+        a: T,
+        b: T,
+        fn map_sum(self, comptime F: type, f: F) -> T {
+            f(self.a) + f(self.b)
+        }
+    }
+}
+fn main() -> i32 {
+    let P = Pair(i32);
+    let p: P = P { a: 10, b: 20 };
+    let s1 = p.map_sum(fn(x: i32) -> i32 { x + 1 });
+    let s2 = p.map_sum(fn(x: i32) -> i32 { x * 3 });
+    s1 + s2
+}
+"""
+exit_code = 122
+
+# =============================================================================
+# Generic higher-order methods with explicit type args
 # =============================================================================
 
 # Named-callable struct passed through a generic method that takes
@@ -183,8 +217,6 @@ fn main() -> i32 {
 [[case]]
 name = "generic_method_takes_named_callable"
 spec = ["4.16:3", "4.16:6"]
-preview = "anon_functions"
-preview_should_pass = true
 source = """
 struct Doubler {
     fn __call(self, x: i32) -> i32 { x * 2 }
@@ -205,21 +237,3 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
-
-# =============================================================================
-# Preview gating — without --preview the feature rejects at the first use
-# =============================================================================
-
-# Note: This case intentionally has no `preview` field so it runs without the
-# flag and verifies the preview gate fires correctly.
-[[case]]
-name = "anon_fn_requires_preview"
-spec = ["4.16:3"]
-source = """
-fn main() -> i32 {
-    let f = fn(x: i32) -> i32 { x + 1 };
-    f(41)
-}
-"""
-compile_fail = true
-error_contains = "requires preview feature"

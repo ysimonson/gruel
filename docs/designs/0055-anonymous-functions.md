@@ -1,13 +1,13 @@
 ---
 id: 0055
 title: Anonymous Functions (Closures-as-Structs)
-status: proposal
+status: implemented
 tags: [expressions, types, comptime, generics]
 feature-flag: anon_functions
 created: 2026-04-24
-accepted:
-implemented:
-spec-sections: []
+accepted: 2026-04-24
+implemented: 2026-04-25
+spec-sections: ["4.16"]
 superseded-by:
 ---
 
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -406,15 +406,26 @@ diagnostic for now, to be refined in a follow-up).
 - [x] Spec test `generic_method_takes_named_callable` covers the full
       pipeline: named-callable struct with `__call`, generic `apply` method
       on an anon struct, call site with explicit type argument.
-- [ ] **Still deferred**: passing an anonymous function *directly* to
-      `apply(comptime F: type, f: F)` requires inferring `F` from the value
-      argument's type, because anonymous-function types are unnameable. See
-      Open Question 1 ("Inferring parameter types from context"). Users who
-      need this today can define a named `struct X { fn __call(...) }` and
-      pass `apply(X, X {})` — verified working.
+- [x] Comptime type-arg inference at generic method call sites: when a
+      method has `comptime F: type, f: F` and the caller supplies only the
+      value arg, the compiler infers `F` from `f`'s analyzed type. Anon-fn
+      literals can now be passed directly: `p.map_sum(fn(x: i32) -> i32
+      { x + 1 })` works without naming the lambda's (anonymous) struct
+      type. Two helpers in `analyze_method_call_impl`:
+      `resolve_method_generic_type_arg` (factored out of the explicit
+      branch) and `method_param_type_syms` (walks RIR to recover the
+      as-written param type symbols). Inference runs after analyzing the
+      runtime args; for each comptime type param, the compiler scans for a
+      later runtime param whose declared type symbol matches the comptime
+      param's name and pulls the type from that arg's analyzed value. If
+      no such param exists, an error directs the user to pass the type
+      explicitly. Bare-symbol matching only — compound shapes like
+      `[U; 3]` against `[i32; 3]` still need explicit type args.
 
 **Deliverable**: lambdas compose end-to-end; generic higher-order methods
-compile and run when the callable's type is nameable at the call site.
+compile and run with either explicit type args or inferred ones, including
+when the callable is an anonymous function literal whose type can't be
+named in source.
 
 ### Phase 5: Specification and tests
 
@@ -435,12 +446,19 @@ compile and run when the callable's type is nameable at the call site.
 **Deliverable**: `make test` green with the new spec section fully covered —
 achieved.
 
-### Phase 6: Stabilization (follow-up, not this ADR's scope to land)
+### Phase 6: Stabilization
 
-- [ ] Remove `preview = "anon_functions"` from spec tests and the
-      `require_preview` call in sema.
-- [ ] Remove `PreviewFeature::AnonFunctions`.
-- [ ] Update ADR status to `implemented`.
+- [x] Removed `preview = "anon_functions"` and `preview_should_pass` from
+      spec tests; deleted `anon_fn_requires_preview` (no longer applicable).
+- [x] Removed the `require_preview(PreviewFeature::AnonFunctions, ...)` call
+      from `analyze_anon_fn_value` in sema.
+- [x] Removed `PreviewFeature::AnonFunctions` from `gruel-error` (variant,
+      `name`, `adr`, `all`, `FromStr`, and the corresponding tests).
+- [x] Removed the `anon_fn_without_preview_flag` UI test; the runtime-
+      capture UI test no longer carries a `preview` field.
+- [x] Updated the spec section to drop the "preview-gated" mention.
+- [x] ADR frontmatter: `status: implemented`, `accepted: 2026-04-24`,
+      `implemented: 2026-04-25`, `spec-sections: ["4.16"]`.
 
 ## Consequences
 

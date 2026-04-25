@@ -6,8 +6,7 @@ template = "spec/page.html"
 
 # Anonymous Functions
 
-Anonymous functions are expressions that denote a callable value. They are
-preview-gated behind `anon_functions` (ADR-0055).
+Anonymous functions are expressions that denote a callable value (ADR-0055).
 
 ## Syntax
 

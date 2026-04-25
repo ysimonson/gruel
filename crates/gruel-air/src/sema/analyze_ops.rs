@@ -4061,11 +4061,6 @@ impl<'a> Sema<'a> {
         span: Span,
         _ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        use gruel_error::PreviewFeature;
-
-        // Preview gate.
-        self.require_preview(PreviewFeature::AnonFunctions, "anonymous functions", span)?;
-
         // Extract the `__call` method signature from the FnDecl the parser
         // synthesized for us.
         let method_inst = self.rir.get(method_ref);

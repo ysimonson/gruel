@@ -2978,15 +2978,18 @@ impl<'a> Sema<'a> {
         let struct_def = self.type_pool.struct_def(struct_id);
         let struct_name_str = struct_def.name.clone();
 
-        // Look up the method using StructId directly
+        // Look up the method using StructId directly. Copy out so the
+        // borrow on `self.methods` doesn't conflict with later mutable
+        // borrows of `self` (e.g. `analyze_call_args`).
         let method_key = (struct_id, method);
-        let method_info = self.methods.get(&method_key).ok_or_compile_error(
+        let method_info: MethodInfo = *self.methods.get(&method_key).ok_or_compile_error(
             ErrorKind::UndefinedMethod {
                 type_name: struct_name_str.clone(),
                 method_name: method_name_str.clone(),
             },
             span,
         )?;
+        let method_info = &method_info;
 
         // Check that this is a method (has self), not an associated function
         if !method_info.has_self {
@@ -3010,9 +3013,19 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        // Check argument count (method_info.params excludes self)
-        let method_param_types = self.param_arena.types(method_info.params);
-        if args.len() != method_param_types.len() {
+        // Clone data needed before mutable borrow
+        let is_method_generic = method_info.is_generic;
+        let method_param_comptime = self.param_arena.comptime(method_info.params).to_vec();
+        let method_param_names = self.param_arena.names(method_info.params).to_vec();
+        let return_type_for_call = method_info.return_type;
+        let method_return_type_sym = method_info.return_type_sym;
+        let method_param_types = self.param_arena.types(method_info.params).to_vec();
+
+        // Argument count check is split between generic and non-generic methods.
+        // Generic methods (ADR-0055) accept either the full arg list (explicit
+        // mode) or just the runtime args (inference mode), so we skip the check
+        // here for generics and validate later inside the inference branch.
+        if !is_method_generic && args.len() != method_param_types.len() {
             return Err(CompileError::new(
                 ErrorKind::WrongArgumentCount {
                     expected: method_param_types.len(),
@@ -3025,101 +3038,119 @@ impl<'a> Sema<'a> {
         // Check for exclusive access violation
         self.check_exclusive_access(&args, span)?;
 
-        // Clone data needed before mutable borrow
-        let is_method_generic = method_info.is_generic;
-        let method_param_comptime = self.param_arena.comptime(method_info.params).to_vec();
-        let method_param_names = self.param_arena.names(method_info.params).to_vec();
-        let return_type_for_call = method_info.return_type;
-        let method_return_type_sym = method_info.return_type_sym;
-
         // ADR-0055 / method-level generics: if this method has comptime type
         // params (e.g. `comptime F: type`), emit a CallGeneric instruction
-        // with the type arguments extracted from the call-site args. The
-        // specialization pass will synthesize a specialized method body.
+        // with the type arguments — either extracted from the call args
+        // (explicit) or inferred from the runtime arg types (when the user
+        // omits the comptime type args entirely). The specialization pass
+        // synthesizes a specialized method body using these type args.
         if is_method_generic {
-            let type_sym_for_gen = self.interner.get_or_intern("type");
-            // Build type_args from args whose corresponding param is comptime type.
+            let total_params = method_param_types.len();
+            let runtime_param_count = method_param_comptime.iter().filter(|c| !**c).count();
+
+            // Two valid call shapes:
+            //   1. Explicit: every comptime + runtime param has an arg.
+            //   2. Inferred: only runtime params have args; comptime types
+            //      are recovered from the runtime arg types.
+            // Anything else is a count mismatch.
+            let infer_comptimes = if args.len() == total_params {
+                false
+            } else if args.len() == runtime_param_count && runtime_param_count < total_params {
+                true
+            } else {
+                return Err(CompileError::new(
+                    ErrorKind::WrongArgumentCount {
+                        expected: total_params,
+                        found: args.len(),
+                    },
+                    span,
+                ));
+            };
+
+            // Phase 1: extract or analyze, in two paths that converge on
+            // (type_args, type_subst, air_runtime_args).
             let mut type_args: Vec<Type> = Vec::new();
             let mut type_subst: std::collections::HashMap<Spur, Type> =
                 std::collections::HashMap::new();
-            let mut runtime_args: Vec<RirCallArg> = Vec::new();
-            for (idx, arg) in args.iter().enumerate() {
-                if method_param_comptime[idx] {
-                    // Extract the type argument from the arg expression.
-                    let arg_inst = self.rir.get(arg.value);
-                    match &arg_inst.data {
-                        InstData::TypeConst { type_name } => {
-                            let ty = self.resolve_type(*type_name, span)?;
-                            type_args.push(ty);
-                            type_subst.insert(method_param_names[idx], ty);
-                        }
-                        InstData::AnonStructType { .. } => {
-                            // Anon struct type used as a type arg — evaluate
-                            // it at comptime to get the concrete Type.
-                            let empty_type_subst: std::collections::HashMap<Spur, Type> =
-                                std::collections::HashMap::new();
-                            let empty_value_subst: std::collections::HashMap<Spur, ConstValue> =
-                                std::collections::HashMap::new();
-                            match self.try_evaluate_const_with_subst(
-                                arg.value,
-                                &empty_type_subst,
-                                &empty_value_subst,
-                            ) {
-                                Some(ConstValue::Type(ty)) => {
-                                    type_args.push(ty);
-                                    type_subst.insert(method_param_names[idx], ty);
-                                }
-                                _ => {
-                                    return Err(CompileError::new(
-                                        ErrorKind::ComptimeEvaluationFailed {
-                                            reason: format!(
-                                                "method-generic argument for `{}` must \
-                                                 be a type value",
-                                                self.interner.resolve(&method_param_names[idx])
-                                            ),
-                                        },
-                                        self.rir.get(arg.value).span,
-                                    ));
-                                }
-                            }
-                        }
-                        _ => {
-                            // Cover `let W = Wrap(i32); w.apply(i32, ...)`
-                            // (comptime type variable) and
-                            // `w.apply(Doubler, d)` (bare struct/enum name).
-                            let resolved_ty = if let InstData::VarRef { name } = &arg_inst.data {
-                                if let Some(&ty) = ctx.comptime_type_vars.get(name) {
-                                    Some(ty)
-                                } else if let Some(&sid) = self.structs.get(name) {
-                                    Some(Type::new_struct(sid))
-                                } else if let Some(&eid) = self.enums.get(name) {
-                                    Some(Type::new_enum(eid))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
-                            if let Some(ty) = resolved_ty {
-                                type_args.push(ty);
-                                type_subst.insert(method_param_names[idx], ty);
-                            } else {
-                                return Err(CompileError::new(
-                                    ErrorKind::ComptimeEvaluationFailed {
-                                        reason: format!(
-                                            "method-generic argument for `{}` must \
-                                             be a type literal, struct/enum name, or \
-                                             comptime type variable",
-                                            self.interner.resolve(&method_param_names[idx])
-                                        ),
-                                    },
-                                    arg_inst.span,
-                                ));
-                            }
-                        }
+            let air_runtime_args: Vec<AirCallArg>;
+
+            if !infer_comptimes {
+                // Explicit mode: walk args in order, picking out comptime
+                // type args and analyzing runtime args.
+                let mut runtime_args: Vec<RirCallArg> = Vec::new();
+                for (idx, arg) in args.iter().enumerate() {
+                    if method_param_comptime[idx] {
+                        let ty = self.resolve_method_generic_type_arg(
+                            arg.value,
+                            method_param_names[idx],
+                            ctx,
+                        )?;
+                        type_args.push(ty);
+                        type_subst.insert(method_param_names[idx], ty);
+                    } else {
+                        runtime_args.push(arg.clone());
                     }
-                } else {
-                    runtime_args.push(arg.clone());
+                }
+                air_runtime_args = self.analyze_call_args(air, &runtime_args, ctx)?;
+            } else {
+                // Inference mode: analyze all user-supplied args (they are
+                // all runtime), then recover each comptime type param by
+                // structural unification against a later runtime param's
+                // declared type.
+                air_runtime_args = self.analyze_call_args(air, &args, ctx)?;
+
+                let runtime_arg_tys: Vec<Type> = air_runtime_args
+                    .iter()
+                    .map(|a| air.get(a.value).ty)
+                    .collect();
+
+                // Look up the declared type symbols of the original method
+                // params from RIR (the resolved types are placeholders).
+                let param_decl_tys =
+                    self.method_param_type_syms(method_info.body)
+                        .ok_or_else(|| {
+                            CompileError::new(
+                                ErrorKind::InternalError(
+                                    "generic method has no FnDecl in RIR".to_string(),
+                                ),
+                                span,
+                            )
+                        })?;
+
+                for (i, is_comptime) in method_param_comptime.iter().enumerate() {
+                    if !is_comptime {
+                        continue;
+                    }
+                    let cp_name = method_param_names[i];
+                    // Find a runtime param at full position j > i whose
+                    // declared type symbol references this comptime type
+                    // param (bare match `j: T` for now).
+                    let mut runtime_pos = 0usize;
+                    let mut inferred: Option<Type> = None;
+                    for (j, j_is_comptime) in method_param_comptime.iter().enumerate() {
+                        if *j_is_comptime {
+                            continue;
+                        }
+                        if j > i && param_decl_tys[j] == cp_name {
+                            inferred = Some(runtime_arg_tys[runtime_pos]);
+                            break;
+                        }
+                        runtime_pos += 1;
+                    }
+                    let inferred_ty = inferred.ok_or_else(|| {
+                        CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: format!(
+                                    "cannot infer comptime type parameter `{}`; \
+                                     pass it explicitly",
+                                    self.interner.resolve(&cp_name)
+                                ),
+                            },
+                            span,
+                        )
+                    })?;
+                    type_args.push(inferred_ty);
+                    type_subst.insert(cp_name, inferred_ty);
                 }
             }
 
@@ -3140,12 +3171,12 @@ impl<'a> Sema<'a> {
                 return_type_for_call
             };
 
-            // Analyze the runtime arguments (receiver + non-comptime args).
+            // Build the AIR call args: receiver first, then runtime args.
             let mut air_args = vec![AirCallArg {
                 value: receiver_result.air_ref,
                 mode: AirArgMode::Normal,
             }];
-            air_args.extend(self.analyze_call_args(air, &runtime_args, ctx)?);
+            air_args.extend(air_runtime_args);
 
             // Encode type args (raw Type discriminant values).
             let type_extra: Vec<u32> = type_args.iter().map(|t| t.as_u32()).collect();
@@ -3163,7 +3194,6 @@ impl<'a> Sema<'a> {
 
             let call_name = format!("{}.{}", struct_name_str, method_name_str);
             let call_name_sym = self.interner.get_or_intern(&call_name);
-            let _ = type_sym_for_gen; // silence unused
 
             let air_ref = air.add_inst(AirInst {
                 data: AirInstData::CallGeneric {
@@ -8764,6 +8794,92 @@ impl<'a> Sema<'a> {
     /// anonymous struct (ADR-0055).
     ///
     /// Unlike `register_anon_struct_methods_for_comptime_with_subst`, we take
+    /// Resolve a single comptime type argument supplied at a generic method
+    /// call site (ADR-0055). Accepts: a `type` literal (e.g. `i32`), an
+    /// anon-struct-type expression evaluated at comptime, a comptime type
+    /// variable bound earlier in the function (`let W = Wrap(i32)`), or a
+    /// bare struct/enum name.
+    pub(crate) fn resolve_method_generic_type_arg(
+        &mut self,
+        arg: InstRef,
+        param_name: Spur,
+        ctx: &super::context::AnalysisContext,
+    ) -> CompileResult<Type> {
+        let arg_inst = self.rir.get(arg);
+        match &arg_inst.data {
+            InstData::TypeConst { type_name } => self.resolve_type(*type_name, arg_inst.span),
+            InstData::AnonStructType { .. } => {
+                let empty_type_subst: std::collections::HashMap<Spur, Type> =
+                    std::collections::HashMap::new();
+                let empty_value_subst: std::collections::HashMap<Spur, ConstValue> =
+                    std::collections::HashMap::new();
+                match self.try_evaluate_const_with_subst(arg, &empty_type_subst, &empty_value_subst)
+                {
+                    Some(ConstValue::Type(ty)) => Ok(ty),
+                    _ => Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "method-generic argument for `{}` must be a type value",
+                                self.interner.resolve(&param_name)
+                            ),
+                        },
+                        arg_inst.span,
+                    )),
+                }
+            }
+            _ => {
+                let resolved_ty = if let InstData::VarRef { name } = &arg_inst.data {
+                    if let Some(&ty) = ctx.comptime_type_vars.get(name) {
+                        Some(ty)
+                    } else if let Some(&sid) = self.structs.get(name) {
+                        Some(Type::new_struct(sid))
+                    } else if let Some(&eid) = self.enums.get(name) {
+                        Some(Type::new_enum(eid))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                resolved_ty.ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "method-generic argument for `{}` must be a type literal, \
+                                 struct/enum name, or comptime type variable",
+                                self.interner.resolve(&param_name)
+                            ),
+                        },
+                        arg_inst.span,
+                    )
+                })
+            }
+        }
+    }
+
+    /// Look up the declared parameter type symbols for a method body. Walks
+    /// RIR to find the FnDecl whose `body` matches and returns its params'
+    /// declared `ty` Spurs in order. Used by ADR-0055 comptime type-arg
+    /// inference, which needs the as-written type names (e.g. `F`, `T`,
+    /// `[U; 3]`) rather than the registered types (which are placeholders
+    /// for method-level generics).
+    pub(crate) fn method_param_type_syms(&self, method_body: InstRef) -> Option<Vec<Spur>> {
+        for (_, inst) in self.rir.iter() {
+            if let InstData::FnDecl {
+                body,
+                params_start,
+                params_len,
+                ..
+            } = &inst.data
+                && *body == method_body
+            {
+                let params = self.rir.get_params(*params_start, *params_len);
+                return Some(params.iter().map(|p| p.ty).collect());
+            }
+        }
+        None
+    }
+
     /// the method InstRef directly rather than reading it from the RIR extra
     /// array, and there is no comptime-parameter substitution to apply — the
     /// parent function's comptime substitutions have already baked into the
