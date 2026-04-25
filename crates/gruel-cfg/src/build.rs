@@ -2170,12 +2170,30 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
-            AirInstData::MakeInterfaceRef { .. } => {
-                // ADR-0056 Phase 4c: the AIR variant exists but sema does
-                // not yet emit it (sema reports "Phase 4d not yet
-                // implemented" before reaching this point). Phase 4d adds
-                // the CFG + codegen lowering.
-                unreachable!("MakeInterfaceRef should not reach CFG until ADR-0056 Phase 4d");
+            AirInstData::MakeInterfaceRef {
+                value,
+                struct_id,
+                interface_id,
+            } => {
+                // ADR-0056 Phase 4d: lower the AIR coercion to a CFG
+                // instruction; codegen materializes the fat-pointer struct.
+                let Some(cfg_value) = self.lower_value(*value) else {
+                    return Self::diverged();
+                };
+                let result = self.emit(
+                    CfgInstData::MakeInterfaceRef {
+                        value: cfg_value,
+                        struct_id: *struct_id,
+                        interface_id: *interface_id,
+                    },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, result);
+                ExprResult {
+                    value: Some(result),
+                    continuation: Continuation::Continues,
+                }
             }
         }
     }

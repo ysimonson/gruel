@@ -5513,27 +5513,44 @@ impl<'a> Sema<'a> {
         }
 
         // Analyze all arguments
-        let air_args = self.analyze_call_args(air, &args, ctx)?;
+        let mut air_args = self.analyze_call_args(air, &args, ctx)?;
 
-        // ADR-0056 Phase 4c: for any argument whose corresponding parameter
-        // has an interface type, run a structural conformance check against
-        // the argument's concrete type. If conformance succeeds we currently
-        // surface a "Phase 4d not yet implemented" error; emitting a real
-        // `MakeInterfaceRef` and lowering it lands in Phase 4d.
-        for (i, (arg_air, param_ty)) in air_args.iter().zip(param_types.iter()).enumerate() {
+        // ADR-0056 Phase 4c/4d: for any argument whose corresponding
+        // parameter has an interface type, run structural conformance
+        // against the argument's concrete type and replace the argument
+        // AIR with a `MakeInterfaceRef` coercion. Codegen (Phase 4d)
+        // lowers that to a `(data_ptr, vtable_ptr)` fat-pointer struct.
+        for (i, param_ty) in param_types.iter().enumerate() {
             if let crate::types::TypeKind::Interface(iface_id) = param_ty.kind() {
-                let arg_ty = air.get(arg_air.value).ty;
+                let arg_air = air_args[i].value;
+                let arg_ty = air.get(arg_air).ty;
                 let arg_span = self.rir.get(args[i].value).span;
-                self.check_conforms(arg_ty, iface_id, arg_span)?;
-                return Err(CompileError::new(
-                    ErrorKind::InternalError(
-                        "interface runtime dispatch (fat-pointer codegen) is not yet \
-                         implemented (ADR-0056 Phase 4d). The conformance check passes; \
-                         use `comptime T: I` for a working alternative."
-                            .to_string(),
-                    ),
-                    arg_span,
-                ));
+                let _witness = self.check_conforms(arg_ty, iface_id, arg_span)?;
+                let struct_id = match arg_ty.kind() {
+                    crate::types::TypeKind::Struct(id) => id,
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: format!("type conforming to interface"),
+                                found: arg_ty.name().to_string(),
+                            },
+                            arg_span,
+                        ));
+                    }
+                };
+                // Record the (struct, interface) pair so codegen can emit a
+                // vtable for it.
+                self.interface_vtables_needed.insert((struct_id, iface_id));
+                let coerced = air.add_inst(AirInst {
+                    data: AirInstData::MakeInterfaceRef {
+                        value: arg_air,
+                        struct_id,
+                        interface_id: iface_id,
+                    },
+                    ty: *param_ty,
+                    span: arg_span,
+                });
+                air_args[i].value = coerced;
             }
         }
 

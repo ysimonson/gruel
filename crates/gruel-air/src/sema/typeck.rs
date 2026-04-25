@@ -438,10 +438,11 @@ impl<'a> Sema<'a> {
             TypeKind::Module(_) => 0,
             // Pointer types take 1 slot (64-bit address)
             TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 1,
-            // Interface types: comptime usage is erased before codegen.
-            // Runtime usage (Phase 4) introduces a fat pointer, but until
-            // then no code path should hit this — return 0 as a placeholder.
-            TypeKind::Interface(_) => 0,
+            // Interface types (ADR-0056): runtime fat pointer occupies two
+            // pointer-sized ABI slots — `(data_ptr, vtable_ptr)`. Comptime
+            // usage is erased before codegen, so this only fires for
+            // runtime-dispatched interface params.
+            TypeKind::Interface(_) => 2,
         }
     }
 }

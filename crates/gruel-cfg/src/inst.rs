@@ -536,6 +536,21 @@ pub enum CfgInstData {
     StorageDead {
         slot: u32,
     },
+
+    /// Coerce a concrete value to an interface fat pointer (ADR-0056).
+    ///
+    /// Lowered by codegen to a literal `{ data_ptr, vtable_ptr }` struct
+    /// value. The data pointer addresses the source value (which must
+    /// outlive this coercion); the vtable pointer is a global constant
+    /// keyed on `(struct_id, interface_id)`.
+    MakeInterfaceRef {
+        /// The source value to wrap. Codegen takes its address.
+        value: CfgValue,
+        /// The concrete struct type of `value`.
+        struct_id: gruel_air::StructId,
+        /// The target interface.
+        interface_id: gruel_air::InterfaceId,
+    },
 }
 
 /// Block terminator - how control leaves a basic block.
@@ -750,8 +765,20 @@ impl Cfg {
     }
 
     /// Get whether a parameter slot is passed by reference (inout or borrow).
+    ///
+    /// ADR-0056: interface-typed parameters carry their own data pointer
+    /// inside the fat-pointer struct, so they are passed *by value* at the
+    /// LLVM ABI level even when the source-level mode is `borrow`/`inout`.
+    /// The borrow/inout semantics still apply to the underlying data via
+    /// the `data_ptr` field of the fat pointer; the ABI just doesn't add
+    /// another layer of indirection.
     #[inline]
     pub fn is_param_by_ref(&self, slot: u32) -> bool {
+        if let Some(ty) = self.param_type(slot)
+            && matches!(ty.kind(), gruel_air::TypeKind::Interface(_))
+        {
+            return false;
+        }
         self.param_mode(slot).is_by_ref()
     }
 
@@ -1392,6 +1419,17 @@ impl Cfg {
             }
             CfgInstData::StorageDead { slot } => {
                 write!(f, "storage_dead ${}", slot)
+            }
+            CfgInstData::MakeInterfaceRef {
+                value,
+                struct_id,
+                interface_id,
+            } => {
+                write!(
+                    f,
+                    "make_interface_ref {} (struct=#{}, iface=#{})",
+                    value, struct_id.0, interface_id.0
+                )
             }
         }
     }

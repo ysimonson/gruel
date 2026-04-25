@@ -92,3 +92,50 @@ fn main() -> i32 {
     0
 }
 ```
+
+## Runtime Dispatch
+
+{{ rule(id="6.5:11", cat="normative") }}
+
+An interface name may also appear as a parameter type with a borrowing
+mode: `borrow t: I` or `inout t: I`. The parameter is then passed as a
+fat pointer `(data_ptr, vtable_ptr)` and method calls on it dispatch
+dynamically through the vtable.
+
+{{ rule(id="6.5:12", cat="legality-rule") }}
+
+Interface-typed parameters require a borrowing mode. By-value `t: I` is
+rejected. Interface types are not legal as struct field types, return
+types, or local-binding types in the current implementation; they appear
+only in parameter positions.
+
+{{ rule(id="6.5:13", cat="legality-rule") }}
+
+At each call site that passes a concrete `C` to a parameter of type `I`,
+the compiler verifies `C` conforms to `I` (same structural check as the
+comptime path). Non-conforming arguments are rejected at the call site.
+
+{{ rule(id="6.5:14", cat="dynamic-semantics") }}
+
+The fat pointer's data field references the caller's storage; passing
+through `borrow t: I` does not copy the underlying value. The vtable
+field is a static, deduplicated global per `(concrete type, interface)`
+pair.
+
+{{ rule(id="6.5:15", cat="example") }}
+
+```gruel
+// Compiled with --preview interfaces
+interface Marker {}
+
+struct Foo {}
+
+fn ignore(borrow t: Marker) {
+}
+
+fn main() -> i32 {
+    let f = Foo {};
+    ignore(borrow f);
+    0
+}
+```

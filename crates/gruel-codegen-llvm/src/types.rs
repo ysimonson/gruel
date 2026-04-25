@@ -254,11 +254,12 @@ pub fn gruel_type_to_llvm<'ctx>(
         | TypeKind::ComptimeInt
         | TypeKind::Module(_) => None,
 
-        // Interfaces (ADR-0056): comptime usage is erased before codegen.
-        // Runtime usage (Phase 4) lowers to a fat-pointer struct ahead of
-        // this point, so reaching this arm with a raw interface type is
-        // unreachable until/unless that lowering changes.
-        TypeKind::Interface(_) => None,
+        // Interfaces (ADR-0056): runtime fat pointer = `{ ptr, ptr }`.
+        // First pointer is the type-erased data, second is a static vtable.
+        TypeKind::Interface(_) => {
+            let ptr = ctx.ptr_type(AddressSpace::default()).into();
+            Some(ctx.struct_type(&[ptr, ptr], false).into())
+        }
     }
 }
 

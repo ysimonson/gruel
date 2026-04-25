@@ -2596,6 +2596,91 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 }
                 None
             }
+
+            CfgInstData::MakeInterfaceRef {
+                value,
+                struct_id,
+                interface_id,
+            } => {
+                // ADR-0056 Phase 4d: build a fat pointer `(data_ptr, vtable_ptr)`.
+                //
+                // The data pointer addresses the source value:
+                //   - Load { slot }  → use the local's alloca directly.
+                //   - Param { index } if by-ref → use the incoming ptr param.
+                //   - Param { index } else → spill the param value to an
+                //     alloca and use that.
+                //   - Otherwise → materialize a fresh alloca, store the
+                //     value into it, and use that.
+                let source_inst = self.cfg.get_inst(value).clone();
+                let source_ty = source_inst.ty;
+                // Zero-sized source types (empty structs) have no LLVM type
+                // and no storage. The data pointer is never dereferenced for
+                // such types, so a null pointer is a valid placeholder.
+                let source_llvm_ty = gruel_type_to_llvm(source_ty, self.ctx, self.type_pool);
+                let data_ptr: inkwell::values::PointerValue<'ctx> = if source_llvm_ty.is_none() {
+                    self.ctx
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null()
+                } else {
+                    match source_inst.data {
+                        CfgInstData::Load { slot } => self
+                            .locals
+                            .get(slot as usize)
+                            .copied()
+                            .flatten()
+                            .unwrap_or_else(|| {
+                                self.ctx
+                                    .ptr_type(inkwell::AddressSpace::default())
+                                    .const_null()
+                            }),
+                        CfgInstData::Param { index } => {
+                            if self.cfg.is_param_by_ref(index) {
+                                let llvm_idx = self.slot_to_llvm_param[index as usize];
+                                self.fn_value
+                                    .get_nth_param(llvm_idx)
+                                    .expect("param out of range")
+                                    .into_pointer_value()
+                            } else {
+                                self.get_or_create_param_alloca(index, source_ty)
+                            }
+                        }
+                        _ => {
+                            // Materialize an alloca and store the value into
+                            // it.
+                            let llvm_ty = source_llvm_ty.unwrap();
+                            let ptr = self.build_entry_alloca(llvm_ty, "iface.tmp");
+                            let v = self.get_value(value);
+                            self.builder.build_store(ptr, v).unwrap();
+                            ptr
+                        }
+                    }
+                };
+
+                // ADR-0056 Phase 4d MVP: the vtable pointer is a per-(struct,
+                // interface) global constant. For empty interfaces it carries
+                // no methods; passing a null pointer is sufficient because no
+                // dispatch happens. Phase 4d-extended will emit a real
+                // `[N x ptr]` constant when interfaces gain methods.
+                let _ = (struct_id, interface_id);
+                let vtable_ptr = self
+                    .ctx
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .const_null();
+
+                let iface_struct_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
+                    .expect("interface type must have LLVM representation")
+                    .into_struct_type();
+                let undef = iface_struct_ty.get_undef();
+                let with_data = self
+                    .builder
+                    .build_insert_value(undef, data_ptr, 0, "iface.data")
+                    .unwrap();
+                let with_vtbl = self
+                    .builder
+                    .build_insert_value(with_data, vtable_ptr, 1, "iface.vt")
+                    .unwrap();
+                Some(with_vtbl.into_struct_value().into())
+            }
         };
 
         if let Some(v) = result {

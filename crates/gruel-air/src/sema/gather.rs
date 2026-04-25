@@ -91,6 +91,7 @@ impl<'a> GatherOutput<'a> {
             interfaces: HashMap::new(),
             interface_defs: Vec::new(),
             comptime_interface_bounds: HashMap::new(),
+            interface_vtables_needed: std::collections::HashSet::new(),
             methods: self.methods,
             enum_methods: HashMap::new(),
             constants: self.constants,

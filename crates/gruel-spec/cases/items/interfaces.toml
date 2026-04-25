@@ -193,6 +193,77 @@ fn main() -> i32 {
 compile_fail = true
 error_contains = "wrong signature"
 
+# =============================================================================
+# Runtime dispatch (Phase 4)
+# =============================================================================
+
+# Phase 4d: a function with `borrow t: I` parameter compiles end-to-end
+# when called with a concrete value that conforms to the interface.
+[[case]]
+name = "interface_runtime_borrow_empty"
+spec = ["6.5:11", "6.5:12", "6.5:13", "6.5:14", "6.5:15"]
+preview = "interfaces"
+preview_should_pass = true
+source = """
+interface Marker {}
+
+struct Foo {}
+
+fn ignore(borrow t: Marker) {
+}
+
+fn main() -> i32 {
+    let f = Foo {};
+    ignore(borrow f);
+    77
+}
+"""
+exit_code = 77
+
+# Same path with a non-empty struct (real data behind the fat pointer).
+[[case]]
+name = "interface_runtime_borrow_nonempty_struct"
+spec = ["6.5:11", "6.5:14"]
+preview = "interfaces"
+preview_should_pass = true
+source = """
+interface Marker {}
+
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn ignore(borrow t: Marker) {
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 20 };
+    ignore(borrow p);
+    p.x + p.y
+}
+"""
+exit_code = 30
+
+# By-value `t: I` is rejected with a tailored message.
+[[case]]
+name = "interface_runtime_by_value_rejected"
+spec = ["6.5:12"]
+preview = "interfaces"
+preview_should_pass = true
+source = """
+interface Marker {}
+
+fn ignore(t: Marker) {
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = ["borrow t: Marker"]
+
 # Two distinct concrete types both flowing through the same generic
 # function each get their own specialization.
 [[case]]

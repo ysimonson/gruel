@@ -375,19 +375,23 @@ order — they share the fat-pointer ABI groundwork.
     `MethodCallDyn` are deferred — they're orthogonal to the parameter
     coercion path and slot in cleanly once codegen lands.
 
-- [ ] **Phase 4d: LLVM codegen — fat pointers, vtables, dispatch**
+- [x] **Phase 4d (partial): fat-pointer codegen for non-method interfaces**
   - LLVM type for `Type::new_interface(iid)` is the canonical
-    `{ ptr, ptr }` struct (data + vtable).
-  - Vtable emission: for each `(StructId, InterfaceId)` pair recorded by
-    Phase 4b/4c, emit a single `@__vtable__C__I` global containing function
-    pointers in interface declaration order. Deduplicated across the
-    program.
-  - `MakeInterfaceRef` lowers to `{ &mut/const arg, &VTABLE_C_I }`.
-  - `MethodCallDyn` lowers to `load slot from vtable; call slot(data,
-    …args)`.
-  - Tests (now passing): end-to-end runnable programs that pass concrete
-    structs through `borrow t: I` parameters and invoke methods via the
-    vtable; mixed comptime + runtime use of the same interface.
+    `{ ptr, ptr }` struct (data + vtable). `is_param_by_ref` returns
+    `false` for interface-typed params: the fat pointer is by-value at
+    the LLVM ABI; the borrow lives in the data field.
+  - `abi_slot_count` returns 2 for interface types.
+  - `MakeInterfaceRef` lowers to a fat-pointer struct value: data field
+    is the source value's address (alloca-spilled if needed); vtable
+    field is currently a null pointer (sufficient for empty interfaces).
+  - End-to-end runnable: empty-interface programs with `borrow t: I`
+    parameters compile and execute, passing a real fat pointer through.
+  - Spec tests for empty-interface end-to-end (passing) and by-value
+    rejection (still rejected).
+  - Deferred to Phase 4d-extended: real vtable globals (per
+    `(StructId, InterfaceId)` pair, with function pointers for each
+    interface method); `MethodCallDyn` lowering; method calls on
+    interface-typed receivers (`t.method()` where `t: I`).
 
 - [ ] **Phase 4e: stabilization polish**
   - Improve diagnostic for "interface used as field type" / "interface used
