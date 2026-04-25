@@ -330,33 +330,68 @@ into each phase but the formal spec chapter lands in Phase 5.
     method resolution that checks the body once against the interface
     instead of per-specialization. Tracked in ADR Open Questions.
 
-- [ ] **Phase 4: Runtime dynamic dispatch** (not yet started — needs a
-      dedicated session; see Phase 4a below for the diagnostic landed in the
-      meantime.)
-  - Sema: accept `inout t: I` and `borrow t: I` parameter forms; reject
-    by-value `t: I`. Reject by-value-`self` method calls through interface
-    typed receivers.
-  - AIR: add `InterfaceRef` as the lowered parameter type, plus
-    `MethodCallDyn { interface: InterfaceId, slot: u32, recv, args }` for
-    dynamically dispatched calls.
-  - Codegen (`gruel-codegen-llvm`):
-    - Layout: fat pointer = `{ ptr, ptr }`; produce LLVM struct type per
-      interface and use it in function signatures.
-    - Vtable emission: for each `(StructId, InterfaceId)` pair that flows
-      into a coercion site, generate `@__vtable__C__I` once, deduplicated.
-    - Coercion lowering: at the call site, materialize
-      `{ &(mut|const) arg, &VTABLE_C_I }`.
-    - Dynamic dispatch lowering: `MethodCallDyn` becomes
-      `load slot k from vtable; call slot(data, …args)`.
-  - Tests: dynamic dispatch against several conforming types; mixed comptime
-    and runtime usage of the same interface; vtable deduplication (golden
-    AIR/asm test).
+**Phase 4 is split into smaller sub-phases for staged delivery.** Each
+sub-phase ends in a runnable, committable state. Sub-phases must land in
+order — they share the fat-pointer ABI groundwork.
 
-- [x] **Phase 4a (interim): improved diagnostic**
+- [x] **Phase 4a: improved diagnostic for runtime-type usage**
   - When a parameter type names a registered interface, the unknown-type
-    error now includes a help line redirecting users to the comptime path
-    (`comptime T: I`) and noting that runtime dispatch is Phase 4.
+    error includes a help line redirecting users to the comptime path
+    (`comptime T: I`) and noting that runtime dispatch is the rest of
+    Phase 4.
   - UI test under `diagnostics/interfaces.toml` pins this guidance.
+
+- [ ] **Phase 4b: sema accepts interface-typed parameters**
+  - Extend `resolve_type` to accept interface names *only* when the param
+    mode is `inout` or `borrow` (top-level functions and methods).
+  - Reject by-value `t: I` with a tailored error pointing at `borrow t: I`.
+  - At call sites where the parameter type is `Type::new_interface(iid)`,
+    run `check_conforms(arg_type, iid)`; on success, record the
+    `(StructId, InterfaceId)` pair on a side-table for later vtable
+    emission. On failure, surface the conformance error at the call site.
+  - Codegen reaches the interface type and currently returns `None` for
+    LLVM lowering — Phase 4b leaves this as an explicit "Phase 4c: not yet
+    implemented in codegen" error so users get a clean message rather than
+    a downstream codegen ICE.
+  - Tests (preview, not-yet-passing): function declaration + call site
+    accepted at sema; codegen still fails with the Phase 4c message.
+
+- [ ] **Phase 4c: AIR + CFG for fat pointers and dynamic dispatch**
+  - Add AIR instructions:
+    - `MakeInterfaceRef { value, interface_id, struct_id }` — concrete
+      `C` lvalue → `(data_ptr, vtable_ptr)`.
+    - `MethodCallDyn { interface_id, slot, recv, args_start, args_len }` —
+      load function pointer from `recv`'s vtable at `slot` and call it.
+  - Sema lowers method calls on interface-typed receivers
+    (`t.method(args)` where `t: I`) to `MethodCallDyn`. Body type-checks
+    against the interface's method signatures, not a concrete type.
+  - Sema lowers call-site coercion (`f(borrow x)` where `f: fn(borrow I)`
+    and `x: C`) to `MakeInterfaceRef`.
+  - Reject by-value-`self` interface methods reached through dynamic
+    dispatch (only `borrow self` and `inout self` are dispatchable).
+  - CFG passes the new instructions through unchanged; codegen still
+    rejects with the Phase 4d message.
+
+- [ ] **Phase 4d: LLVM codegen — fat pointers, vtables, dispatch**
+  - LLVM type for `Type::new_interface(iid)` is the canonical
+    `{ ptr, ptr }` struct (data + vtable).
+  - Vtable emission: for each `(StructId, InterfaceId)` pair recorded by
+    Phase 4b/4c, emit a single `@__vtable__C__I` global containing function
+    pointers in interface declaration order. Deduplicated across the
+    program.
+  - `MakeInterfaceRef` lowers to `{ &mut/const arg, &VTABLE_C_I }`.
+  - `MethodCallDyn` lowers to `load slot from vtable; call slot(data,
+    …args)`.
+  - Tests (now passing): end-to-end runnable programs that pass concrete
+    structs through `borrow t: I` parameters and invoke methods via the
+    vtable; mixed comptime + runtime use of the same interface.
+
+- [ ] **Phase 4e: stabilization polish**
+  - Improve diagnostic for "interface used as field type" / "interface used
+    as return type" (still rejected, with tailored messages).
+  - Vtable deduplication golden test (asm dump).
+  - Decision: collect all conformance failures into one error vs. fail-fast
+    (currently fail-fast).
 
 - [ ] **Phase 5: Specification, traceability, and stabilization**
   - New spec chapter (suggested 4.17 or section 6.5 — pick during writing)
