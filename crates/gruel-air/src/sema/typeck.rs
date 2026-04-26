@@ -13,7 +13,7 @@ use lasso::Spur;
 use super::Sema;
 use crate::inference::InferType;
 use crate::types::{
-    ArrayTypeId, Type, TypeKind, parse_array_type_syntax, parse_tuple_type_syntax,
+    ArrayTypeId, IfaceTy, Type, TypeKind, parse_array_type_syntax, parse_tuple_type_syntax,
     parse_type_call_syntax,
 };
 
@@ -152,6 +152,22 @@ impl<'a> Sema<'a> {
         } else {
             self.resolve_type(type_sym, span)
         }
+    }
+
+    /// Resolve a type slot inside an interface method signature (ADR-0060).
+    ///
+    /// Recognizes the symbol `Self` and returns `IfaceTy::SelfType`.
+    /// All other symbols flow through `resolve_type` and are wrapped in
+    /// `IfaceTy::Concrete`.
+    pub(crate) fn resolve_iface_ty(
+        &mut self,
+        type_sym: Spur,
+        span: Span,
+    ) -> CompileResult<IfaceTy> {
+        if self.interner.resolve(&type_sym) == "Self" {
+            return Ok(IfaceTy::SelfType);
+        }
+        Ok(IfaceTy::Concrete(self.resolve_type(type_sym, span)?))
     }
 
     /// Resolve a type symbol to a Type.

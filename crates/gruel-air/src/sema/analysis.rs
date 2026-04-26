@@ -3149,11 +3149,15 @@ impl<'a> Sema<'a> {
             let air_args = self.analyze_call_args(air, &args, ctx)?;
 
             // Type-check each arg against the interface's declared param type.
-            for (i, (arg_air, expected_ty)) in
-                air_args.iter().zip(req.param_types.iter()).enumerate()
-            {
+            // `Self` slots (ADR-0060) are substituted with the interface type
+            // itself — at a dynamic dispatch site there is no concrete
+            // candidate to bind to, so `Self` flows through as the receiver's
+            // static type.
+            let iface_ty = receiver_type;
+            for (i, (arg_air, req_ty)) in air_args.iter().zip(req.param_types.iter()).enumerate() {
+                let expected_ty = req_ty.substitute_self(iface_ty);
                 let actual_ty = air.get(arg_air.value).ty;
-                if actual_ty != *expected_ty {
+                if actual_ty != expected_ty {
                     let arg_span = self.rir.get(args[i].value).span;
                     return Err(CompileError::new(
                         ErrorKind::TypeMismatch {
@@ -3174,7 +3178,7 @@ impl<'a> Sema<'a> {
             let dyn_args_start = air.add_extra(&extra_data);
             let dyn_args_len = air_args.len() as u32;
 
-            let return_type = req.return_type;
+            let return_type = req.return_type.substitute_self(iface_ty);
             let air_ref = air.add_inst(AirInst {
                 data: AirInstData::MethodCallDyn {
                     interface_id: iface_id,

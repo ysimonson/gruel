@@ -16,7 +16,7 @@ use gruel_span::Span;
 use lasso::Spur;
 
 use super::Sema;
-use crate::types::{InterfaceDef, InterfaceId, InterfaceMethodReq, Type};
+use crate::types::{IfaceTy, InterfaceDef, InterfaceId, InterfaceMethodReq, ReceiverMode, Type};
 
 impl<'a> Sema<'a> {
     /// Resolve the methods of an anonymous interface (the method-sig
@@ -81,12 +81,12 @@ impl<'a> Sema<'a> {
                 .collect();
             let mut param_types = Vec::with_capacity(params.len());
             for (_pname, ty_sym) in &params {
-                let ty = self.resolve_with_subst(*ty_sym, span, subst)?;
-                param_types.push(ty);
+                param_types.push(self.resolve_iface_with_subst(*ty_sym, span, subst)?);
             }
-            let return_type = self.resolve_with_subst(return_type_sym, span, subst)?;
+            let return_type = self.resolve_iface_with_subst(return_type_sym, span, subst)?;
             out.push(InterfaceMethodReq {
                 name: name_str,
+                receiver: ReceiverMode::ByValue,
                 param_types,
                 return_type,
             });
@@ -111,6 +111,23 @@ impl<'a> Sema<'a> {
             return Ok(ty);
         }
         self.resolve_type(ty_sym, span)
+    }
+
+    /// Resolve a type slot inside an anonymous interface signature, mirroring
+    /// `resolve_with_subst` but yielding `IfaceTy` so that `Self` survives
+    /// resolution unwrapped (ADR-0060).
+    fn resolve_iface_with_subst(
+        &mut self,
+        ty_sym: Spur,
+        span: Span,
+        subst: &HashMap<Spur, Type>,
+    ) -> CompileResult<IfaceTy> {
+        if self.interner.resolve(&ty_sym) == "Self" {
+            return Ok(IfaceTy::SelfType);
+        }
+        Ok(IfaceTy::Concrete(
+            self.resolve_with_subst(ty_sym, span, subst)?,
+        ))
     }
 
     /// Look up an existing anonymous interface that matches the supplied

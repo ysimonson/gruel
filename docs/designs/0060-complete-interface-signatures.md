@@ -98,7 +98,7 @@ pub enum ReceiverMode { ByValue, Inout, Borrow }
 
 ## Implementation Phases
 
-- [ ] **Phase 1: `Self` in interface signatures.**
+- [x] **Phase 1: `Self` in interface signatures.**
   - Introduce `IfaceTy` (or equivalent) and update `InterfaceMethodReq`.
   - `validate_interface_decls` recognizes the symbol `Self` and stores `IfaceTy::SelfType`.
   - `check_conforms` substitutes `Self` with the candidate before comparing.

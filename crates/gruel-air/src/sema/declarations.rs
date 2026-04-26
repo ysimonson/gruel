@@ -20,8 +20,8 @@ use lasso::Spur;
 use super::{ConstInfo, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::inference::{FunctionSig, MethodSig};
 use crate::types::{
-    EnumDef, EnumId, EnumVariantDef, InterfaceDef, InterfaceId, InterfaceMethodReq, StructDef,
-    StructField, StructId, Type,
+    EnumDef, EnumId, EnumVariantDef, InterfaceDef, InterfaceId, InterfaceMethodReq, ReceiverMode,
+    StructDef, StructField, StructId, Type,
 };
 
 impl<'a> Sema<'a> {
@@ -262,17 +262,20 @@ impl<'a> Sema<'a> {
                 ));
             }
 
-            // Resolve each method's parameter and return types.
+            // Resolve each method's parameter and return slots, recognizing
+            // the symbol `Self` as `IfaceTy::SelfType` (ADR-0060). Receiver
+            // mode is `ByValue` until Phase 2 threads `inout`/`borrow self`
+            // from the parser.
             let mut resolved_methods = Vec::with_capacity(r.methods.len());
             for m in &r.methods {
                 let mut param_types = Vec::with_capacity(m.params.len());
                 for (_pname, ty_sym) in &m.params {
-                    let ty = self.resolve_type(*ty_sym, m.span)?;
-                    param_types.push(ty);
+                    param_types.push(self.resolve_iface_ty(*ty_sym, m.span)?);
                 }
-                let return_type = self.resolve_type(m.return_type_sym, m.span)?;
+                let return_type = self.resolve_iface_ty(m.return_type_sym, m.span)?;
                 resolved_methods.push(InterfaceMethodReq {
                     name: self.interner.resolve(&m.name).to_string(),
+                    receiver: ReceiverMode::ByValue,
                     param_types,
                     return_type,
                 });

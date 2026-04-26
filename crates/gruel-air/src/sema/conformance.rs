@@ -20,7 +20,7 @@ use gruel_span::Span;
 use lasso::Spur;
 
 use super::Sema;
-use crate::types::{InterfaceId, StructId, Type, TypeKind};
+use crate::types::{IfaceTy, InterfaceId, StructId, Type, TypeKind};
 
 /// Witness that a concrete type conforms to an interface.
 ///
@@ -145,7 +145,7 @@ impl<'a> Sema<'a> {
                 ));
             }
             for (req_ty, cand_ty) in req.param_types.iter().zip(candidate_param_types.iter()) {
-                if *req_ty != *cand_ty {
+                if req_ty.substitute_self(candidate) != *cand_ty {
                     return Err(self.iface_method_sig_mismatch(
                         candidate,
                         interface_id,
@@ -155,7 +155,7 @@ impl<'a> Sema<'a> {
                     ));
                 }
             }
-            if method_info.return_type != req.return_type {
+            if method_info.return_type != req.return_type.substitute_self(candidate) {
                 return Err(self.iface_method_sig_mismatch(
                     candidate,
                     interface_id,
@@ -213,26 +213,33 @@ impl<'a> Sema<'a> {
         )
     }
 
+    fn format_iface_ty(&self, t: &IfaceTy) -> String {
+        match t {
+            IfaceTy::SelfType => "Self".to_string(),
+            IfaceTy::Concrete(ty) => self.format_type_name(*ty),
+        }
+    }
+
     fn format_interface_method_sig(&self, interface_id: InterfaceId, method_name: &str) -> String {
         let iface_def = &self.interface_defs[interface_id.0 as usize];
         let req = match iface_def.methods.iter().find(|m| m.name == method_name) {
             Some(r) => r,
             None => return format!("fn {}(self)", method_name),
         };
+        let recv = req.receiver.render();
         let params: Vec<String> = req
             .param_types
             .iter()
-            .map(|t| self.format_type_name(*t))
+            .map(|t| self.format_iface_ty(t))
             .collect();
         let prefix = if params.is_empty() {
-            format!("fn {}(self)", method_name)
+            format!("fn {}({})", method_name, recv)
         } else {
-            format!("fn {}(self, {})", method_name, params.join(", "))
+            format!("fn {}({}, {})", method_name, recv, params.join(", "))
         };
-        if req.return_type == Type::UNIT {
-            prefix
-        } else {
-            format!("{} -> {}", prefix, self.format_type_name(req.return_type))
+        match &req.return_type {
+            IfaceTy::Concrete(t) if *t == Type::UNIT => prefix,
+            other => format!("{} -> {}", prefix, self.format_iface_ty(other)),
         }
     }
 
@@ -426,6 +433,104 @@ mod tests {
         let buf = struct_ty(&sema, "Buf");
         let err = sema
             .check_conforms(buf, iid, dummy_span())
+            .expect_err("should fail");
+        assert!(matches!(
+            err.kind,
+            ErrorKind::InterfaceMethodSignatureMismatch(_)
+        ));
+    }
+
+    #[test]
+    fn self_return_type_substitutes_candidate() {
+        // ADR-0060: `Self` in return position resolves to the candidate type.
+        let sema = gather(
+            r#"
+            interface Cloner {
+                fn clone(self) -> Self;
+            }
+
+            struct Foo {
+                fn clone(self) -> Foo { Foo {} }
+            }
+
+            fn main() -> i32 { 0 }
+            "#,
+        );
+        let iid = iface_id(&sema, "Cloner");
+        let foo = struct_ty(&sema, "Foo");
+        sema.check_conforms(foo, iid, dummy_span())
+            .expect("conforms");
+    }
+
+    #[test]
+    fn self_return_type_mismatch_rejected() {
+        // ADR-0060: a candidate whose return type is not the candidate itself
+        // fails to conform when the interface declares `-> Self`.
+        let sema = gather(
+            r#"
+            interface Cloner {
+                fn clone(self) -> Self;
+            }
+
+            struct Foo {
+                fn clone(self) -> i32 { 0 }
+            }
+
+            fn main() -> i32 { 0 }
+            "#,
+        );
+        let iid = iface_id(&sema, "Cloner");
+        let foo = struct_ty(&sema, "Foo");
+        let err = sema
+            .check_conforms(foo, iid, dummy_span())
+            .expect_err("should fail");
+        assert!(matches!(
+            err.kind,
+            ErrorKind::InterfaceMethodSignatureMismatch(_)
+        ));
+    }
+
+    #[test]
+    fn self_param_type_substitutes_candidate() {
+        // `Self` in a non-receiver parameter position binds to the candidate.
+        let sema = gather(
+            r#"
+            interface Combiner {
+                fn combine(self, other: Self) -> Self;
+            }
+
+            struct Foo {
+                fn combine(self, other: Foo) -> Foo { other }
+            }
+
+            fn main() -> i32 { 0 }
+            "#,
+        );
+        let iid = iface_id(&sema, "Combiner");
+        let foo = struct_ty(&sema, "Foo");
+        sema.check_conforms(foo, iid, dummy_span())
+            .expect("conforms");
+    }
+
+    #[test]
+    fn self_param_type_mismatch_rejected() {
+        let sema = gather(
+            r#"
+            interface Combiner {
+                fn combine(self, other: Self) -> Self;
+            }
+
+            struct Foo {
+                fn combine(self, other: i32) -> Foo { Foo {} }
+            }
+
+            fn main() -> i32 { 0 }
+            "#,
+        );
+        let iid = iface_id(&sema, "Combiner");
+        let foo = struct_ty(&sema, "Foo");
+        let err = sema
+            .check_conforms(foo, iid, dummy_span())
             .expect_err("should fail");
         assert!(matches!(
             err.kind,

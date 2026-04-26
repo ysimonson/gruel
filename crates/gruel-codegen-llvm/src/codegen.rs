@@ -2824,16 +2824,24 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
                 // Build the function type. First arg is `ptr` (the data
                 // pointer carrying the receiver). Subsequent args follow
-                // the interface's declared parameter types.
+                // the interface's declared parameter types. `Self` slots
+                // (ADR-0060) substitute to the interface type itself at the
+                // dynamic dispatch boundary.
+                let iface_self_ty = gruel_air::Type::new_interface(interface_id);
                 let mut llvm_param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
                     Vec::with_capacity(req.param_types.len() + 1);
                 llvm_param_types.push(ptr_ty.into());
                 for pty in req.param_types.iter() {
-                    if let Some(ll) = gruel_type_to_llvm_param(*pty, self.ctx, self.type_pool) {
+                    let concrete = pty.substitute_self(iface_self_ty);
+                    if let Some(ll) = gruel_type_to_llvm_param(concrete, self.ctx, self.type_pool) {
                         llvm_param_types.push(ll);
                     }
                 }
-                let ret_llvm = gruel_type_to_llvm(req.return_type, self.ctx, self.type_pool);
+                let ret_llvm = gruel_type_to_llvm(
+                    req.return_type.substitute_self(iface_self_ty),
+                    self.ctx,
+                    self.type_pool,
+                );
                 let fn_type = match ret_llvm {
                     Some(t) => t.fn_type(&llvm_param_types, false),
                     None => self.ctx.void_type().fn_type(&llvm_param_types, false),

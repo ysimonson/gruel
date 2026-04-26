@@ -471,19 +471,76 @@ pub struct InterfaceDef {
     pub file_id: gruel_span::FileId,
 }
 
+/// A type slot inside an interface method signature (ADR-0060).
+///
+/// Interface signatures may mention `Self` — the type that conforms to the
+/// interface — in parameter or return position. `IfaceTy` carries that
+/// distinction so `check_conforms` can substitute the candidate's concrete
+/// type at compare time. Concrete (non-`Self`) slots are resolved during
+/// `validate_interface_decls` via the regular `resolve_type` path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IfaceTy {
+    /// `Self` — substituted with the candidate type at conformance time.
+    SelfType,
+    /// A concrete type resolved against the surrounding scope.
+    Concrete(Type),
+}
+
+impl IfaceTy {
+    /// Substitute `Self` with the supplied candidate type, leaving concrete
+    /// slots unchanged.
+    pub fn substitute_self(&self, candidate: Type) -> Type {
+        match self {
+            IfaceTy::SelfType => candidate,
+            IfaceTy::Concrete(t) => *t,
+        }
+    }
+
+    /// Returns `true` if this slot is `Self`.
+    pub fn is_self(&self) -> bool {
+        matches!(self, IfaceTy::SelfType)
+    }
+}
+
+/// Receiver mode for an interface method (ADR-0060).
+///
+/// Mirrors the parameter modes available on regular methods. `check_conforms`
+/// requires the candidate method's receiver mode to match exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiverMode {
+    /// `self` — by-value receiver.
+    ByValue,
+    /// `inout self` — exclusive mutable borrow.
+    Inout,
+    /// `borrow self` — shared immutable borrow.
+    Borrow,
+}
+
+impl ReceiverMode {
+    /// Render the receiver token (e.g. `self`, `inout self`, `borrow self`).
+    pub fn render(&self) -> &'static str {
+        match self {
+            ReceiverMode::ByValue => "self",
+            ReceiverMode::Inout => "inout self",
+            ReceiverMode::Borrow => "borrow self",
+        }
+    }
+}
+
 /// A single required method signature inside an `InterfaceDef`.
 ///
-/// Phase 1 / 2 only carry `self` (by-value receiver). `inout self` and
-/// `borrow self` land alongside ADR-0008 / ADR-0013 receiver-mode work for
-/// methods generally.
+/// Per ADR-0060, parameter and return slots are `IfaceTy` so that `Self` can
+/// be substituted with the candidate at conformance check time.
 #[derive(Debug, Clone)]
 pub struct InterfaceMethodReq {
     /// Method name.
     pub name: String,
-    /// Resolved parameter types in declaration order (excluding `self`).
-    pub param_types: Vec<Type>,
-    /// Resolved return type.
-    pub return_type: Type,
+    /// Receiver mode (`self`, `inout self`, or `borrow self`).
+    pub receiver: ReceiverMode,
+    /// Resolved parameter slots in declaration order (excluding the receiver).
+    pub param_types: Vec<IfaceTy>,
+    /// Resolved return slot.
+    pub return_type: IfaceTy,
 }
 
 impl InterfaceDef {
