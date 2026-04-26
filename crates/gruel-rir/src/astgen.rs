@@ -996,9 +996,15 @@ impl<'a> AstGen<'a> {
                 // Generate a type constant instruction for type-as-value expressions
                 match &type_lit.type_expr {
                     TypeExpr::AnonymousStruct {
-                        fields, methods, ..
+                        directives,
+                        fields,
+                        methods,
+                        ..
                     } => {
                         // Generate an anonymous struct type instruction with methods
+                        let rir_directives = self.convert_directives(directives);
+                        let (directives_start, directives_len) =
+                            self.rir.add_directives(&rir_directives);
                         let field_decls: Vec<(Spur, Spur)> = fields
                             .iter()
                             .map(|f| {
@@ -1017,6 +1023,8 @@ impl<'a> AstGen<'a> {
 
                         self.rir.add_inst(Inst {
                             data: InstData::AnonStructType {
+                                directives_start,
+                                directives_len,
                                 fields_start,
                                 fields_len,
                                 methods_start,
@@ -1071,10 +1079,16 @@ impl<'a> AstGen<'a> {
                         })
                     }
                     TypeExpr::AnonymousEnum {
-                        variants, methods, ..
+                        directives,
+                        variants,
+                        methods,
+                        ..
                     } => {
                         // Generate an anonymous enum type instruction with methods
                         use gruel_parser::ast::EnumVariantKind;
+                        let rir_directives = self.convert_directives(directives);
+                        let (directives_start, directives_len) =
+                            self.rir.add_directives(&rir_directives);
                         let variant_decls: Vec<(Spur, Vec<Spur>, Vec<Spur>)> = variants
                             .iter()
                             .map(|v| {
@@ -1108,6 +1122,8 @@ impl<'a> AstGen<'a> {
 
                         self.rir.add_inst(Inst {
                             data: InstData::AnonEnumType {
+                                directives_start,
+                                directives_len,
                                 variants_start,
                                 variants_len,
                                 methods_start,
@@ -2998,6 +3014,7 @@ mod tests {
                 fields_len,
                 methods_start,
                 methods_len,
+                ..
             } => {
                 // Should have 2 fields (x and y)
                 let fields = rir.get_field_decls(*fields_start, *fields_len);

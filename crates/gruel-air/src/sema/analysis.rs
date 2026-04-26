@@ -794,6 +794,13 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         errors.push(e);
     }
 
+    // Surface any errors raised during anonymous-host derive expansion
+    // (ADR-0058). The comptime evaluator has an `Option` return type so
+    // it cannot propagate these via `?`; we collect them here.
+    for e in std::mem::take(&mut sema.pending_anon_derive_errors) {
+        errors.push(e);
+    }
+
     errors.into_result_with(output)
 }
 
@@ -1285,6 +1292,12 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
     // Run specialization pass to rewrite CallGeneric instructions to Call
     // and create specialized function bodies
     if let Err(e) = crate::specialize::specialize(&mut output, sema, &infer_ctx, sema.interner) {
+        errors.push(e);
+    }
+
+    // Surface anonymous-host derive expansion errors (ADR-0058) for the
+    // lazy path, mirroring the sequential path above.
+    for e in std::mem::take(&mut sema.pending_anon_derive_errors) {
         errors.push(e);
     }
 
@@ -2545,6 +2558,7 @@ impl<'a> Sema<'a> {
                 fields_len,
                 methods_start,
                 methods_len,
+                ..
             } => {
                 // Get the field declarations from the RIR
                 let field_decls = self.rir.get_field_decls(*fields_start, *fields_len);
@@ -2637,6 +2651,7 @@ impl<'a> Sema<'a> {
                 variants_len,
                 methods_start,
                 methods_len,
+                ..
             } => {
                 // Get the variant declarations from the RIR
                 let variant_decls = self
@@ -5152,6 +5167,8 @@ impl<'a> Sema<'a> {
                 fields_len,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             } => {
                 // Get the field declarations from the RIR
                 let field_decls = self.rir.get_field_decls(*fields_start, *fields_len);
@@ -5194,6 +5211,23 @@ impl<'a> Sema<'a> {
                         &HashMap::new(), // Empty value substitution (non-comptime)
                     )?;
                 }
+                // ADR-0058: splice `@derive(...)` directives on the anon
+                // struct expression. Runs only on the new-StructId path so
+                // identical parameterizations don't double-splice. Errors
+                // are converted to None so the comptime evaluator gives
+                // up on this value (matching the rest of the path).
+                if is_new
+                    && *directives_len > 0
+                    && let Some(struct_id) = struct_ty.as_struct()
+                    && let Err(e) = self.splice_anon_struct_derives(
+                        struct_id,
+                        *directives_start,
+                        *directives_len,
+                    )
+                {
+                    self.pending_anon_derive_errors.push(e);
+                    return None;
+                }
                 Some(ConstValue::Type(struct_ty))
             }
 
@@ -5221,6 +5255,8 @@ impl<'a> Sema<'a> {
                 variants_len,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             } => {
                 let variant_decls = self
                     .rir
@@ -5262,6 +5298,17 @@ impl<'a> Sema<'a> {
                         *methods_len,
                         &HashMap::new(),
                     );
+                }
+                // ADR-0058: splice `@derive(...)` on the anon enum
+                // expression for the non-substitution comptime path.
+                if is_new
+                    && *directives_len > 0
+                    && let TypeKind::Enum(enum_id) = enum_ty.kind()
+                    && let Err(e) =
+                        self.splice_anon_enum_derives(enum_id, *directives_start, *directives_len)
+                {
+                    self.pending_anon_derive_errors.push(e);
+                    return None;
                 }
 
                 Some(ConstValue::Type(enum_ty))
@@ -5592,6 +5639,8 @@ impl<'a> Sema<'a> {
                 fields_len,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             } => {
                 let field_decls = self.rir.get_field_decls(*fields_start, *fields_len);
 
@@ -5610,7 +5659,7 @@ impl<'a> Sema<'a> {
                 // Extract method signatures for structural equality comparison
                 let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
 
-                let (struct_ty, _is_new) =
+                let (struct_ty, is_new) =
                     self.find_or_create_anon_struct(&struct_fields, &method_sigs, value_subst);
 
                 // Register methods if present (requires preview feature)
@@ -5647,6 +5696,21 @@ impl<'a> Sema<'a> {
                         }
                     }
                 }
+                // ADR-0058: splice `@derive(...)` on the anon struct
+                // expression for parameterized comptime calls. Each fresh
+                // `StructId` (per parameterization) gets its own splice.
+                if is_new
+                    && *directives_len > 0
+                    && let Some(struct_id) = struct_ty.as_struct()
+                    && let Err(e) = self.splice_anon_struct_derives(
+                        struct_id,
+                        *directives_start,
+                        *directives_len,
+                    )
+                {
+                    self.pending_anon_derive_errors.push(e);
+                    return None;
+                }
                 Some(ConstValue::Type(struct_ty))
             }
 
@@ -5672,6 +5736,8 @@ impl<'a> Sema<'a> {
                 variants_len,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             } => {
                 let variant_decls = self
                     .rir
@@ -5714,6 +5780,18 @@ impl<'a> Sema<'a> {
                         *methods_len,
                         type_subst,
                     );
+                }
+                // ADR-0058: splice `@derive(...)` on the anon enum
+                // expression with substitution. Each fresh `EnumId` gets
+                // its own splice.
+                if is_new
+                    && *directives_len > 0
+                    && let TypeKind::Enum(enum_id) = enum_ty.kind()
+                    && let Err(e) =
+                        self.splice_anon_enum_derives(enum_id, *directives_start, *directives_len)
+                {
+                    self.pending_anon_derive_errors.push(e);
+                    return None;
                 }
 
                 Some(ConstValue::Type(enum_ty))

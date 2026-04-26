@@ -96,6 +96,7 @@ impl<'a> GatherOutput<'a> {
             enum_methods: HashMap::new(),
             derives: HashMap::new(),
             derive_bindings: Vec::new(),
+            pending_anon_derive_errors: Vec::new(),
             constants: self.constants,
             preview_features: self.preview_features,
             builtin_string_id: self.builtin_string_id,

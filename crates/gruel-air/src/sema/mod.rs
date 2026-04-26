@@ -112,6 +112,12 @@ pub struct Sema<'a> {
     /// (ADR-0058). Populated during directive resolution; consumed by the
     /// derive-expansion sub-phase.
     pub(crate) derive_bindings: Vec<DeriveBinding>,
+    /// Errors raised during anonymous-host derive expansion (ADR-0058).
+    /// The comptime interpreter returns `Option<...>` so it cannot
+    /// propagate these via `?`; we buffer them here and surface after
+    /// analysis so users still see actionable diagnostics for an
+    /// `@derive(...)` error on an anonymous struct/enum.
+    pub(crate) pending_anon_derive_errors: Vec<gruel_error::CompileError>,
     /// Constant table: maps const name symbol to const info
     pub(crate) constants: HashMap<Spur, ConstInfo>,
     /// Enabled preview features
@@ -209,6 +215,7 @@ impl<'a> Sema<'a> {
             enum_methods: HashMap::new(),
             derives: HashMap::new(),
             derive_bindings: Vec::new(),
+            pending_anon_derive_errors: Vec::new(),
             constants: HashMap::new(),
             preview_features,
             builtin_string_id: None,

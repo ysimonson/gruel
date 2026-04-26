@@ -407,6 +407,9 @@ pub enum TypeExpr {
     /// Used in comptime type construction (e.g., `fn Pair(comptime T: type) -> type { struct { first: T, second: T } }`)
     /// Methods can be included inside the struct definition (Zig-style).
     AnonymousStruct {
+        /// Directives applied to the struct expression (e.g., `@derive(...)`,
+        /// ADR-0058). Parsed before the `struct` keyword.
+        directives: Directives,
         /// Field declarations (name and type)
         fields: Vec<AnonStructField>,
         /// Method definitions inside the anonymous struct
@@ -417,6 +420,8 @@ pub enum TypeExpr {
     /// Used in comptime type construction (e.g., `fn Option(comptime T: type) -> type { enum { Some(T), None } }`)
     /// Methods can be included inside the enum definition (Zig-style).
     AnonymousEnum {
+        /// Directives applied to the enum expression (ADR-0058).
+        directives: Directives,
         /// Enum variants
         variants: Vec<EnumVariant>,
         /// Method definitions inside the anonymous enum

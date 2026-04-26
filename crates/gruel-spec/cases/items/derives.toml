@@ -407,3 +407,85 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# Phase 4 anon-host: a derive applied to an anonymous struct returned
+# from a comptime function lands as a callable method on the host.
+[[case]]
+name = "derive_splice_anon_struct"
+spec = ["4.14:105"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Tagger {
+    fn tag(self) -> i32 { 7 }
+}
+
+fn Pair(comptime T: type) -> type {
+    @derive(Tagger)
+    struct {
+        first: T,
+        second: T,
+    }
+}
+
+fn main() -> i32 {
+    let IntPair = Pair(i32);
+    let p: IntPair = IntPair { first: 0, second: 0 };
+    p.tag()
+}
+"""
+exit_code = 7
+
+# Phase 4 anon-host: each parameterization of an anonymous-host type
+# gets its own monomorphized splice; the derive is independent on
+# each fresh `StructId`.
+[[case]]
+name = "derive_splice_anon_struct_per_instantiation"
+spec = ["4.14:105"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Tagger {
+    fn tag(self) -> i32 { 11 }
+}
+
+fn FixedBuffer(comptime N: i32) -> type {
+    @derive(Tagger)
+    struct {
+        capacity: i32,
+    }
+}
+
+fn main() -> i32 {
+    let A = FixedBuffer(8);
+    let B = FixedBuffer(16);
+    let a: A = A { capacity: 0 };
+    let b: B = B { capacity: 0 };
+    a.tag() + b.tag()
+}
+"""
+exit_code = 22
+
+# Phase 4 anon-host: an unknown derive on an anonymous struct surfaces
+# the same diagnostic as the named-host case.
+[[case]]
+name = "derive_anon_unknown_name_rejected"
+spec = ["4.14:106"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+fn Buffer(comptime N: i32) -> type {
+    @derive(NotADerive)
+    struct {
+        capacity: i32,
+    }
+}
+
+fn main() -> i32 {
+    let B = Buffer(8);
+    let b: B = B { capacity: 0 };
+    b.capacity
+}
+"""
+compile_fail = true
+error_contains = "expected a `derive`"

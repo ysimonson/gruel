@@ -386,6 +386,7 @@ where
                 .ignore_then(anon_struct_fields)
                 .then_ignore(just(TokenKind::RBrace))
                 .map_with(|fields, e| TypeExpr::AnonymousStruct {
+                    directives: Directives::new(),
                     fields,
                     methods: vec![],
                     span: span_from_extra(e),
@@ -2037,22 +2038,25 @@ where
     // Methods inside anonymous structs follow the same syntax as impl block methods
     let anon_struct_method = anon_struct_method_parser(expr.clone());
 
-    let anon_struct_header: GruelParser<'src, I, (Vec<AnonStructField>, Vec<Method>)> =
-        just(TokenKind::Struct)
-            .ignore_then(just(TokenKind::LBrace))
-            .ignore_then(anon_struct_fields)
+    let anon_struct_header: GruelParser<'src, I, (Directives, Vec<AnonStructField>, Vec<Method>)> =
+        directives_parser()
+            .then_ignore(just(TokenKind::Struct))
+            .then_ignore(just(TokenKind::LBrace))
+            .then(anon_struct_fields)
             .then(
                 // Then parse methods (not comma-separated, each ends with })
                 anon_struct_method.repeated().collect::<Vec<_>>(),
             )
+            .map(|((directives, fields), methods)| (directives, fields, methods))
             .boxed();
 
     let anon_struct_type_expr = anon_struct_header
         .then_ignore(just(TokenKind::RBrace))
-        .map_with(|(fields, methods), e| {
+        .map_with(|(directives, fields, methods), e| {
             let span = span_from_extra(e);
             Expr::TypeLit(TypeLitExpr {
                 type_expr: TypeExpr::AnonymousStruct {
+                    directives,
                     fields,
                     methods,
                     span,
@@ -2089,18 +2093,20 @@ where
     //   fn Option(comptime T: type) -> type { enum { Some(T), None } }
     let anon_enum_method = anon_struct_method_parser(expr.clone());
 
-    let anon_enum_type_expr = just(TokenKind::Enum)
-        .ignore_then(just(TokenKind::LBrace))
-        .ignore_then(enum_variants_parser())
+    let anon_enum_type_expr = directives_parser()
+        .then_ignore(just(TokenKind::Enum))
+        .then_ignore(just(TokenKind::LBrace))
+        .then(enum_variants_parser())
         .then(
             // Then parse methods (not comma-separated, each ends with })
             anon_enum_method.repeated().collect::<Vec<_>>(),
         )
         .then_ignore(just(TokenKind::RBrace))
-        .map_with(|(variants, methods), e| {
+        .map_with(|((directives, variants), methods), e| {
             let span = span_from_extra(e);
             Expr::TypeLit(TypeLitExpr {
                 type_expr: TypeExpr::AnonymousEnum {
+                    directives,
                     variants,
                     methods,
                     span,

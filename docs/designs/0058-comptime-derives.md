@@ -179,23 +179,20 @@ Phases share the `comptime_derives` preview flag; stable when phase 6 lands.
   - Resolve `D` against `Sema::derives`; record the binding `(host_type, derive_id)` for the sub-phase. Error if `D` doesn't name a `derive` item.
   - Tests: parsing accepts the directive; resolution errors on a non-derive target.
 
-- [x] **Phase 4: Derive expansion (named hosts implemented; anonymous hosts deferred)**
+- [x] **Phase 4: Derive expansion (named and anonymous)**
 
-  Named-type call site is implemented and tested end-to-end: each
-  `@derive(D)` binding has its methods spliced into the host's method
-  list with `Self` bound to the host. The single splicing routine works
-  for both struct and enum hosts; cross-derive and derive-vs-inline
-  duplicates are rejected.
-
-  Anonymous-host expansion (`@derive(D)` on `struct { ... }` /
-  `enum { ... }` expressions inside comptime functions) is **deferred
-  to a follow-up**. It needs a parser-side change to collect
-  directives in front of anonymous-struct/enum expressions, an AST/RIR
-  shape that flows directives through the comptime interpreter, and a
-  hook into `find_or_create_anon_struct` to call the existing
-  `splice_derive_methods_into_struct` before the def is interned. The
-  shared splicing routine is already in place — the missing piece is
-  surface syntax + comptime plumbing.
+  Both call sites are implemented end-to-end. Named hosts (struct
+  declarations carrying `@derive(...)`) splice during a sub-phase
+  between field-type resolution and destructor / Copy validation;
+  each binding's methods are inserted into `Sema::methods` (or
+  `Sema::enum_methods`) with `Self` bound to the host. Anonymous
+  hosts (`@derive(...)` on `struct { ... }` / `enum { ... }`
+  expressions inside comptime functions) splice from inside the
+  comptime evaluator's anonymous-type construction path. Each fresh
+  `StructId` per parameterization gets its own splice; structural
+  dedup short-circuits identical parameterizations so methods aren't
+  double-spliced. The splicing routine itself is shared between both
+  call sites.
   - Factor splicing into a single routine `splice_derive_methods(derive_id, host_type) -> CompileResult<()>` that walks the derive's method list and inserts each into `Sema::methods` / `Sema::enum_methods` with `Self` bound to `host_type` and provenance recorded.
   - **Named-type call site.** Insert a new sub-phase after field-type resolution, before destructor/Copy validation. For each `(host_type, derive_id)` binding from phase 3, call the splicing routine.
   - **Anonymous-type call site.** Hook the comptime interpreter's anonymous-`StructDef`/`EnumDef` construction path: after the def is built but before it's interned in the type pool, walk the source expression's `@derive` directives and call the splicing routine. Structural dedup short-circuits on cache hit so methods aren't re-spliced.

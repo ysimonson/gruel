@@ -532,6 +532,125 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
+    /// Anonymous-host call site for ADR-0058: walk an anonymous-struct
+    /// expression's `@derive(...)` directives and splice each derive's
+    /// methods into the freshly-built host. Should be called exactly once
+    /// per new anonymous `StructId` (the structural-dedup path skips this).
+    pub(crate) fn splice_anon_struct_derives(
+        &mut self,
+        host_id: StructId,
+        directives_start: u32,
+        directives_len: u32,
+    ) -> CompileResult<()> {
+        if directives_len == 0 {
+            return Ok(());
+        }
+        use gruel_error::PreviewFeature;
+        let derive_dir_sym = self.interner.get_or_intern("derive");
+        let directives = self.rir.get_directives(directives_start, directives_len);
+        for d in directives {
+            if d.name != derive_dir_sym {
+                continue;
+            }
+            self.require_preview(
+                PreviewFeature::ComptimeDerives,
+                "`@derive(...)` directives",
+                d.span,
+            )?;
+            if d.args.len() != 1 {
+                return Err(CompileError::new(
+                    ErrorKind::DeriveNotADerive {
+                        name: "<wrong arg count>".to_string(),
+                        found: format!("{} arguments", d.args.len()),
+                    },
+                    d.span,
+                ));
+            }
+            let derive_name = d.args[0];
+            let name_str = self.interner.resolve(&derive_name).to_string();
+            if !self.derives.contains_key(&derive_name) {
+                let found = if self.structs.contains_key(&derive_name) {
+                    "struct"
+                } else if self.enums.contains_key(&derive_name) {
+                    "enum"
+                } else if self.interfaces.contains_key(&derive_name) {
+                    "interface"
+                } else if self.functions.contains_key(&derive_name) {
+                    "function"
+                } else {
+                    "unknown name"
+                };
+                return Err(CompileError::new(
+                    ErrorKind::DeriveNotADerive {
+                        name: name_str,
+                        found: found.to_string(),
+                    },
+                    d.span,
+                ));
+            }
+            self.splice_derive_methods_into_struct(derive_name, host_id, d.span)?;
+        }
+        Ok(())
+    }
+
+    /// Anonymous-enum mirror of `splice_anon_struct_derives`.
+    pub(crate) fn splice_anon_enum_derives(
+        &mut self,
+        host_id: EnumId,
+        directives_start: u32,
+        directives_len: u32,
+    ) -> CompileResult<()> {
+        if directives_len == 0 {
+            return Ok(());
+        }
+        use gruel_error::PreviewFeature;
+        let derive_dir_sym = self.interner.get_or_intern("derive");
+        let directives = self.rir.get_directives(directives_start, directives_len);
+        for d in directives {
+            if d.name != derive_dir_sym {
+                continue;
+            }
+            self.require_preview(
+                PreviewFeature::ComptimeDerives,
+                "`@derive(...)` directives",
+                d.span,
+            )?;
+            if d.args.len() != 1 {
+                return Err(CompileError::new(
+                    ErrorKind::DeriveNotADerive {
+                        name: "<wrong arg count>".to_string(),
+                        found: format!("{} arguments", d.args.len()),
+                    },
+                    d.span,
+                ));
+            }
+            let derive_name = d.args[0];
+            let name_str = self.interner.resolve(&derive_name).to_string();
+            if !self.derives.contains_key(&derive_name) {
+                let found = if self.structs.contains_key(&derive_name) {
+                    "struct"
+                } else if self.enums.contains_key(&derive_name) {
+                    "enum"
+                } else if self.interfaces.contains_key(&derive_name) {
+                    "interface"
+                } else if self.functions.contains_key(&derive_name) {
+                    "function"
+                } else {
+                    "unknown name"
+                };
+                return Err(CompileError::new(
+                    ErrorKind::DeriveNotADerive {
+                        name: name_str,
+                        found: found.to_string(),
+                    },
+                    d.span,
+                ));
+            }
+            self.splice_derive_methods_into_enum(derive_name, host_id, d.span)?;
+        }
+        Ok(())
+    }
+
     /// Splice every method of `derive_name` into the struct identified by
     /// `host_id`. `Self` is bound to the host struct's `Type`.
     pub(crate) fn splice_derive_methods_into_struct(

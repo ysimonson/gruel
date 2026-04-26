@@ -2020,22 +2020,38 @@ impl Rir {
                 type_name: *type_name,
             },
             InstData::AnonStructType {
+                directives_start,
+                directives_len,
                 fields_start,
                 fields_len,
                 methods_start,
                 methods_len,
             } => InstData::AnonStructType {
+                directives_start: if *directives_len == 0 {
+                    *directives_start
+                } else {
+                    *directives_start + extra_offset
+                },
+                directives_len: *directives_len,
                 fields_start: *fields_start + extra_offset,
                 fields_len: *fields_len,
                 methods_start: *methods_start + extra_offset,
                 methods_len: *methods_len,
             },
             InstData::AnonEnumType {
+                directives_start,
+                directives_len,
                 variants_start,
                 variants_len,
                 methods_start,
                 methods_len,
             } => InstData::AnonEnumType {
+                directives_start: if *directives_len == 0 {
+                    *directives_start
+                } else {
+                    *directives_start + extra_offset
+                },
+                directives_len: *directives_len,
                 variants_start: *variants_start + extra_offset,
                 variants_len: *variants_len,
                 methods_start: *methods_start + extra_offset,
@@ -2834,6 +2850,10 @@ pub enum InstData {
     /// Fields are stored in the extra array using add_field_decls/get_field_decls.
     /// Methods are stored as InstRefs to FnDecl instructions in the extra array.
     AnonStructType {
+        /// Index into extra data where directives start (ADR-0058 anon hosts).
+        directives_start: u32,
+        /// Number of directives.
+        directives_len: u32,
         /// Index into extra data where fields start
         fields_start: u32,
         /// Number of fields
@@ -2849,6 +2869,10 @@ pub enum InstData {
     /// Variants are stored in the extra array using add_enum_variant_decls/get_enum_variant_decls.
     /// Methods are stored as InstRefs to FnDecl instructions in the extra array.
     AnonEnumType {
+        /// Index into extra data where directives start (ADR-0058 anon hosts).
+        directives_start: u32,
+        /// Number of directives.
+        directives_len: u32,
         /// Index into extra data where variants start
         variants_start: u32,
         /// Number of variants
@@ -3683,6 +3707,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     fields_len,
                     methods_start,
                     methods_len,
+                    ..
                 } => {
                     write!(out, "struct {{ ").unwrap();
                     let fields = self.rir.get_field_decls(*fields_start, *fields_len);
@@ -3713,6 +3738,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     variants_len,
                     methods_start,
                     methods_len,
+                    ..
                 } => {
                     write!(out, "enum {{ ").unwrap();
                     let variants = self
