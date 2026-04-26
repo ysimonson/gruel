@@ -59,6 +59,7 @@ impl<'a> Sema<'a> {
             builtin_arch_id: self.builtin_arch_id,
             builtin_os_id: self.builtin_os_id,
             builtin_typekind_id: self.builtin_typekind_id,
+            builtin_ownership_id: self.builtin_ownership_id,
             target: Target::default(), // Will be overridden by caller if needed
             inference_ctx,
             known: KnownSymbols::new(self.interner),

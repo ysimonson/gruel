@@ -130,6 +130,8 @@ pub struct Sema<'a> {
     pub(crate) builtin_os_id: Option<EnumId>,
     /// EnumId of the synthetic TypeKind enum (for @type_info intrinsic).
     pub(crate) builtin_typekind_id: Option<EnumId>,
+    /// EnumId of the synthetic Ownership enum (for @ownership intrinsic).
+    pub(crate) builtin_ownership_id: Option<EnumId>,
     /// Pre-interned known symbols for fast comparison.
     pub(crate) known: KnownSymbols,
     /// Type intern pool for unified type representation (ADR-0024 Phase 1).
@@ -222,6 +224,7 @@ impl<'a> Sema<'a> {
             builtin_arch_id: None,
             builtin_os_id: None,
             builtin_typekind_id: None,
+            builtin_ownership_id: None,
             known: KnownSymbols::new(interner),
             type_pool: TypeInternPool::new(),
             module_registry: crate::sema_context::ModuleRegistry::new(),

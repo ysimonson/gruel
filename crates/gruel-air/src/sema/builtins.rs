@@ -101,6 +101,8 @@ impl<'a> Sema<'a> {
                 self.builtin_os_id = Some(enum_id);
             } else if builtin_enum.name == "TypeKind" {
                 self.builtin_typekind_id = Some(enum_id);
+            } else if builtin_enum.name == "Ownership" {
+                self.builtin_ownership_id = Some(enum_id);
             }
         }
     }
@@ -181,6 +183,20 @@ impl<'a> Sema<'a> {
             }
             // Only struct types can be linear
             _ => false,
+        }
+    }
+
+    /// Variant index of the `Ownership` builtin enum classifying `ty`.
+    ///
+    /// Mirrors the `Ownership` variant order in `gruel-builtins`:
+    /// `Copy` = 0, `Affine` = 1, `Linear` = 2.
+    pub(crate) fn ownership_variant_index(&self, ty: Type) -> u32 {
+        if self.is_type_linear(ty) {
+            2
+        } else if self.is_type_copy(ty) {
+            0
+        } else {
+            1
         }
     }
 }

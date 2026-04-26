@@ -810,7 +810,7 @@ impl<'a> ConstraintGenerator<'a> {
                 }
             }
 
-            // Type intrinsic (@size_of, @align_of, @type_name, @type_info)
+            // Type intrinsic (@size_of, @align_of, @type_name, @type_info, @ownership)
             InstData::TypeIntrinsic { name, type_arg: _ } => {
                 let intrinsic_name = self.interner.resolve(name);
                 match lookup_by_name(intrinsic_name).map(|d| d.id) {
@@ -823,6 +823,18 @@ impl<'a> ConstraintGenerator<'a> {
                     Some(IntrinsicId::SizeOf) | Some(IntrinsicId::AlignOf) => {
                         // @size_of / @align_of return `usize` (ADR-0054).
                         InferType::Concrete(Type::USIZE)
+                    }
+                    Some(IntrinsicId::Ownership) => {
+                        // @ownership returns the built-in `Ownership` enum.
+                        if let Some(ownership_spur) = self.interner.get("Ownership") {
+                            if let Some(&ownership_ty) = self.enums.get(&ownership_spur) {
+                                InferType::Concrete(ownership_ty)
+                            } else {
+                                InferType::Concrete(Type::ERROR)
+                            }
+                        } else {
+                            InferType::Concrete(Type::ERROR)
+                        }
                     }
                     // Fallback for unknown names.
                     _ => InferType::Concrete(Type::I32),

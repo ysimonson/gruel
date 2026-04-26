@@ -70,6 +70,8 @@ pub struct GatherOutput<'a> {
     pub builtin_os_id: Option<EnumId>,
     /// EnumId of the synthetic TypeKind enum (for @type_info intrinsic).
     pub builtin_typekind_id: Option<EnumId>,
+    /// EnumId of the synthetic Ownership enum (for @ownership intrinsic).
+    pub builtin_ownership_id: Option<EnumId>,
     /// Type intern pool (ADR-0024 Phase 1).
     pub type_pool: TypeInternPool,
     /// Arena storage for function/method parameter data.
@@ -103,6 +105,7 @@ impl<'a> GatherOutput<'a> {
             builtin_arch_id: self.builtin_arch_id,
             builtin_os_id: self.builtin_os_id,
             builtin_typekind_id: self.builtin_typekind_id,
+            builtin_ownership_id: self.builtin_ownership_id,
             known: KnownSymbols::new(self.interner),
             type_pool: self.type_pool,
             module_registry: crate::sema_context::ModuleRegistry::new(),

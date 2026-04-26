@@ -4093,6 +4093,7 @@ impl<'a> Sema<'a> {
             | IntrinsicId::AlignOf
             | IntrinsicId::TypeName
             | IntrinsicId::TypeInfo
+            | IntrinsicId::Ownership
             | IntrinsicId::Range => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
@@ -8359,6 +8360,16 @@ impl<'a> Sema<'a> {
                     }
                     Some(IntrinsicId::TypeName) => self.evaluate_comptime_type_name(ty, inst_span),
                     Some(IntrinsicId::TypeInfo) => self.evaluate_comptime_type_info(ty, inst_span),
+                    Some(IntrinsicId::Ownership) => {
+                        let enum_id = self
+                            .builtin_ownership_id
+                            .expect("Ownership enum not injected - internal compiler error");
+                        let variant_idx = self.ownership_variant_index(ty);
+                        Ok(ConstValue::EnumVariant {
+                            enum_id,
+                            variant_idx,
+                        })
+                    }
                     _ => Err(not_const(inst_span)),
                 }
             }

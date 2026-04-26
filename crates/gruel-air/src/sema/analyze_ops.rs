@@ -26,6 +26,7 @@ use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
     WarningKind,
 };
+use gruel_intrinsics::IntrinsicId;
 use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirDestructureField, RirParamMode, RirPattern,
     RirPatternBinding,
@@ -5748,7 +5749,7 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Analyze a type intrinsic (@size_of, @align_of, @type_name, @type_info).
+    /// Analyze a type intrinsic (@size_of, @align_of, @type_name, @type_info, @ownership).
     fn analyze_type_intrinsic(
         &mut self,
         air: &mut Air,
@@ -5770,32 +5771,48 @@ impl<'a> Sema<'a> {
 
         let ty = self.resolve_type(type_arg, span)?;
 
-        // Calculate the value based on which intrinsic
-        let value: u64 = match intrinsic_name {
-            "size_of" => {
-                // Calculate size in bytes (slot count * 8)
+        match self.known.intrinsic_id(name) {
+            Some(IntrinsicId::SizeOf) => {
                 let slot_count = self.abi_slot_count(ty);
-                (slot_count * 8) as u64
-            }
-            "align_of" => {
-                // Zero-sized types have 1-byte alignment, others have 8-byte
-                let slot_count = self.abi_slot_count(ty);
-                if slot_count == 0 { 1u64 } else { 8u64 }
-            }
-            _ => {
-                return Err(CompileError::new(
-                    ErrorKind::UnknownIntrinsic(intrinsic_name.to_string()),
+                let value = (slot_count * 8) as u64;
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Const(value),
+                    ty: Type::USIZE,
                     span,
-                ));
+                });
+                Ok(AnalysisResult::new(air_ref, Type::USIZE))
             }
-        };
-
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Const(value),
-            ty: Type::USIZE,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, Type::USIZE))
+            Some(IntrinsicId::AlignOf) => {
+                let slot_count = self.abi_slot_count(ty);
+                let value = if slot_count == 0 { 1u64 } else { 8u64 };
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Const(value),
+                    ty: Type::USIZE,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, Type::USIZE))
+            }
+            Some(IntrinsicId::Ownership) => {
+                let enum_id = self
+                    .builtin_ownership_id
+                    .expect("Ownership enum not injected - internal compiler error");
+                let variant_index = self.ownership_variant_index(ty);
+                let result_type = Type::new_enum(enum_id);
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::EnumVariant {
+                        enum_id,
+                        variant_index,
+                    },
+                    ty: result_type,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, result_type))
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::UnknownIntrinsic(intrinsic_name.to_string()),
+                span,
+            )),
+        }
     }
 
     // ========================================================================

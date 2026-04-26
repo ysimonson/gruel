@@ -1492,3 +1492,144 @@ fn main() -> i32 {
 }
 """
 exit_code = 20
+
+# =============================================================================
+# @ownership Intrinsic
+# =============================================================================
+
+[[case]]
+name = "ownership_primitive_is_copy"
+spec = ["4.13:108", "4.13:109", "4.13:110", "4.13:111"]
+source = """
+fn main() -> i32 {
+    match @ownership(i32) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 2,
+        Ownership::Linear => 3,
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "ownership_bool_is_copy"
+spec = ["4.13:111"]
+source = """
+fn main() -> i32 {
+    match @ownership(bool) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 2,
+        Ownership::Linear => 3,
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "ownership_default_struct_is_affine"
+spec = ["4.13:108", "4.13:111"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    match @ownership(Point) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 2,
+        Ownership::Linear => 3,
+    }
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "ownership_copy_struct_is_copy"
+spec = ["4.13:111"]
+source = """
+@copy
+struct Pair { x: i32, y: i32 }
+
+fn main() -> i32 {
+    match @ownership(Pair) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 2,
+        Ownership::Linear => 3,
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "ownership_linear_struct_is_linear"
+spec = ["4.13:111"]
+source = """
+linear struct Token { id: i32 }
+
+fn consume(t: Token) -> i32 {
+    let Token { id } = t;
+    id
+}
+
+fn main() -> i32 {
+    let kind = match @ownership(Token) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 2,
+        Ownership::Linear => 3,
+    };
+    let t = Token { id: 0 };
+    consume(t);
+    kind
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "ownership_enum_is_copy"
+spec = ["4.13:111"]
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    match @ownership(Color) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 2,
+        Ownership::Linear => 3,
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "ownership_returns_ownership_enum_type"
+spec = ["4.13:110"]
+source = """
+fn classify(o: Ownership) -> i32 {
+    match o {
+        Ownership::Copy => 10,
+        Ownership::Affine => 20,
+        Ownership::Linear => 30,
+    }
+}
+
+fn main() -> i32 {
+    classify(@ownership(i32))
+}
+"""
+exit_code = 10
+
+[[case]]
+name = "ownership_compile_time_constant"
+spec = ["4.13:112"]
+source = """
+struct Data { value: i32 }
+
+fn main() -> i32 {
+    // Used in a comptime context: the value must be available at compile time.
+    let kind = @ownership(Data);
+    match kind {
+        Ownership::Copy => 1,
+        Ownership::Affine => 2,
+        Ownership::Linear => 3,
+    }
+}
+"""
+exit_code = 2

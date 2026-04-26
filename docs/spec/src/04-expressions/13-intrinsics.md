@@ -213,6 +213,60 @@ fn main() -> i32 {
 }
 ```
 
+## `@ownership`
+
+{{ rule(id="4.13:108", cat="normative") }}
+
+The `@ownership` intrinsic classifies the ownership posture of a type (see ADR-0008).
+
+{{ rule(id="4.13:109", cat="normative") }}
+
+`@ownership` accepts exactly one argument, which **MUST** be a type.
+
+{{ rule(id="4.13:110", cat="normative") }}
+
+The return type of `@ownership` is the built-in enum `Ownership`, which has three variants:
+
+| Variant | Meaning |
+|---------|---------|
+| `Ownership::Copy` | Values may be implicitly duplicated by bitwise copy. |
+| `Ownership::Affine` | Values may be used at most once and are implicitly dropped if not consumed. This is the default for user-defined structs. |
+| `Ownership::Linear` | Values must be explicitly consumed; implicit drop is a compile-time error. |
+
+{{ rule(id="4.13:111", cat="normative") }}
+
+The variants are mutually exclusive: every type has exactly one ownership posture. A `linear` struct is `Linear`; a struct annotated with `@copy` is `Copy`; primitives, enums, pointers, and arrays of `Copy` elements are `Copy`; all other struct types are `Affine`.
+
+{{ rule(id="4.13:112", cat="normative") }}
+
+The value returned by `@ownership` is determined at compile time.
+
+{{ rule(id="4.13:113") }}
+
+```gruel
+fn main() -> i32 {
+    match @ownership(i32) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 2,
+        Ownership::Linear => 3,
+    }  // 1
+}
+```
+
+{{ rule(id="4.13:114") }}
+
+```gruel
+struct Point { x: i32, y: i32 }  // Affine by default
+
+fn main() -> i32 {
+    match @ownership(Point) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 2,
+        Ownership::Linear => 3,
+    }  // 2
+}
+```
+
 ## `@intCast`
 
 {{ rule(id="4.13:24", cat="normative") }}

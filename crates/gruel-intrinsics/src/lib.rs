@@ -49,6 +49,7 @@ pub enum IntrinsicId {
     AlignOf,
     TypeName,
     TypeInfo,
+    Ownership,
     Field,
     Import,
 
@@ -357,6 +358,22 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         summary: "Reflective info about a type.",
         description: "`@type_info(T)` returns a comptime struct describing `T` (kind, fields, variants, ...).",
         examples: &["@type_info(MyStruct)"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::Ownership,
+        name: "ownership",
+        kind: IntrinsicKind::Type,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Ownership posture of a type (`Copy`, `Affine`, or `Linear`).",
+        description: "`@ownership(T)` returns a variant of the built-in `Ownership` enum classifying `T`'s ownership posture (see ADR-0008): `Copy` if values can be implicitly duplicated, `Linear` if values must be explicitly consumed, or `Affine` otherwise (move-once with implicit drop). Evaluated at compile time.",
+        examples: &[
+            "@ownership(i32) // Ownership::Copy",
+            "@ownership(String) // Ownership::Affine",
+            "match @ownership(T) { Ownership::Copy => ..., Ownership::Affine => ..., Ownership::Linear => ... }",
+        ],
     },
     IntrinsicDef {
         id: IntrinsicId::Field,
@@ -743,6 +760,7 @@ mod tests {
                 | IntrinsicId::AlignOf
                 | IntrinsicId::TypeName
                 | IntrinsicId::TypeInfo
+                | IntrinsicId::Ownership
                 | IntrinsicId::Field
                 | IntrinsicId::Import
                 | IntrinsicId::TargetArch
@@ -783,16 +801,17 @@ mod tests {
     #[test]
     fn type_intrinsics_match_legacy_list() {
         // The legacy TYPE_INTRINSICS constant in gruel-rir/astgen.rs lists:
-        // size_of, align_of, type_name, type_info.
+        // size_of, align_of, type_name, type_info, ownership.
         // The registry must match exactly.
         let from_registry: HashSet<&'static str> = INTRINSICS
             .iter()
             .filter(|d| d.kind == IntrinsicKind::Type)
             .map(|d| d.name)
             .collect();
-        let expected: HashSet<&'static str> = ["size_of", "align_of", "type_name", "type_info"]
-            .into_iter()
-            .collect();
+        let expected: HashSet<&'static str> =
+            ["size_of", "align_of", "type_name", "type_info", "ownership"]
+                .into_iter()
+                .collect();
         assert_eq!(from_registry, expected);
     }
 

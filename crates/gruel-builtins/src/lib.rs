@@ -548,11 +548,27 @@ pub static TYPEKIND_ENUM: BuiltinEnumDef = BuiltinEnumDef {
     variants: &["Struct", "Enum", "Int", "Bool", "Unit", "Never", "Array"],
 };
 
+/// The built-in `Ownership` enum classifying a type's ownership posture.
+///
+/// Variants (per ADR-0008):
+/// - `Copy` (index 0): values may be implicitly duplicated by bitwise copy
+/// - `Affine` (index 1): values may be used at most once and are implicitly
+///   dropped if not consumed (the default for user-defined structs)
+/// - `Linear` (index 2): values must be explicitly consumed; implicit drop is
+///   a compile-time error
+///
+/// Returned by the `@ownership(T)` intrinsic.
+pub static OWNERSHIP_ENUM: BuiltinEnumDef = BuiltinEnumDef {
+    name: "Ownership",
+    variants: &["Copy", "Affine", "Linear"],
+};
+
 /// All built-in enums.
 ///
 /// The compiler iterates over this to inject synthetic enums before
 /// processing user code.
-pub static BUILTIN_ENUMS: &[&BuiltinEnumDef] = &[&ARCH_ENUM, &OS_ENUM, &TYPEKIND_ENUM];
+pub static BUILTIN_ENUMS: &[&BuiltinEnumDef] =
+    &[&ARCH_ENUM, &OS_ENUM, &TYPEKIND_ENUM, &OWNERSHIP_ENUM];
 
 /// Look up a built-in enum by name.
 pub fn get_builtin_enum(name: &str) -> Option<&'static BuiltinEnumDef> {
@@ -732,11 +748,12 @@ mod tests {
         assert!(is_reserved_enum_name("Arch"));
         assert!(is_reserved_enum_name("Os"));
         assert!(is_reserved_enum_name("TypeKind"));
+        assert!(is_reserved_enum_name("Ownership"));
         assert!(!is_reserved_enum_name("MyEnum"));
     }
 
     #[test]
     fn test_builtin_enums_count() {
-        assert_eq!(BUILTIN_ENUMS.len(), 3);
+        assert_eq!(BUILTIN_ENUMS.len(), 4);
     }
 }

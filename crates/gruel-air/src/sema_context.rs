@@ -211,6 +211,8 @@ pub struct SemaContext<'a> {
     pub builtin_os_id: Option<EnumId>,
     /// EnumId of the synthetic TypeKind enum (for @type_info intrinsic).
     pub builtin_typekind_id: Option<EnumId>,
+    /// EnumId of the synthetic Ownership enum (for @ownership intrinsic).
+    pub builtin_ownership_id: Option<EnumId>,
     /// Compilation target (architecture + OS).
     pub target: gruel_target::Target,
     /// Pre-computed inference context for HM type inference.

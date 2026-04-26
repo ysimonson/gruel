@@ -994,12 +994,12 @@ mod tests {
 
         // 3 structs: String (builtin) + A + B
         assert_eq!(stats.struct_count, 3);
-        // 4 enums: Arch (builtin) + Os (builtin) + TypeKind (builtin) + E
-        assert_eq!(stats.enum_count, 4);
+        // 5 enums: Arch (builtin) + Os (builtin) + TypeKind (builtin) + Ownership (builtin) + E
+        assert_eq!(stats.enum_count, 5);
         // No arrays in Phase 1
         assert_eq!(stats.array_count, 0);
-        // Total: 7 composite types
-        assert_eq!(stats.total, 7);
+        // Total: 8 composite types
+        assert_eq!(stats.total, 8);
     }
 
     #[test]

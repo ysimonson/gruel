@@ -24,6 +24,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@align_of` | type | Compile-time Reflection | — | — | Alignment of a type in bytes. |
 | `@type_name` | type | Compile-time Reflection | — | — | Name of a type as a comptime string. |
 | `@type_info` | type | Compile-time Reflection | — | — | Reflective info about a type. |
+| `@ownership` | type | Compile-time Reflection | — | — | Ownership posture of a type (`Copy`, `Affine`, or `Linear`). |
 | `@field` | expr | Compile-time Reflection | — | — | Access a field by comptime-known name. |
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
 | `@target_arch` | expr | Target Platform | — | — | Compile target CPU architecture. |
@@ -235,6 +236,25 @@ let r = @random_u64();
 
 ```gruel
 @type_info(MyStruct)
+```
+
+### `@ownership`
+
+`@ownership(T)` returns a variant of the built-in `Ownership` enum classifying `T`'s ownership posture (see ADR-0008): `Copy` if values can be implicitly duplicated, `Linear` if values must be explicitly consumed, or `Affine` otherwise (move-once with implicit drop). Evaluated at compile time.
+
+
+**Examples:**
+
+```gruel
+@ownership(i32) // Ownership::Copy
+```
+
+```gruel
+@ownership(String) // Ownership::Affine
+```
+
+```gruel
+match @ownership(T) { Ownership::Copy => ..., Ownership::Affine => ..., Ownership::Linear => ... }
 ```
 
 ### `@field`
