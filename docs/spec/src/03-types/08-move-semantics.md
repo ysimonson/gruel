@@ -41,26 +41,30 @@ fn main() -> i32 {
 }
 ```
 
-## The `@copy` Directive
+## The `@derive(Copy)` Directive
 
 {{ rule(id="3.8:14", cat="normative") }}
 
-A struct type **MAY** be declared as a Copy type using the `@copy` directive before the struct definition.
+A struct type **MAY** be declared as a Copy type using the `@derive(Copy)`
+directive before the struct definition (ADR-0059). `Copy` is a
+compiler-recognized structural interface (see §6.5) whose method shape is
+`fn copy(borrow self) -> Self`.
 
 {{ rule(id="3.8:15", cat="syntax") }}
 
 ```ebnf
-copy_struct = "@copy" struct_def ;
+copy_struct = "@derive(Copy)" struct_def ;
 ```
 
 {{ rule(id="3.8:16", cat="normative") }}
 
-A struct marked with `@copy` is a Copy type. Using a `@copy` struct value does not consume it; the value is implicitly duplicated.
+A struct that conforms to `Copy` is a Copy type. Using a Copy struct value
+does not consume it; the value is implicitly duplicated.
 
 {{ rule(id="3.8:17", cat="example") }}
 
 ```gruel
-@copy
+@derive(Copy)
 struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
@@ -73,29 +77,33 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:18", cat="legality-rule") }}
 
-A `@copy` struct **MUST** contain only fields that are themselves Copy types. It is a compile-time error to mark a struct as `@copy` if any of its fields are move types.
+A struct marked with `@derive(Copy)` **MUST** contain only fields that are
+themselves Copy types. It is a compile-time error if any field has a type
+that does not conform to `Copy`.
 
 {{ rule(id="3.8:19", cat="example") }}
 
 ```gruel
-struct Inner { value: i32 }  // move type (no @copy)
+struct Inner { value: i32 }  // move type (no @derive(Copy))
 
-@copy
+@derive(Copy)
 struct Outer { inner: Inner }  // ERROR: field 'inner' has non-Copy type 'Inner'
 ```
 
 {{ rule(id="3.8:20", cat="normative") }}
 
-A `@copy` struct **MAY** contain fields of primitive Copy types (integers, booleans, unit), enum types, arrays of Copy types, or other `@copy` struct types.
+A `@derive(Copy)` struct **MAY** contain fields of primitive Copy types
+(integers, booleans, unit), enum types, arrays of Copy types, or other
+`@derive(Copy)` struct types.
 
 {{ rule(id="3.8:21", cat="example") }}
 
 ```gruel
-@copy
+@derive(Copy)
 struct Point { x: i32, y: i32 }
 
-@copy
-struct Rect { top_left: Point, bottom_right: Point }  // OK: Point is @copy
+@derive(Copy)
+struct Rect { top_left: Point, bottom_right: Point }  // OK: Point is Copy
 
 fn main() -> i32 {
     let r = Rect {

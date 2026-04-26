@@ -101,6 +101,7 @@ impl ErrorCode {
     pub const DUPLICATE_METHOD: Self = Self(410);
     pub const DERIVE_DIRECT_FIELD_ACCESS: Self = Self(440);
     pub const DERIVE_NOT_A_DERIVE: Self = Self(441);
+    pub const DEPRECATED_DIRECTIVE: Self = Self(442);
     pub const UNDEFINED_METHOD: Self = Self(411);
     pub const UNDEFINED_ASSOC_FN: Self = Self(412);
     pub const METHOD_CALL_ON_NON_STRUCT: Self = Self(413);
@@ -894,8 +895,8 @@ pub enum ErrorKind {
     /// Anonymous enum with no variants is not allowed
     #[error("anonymous enum must have at least one variant")]
     EmptyAnonEnum,
-    /// @copy struct contains a field with non-Copy type
-    #[error("@copy struct '{struct_name}' has field '{field_name}' with non-Copy type '{field_type}'", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
+    /// @derive(Copy) struct contains a field with non-Copy type
+    #[error("@derive(Copy) struct '{struct_name}' has field '{field_name}' with non-Copy type '{field_type}'", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
     CopyStructNonCopyField(Box<CopyStructNonCopyFieldError>),
     /// User-defined type collides with a built-in type name
     #[error("cannot define type `{type_name}`: name is reserved for built-in type")]
@@ -906,9 +907,12 @@ pub enum ErrorKind {
     /// Linear value was not consumed before going out of scope
     #[error("linear value '{0}' must be consumed but was dropped")]
     LinearValueNotConsumed(String),
-    /// Linear struct cannot be marked @copy
-    #[error("linear struct '{0}' cannot be marked @copy")]
+    /// Linear struct cannot derive Copy
+    #[error("linear struct '{0}' cannot be marked `@derive(Copy)`")]
     LinearStructCopy(String),
+    /// A directive that has been retired (ADR-0059).
+    #[error("the `@{name}` directive is no longer supported; use `{replacement}` instead")]
+    DeprecatedDirective { name: String, replacement: String },
     /// @handle struct missing required .handle() method
     #[error("struct '{struct_name}' is marked @handle but has no `handle` method")]
     HandleStructMissingMethod { struct_name: String },
@@ -1222,6 +1226,7 @@ impl ErrorKind {
             ErrorKind::DuplicateTypeDefinition { .. } => ErrorCode::DUPLICATE_TYPE_DEFINITION,
             ErrorKind::LinearValueNotConsumed(_) => ErrorCode::LINEAR_VALUE_NOT_CONSUMED,
             ErrorKind::LinearStructCopy(_) => ErrorCode::LINEAR_STRUCT_COPY,
+            ErrorKind::DeprecatedDirective { .. } => ErrorCode::DEPRECATED_DIRECTIVE,
             ErrorKind::HandleStructMissingMethod { .. } => ErrorCode::HANDLE_STRUCT_MISSING_METHOD,
             ErrorKind::HandleMethodWrongSignature { .. } => {
                 ErrorCode::HANDLE_METHOD_WRONG_SIGNATURE

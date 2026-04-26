@@ -102,7 +102,7 @@ The current implementation already returns these values via `is_type_copy` / `is
   - Re-route `is_type_copy(ty)` and `ownership_variant_index(ty)` through interface conformance. `is_type_linear` continues to read the keyword flag.
   - **Testable**: `comptime T: Copy` accepts `i32` / `[i32; 4]` / `(i32, bool)`; rejects `String`; `@ownership` returns the same answers as before.
 
-- [ ] **Phase 3: Codemod and remove `@copy`.**
+- [x] **Phase 3: Codemod and remove `@copy`.**
   - Search-and-replace `@copy\nstruct` → `@derive(Copy)\nstruct` across the test corpus, the spec, and any in-tree examples.
   - Remove the `@copy` directive recognition in sema. A user who still writes `@copy` gets a migration error pointing at `@derive(Copy)`.
   - Update spec §3.8 to drop the `@copy` subsection and document `@derive(Copy)` in its place.

@@ -498,8 +498,8 @@ mod tests {
     fn test_struct_field_type_resolution() {
         // Struct with field of another struct type should resolve correctly
         let output = compile_to_air(
-            "@copy struct Inner { x: i32 }
-             @copy struct Outer { inner: Inner }
+            "@derive(Copy) struct Inner { x: i32 }
+             @derive(Copy) struct Outer { inner: Inner }
              fn main() -> i32 {
                 let o = Outer { inner: Inner { x: 42 } };
                 o.inner.x
@@ -512,9 +512,9 @@ mod tests {
 
     #[test]
     fn test_copy_struct_with_copy_fields() {
-        // @copy struct with only Copy fields should compile
+        // @derive(Copy) struct with only Copy fields should compile
         let output = compile_to_air(
-            "@copy struct Point { x: i32, y: i32 }
+            "@derive(Copy) struct Point { x: i32, y: i32 }
              fn main() -> i32 {
                 let p = Point { x: 1, y: 2 };
                 let q = p;  // Copy, not move
@@ -535,10 +535,10 @@ mod tests {
 
     #[test]
     fn test_copy_struct_with_non_copy_field_rejected() {
-        // @copy struct with non-copy field should error
+        // @derive(Copy) struct with non-copy field should error
         let result = compile_to_air(
             "struct NonCopy { x: i32 }
-             @copy struct Wrapper { inner: NonCopy }
+             @derive(Copy) struct Wrapper { inner: NonCopy }
              fn main() -> i32 { 0 }",
         );
 
@@ -699,7 +699,7 @@ mod tests {
     fn test_copy_type_not_moved() {
         // Copy types should not be moved, allowing multiple uses
         let output = compile_to_air(
-            "@copy struct Point { x: i32, y: i32 }
+            "@derive(Copy) struct Point { x: i32, y: i32 }
              fn use_point(p: Point) -> i32 { p.x }
              fn main() -> i32 {
                  let p = Point { x: 1, y: 2 };
@@ -969,7 +969,7 @@ mod tests {
     #[test]
     fn test_type_pool_copy_struct() {
         let sema = gather_declarations_for_testing(
-            "@copy
+            "@derive(Copy)
              struct Data { value: i32 }
              fn main() -> i32 { 0 }",
         );
@@ -978,7 +978,7 @@ mod tests {
         let pool_data = sema.type_pool.get_struct_by_name(data_name).unwrap();
         let pool_def = sema.type_pool.get_struct_def(pool_data).unwrap();
 
-        assert!(pool_def.is_copy, "Data should be marked as @copy");
+        assert!(pool_def.is_copy, "Data should be marked as @derive(Copy)");
     }
 
     #[test]
@@ -1008,7 +1008,7 @@ mod tests {
         let sema = gather_declarations_for_testing(
             "struct Point { x: i32, y: i32 }
              struct Empty {}
-             @copy struct Value { v: bool }
+             @derive(Copy) struct Value { v: bool }
              enum Status { Ok, Error }
              enum Direction { Up, Down, Left, Right }
              fn main() -> i32 { 0 }",

@@ -848,7 +848,7 @@ error_contains = "must take `self`"
 name = "inline_drop_on_copy_type_error"
 spec = ["3.9:36"]
 source = """
-@copy
+@derive(Copy)
 struct Pt {
     x: i32,
 
@@ -858,7 +858,7 @@ struct Pt {
 fn main() -> i32 { 0 }
 """
 compile_fail = true
-error_contains = "@copy"
+error_contains = "@derive(Copy)"
 
 [[case]]
 name = "inline_drop_on_linear_type_error"

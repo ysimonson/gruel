@@ -138,18 +138,14 @@ impl<'a> Sema<'a> {
             enum_method_sigs,
         }
     }
-    /// Check if a directive list contains the @copy directive *or* a
-    /// `@derive(Copy)` directive. ADR-0059 reframes `@copy` as
-    /// `@derive(Copy)`; both spellings set `StructDef::is_copy` and run the
-    /// same field-Copy validation.
+    /// Check if a directive list contains `@derive(Copy)`. ADR-0059 reframes
+    /// `@copy` as `@derive(Copy)`; the bare `@copy` directive is no longer
+    /// recognized (callers should run `validate_no_copy_directive` to surface
+    /// a migration error instead of silently treating `@copy` as a no-op).
     pub(crate) fn has_copy_directive(&self, directives: &[RirDirective]) -> bool {
-        let copy_sym = self.interner.get("copy");
         let derive_sym = self.interner.get("derive");
         let copy_iface_sym = self.interner.get("Copy");
         for directive in directives {
-            if Some(directive.name) == copy_sym {
-                return true;
-            }
             if Some(directive.name) == derive_sym
                 && let Some(copy_iface) = copy_iface_sym
                 && directive.args.contains(&copy_iface)
@@ -158,6 +154,29 @@ impl<'a> Sema<'a> {
             }
         }
         false
+    }
+
+    /// Reject the legacy `@copy` directive with a migration error. ADR-0059
+    /// retired `@copy` in favor of `@derive(Copy)`; the directive parser is
+    /// generic so we surface the migration here.
+    pub(crate) fn validate_no_copy_directive(
+        &self,
+        directives: &[RirDirective],
+        _span: Span,
+    ) -> CompileResult<()> {
+        let copy_sym = self.interner.get("copy");
+        for directive in directives {
+            if Some(directive.name) == copy_sym {
+                return Err(CompileError::new(
+                    ErrorKind::DeprecatedDirective {
+                        name: "copy".to_string(),
+                        replacement: "@derive(Copy)".to_string(),
+                    },
+                    directive.span,
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Check if a directive list contains the @handle directive
@@ -443,6 +462,7 @@ impl<'a> Sema<'a> {
                     }
 
                     let directives = self.rir.get_directives(*directives_start, *directives_len);
+                    self.validate_no_copy_directive(&directives, inst.span)?;
                     let is_copy = self.has_copy_directive(&directives);
                     let is_handle = self.has_handle_directive(&directives);
 
@@ -1976,8 +1996,9 @@ impl<'a> Sema<'a> {
             return Err(CompileError::new(
                 ErrorKind::InvalidInlineDrop {
                     type_name: type_name_str.clone(),
-                    reason: "`@copy` types cannot declare `fn drop` (would double-free on copy)"
-                        .into(),
+                    reason:
+                        "`@derive(Copy)` types cannot declare `fn drop` (would double-free on copy)"
+                            .into(),
                 },
                 span,
             ));
