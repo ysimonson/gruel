@@ -56,7 +56,7 @@ mod visibility;
 pub use context::ConstValue;
 pub use gather::GatherOutput;
 pub use inference_ctx::InferenceContext;
-pub use info::{AnonMethodSig, ConstInfo, FunctionInfo, MethodInfo};
+pub use info::{AnonMethodSig, ConstInfo, DeriveInfo, FunctionInfo, MethodInfo};
 pub use known_symbols::KnownSymbols;
 pub use output::{AnalyzedFunction, SemaOutput};
 
@@ -104,6 +104,10 @@ pub struct Sema<'a> {
     pub(crate) methods: HashMap<(StructId, Spur), MethodInfo>,
     /// Enum method table: maps (enum_id, method_name) to method info
     pub(crate) enum_methods: HashMap<(EnumId, Spur), MethodInfo>,
+    /// Derive table: maps a derive name to its method-template info
+    /// (ADR-0058). Populated during declaration gathering; consumed by
+    /// `@derive(...)` expansion.
+    pub(crate) derives: HashMap<Spur, DeriveInfo>,
     /// Constant table: maps const name symbol to const info
     pub(crate) constants: HashMap<Spur, ConstInfo>,
     /// Enabled preview features
@@ -199,6 +203,7 @@ impl<'a> Sema<'a> {
             interface_vtables_needed: HashMap::new(),
             methods: HashMap::new(),
             enum_methods: HashMap::new(),
+            derives: HashMap::new(),
             constants: HashMap::new(),
             preview_features,
             builtin_string_id: None,

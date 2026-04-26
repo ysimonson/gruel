@@ -60,3 +60,83 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "comptime_derives"
+
+# Phase 2: two `derive` items with the same name are rejected.
+[[case]]
+name = "derive_duplicate_name"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Marker {
+}
+
+derive Marker {
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "duplicate"
+
+# Phase 2: a `derive` cannot share a name with a struct.
+[[case]]
+name = "derive_collides_with_struct"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+struct Drop {}
+
+derive Drop {
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "duplicate"
+
+# Phase 2: two methods with the same name inside one derive are rejected.
+[[case]]
+name = "derive_duplicate_method"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Drop {
+    fn drop(self) {}
+    fn drop(self) {}
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "duplicate"
+
+# Phase 2: direct field projection on `self` inside a derive body is
+# rejected — the host type is not known yet, so users must go through
+# `@field`.
+[[case]]
+name = "derive_self_dot_field_rejected"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Drop {
+    fn drop(self) {
+        let _ = self.x;
+    }
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "direct field access on `self`"

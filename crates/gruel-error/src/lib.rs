@@ -99,6 +99,7 @@ impl ErrorCode {
     pub const HANDLE_STRUCT_MISSING_METHOD: Self = Self(408);
     pub const HANDLE_METHOD_WRONG_SIGNATURE: Self = Self(409);
     pub const DUPLICATE_METHOD: Self = Self(410);
+    pub const DERIVE_DIRECT_FIELD_ACCESS: Self = Self(440);
     pub const UNDEFINED_METHOD: Self = Self(411);
     pub const UNDEFINED_ASSOC_FN: Self = Self(412);
     pub const METHOD_CALL_ON_NON_STRUCT: Self = Self(413);
@@ -929,6 +930,16 @@ pub enum ErrorKind {
         type_name: String,
         method_name: String,
     },
+    /// A `derive` body uses direct field projection (`self.field`) instead
+    /// of `@field(self, "name")`. The host type's structure is not known at
+    /// derive-definition time (ADR-0058), so direct projection is rejected.
+    #[error(
+        "direct field access on `self` is not allowed in `derive {derive_name}`; use `@field(self, \"...\")` because the host type is not known at derive-definition time"
+    )]
+    DeriveDirectFieldAccess {
+        derive_name: String,
+        method_name: String,
+    },
     /// Method not found on a type
     #[error("no method named '{method_name}' found for type '{type_name}'")]
     UndefinedMethod {
@@ -1212,6 +1223,7 @@ impl ErrorKind {
                 ErrorCode::HANDLE_METHOD_WRONG_SIGNATURE
             }
             ErrorKind::DuplicateMethod { .. } => ErrorCode::DUPLICATE_METHOD,
+            ErrorKind::DeriveDirectFieldAccess { .. } => ErrorCode::DERIVE_DIRECT_FIELD_ACCESS,
             ErrorKind::UndefinedMethod { .. } => ErrorCode::UNDEFINED_METHOD,
             ErrorKind::UndefinedAssocFn { .. } => ErrorCode::UNDEFINED_ASSOC_FN,
             ErrorKind::MethodCallOnNonStruct { .. } => ErrorCode::METHOD_CALL_ON_NON_STRUCT,

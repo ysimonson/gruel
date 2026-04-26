@@ -488,14 +488,163 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Phase 1 of ADR-0058: walk every `DeriveDecl` instruction and require
-    /// the `comptime_derives` preview feature. The full validation of
-    /// derive bodies is added in Phase 2.
+    /// ADR-0058 phases 1 + 2: gate `derive` items behind the
+    /// `comptime_derives` preview feature, register each into
+    /// `Sema::derives` for later expansion, and reject ill-formed bodies
+    /// (duplicate names, name collisions with structs/enums/interfaces,
+    /// duplicate methods within a single derive, and direct `self.field`
+    /// projection — the host type's structure isn't known at
+    /// derive-definition time).
     pub(crate) fn validate_derive_decls(&mut self) -> CompileResult<()> {
+        use super::DeriveInfo;
+        use crate::sema::info::DeriveMethod;
         use gruel_error::PreviewFeature;
-        for (_, inst) in self.rir.iter() {
-            if let InstData::DeriveDecl { .. } = &inst.data {
-                self.require_preview(PreviewFeature::ComptimeDerives, "`derive` items", inst.span)?;
+
+        // Snapshot: copy out enough RIR data so we can mutate `self.derives`
+        // and emit diagnostics without holding shared borrows on `self.rir`.
+        struct RawDerive {
+            name: Spur,
+            decl_ref: gruel_rir::InstRef,
+            span: Span,
+            methods_start: u32,
+            methods_len: u32,
+        }
+        let mut raw: Vec<RawDerive> = Vec::new();
+        for (inst_ref, inst) in self.rir.iter() {
+            if let InstData::DeriveDecl {
+                name,
+                methods_start,
+                methods_len,
+            } = &inst.data
+            {
+                raw.push(RawDerive {
+                    name: *name,
+                    decl_ref: inst_ref,
+                    span: inst.span,
+                    methods_start: *methods_start,
+                    methods_len: *methods_len,
+                });
+            }
+        }
+
+        for d in raw {
+            self.require_preview(PreviewFeature::ComptimeDerives, "`derive` items", d.span)?;
+
+            let name_str = self.interner.resolve(&d.name).to_string();
+
+            if self.derives.contains_key(&d.name)
+                || self.structs.contains_key(&d.name)
+                || self.enums.contains_key(&d.name)
+                || self.interfaces.contains_key(&d.name)
+            {
+                return Err(CompileError::new(
+                    ErrorKind::DuplicateTypeDefinition {
+                        type_name: format!("derive `{}`", name_str),
+                    },
+                    d.span,
+                ));
+            }
+
+            let method_refs = self.rir.get_inst_refs(d.methods_start, d.methods_len);
+            let mut seen: HashSet<Spur> = HashSet::new();
+            let mut methods: Vec<DeriveMethod> = Vec::with_capacity(method_refs.len());
+            for method_ref in method_refs {
+                let m = self.rir.get(method_ref);
+                let InstData::FnDecl {
+                    name: method_name,
+                    has_self,
+                    ..
+                } = &m.data
+                else {
+                    // The grammar only admits method declarations inside a
+                    // derive body, but if RIR ever produces something else
+                    // we surface a clear diagnostic instead of panicking.
+                    return Err(CompileError::new(
+                        ErrorKind::InternalError(format!(
+                            "non-method instruction inside `derive {}` body",
+                            name_str
+                        )),
+                        m.span,
+                    ));
+                };
+
+                if !seen.insert(*method_name) {
+                    return Err(CompileError::new(
+                        ErrorKind::DuplicateMethod {
+                            type_name: format!("derive `{}`", name_str),
+                            method_name: self.interner.resolve(method_name).to_string(),
+                        },
+                        m.span,
+                    ));
+                }
+
+                self.reject_direct_self_projection(*method_name, &name_str, method_ref)?;
+
+                methods.push(DeriveMethod {
+                    name: *method_name,
+                    has_self: *has_self,
+                    method_ref,
+                    span: m.span,
+                });
+            }
+
+            self.derives.insert(
+                d.name,
+                DeriveInfo {
+                    name: d.name,
+                    decl_ref: d.decl_ref,
+                    span: d.span,
+                    methods,
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Walk the RIR range `[body_start, decl)` for the method whose `FnDecl`
+    /// is at `method_ref`, and reject any `FieldGet { base: VarRef "self" }`.
+    /// The host's structure isn't known at derive-definition time, so direct
+    /// projection (`self.x`) is illegal — users must go through
+    /// `@field(self, "x")` (ADR-0058).
+    fn reject_direct_self_projection(
+        &self,
+        method_name: Spur,
+        derive_name: &str,
+        method_ref: gruel_rir::InstRef,
+    ) -> CompileResult<()> {
+        let self_sym = match self.interner.get("self") {
+            Some(s) => s,
+            // No `self` symbol exists yet, so no method can reference it.
+            None => return Ok(()),
+        };
+
+        // Find this method's function span so we can iterate just its body.
+        let span = match self
+            .rir
+            .function_spans()
+            .iter()
+            .find(|s| s.decl == method_ref)
+        {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        let view = self.rir.function_view(span);
+        for (_, inst) in view.iter() {
+            if let InstData::FieldGet { base, .. } = &inst.data {
+                let base_inst = self.rir.get(*base);
+                if let InstData::VarRef { name } = &base_inst.data
+                    && *name == self_sym
+                {
+                    return Err(CompileError::new(
+                        ErrorKind::DeriveDirectFieldAccess {
+                            derive_name: derive_name.to_string(),
+                            method_name: self.interner.resolve(&method_name).to_string(),
+                        },
+                        inst.span,
+                    ));
+                }
             }
         }
         Ok(())

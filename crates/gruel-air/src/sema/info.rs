@@ -89,6 +89,40 @@ pub struct AnonMethodSig {
     pub return_type: Spur,
 }
 
+/// A single method declaration inside a `derive` body (ADR-0058).
+///
+/// Captures the structural info needed to splice the method into a host
+/// type's method list at derive expansion: the original RIR refs are
+/// preserved verbatim — the existing generic-method machinery substitutes
+/// `Self` at first call.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // fields populated in phase 2; consumed in phase 4
+pub struct DeriveMethod {
+    /// Method name.
+    pub name: Spur,
+    /// Whether this method takes a `self` receiver.
+    pub has_self: bool,
+    /// RIR instruction ref for the method's `FnDecl` (the same instruction
+    /// `gen_method` emits for an inline method).
+    pub method_ref: gruel_rir::InstRef,
+    /// Span of the method declaration (used for diagnostics).
+    pub span: Span,
+}
+
+/// Information about a `derive` item (ADR-0058).
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // fields populated in phase 2; consumed in phase 4
+pub struct DeriveInfo {
+    /// Derive name (e.g., `Drop`).
+    pub name: Spur,
+    /// RIR ref to the `DeriveDecl` instruction itself.
+    pub decl_ref: gruel_rir::InstRef,
+    /// Span covering the derive item.
+    pub span: Span,
+    /// One entry per method declaration in the derive body, in source order.
+    pub methods: Vec<DeriveMethod>,
+}
+
 /// Information about a constant declaration.
 ///
 /// Constants are compile-time values. In the module system, they're primarily

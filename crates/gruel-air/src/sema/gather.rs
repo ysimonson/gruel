@@ -94,6 +94,7 @@ impl<'a> GatherOutput<'a> {
             interface_vtables_needed: HashMap::new(),
             methods: self.methods,
             enum_methods: HashMap::new(),
+            derives: HashMap::new(),
             constants: self.constants,
             preview_features: self.preview_features,
             builtin_string_id: self.builtin_string_id,

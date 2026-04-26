@@ -168,7 +168,7 @@ Phases share the `comptime_derives` preview flag; stable when phase 6 lands.
   - Method-decl bodies parse via the existing inline-method grammar.
   - Tests (preview, allowed-to-fail): a `derive` item parses without crashing the frontend.
 
-- [ ] **Phase 2: Sema validation of derive bodies**
+- [x] **Phase 2: Sema validation of derive bodies**
   - Register each derive in a new `Sema::derives: HashMap<Spur, DeriveInfo>` table during declaration gathering.
   - Type-check each method body with `Self` as a free type variable. Field access on `self` requires `@field`; direct projection errors with a clean diagnostic.
   - Reject malformed derive bodies (anything other than method declarations).
