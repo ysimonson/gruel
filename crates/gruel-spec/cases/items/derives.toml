@@ -325,3 +325,85 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "duplicate method"
+
+# Phase 5: a derive with multiple methods on a host. Each method is
+# independently callable through normal method-call resolution.
+[[case]]
+name = "derive_multi_method_dispatch"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Counter {
+    fn one(self) -> i32 { 1 }
+    fn two(self) -> i32 { 2 }
+    fn three(self) -> i32 { 3 }
+}
+
+@copy
+@derive(Counter)
+struct Box {
+    inner: i32,
+}
+
+fn main() -> i32 {
+    let b = Box { inner: 0 };
+    b.one() + b.two() + b.three()
+}
+"""
+exit_code = 6
+
+# Phase 5: the same derive applied to two different hosts attaches a
+# distinct callable method on each. This exercises the splicing
+# routine across two independent host types.
+[[case]]
+name = "derive_same_derive_on_two_hosts"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Tagger {
+    fn tag(self) -> i32 { 11 }
+}
+
+@derive(Tagger)
+struct A {
+    inner: i32,
+}
+
+@derive(Tagger)
+struct B {
+    inner: i32,
+}
+
+fn main() -> i32 {
+    let a = A { inner: 0 };
+    let b = B { inner: 0 };
+    a.tag() + b.tag()
+}
+"""
+exit_code = 22
+
+# Phase 5: a derive method with a parameter is callable. The body
+# parameters work like any other method.
+[[case]]
+name = "derive_method_with_param"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Doubler {
+    fn doubled(self, x: i32) -> i32 { x + x }
+}
+
+@derive(Doubler)
+struct Box {
+    inner: i32,
+}
+
+fn main() -> i32 {
+    let b = Box { inner: 0 };
+    b.doubled(21)
+}
+"""
+exit_code = 42

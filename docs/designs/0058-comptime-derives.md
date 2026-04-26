@@ -202,7 +202,7 @@ Phases share the `comptime_derives` preview flag; stable when phase 6 lands.
   - Reject duplicates (cross-derive, derive-vs-inline) at insertion with multi-span diagnostics. Same routine on both call sites — diagnostics shape is identical.
   - Tests: end-to-end one-method derive on a named struct lands as a callable method; same on an anonymous struct produced from a comptime function; two parameterizations of the same anonymous type each get their own monomorphized methods; structural dedup of identical parameterizations does not double-splice; an empty derive is a clean no-op; two derives attaching the same name fail with a clear multi-span error on both sites.
 
-- [ ] **Phase 5: Method dispatch and diagnostics**
+- [x] **Phase 5: Method dispatch and diagnostics**
   - Verify attached methods are reachable through normal method-call resolution and that monomorphization handles them like any other generic method.
   - Plumb provenance through error reporting: type errors inside an attached body cite the method's span inside the derive item and the `@derive(...)` directive span.
   - Tests: a runtime-end-to-end derive test (`@derive(Drop)` with the example above runs the cleanup); diagnostics tests for attachment provenance.

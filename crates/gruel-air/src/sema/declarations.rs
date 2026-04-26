@@ -569,16 +569,25 @@ impl<'a> Sema<'a> {
                 let derive_str = self.interner.resolve(&derive_name).to_string();
                 let method_str = self.interner.resolve(&method_name).to_string();
                 let host_str = self.type_pool.struct_def(host_id).name.clone();
-                return Err(CompileError::new(
+                let prior_span = self.methods.get(&key).map(|info| info.span);
+                let mut err = CompileError::new(
                     ErrorKind::DuplicateMethod {
                         type_name: format!(
                             "type `{}` (attached by `@derive({})`)",
                             host_str, derive_str
                         ),
-                        method_name: method_str,
+                        method_name: method_str.clone(),
                     },
                     directive_span,
-                ));
+                )
+                .with_label(
+                    format!("`{}` declared inside `derive {}`", method_str, derive_str),
+                    m.span,
+                );
+                if let Some(s) = prior_span {
+                    err = err.with_label(format!("`{}` already attached here", method_str), s);
+                }
+                return Err(err);
             }
 
             let params = self.rir.get_params(params_start, params_len);
@@ -657,13 +666,22 @@ impl<'a> Sema<'a> {
             if self.enum_methods.contains_key(&key) {
                 let derive_str = self.interner.resolve(&derive_name).to_string();
                 let method_str = self.interner.resolve(&method_name).to_string();
-                return Err(CompileError::new(
+                let prior_span = self.enum_methods.get(&key).map(|info| info.span);
+                let mut err = CompileError::new(
                     ErrorKind::DuplicateMethod {
                         type_name: format!("enum (attached by `@derive({})`)", derive_str),
-                        method_name: method_str,
+                        method_name: method_str.clone(),
                     },
                     directive_span,
-                ));
+                )
+                .with_label(
+                    format!("`{}` declared inside `derive {}`", method_str, derive_str),
+                    m.span,
+                );
+                if let Some(s) = prior_span {
+                    err = err.with_label(format!("`{}` already attached here", method_str), s);
+                }
+                return Err(err);
             }
 
             let params = self.rir.get_params(params_start, params_len);
