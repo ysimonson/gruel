@@ -57,6 +57,19 @@ impl<'a> Sema<'a> {
         interface_id: InterfaceId,
         use_span: Span,
     ) -> CompileResult<ConformanceWitness> {
+        // ADR-0059: `Copy` and `Drop` are compiler-recognized. Rather than
+        // synthesizing per-type method tables for primitives, pointers,
+        // arrays, etc., consult the existing ownership predicates and short
+        // -circuit. Built-in conformance never needs a real method witness:
+        // codegen handles built-in copy/drop natively.
+        let iface_def = &self.interface_defs[interface_id.0 as usize];
+        if iface_def.name == "Copy" {
+            return self.check_copy_conformance(candidate, interface_id, use_span);
+        }
+        if iface_def.name == "Drop" {
+            return self.check_drop_conformance(candidate, interface_id, use_span);
+        }
+
         let candidate_struct_id = match candidate.kind() {
             TypeKind::Struct(id) => id,
             // For Phase 2, only struct candidates are supported. Enums get
@@ -180,6 +193,51 @@ impl<'a> Sema<'a> {
         }
 
         Ok(ConformanceWitness { slot_methods })
+    }
+
+    /// Built-in conformance for the `Copy` interface (ADR-0059).
+    ///
+    /// Linear types never conform; otherwise `is_type_copy` is the source of
+    /// truth. The witness has no real slot — the compiler dispatches Copy
+    /// for built-ins natively, and `@derive(Copy)` user types reach the
+    /// regular method-set path on later phases.
+    fn check_copy_conformance(
+        &self,
+        candidate: Type,
+        interface_id: InterfaceId,
+        use_span: Span,
+    ) -> CompileResult<ConformanceWitness> {
+        if self.is_type_linear(candidate) {
+            return Err(self.iface_method_missing(candidate, interface_id, "copy", use_span));
+        }
+        if self.is_type_copy(candidate) {
+            return Ok(ConformanceWitness {
+                slot_methods: Vec::new(),
+            });
+        }
+        Err(self.iface_method_missing(candidate, interface_id, "copy", use_span))
+    }
+
+    /// Built-in conformance for the `Drop` interface (ADR-0059).
+    ///
+    /// Affine types (non-`Copy`, non-linear) conform — they all have a
+    /// drop-on-scope-exit, either user-written via `fn drop(self)` or the
+    /// compiler-synthesized recursive drop.
+    fn check_drop_conformance(
+        &self,
+        candidate: Type,
+        interface_id: InterfaceId,
+        use_span: Span,
+    ) -> CompileResult<ConformanceWitness> {
+        if self.is_type_linear(candidate) {
+            return Err(self.iface_method_missing(candidate, interface_id, "drop", use_span));
+        }
+        if self.is_type_copy(candidate) {
+            return Err(self.iface_method_missing(candidate, interface_id, "drop", use_span));
+        }
+        Ok(ConformanceWitness {
+            slot_methods: Vec::new(),
+        })
     }
 
     fn iface_method_missing(

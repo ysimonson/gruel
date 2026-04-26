@@ -97,7 +97,7 @@ The current implementation already returns these values via `is_type_copy` / `is
   - Add the `@derive(Copy)` derive item to the prelude. The directive splices `fn copy(borrow self) -> Self` into the host type and sets `StructDef::is_copy` for backward compatibility.
   - **Testable**: `comptime T: Copy` parses and resolves; `@derive(Copy) struct Pair { x: i32, y: i32 }` compiles; `@derive(Copy) struct Bad { s: String }` errors with a multi-span diagnostic citing the offending field.
 
-- [ ] **Phase 2: Synthesize built-in `Copy` / `Drop` conformance.**
+- [x] **Phase 2: Synthesize built-in `Copy` / `Drop` conformance.**
   - In `inject_builtin_types`, attach `Copy`/`Drop` to primitives, pointers, enums, tuples, arrays, and `String` per the rules above (via a helper that conformance lookups consult — built-ins don't carry per-type method lists).
   - Re-route `is_type_copy(ty)` and `ownership_variant_index(ty)` through interface conformance. `is_type_linear` continues to read the keyword flag.
   - **Testable**: `comptime T: Copy` accepts `i32` / `[i32; 4]` / `(i32, bool)`; rejects `String`; `@ownership` returns the same answers as before.
