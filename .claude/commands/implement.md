@@ -8,6 +8,8 @@ argument-hint: <adr-id or feature description>
 
 Implement the feature: $ARGUMENTS
 
+**Completion contract:** when given an ADR, you implement **every incomplete phase** in that ADR. You are not done until every `[ ]` in the Implementation Phases checklist is `[x]` and (if applicable) the feature has been stabilized. Stopping after one or two phases is a failure mode — do not do it unless the user explicitly tells you to stop, you hit a blocker that requires user input, or the remaining phase has been deferred in the ADR itself.
+
 ## Prerequisites
 
 Before implementing:
@@ -20,11 +22,12 @@ Before implementing:
 1. **For large features**, read the ADR in `docs/designs/`:
    - List all phases from the Implementation Phases checklist
    - Identify which phases are already complete (`[x]`) and which remain (`[ ]`)
+   - Use TaskCreate to record one task per incomplete phase, plus a final "stabilize feature" task if the ADR is preview-gated. This list is your completion checklist — you are not done until every task is marked done.
    - You will implement **every incomplete phase**, one at a time
 
 2. **Scope check** per phase before starting each one:
    - Clear, bounded changes (1-5 files to modify) → proceed
-   - More than 5-7 files or multiple unrelated changes → split into sub-phases
+   - More than 5-7 files or multiple unrelated changes → split into sub-phases (this splits the *phase*, it does not let you stop early — all sub-phases still must ship)
 
 ## Step 2: Implementation Order
 
@@ -103,7 +106,26 @@ Check off the completed phase in the ADR:
 
 ## Step 6: Repeat for the Next Phase
 
-Go back to **Step 2** and implement the next incomplete phase. Continue until all phases are complete.
+Go back to **Step 2** and implement the next incomplete phase. Do not stop, summarize, or hand back to the user between phases — continue until **every** phase in the ADR's checklist is `[x]`. After committing one phase, immediately re-read the ADR's Implementation Phases section, pick the next `[ ]` item, and start it.
+
+The only legitimate reasons to pause before all phases are done:
+- A phase is genuinely blocked on a question only the user can answer (state the question explicitly).
+- A phase failed `make test` and you cannot resolve the failure without input.
+- The user told you to stop.
+- The ADR itself marks a phase as deferred / out-of-scope for this implementation pass.
+
+"This feels like a good stopping point", "the core is working", or "the remaining phases are smaller polish" are **not** valid reasons to stop.
+
+## Step 7: Final Verification (Before Reporting Done)
+
+Before telling the user the work is complete, verify:
+
+1. Re-read the ADR's Implementation Phases section. Every item is `[x]`. Quote the checklist back in your final message so the user can confirm.
+2. If the ADR is a preview feature and all phases are done, you have completed the **Stabilizing a Large Feature** steps below (or have an explicit reason not to, called out in your final message).
+3. `make test` passes on the final state.
+4. Every TaskCreate task you opened in Step 1 is marked done.
+
+If any of the above is not true, you are not done — go back to Step 2.
 
 ## Stabilizing a Large Feature
 
@@ -147,7 +169,7 @@ When all phases are complete:
 ## Important
 
 - Each commit should leave tests passing
-- Split work that's too large into phases
+- Split work that's too large into phases — but splitting does not mean stopping; finish all sub-phases in this session
 - Use Cargo for builds (see `CLAUDE.md` for common commands)
 - Use `git` for version control
 - **Only the ADR being implemented should change.** Old ADRs may only have their `superseded-by` field and open questions updated. If you find a discrepancy in an old ADR, resolve it in the new ADR rather than rewriting the old one.
