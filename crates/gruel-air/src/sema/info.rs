@@ -45,6 +45,10 @@ pub struct MethodInfo {
     pub struct_type: Type,
     /// Whether this is a method (has self) or associated function (no self)
     pub has_self: bool,
+    /// Receiver mode (`self`, `inout self`, `borrow self`). Meaningful only
+    /// when `has_self` is true; `ByValue` is used as a placeholder for
+    /// associated functions (ADR-0060).
+    pub receiver: crate::types::ReceiverMode,
     /// Parameter data (names, types, modes, comptime flags) stored in arena.
     /// Access via `arena.names(params)`, `arena.types(params)`, etc.
     /// Note: This excludes `self` if present - only explicit parameters.

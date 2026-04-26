@@ -348,12 +348,18 @@ impl<'a> AstGen<'a> {
                     .collect();
                 let (params_start, params_len) = self.rir.add_params(&params);
 
+                let receiver_mode = match sig.receiver.mode {
+                    gruel_parser::ast::SelfMode::ByValue => 0u8,
+                    gruel_parser::ast::SelfMode::Inout => 1u8,
+                    gruel_parser::ast::SelfMode::Borrow => 2u8,
+                };
                 self.rir.add_inst(Inst {
                     data: InstData::InterfaceMethodSig {
                         name,
                         params_start,
                         params_len,
                         return_type,
+                        receiver_mode,
                     },
                     span: sig.span,
                 })
@@ -458,6 +464,11 @@ impl<'a> AstGen<'a> {
 
         // Track whether this method has a self receiver (method vs associated function)
         let has_self = method.receiver.is_some();
+        let receiver_mode = match method.receiver.as_ref().map(|r| r.mode) {
+            Some(gruel_parser::ast::SelfMode::Inout) => 1u8,
+            Some(gruel_parser::ast::SelfMode::Borrow) => 2u8,
+            _ => 0u8,
+        };
 
         // Emit methods as FnDecl instructions with has_self flag.
         // Sema uses has_self to add the implicit self parameter for methods.
@@ -475,6 +486,7 @@ impl<'a> AstGen<'a> {
                 return_type,
                 body,
                 has_self,
+                receiver_mode,
             },
             span: method.span,
         });
@@ -577,6 +589,7 @@ impl<'a> AstGen<'a> {
                 return_type,
                 body,
                 has_self: false,
+                receiver_mode: 0,
             },
             span: func.span,
         });
@@ -1058,12 +1071,18 @@ impl<'a> AstGen<'a> {
                                     })
                                     .collect();
                                 let (params_start, params_len) = self.rir.add_params(&params);
+                                let receiver_mode = match sig.receiver.mode {
+                                    gruel_parser::ast::SelfMode::ByValue => 0u8,
+                                    gruel_parser::ast::SelfMode::Inout => 1u8,
+                                    gruel_parser::ast::SelfMode::Borrow => 2u8,
+                                };
                                 self.rir.add_inst(Inst {
                                     data: InstData::InterfaceMethodSig {
                                         name,
                                         params_start,
                                         params_len,
                                         return_type,
+                                        receiver_mode,
                                     },
                                     span: sig.span,
                                 })
@@ -1223,7 +1242,10 @@ impl<'a> AstGen<'a> {
                 let synth_method = Method {
                     directives: Directives::new(),
                     name: call_ident,
-                    receiver: Some(SelfParam { span: anon_fn.span }),
+                    receiver: Some(SelfParam {
+                        mode: gruel_parser::ast::SelfMode::ByValue,
+                        span: anon_fn.span,
+                    }),
                     params: anon_fn.params.clone(),
                     return_type: anon_fn.return_type.clone(),
                     body: Expr::Block(BlockExpr {

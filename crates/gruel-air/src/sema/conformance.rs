@@ -133,6 +133,17 @@ impl<'a> Sema<'a> {
                 ));
             }
 
+            // Receiver mode must match exactly (ADR-0060).
+            if method_info.receiver != req.receiver {
+                return Err(self.iface_method_sig_mismatch(
+                    candidate,
+                    interface_id,
+                    &req.name,
+                    &self.format_concrete_method_sig(&method_info),
+                    use_span,
+                ));
+            }
+
             // Compare parameter types (excluding self) and return type.
             let candidate_param_types = self.param_arena.types(method_info.params);
             if candidate_param_types.len() != req.param_types.len() {
@@ -245,14 +256,15 @@ impl<'a> Sema<'a> {
 
     fn format_concrete_method_sig(&self, method_info: &super::MethodInfo) -> String {
         let param_types = self.param_arena.types(method_info.params);
+        let recv = method_info.receiver.render();
         let params: Vec<String> = param_types
             .iter()
             .map(|t| self.format_type_name(*t))
             .collect();
         let prefix = if params.is_empty() {
-            "fn(self)".to_string()
+            format!("fn({})", recv)
         } else {
-            format!("fn(self, {})", params.join(", "))
+            format!("fn({}, {})", recv, params.join(", "))
         };
         if method_info.return_type == Type::UNIT {
             prefix
@@ -531,6 +543,55 @@ mod tests {
         let foo = struct_ty(&sema, "Foo");
         let err = sema
             .check_conforms(foo, iid, dummy_span())
+            .expect_err("should fail");
+        assert!(matches!(
+            err.kind,
+            ErrorKind::InterfaceMethodSignatureMismatch(_)
+        ));
+    }
+
+    #[test]
+    fn receiver_mode_must_match() {
+        // ADR-0060: candidate's `borrow self` matches interface's `borrow self`.
+        let sema = gather(
+            r#"
+            interface Reader {
+                fn read(borrow self) -> i32;
+            }
+
+            struct Buf {
+                fn read(borrow self) -> i32 { 0 }
+            }
+
+            fn main() -> i32 { 0 }
+            "#,
+        );
+        let iid = iface_id(&sema, "Reader");
+        let buf = struct_ty(&sema, "Buf");
+        sema.check_conforms(buf, iid, dummy_span())
+            .expect("conforms");
+    }
+
+    #[test]
+    fn receiver_mode_mismatch_rejected() {
+        // ADR-0060: by-value self does not satisfy `borrow self`.
+        let sema = gather(
+            r#"
+            interface Reader {
+                fn read(borrow self) -> i32;
+            }
+
+            struct Buf {
+                fn read(self) -> i32 { 0 }
+            }
+
+            fn main() -> i32 { 0 }
+            "#,
+        );
+        let iid = iface_id(&sema, "Reader");
+        let buf = struct_ty(&sema, "Buf");
+        let err = sema
+            .check_conforms(buf, iid, dummy_span())
             .expect_err("should fail");
         assert!(matches!(
             err.kind,

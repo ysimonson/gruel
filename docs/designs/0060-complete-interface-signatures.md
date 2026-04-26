@@ -105,7 +105,7 @@ pub enum ReceiverMode { ByValue, Inout, Borrow }
   - Diagnostic formatters print `Self` correctly.
   - **Testable**: `interface Clone { fn clone(self) -> Self; }` parses and resolves; a struct with `fn clone(self) -> StructName` conforms; a struct with `fn clone(self) -> i32` is rejected with a sig-mismatch diagnostic citing `Self`.
 
-- [ ] **Phase 2: Receiver modes in interface methods.**
+- [x] **Phase 2: Receiver modes in interface methods.**
   - Add `receiver: ReceiverMode` to `InterfaceMethodSig` (RIR) and `InterfaceMethodReq` (AIR).
   - `validate_interface_decls` reads the receiver mode from the parsed method signature.
   - `check_conforms` compares the candidate method's receiver mode against the requirement.

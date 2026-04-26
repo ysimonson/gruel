@@ -18,6 +18,17 @@ use lasso::Spur;
 use super::Sema;
 use crate::types::{IfaceTy, InterfaceDef, InterfaceId, InterfaceMethodReq, ReceiverMode, Type};
 
+/// Decode a `RirParamMode`-style byte (0/1/2) into a [`ReceiverMode`].
+/// Falls back to `ByValue` for unrecognized values. Shared by interface
+/// validation and method gather paths (ADR-0060).
+pub(crate) fn decode_receiver_mode(byte: u8) -> ReceiverMode {
+    match byte {
+        1 => ReceiverMode::Inout,
+        2 => ReceiverMode::Borrow,
+        _ => ReceiverMode::ByValue,
+    }
+}
+
 impl<'a> Sema<'a> {
     /// Resolve the methods of an anonymous interface (the method-sig
     /// instructions referenced from `methods_start..+methods_len`) under
@@ -46,6 +57,7 @@ impl<'a> Sema<'a> {
                 params_start,
                 params_len,
                 return_type,
+                receiver_mode,
             } = &m.data
             else {
                 return Err(CompileError::new(
@@ -61,6 +73,7 @@ impl<'a> Sema<'a> {
             let params_start = *params_start;
             let params_len = *params_len;
             let return_type_sym = *return_type;
+            let receiver = decode_receiver_mode(*receiver_mode);
 
             let name_str = self.interner.resolve(&name).to_string();
             if !seen.insert(name_str.clone()) {
@@ -86,7 +99,7 @@ impl<'a> Sema<'a> {
             let return_type = self.resolve_iface_with_subst(return_type_sym, span, subst)?;
             out.push(InterfaceMethodReq {
                 name: name_str,
-                receiver: ReceiverMode::ByValue,
+                receiver,
                 param_types,
                 return_type,
             });

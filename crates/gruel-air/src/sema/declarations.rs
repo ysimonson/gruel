@@ -17,6 +17,7 @@ use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_span::Span;
 use lasso::Spur;
 
+use super::anon_interfaces::decode_receiver_mode;
 use super::{ConstInfo, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::inference::{FunctionSig, MethodSig};
 use crate::types::{
@@ -187,6 +188,7 @@ impl<'a> Sema<'a> {
             name: Spur,
             params: Vec<(Spur, Spur)>, // (param_name, type_symbol)
             return_type_sym: Spur,
+            receiver: ReceiverMode,
             span: Span,
         }
 
@@ -209,6 +211,7 @@ impl<'a> Sema<'a> {
                         params_start,
                         params_len,
                         return_type,
+                        receiver_mode,
                     } = &m.data
                     {
                         if !seen.insert(*method_name) {
@@ -228,10 +231,16 @@ impl<'a> Sema<'a> {
                             .into_iter()
                             .map(|p| (p.name, p.ty))
                             .collect();
+                        let receiver = match *receiver_mode {
+                            1 => ReceiverMode::Inout,
+                            2 => ReceiverMode::Borrow,
+                            _ => ReceiverMode::ByValue,
+                        };
                         methods.push(RawIfaceMethod {
                             name: *method_name,
                             params,
                             return_type_sym: *return_type,
+                            receiver,
                             span: m.span,
                         });
                     }
@@ -275,7 +284,7 @@ impl<'a> Sema<'a> {
                 let return_type = self.resolve_iface_ty(m.return_type_sym, m.span)?;
                 resolved_methods.push(InterfaceMethodReq {
                     name: self.interner.resolve(&m.name).to_string(),
-                    receiver: ReceiverMode::ByValue,
+                    receiver: m.receiver,
                     param_types,
                     return_type,
                 });
@@ -669,11 +678,13 @@ impl<'a> Sema<'a> {
                 return_type,
                 body,
                 has_self,
+                receiver_mode,
                 ..
             } = m.data
             else {
                 continue;
             };
+            let receiver = decode_receiver_mode(receiver_mode);
             let key = (host_id, method_name);
             if self.methods.contains_key(&key) {
                 let derive_str = self.interner.resolve(&derive_name).to_string();
@@ -727,6 +738,7 @@ impl<'a> Sema<'a> {
                 MethodInfo {
                     struct_type: host_type,
                     has_self,
+                    receiver,
                     params: param_range,
                     return_type: ret_type,
                     body,
@@ -767,11 +779,13 @@ impl<'a> Sema<'a> {
                 return_type,
                 body,
                 has_self,
+                receiver_mode,
                 ..
             } = m.data
             else {
                 continue;
             };
+            let receiver = decode_receiver_mode(receiver_mode);
             let key = (host_id, method_name);
             if self.enum_methods.contains_key(&key) {
                 let derive_str = self.interner.resolve(&derive_name).to_string();
@@ -821,6 +835,7 @@ impl<'a> Sema<'a> {
                 MethodInfo {
                     struct_type: host_type,
                     has_self,
+                    receiver,
                     params: param_range,
                     return_type: ret_type,
                     body,
@@ -1722,9 +1737,11 @@ impl<'a> Sema<'a> {
                 return_type,
                 body,
                 has_self,
+                receiver_mode,
                 ..
             } = &method_inst.data
             {
+                let receiver = decode_receiver_mode(*receiver_mode);
                 // ADR-0053: a method named `drop` is the struct's destructor,
                 // not a regular method. Route it through the destructor slot.
                 if *method_name == drop_name_sym {
@@ -1848,6 +1865,7 @@ impl<'a> Sema<'a> {
                     MethodInfo {
                         struct_type,
                         has_self: *has_self,
+                        receiver,
                         params: param_range,
                         return_type: ret_type,
                         body: *body,
@@ -2057,9 +2075,11 @@ impl<'a> Sema<'a> {
                 return_type,
                 body,
                 has_self,
+                receiver_mode,
                 ..
             } = &method_inst.data
             {
+                let receiver = decode_receiver_mode(*receiver_mode);
                 // ADR-0053 phase 3b: a method named `drop` is the enum's destructor,
                 // not a regular method. Route it through the per-enum destructor slot.
                 if *method_name == drop_name_sym {
@@ -2119,6 +2139,7 @@ impl<'a> Sema<'a> {
                     MethodInfo {
                         struct_type: enum_type,
                         has_self: *has_self,
+                        receiver,
                         params: param_range,
                         return_type: ret_type,
                         body: *body,

@@ -11,9 +11,9 @@ use crate::ast::{
     EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function,
     Ident, IfExpr, IndexExpr, IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item,
     LetStatement, LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, MethodSig, NegIntLit,
-    Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, ReturnExpr, SelfExpr, SelfParam,
-    Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern, TupleExpr, TupleIndexExpr,
-    TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
+    Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, ReturnExpr, SelfExpr, SelfMode,
+    SelfParam, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern, TupleExpr,
+    TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -2887,10 +2887,8 @@ fn method_parser_with_expr<'src, I>(
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    // Parse optional self parameter
-    let self_param = just(TokenKind::SelfValue).map_with(|_, e| SelfParam {
-        span: span_from_extra(e),
-    });
+    // Parse optional self parameter — `self`, `inout self`, or `borrow self`.
+    let self_param = self_param_parser();
 
     // Parse self followed by optional regular params
     let self_then_params = self_param
@@ -2950,10 +2948,9 @@ where
 {
     let expr = expr_parser();
 
-    // Parse self parameter
-    let self_param = just(TokenKind::SelfValue).map_with(|_, e| SelfParam {
-        span: span_from_extra(e),
-    });
+    // Parse self parameter — `drop fn` only allows plain `self`, but reuse
+    // the shared receiver parser so the AST shape stays uniform.
+    let self_param = self_param_parser();
 
     // NOTE: Box after accumulating the head to keep the final MapWith type short.
     let drop_fn_sig: GruelParser<'src, I, (Ident, SelfParam)> = just(TokenKind::Drop)
@@ -3024,20 +3021,34 @@ where
         .boxed()
 }
 
+/// Shared parser for receivers: `self`, `inout self`, or `borrow self`.
+/// Used by methods, interface method signatures, and `drop fn`.
+fn self_param_parser<'src, I>() -> GruelParser<'src, I, SelfParam>
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    let mode = choice((
+        just(TokenKind::Inout).to(SelfMode::Inout).boxed(),
+        just(TokenKind::Borrow).to(SelfMode::Borrow).boxed(),
+    ))
+    .or_not();
+    mode.then(just(TokenKind::SelfValue))
+        .map_with(|(mode, _), e| SelfParam {
+            mode: mode.unwrap_or(SelfMode::ByValue),
+            span: span_from_extra(e),
+        })
+        .boxed()
+}
+
 /// Parser for top-level items (functions, structs, enums, drop fns, and consts)
-/// Parser for interface method signatures: `fn name(self [, params]) [-> Type];`
+/// Parser for interface method signatures: `fn name([recv] self [, params]) [-> Type];`
 ///
-/// No body and no associated functions (no-`self` methods) are accepted in
-/// MVP. Receiver is plain `self` only — `inout self` and `borrow self` are
-/// future work, parallel to method definitions which also only support
-/// by-value `self` today.
+/// `recv` is one of `inout` / `borrow`, or omitted for a by-value receiver.
 fn interface_method_sig_parser<'src, I>() -> GruelParser<'src, I, MethodSig>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    let self_param = just(TokenKind::SelfValue).map_with(|_, e| SelfParam {
-        span: span_from_extra(e),
-    });
+    let self_param = self_param_parser();
 
     let extra_params = just(TokenKind::Comma)
         .ignore_then(params_parser())

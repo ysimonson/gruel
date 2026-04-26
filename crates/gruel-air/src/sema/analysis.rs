@@ -9065,9 +9065,11 @@ impl<'a> Sema<'a> {
                 return_type,
                 body,
                 has_self,
+                receiver_mode,
                 ..
             } = &method_inst.data
             {
+                let receiver = crate::sema::anon_interfaces::decode_receiver_mode(*receiver_mode);
                 let key = (struct_id, *method_name);
 
                 if seen_methods.contains(method_name) {
@@ -9155,6 +9157,7 @@ impl<'a> Sema<'a> {
                     MethodInfo {
                         struct_type,
                         has_self: *has_self,
+                        receiver,
                         params: param_range,
                         return_type: ret_type,
                         body: *body,
@@ -9271,28 +9274,38 @@ impl<'a> Sema<'a> {
         span: Span,
     ) -> CompileResult<()> {
         let method_inst = self.rir.get(method_ref);
-        let (method_name, is_unchecked, params_start, params_len, return_type, body, has_self) =
-            match &method_inst.data {
-                InstData::FnDecl {
-                    name,
-                    is_unchecked,
-                    params_start,
-                    params_len,
-                    return_type,
-                    body,
-                    has_self,
-                    ..
-                } => (
-                    *name,
-                    *is_unchecked,
-                    *params_start,
-                    *params_len,
-                    *return_type,
-                    *body,
-                    *has_self,
-                ),
-                _ => unreachable!("AnonFnValue method must be a FnDecl"),
-            };
+        let (
+            method_name,
+            is_unchecked,
+            params_start,
+            params_len,
+            return_type,
+            body,
+            has_self,
+            receiver,
+        ) = match &method_inst.data {
+            InstData::FnDecl {
+                name,
+                is_unchecked,
+                params_start,
+                params_len,
+                return_type,
+                body,
+                has_self,
+                receiver_mode,
+                ..
+            } => (
+                *name,
+                *is_unchecked,
+                *params_start,
+                *params_len,
+                *return_type,
+                *body,
+                *has_self,
+                crate::sema::anon_interfaces::decode_receiver_mode(*receiver_mode),
+            ),
+            _ => unreachable!("AnonFnValue method must be a FnDecl"),
+        };
 
         let key = (struct_id, method_name);
         if self.methods.contains_key(&key) {
@@ -9326,6 +9339,7 @@ impl<'a> Sema<'a> {
             MethodInfo {
                 struct_type,
                 has_self,
+                receiver,
                 params: param_range,
                 return_type: ret_ty,
                 body,
@@ -9366,9 +9380,11 @@ impl<'a> Sema<'a> {
                 return_type,
                 body,
                 has_self,
+                receiver_mode,
                 ..
             } = &method_inst.data
             {
+                let receiver = crate::sema::anon_interfaces::decode_receiver_mode(*receiver_mode);
                 let key = (enum_id, *method_name);
 
                 if seen_methods.contains(method_name) {
@@ -9410,6 +9426,7 @@ impl<'a> Sema<'a> {
                     MethodInfo {
                         struct_type: enum_type,
                         has_self: *has_self,
+                        receiver,
                         params: param_range,
                         return_type: ret_type,
                         body: *body,

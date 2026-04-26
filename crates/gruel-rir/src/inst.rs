@@ -1811,6 +1811,7 @@ impl Rir {
                 return_type,
                 body,
                 has_self,
+                receiver_mode,
             } => InstData::FnDecl {
                 directives_start: *directives_start + extra_offset,
                 directives_len: *directives_len,
@@ -1822,6 +1823,7 @@ impl Rir {
                 return_type: *return_type,
                 body: renumber(*body),
                 has_self: *has_self,
+                receiver_mode: *receiver_mode,
             },
 
             // Constant declaration - init is an InstRef
@@ -1923,11 +1925,13 @@ impl Rir {
                 params_start,
                 params_len,
                 return_type,
+                receiver_mode,
             } => InstData::InterfaceMethodSig {
                 name: *name,
                 params_start: *params_start + extra_offset,
                 params_len: *params_len,
                 return_type: *return_type,
+                receiver_mode: *receiver_mode,
             },
 
             // Enum operations
@@ -2482,6 +2486,9 @@ pub enum InstData {
         /// Only true for methods in impl blocks that have a self parameter.
         /// Used by sema to know to add the implicit self parameter.
         has_self: bool,
+        /// Receiver mode for methods (ADR-0060). Encoded as `RirParamMode`
+        /// (0 = Normal, 1 = Inout, 2 = Borrow). Ignored when `!has_self`.
+        receiver_mode: u8,
     },
 
     /// Constant declaration
@@ -2774,8 +2781,11 @@ pub enum InstData {
 
     /// A single method signature inside an `InterfaceDecl`.
     ///
-    /// No body. The receiver is always `self` for now (Phase 1) — `inout
-    /// self` and `borrow self` are future work.
+    /// No body. The receiver is always present (interface methods cannot
+    /// be associated functions in MVP); its mode (`self`, `inout self`,
+    /// `borrow self`) is encoded in `receiver_mode` using the same numbering
+    /// as `RirParamMode` (Normal/Inout/Borrow only — Comptime is rejected
+    /// by the grammar).
     InterfaceMethodSig {
         /// Method name.
         name: Spur,
@@ -2785,6 +2795,8 @@ pub enum InstData {
         params_len: u32,
         /// Return type symbol (`()` if none was written).
         return_type: Spur,
+        /// Receiver mode encoded as `RirParamMode` (ADR-0060).
+        receiver_mode: u8,
     },
 
     /// Derive declaration (ADR-0058): `derive Name { fn ... }`.
@@ -3211,6 +3223,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     return_type,
                     body,
                     has_self,
+                    receiver_mode: _,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let unchecked_str = if *is_unchecked { "unchecked " } else { "" };
@@ -3628,6 +3641,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     params_start,
                     params_len,
                     return_type,
+                    receiver_mode,
                 } => {
                     let params = self.rir.get_params(*params_start, *params_len);
                     let params_str: Vec<String> = params
@@ -3640,10 +3654,16 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                             )
                         })
                         .collect();
+                    let recv = match *receiver_mode {
+                        1 => "inout self",
+                        2 => "borrow self",
+                        _ => "self",
+                    };
                     writeln!(
                         out,
-                        "interface_method_sig {}(self{}{}) -> {}",
+                        "interface_method_sig {}({}{}{}) -> {}",
                         self.interner.resolve(name),
+                        recv,
                         if params.is_empty() { "" } else { ", " },
                         params_str.join(", "),
                         self.interner.resolve(return_type)
@@ -4312,6 +4332,7 @@ mod tests {
                 return_type,
                 body,
                 has_self: false,
+                receiver_mode: 0,
             },
             span: Span::new(0, 30),
         });
@@ -4347,6 +4368,7 @@ mod tests {
                 return_type,
                 body,
                 has_self: true,
+                receiver_mode: 0,
             },
             span: Span::new(0, 30),
         });
@@ -4407,6 +4429,7 @@ mod tests {
                 return_type,
                 body,
                 has_self: false,
+                receiver_mode: 0,
             },
             span: Span::new(0, 50),
         });
@@ -5025,6 +5048,7 @@ mod tests {
                 return_type,
                 body: method_body,
                 has_self: true,
+                receiver_mode: 0,
             },
             span: Span::new(0, 30),
         });
@@ -5617,6 +5641,7 @@ mod tests {
                 return_type: ret_type,
                 body: const1,
                 has_self: false,
+                receiver_mode: 0,
             },
             span: Span::new(0, 10),
         });
@@ -5643,6 +5668,7 @@ mod tests {
                 return_type: ret_type,
                 body: const2,
                 has_self: false,
+                receiver_mode: 0,
             },
             span: Span::new(20, 35),
         });

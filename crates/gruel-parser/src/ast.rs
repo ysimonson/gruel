@@ -317,8 +317,27 @@ pub struct Method {
 /// A self parameter in a method.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelfParam {
-    /// Span covering the `self` keyword
+    /// Receiver mode written before `self` (`inout self`, `borrow self`,
+    /// or just `self`). `comptime self` is not allowed by the grammar
+    /// (ADR-0060).
+    pub mode: SelfMode,
+    /// Span covering the receiver (including any `inout`/`borrow` keyword).
     pub span: Span,
+}
+
+/// Receiver mode for a `self` parameter (ADR-0060).
+///
+/// Mirrors the runtime portion of [`ParamMode`] but excludes `Comptime`,
+/// which the grammar rejects on receivers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SelfMode {
+    /// Plain `self` — by-value receiver.
+    #[default]
+    ByValue,
+    /// `inout self` — exclusive mutable borrow.
+    Inout,
+    /// `borrow self` — shared immutable borrow.
+    Borrow,
 }
 
 /// Visibility of an item (function, struct, enum, etc.)
