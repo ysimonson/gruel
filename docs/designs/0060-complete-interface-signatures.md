@@ -1,12 +1,12 @@
 ---
 id: 0060
 title: Complete Interface Signatures (Self + Receiver Modes)
-status: proposal
+status: implemented
 tags: [interfaces, types, conformance]
 feature-flag:
 created: 2026-04-26
-accepted:
-implemented:
+accepted: 2026-04-26
+implemented: 2026-04-26
 spec-sections: ["6.5"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -112,7 +112,7 @@ pub enum ReceiverMode { ByValue, Inout, Borrow }
   - Diagnostic formatters print the receiver mode.
   - **Testable**: `interface Copy { fn copy(borrow self) -> Self; }` parses and resolves; a struct with `fn copy(borrow self) -> StructName` conforms; a struct with `fn copy(self) -> StructName` (wrong receiver) is rejected.
 
-- [ ] **Phase 3: Spec + traceability.**
+- [x] **Phase 3: Spec + traceability.**
   - Update §6.5 to document `Self` in interface signatures and the three receiver modes; add normative paragraphs and examples.
   - Drop the "future work" notes from `InterfaceMethodReq` and `InterfaceMethodSig` doc comments.
   - Run traceability check; backfill any uncovered paragraphs.

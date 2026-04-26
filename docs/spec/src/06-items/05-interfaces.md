@@ -22,8 +22,13 @@ declared at module scope with the `interface` keyword.
 
 ```ebnf
 interface_def  = [ "pub" ] "interface" IDENT "{" { method_sig } "}" ;
-method_sig     = "fn" IDENT "(" "self" [ "," params ] ")" [ "->" type ] ";" ;
+method_sig     = "fn" IDENT "(" receiver [ "," params ] ")" [ "->" type ] ";" ;
+receiver       = [ "inout" | "borrow" ] "self" ;
 ```
+
+The type used in a method signature's parameter list or return position
+may be the keyword `Self`, which stands for the type that conforms to
+the enclosing interface (see 6.5:18).
 
 {{ rule(id="6.5:3", cat="legality-rule") }}
 
@@ -55,10 +60,12 @@ to `T` must structurally conform to `I`.
 {{ rule(id="6.5:8", cat="legality-rule") }}
 
 Conformance is checked at the call site. The concrete type `C` conforms to
-interface `I` iff for every method signature `fn name(self [, params]) [-> R]`
-in `I`, type `C` has a method with the same name, the same parameter types
-in declaration order, and the same return type. Any missing method or
-signature mismatch is a compile error at the call site.
+interface `I` iff for every method signature
+`fn name(receiver [, params]) [-> R]` in `I`, type `C` has a method with the
+same name, the same receiver mode (6.5:19), the same parameter types in
+declaration order after substituting `Self` with `C` (6.5:18), and the same
+return type after the same substitution. Any missing method, mismatched
+receiver mode, or signature mismatch is a compile error at the call site.
 
 {{ rule(id="6.5:9", cat="dynamic-semantics") }}
 
@@ -167,5 +174,90 @@ fn main() -> i32 {
     let a = One {};
     let b = Five {};
     invoke(borrow a) + invoke(borrow b)  // 6
+}
+```
+
+## `Self` and Receiver Modes (ADR-0060)
+
+{{ rule(id="6.5:18", cat="normative") }}
+
+Inside an interface method signature, the keyword `Self` is a type that
+stands for the candidate type being checked for conformance. At
+conformance check time (6.5:8) every occurrence of `Self` in a parameter
+or return type is replaced by the candidate type before comparing
+against the candidate's method. `Self` has no other meaning; it is not a
+runtime type and may not appear outside an interface method signature.
+
+{{ rule(id="6.5:19", cat="normative") }}
+
+An interface method's receiver is one of `self`, `inout self`, or
+`borrow self`. The receiver mode is part of the method's required
+signature: a candidate type's method conforms only if its receiver mode
+is identical to the interface's. Mismatched receiver modes are a compile
+error at the call site, distinct from a parameter or return type
+mismatch.
+
+{{ rule(id="6.5:20", cat="legality-rule") }}
+
+The keyword `Self` is reserved inside an interface body and refers only
+to the candidate type. Using `Self` in any other position (free
+functions, struct field types, top-level type aliases) is rejected at
+analysis time as an unknown type.
+
+{{ rule(id="6.5:21", cat="example") }}
+
+```gruel
+// Compiled with --preview interfaces
+interface Cloner {
+    fn clone(borrow self) -> Self;
+}
+
+struct Buf {
+    n: i32,
+
+    fn clone(borrow self) -> Buf {
+        Buf { n: self.n }
+    }
+}
+
+fn use_cloner(comptime T: Cloner, t: T) {
+}
+
+fn main() -> i32 {
+    let b = Buf { n: 1 };
+    use_cloner(Buf, b);
+    0
+}
+```
+
+{{ rule(id="6.5:22", cat="example") }}
+
+A candidate whose return type is not the candidate itself fails to
+conform when the interface declares `-> Self`:
+
+```gruel
+// Compile error: type `Buf` does not conform to interface `Cloner`
+interface Cloner {
+    fn clone(borrow self) -> Self;
+}
+
+struct Buf {
+    fn clone(borrow self) -> i32 { 0 }
+}
+```
+
+{{ rule(id="6.5:23", cat="example") }}
+
+A candidate with the wrong receiver mode is rejected even when the
+parameter and return types align:
+
+```gruel
+// Compile error: type `Buf` does not conform to interface `Reader`
+interface Reader {
+    fn read(borrow self) -> i32;
+}
+
+struct Buf {
+    fn read(self) -> i32 { 0 }
 }
 ```

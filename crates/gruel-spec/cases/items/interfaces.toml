@@ -342,3 +342,150 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "duplicate method"
+
+# =============================================================================
+# `Self` in interface signatures (ADR-0060)
+# =============================================================================
+
+# A candidate whose return type matches the candidate type itself satisfies
+# `-> Self`.
+[[case]]
+name = "interface_self_return_conforms"
+spec = ["6.5:18", "6.5:21"]
+source = """
+interface Cloner {
+    fn clone(self) -> Self;
+}
+
+struct Foo {
+    fn clone(self) -> Foo { Foo {} }
+}
+
+fn use_cloner(comptime T: Cloner, t: T) {
+}
+
+fn main() -> i32 {
+    use_cloner(Foo, Foo {});
+    7
+}
+"""
+exit_code = 7
+
+# A candidate whose return type is anything other than the candidate type
+# fails to satisfy `-> Self`.
+[[case]]
+name = "interface_self_return_mismatch_rejected"
+spec = ["6.5:18", "6.5:22"]
+source = """
+interface Cloner {
+    fn clone(self) -> Self;
+}
+
+struct Foo {
+    fn clone(self) -> i32 { 0 }
+}
+
+fn use_cloner(comptime T: Cloner, t: T) {
+}
+
+fn main() -> i32 {
+    use_cloner(Foo, Foo {});
+    0
+}
+"""
+compile_fail = true
+error_contains = "wrong signature"
+
+# `Self` works in non-receiver parameter position too: must substitute to the
+# candidate type.
+[[case]]
+name = "interface_self_param_conforms"
+spec = ["6.5:18"]
+source = """
+interface Combiner {
+    fn combine(self, other: Self) -> Self;
+}
+
+struct Foo {
+    fn combine(self, other: Foo) -> Foo { other }
+}
+
+fn use_combiner(comptime T: Combiner, t: T) {
+}
+
+fn main() -> i32 {
+    use_combiner(Foo, Foo {});
+    0
+}
+"""
+exit_code = 0
+
+# =============================================================================
+# Receiver modes on interface methods (ADR-0060)
+# =============================================================================
+
+# `borrow self` on the interface requires `borrow self` on the candidate.
+[[case]]
+name = "interface_borrow_self_conforms"
+spec = ["6.5:19"]
+source = """
+interface Reader {
+    fn read(borrow self) -> i32;
+}
+
+struct Buf {
+    n: i32,
+
+    fn read(borrow self) -> i32 { self.n }
+}
+
+fn use_reader(comptime T: Reader, t: T) {
+}
+
+fn main() -> i32 {
+    use_reader(Buf, Buf { n: 0 });
+    0
+}
+"""
+exit_code = 0
+
+# A by-value `self` on the candidate does not satisfy `borrow self`.
+[[case]]
+name = "interface_receiver_mode_mismatch_rejected"
+spec = ["6.5:19", "6.5:23"]
+source = """
+interface Reader {
+    fn read(borrow self) -> i32;
+}
+
+struct Buf {
+    n: i32,
+
+    fn read(self) -> i32 { self.n }
+}
+
+fn use_reader(comptime T: Reader, t: T) {
+}
+
+fn main() -> i32 {
+    use_reader(Buf, Buf { n: 0 });
+    0
+}
+"""
+compile_fail = true
+error_contains = "wrong signature"
+
+# `Self` outside of an interface body is not a recognized type — using it as a
+# function parameter type is an unknown-type error.
+[[case]]
+name = "self_outside_interface_rejected"
+spec = ["6.5:20"]
+source = """
+fn id(x: Self) -> Self { x }
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "Self"
