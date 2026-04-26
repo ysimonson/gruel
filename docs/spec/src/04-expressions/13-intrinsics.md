@@ -217,7 +217,10 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:108", cat="normative") }}
 
-The `@ownership` intrinsic classifies the ownership posture of a type (see ADR-0008).
+The `@ownership` intrinsic classifies the ownership posture of a type
+(see ADR-0008, ADR-0059). The classification is computed from conformance
+to the compiler-recognized `Copy` interface (§3.8) plus the `linear`
+keyword.
 
 {{ rule(id="4.13:109", cat="normative") }}
 
@@ -235,7 +238,14 @@ The return type of `@ownership` is the built-in enum `Ownership`, which has thre
 
 {{ rule(id="4.13:111", cat="normative") }}
 
-The variants are mutually exclusive: every type has exactly one ownership posture. A `linear` struct is `Linear`; a struct annotated with `@copy` is `Copy`; primitives, enums, pointers, and arrays of `Copy` elements are `Copy`; all other struct types are `Affine`.
+The variants are mutually exclusive: every type has exactly one ownership
+posture. The classification is:
+
+- `Linear` if `T` carries the `linear` keyword.
+- `Copy` if `T` (not `linear`) conforms to the `Copy` interface — this
+  covers primitives, enums, pointers, arrays of `Copy` elements, and
+  struct/enum types declared with `@derive(Copy)`.
+- `Affine` otherwise.
 
 {{ rule(id="4.13:112", cat="normative") }}
 

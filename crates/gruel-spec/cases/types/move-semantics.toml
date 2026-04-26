@@ -1151,3 +1151,58 @@ fn main() -> i32 {
 }
 """
 exit_code = 3
+# =============================================================================
+# Drop and Copy as Interfaces (ADR-0059)
+# =============================================================================
+
+# A `comptime T: Copy` bound accepts a Copy primitive.
+[[case]]
+name = "copy_interface_accepts_primitive"
+spec = ["3.8:60", "3.8:61"]
+description = "comptime T: Copy accepts i32"
+source = """
+fn use_copy(comptime T: Copy, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_copy(i32, 7)
+}
+"""
+exit_code = 0
+
+# A `comptime T: Copy` bound accepts a struct with @derive(Copy).
+[[case]]
+name = "copy_interface_accepts_derive_copy_struct"
+spec = ["3.8:60", "3.8:61"]
+description = "comptime T: Copy accepts a @derive(Copy) struct"
+source = """
+@derive(Copy)
+struct Pair { x: i32, y: i32 }
+
+fn use_copy(comptime T: Copy, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_copy(Pair, Pair { x: 1, y: 2 })
+}
+"""
+exit_code = 0
+
+# A `comptime T: Copy` bound rejects an affine type (String).
+[[case]]
+name = "copy_interface_rejects_affine"
+spec = ["3.8:60", "3.8:61", "3.8:62"]
+description = "comptime T: Copy rejects affine String"
+source = """
+fn use_copy(comptime T: Copy, t: T) {
+}
+
+fn main() -> i32 {
+    use_copy(String, "hello");
+    0
+}
+"""
+compile_fail = true
+error_contains = "does not conform to interface `Copy`"

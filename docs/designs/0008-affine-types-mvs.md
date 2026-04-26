@@ -7,14 +7,17 @@ created: 2025-12-24
 accepted: 2025-12-24
 implemented: 2026-01-04
 spec-sections: ["3.8"]
-superseded-by:
+superseded-by: 0059
 ---
 
 # ADR-0008: Affine Types and Mutable Value Semantics
 
 ## Status
 
-Implemented
+Implemented (the `@copy` directive portion has been superseded by
+[ADR-0059](./0059-drop-and-copy-interfaces.md), which reframes Copy and
+Drop as compiler-recognized interfaces and replaces `@copy` with
+`@derive(Copy)`).
 
 ## Summary
 

@@ -395,3 +395,38 @@ fn main() -> i32 {
     // Original 'd' is still invalid here
 }
 ```
+
+## `Drop` and `Copy` as Interfaces (ADR-0059)
+
+{{ rule(id="3.8:60", cat="normative") }}
+
+Gruel's three ownership postures are mediated by two compiler-recognized
+structural interfaces: `Copy` (`fn copy(borrow self) -> Self`) and `Drop`
+(`fn drop(self)`). Conformance to these interfaces is computed by the
+compiler — built-in types acquire conformance through synthetic rules,
+user types via `@derive(Copy)` or by defining the corresponding inline
+method.
+
+{{ rule(id="3.8:61", cat="normative") }}
+
+For every struct or enum `T`:
+
+- `T` conforms to `Copy` iff `T` is not `linear` and every constituent
+  field is itself `Copy`.
+- `T` conforms to `Drop` iff `T` is not `linear` and `T` does not conform
+  to `Copy`. Affine types always conform to `Drop`; their drop body is
+  either user-written via `fn drop(self)` (ADR-0053) or the compiler's
+  recursive field-drop synthesis.
+
+{{ rule(id="3.8:62", cat="legality-rule") }}
+
+`Copy` and `Drop` are mutually exclusive: a single type **MUST NOT**
+conform to both. `@derive(Copy)` on a struct that declares `fn drop(self)`
+is rejected at the declaration site. Linear types conform to neither.
+
+{{ rule(id="3.8:63", cat="informative") }}
+
+Generic code may constrain on these interfaces directly:
+`fn process(comptime T: Copy, t: T)` accepts any `Copy` type and rejects
+non-conforming types at the call site. This is the same conformance
+machinery as user-defined interfaces (§6.5).

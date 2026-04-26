@@ -1,12 +1,12 @@
 ---
 id: 0059
 title: Drop and Copy as Interfaces
-status: proposal
+status: implemented
 tags: [types, ownership, interfaces, derives]
 feature-flag:
 created: 2026-04-26
-accepted:
-implemented:
+accepted: 2026-04-26
+implemented: 2026-04-26
 spec-sections: ["3.8", "4.13"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -107,7 +107,7 @@ The current implementation already returns these values via `is_type_copy` / `is
   - Remove the `@copy` directive recognition in sema. A user who still writes `@copy` gets a migration error pointing at `@derive(Copy)`.
   - Update spec §3.8 to drop the `@copy` subsection and document `@derive(Copy)` in its place.
 
-- [ ] **Phase 4: Spec + traceability.**
+- [x] **Phase 4: Spec + traceability.**
   - Define `Drop` / `Copy` in the spec as part of §3.8 (interfaces backing the ownership trichotomy).
   - Mark §4.13:108–114 (`@ownership`) as defined via `Copy` conformance plus the `linear` flag.
   - Mark ADR-0008 as superseded-in-part by ADR-0059 (`superseded-by` field updated; only the `@copy` portion is superseded).
