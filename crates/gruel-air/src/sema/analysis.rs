@@ -353,6 +353,116 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         }
     }
 
+    // Analyze method bodies attached to host types via `@derive(...)`
+    // directives (ADR-0058). Mirrors the inline-method loops above; the
+    // host type substitutes for `Self` exactly as it does for inline
+    // methods on the host.
+    let derive_jobs: Vec<(Spur, Spur, bool, super::DeriveBinding)> = sema
+        .derive_bindings
+        .iter()
+        .map(|b| (b.derive_name, b.host_name, b.host_is_enum, *b))
+        .collect();
+    for (derive_name, host_name, host_is_enum, _binding) in derive_jobs {
+        // Each binding's full method list is captured in `Sema::derives`.
+        let dmethods: Vec<crate::sema::info::DeriveMethod> = match sema.derives.get(&derive_name) {
+            Some(info) => info.methods.clone(),
+            None => continue,
+        };
+        if host_is_enum {
+            let enum_id = match sema.enums.get(&host_name).copied() {
+                Some(id) => id,
+                None => continue,
+            };
+            let enum_type = Type::new_enum(enum_id);
+            let host_str = sema.type_pool.enum_def(enum_id).name.clone();
+            for dm in dmethods {
+                let m = sema.rir.get(dm.method_ref);
+                let InstData::FnDecl {
+                    name: method_name,
+                    params_start,
+                    params_len,
+                    return_type,
+                    body,
+                    has_self,
+                    ..
+                } = &m.data
+                else {
+                    continue;
+                };
+                let method_str = sema.interner.resolve(method_name).to_string();
+                let params = sema.rir.get_params(*params_start, *params_len);
+                let full_name = if *has_self {
+                    format!("{}.{}", host_str, method_str)
+                } else {
+                    format!("{}::{}", host_str, method_str)
+                };
+                match sema.analyze_method_function(
+                    &infer_ctx,
+                    &full_name,
+                    MethodBodySpec {
+                        return_type: *return_type,
+                        params: &params,
+                        body: *body,
+                        self_type: has_self.then_some(enum_type),
+                    },
+                    m.span,
+                ) {
+                    Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
+                        functions_with_strings.push((analyzed, local_strings));
+                        all_warnings.extend(warnings);
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+        } else {
+            let struct_id = match sema.structs.get(&host_name).copied() {
+                Some(id) => id,
+                None => continue,
+            };
+            let struct_type = Type::new_struct(struct_id);
+            let host_str = sema.type_pool.struct_def(struct_id).name.clone();
+            for dm in dmethods {
+                let m = sema.rir.get(dm.method_ref);
+                let InstData::FnDecl {
+                    name: method_name,
+                    params_start,
+                    params_len,
+                    return_type,
+                    body,
+                    has_self,
+                    ..
+                } = &m.data
+                else {
+                    continue;
+                };
+                let method_str = sema.interner.resolve(method_name).to_string();
+                let params = sema.rir.get_params(*params_start, *params_len);
+                let full_name = if *has_self {
+                    format!("{}.{}", host_str, method_str)
+                } else {
+                    format!("{}::{}", host_str, method_str)
+                };
+                match sema.analyze_method_function(
+                    &infer_ctx,
+                    &full_name,
+                    MethodBodySpec {
+                        return_type: *return_type,
+                        params: &params,
+                        body: *body,
+                        self_type: has_self.then_some(struct_type),
+                    },
+                    m.span,
+                ) {
+                    Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
+                        functions_with_strings.push((analyzed, local_strings));
+                        all_warnings.extend(warnings);
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+        }
+    }
+
     // Analyze inline `fn drop(self)` destructor bodies (ADR-0053 phase 3).
     let inline_drops: Vec<(StructId, InstRef, Span)> = sema
         .inline_struct_drops

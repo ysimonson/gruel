@@ -489,7 +489,220 @@ impl<'a> Sema<'a> {
         // step. Runs after field-type resolution so the host type is
         // already fully known.
         self.resolve_derive_directives()?;
+        // ADR-0058 sub-phase: splice every `(host_type, derive_id)`
+        // binding's methods into the host's method list. Runs after the
+        // host's fields are known so destructor / Copy validation
+        // (`resolve_remaining_declarations`) sees the attached methods.
+        self.expand_derives()?;
         self.resolve_remaining_declarations()?;
+        Ok(())
+    }
+
+    /// Phase 4 of ADR-0058: walk every recorded `DeriveBinding` and splice
+    /// the named derive's methods into the host type's method list. The
+    /// same routine is reused at the anonymous-host call site (see
+    /// `splice_derive_methods_into_struct`).
+    pub(crate) fn expand_derives(&mut self) -> CompileResult<()> {
+        // Snapshot the bindings so we can iterate while mutating
+        // `self.methods`. Bindings are restored after expansion so the
+        // analysis loop can drive each spliced method's body analysis.
+        let bindings = self.derive_bindings.clone();
+        for b in &bindings {
+            // Anonymous-host expansion uses a different call site; named
+            // bindings always carry a `host_name` that resolves through
+            // `self.structs` (or, in the future, `self.enums`).
+            if b.host_is_enum {
+                let enum_id = match self.enums.get(&b.host_name).copied() {
+                    Some(id) => id,
+                    None => continue,
+                };
+                self.splice_derive_methods_into_enum(b.derive_name, enum_id, b.directive_span)?;
+            } else {
+                let struct_id = match self.structs.get(&b.host_name).copied() {
+                    Some(id) => id,
+                    None => continue,
+                };
+                self.splice_derive_methods_into_struct(b.derive_name, struct_id, b.directive_span)?;
+            }
+        }
+        // Replace the (now-consumed) bindings — the cloned working set is
+        // already done. Phase 4 keeps the original list around for the
+        // analysis loop to drive body analysis later.
+        self.derive_bindings = bindings;
+        Ok(())
+    }
+
+    /// Splice every method of `derive_name` into the struct identified by
+    /// `host_id`. `Self` is bound to the host struct's `Type`.
+    pub(crate) fn splice_derive_methods_into_struct(
+        &mut self,
+        derive_name: Spur,
+        host_id: StructId,
+        directive_span: Span,
+    ) -> CompileResult<()> {
+        // Snapshot the per-derive method list (we'll borrow `self` mutably
+        // when calling `resolve_param_type` below).
+        let methods: Vec<crate::sema::info::DeriveMethod> = match self.derives.get(&derive_name) {
+            Some(info) => info.methods.clone(),
+            None => return Ok(()),
+        };
+        let host_type = Type::new_struct(host_id);
+        let self_type_sym = self.interner.get_or_intern("Self");
+
+        for dm in methods {
+            let m = self.rir.get(dm.method_ref);
+            let InstData::FnDecl {
+                name: method_name,
+                is_unchecked,
+                params_start,
+                params_len,
+                return_type,
+                body,
+                has_self,
+                ..
+            } = m.data
+            else {
+                continue;
+            };
+            let key = (host_id, method_name);
+            if self.methods.contains_key(&key) {
+                let derive_str = self.interner.resolve(&derive_name).to_string();
+                let method_str = self.interner.resolve(&method_name).to_string();
+                let host_str = self.type_pool.struct_def(host_id).name.clone();
+                return Err(CompileError::new(
+                    ErrorKind::DuplicateMethod {
+                        type_name: format!(
+                            "type `{}` (attached by `@derive({})`)",
+                            host_str, derive_str
+                        ),
+                        method_name: method_str,
+                    },
+                    directive_span,
+                ));
+            }
+
+            let params = self.rir.get_params(params_start, params_len);
+            let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
+            let param_modes: Vec<gruel_rir::RirParamMode> = params.iter().map(|p| p.mode).collect();
+            let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
+            let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
+            for p in &params {
+                let ty = if p.ty == self_type_sym {
+                    host_type
+                } else {
+                    self.resolve_param_type(p.ty, p.mode, m.span)?
+                };
+                param_types.push(ty);
+            }
+            let ret_type = if return_type == self_type_sym {
+                host_type
+            } else {
+                self.resolve_type(return_type, m.span)?
+            };
+            let param_range =
+                self.param_arena
+                    .alloc(param_names, param_types, param_modes, param_comptime);
+
+            self.methods.insert(
+                key,
+                MethodInfo {
+                    struct_type: host_type,
+                    has_self,
+                    params: param_range,
+                    return_type: ret_type,
+                    body,
+                    span: m.span,
+                    is_unchecked,
+                    is_generic: false,
+                    return_type_sym: return_type,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Splice every method of `derive_name` into the enum identified by
+    /// `host_id`. `Self` is bound to the host enum's `Type`. Mirrors the
+    /// struct case; structs and enums share the splicing logic (only the
+    /// destination map differs).
+    pub(crate) fn splice_derive_methods_into_enum(
+        &mut self,
+        derive_name: Spur,
+        host_id: EnumId,
+        directive_span: Span,
+    ) -> CompileResult<()> {
+        let methods: Vec<crate::sema::info::DeriveMethod> = match self.derives.get(&derive_name) {
+            Some(info) => info.methods.clone(),
+            None => return Ok(()),
+        };
+        let host_type = Type::new_enum(host_id);
+        let self_type_sym = self.interner.get_or_intern("Self");
+
+        for dm in methods {
+            let m = self.rir.get(dm.method_ref);
+            let InstData::FnDecl {
+                name: method_name,
+                is_unchecked,
+                params_start,
+                params_len,
+                return_type,
+                body,
+                has_self,
+                ..
+            } = m.data
+            else {
+                continue;
+            };
+            let key = (host_id, method_name);
+            if self.enum_methods.contains_key(&key) {
+                let derive_str = self.interner.resolve(&derive_name).to_string();
+                let method_str = self.interner.resolve(&method_name).to_string();
+                return Err(CompileError::new(
+                    ErrorKind::DuplicateMethod {
+                        type_name: format!("enum (attached by `@derive({})`)", derive_str),
+                        method_name: method_str,
+                    },
+                    directive_span,
+                ));
+            }
+
+            let params = self.rir.get_params(params_start, params_len);
+            let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
+            let param_modes: Vec<gruel_rir::RirParamMode> = params.iter().map(|p| p.mode).collect();
+            let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
+            let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
+            for p in &params {
+                let ty = if p.ty == self_type_sym {
+                    host_type
+                } else {
+                    self.resolve_param_type(p.ty, p.mode, m.span)?
+                };
+                param_types.push(ty);
+            }
+            let ret_type = if return_type == self_type_sym {
+                host_type
+            } else {
+                self.resolve_type(return_type, m.span)?
+            };
+            let param_range =
+                self.param_arena
+                    .alloc(param_names, param_types, param_modes, param_comptime);
+
+            self.enum_methods.insert(
+                key,
+                MethodInfo {
+                    struct_type: host_type,
+                    has_self,
+                    params: param_range,
+                    return_type: ret_type,
+                    body,
+                    span: m.span,
+                    is_unchecked,
+                    is_generic: false,
+                    return_type_sym: return_type,
+                },
+            );
+        }
         Ok(())
     }
 

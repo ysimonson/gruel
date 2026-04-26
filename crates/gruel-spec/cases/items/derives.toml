@@ -222,3 +222,106 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "comptime_derives"
+
+# Phase 4: a one-method derive on a named struct lands as a callable
+# method on the host. The derive method body is not copied — it is
+# spliced verbatim into the host's method list.
+[[case]]
+name = "derive_splice_struct_method"
+spec = ["4.14:101", "4.14:103"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Tagger {
+    fn tag(self) -> i32 { 7 }
+}
+
+@derive(Tagger)
+struct Buffer {
+    capacity: i32,
+}
+
+fn main() -> i32 {
+    let b = Buffer { capacity: 0 };
+    b.tag()
+}
+"""
+exit_code = 7
+
+# Phase 4: an empty derive is a clean no-op — the host type still
+# compiles and runs.
+[[case]]
+name = "derive_splice_empty"
+spec = ["4.14:100"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Marker {
+}
+
+@derive(Marker)
+struct Buffer {
+    capacity: i32,
+}
+
+fn main() -> i32 {
+    let b = Buffer { capacity: 0 };
+    b.capacity
+}
+"""
+exit_code = 0
+
+# Phase 4: a derive that attaches a method conflicting with a hand-
+# written inline method on the host is rejected.
+[[case]]
+name = "derive_conflicts_with_inline_method"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Tagger {
+    fn tag(self) -> i32 { 7 }
+}
+
+@derive(Tagger)
+struct Buffer {
+    capacity: i32,
+
+    fn tag(self) -> i32 { 1 }
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "duplicate method"
+
+# Phase 4: two derives attaching the same method name to one host are
+# rejected.
+[[case]]
+name = "derive_two_derives_same_method"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive A {
+    fn shared(self) -> i32 { 1 }
+}
+
+derive B {
+    fn shared(self) -> i32 { 2 }
+}
+
+@derive(A)
+@derive(B)
+struct Buffer {
+    capacity: i32,
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "duplicate method"
