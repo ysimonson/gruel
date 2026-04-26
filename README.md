@@ -30,6 +30,7 @@ freestanding/hermetic capacities.
 - Tuples (ADR-0048)
 - Anonymous functions (ADR-0055)
 - Go-like structurally typed interfaces (ADR-0056, ADR-0057, ADR-0060)
+- Rust-like @derive for structs and enums (ADR-0058)
 - Stabilized anonymous struct methods (ADR-0029)
 - All struct/enum methods, including destructors, are inlined - there are no `impl` blocks (ADR-0053)
 - Added struct destructuring (ADR-0036)
