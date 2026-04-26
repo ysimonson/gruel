@@ -7,7 +7,8 @@ use lasso::{Spur, ThreadedRodeo};
 
 use gruel_intrinsics::is_type_intrinsic;
 use gruel_parser::ast::{
-    BlockExpr, ConstDecl, Directives, DropFn, FieldPattern, Ident, SelfParam, TupleElemPattern,
+    BlockExpr, ConstDecl, DeriveDecl, Directives, DropFn, FieldPattern, Ident, SelfParam,
+    TupleElemPattern,
 };
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
@@ -77,6 +78,9 @@ impl<'a> AstGen<'a> {
             }
             Item::Interface(iface) => {
                 self.gen_interface(iface);
+            }
+            Item::Derive(derive_decl) => {
+                self.gen_derive(derive_decl);
             }
             Item::DropFn(drop_fn) => {
                 self.gen_drop_fn(drop_fn);
@@ -365,6 +369,27 @@ impl<'a> AstGen<'a> {
                 methods_len,
             },
             span: iface.span,
+        })
+    }
+
+    fn gen_derive(&mut self, derive_decl: &DeriveDecl) -> InstRef {
+        // Each method body is generated like an inline struct/enum method:
+        // `gen_method` emits a `FnDecl` instruction whose body uses `Self`
+        // as a free type variable, to be bound at derive-expansion time.
+        let method_refs: Vec<InstRef> = derive_decl
+            .methods
+            .iter()
+            .map(|m| self.gen_method(m))
+            .collect();
+        let (methods_start, methods_len) = self.rir.add_inst_refs(&method_refs);
+
+        self.rir.add_inst(Inst {
+            data: InstData::DeriveDecl {
+                name: derive_decl.name.name,
+                methods_start,
+                methods_len,
+            },
+            span: derive_decl.span,
         })
     }
 

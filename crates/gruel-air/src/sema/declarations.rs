@@ -470,6 +470,10 @@ impl<'a> Sema<'a> {
     /// are created on-demand via the thread-safe `TypeInternPool` during function
     /// body analysis.
     pub(crate) fn resolve_declarations(&mut self) -> CompileResult<()> {
+        // Derives (ADR-0058) are gated by the `comptime_derives` preview
+        // feature. Reject any `derive` item before we touch the rest of
+        // declaration gathering so users get a clear diagnostic.
+        self.validate_derive_decls()?;
         // Interfaces (ADR-0056) must be registered before struct/enum field
         // and method-param resolution so that:
         //   - using an interface name as a struct field type produces a
@@ -481,6 +485,19 @@ impl<'a> Sema<'a> {
         self.resolve_struct_fields()?;
         self.resolve_enum_variant_fields()?;
         self.resolve_remaining_declarations()?;
+        Ok(())
+    }
+
+    /// Phase 1 of ADR-0058: walk every `DeriveDecl` instruction and require
+    /// the `comptime_derives` preview feature. The full validation of
+    /// derive bodies is added in Phase 2.
+    pub(crate) fn validate_derive_decls(&mut self) -> CompileResult<()> {
+        use gruel_error::PreviewFeature;
+        for (_, inst) in self.rir.iter() {
+            if let InstData::DeriveDecl { .. } = &inst.data {
+                self.require_preview(PreviewFeature::ComptimeDerives, "`derive` items", inst.span)?;
+            }
+        }
         Ok(())
     }
 
@@ -631,6 +648,14 @@ impl<'a> Sema<'a> {
                     ..
                 } => (*methods_start, *methods_len),
                 InstData::AnonEnumType {
+                    methods_start,
+                    methods_len,
+                    ..
+                } => (*methods_start, *methods_len),
+                // Methods inside `derive` bodies (ADR-0058) are not standalone
+                // functions either — they are spliced into a host type's
+                // method list at derive expansion.
+                InstData::DeriveDecl {
                     methods_start,
                     methods_len,
                     ..

@@ -86,6 +86,7 @@ mod tests {
         "MethodCall",
         "AssocFnCall",
         "DropFnDecl",
+        "DeriveDecl",
     ];
 
     // Include the source files at compile time

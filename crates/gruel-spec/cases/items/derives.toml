@@ -1,0 +1,62 @@
+# Derive Item Tests (ADR-0058)
+#
+# User-defined derives via `derive` items. Gated behind the
+# `comptime_derives` preview feature.
+
+[section]
+id = "items.derives"
+spec_chapter = "4.14"
+name = "Derive Items"
+description = "User-defined derives via `derive` items (ADR-0058)."
+
+# Phase 1: a `derive` item with a single method body parses without crashing
+# the frontend. With the preview gate enabled, sema accepts the declaration
+# even before splice-on-host expansion is wired up.
+[[case]]
+name = "derive_parses_single_method"
+spec = ["4.14:100", "4.14:101", "4.14:102"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Marker {
+    fn marker(self) {}
+}
+
+fn main() -> i32 {
+    42
+}
+"""
+exit_code = 42
+
+# Phase 1: an empty derive body parses cleanly.
+[[case]]
+name = "derive_parses_empty"
+spec = ["4.14:100", "4.14:102"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Marker {
+}
+
+fn main() -> i32 {
+    7
+}
+"""
+exit_code = 7
+
+# Without the preview flag, a `derive` item is rejected with a clear
+# diagnostic citing the feature name.
+[[case]]
+name = "derive_requires_preview"
+spec = ["4.14:102"]
+source = """
+derive Marker {
+    fn marker(self) {}
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "comptime_derives"

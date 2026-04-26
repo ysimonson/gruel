@@ -162,6 +162,8 @@ pub enum LogosTokenKind {
     ComptimeUnroll,
     #[token("comptime")]
     Comptime,
+    #[token("derive")]
+    Derive,
     #[token("pub")]
     Pub,
     #[token("const")]
@@ -352,6 +354,7 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::SelfType => TokenKind::SelfType,
             LogosTokenKind::ComptimeUnroll => TokenKind::ComptimeUnroll,
             LogosTokenKind::Comptime => TokenKind::Comptime,
+            LogosTokenKind::Derive => TokenKind::Derive,
             LogosTokenKind::Pub => TokenKind::Pub,
             LogosTokenKind::Const => TokenKind::Const,
             LogosTokenKind::Checked => TokenKind::Checked,

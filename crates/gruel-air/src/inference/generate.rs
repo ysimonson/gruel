@@ -1320,6 +1320,7 @@ impl<'a> ConstraintGenerator<'a> {
             | InstData::EnumDecl { .. }
             | InstData::InterfaceDecl { .. }
             | InstData::InterfaceMethodSig { .. }
+            | InstData::DeriveDecl { .. }
             | InstData::DropFnDecl { .. }
             | InstData::ConstDecl { .. } => InferType::Concrete(Type::UNIT),
 

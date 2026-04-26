@@ -45,6 +45,7 @@ pub enum TokenKind {
     SelfType,       // Self (type, not value) - used in methods to refer to the struct type
     Comptime,       // comptime (compile-time evaluation)
     ComptimeUnroll, // comptime_unroll (compile-time loop unrolling)
+    Derive,         // derive (user-defined derive items, ADR-0058)
     Pub,            // pub visibility modifier (module system)
     Const,          // const declaration (module system re-exports)
     Checked,        // checked { } block for unchecked operations
@@ -156,6 +157,7 @@ impl TokenKind {
             TokenKind::SelfType => "'Self'",
             TokenKind::Comptime => "'comptime'",
             TokenKind::ComptimeUnroll => "'comptime_unroll'",
+            TokenKind::Derive => "'derive'",
             TokenKind::Pub => "'pub'",
             TokenKind::Const => "'const'",
             TokenKind::Checked => "'checked'",
@@ -267,6 +269,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::SelfType => write!(f, "SELFTYPE"),
             TokenKind::Comptime => write!(f, "COMPTIME"),
             TokenKind::ComptimeUnroll => write!(f, "COMPTIME_UNROLL"),
+            TokenKind::Derive => write!(f, "DERIVE"),
             TokenKind::Pub => write!(f, "PUB"),
             TokenKind::Const => write!(f, "CONST"),
             TokenKind::Checked => write!(f, "CHECKED"),

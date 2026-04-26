@@ -6,14 +6,14 @@
 use crate::ast::{
     AnonFnExpr, AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget,
     AssocFnCallExpr, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr,
-    CheckedBlockExpr, ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr, Directive,
-    DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr, EnumVariant, Expr, FieldDecl,
-    FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function, Ident, IfExpr, IndexExpr,
-    IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item, LetStatement, LoopExpr, MatchArm,
-    MatchExpr, Method, MethodCallExpr, MethodSig, NegIntLit, Param, ParamMode, ParenExpr, PathExpr,
-    PathPattern, Pattern, ReturnExpr, SelfExpr, SelfParam, Statement, StringLit, StructDecl,
-    StructLitExpr, TupleElemPattern, TupleExpr, TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr,
-    UnaryOp, UnitLit, Visibility, WhileExpr,
+    CheckedBlockExpr, ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr,
+    DeriveDecl, Directive, DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr,
+    EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function,
+    Ident, IfExpr, IndexExpr, IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item,
+    LetStatement, LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, MethodSig, NegIntLit,
+    Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, ReturnExpr, SelfExpr, SelfParam,
+    Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern, TupleExpr, TupleIndexExpr,
+    TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -3072,6 +3072,35 @@ where
         .boxed()
 }
 
+/// Parser for derive declarations (ADR-0058):
+///
+/// ```text
+/// derive Name {
+///     fn method(self [, params]) [-> RetType] { body }
+///     ...
+/// }
+/// ```
+fn derive_parser<'src, I>() -> GruelParser<'src, I, DeriveDecl>
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    let body = method_parser()
+        .repeated()
+        .collect::<Vec<_>>()
+        .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace))
+        .boxed();
+
+    just(TokenKind::Derive)
+        .ignore_then(ident_parser())
+        .then(body)
+        .map_with(|(name, methods), e| DeriveDecl {
+            name,
+            methods,
+            span: span_from_extra(e),
+        })
+        .boxed()
+}
+
 fn item_parser<'src, I>() -> GruelParser<'src, I, Item>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -3081,6 +3110,7 @@ where
         struct_parser().map(Item::Struct).boxed(),
         enum_parser().map(Item::Enum).boxed(),
         interface_parser().map(Item::Interface).boxed(),
+        derive_parser().map(Item::Derive).boxed(),
         drop_fn_parser().map(Item::DropFn).boxed(),
         const_parser().map(Item::Const).boxed(),
     ))
@@ -3100,6 +3130,7 @@ where
         just(TokenKind::Struct).ignored().boxed(),
         just(TokenKind::Enum).ignored().boxed(),
         just(TokenKind::Interface).ignored().boxed(),
+        just(TokenKind::Derive).ignored().boxed(),
         just(TokenKind::Drop).ignored().boxed(),
         just(TokenKind::Const).ignored().boxed(),
     ))
@@ -3369,6 +3400,11 @@ fn validate_item(item: &Item, errors: &mut Vec<CompileError>, v: &AstValidator) 
         Item::Const(c) => validate_expr(&c.init, errors, v),
         Item::DropFn(d) => validate_expr(&d.body, errors, v),
         Item::Interface(_) => {}
+        Item::Derive(d) => {
+            for m in &d.methods {
+                validate_expr(&m.body, errors, v);
+            }
+        }
         Item::Error(_) => {}
     }
 }
@@ -3610,6 +3646,7 @@ mod tests {
             Item::Struct(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Enum(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Interface(_) => panic!("parse_expr helper should only be used with functions"),
+            Item::Derive(_) => panic!("parse_expr helper should only be used with functions"),
             Item::DropFn(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Const(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Error(_) => panic!("parse_expr helper should only be used with functions"),
@@ -3640,6 +3677,7 @@ mod tests {
             Item::Struct(_) => panic!("expected Function"),
             Item::Enum(_) => panic!("expected Function"),
             Item::Interface(_) => panic!("expected Function"),
+            Item::Derive(_) => panic!("expected Function"),
             Item::DropFn(_) => panic!("expected Function"),
             Item::Const(_) => panic!("expected Function"),
             Item::Error(_) => panic!("expected Function"),
@@ -3711,6 +3749,7 @@ mod tests {
             Item::Struct(_) => panic!("expected Function"),
             Item::Enum(_) => panic!("expected Function"),
             Item::Interface(_) => panic!("expected Function"),
+            Item::Derive(_) => panic!("expected Function"),
             Item::DropFn(_) => panic!("expected Function"),
             Item::Const(_) => panic!("expected Function"),
             Item::Error(_) => panic!("expected Function"),

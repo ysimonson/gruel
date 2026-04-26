@@ -70,6 +70,9 @@ pub enum Item {
     /// Interface declaration (ADR-0056) - a structurally typed set of method
     /// requirements.
     Interface(InterfaceDecl),
+    /// Derive declaration (ADR-0058) - a set of method declarations attached
+    /// to a host type via `@derive(...)`.
+    Derive(DeriveDecl),
     DropFn(DropFn),
     /// Constant declaration (e.g., `const math = @import("math");`)
     Const(ConstDecl),
@@ -249,6 +252,31 @@ pub struct MethodSig {
     /// Return type (None means implicit unit `()`)
     pub return_type: Option<TypeExpr>,
     /// Span covering the entire signature (`fn name(...) -> R;`)
+    pub span: Span,
+}
+
+/// A derive declaration (ADR-0058).
+///
+/// Holds a list of method declarations whose body refers to the host type
+/// as `Self`. Methods are spliced into a host type's method list when a
+/// `@derive(Name)` directive on a struct or enum names this derive.
+///
+/// ```gruel
+/// derive Drop {
+///     fn drop(self) {
+///         comptime_unroll for f in @type_info(Self).fields {
+///             drop(@field(self, f.name));
+///         }
+///     }
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeriveDecl {
+    /// Derive name (e.g., `Drop`)
+    pub name: Ident,
+    /// Method declarations inside the derive body
+    pub methods: Vec<Method>,
+    /// Span covering the entire derive item
     pub span: Span,
 }
 
@@ -1304,6 +1332,7 @@ impl fmt::Display for Ast {
                 Item::Struct(s) => fmt_struct(f, s, 0)?,
                 Item::Enum(e) => fmt_enum(f, e, 0)?,
                 Item::Interface(i) => fmt_interface(f, i, 0)?,
+                Item::Derive(d) => fmt_derive(f, d, 0)?,
                 Item::DropFn(drop_fn) => fmt_drop_fn(f, drop_fn, 0)?,
                 Item::Const(c) => fmt_const(f, c, 0)?,
                 Item::Error(span) => writeln!(f, "Error({:?})", span)?,
@@ -1392,6 +1421,15 @@ fn fmt_interface(f: &mut fmt::Formatter<'_>, iface: &InterfaceDecl, level: usize
             write!(f, " -> {}", ret)?;
         }
         writeln!(f)?;
+    }
+    Ok(())
+}
+
+fn fmt_derive(f: &mut fmt::Formatter<'_>, d: &DeriveDecl, level: usize) -> fmt::Result {
+    indent(f, level)?;
+    writeln!(f, "Derive sym:{}", d.name.name.into_usize())?;
+    for method in &d.methods {
+        fmt_method(f, method, level + 1)?;
     }
     Ok(())
 }

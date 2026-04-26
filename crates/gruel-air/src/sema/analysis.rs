@@ -2221,7 +2221,8 @@ impl<'a> Sema<'a> {
             | InstData::FnDecl { .. }
             | InstData::ConstDecl { .. }
             | InstData::InterfaceDecl { .. }
-            | InstData::InterfaceMethodSig { .. } => self.analyze_decl_noop(air, inst_ref, ctx),
+            | InstData::InterfaceMethodSig { .. }
+            | InstData::DeriveDecl { .. } => self.analyze_decl_noop(air, inst_ref, ctx),
 
             // Comptime block expression
             InstData::Comptime { expr } => {

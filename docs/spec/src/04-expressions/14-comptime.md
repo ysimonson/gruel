@@ -1032,3 +1032,36 @@ fn main() -> i32 {
     sum_fields(Point, p)
 }
 ```
+
+## User-Defined Derives (ADR-0058)
+
+{{ rule(id="4.14:100", cat="syntax") }}
+
+```ebnf
+derive_item = "derive" IDENT "{" { method_decl } "}" ;
+```
+
+A `derive` item is a top-level declaration whose body is a list of inline method declarations referring to the host type as `Self`. The grammar of `method_decl` is identical to inline methods inside a struct or enum body.
+
+{{ rule(id="4.14:101", cat="normative") }}
+
+A `derive` item introduces a name into the surrounding scope. The methods inside its body are not free functions — they are templates that may later be spliced into a host type's method list when a `@derive(Name)` directive on a struct or enum names this derive.
+
+{{ rule(id="4.14:102", cat="legality-rule") }}
+
+Both `derive` items and `@derive(...)` directives require the `comptime_derives` preview feature. It is a compile-time error to declare a `derive` item or use `@derive` without enabling that feature.
+
+{{ rule(id="4.14:103", cat="example") }}
+
+```gruel
+derive Drop {
+    fn drop(self) {
+        comptime_unroll for f in @type_info(Self).fields {
+            drop(@field(self, f.name));
+        }
+    }
+}
+
+@derive(Drop)
+struct Buffer { name: String, capacity: i32 }
+```

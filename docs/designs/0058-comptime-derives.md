@@ -162,7 +162,7 @@ Diagnostics inside an attached method body cite the original method's span insid
 
 Phases share the `comptime_derives` preview flag; stable when phase 6 lands.
 
-- [ ] **Phase 1: Parse `derive` items**
+- [x] **Phase 1: Parse `derive` items**
   - Lexer: add `derive` as a reserved keyword.
   - Parser: produce `RirItem::Derive { name: Spur, methods: ... }` parallel to `RirItem::Function` / `RirItem::Struct`.
   - Method-decl bodies parse via the existing inline-method grammar.

@@ -1992,6 +1992,15 @@ impl Rir {
                 type_name: *type_name,
                 body: renumber(*body),
             },
+            InstData::DeriveDecl {
+                name,
+                methods_start,
+                methods_len,
+            } => InstData::DeriveDecl {
+                name: *name,
+                methods_start: *methods_start + extra_offset,
+                methods_len: *methods_len,
+            },
             InstData::Comptime { expr } => InstData::Comptime {
                 expr: renumber(*expr),
             },
@@ -2131,6 +2140,18 @@ impl Rir {
 
                 // Interface decl - contains InstRef array for method signatures
                 InstData::InterfaceDecl {
+                    methods_start,
+                    methods_len,
+                    ..
+                } => {
+                    let start = (*methods_start + extra_offset) as usize;
+                    for i in 0..*methods_len as usize {
+                        extra[start + i] += inst_offset;
+                    }
+                }
+
+                // Derive decl - contains InstRef array for method declarations
+                InstData::DeriveDecl {
                     methods_start,
                     methods_len,
                     ..
@@ -2748,6 +2769,22 @@ pub enum InstData {
         params_len: u32,
         /// Return type symbol (`()` if none was written).
         return_type: Spur,
+    },
+
+    /// Derive declaration (ADR-0058): `derive Name { fn ... }`.
+    ///
+    /// Holds a list of method declarations (each emitted as a `FnDecl`
+    /// instruction with `has_self` set when the method takes `self`). When a
+    /// `@derive(Name)` directive on a struct or enum names this derive, the
+    /// methods are spliced into the host type's method list with `Self`
+    /// bound to the host.
+    DeriveDecl {
+        /// Derive name (e.g., `Drop`).
+        name: Spur,
+        /// Start of method-decl inst refs in extra data.
+        methods_start: u32,
+        /// Number of methods.
+        methods_len: u32,
     },
 
     /// User-defined destructor declaration: drop fn TypeName(self) { ... }
@@ -3595,6 +3632,19 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     writeln!(out, "drop fn {}(self) {{", self.interner.resolve(type_name)).unwrap();
                     writeln!(out, "    {}", body).unwrap();
                     writeln!(out, "}}").unwrap();
+                }
+
+                // Derives (ADR-0058)
+                InstData::DeriveDecl {
+                    name,
+                    methods_start,
+                    methods_len,
+                } => {
+                    let name_str = self.interner.resolve(name);
+                    let methods = self.rir.get_inst_refs(*methods_start, *methods_len);
+                    let method_refs: Vec<String> =
+                        methods.iter().map(|m| format!("{}", m)).collect();
+                    writeln!(out, "derive {} {{ {} }}", name_str, method_refs.join(", ")).unwrap();
                 }
 
                 // Comptime block

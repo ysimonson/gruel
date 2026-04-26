@@ -334,6 +334,10 @@ impl<'src> CompilationUnit<'src> {
                         // Interfaces (ADR-0056) are validated in Sema; cross-file
                         // duplicate detection is added in Phase 2.
                     }
+                    Item::Derive(_) => {
+                        // Derives (ADR-0058) are validated in Sema; cross-file
+                        // duplicate detection follows the interface model.
+                    }
                     Item::DropFn(_) | Item::Const(_) => {
                         // Validated in Sema
                     }
