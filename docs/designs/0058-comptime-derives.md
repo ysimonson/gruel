@@ -1,12 +1,12 @@
 ---
 id: 0058
 title: User-Defined Derives via `derive` Items
-status: proposal
+status: implemented
 tags: [comptime, metaprogramming, types, derives]
-feature-flag: comptime_derives
+feature-flag:
 created: 2026-04-26
-accepted:
-implemented:
+accepted: 2026-04-26
+implemented: 2026-04-26
 spec-sections: ["4.14"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -204,18 +204,16 @@ Phases share the `comptime_derives` preview flag; stable when phase 6 lands.
   - Plumb provenance through error reporting: type errors inside an attached body cite the method's span inside the derive item and the `@derive(...)` directive span.
   - Tests: a runtime-end-to-end derive test (`@derive(Drop)` with the example above runs the cleanup); diagnostics tests for attachment provenance.
 
-- [x] **Phase 6: Spec + traceability (stabilization deferred with anon hosts)**
-  - Spec section 4.14 (comptime) gained paragraphs `4.14:100..107`
-    covering syntax, the preview gate, the splicing semantics, and the
-    legality rules around name collisions and `self.field` projection.
+- [x] **Phase 6: Spec, traceability, stabilization**
+  - Spec section 4.14 (comptime) covers `derive` items and `@derive`
+    in `4.14:100..107`: syntax, splicing semantics, and the legality
+    rules around name collisions and direct `self.field` projection.
   - All normative paragraphs are covered by tests; traceability stays
     at 100% normative coverage.
-  - The `comptime_derives` preview gate **stays in place** until
-    anonymous-host expansion lands (see phase 4 follow-up). Marking
-    this ADR *implemented* and dropping the gate happens in that
-    follow-up — exposing only the named-host case under a stable
-    surface would surprise users who reach for the anonymous-host form
-    documented in this ADR.
+  - The `comptime_derives` preview gate is dropped: `require_preview`
+    calls are removed from sema, the `ComptimeDerives` variant is
+    removed from `PreviewFeature`, and spec tests no longer carry
+    `preview = "..."`.
 
 ## Consequences
 

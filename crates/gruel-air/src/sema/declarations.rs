@@ -545,18 +545,12 @@ impl<'a> Sema<'a> {
         if directives_len == 0 {
             return Ok(());
         }
-        use gruel_error::PreviewFeature;
         let derive_dir_sym = self.interner.get_or_intern("derive");
         let directives = self.rir.get_directives(directives_start, directives_len);
         for d in directives {
             if d.name != derive_dir_sym {
                 continue;
             }
-            self.require_preview(
-                PreviewFeature::ComptimeDerives,
-                "`@derive(...)` directives",
-                d.span,
-            )?;
             if d.args.len() != 1 {
                 return Err(CompileError::new(
                     ErrorKind::DeriveNotADerive {
@@ -603,18 +597,12 @@ impl<'a> Sema<'a> {
         if directives_len == 0 {
             return Ok(());
         }
-        use gruel_error::PreviewFeature;
         let derive_dir_sym = self.interner.get_or_intern("derive");
         let directives = self.rir.get_directives(directives_start, directives_len);
         for d in directives {
             if d.name != derive_dir_sym {
                 continue;
             }
-            self.require_preview(
-                PreviewFeature::ComptimeDerives,
-                "`@derive(...)` directives",
-                d.span,
-            )?;
             if d.args.len() != 1 {
                 return Err(CompileError::new(
                     ErrorKind::DeriveNotADerive {
@@ -849,7 +837,6 @@ impl<'a> Sema<'a> {
     /// item.
     pub(crate) fn resolve_derive_directives(&mut self) -> CompileResult<()> {
         use super::DeriveBinding;
-        use gruel_error::PreviewFeature;
 
         // Snapshot of struct/enum declarations carrying `@derive(...)`.
         struct RawAttach {
@@ -901,17 +888,9 @@ impl<'a> Sema<'a> {
             }
         }
 
-        // Resolve each binding. Only fire the preview gate when the user
-        // actually uses `@derive(...)` — items without it stay free of any
-        // preview-related diagnostics.
+        // Resolve each binding.
         for r in raw {
             for (derive_name, dir_span) in r.derive_names {
-                self.require_preview(
-                    PreviewFeature::ComptimeDerives,
-                    "`@derive(...)` directives",
-                    dir_span,
-                )?;
-
                 let name_str = self.interner.resolve(&derive_name).to_string();
 
                 // Resolution order: a `derive` item, else categorize what
@@ -960,7 +939,6 @@ impl<'a> Sema<'a> {
     pub(crate) fn validate_derive_decls(&mut self) -> CompileResult<()> {
         use super::DeriveInfo;
         use crate::sema::info::DeriveMethod;
-        use gruel_error::PreviewFeature;
 
         // Snapshot: copy out enough RIR data so we can mutate `self.derives`
         // and emit diagnostics without holding shared borrows on `self.rir`.
@@ -990,8 +968,6 @@ impl<'a> Sema<'a> {
         }
 
         for d in raw {
-            self.require_preview(PreviewFeature::ComptimeDerives, "`derive` items", d.span)?;
-
             let name_str = self.interner.resolve(&d.name).to_string();
 
             if self.derives.contains_key(&d.name)

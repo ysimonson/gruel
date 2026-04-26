@@ -1049,10 +1049,6 @@ A `derive` item is a top-level declaration whose body is a list of inline method
 
 A `derive` item introduces a name into the surrounding scope. The methods inside its body are not free functions — they are templates that may later be spliced into a host type's method list when a `@derive(Name)` directive on a struct or enum names this derive.
 
-{{ rule(id="4.14:102", cat="legality-rule") }}
-
-Both `derive` items and `@derive(...)` directives require the `comptime_derives` preview feature. It is a compile-time error to declare a `derive` item or use `@derive` without enabling that feature.
-
 {{ rule(id="4.14:103", cat="example") }}
 
 ```gruel
