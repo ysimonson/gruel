@@ -77,7 +77,7 @@ error_contains = "duplicate"
 name = "derive_duplicate_method"
 spec = ["4.14:104"]
 source = """
-derive Drop {
+derive MyDrop {
     fn drop(self) {}
     fn drop(self) {}
 }
@@ -95,7 +95,7 @@ error_contains = "duplicate"
 name = "derive_self_dot_field_rejected"
 spec = ["4.14:104"]
 source = """
-derive Drop {
+derive MyDrop {
     fn drop(self) {
         let _ = self.x;
     }

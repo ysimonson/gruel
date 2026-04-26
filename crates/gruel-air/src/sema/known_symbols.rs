@@ -57,6 +57,10 @@ pub struct KnownSymbols {
     pub string_type: Spur,
     /// The `main` function name symbol.
     pub main_fn: Spur,
+    /// The `Drop` interface name (ADR-0059). Compiler-recognized.
+    pub drop_iface: Spur,
+    /// The `Copy` interface name (ADR-0059). Compiler-recognized.
+    pub copy_iface: Spur,
 }
 
 impl KnownSymbols {
@@ -81,6 +85,8 @@ impl KnownSymbols {
             import: interner.get_or_intern_static("import"),
             string_type: interner.get_or_intern_static("String"),
             main_fn: interner.get_or_intern_static("main"),
+            drop_iface: interner.get_or_intern_static("Drop"),
+            copy_iface: interner.get_or_intern_static("Copy"),
         }
     }
 

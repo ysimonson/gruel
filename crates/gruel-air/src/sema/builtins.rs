@@ -8,7 +8,10 @@
 use gruel_builtins::{BUILTIN_ENUMS, BUILTIN_TYPES, BuiltinFieldType, BuiltinTypeDef};
 
 use super::Sema;
-use crate::types::{EnumDef, EnumVariantDef, StructDef, StructField, StructId, Type, TypeKind};
+use crate::types::{
+    EnumDef, EnumVariantDef, IfaceTy, InterfaceDef, InterfaceId, InterfaceMethodReq, ReceiverMode,
+    StructDef, StructField, StructId, Type, TypeKind,
+};
 
 impl<'a> Sema<'a> {
     /// Phase 0: Inject built-in types as synthetic structs and enums.
@@ -104,6 +107,51 @@ impl<'a> Sema<'a> {
             } else if builtin_enum.name == "Ownership" {
                 self.builtin_ownership_id = Some(enum_id);
             }
+        }
+
+        // Inject the compiler-recognized `Drop` and `Copy` interfaces
+        // (ADR-0059). Drop has `fn drop(self)`; Copy has
+        // `fn copy(borrow self) -> Self`. The shapes are referenced by the
+        // ownership trichotomy and by `@derive(Copy)` validation.
+        self.inject_builtin_interfaces();
+    }
+
+    /// Register `Drop` and `Copy` as compiler-recognized interfaces. Called
+    /// from `inject_builtin_types` so the names are already resolvable when
+    /// user code is parsed.
+    fn inject_builtin_interfaces(&mut self) {
+        let drop_name = self.interner.get_or_intern_static("Drop");
+        if !self.interfaces.contains_key(&drop_name) {
+            let id = InterfaceId(self.interface_defs.len() as u32);
+            self.interface_defs.push(InterfaceDef {
+                name: "Drop".to_string(),
+                methods: vec![InterfaceMethodReq {
+                    name: "drop".to_string(),
+                    receiver: ReceiverMode::ByValue,
+                    param_types: Vec::new(),
+                    return_type: IfaceTy::Concrete(Type::UNIT),
+                }],
+                is_pub: true,
+                file_id: gruel_span::FileId::new(0),
+            });
+            self.interfaces.insert(drop_name, id);
+        }
+
+        let copy_name = self.interner.get_or_intern_static("Copy");
+        if !self.interfaces.contains_key(&copy_name) {
+            let id = InterfaceId(self.interface_defs.len() as u32);
+            self.interface_defs.push(InterfaceDef {
+                name: "Copy".to_string(),
+                methods: vec![InterfaceMethodReq {
+                    name: "copy".to_string(),
+                    receiver: ReceiverMode::Borrow,
+                    param_types: Vec::new(),
+                    return_type: IfaceTy::SelfType,
+                }],
+                is_pub: true,
+                file_id: gruel_span::FileId::new(0),
+            });
+            self.interfaces.insert(copy_name, id);
         }
     }
 

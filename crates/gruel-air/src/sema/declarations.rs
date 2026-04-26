@@ -138,11 +138,22 @@ impl<'a> Sema<'a> {
             enum_method_sigs,
         }
     }
-    /// Check if a directive list contains the @copy directive
+    /// Check if a directive list contains the @copy directive *or* a
+    /// `@derive(Copy)` directive. ADR-0059 reframes `@copy` as
+    /// `@derive(Copy)`; both spellings set `StructDef::is_copy` and run the
+    /// same field-Copy validation.
     pub(crate) fn has_copy_directive(&self, directives: &[RirDirective]) -> bool {
         let copy_sym = self.interner.get("copy");
+        let derive_sym = self.interner.get("derive");
+        let copy_iface_sym = self.interner.get("Copy");
         for directive in directives {
             if Some(directive.name) == copy_sym {
+                return true;
+            }
+            if Some(directive.name) == derive_sym
+                && let Some(copy_iface) = copy_iface_sym
+                && directive.args.contains(&copy_iface)
+            {
                 return true;
             }
         }
@@ -573,6 +584,12 @@ impl<'a> Sema<'a> {
                 ));
             }
             let derive_name = d.args[0];
+            // ADR-0059: `@derive(Copy)` on an anonymous host is no-op for
+            // method splicing; the `is_copy` bookkeeping flows through the
+            // existing copy-directive path.
+            if self.is_compiler_derive(derive_name) {
+                continue;
+            }
             let name_str = self.interner.resolve(&derive_name).to_string();
             if !self.derives.contains_key(&derive_name) {
                 let found = if self.structs.contains_key(&derive_name) {
@@ -625,6 +642,10 @@ impl<'a> Sema<'a> {
                 ));
             }
             let derive_name = d.args[0];
+            // ADR-0059: `@derive(Copy)` short-circuits — no methods to splice.
+            if self.is_compiler_derive(derive_name) {
+                continue;
+            }
             let name_str = self.interner.resolve(&derive_name).to_string();
             if !self.derives.contains_key(&derive_name) {
                 let found = if self.structs.contains_key(&derive_name) {
@@ -909,6 +930,14 @@ impl<'a> Sema<'a> {
         // Resolve each binding.
         for r in raw {
             for (derive_name, dir_span) in r.derive_names {
+                // `@derive(Copy)` is compiler-recognized (ADR-0059): the
+                // field-Copy validation already runs via the `is_copy`
+                // bookkeeping, and there is no derive item to look up. Skip
+                // the regular resolution path.
+                if self.is_compiler_derive(derive_name) {
+                    continue;
+                }
+
                 let name_str = self.interner.resolve(&derive_name).to_string();
 
                 // Resolution order: a `derive` item, else categorize what
@@ -945,6 +974,15 @@ impl<'a> Sema<'a> {
         }
 
         Ok(())
+    }
+
+    /// Returns `true` if `name` is a compiler-recognized derive that does
+    /// not have a corresponding `derive` item in user code (ADR-0059). At
+    /// the moment only `Copy` qualifies — the `is_copy` cache is populated
+    /// elsewhere and there are no methods to splice.
+    fn is_compiler_derive(&self, name: Spur) -> bool {
+        let copy_iface_sym = self.interner.get("Copy");
+        Some(name) == copy_iface_sym
     }
 
     /// ADR-0058 phases 1 + 2: gate `derive` items behind the

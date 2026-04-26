@@ -92,7 +92,7 @@ The current implementation already returns these values via `is_type_copy` / `is
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Inject `Drop` and `Copy` interfaces.**
+- [x] **Phase 1: Inject `Drop` and `Copy` interfaces.**
   - Add `Drop` and `Copy` to `KnownSymbols`; register their `InterfaceDef`s during built-in injection.
   - Add the `@derive(Copy)` derive item to the prelude. The directive splices `fn copy(borrow self) -> Self` into the host type and sets `StructDef::is_copy` for backward compatibility.
   - **Testable**: `comptime T: Copy` parses and resolves; `@derive(Copy) struct Pair { x: i32, y: i32 }` compiles; `@derive(Copy) struct Bad { s: String }` errors with a multi-span diagnostic citing the offending field.
