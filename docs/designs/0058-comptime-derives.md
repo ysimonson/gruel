@@ -174,7 +174,7 @@ Phases share the `comptime_derives` preview flag; stable when phase 6 lands.
   - Reject malformed derive bodies (anything other than method declarations).
   - Tests: well-formed derives type-check; ill-formed ones (direct field access on `self`, non-method items in body) error cleanly.
 
-- [ ] **Phase 3: `@derive(D)` directive parsing and resolution**
+- [x] **Phase 3: `@derive(D)` directive parsing and resolution**
   - Extend the directive parser for `@derive(IDENT)`.
   - Resolve `D` against `Sema::derives`; record the binding `(host_type, derive_id)` for the sub-phase. Error if `D` doesn't name a `derive` item.
   - Tests: parsing accepts the directive; resolution errors on a non-derive target.

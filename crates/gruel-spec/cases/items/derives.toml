@@ -140,3 +140,85 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "direct field access on `self`"
+
+# Phase 3: a struct with `@derive(D)` where `D` is a known derive item
+# is accepted by the directive resolver. (The methods are not yet
+# spliced — that lands in phase 4.)
+[[case]]
+name = "derive_directive_resolves"
+spec = ["4.14:101", "4.14:102"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+derive Marker {
+}
+
+@derive(Marker)
+struct Buffer {
+    capacity: i32,
+}
+
+fn main() -> i32 {
+    9
+}
+"""
+exit_code = 9
+
+# Phase 3: `@derive(X)` where `X` is not a `derive` item is rejected
+# with a clear diagnostic.
+[[case]]
+name = "derive_directive_unknown_name_rejected"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+@derive(NotADerive)
+struct Buffer {
+    capacity: i32,
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "expected a `derive`"
+
+# Phase 3: `@derive(X)` where `X` resolves to a struct is rejected.
+[[case]]
+name = "derive_directive_struct_rejected"
+spec = ["4.14:101"]
+preview = "comptime_derives"
+preview_should_pass = true
+source = """
+struct Other {}
+
+@derive(Other)
+struct Buffer {
+    capacity: i32,
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "found struct"
+
+# Phase 3: `@derive(D)` requires the preview feature even when the
+# derive item itself isn't present.
+[[case]]
+name = "derive_directive_requires_preview"
+spec = ["4.14:102"]
+source = """
+@derive(Marker)
+struct Buffer {
+    capacity: i32,
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "comptime_derives"

@@ -484,7 +484,119 @@ impl<'a> Sema<'a> {
         self.validate_interface_decls()?;
         self.resolve_struct_fields()?;
         self.resolve_enum_variant_fields()?;
+        // ADR-0058 sub-phase: resolve every `@derive(D)` directive on a
+        // named struct or enum into a binding for the upcoming expansion
+        // step. Runs after field-type resolution so the host type is
+        // already fully known.
+        self.resolve_derive_directives()?;
         self.resolve_remaining_declarations()?;
+        Ok(())
+    }
+
+    /// Walk every named struct/enum declaration; for each `@derive(D)`
+    /// directive, resolve `D` against `Sema::derives` and record a
+    /// `DeriveBinding` for Phase 4. Errors if `D` doesn't name a `derive`
+    /// item.
+    pub(crate) fn resolve_derive_directives(&mut self) -> CompileResult<()> {
+        use super::DeriveBinding;
+        use gruel_error::PreviewFeature;
+
+        // Snapshot of struct/enum declarations carrying `@derive(...)`.
+        struct RawAttach {
+            host_name: Spur,
+            host_is_enum: bool,
+            host_span: Span,
+            derive_names: Vec<(Spur, Span)>,
+        }
+        let derive_dir_sym = self.interner.get_or_intern("derive");
+        let mut raw: Vec<RawAttach> = Vec::new();
+
+        for (_, inst) in self.rir.iter() {
+            // Only `StructDecl` carries directives in RIR today; `EnumDecl`
+            // does not yet (the parser does not collect directives for
+            // enums). When that lands, the same logic applies — the new
+            // arm will read `directives_start` / `directives_len` off the
+            // enum decl. For now we only walk structs.
+            if let InstData::StructDecl {
+                directives_start,
+                directives_len,
+                name,
+                ..
+            } = &inst.data
+            {
+                let directives = self.rir.get_directives(*directives_start, *directives_len);
+                let mut attached = Vec::new();
+                for d in &directives {
+                    if d.name == derive_dir_sym {
+                        if d.args.len() != 1 {
+                            return Err(CompileError::new(
+                                ErrorKind::DeriveNotADerive {
+                                    name: "<wrong arg count>".to_string(),
+                                    found: format!("{} arguments", d.args.len()),
+                                },
+                                d.span,
+                            ));
+                        }
+                        attached.push((d.args[0], d.span));
+                    }
+                }
+                if !attached.is_empty() {
+                    raw.push(RawAttach {
+                        host_name: *name,
+                        host_is_enum: false,
+                        host_span: inst.span,
+                        derive_names: attached,
+                    });
+                }
+            }
+        }
+
+        // Resolve each binding. Only fire the preview gate when the user
+        // actually uses `@derive(...)` — items without it stay free of any
+        // preview-related diagnostics.
+        for r in raw {
+            for (derive_name, dir_span) in r.derive_names {
+                self.require_preview(
+                    PreviewFeature::ComptimeDerives,
+                    "`@derive(...)` directives",
+                    dir_span,
+                )?;
+
+                let name_str = self.interner.resolve(&derive_name).to_string();
+
+                // Resolution order: a `derive` item, else categorize what
+                // we actually found for a clearer diagnostic.
+                if !self.derives.contains_key(&derive_name) {
+                    let found = if self.structs.contains_key(&derive_name) {
+                        "struct"
+                    } else if self.enums.contains_key(&derive_name) {
+                        "enum"
+                    } else if self.interfaces.contains_key(&derive_name) {
+                        "interface"
+                    } else if self.functions.contains_key(&derive_name) {
+                        "function"
+                    } else {
+                        "unknown name"
+                    };
+                    return Err(CompileError::new(
+                        ErrorKind::DeriveNotADerive {
+                            name: name_str,
+                            found: found.to_string(),
+                        },
+                        dir_span,
+                    ));
+                }
+
+                self.derive_bindings.push(DeriveBinding {
+                    host_name: r.host_name,
+                    host_is_enum: r.host_is_enum,
+                    derive_name,
+                    host_span: r.host_span,
+                    directive_span: dir_span,
+                });
+            }
+        }
+
         Ok(())
     }
 

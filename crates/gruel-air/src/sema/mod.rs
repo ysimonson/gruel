@@ -56,7 +56,7 @@ mod visibility;
 pub use context::ConstValue;
 pub use gather::GatherOutput;
 pub use inference_ctx::InferenceContext;
-pub use info::{AnonMethodSig, ConstInfo, DeriveInfo, FunctionInfo, MethodInfo};
+pub use info::{AnonMethodSig, ConstInfo, DeriveBinding, DeriveInfo, FunctionInfo, MethodInfo};
 pub use known_symbols::KnownSymbols;
 pub use output::{AnalyzedFunction, SemaOutput};
 
@@ -108,6 +108,10 @@ pub struct Sema<'a> {
     /// (ADR-0058). Populated during declaration gathering; consumed by
     /// `@derive(...)` expansion.
     pub(crate) derives: HashMap<Spur, DeriveInfo>,
+    /// Pending `@derive(D)` bindings on named struct/enum declarations
+    /// (ADR-0058). Populated during directive resolution; consumed by the
+    /// derive-expansion sub-phase.
+    pub(crate) derive_bindings: Vec<DeriveBinding>,
     /// Constant table: maps const name symbol to const info
     pub(crate) constants: HashMap<Spur, ConstInfo>,
     /// Enabled preview features
@@ -204,6 +208,7 @@ impl<'a> Sema<'a> {
             methods: HashMap::new(),
             enum_methods: HashMap::new(),
             derives: HashMap::new(),
+            derive_bindings: Vec::new(),
             constants: HashMap::new(),
             preview_features,
             builtin_string_id: None,

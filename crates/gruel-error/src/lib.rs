@@ -100,6 +100,7 @@ impl ErrorCode {
     pub const HANDLE_METHOD_WRONG_SIGNATURE: Self = Self(409);
     pub const DUPLICATE_METHOD: Self = Self(410);
     pub const DERIVE_DIRECT_FIELD_ACCESS: Self = Self(440);
+    pub const DERIVE_NOT_A_DERIVE: Self = Self(441);
     pub const UNDEFINED_METHOD: Self = Self(411);
     pub const UNDEFINED_ASSOC_FN: Self = Self(412);
     pub const METHOD_CALL_ON_NON_STRUCT: Self = Self(413);
@@ -940,6 +941,14 @@ pub enum ErrorKind {
         derive_name: String,
         method_name: String,
     },
+    /// `@derive(N)` references a name that is not a `derive` item.
+    #[error("expected a `derive` item, found {found} `{name}`")]
+    DeriveNotADerive {
+        /// The name in the `@derive(...)` directive.
+        name: String,
+        /// What `name` actually resolved to (e.g., "struct", "enum", "function", or "unknown name").
+        found: String,
+    },
     /// Method not found on a type
     #[error("no method named '{method_name}' found for type '{type_name}'")]
     UndefinedMethod {
@@ -1224,6 +1233,7 @@ impl ErrorKind {
             }
             ErrorKind::DuplicateMethod { .. } => ErrorCode::DUPLICATE_METHOD,
             ErrorKind::DeriveDirectFieldAccess { .. } => ErrorCode::DERIVE_DIRECT_FIELD_ACCESS,
+            ErrorKind::DeriveNotADerive { .. } => ErrorCode::DERIVE_NOT_A_DERIVE,
             ErrorKind::UndefinedMethod { .. } => ErrorCode::UNDEFINED_METHOD,
             ErrorKind::UndefinedAssocFn { .. } => ErrorCode::UNDEFINED_ASSOC_FN,
             ErrorKind::MethodCallOnNonStruct { .. } => ErrorCode::METHOD_CALL_ON_NON_STRUCT,

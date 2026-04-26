@@ -109,6 +109,27 @@ pub struct DeriveMethod {
     pub span: Span,
 }
 
+/// A pending `@derive(D)` attachment from a struct or enum declaration.
+///
+/// Recorded during Phase 3 (directive resolution); consumed by Phase 4
+/// to splice the derive's methods into the host type's method list.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // fields populated in phase 3; consumed in phase 4
+pub struct DeriveBinding {
+    /// Host type — the struct or enum whose declaration carries the
+    /// `@derive(...)` directive.
+    pub host_name: Spur,
+    /// Whether the host is an enum (`true`) or a struct (`false`).
+    pub host_is_enum: bool,
+    /// Name of the derive being attached (must resolve to a `derive` item
+    /// in `Sema::derives`).
+    pub derive_name: Spur,
+    /// Span of the host type's declaration.
+    pub host_span: Span,
+    /// Span of the `@derive(...)` directive itself, for diagnostics.
+    pub directive_span: Span,
+}
+
 /// Information about a `derive` item (ADR-0058).
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // fields populated in phase 2; consumed in phase 4

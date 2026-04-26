@@ -50,6 +50,10 @@ pub struct PrimitiveTypeSpurs {
     /// The identifier "drop" — recognized as a method name to define a destructor
     /// inside a type body (ADR-0053).
     pub drop_name: Spur,
+    /// The identifier "derive" — accepted as a directive name so users can
+    /// write `@derive(Foo)` even though `derive` is also a reserved keyword
+    /// for top-level derive items (ADR-0058).
+    pub derive_name: Spur,
 }
 
 impl PrimitiveTypeSpurs {
@@ -72,6 +76,7 @@ impl PrimitiveTypeSpurs {
             bool: interner.get_or_intern("bool"),
             self_type: interner.get_or_intern("Self"),
             drop_name: interner.get_or_intern("drop"),
+            derive_name: interner.get_or_intern("derive"),
         }
     }
 }
@@ -559,12 +564,31 @@ where
 }
 
 /// Parser for a single directive: @name or @name(arg1, arg2, ...)
+///
+/// `name` accepts both bare identifiers and the `derive` reserved keyword
+/// (ADR-0058) so that `@derive(Foo)` works even though `derive` is also a
+/// keyword for top-level derive items.
 fn directive_parser<'src, I>() -> GruelParser<'src, I, Directive>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
+    let directive_name = choice((
+        ident_parser().boxed(),
+        select! {
+            TokenKind::Derive = e => {
+                let state: &mut SimpleState<ParserState> = e.state();
+                Ident {
+                    name: state.0.syms.derive_name,
+                    span: span_from_extra(e),
+                }
+            },
+        }
+        .boxed(),
+    ))
+    .boxed();
+
     just(TokenKind::At)
-        .ignore_then(ident_parser())
+        .ignore_then(directive_name)
         .then(
             ident_parser()
                 .map(DirectiveArg::Ident)
