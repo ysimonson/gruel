@@ -1039,6 +1039,8 @@ fn main() -> i32 {
 
 ```ebnf
 derive_item = "derive" IDENT "{" { method_decl } "}" ;
+method_decl = "fn" IDENT "(" [ "self" [ "," param_list ] | param_list ] ")"
+              [ "->" type ] block ;
 ```
 
 A `derive` item is a top-level declaration whose body is a list of inline method declarations referring to the host type as `Self`. The grammar of `method_decl` is identical to inline methods inside a struct or enum body.
@@ -1065,3 +1067,19 @@ derive Drop {
 @derive(Drop)
 struct Buffer { name: String, capacity: i32 }
 ```
+
+{{ rule(id="4.14:104", cat="legality-rule") }}
+
+A `derive` item's name **MUST NOT** collide with any other top-level item name in scope (struct, enum, interface, or another derive). Two methods inside one `derive` body **MUST NOT** share a name. Inside a `derive` method body, direct field projection on `self` (`self.x`) is rejected; the host type's structure is unknown at derive-definition time, so users **MUST** go through the `@field(self, "...")` intrinsic to access fields by comptime-known name.
+
+{{ rule(id="4.14:105", cat="normative") }}
+
+A `@derive(D)` directive on a struct or enum declaration names a `derive` item `D`. At compile time, every method inside `D`'s body is added to the host type's method list with `Self` bound to the host. After expansion, attached methods are indistinguishable from hand-written inline methods on the host: they are reachable through normal method-call resolution and lower exactly like inline methods.
+
+{{ rule(id="4.14:106", cat="legality-rule") }}
+
+It is a compile-time error if `@derive(D)` resolves to a name that is not a `derive` item (a struct, enum, interface, function, or unknown name). It is a compile-time error if a derive attaches a method whose name is already present on the host type, whether from a hand-written inline method, an earlier `@derive(...)` on the same host, or another method in the same derive.
+
+{{ rule(id="4.14:107", cat="normative") }}
+
+Multiple `@derive(...)` directives on one type run in source order. Each adds its methods to the host type's method list. Method-attachment conflicts are reported at the second attachment site with secondary labels pointing back at the first.

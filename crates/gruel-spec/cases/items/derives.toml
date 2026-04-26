@@ -64,7 +64,7 @@ error_contains = "comptime_derives"
 # Phase 2: two `derive` items with the same name are rejected.
 [[case]]
 name = "derive_duplicate_name"
-spec = ["4.14:101"]
+spec = ["4.14:104"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -84,7 +84,7 @@ error_contains = "duplicate"
 # Phase 2: a `derive` cannot share a name with a struct.
 [[case]]
 name = "derive_collides_with_struct"
-spec = ["4.14:101"]
+spec = ["4.14:104"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -103,7 +103,7 @@ error_contains = "duplicate"
 # Phase 2: two methods with the same name inside one derive are rejected.
 [[case]]
 name = "derive_duplicate_method"
-spec = ["4.14:101"]
+spec = ["4.14:104"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -124,7 +124,7 @@ error_contains = "duplicate"
 # `@field`.
 [[case]]
 name = "derive_self_dot_field_rejected"
-spec = ["4.14:101"]
+spec = ["4.14:104"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -146,7 +146,7 @@ error_contains = "direct field access on `self`"
 # spliced — that lands in phase 4.)
 [[case]]
 name = "derive_directive_resolves"
-spec = ["4.14:101", "4.14:102"]
+spec = ["4.14:101", "4.14:102", "4.14:105"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -168,7 +168,7 @@ exit_code = 9
 # with a clear diagnostic.
 [[case]]
 name = "derive_directive_unknown_name_rejected"
-spec = ["4.14:101"]
+spec = ["4.14:106"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -187,7 +187,7 @@ error_contains = "expected a `derive`"
 # Phase 3: `@derive(X)` where `X` resolves to a struct is rejected.
 [[case]]
 name = "derive_directive_struct_rejected"
-spec = ["4.14:101"]
+spec = ["4.14:106"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -228,7 +228,7 @@ error_contains = "comptime_derives"
 # spliced verbatim into the host's method list.
 [[case]]
 name = "derive_splice_struct_method"
-spec = ["4.14:101", "4.14:103"]
+spec = ["4.14:103", "4.14:105"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -275,7 +275,7 @@ exit_code = 0
 # written inline method on the host is rejected.
 [[case]]
 name = "derive_conflicts_with_inline_method"
-spec = ["4.14:101"]
+spec = ["4.14:106"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -301,7 +301,7 @@ error_contains = "duplicate method"
 # rejected.
 [[case]]
 name = "derive_two_derives_same_method"
-spec = ["4.14:101"]
+spec = ["4.14:106", "4.14:107"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -330,7 +330,7 @@ error_contains = "duplicate method"
 # independently callable through normal method-call resolution.
 [[case]]
 name = "derive_multi_method_dispatch"
-spec = ["4.14:101"]
+spec = ["4.14:105"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -358,7 +358,7 @@ exit_code = 6
 # routine across two independent host types.
 [[case]]
 name = "derive_same_derive_on_two_hosts"
-spec = ["4.14:101"]
+spec = ["4.14:105"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """
@@ -388,7 +388,7 @@ exit_code = 22
 # parameters work like any other method.
 [[case]]
 name = "derive_method_with_param"
-spec = ["4.14:101"]
+spec = ["4.14:105"]
 preview = "comptime_derives"
 preview_should_pass = true
 source = """

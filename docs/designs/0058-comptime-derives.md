@@ -207,10 +207,18 @@ Phases share the `comptime_derives` preview flag; stable when phase 6 lands.
   - Plumb provenance through error reporting: type errors inside an attached body cite the method's span inside the derive item and the `@derive(...)` directive span.
   - Tests: a runtime-end-to-end derive test (`@derive(Drop)` with the example above runs the cleanup); diagnostics tests for attachment provenance.
 
-- [ ] **Phase 6: Spec, traceability, stabilization**
-  - Spec section 4.14 (comptime) gains paragraphs for `derive` items and `@derive`. The phase ordering is documented as part of sema (5.x).
-  - Cover normative paragraphs with spec tests.
-  - Drop the `comptime_derives` preview gate; mark this ADR *implemented*.
+- [x] **Phase 6: Spec + traceability (stabilization deferred with anon hosts)**
+  - Spec section 4.14 (comptime) gained paragraphs `4.14:100..107`
+    covering syntax, the preview gate, the splicing semantics, and the
+    legality rules around name collisions and `self.field` projection.
+  - All normative paragraphs are covered by tests; traceability stays
+    at 100% normative coverage.
+  - The `comptime_derives` preview gate **stays in place** until
+    anonymous-host expansion lands (see phase 4 follow-up). Marking
+    this ADR *implemented* and dropping the gate happens in that
+    follow-up — exposing only the named-host case under a stable
+    surface would surprise users who reach for the anonymous-host form
+    documented in this ADR.
 
 ## Consequences
 
