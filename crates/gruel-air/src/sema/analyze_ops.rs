@@ -2918,24 +2918,35 @@ impl<'a> Sema<'a> {
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
         let inst = self.rir.get(inst_ref);
-        let (directives_start, directives_len, name, is_mut, init, span) = match inst.data {
+        let (directives_start, directives_len, name, is_mut, ty_annot, init, span) = match inst.data
+        {
             InstData::Alloc {
                 directives_start,
                 directives_len,
                 name,
                 is_mut,
+                ty,
                 init,
-                ..
             } => (
                 directives_start,
                 directives_len,
                 name,
                 is_mut,
+                ty,
                 init,
                 inst.span,
             ),
             _ => unreachable!("analyze_alloc called with non-Alloc instruction"),
         };
+
+        // Trigger preview-feature gates for type annotations on let bindings
+        // (e.g. `let p: Ptr(i32) = ...` — ADR-0061). The annotation is otherwise
+        // resolved by inference; we only need this hook to fire the gate.
+        // Doing a full `resolve_type` here would error on annotations that
+        // refer to comptime locals (e.g. `let IntPair = Pair(i32); let p: IntPair = ...`).
+        if let Some(ty_sym) = ty_annot {
+            self.check_type_annotation_preview_gates(ty_sym, span)?;
+        }
 
         // Analyze the initializer
         let init_result = self.analyze_inst(air, init, ctx)?;

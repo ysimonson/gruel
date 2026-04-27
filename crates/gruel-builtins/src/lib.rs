@@ -603,13 +603,16 @@ pub fn is_reserved_type_name(name: &str) -> bool {
 ///
 /// New constructors are added by extending this enum, adding an entry to
 /// [`BUILTIN_TYPE_CONSTRUCTORS`], and adding a corresponding sema lowering
-/// arm. The enum is `#[non_exhaustive]` so that adding variants is not a
-/// breaking change for downstream consumers that match exhaustively.
+/// arm. Exhaustive matches in sema force you to add the lowering arm when
+/// adding a variant — that's intentional, so the enum is not marked
+/// `#[non_exhaustive]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum BuiltinTypeConstructorKind {
-    // No variants yet. ADR-0061 phase 2 adds `Ptr` and `MutPtr`;
-    // ADR-0062 phase 1 adds `Ref` and `MutRef`.
+    /// Immutable raw pointer (ADR-0061): `Ptr(T)` lowers to `TypeKind::PtrConst`.
+    Ptr,
+    /// Mutable raw pointer (ADR-0061): `MutPtr(T)` lowers to `TypeKind::PtrMut`.
+    MutPtr,
+    // ADR-0062 phase 1 will add `Ref` and `MutRef`.
 }
 
 /// Definition of a built-in parameterized type constructor.
@@ -632,12 +635,26 @@ pub struct BuiltinTypeConstructor {
     pub kind: BuiltinTypeConstructorKind,
 }
 
+/// `Ptr(T)` — immutable raw pointer (ADR-0061).
+pub static PTR_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructor {
+    name: "Ptr",
+    arity: 1,
+    kind: BuiltinTypeConstructorKind::Ptr,
+};
+
+/// `MutPtr(T)` — mutable raw pointer (ADR-0061).
+pub static MUT_PTR_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructor {
+    name: "MutPtr",
+    arity: 1,
+    kind: BuiltinTypeConstructorKind::MutPtr,
+};
+
 /// All built-in type constructors.
 ///
-/// Empty until ADR-0061 phase 2 adds `Ptr` / `MutPtr`. The compiler iterates
-/// over this slice when resolving type-call expressions and when reserving
-/// names so user code cannot shadow them.
-pub static BUILTIN_TYPE_CONSTRUCTORS: &[&BuiltinTypeConstructor] = &[];
+/// The compiler iterates over this slice when resolving type-call expressions
+/// and when reserving names so user code cannot shadow them.
+pub static BUILTIN_TYPE_CONSTRUCTORS: &[&BuiltinTypeConstructor] =
+    &[&PTR_CONSTRUCTOR, &MUT_PTR_CONSTRUCTOR];
 
 /// Look up a built-in type constructor by name.
 pub fn get_builtin_type_constructor(name: &str) -> Option<&'static BuiltinTypeConstructor> {
@@ -824,21 +841,31 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_builtin_type_constructors_registry_initially_empty() {
-        // ADR-0061 phase 1 wires the registry but ships it empty.
-        // Phase 2 adds Ptr/MutPtr; ADR-0062 phase 1 adds Ref/MutRef.
-        assert_eq!(BUILTIN_TYPE_CONSTRUCTORS.len(), 0);
+    fn test_builtin_type_constructors_registry() {
+        // ADR-0061 phase 2: Ptr and MutPtr registered.
+        // ADR-0062 phase 1 will add Ref and MutRef.
+        assert_eq!(BUILTIN_TYPE_CONSTRUCTORS.len(), 2);
     }
 
     #[test]
-    fn test_get_builtin_type_constructor_unknown() {
-        assert!(get_builtin_type_constructor("Ptr").is_none());
+    fn test_get_builtin_type_constructor() {
+        let ptr = get_builtin_type_constructor("Ptr").unwrap();
+        assert_eq!(ptr.name, "Ptr");
+        assert_eq!(ptr.arity, 1);
+        assert_eq!(ptr.kind, BuiltinTypeConstructorKind::Ptr);
+
+        let mut_ptr = get_builtin_type_constructor("MutPtr").unwrap();
+        assert_eq!(mut_ptr.name, "MutPtr");
+        assert_eq!(mut_ptr.arity, 1);
+        assert_eq!(mut_ptr.kind, BuiltinTypeConstructorKind::MutPtr);
+
         assert!(get_builtin_type_constructor("MyConstructor").is_none());
     }
 
     #[test]
-    fn test_is_reserved_type_constructor_name_empty_registry() {
-        assert!(!is_reserved_type_constructor_name("Ptr"));
-        assert!(!is_reserved_type_constructor_name("Anything"));
+    fn test_is_reserved_type_constructor_name() {
+        assert!(is_reserved_type_constructor_name("Ptr"));
+        assert!(is_reserved_type_constructor_name("MutPtr"));
+        assert!(!is_reserved_type_constructor_name("MyConstructor"));
     }
 }

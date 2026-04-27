@@ -170,6 +170,43 @@ impl<'a> Sema<'a> {
         Ok(IfaceTy::Concrete(self.resolve_type(type_sym, span)?))
     }
 
+    /// Walk a type annotation symbol and fire any preview-feature gates that
+    /// apply to it (currently just `Ptr(T)` / `MutPtr(T)` from ADR-0061).
+    ///
+    /// Used by sema passes that want to enforce preview gates on type
+    /// annotations without performing a full `resolve_type` — useful for
+    /// `let` bindings whose annotation may refer to comptime locals that
+    /// `resolve_type` doesn't know about.
+    pub(crate) fn check_type_annotation_preview_gates(
+        &self,
+        type_sym: Spur,
+        span: Span,
+    ) -> CompileResult<()> {
+        let type_name = self.interner.resolve(&type_sym);
+        if let Some((callee_name, arg_strs)) = crate::types::parse_type_call_syntax(type_name)
+            && let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name)
+        {
+            use gruel_builtins::BuiltinTypeConstructorKind;
+            let feature = match constructor.kind {
+                BuiltinTypeConstructorKind::Ptr | BuiltinTypeConstructorKind::MutPtr => {
+                    gruel_error::PreviewFeature::GenericPointerTypes
+                }
+            };
+            self.require_preview(
+                feature,
+                &format!("`{}` type constructor", callee_name),
+                span,
+            )?;
+            // Recurse into argument annotations so nested constructors are
+            // gated too (e.g. `Ptr(MutPtr(i32))`).
+            for arg_str in &arg_strs {
+                let arg_sym = self.interner.get_or_intern(arg_str);
+                self.check_type_annotation_preview_gates(arg_sym, span)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Resolve a type symbol to a Type.
     ///
     /// Handles array types with the syntax "[T; N]".
@@ -219,6 +256,45 @@ impl<'a> Sema<'a> {
                 type_name, type_name, type_name, type_name
             )))
         } else if let Some((callee_name, arg_strs)) = parse_type_call_syntax(type_name) {
+            // ADR-0061: built-in parameterized types (`Ptr(T)`, `MutPtr(T)`).
+            // These short-circuit the comptime-evaluation path because they
+            // lower to fixed `TypeKind` variants rather than running through
+            // a `fn ... -> type` body. Gated behind the `generic_pointer_types`
+            // preview flag during the migration.
+            if let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name) {
+                use gruel_builtins::BuiltinTypeConstructorKind;
+                self.require_preview(
+                    gruel_error::PreviewFeature::GenericPointerTypes,
+                    &format!("`{}` type constructor", callee_name),
+                    span,
+                )?;
+                if arg_strs.len() != constructor.arity {
+                    return Err(CompileError::new(
+                        ErrorKind::WrongArgumentCount {
+                            expected: constructor.arity,
+                            found: arg_strs.len(),
+                        },
+                        span,
+                    ));
+                }
+                let mut arg_types: Vec<Type> = Vec::with_capacity(arg_strs.len());
+                for arg_str in &arg_strs {
+                    let arg_sym = self.interner.get_or_intern(arg_str);
+                    let arg_ty = self.resolve_type(arg_sym, span)?;
+                    arg_types.push(arg_ty);
+                }
+                return match constructor.kind {
+                    BuiltinTypeConstructorKind::Ptr => {
+                        let ptr_id = self.type_pool.intern_ptr_const_from_type(arg_types[0]);
+                        Ok(Type::new_ptr_const(ptr_id))
+                    }
+                    BuiltinTypeConstructorKind::MutPtr => {
+                        let ptr_id = self.type_pool.intern_ptr_mut_from_type(arg_types[0]);
+                        Ok(Type::new_ptr_mut(ptr_id))
+                    }
+                };
+            }
+
             // ADR-0057: parameterized type call `Name(arg1, arg2, ...)` in
             // type position. Evaluate the callee at comptime with the
             // resolved arguments substituted in for its comptime params.

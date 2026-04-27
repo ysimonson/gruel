@@ -13,7 +13,9 @@ use crate::intern_pool::TypeInternPool;
 use crate::scope::ScopedContext;
 use crate::types::{
     EnumId, PtrMutability, StructId, parse_array_type_syntax, parse_pointer_type_syntax,
+    parse_type_call_syntax,
 };
+use gruel_builtins::BuiltinTypeConstructorKind;
 use gruel_intrinsics::{IntrinsicId, lookup_by_name};
 use gruel_rir::{InstData, InstRef, Rir};
 use gruel_span::Span;
@@ -1884,6 +1886,34 @@ impl<'a> ConstraintGenerator<'a> {
                 element: Box::new(element_ty),
                 length,
             });
+        }
+
+        // ADR-0061: built-in parameterized types (`Ptr(T)`, `MutPtr(T)`).
+        // Sema's `resolve_type` is the canonical entry that emits the
+        // `--preview generic_pointer_types` gate; here we just need to
+        // produce the right `InferType` so type checking succeeds. The gate
+        // is enforced separately when `analyze_alloc` calls `resolve_type`
+        // on the annotation.
+        if let Some((callee_name, arg_strs)) = parse_type_call_syntax(name)
+            && let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name)
+            && arg_strs.len() == constructor.arity
+        {
+            let arg_infer = self.resolve_type_name(&arg_strs[0])?;
+            let arg_ty = match arg_infer {
+                InferType::Concrete(ty) => ty,
+                _ => return None,
+            };
+            let ptr_ty = match constructor.kind {
+                BuiltinTypeConstructorKind::Ptr => {
+                    let id = self.type_pool.intern_ptr_const_from_type(arg_ty);
+                    Type::new_ptr_const(id)
+                }
+                BuiltinTypeConstructorKind::MutPtr => {
+                    let id = self.type_pool.intern_ptr_mut_from_type(arg_ty);
+                    Type::new_ptr_mut(id)
+                }
+            };
+            return Some(InferType::Concrete(ptr_ty));
         }
 
         // Check for pointer syntax: ptr mut T / ptr const T
