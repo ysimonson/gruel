@@ -750,6 +750,10 @@ pub enum UnaryOp {
     Neg,    // -
     Not,    // !
     BitNot, // ~
+    /// Immutable reference construction: `&x` (ADR-0062). Operand must be an lvalue.
+    Ref,
+    /// Mutable reference construction: `&mut x` (ADR-0062). Operand must be an lvalue.
+    MutRef,
 }
 
 /// A parenthesized expression.
@@ -1995,6 +1999,8 @@ pub fn encode_unary_op(op: UnaryOp) -> u32 {
         UnaryOp::Neg => 0,
         UnaryOp::Not => 1,
         UnaryOp::BitNot => 2,
+        UnaryOp::Ref => 3,
+        UnaryOp::MutRef => 4,
     }
 }
 
@@ -2486,6 +2492,8 @@ impl SoaAst {
             0 => UnaryOp::Neg,
             1 => UnaryOp::Not,
             2 => UnaryOp::BitNot,
+            3 => UnaryOp::Ref,
+            4 => UnaryOp::MutRef,
             _ => panic!("invalid UnaryOp encoding: {}", data.rhs),
         }
     }

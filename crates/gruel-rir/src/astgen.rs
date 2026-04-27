@@ -651,6 +651,14 @@ impl<'a> AstGen<'a> {
                     UnaryOp::Neg => InstData::Neg { operand },
                     UnaryOp::Not => InstData::Not { operand },
                     UnaryOp::BitNot => InstData::BitNot { operand },
+                    UnaryOp::Ref => InstData::MakeRef {
+                        operand,
+                        is_mut: false,
+                    },
+                    UnaryOp::MutRef => InstData::MakeRef {
+                        operand,
+                        is_mut: true,
+                    },
                 };
                 self.rir.add_inst(Inst {
                     data,

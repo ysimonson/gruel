@@ -744,6 +744,16 @@ where
                     just(TokenKind::Tilde)
                         .map_with(|_, e| (UnaryOp::BitNot, e.span()))
                         .boxed(),
+                    // ADR-0062: `&mut x` constructs a `MutRef(T)` (must come
+                    // before the bare `&` so we don't fall through to `Ref`).
+                    just(TokenKind::Amp)
+                        .then(just(TokenKind::Mut))
+                        .map_with(|_, e| (UnaryOp::MutRef, e.span()))
+                        .boxed(),
+                    // ADR-0062: `&x` constructs a `Ref(T)`.
+                    just(TokenKind::Amp)
+                        .map_with(|_, e| (UnaryOp::Ref, e.span()))
+                        .boxed(),
                 ))
                 .boxed();
                 prefix_op

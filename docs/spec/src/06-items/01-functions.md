@@ -185,6 +185,40 @@ fn main() -> i32 {
 }
 ```
 
+## Reference Types (ADR-0062, preview)
+
+{{ rule(id="6.1:34", cat="normative") }}
+
+A `Ref(T)` value is a scope-bound immutable reference to a value of type `T`. A `MutRef(T)` value is a scope-bound exclusive mutable reference to a value of type `T`. References do not transfer ownership and cannot escape the function in which they are constructed.
+
+{{ rule(id="6.1:35", cat="syntax") }}
+
+```ebnf
+ref_expr = "&" expr ;
+mut_ref_expr = "&" "mut" expr ;
+```
+
+{{ rule(id="6.1:36", cat="legality-rule") }}
+
+The operand of `&` or `&mut` **MUST** be an lvalue (a variable, field access, or array index expression).
+
+{{ rule(id="6.1:37", cat="dynamic-semantics") }}
+
+`&x` evaluates to a `Ref(T)` whose target is the storage of `x`. `&mut x` evaluates to a `MutRef(T)` whose target is the storage of `x`. Both forms produce a single pointer-sized value.
+
+{{ rule(id="6.1:38", cat="example") }}
+
+```gruel
+fn read(r: Ref(i32)) -> i32 {
+    42
+}
+
+fn main() -> i32 {
+    let x: i32 = 7;
+    read(&x)
+}
+```
+
 ## Parameter Immutability
 
 {{ rule(id="6.1:32", cat="legality-rule") }}

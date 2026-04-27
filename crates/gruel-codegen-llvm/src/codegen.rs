@@ -1803,6 +1803,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     }
                 }
             }
+            // ADR-0062: `&x` / `&mut x` lower to the local's alloca pointer.
+            // Same lowering as the borrow-arg `Load`-passthrough today; the
+            // borrow checker enforces exclusivity at sema time.
+            CfgInstData::MakeRef { slot, is_mut: _ } => {
+                let ptr = self.locals[slot as usize].expect("MakeRef before Alloc — invalid CFG");
+                Some(ptr.into())
+            }
             CfgInstData::Store { slot, value } => {
                 let value_ty = self.cfg.get_inst(value).ty;
                 // Unit-typed stores have no LLVM representation — skip.

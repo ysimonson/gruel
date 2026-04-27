@@ -589,6 +589,35 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
+            // ADR-0062: `&x` / `&mut x` produces the address of the operand's
+            // slot. Sema has already enforced that the operand is an lvalue,
+            // so the AIR shape under it is a Load of a slot; we extract the
+            // slot directly rather than emitting a load and taking its address
+            // back.
+            AirInstData::MakeRef { operand, is_mut } => {
+                let operand_inst = self.air.get(*operand);
+                let slot = match &operand_inst.data {
+                    AirInstData::Load { slot } => *slot,
+                    other => panic!(
+                        "MakeRef operand must lower to an lvalue Load, got {:?}",
+                        other
+                    ),
+                };
+                let value = self.emit(
+                    CfgInstData::MakeRef {
+                        slot,
+                        is_mut: *is_mut,
+                    },
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
             AirInstData::BitAnd(lhs, rhs) => {
                 let Some(lhs_val) = self.lower_value(*lhs) else {
                     return Self::diverged();

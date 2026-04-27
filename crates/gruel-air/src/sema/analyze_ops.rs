@@ -575,6 +575,73 @@ impl<'a> Sema<'a> {
     }
 
     // ========================================================================
+    // Reference construction (ADR-0062): &x / &mut x
+    // ========================================================================
+
+    /// Analyze a `&x` or `&mut x` reference-construction expression.
+    ///
+    /// - Operand must be an lvalue (variable, parameter, or place expression).
+    /// - Result type is `Ref(T)` for `&x`, `MutRef(T)` for `&mut x`, where
+    ///   `T` is the operand's type.
+    /// - Gated behind the `reference_types` preview flag.
+    pub(crate) fn analyze_make_ref(
+        &mut self,
+        air: &mut Air,
+        inst_ref: InstRef,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        let inst = self.rir.get(inst_ref);
+        let (operand, is_mut) = match &inst.data {
+            InstData::MakeRef { operand, is_mut } => (*operand, *is_mut),
+            _ => unreachable!("analyze_make_ref called with non-MakeRef instruction"),
+        };
+        let span = inst.span;
+
+        self.require_preview(
+            gruel_error::PreviewFeature::ReferenceTypes,
+            if is_mut {
+                "`&mut` reference construction"
+            } else {
+                "`&` reference construction"
+            },
+            span,
+        )?;
+
+        // Operand must be an lvalue — track from the unanalyzed RIR so we
+        // catch e.g. `&(1 + 2)` without depending on AIR shape.
+        if self.extract_root_variable(operand).is_none() {
+            let kind = if is_mut {
+                ErrorKind::InoutNonLvalue
+            } else {
+                ErrorKind::BorrowNonLvalue
+            };
+            return Err(CompileError::new(kind, self.rir.get(operand).span));
+        }
+
+        let operand_result = self.analyze_inst(air, operand, ctx)?;
+        let operand_ty = operand_result.ty;
+
+        // Construct the Ref(T) / MutRef(T) type via the intern pool.
+        let result_ty = if is_mut {
+            let id = self.type_pool.intern_mut_ref_from_type(operand_ty);
+            Type::new_mut_ref(id)
+        } else {
+            let id = self.type_pool.intern_ref_from_type(operand_ty);
+            Type::new_ref(id)
+        };
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::MakeRef {
+                operand: operand_result.air_ref,
+                is_mut,
+            },
+            ty: result_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, result_ty))
+    }
+
+    // ========================================================================
     // Logical operations: And, Or
     // ========================================================================
 

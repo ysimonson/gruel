@@ -316,6 +316,15 @@ pub enum CfgInstData {
     Not(CfgValue),
     BitNot(CfgValue),
 
+    /// Reference construction (ADR-0062): produce the address of `slot`.
+    /// `is_mut` is informational; codegen produces the same alloca pointer
+    /// for both immutable and mutable references — the borrow checker has
+    /// already enforced exclusivity at sema time.
+    MakeRef {
+        slot: u32,
+        is_mut: bool,
+    },
+
     // Variable operations
     /// Allocate local variable with initial value
     Alloc {
@@ -1238,6 +1247,9 @@ impl Cfg {
             CfgInstData::Neg(v) => write!(f, "neg {}", v),
             CfgInstData::Not(v) => write!(f, "not {}", v),
             CfgInstData::BitNot(v) => write!(f, "bit_not {}", v),
+            CfgInstData::MakeRef { slot, is_mut } => {
+                write!(f, "make_ref{} ${}", if *is_mut { "_mut" } else { "" }, slot)
+            }
             CfgInstData::Alloc { slot, init } => write!(f, "alloc ${} = {}", slot, init),
             CfgInstData::Load { slot } => write!(f, "load ${}", slot),
             CfgInstData::Store { slot, value } => write!(f, "store ${} = {}", slot, value),

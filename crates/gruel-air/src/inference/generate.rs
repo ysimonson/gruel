@@ -407,6 +407,16 @@ impl<'a> ConstraintGenerator<'a> {
                 result_ty
             }
 
+            // ADR-0062: `&x` / `&mut x` produces `Ref(T)` / `MutRef(T)`.
+            // The result type depends on the operand's resolved type, which
+            // inference may not have nailed down yet. Defer the construction
+            // of the actual `Ref`/`MutRef` type to sema (`analyze_inst`),
+            // and just propagate a fresh type variable that sema will set.
+            InstData::MakeRef { operand, .. } => {
+                let _ = self.generate(*operand, ctx);
+                InferType::Var(self.fresh_var())
+            }
+
             // Variable reference
             InstData::VarRef { name } => {
                 if let Some(local) = ctx.locals.get(name) {

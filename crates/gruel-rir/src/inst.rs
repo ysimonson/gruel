@@ -1728,6 +1728,10 @@ impl Rir {
             InstData::BitNot { operand } => InstData::BitNot {
                 operand: renumber(*operand),
             },
+            InstData::MakeRef { operand, is_mut } => InstData::MakeRef {
+                operand: renumber(*operand),
+                is_mut: *is_mut,
+            },
 
             // Control flow
             InstData::Branch {
@@ -2318,6 +2322,7 @@ impl Rir {
                 | InstData::Neg { .. }
                 | InstData::Not { .. }
                 | InstData::BitNot { .. }
+                | InstData::MakeRef { .. }
                 | InstData::Branch { .. }
                 | InstData::Loop { .. }
                 | InstData::For { .. }
@@ -2429,6 +2434,11 @@ pub enum InstData {
     Not { operand: InstRef },
     /// Bitwise NOT: ~operand
     BitNot { operand: InstRef },
+
+    /// Reference construction (ADR-0062): `&x` (`is_mut = false`) or
+    /// `&mut x` (`is_mut = true`). Operand must be an lvalue. Result type
+    /// is `Ref(T)` or `MutRef(T)` where `T` is the operand's type.
+    MakeRef { operand: InstRef, is_mut: bool },
 
     // Control flow
     /// Branch: if cond then then_block else else_block
@@ -3185,6 +3195,13 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::Neg { operand } => writeln!(out, "neg {}", operand).unwrap(),
                 InstData::Not { operand } => writeln!(out, "not {}", operand).unwrap(),
                 InstData::BitNot { operand } => writeln!(out, "bit_not {}", operand).unwrap(),
+                InstData::MakeRef { operand, is_mut } => writeln!(
+                    out,
+                    "make_ref{} {}",
+                    if *is_mut { "_mut" } else { "" },
+                    operand
+                )
+                .unwrap(),
 
                 // Control flow
                 InstData::Branch {

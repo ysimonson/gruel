@@ -1033,6 +1033,11 @@ pub enum AirInstData {
     /// Bitwise NOT
     BitNot(AirRef),
 
+    /// Reference construction (ADR-0062): `&x` (`is_mut = false`) or
+    /// `&mut x` (`is_mut = true`). Operand must be an lvalue. Lowers to
+    /// the address of the operand's slot.
+    MakeRef { operand: AirRef, is_mut: bool },
+
     // Control flow
     /// Conditional branch
     Branch {
@@ -1463,6 +1468,12 @@ impl fmt::Display for Air {
                 AirInstData::Neg(operand) => writeln!(f, "neg {}", operand)?,
                 AirInstData::Not(operand) => writeln!(f, "not {}", operand)?,
                 AirInstData::BitNot(operand) => writeln!(f, "bit_not {}", operand)?,
+                AirInstData::MakeRef { operand, is_mut } => writeln!(
+                    f,
+                    "make_ref{} {}",
+                    if *is_mut { "_mut" } else { "" },
+                    operand
+                )?,
                 AirInstData::Branch {
                     cond,
                     then_value,
