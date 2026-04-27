@@ -777,13 +777,24 @@ impl Cfg {
         self.param_mode(slot).is_inout()
     }
 
-    /// Get whether a parameter slot is borrow.
+    /// Get whether a parameter slot is borrow (legacy `borrow` mode or
+    /// ADR-0062 `Ref(T)`-typed parameter).
     #[inline]
     pub fn is_param_borrow(&self, slot: u32) -> bool {
-        self.param_mode(slot).is_borrow()
+        if self.param_mode(slot).is_borrow() {
+            return true;
+        }
+        // ADR-0062: a `Ref(T)`-typed parameter has the same calling
+        // convention shape as a `borrow` parameter — it's a noalias readonly
+        // pointer at the LLVM level.
+        matches!(
+            self.param_type(slot).map(|t| t.kind()),
+            Some(gruel_air::TypeKind::Ref(_))
+        )
     }
 
-    /// Get whether a parameter slot is passed by reference (inout or borrow).
+    /// Get whether a parameter slot is passed by reference (inout or borrow,
+    /// or an ADR-0062 `Ref(T)` / `MutRef(T)` parameter type).
     ///
     /// ADR-0056: interface-typed parameters carry their own data pointer
     /// inside the fat-pointer struct, so they are passed *by value* at the
@@ -793,10 +804,14 @@ impl Cfg {
     /// another layer of indirection.
     #[inline]
     pub fn is_param_by_ref(&self, slot: u32) -> bool {
-        if let Some(ty) = self.param_type(slot)
-            && matches!(ty.kind(), gruel_air::TypeKind::Interface(_))
-        {
-            return false;
+        if let Some(ty) = self.param_type(slot) {
+            match ty.kind() {
+                gruel_air::TypeKind::Interface(_) => return false,
+                gruel_air::TypeKind::Ref(_) | gruel_air::TypeKind::MutRef(_) => {
+                    return true;
+                }
+                _ => {}
+            }
         }
         self.param_mode(slot).is_by_ref()
     }
