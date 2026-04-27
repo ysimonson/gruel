@@ -74,19 +74,25 @@ fn main() -> i32 {
 {{ rule(id="9.1:10", cat="normative") }}
 
 Gruel provides two raw pointer types for low-level memory access:
-- `ptr const T` - a pointer to immutable data of type `T`
-- `ptr mut T` - a pointer to mutable data of type `T`
+- `Ptr(T)` - a pointer to immutable data of type `T`
+- `MutPtr(T)` - a pointer to mutable data of type `T`
+
+`Ptr` and `MutPtr` are built-in compiler-recognized type constructors;
+they share the call-style surface form with comptime-generic user types
+(e.g. `Vec(T)`), but their lowering is hard-wired in the compiler. See
+ADR-0061. Originally introduced as `ptr const T` / `ptr mut T` keyword
+syntax (ADR-0028); that surface form has been replaced.
 
 {{ rule(id="9.1:11", cat="syntax") }}
 
 ```ebnf
-ptr_type = "ptr" ( "const" | "mut" ) type ;
+ptr_type = ( "Ptr" | "MutPtr" ) "(" type ")" ;
 ```
 
 {{ rule(id="9.1:12", cat="example") }}
 
 ```gruel
-fn takes_ptr(p: ptr const i32) -> i32 { 0 }
-fn takes_mut_ptr(p: ptr mut i32) -> i32 { 0 }
-unchecked fn get_ptr() -> ptr const i32 { @panic() }
+fn takes_ptr(p: Ptr(i32)) -> i32 { 0 }
+fn takes_mut_ptr(p: MutPtr(i32)) -> i32 { 0 }
+unchecked fn get_ptr() -> Ptr(i32) { @panic() }
 ```

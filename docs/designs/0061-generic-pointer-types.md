@@ -82,7 +82,7 @@ Cut over once feature-complete:
 - [x] **Phase 2: Parser/sema for `Ptr(T)` / `MutPtr(T)`** — accept call-style type expressions in type position when the callee resolves to a builtin constructor. Lower `Ptr(T)` to existing `TypeKind::PtrConst`, `MutPtr(T)` to `TypeKind::PtrMut`. Gate behind the `generic_pointer_types` preview flag.
 - [x] **Phase 3: Diagnostics** — error/info messages display `Ptr(T)` / `MutPtr(T)` instead of `ptr const T` / `ptr mut T`. The canonical format is unconditional (not gated on the preview flag), since the old surface form is being removed in phase 6. Intrinsic registry descriptions and examples updated in lockstep.
 - [x] **Phase 4: Codemod** — convert spec tests, UI tests, scratch programs to the new syntax. Each affected case picks up `preview = "generic_pointer_types"` and `preview_should_pass = true`; phase 6 removes both. ADR-0028 examples are left as-is for historical accuracy.
-- [ ] **Phase 5: Spec rewrite** — update `docs/spec/src/09-runtime-behavior` (and any pointer mentions in `03-types`) to document `Ptr(T)` / `MutPtr(T)`. Mark ADR-0028's surface-syntax sections as superseded by this ADR.
+- [x] **Phase 5: Spec rewrite** — update `docs/spec/src/09-unchecked-code/{01-syntax,02-intrinsics}.md` to document `Ptr(T)` / `MutPtr(T)`. ADR-0028's surface-syntax sections are now historical (noted inline in the spec); the rest of ADR-0028 remains accurate so the ADR itself is left unchanged.
 - [ ] **Phase 6: Remove old syntax and stabilize** — drop `TypeExpr::PointerConst`/`PointerMut`, the `ptr` keyword from the lexer/parser, all `require_preview()` calls for `generic_pointer_types`, and the `PreviewFeature::GenericPointerTypes` enum variant. Update ADR status to `implemented`.
 
 ## Consequences
