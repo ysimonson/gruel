@@ -591,6 +591,68 @@ pub fn is_reserved_type_name(name: &str) -> bool {
 }
 
 // ============================================================================
+// Built-in Type Constructors (parameterized types)
+// ============================================================================
+
+/// Identifier for a built-in parameterized type.
+///
+/// Each variant corresponds to a closed, compiler-recognized type constructor
+/// (e.g. `Ptr(T)`, `MutPtr(T)`). The actual lowering to a `TypeKind` happens
+/// in sema (`gruel-air`), which dispatches on this tag — `gruel-builtins`
+/// has no dependency on the type system.
+///
+/// New constructors are added by extending this enum, adding an entry to
+/// [`BUILTIN_TYPE_CONSTRUCTORS`], and adding a corresponding sema lowering
+/// arm. The enum is `#[non_exhaustive]` so that adding variants is not a
+/// breaking change for downstream consumers that match exhaustively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum BuiltinTypeConstructorKind {
+    // No variants yet. ADR-0061 phase 2 adds `Ptr` and `MutPtr`;
+    // ADR-0062 phase 1 adds `Ref` and `MutRef`.
+}
+
+/// Definition of a built-in parameterized type constructor.
+///
+/// Built-in type constructors share a single surface form with user-defined
+/// comptime-generic functions that return `type` (e.g. `fn Vec(comptime T: type) -> type`):
+/// both are written `Name(arg1, arg2, ...)` in type position. The difference is
+/// that built-in constructors are hard-wired in the compiler — sema resolves
+/// the name against this registry and lowers directly to a `TypeKind` without
+/// running the comptime interpreter.
+///
+/// See ADR-0061 (`Ptr`/`MutPtr`) and ADR-0062 (`Ref`/`MutRef`) for usage.
+#[derive(Debug, Clone, Copy)]
+pub struct BuiltinTypeConstructor {
+    /// Constructor name as it appears in source code (e.g., "Ptr").
+    pub name: &'static str,
+    /// Number of comptime type arguments this constructor accepts.
+    pub arity: usize,
+    /// Which built-in lowering to use.
+    pub kind: BuiltinTypeConstructorKind,
+}
+
+/// All built-in type constructors.
+///
+/// Empty until ADR-0061 phase 2 adds `Ptr` / `MutPtr`. The compiler iterates
+/// over this slice when resolving type-call expressions and when reserving
+/// names so user code cannot shadow them.
+pub static BUILTIN_TYPE_CONSTRUCTORS: &[&BuiltinTypeConstructor] = &[];
+
+/// Look up a built-in type constructor by name.
+pub fn get_builtin_type_constructor(name: &str) -> Option<&'static BuiltinTypeConstructor> {
+    BUILTIN_TYPE_CONSTRUCTORS
+        .iter()
+        .find(|c| c.name == name)
+        .copied()
+}
+
+/// Check if a name is reserved for a built-in type constructor.
+pub fn is_reserved_type_constructor_name(name: &str) -> bool {
+    BUILTIN_TYPE_CONSTRUCTORS.iter().any(|c| c.name == name)
+}
+
+// ============================================================================
 // Helper methods
 // ============================================================================
 
@@ -755,5 +817,28 @@ mod tests {
     #[test]
     fn test_builtin_enums_count() {
         assert_eq!(BUILTIN_ENUMS.len(), 4);
+    }
+
+    // ========================================================================
+    // Built-in Type Constructor Tests
+    // ========================================================================
+
+    #[test]
+    fn test_builtin_type_constructors_registry_initially_empty() {
+        // ADR-0061 phase 1 wires the registry but ships it empty.
+        // Phase 2 adds Ptr/MutPtr; ADR-0062 phase 1 adds Ref/MutRef.
+        assert_eq!(BUILTIN_TYPE_CONSTRUCTORS.len(), 0);
+    }
+
+    #[test]
+    fn test_get_builtin_type_constructor_unknown() {
+        assert!(get_builtin_type_constructor("Ptr").is_none());
+        assert!(get_builtin_type_constructor("MyConstructor").is_none());
+    }
+
+    #[test]
+    fn test_is_reserved_type_constructor_name_empty_registry() {
+        assert!(!is_reserved_type_constructor_name("Ptr"));
+        assert!(!is_reserved_type_constructor_name("Anything"));
     }
 }

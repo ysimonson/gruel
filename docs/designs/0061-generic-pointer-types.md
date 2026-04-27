@@ -78,7 +78,7 @@ Cut over once feature-complete:
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Builtin type-constructor infrastructure** — extend `gruel-builtins` with `BuiltinTypeConstructor { name, arity, lower }`. Inject into the global namespace alongside `BUILTIN_TYPES`. No behavior change yet (registry is empty/unused).
+- [x] **Phase 1: Builtin type-constructor infrastructure** — extend `gruel-builtins` with `BuiltinTypeConstructor { name, arity, lower }`. Inject into the global namespace alongside `BUILTIN_TYPES`. No behavior change yet (registry is empty/unused).
 - [ ] **Phase 2: Parser/sema for `Ptr(T)` / `MutPtr(T)`** — accept call-style type expressions in type position when the callee resolves to a builtin constructor. Lower `Ptr(T)` to existing `TypeKind::PtrConst`, `MutPtr(T)` to `TypeKind::PtrMut`. Gate behind the `generic_pointer_types` preview flag.
 - [ ] **Phase 3: Diagnostics** — error/info messages display `Ptr(T)` / `MutPtr(T)` instead of `ptr const T` / `ptr mut T` when the new feature is enabled. Tests in `gruel-ui-tests`.
 - [ ] **Phase 4: Codemod** — convert spec tests, UI tests, scratch programs, and ADR examples to the new syntax. Old syntax remains accepted (parallel grammars) until Phase 6.
