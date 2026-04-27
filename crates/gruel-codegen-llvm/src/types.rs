@@ -21,6 +21,7 @@ pub fn type_alignment(ty: Type, type_pool: &TypeInternPool) -> u64 {
         TypeKind::F32 => 4,
         TypeKind::F64 => 8,
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 8,
+        TypeKind::Ref(_) | TypeKind::MutRef(_) => 8,
         TypeKind::Struct(id) => {
             let def = type_pool.struct_def(id);
             def.fields
@@ -67,6 +68,7 @@ pub fn type_byte_size(ty: Type, type_pool: &TypeInternPool) -> u64 {
         TypeKind::F32 => 4,
         TypeKind::F64 => 8,
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 8, // 64-bit target
+        TypeKind::Ref(_) | TypeKind::MutRef(_) => 8,      // 64-bit target
         TypeKind::Struct(id) => {
             // Compute LLVM non-packed struct layout: fields are placed at
             // aligned offsets, and the struct is tail-padded to its alignment.
@@ -208,6 +210,12 @@ pub fn gruel_type_to_llvm<'ctx>(
 
         // Raw pointers → opaque `ptr` (LLVM ≥ 15).
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => {
+            Some(ctx.ptr_type(AddressSpace::default()).into())
+        }
+
+        // References (ADR-0062) lower identically to today's borrows: a single
+        // opaque pointer. Borrow-check enforces the safety properties.
+        TypeKind::Ref(_) | TypeKind::MutRef(_) => {
             Some(ctx.ptr_type(AddressSpace::default()).into())
         }
 

@@ -316,6 +316,10 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// Reference types (ADR-0062) — `Ref(T)` / `MutRef(T)` and the
+    /// `&x` / `&mut x` construction expressions, replacing the
+    /// `borrow x: T` / `inout x: T` parameter modes.
+    ReferenceTypes,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -354,6 +358,7 @@ impl PreviewFeature {
     pub fn name(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "test_infra",
+            PreviewFeature::ReferenceTypes => "reference_types",
         }
     }
 
@@ -361,12 +366,13 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::ReferenceTypes => "ADR-0062",
         }
     }
 
     /// Get all available preview features.
     pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra]
+        &[PreviewFeature::TestInfra, PreviewFeature::ReferenceTypes]
     }
 
     /// Get a comma-separated list of all feature names (for help text).
@@ -389,6 +395,7 @@ impl std::str::FromStr for PreviewFeature {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "test_infra" => Ok(PreviewFeature::TestInfra),
+            "reference_types" => Ok(PreviewFeature::ReferenceTypes),
             _ => Err(ParsePreviewFeatureError(s.to_string())),
         }
     }
@@ -1994,7 +2001,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, reference_types");
     }
 
     // ========================================================================

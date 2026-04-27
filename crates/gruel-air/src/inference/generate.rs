@@ -1907,6 +1907,14 @@ impl<'a> ConstraintGenerator<'a> {
                     let id = self.type_pool.intern_ptr_mut_from_type(arg_ty);
                     Type::new_ptr_mut(id)
                 }
+                BuiltinTypeConstructorKind::Ref => {
+                    let id = self.type_pool.intern_ref_from_type(arg_ty);
+                    Type::new_ref(id)
+                }
+                BuiltinTypeConstructorKind::MutRef => {
+                    let id = self.type_pool.intern_mut_ref_from_type(arg_ty);
+                    Type::new_mut_ref(id)
+                }
             };
             return Some(InferType::Concrete(ptr_ty));
         }

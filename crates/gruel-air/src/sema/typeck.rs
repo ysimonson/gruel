@@ -67,6 +67,10 @@ impl<'a> Sema<'a> {
             TypeKind::ComptimeType | TypeKind::ComptimeStr => true,
             // Pointer types are Copy (they're just addresses)
             TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => true,
+            // References (ADR-0062) are Copy — they're scope-bound aliases,
+            // not owning handles. Borrow-checking enforces exclusivity, not
+            // affinity.
+            TypeKind::Ref(_) | TypeKind::MutRef(_) => true,
             // Interface types (ADR-0056): the fat pointer is two pointer-
             // sized values. Bitwise-copying it is safe — it just produces a
             // second reference to the same underlying data via the data
@@ -248,6 +252,14 @@ impl<'a> Sema<'a> {
                     BuiltinTypeConstructorKind::MutPtr => {
                         let ptr_id = self.type_pool.intern_ptr_mut_from_type(arg_types[0]);
                         Ok(Type::new_ptr_mut(ptr_id))
+                    }
+                    BuiltinTypeConstructorKind::Ref => {
+                        let ref_id = self.type_pool.intern_ref_from_type(arg_types[0]);
+                        Ok(Type::new_ref(ref_id))
+                    }
+                    BuiltinTypeConstructorKind::MutRef => {
+                        let ref_id = self.type_pool.intern_mut_ref_from_type(arg_types[0]);
+                        Ok(Type::new_mut_ref(ref_id))
                     }
                 };
             }
@@ -551,6 +563,8 @@ impl<'a> Sema<'a> {
             TypeKind::Module(_) => 0,
             // Pointer types take 1 slot (64-bit address)
             TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 1,
+            // References (ADR-0062) lower like borrows — single pointer slot.
+            TypeKind::Ref(_) | TypeKind::MutRef(_) => 1,
             // Interface types (ADR-0056): runtime fat pointer occupies two
             // pointer-sized ABI slots — `(data_ptr, vtable_ptr)`. Comptime
             // usage is erased before codegen, so this only fires for

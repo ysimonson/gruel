@@ -116,6 +116,40 @@ impl PtrMutTypeId {
     }
 }
 
+/// A unique identifier for a `Ref(T)` type (ADR-0062).
+/// Mirrors `PtrConstTypeId` — uses pool indices for type interning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RefTypeId(pub u32);
+
+impl RefTypeId {
+    #[inline]
+    pub fn from_pool_index(pool_index: u32) -> Self {
+        RefTypeId(pool_index)
+    }
+
+    #[inline]
+    pub fn pool_index(self) -> u32 {
+        self.0
+    }
+}
+
+/// A unique identifier for a `MutRef(T)` type (ADR-0062).
+/// Mirrors `PtrMutTypeId`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MutRefTypeId(pub u32);
+
+impl MutRefTypeId {
+    #[inline]
+    pub fn from_pool_index(pool_index: u32) -> Self {
+        MutRefTypeId(pool_index)
+    }
+
+    #[inline]
+    pub fn pool_index(self) -> u32 {
+        self.0
+    }
+}
+
 /// A unique identifier for an interface declaration (ADR-0056).
 ///
 /// Mirrors `StructId` / `EnumId`: the inner value is a pool index into
@@ -214,6 +248,10 @@ pub enum TypeKind {
     PtrConst(PtrConstTypeId),
     /// Raw pointer to mutable data: ptr mut T
     PtrMut(PtrMutTypeId),
+    /// Immutable reference (ADR-0062): `Ref(T)` — scope-bound, exclusivity-checked.
+    Ref(RefTypeId),
+    /// Mutable reference (ADR-0062): `MutRef(T)` — scope-bound, exclusive.
+    MutRef(MutRefTypeId),
     /// A module type (from @import)
     Module(ModuleId),
     /// An error type (used during type checking to continue after errors)
@@ -300,6 +338,8 @@ impl std::fmt::Debug for Type {
             TypeKind::Array(id) => write!(f, "Type::new_array(ArrayTypeId({}))", id.0),
             TypeKind::PtrConst(id) => write!(f, "Type::new_ptr_const(PtrConstTypeId({}))", id.0),
             TypeKind::PtrMut(id) => write!(f, "Type::new_ptr_mut(PtrMutTypeId({}))", id.0),
+            TypeKind::Ref(id) => write!(f, "Type::new_ref(RefTypeId({}))", id.0),
+            TypeKind::MutRef(id) => write!(f, "Type::new_mut_ref(MutRefTypeId({}))", id.0),
             TypeKind::Module(id) => write!(f, "Type::new_module(ModuleId({}))", id.0),
             TypeKind::Interface(id) => write!(f, "Type::new_interface(InterfaceId({}))", id.0),
         }
@@ -316,6 +356,8 @@ const TAG_MODULE: u32 = 103;
 const TAG_PTR_CONST: u32 = 104;
 const TAG_PTR_MUT: u32 = 105;
 const TAG_INTERFACE: u32 = 106;
+const TAG_REF: u32 = 107;
+const TAG_MUT_REF: u32 = 108;
 
 // Primitive type constants
 impl Type {
@@ -391,6 +433,18 @@ impl Type {
     #[inline]
     pub const fn new_ptr_mut(id: PtrMutTypeId) -> Type {
         Type(TAG_PTR_MUT | (id.0 << 8))
+    }
+
+    /// Create an immutable reference type (ADR-0062) from a RefTypeId.
+    #[inline]
+    pub const fn new_ref(id: RefTypeId) -> Type {
+        Type(TAG_REF | (id.0 << 8))
+    }
+
+    /// Create a mutable reference type (ADR-0062) from a MutRefTypeId.
+    #[inline]
+    pub const fn new_mut_ref(id: MutRefTypeId) -> Type {
+        Type(TAG_MUT_REF | (id.0 << 8))
     }
 
     /// Create a module type from a ModuleId.
@@ -816,6 +870,8 @@ impl Type {
             TAG_ARRAY => Some(TypeKind::Array(ArrayTypeId(self.0 >> 8))),
             TAG_PTR_CONST => Some(TypeKind::PtrConst(PtrConstTypeId(self.0 >> 8))),
             TAG_PTR_MUT => Some(TypeKind::PtrMut(PtrMutTypeId(self.0 >> 8))),
+            TAG_REF => Some(TypeKind::Ref(RefTypeId(self.0 >> 8))),
+            TAG_MUT_REF => Some(TypeKind::MutRef(MutRefTypeId(self.0 >> 8))),
             TAG_MODULE => Some(TypeKind::Module(ModuleId(self.0 >> 8))),
             TAG_INTERFACE => Some(TypeKind::Interface(InterfaceId(self.0 >> 8))),
             _ => None,
@@ -847,6 +903,8 @@ impl Type {
             TypeKind::Array(_) => "<array>",
             TypeKind::PtrConst(_) => "<ptr const>",
             TypeKind::PtrMut(_) => "<ptr mut>",
+            TypeKind::Ref(_) => "<ref>",
+            TypeKind::MutRef(_) => "<mut ref>",
             TypeKind::Module(_) => "<module>",
             TypeKind::Interface(_) => "<interface>",
             TypeKind::Error => "<error>",
@@ -1034,6 +1092,45 @@ impl Type {
     pub fn is_ptr(&self) -> bool {
         let tag = self.0 & 0xFF;
         tag == TAG_PTR_CONST || tag == TAG_PTR_MUT
+    }
+
+    /// Check if this is an immutable reference type (`Ref(T)`, ADR-0062).
+    #[inline]
+    pub fn is_ref(&self) -> bool {
+        (self.0 & 0xFF) == TAG_REF
+    }
+
+    /// Get the reference type ID if this is a `Ref(T)`.
+    #[inline]
+    pub fn as_ref_type(&self) -> Option<RefTypeId> {
+        if self.is_ref() {
+            Some(RefTypeId(self.0 >> 8))
+        } else {
+            None
+        }
+    }
+
+    /// Check if this is a mutable reference type (`MutRef(T)`, ADR-0062).
+    #[inline]
+    pub fn is_mut_ref(&self) -> bool {
+        (self.0 & 0xFF) == TAG_MUT_REF
+    }
+
+    /// Get the reference type ID if this is a `MutRef(T)`.
+    #[inline]
+    pub fn as_mut_ref_type(&self) -> Option<MutRefTypeId> {
+        if self.is_mut_ref() {
+            Some(MutRefTypeId(self.0 >> 8))
+        } else {
+            None
+        }
+    }
+
+    /// Check if this is any reference type (`Ref(T)` or `MutRef(T)`).
+    #[inline]
+    pub fn is_any_ref(&self) -> bool {
+        let tag = self.0 & 0xFF;
+        tag == TAG_REF || tag == TAG_MUT_REF
     }
 
     /// Check if this is a signed integer type.
@@ -1231,7 +1328,8 @@ impl Type {
             // Primitive types: I8=0 through ComptimeInt=19
             0..=19 => true,
             // Composite types with valid tags
-            TAG_STRUCT | TAG_ENUM | TAG_ARRAY | TAG_PTR_CONST | TAG_PTR_MUT | TAG_MODULE => true,
+            TAG_STRUCT | TAG_ENUM | TAG_ARRAY | TAG_PTR_CONST | TAG_PTR_MUT | TAG_MODULE
+            | TAG_INTERFACE | TAG_REF | TAG_MUT_REF => true,
             // Everything else is invalid
             _ => false,
         }
@@ -2130,8 +2228,8 @@ mod tests {
             );
         }
 
-        // Tags above composites are invalid (106+)
-        for tag in 106..=255u32 {
+        // Tags above composites are invalid (109+)
+        for tag in 109..=255u32 {
             assert!(
                 !Type::is_valid_encoding(tag),
                 "tag {} should be invalid",
@@ -2157,7 +2255,7 @@ mod tests {
         // Invalid tags
         assert!(Type::try_from_u32(50).is_none());
         assert!(Type::try_from_u32(99).is_none());
-        assert!(Type::try_from_u32(106).is_none());
+        assert!(Type::try_from_u32(109).is_none());
         assert!(Type::try_from_u32(255).is_none());
     }
 

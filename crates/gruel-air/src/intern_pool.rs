@@ -41,7 +41,8 @@ use std::sync::{PoisonError, RwLock};
 use lasso::Spur;
 
 use crate::types::{
-    ArrayTypeId, EnumDef, EnumId, PtrConstTypeId, PtrMutTypeId, StructDef, StructId, Type, TypeKind,
+    ArrayTypeId, EnumDef, EnumId, MutRefTypeId, PtrConstTypeId, PtrMutTypeId, RefTypeId, StructDef,
+    StructId, Type, TypeKind,
 };
 
 /// Interned type index - 32 bits, Copy, cheap comparison.
@@ -199,6 +200,16 @@ pub enum TypeData {
     ///
     /// `ptr mut T` - pointer to mutable data.
     PtrMut { pointee: InternedType },
+
+    /// Immutable reference (structural type, ADR-0062).
+    ///
+    /// `Ref(T)` - scope-bound non-mutating borrow.
+    Ref { referent: InternedType },
+
+    /// Mutable reference (structural type, ADR-0062).
+    ///
+    /// `MutRef(T)` - scope-bound exclusive mutating borrow.
+    MutRef { referent: InternedType },
 }
 
 /// Data for a struct type in the intern pool.
@@ -279,6 +290,12 @@ struct TypeInternPoolInner {
     /// Structural type deduplication: pointee -> InternedType for ptr mut.
     ptr_mut_map: HashMap<InternedType, InternedType>,
 
+    /// Structural type deduplication: referent -> InternedType for `Ref(T)`.
+    ref_map: HashMap<InternedType, InternedType>,
+
+    /// Structural type deduplication: referent -> InternedType for `MutRef(T)`.
+    mut_ref_map: HashMap<InternedType, InternedType>,
+
     /// Nominal type lookup: name -> InternedType for structs.
     struct_by_name: HashMap<Spur, InternedType>,
 
@@ -295,6 +312,8 @@ impl TypeInternPool {
                 array_map: HashMap::new(),
                 ptr_const_map: HashMap::new(),
                 ptr_mut_map: HashMap::new(),
+                ref_map: HashMap::new(),
+                mut_ref_map: HashMap::new(),
                 struct_by_name: HashMap::new(),
                 enum_by_name: HashMap::new(),
             }),
@@ -544,6 +563,44 @@ impl TypeInternPool {
         inner.types.push(TypeData::PtrMut { pointee });
         inner.ptr_mut_map.insert(pointee, interned);
 
+        interned
+    }
+
+    /// Intern a `Ref(T)` type (structural - deduplicates).
+    pub fn intern_ref(&self, referent: InternedType) -> InternedType {
+        {
+            let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+            if let Some(&existing) = inner.ref_map.get(&referent) {
+                return existing;
+            }
+        }
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(&existing) = inner.ref_map.get(&referent) {
+            return existing;
+        }
+        let pool_index = inner.types.len() as u32;
+        let interned = InternedType::from_pool_index(pool_index);
+        inner.types.push(TypeData::Ref { referent });
+        inner.ref_map.insert(referent, interned);
+        interned
+    }
+
+    /// Intern a `MutRef(T)` type (structural - deduplicates).
+    pub fn intern_mut_ref(&self, referent: InternedType) -> InternedType {
+        {
+            let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+            if let Some(&existing) = inner.mut_ref_map.get(&referent) {
+                return existing;
+            }
+        }
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(&existing) = inner.mut_ref_map.get(&referent) {
+            return existing;
+        }
+        let pool_index = inner.types.len() as u32;
+        let interned = InternedType::from_pool_index(pool_index);
+        inner.types.push(TypeData::MutRef { referent });
+        inner.mut_ref_map.insert(referent, interned);
         interned
     }
 
@@ -851,6 +908,47 @@ impl TypeInternPool {
         }
     }
 
+    /// Intern a `Ref(T)` type from a Type referent.
+    pub fn intern_ref_from_type(&self, referent_type: Type) -> RefTypeId {
+        let referent_interned = Self::type_to_interned_recursive(referent_type);
+        let ref_interned = self.intern_ref(referent_interned);
+        RefTypeId::from_pool_index(ref_interned.pool_index().expect("ref must have pool index"))
+    }
+
+    /// Intern a `MutRef(T)` type from a Type referent.
+    pub fn intern_mut_ref_from_type(&self, referent_type: Type) -> MutRefTypeId {
+        let referent_interned = Self::type_to_interned_recursive(referent_type);
+        let mut_ref_interned = self.intern_mut_ref(referent_interned);
+        MutRefTypeId::from_pool_index(
+            mut_ref_interned
+                .pool_index()
+                .expect("mut ref must have pool index"),
+        )
+    }
+
+    /// Get the referent type of a `Ref(T)`.
+    pub fn ref_def(&self, ref_id: RefTypeId) -> Type {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let pool_index = ref_id.0 as usize;
+        match &inner.types[pool_index] {
+            TypeData::Ref { referent } => Self::interned_to_type_recursive(*referent, &inner),
+            other => panic!("Expected ref at pool index {}, got {:?}", pool_index, other),
+        }
+    }
+
+    /// Get the referent type of a `MutRef(T)`.
+    pub fn mut_ref_def(&self, ref_id: MutRefTypeId) -> Type {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let pool_index = ref_id.0 as usize;
+        match &inner.types[pool_index] {
+            TypeData::MutRef { referent } => Self::interned_to_type_recursive(*referent, &inner),
+            other => panic!(
+                "Expected mut ref at pool index {}, got {:?}",
+                pool_index, other
+            ),
+        }
+    }
+
     /// Convert InternedType to Type recursively (handles composite types).
     ///
     /// This is used to convert array element types from InternedType back to Type.
@@ -887,6 +985,8 @@ impl TypeInternPool {
                 Type::new_ptr_const(PtrConstTypeId::from_pool_index(pool_index))
             }
             TypeData::PtrMut { .. } => Type::new_ptr_mut(PtrMutTypeId::from_pool_index(pool_index)),
+            TypeData::Ref { .. } => Type::new_ref(RefTypeId::from_pool_index(pool_index)),
+            TypeData::MutRef { .. } => Type::new_mut_ref(MutRefTypeId::from_pool_index(pool_index)),
         }
     }
 
@@ -918,6 +1018,8 @@ impl TypeInternPool {
             TypeKind::Array(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::PtrConst(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::PtrMut(id) => InternedType::from_pool_index(id.pool_index()),
+            TypeKind::Ref(id) => InternedType::from_pool_index(id.pool_index()),
+            TypeKind::MutRef(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::Module(_) => panic!("Cannot intern module types"),
             TypeKind::Interface(_) => panic!("Cannot intern interface types"),
             TypeKind::ComptimeType => panic!("Cannot intern comptime types"),
@@ -1006,8 +1108,11 @@ impl TypeInternPool {
                 TypeData::Struct(_) => struct_count += 1,
                 TypeData::Enum(_) => enum_count += 1,
                 TypeData::Array { .. } => array_count += 1,
-                TypeData::PtrConst { .. } | TypeData::PtrMut { .. } => {
-                    // Pointer types are not counted separately in stats
+                TypeData::PtrConst { .. }
+                | TypeData::PtrMut { .. }
+                | TypeData::Ref { .. }
+                | TypeData::MutRef { .. } => {
+                    // Pointer/reference types are not counted separately in stats
                 }
             }
         }
@@ -1061,6 +1166,8 @@ impl TypeInternPool {
             | TypeKind::Array(_)
             | TypeKind::PtrConst(_)
             | TypeKind::PtrMut(_)
+            | TypeKind::Ref(_)
+            | TypeKind::MutRef(_)
             | TypeKind::Module(_)
             | TypeKind::Interface(_) => None,
             // Comptime-only types cannot be interned for runtime
@@ -1168,6 +1275,14 @@ impl TypeInternPool {
                 let pointee = self.ptr_mut_def(id);
                 format!("MutPtr({})", self.format_type_name(pointee))
             }
+            TypeKind::Ref(id) => {
+                let referent = self.ref_def(id);
+                format!("Ref({})", self.format_type_name(referent))
+            }
+            TypeKind::MutRef(id) => {
+                let referent = self.mut_ref_def(id);
+                format!("MutRef({})", self.format_type_name(referent))
+            }
             TypeKind::Module(_) => "<module>".to_string(),
             // Interface names are stored on `Sema::interfaces`, not in the
             // type pool. Caller-side error messages should resolve them via
@@ -1197,6 +1312,8 @@ impl Clone for TypeInternPool {
                 array_map: inner.array_map.clone(),
                 ptr_const_map: inner.ptr_const_map.clone(),
                 ptr_mut_map: inner.ptr_mut_map.clone(),
+                ref_map: inner.ref_map.clone(),
+                mut_ref_map: inner.mut_ref_map.clone(),
                 struct_by_name: inner.struct_by_name.clone(),
                 enum_by_name: inner.enum_by_name.clone(),
             }),

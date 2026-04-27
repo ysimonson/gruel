@@ -7,18 +7,12 @@ Gruel is a programming language. It's like
 
 I think the bones of a really compelling language are there with Rue. But the
 project is not contributor-friendly. This is by design: Steve wants to
-experiment largely in isolation with some ideas, and it's apparent with e.g.
-PRs that are not getting accepted. To make it contributor friendly, and
-hopefully iterate on a language faster, this fork originally got rid of as much
-off-the-beaten path infrastructure as possible in favor of more pedestrian
-variants: git instead of jj, just ADRs without beads workflows, cargo instead
-of buck, etc.
-
-Since then, this has been used as a basis to iterate on the language and its
-tooling. As of April 2026, Gruel is a superset of Rue, with a compiler that
-uses LLVM to produce faster code, better platform compatibility, and more
-standardized infrastructure - at the cost of slower compile times, and loss of
-freestanding/hermetic capacities.
+experiment largely in isolation with some ideas. To make it more contributor
+friendly, and hopefully iterate on a language faster, this fork originally got
+rid of as much off-the-beaten path infrastructure as possible in favor of more
+pedestrian variants: git instead of jj, just ADRs without beads workflows,
+cargo instead of buck, etc. Since then, the languages have diverged
+substantially.
 
 ## Differences from Rue
 
@@ -31,6 +25,7 @@ freestanding/hermetic capacities.
 - Anonymous functions (ADR-0055)
 - Go-like structurally typed interfaces (ADR-0056, ADR-0057, ADR-0060)
 - Rust-like @derive for structs and enums (ADR-0058)
+- Reworked pointers and references to a less keyword-driven syntax to accomodate the growing number of variants (ADR-0061, ADR-0062)
 - Stabilized anonymous struct methods (ADR-0029)
 - All struct/enum methods, including destructors, are inlined - there are no `impl` blocks (ADR-0053)
 - Added struct destructuring (ADR-0036)

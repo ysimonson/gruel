@@ -109,7 +109,7 @@ Cut over once feature-complete (matches ADR-0061's approach):
 
 This ADR depends on ADR-0061 Phase 1 (builtin type-constructor registry) being complete.
 
-- [ ] **Phase 1: Type system** — introduce `TypeKind::Ref(TypeId)` and `TypeKind::MutRef(TypeId)` with intern-pool support, mirroring the existing pointer pool pattern.
+- [x] **Phase 1: Type system** — introduce `TypeKind::Ref(TypeId)` and `TypeKind::MutRef(TypeId)` with intern-pool support, mirroring the existing pointer pool pattern.
 - [ ] **Phase 2: Parser** — accept `Ref(T)` / `MutRef(T)` as type expressions (via the constructor registry from ADR-0061). Accept `&expr` and `&mut expr` as prefix expressions. Gate behind the `reference_types` preview flag.
 - [ ] **Phase 3: Borrow checker port** — adapt ADR-0013's exclusivity, non-escape, and no-mutate rules to operate on values of `Ref`/`MutRef` types instead of parameter modes. Bidirectional during migration: `borrow x: T` and `x: Ref(T)` produce identical AIR for the body of the borrow checker.
 - [ ] **Phase 4: Method receivers** — accept `self: Ref(Self)` and `self: MutRef(Self)`, plus the `&self` / `&mut self` sugar.

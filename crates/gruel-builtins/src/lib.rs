@@ -612,7 +612,10 @@ pub enum BuiltinTypeConstructorKind {
     Ptr,
     /// Mutable raw pointer (ADR-0061): `MutPtr(T)` lowers to `TypeKind::PtrMut`.
     MutPtr,
-    // ADR-0062 phase 1 will add `Ref` and `MutRef`.
+    /// Immutable reference (ADR-0062): `Ref(T)` lowers to `TypeKind::Ref`.
+    Ref,
+    /// Mutable reference (ADR-0062): `MutRef(T)` lowers to `TypeKind::MutRef`.
+    MutRef,
 }
 
 /// Definition of a built-in parameterized type constructor.
@@ -649,12 +652,30 @@ pub static MUT_PTR_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructor 
     kind: BuiltinTypeConstructorKind::MutPtr,
 };
 
+/// `Ref(T)` — immutable reference (ADR-0062).
+pub static REF_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructor {
+    name: "Ref",
+    arity: 1,
+    kind: BuiltinTypeConstructorKind::Ref,
+};
+
+/// `MutRef(T)` — mutable reference (ADR-0062).
+pub static MUT_REF_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructor {
+    name: "MutRef",
+    arity: 1,
+    kind: BuiltinTypeConstructorKind::MutRef,
+};
+
 /// All built-in type constructors.
 ///
 /// The compiler iterates over this slice when resolving type-call expressions
 /// and when reserving names so user code cannot shadow them.
-pub static BUILTIN_TYPE_CONSTRUCTORS: &[&BuiltinTypeConstructor] =
-    &[&PTR_CONSTRUCTOR, &MUT_PTR_CONSTRUCTOR];
+pub static BUILTIN_TYPE_CONSTRUCTORS: &[&BuiltinTypeConstructor] = &[
+    &PTR_CONSTRUCTOR,
+    &MUT_PTR_CONSTRUCTOR,
+    &REF_CONSTRUCTOR,
+    &MUT_REF_CONSTRUCTOR,
+];
 
 /// Look up a built-in type constructor by name.
 pub fn get_builtin_type_constructor(name: &str) -> Option<&'static BuiltinTypeConstructor> {
@@ -842,9 +863,8 @@ mod tests {
 
     #[test]
     fn test_builtin_type_constructors_registry() {
-        // ADR-0061 phase 2: Ptr and MutPtr registered.
-        // ADR-0062 phase 1 will add Ref and MutRef.
-        assert_eq!(BUILTIN_TYPE_CONSTRUCTORS.len(), 2);
+        // ADR-0061: Ptr / MutPtr. ADR-0062: Ref / MutRef.
+        assert_eq!(BUILTIN_TYPE_CONSTRUCTORS.len(), 4);
     }
 
     #[test]

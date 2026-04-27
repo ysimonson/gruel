@@ -127,6 +127,14 @@ pub fn type_name_component(ty: Type, type_pool: &TypeInternPool) -> String {
             let pointee = type_pool.ptr_mut_def(id);
             format!("ptr_mut_{}", type_name_component(pointee, type_pool))
         }
+        TypeKind::Ref(id) => {
+            let referent = type_pool.ref_def(id);
+            format!("ref_{}", type_name_component(referent, type_pool))
+        }
+        TypeKind::MutRef(id) => {
+            let referent = type_pool.mut_ref_def(id);
+            format!("mut_ref_{}", type_name_component(referent, type_pool))
+        }
         TypeKind::Interface(id) => format!("interface{}", id.0),
     }
 }
