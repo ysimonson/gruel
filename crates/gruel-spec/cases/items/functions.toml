@@ -469,6 +469,26 @@ fn main() -> i32 {
 """
 exit_code = 42
 
+# ADR-0062 phase 6: passing `&mut x` to a `MutRef(T)` parameter works at
+# the call site. Mutation through a typed reference requires deref syntax,
+# which is future work; for now the test only exercises the call shape.
+[[case]]
+name = "mut_ref_param_call"
+spec = ["6.1:34", "6.1:37"]
+preview = "reference_types"
+preview_should_pass = true
+source = """
+fn touch(a: MutRef(i32), b: MutRef(i32)) -> i32 {
+    42
+}
+fn main() -> i32 {
+    let mut x = 10;
+    let mut y = 1;
+    touch(&mut x, &mut y)
+}
+"""
+exit_code = 42
+
 [[case]]
 name = "inout_param_return_value"
 spec = ["6.1:14", "6.1:18"]
