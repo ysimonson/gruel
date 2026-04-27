@@ -7,7 +7,7 @@
 id = "runtime.pointers"
 spec_chapter = "9.2"
 name = "Pointer Intrinsics"
-description = "Tests for pointer intrinsics (@raw, @ptr_read, @ptr_write, etc.)"
+description = "Tests for pointer operations (Ptr(T)::from, .read(), .write(), etc.)"
 
 # =============================================================================
 # @raw with simple local variable
@@ -19,8 +19,8 @@ spec = ["9.2:1"]
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
-    let p: Ptr(i32) = checked { @raw(x) };
-    let val: i32 = checked { @ptr_read(p) };
+    let p = checked { Ptr(i32)::from(&x) };
+    let val: i32 = checked { p.read() };
     val
 }
 """
@@ -37,8 +37,8 @@ source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 30];
     let first: i32 = checked {
-        let p: Ptr(i32) = @raw(arr[0]);
-        @ptr_read(p)
+        let p = Ptr(i32)::from(&arr[0]);
+        p.read()
     };
     first
 }
@@ -52,8 +52,8 @@ source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 30];
     let second: i32 = checked {
-        let p: Ptr(i32) = @raw(arr[1]);
-        @ptr_read(p)
+        let p = Ptr(i32)::from(&arr[1]);
+        p.read()
     };
     second
 }
@@ -67,8 +67,8 @@ source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 30];
     let third: i32 = checked {
-        let p: Ptr(i32) = @raw(arr[2]);
-        @ptr_read(p)
+        let p = Ptr(i32)::from(&arr[2]);
+        p.read()
     };
     third
 }
@@ -85,8 +85,8 @@ spec = ["9.2:1"]
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
-    let p: Ptr(i32) = checked { @raw(x) };
-    let addr: u64 = checked { @ptr_to_int(p) };
+    let p = checked { Ptr(i32)::from(&x) };
+    let addr: u64 = checked { p.to_int() };
     // Stack addresses are high values, should be > 1000
     let threshold: u64 = 1000;
     if addr > threshold { 42 } else { 1 }
@@ -105,8 +105,8 @@ source = """
 fn main() -> i32 {
     let mut x: i32 = 10;
     checked {
-        let p: MutPtr(i32) = @raw_mut(x);
-        @ptr_write(p, 99);
+        let p = MutPtr(i32)::from(&mut x);
+        p.write(99);
     };
     x
 }
@@ -120,8 +120,8 @@ source = """
 fn main() -> i32 {
     let mut arr: [i32; 3] = [10, 20, 30];
     checked {
-        let p: MutPtr(i32) = @raw_mut(arr[1]);
-        @ptr_write(p, 77);
+        let p = MutPtr(i32)::from(&mut arr[1]);
+        p.write(77);
     };
     arr[1]
 }
@@ -138,11 +138,11 @@ spec = ["9.2:1"]
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
-    let p1: Ptr(i32) = checked { @raw(x) };
-    let addr: u64 = checked { @ptr_to_int(p1) };
+    let p1 = checked { Ptr(i32)::from(&x) };
+    let addr: u64 = checked { p1.to_int() };
     // Convert address back to pointer with explicit type annotation
-    let p2: MutPtr(i32) = checked { @int_to_ptr(addr) };
-    let val: i32 = checked { @ptr_read(p2) };
+    let p2 = checked { MutPtr(i32)::from_int(addr) };
+    let val: i32 = checked { p2.read() };
     val
 }
 """
@@ -154,12 +154,12 @@ spec = ["9.2:1"]
 source = """
 fn main() -> i32 {
     let x: i32 = 99;
-    let p1: Ptr(i32) = checked { @raw(x) };
-    let addr: u64 = checked { @ptr_to_int(p1) };
+    let p1 = checked { Ptr(i32)::from(&x) };
+    let addr: u64 = checked { p1.to_int() };
     // Convert to MutPtr (even from a const pointer address)
     // This is allowed because int_to_ptr assumes you know what you're doing
-    let p2: MutPtr(i32) = checked { @int_to_ptr(addr) };
-    let val: i32 = checked { @ptr_read(p2) };
+    let p2 = checked { MutPtr(i32)::from_int(addr) };
+    let val: i32 = checked { p2.read() };
     val
 }
 """
@@ -171,11 +171,11 @@ spec = ["9.2:1"]
 source = """
 fn main() -> i32 {
     let x: u64 = 12345;
-    let p1: Ptr(u64) = checked { @raw(x) };
-    let addr: u64 = checked { @ptr_to_int(p1) };
+    let p1 = checked { Ptr(u64)::from(&x) };
+    let addr: u64 = checked { p1.to_int() };
     // Convert to MutPtr(u64)
-    let p2: MutPtr(u64) = checked { @int_to_ptr(addr) };
-    let val: u64 = checked { @ptr_read(p2) };
+    let p2 = checked { MutPtr(u64)::from_int(addr) };
+    let val: u64 = checked { p2.read() };
     // Return i32 conversion for exit code
     @cast(val)
 }
@@ -191,8 +191,8 @@ name = "null_ptr_const"
 spec = ["9.2:7"]
 source = """
 fn main() -> i32 {
-    let p: Ptr(i32) = checked { @null_ptr() };
-    if checked { @is_null(p) } { 1 } else { 0 }
+    let p = checked { Ptr(i32)::null() };
+    if checked { p.is_null() } { 1 } else { 0 }
 }
 """
 exit_code = 1
@@ -202,8 +202,8 @@ name = "null_ptr_mut"
 spec = ["9.2:7"]
 source = """
 fn main() -> i32 {
-    let p: MutPtr(i32) = checked { @null_ptr() };
-    if checked { @is_null(p) } { 1 } else { 0 }
+    let p = checked { MutPtr(i32)::null() };
+    if checked { p.is_null() } { 1 } else { 0 }
 }
 """
 exit_code = 1
@@ -217,8 +217,8 @@ name = "is_null_null_pointer"
 spec = ["9.2:9"]
 source = """
 fn main() -> i32 {
-    let p: Ptr(i32) = checked { @null_ptr() };
-    if checked { @is_null(p) } { 42 } else { 0 }
+    let p = checked { Ptr(i32)::null() };
+    if checked { p.is_null() } { 42 } else { 0 }
 }
 """
 exit_code = 42
@@ -229,8 +229,8 @@ spec = ["9.2:9"]
 source = """
 fn main() -> i32 {
     let x: i32 = 99;
-    let p: Ptr(i32) = checked { @raw(x) };
-    if checked { @is_null(p) } { 0 } else { 42 }
+    let p = checked { Ptr(i32)::from(&x) };
+    if checked { p.is_null() } { 0 } else { 42 }
 }
 """
 exit_code = 42
@@ -241,8 +241,8 @@ spec = ["9.2:9"]
 source = """
 fn main() -> i32 {
     let mut x: i32 = 5;
-    let p: MutPtr(i32) = checked { @raw_mut(x) };
-    if checked { @is_null(p) } { 0 } else { 1 }
+    let p = checked { MutPtr(i32)::from(&mut x) };
+    if checked { p.is_null() } { 0 } else { 1 }
 }
 """
 exit_code = 1
@@ -259,9 +259,9 @@ fn main() -> i32 {
     let src: [i32; 3] = [10, 20, 30];
     let mut dst: [i32; 3] = [0, 0, 0];
     let count: usize = 3;
-    let s: Ptr(i32) = checked { @raw(src[0]) };
-    let d: MutPtr(i32) = checked { @raw_mut(dst[0]) };
-    checked { @ptr_copy(d, s, count) };
+    let s = checked { Ptr(i32)::from(&src[0]) };
+    let d = checked { MutPtr(i32)::from(&mut dst[0]) };
+    checked { d.copy_from(s, count) };
     dst[0] + dst[1] + dst[2]
 }
 """
@@ -275,9 +275,9 @@ fn main() -> i32 {
     let src: [i32; 4] = [5, 10, 15, 20];
     let mut dst: [i32; 4] = [0, 0, 0, 0];
     let count: usize = 2;
-    let s: Ptr(i32) = checked { @raw(src[0]) };
-    let d: MutPtr(i32) = checked { @raw_mut(dst[0]) };
-    checked { @ptr_copy(d, s, count) };
+    let s = checked { Ptr(i32)::from(&src[0]) };
+    let d = checked { MutPtr(i32)::from(&mut dst[0]) };
+    checked { d.copy_from(s, count) };
     dst[0] + dst[1] + dst[2]
 }
 """
@@ -291,9 +291,9 @@ fn main() -> i32 {
     let src: [i32; 2] = [10, 20];
     let mut dst: [i32; 2] = [1, 2];
     let count: usize = 0;
-    let s: Ptr(i32) = checked { @raw(src[0]) };
-    let d: MutPtr(i32) = checked { @raw_mut(dst[0]) };
-    checked { @ptr_copy(d, s, count) };
+    let s = checked { Ptr(i32)::from(&src[0]) };
+    let d = checked { MutPtr(i32)::from(&mut dst[0]) };
+    checked { d.copy_from(s, count) };
     dst[0] + dst[1]
 }
 """

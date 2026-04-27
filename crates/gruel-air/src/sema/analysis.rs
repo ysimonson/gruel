@@ -4090,6 +4090,33 @@ impl<'a> Sema<'a> {
             Self::require_checked_for_intrinsic(ctx, def.name, span)?;
         }
 
+        // ADR-0063: pointer intrinsics are no longer reachable through the
+        // `@…` namespace. Their `IntrinsicId` variants stay (so codegen can
+        // dispatch from the new `p.method(...)` / `Ptr(T)::name(...)`
+        // surface form) but using them via `@name(...)` is rejected with a
+        // pointer to the new spelling.
+        if matches!(
+            id,
+            IntrinsicId::PtrRead
+                | IntrinsicId::PtrWrite
+                | IntrinsicId::PtrOffset
+                | IntrinsicId::PtrToInt
+                | IntrinsicId::IntToPtr
+                | IntrinsicId::NullPtr
+                | IntrinsicId::IsNull
+                | IntrinsicId::PtrCopy
+                | IntrinsicId::Raw
+                | IntrinsicId::RawMut
+        ) {
+            return Err(CompileError::new(
+                ErrorKind::UnknownIntrinsic(format!(
+                    "{} (replaced by Ptr(T)/MutPtr(T) methods, ADR-0063)",
+                    def.name
+                )),
+                span,
+            ));
+        }
+
         match id {
             IntrinsicId::Dbg => self.analyze_dbg_intrinsic(air, inst_ref, &args, span, ctx),
             IntrinsicId::TestPreviewGate => {
@@ -10229,25 +10256,11 @@ impl<'a> Sema<'a> {
                 )
             })?;
 
-        // ADR-0063: surface form is preview-gated until phase 6.
-        self.require_preview(
-            gruel_error::PreviewFeature::PointerMethods,
-            &format!(
-                "`{}({})::{}` associated function",
-                pointer_kind_name(ptr_kind),
-                self.format_type_name(self.pointer_pointee_type(lhs_type)),
-                function_name
-            ),
-            span,
-        )?;
-
-        // Pointer intrinsics all require a `checked` block.
-        let intrinsic_def = lookup_by_id(entry.intrinsic);
-        if intrinsic_def.requires_unchecked {
-            Self::require_checked_for_intrinsic(ctx, intrinsic_def.name, span)?;
+        if entry.requires_checked {
+            Self::require_checked_for_intrinsic(ctx, entry.intrinsic_name, span)?;
         }
 
-        let intrinsic_name_sym = self.interner.get_or_intern(intrinsic_def.name);
+        let intrinsic_name_sym = self.interner.get_or_intern(entry.intrinsic_name);
         self.lower_pointer_op_to_air(
             air,
             entry.intrinsic,
@@ -10294,21 +10307,11 @@ impl<'a> Sema<'a> {
                 )
             })?;
 
-        // ADR-0063: surface form is preview-gated until phase 6.
-        self.require_preview(
-            gruel_error::PreviewFeature::PointerMethods,
-            &format!("`.{}()` pointer method", method_name),
-            span,
-        )?;
-
-        // Pointer intrinsics all require a `checked` block; carry that
-        // through to the new surface form.
-        let intrinsic_def = lookup_by_id(entry.intrinsic);
-        if intrinsic_def.requires_unchecked {
-            Self::require_checked_for_intrinsic(ctx, intrinsic_def.name, span)?;
+        if entry.requires_checked {
+            Self::require_checked_for_intrinsic(ctx, entry.intrinsic_name, span)?;
         }
 
-        let intrinsic_name_sym = self.interner.get_or_intern(intrinsic_def.name);
+        let intrinsic_name_sym = self.interner.get_or_intern(entry.intrinsic_name);
         self.lower_pointer_op_to_air(
             air,
             entry.intrinsic,

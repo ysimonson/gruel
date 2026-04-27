@@ -444,6 +444,13 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         description: "`@target_os()` returns a variant of the built-in `Os` enum.",
         examples: &["if @target_os() == Os::Linux { ... }"],
     },
+    // ADR-0063: pointer operations are no longer user-callable via the
+    // `@…` namespace — the surface form is `p.method(...)` /
+    // `Ptr(T)::name(...)`. The metadata entries remain so codegen and
+    // `lookup_by_id` can find each intrinsic by `IntrinsicId`. Sema's
+    // `analyze_intrinsic_impl` rejects the `@…` form for these
+    // intrinsics; the same `IntrinsicId` is reachable through the
+    // POINTER_METHODS registry.
     IntrinsicDef {
         id: IntrinsicId::PtrRead,
         name: "ptr_read",
@@ -452,9 +459,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "Load a value through a raw pointer.",
-        description: "`@ptr_read(p)` dereferences `p: Ptr(T)` or `MutPtr(T)` and returns `T`. Requires a `checked` block.",
-        examples: &["checked { let v = @ptr_read(p); }"],
+        summary: "Load a value through a raw pointer (internal).",
+        description: "Internal lowering target for `p.read()` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::PtrWrite,
@@ -464,9 +471,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "Store a value through a raw mutable pointer.",
-        description: "`@ptr_write(p, v)` writes `v` through `p: MutPtr(T)`. Requires a `checked` block.",
-        examples: &["checked { @ptr_write(p, 42); }"],
+        summary: "Store a value through a raw mutable pointer (internal).",
+        description: "Internal lowering target for `p.write(v)` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::PtrOffset,
@@ -476,9 +483,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "Pointer arithmetic by element count.",
-        description: "`@ptr_offset(p, n)` advances `p` by `n * sizeof(*p)` bytes. Requires an `unchecked` block.",
-        examples: &["checked { let q = @ptr_offset(p, 3); }"],
+        summary: "Pointer arithmetic by element count (internal).",
+        description: "Internal lowering target for `p.offset(n)` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::PtrToInt,
@@ -488,9 +495,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "Convert a pointer to its integer address.",
-        description: "`@ptr_to_int(p)` returns the address of `p` as `u64`. Requires an `unchecked` block.",
-        examples: &["checked { let a = @ptr_to_int(p); }"],
+        summary: "Convert a pointer to its integer address (internal).",
+        description: "Internal lowering target for `p.to_int()` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::IntToPtr,
@@ -500,9 +507,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "Construct a pointer from an integer address.",
-        description: "`@int_to_ptr(addr)` reinterprets `addr: u64` as a pointer. Target pointer type is inferred from context. Requires an `unchecked` block.",
-        examples: &["checked { let p: MutPtr(u8) = @int_to_ptr(addr); }"],
+        summary: "Construct a pointer from an integer address (internal).",
+        description: "Internal lowering target for `Ptr(T)::from_int(addr)` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::NullPtr,
@@ -512,9 +519,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "A null pointer of the inferred type.",
-        description: "`@null_ptr()` returns a pointer whose address is zero; the pointer type is inferred from context. Requires an `unchecked` block.",
-        examples: &["checked { let p: Ptr(u8) = @null_ptr(); }"],
+        summary: "A null pointer of the inferred type (internal).",
+        description: "Internal lowering target for `Ptr(T)::null()` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::IsNull,
@@ -524,9 +531,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "Test whether a pointer is null.",
-        description: "`@is_null(p)` returns `true` iff `p`'s address is zero. Requires an `unchecked` block.",
-        examples: &["checked { if @is_null(p) { ... } }"],
+        summary: "Test whether a pointer is null (internal).",
+        description: "Internal lowering target for `p.is_null()` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::PtrCopy,
@@ -536,9 +543,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "Bulk copy between pointers.",
-        description: "`@ptr_copy(dst, src, n)` copies `n` elements of the pointee type from `src` to `dst` via LLVM `memcpy`. Requires an `unchecked` block.",
-        examples: &["checked { @ptr_copy(dst, src, 16); }"],
+        summary: "Bulk copy between pointers (internal).",
+        description: "Internal lowering target for `dst.copy_from(src, n)` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::Raw,
@@ -548,9 +555,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "Take a const pointer to an lvalue.",
-        description: "`@raw(place)` returns `Ptr(T)` pointing to `place`. Requires a `checked` block.",
-        examples: &["checked { let p = @raw(x); }"],
+        summary: "Take a const pointer to an lvalue (internal).",
+        description: "Internal lowering target for `Ptr(T)::from(&x)` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::RawMut,
@@ -560,9 +567,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         requires_unchecked: true,
         preview: None,
         runtime_fn: None,
-        summary: "Take a mutable pointer to an lvalue.",
-        description: "`@raw_mut(place)` returns `MutPtr(T)` pointing to `place`. Requires a `checked` block.",
-        examples: &["checked { let p = @raw_mut(x); }"],
+        summary: "Take a mutable pointer to an lvalue (internal).",
+        description: "Internal lowering target for `MutPtr(T)::from(&mut x)` (ADR-0063).",
+        examples: &[],
     },
     IntrinsicDef {
         id: IntrinsicId::Syscall,
@@ -627,9 +634,14 @@ pub enum PointerOpForm {
 /// One method or associated function on `Ptr(T)` / `MutPtr(T)` (ADR-0063).
 ///
 /// Each entry is a pure metadata record describing the surface form. The
-/// actual semantic / codegen behaviour is reused from the existing intrinsic
+/// actual semantic / codegen behaviour is reused from the intrinsic
 /// identified by [`PointerMethod::intrinsic`] — this registry exists only to
 /// give sema the surface-to-intrinsic mapping. No new runtime functions.
+///
+/// `intrinsic_name` mirrors what the equivalent legacy `@…` form was called
+/// (e.g. `"ptr_read"` for `IntrinsicId::PtrRead`). The codegen path
+/// dispatches `AirInstData::Intrinsic` by name, so emitting the new surface
+/// form lowers to the same string the old `@ptr_read` would have.
 #[derive(Debug, Clone, Copy)]
 pub struct PointerMethod {
     /// Constructor this method/fn is defined on.
@@ -639,8 +651,13 @@ pub struct PointerMethod {
     pub name: &'static str,
     /// Method (`p.name(...)`) or associated fn (`Type(T)::name(...)`).
     pub form: PointerOpForm,
-    /// Existing intrinsic the surface form lowers to.
+    /// Stable identity used by codegen / IR analyzers.
     pub intrinsic: IntrinsicId,
+    /// Symbol the AIR `Intrinsic` instruction is tagged with.
+    pub intrinsic_name: &'static str,
+    /// Whether the lowering requires a `checked` block (mirrors what the
+    /// legacy `@…` registry entry would have had).
+    pub requires_checked: bool,
 }
 
 /// Closed registry of every pointer method / associated function (ADR-0063).
@@ -655,24 +672,32 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         name: "read",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrRead,
+        intrinsic_name: "ptr_read",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
         name: "offset",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrOffset,
+        intrinsic_name: "ptr_offset",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
         name: "is_null",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::IsNull,
+        intrinsic_name: "is_null",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
         name: "to_int",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrToInt,
+        intrinsic_name: "ptr_to_int",
+        requires_checked: true,
     },
     // ---- Associated fns on Ptr(T) ----
     PointerMethod {
@@ -680,18 +705,24 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         name: "from",
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::Raw,
+        intrinsic_name: "raw",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
         name: "null",
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::NullPtr,
+        intrinsic_name: "null_ptr",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
         name: "from_int",
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::IntToPtr,
+        intrinsic_name: "int_to_ptr",
+        requires_checked: true,
     },
     // ---- Methods on MutPtr(T) ----
     PointerMethod {
@@ -699,36 +730,48 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         name: "read",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrRead,
+        intrinsic_name: "ptr_read",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
         name: "write",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrWrite,
+        intrinsic_name: "ptr_write",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
         name: "offset",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrOffset,
+        intrinsic_name: "ptr_offset",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
         name: "is_null",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::IsNull,
+        intrinsic_name: "is_null",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
         name: "to_int",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrToInt,
+        intrinsic_name: "ptr_to_int",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
         name: "copy_from",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrCopy,
+        intrinsic_name: "ptr_copy",
+        requires_checked: true,
     },
     // ---- Associated fns on MutPtr(T) ----
     PointerMethod {
@@ -736,18 +779,24 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         name: "from",
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::RawMut,
+        intrinsic_name: "raw_mut",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
         name: "null",
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::NullPtr,
+        intrinsic_name: "null_ptr",
+        requires_checked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
         name: "from_int",
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::IntToPtr,
+        intrinsic_name: "int_to_ptr",
+        requires_checked: true,
     },
 ];
 

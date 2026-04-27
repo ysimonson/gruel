@@ -139,7 +139,7 @@ spec = ["9.1:8"]
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
-    let p: Ptr(i32) = @raw(x);
+    let p = Ptr(i32)::from(&x);
     0
 }
 """
@@ -152,8 +152,8 @@ spec = ["9.1:8"]
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
-    let p: Ptr(i32) = checked { @raw(x) };
-    @ptr_read(p)
+    let p = checked { Ptr(i32)::from(&x) };
+    p.read()
 }
 """
 compile_fail = true

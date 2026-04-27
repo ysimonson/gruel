@@ -9,7 +9,7 @@ name = "Generic Pointer Types"
 description = "Tests for ADR-0061 Ptr(T) / MutPtr(T) generic pointer surface syntax."
 
 # =============================================================================
-# Ptr(T) basic round-trip via @raw / @ptr_read
+# Ptr(T) basic round-trip via Ptr(T)::from / .read()
 # =============================================================================
 
 [[case]]
@@ -18,15 +18,15 @@ spec = ["9.1:10"]
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
-    let p: Ptr(i32) = checked { @raw(x) };
-    let val: i32 = checked { @ptr_read(p) };
+    let p = checked { Ptr(i32)::from(&x) };
+    let val: i32 = checked { p.read() };
     val
 }
 """
 exit_code = 42
 
 # =============================================================================
-# MutPtr(T) basic round-trip via @raw_mut / @ptr_write / @ptr_read
+# MutPtr(T) basic round-trip via MutPtr(T)::from / .write() / .read()
 # =============================================================================
 
 [[case]]
@@ -36,8 +36,8 @@ source = """
 fn main() -> i32 {
     let mut x: i32 = 0;
     checked {
-        let p: MutPtr(i32) = @raw_mut(x);
-        @ptr_write(p, 42);
+        let p = MutPtr(i32)::from(&mut x);
+        p.write(42);
     };
     x
 }
@@ -53,12 +53,12 @@ name = "ptr_generic_param"
 spec = ["9.1:12"]
 source = """
 unchecked fn deref(p: Ptr(i32)) -> i32 {
-    checked { @ptr_read(p) }
+    checked { p.read() }
 }
 
 fn main() -> i32 {
     let x: i32 = 42;
-    let p: Ptr(i32) = checked { @raw(x) };
+    let p = checked { Ptr(i32)::from(&x) };
     checked { deref(p) }
 }
 """

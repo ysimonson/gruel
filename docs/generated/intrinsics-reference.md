@@ -30,16 +30,16 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
 | `@target_arch` | expr | Target Platform | — | — | Compile target CPU architecture. |
 | `@target_os` | expr | Target Platform | — | — | Compile target operating system. |
-| `@ptr_read` | expr | Raw Pointers | — | yes | Load a value through a raw pointer. |
-| `@ptr_write` | expr | Raw Pointers | — | yes | Store a value through a raw mutable pointer. |
-| `@ptr_offset` | expr | Raw Pointers | — | yes | Pointer arithmetic by element count. |
-| `@ptr_to_int` | expr | Raw Pointers | — | yes | Convert a pointer to its integer address. |
-| `@int_to_ptr` | expr | Raw Pointers | — | yes | Construct a pointer from an integer address. |
-| `@null_ptr` | expr | Raw Pointers | — | yes | A null pointer of the inferred type. |
-| `@is_null` | expr | Raw Pointers | — | yes | Test whether a pointer is null. |
-| `@ptr_copy` | expr | Raw Pointers | — | yes | Bulk copy between pointers. |
-| `@raw` | expr | Raw Pointers | — | yes | Take a const pointer to an lvalue. |
-| `@raw_mut` | expr | Raw Pointers | — | yes | Take a mutable pointer to an lvalue. |
+| `@ptr_read` | expr | Raw Pointers | — | yes | Load a value through a raw pointer (internal). |
+| `@ptr_write` | expr | Raw Pointers | — | yes | Store a value through a raw mutable pointer (internal). |
+| `@ptr_offset` | expr | Raw Pointers | — | yes | Pointer arithmetic by element count (internal). |
+| `@ptr_to_int` | expr | Raw Pointers | — | yes | Convert a pointer to its integer address (internal). |
+| `@int_to_ptr` | expr | Raw Pointers | — | yes | Construct a pointer from an integer address (internal). |
+| `@null_ptr` | expr | Raw Pointers | — | yes | A null pointer of the inferred type (internal). |
+| `@is_null` | expr | Raw Pointers | — | yes | Test whether a pointer is null (internal). |
+| `@ptr_copy` | expr | Raw Pointers | — | yes | Bulk copy between pointers (internal). |
+| `@raw` | expr | Raw Pointers | — | yes | Take a const pointer to an lvalue (internal). |
+| `@raw_mut` | expr | Raw Pointers | — | yes | Take a mutable pointer to an lvalue (internal). |
 | `@syscall` | expr | System Calls | — | yes | Direct OS system call. |
 | `@range` | expr | Iteration | — | — | Iterable range for `for`-loops. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
@@ -327,123 +327,63 @@ if @target_os() == Os::Linux { ... }
 
 ### `@ptr_read`
 
-`@ptr_read(p)` dereferences `p: Ptr(T)` or `MutPtr(T)` and returns `T`. Requires a `checked` block.
+Internal lowering target for `p.read()` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { let v = @ptr_read(p); }
-```
 
 ### `@ptr_write`
 
-`@ptr_write(p, v)` writes `v` through `p: MutPtr(T)`. Requires a `checked` block.
+Internal lowering target for `p.write(v)` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { @ptr_write(p, 42); }
-```
 
 ### `@ptr_offset`
 
-`@ptr_offset(p, n)` advances `p` by `n * sizeof(*p)` bytes. Requires an `unchecked` block.
+Internal lowering target for `p.offset(n)` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { let q = @ptr_offset(p, 3); }
-```
 
 ### `@ptr_to_int`
 
-`@ptr_to_int(p)` returns the address of `p` as `u64`. Requires an `unchecked` block.
+Internal lowering target for `p.to_int()` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { let a = @ptr_to_int(p); }
-```
 
 ### `@int_to_ptr`
 
-`@int_to_ptr(addr)` reinterprets `addr: u64` as a pointer. Target pointer type is inferred from context. Requires an `unchecked` block.
+Internal lowering target for `Ptr(T)::from_int(addr)` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { let p: MutPtr(u8) = @int_to_ptr(addr); }
-```
 
 ### `@null_ptr`
 
-`@null_ptr()` returns a pointer whose address is zero; the pointer type is inferred from context. Requires an `unchecked` block.
+Internal lowering target for `Ptr(T)::null()` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { let p: Ptr(u8) = @null_ptr(); }
-```
 
 ### `@is_null`
 
-`@is_null(p)` returns `true` iff `p`'s address is zero. Requires an `unchecked` block.
+Internal lowering target for `p.is_null()` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { if @is_null(p) { ... } }
-```
 
 ### `@ptr_copy`
 
-`@ptr_copy(dst, src, n)` copies `n` elements of the pointee type from `src` to `dst` via LLVM `memcpy`. Requires an `unchecked` block.
+Internal lowering target for `dst.copy_from(src, n)` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { @ptr_copy(dst, src, 16); }
-```
 
 ### `@raw`
 
-`@raw(place)` returns `Ptr(T)` pointing to `place`. Requires a `checked` block.
+Internal lowering target for `Ptr(T)::from(&x)` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { let p = @raw(x); }
-```
 
 ### `@raw_mut`
 
-`@raw_mut(place)` returns `MutPtr(T)` pointing to `place`. Requires a `checked` block.
+Internal lowering target for `MutPtr(T)::from(&mut x)` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { let p = @raw_mut(x); }
-```
 
 ## System Calls
 
