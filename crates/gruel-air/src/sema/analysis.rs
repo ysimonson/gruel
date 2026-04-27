@@ -21,7 +21,9 @@ use gruel_error::{
     CompileError, CompileErrors, CompileResult, CompileWarning, ErrorKind,
     IntrinsicTypeMismatchError, MultiErrorResult, OptionExt, PreviewFeature, WarningKind,
 };
-use gruel_intrinsics::{IntrinsicId, lookup_by_id};
+use gruel_intrinsics::{
+    IntrinsicId, PointerKind, PointerOpForm, lookup_by_id, lookup_pointer_method,
+};
 use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirDirective, RirParamMode, RirPattern,
 };
@@ -3196,6 +3198,22 @@ impl<'a> Sema<'a> {
                 span,
             });
             return Ok(AnalysisResult::new(air_ref, return_type));
+        }
+
+        // ADR-0063: methods on `Ptr(T)` / `MutPtr(T)` values dispatch through
+        // the POINTER_METHODS registry to existing pointer intrinsics.
+        if matches!(
+            receiver_type.kind(),
+            TypeKind::PtrConst(_) | TypeKind::PtrMut(_)
+        ) {
+            return self.dispatch_pointer_method_call(
+                air,
+                receiver_result,
+                &method_name_str,
+                &args,
+                span,
+                ctx,
+            );
         }
 
         let struct_id = match receiver_type.kind() {
@@ -10153,6 +10171,376 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, result_type))
     }
 
+    /// ADR-0063: dispatch a method call `p.name(args)` on a `Ptr(T)` /
+    /// `MutPtr(T)` value through the [`POINTER_METHODS`] registry.
+    ///
+    /// The receiver has already been analysed by the caller; this function
+    /// only handles the explicit `args` (which still need analysing) and emits
+    /// the equivalent intrinsic AIR instruction. It does not re-analyse the
+    /// receiver to avoid emitting duplicate AIR for it.
+    pub(crate) fn dispatch_pointer_method_call(
+        &mut self,
+        air: &mut Air,
+        receiver_result: AnalysisResult,
+        method_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        let ptr_kind = match receiver_result.ty.kind() {
+            TypeKind::PtrConst(_) => PointerKind::Ptr,
+            TypeKind::PtrMut(_) => PointerKind::MutPtr,
+            _ => unreachable!("dispatch_pointer_method_call called with non-pointer receiver"),
+        };
+
+        let entry = lookup_pointer_method(ptr_kind, method_name, PointerOpForm::Method)
+            .ok_or_else(|| {
+                CompileError::new(
+                    ErrorKind::UndefinedMethod {
+                        type_name: self.format_type_name(receiver_result.ty),
+                        method_name: method_name.to_string(),
+                    },
+                    span,
+                )
+            })?;
+
+        // ADR-0063: surface form is preview-gated until phase 6.
+        self.require_preview(
+            gruel_error::PreviewFeature::PointerMethods,
+            &format!("`.{}()` pointer method", method_name),
+            span,
+        )?;
+
+        // Pointer intrinsics all require a `checked` block; carry that
+        // through to the new surface form.
+        let intrinsic_def = lookup_by_id(entry.intrinsic);
+        if intrinsic_def.requires_unchecked {
+            Self::require_checked_for_intrinsic(ctx, intrinsic_def.name, span)?;
+        }
+
+        let intrinsic_name_sym = self.interner.get_or_intern(intrinsic_def.name);
+        self.lower_pointer_op_to_air(
+            air,
+            entry.intrinsic,
+            intrinsic_name_sym,
+            method_name,
+            Some(receiver_result),
+            None,
+            args,
+            span,
+            ctx,
+        )
+    }
+
+    /// Shared lowering for ADR-0063 pointer methods and associated functions.
+    ///
+    /// Each entry maps to an existing [`IntrinsicId`] and reuses the same
+    /// type-checking shape that the corresponding `analyze_*_intrinsic`
+    /// function uses. The receiver, when present, must already be analysed —
+    /// for method calls the caller is `dispatch_pointer_method_call` and for
+    /// associated-function calls it is the path-call dispatch.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn lower_pointer_op_to_air(
+        &mut self,
+        air: &mut Air,
+        intrinsic: IntrinsicId,
+        intrinsic_name: Spur,
+        op_name: &str,
+        receiver: Option<AnalysisResult>,
+        lhs_type: Option<Type>,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // ---- Helpers ----
+        let make_intrinsic = |air: &mut Air, arg_refs: &[u32], ty: Type| -> AirRef {
+            let args_start = air.add_extra(arg_refs);
+            air.add_inst(AirInst {
+                data: AirInstData::Intrinsic {
+                    name: intrinsic_name,
+                    args_start,
+                    args_len: arg_refs.len() as u32,
+                },
+                ty,
+                span,
+            })
+        };
+
+        match intrinsic {
+            // p.read() — receiver: pointer; args: 0; result: pointee T
+            IntrinsicId::PtrRead => {
+                if !args.is_empty() {
+                    return Err(self.pointer_op_arg_count_err(op_name, 0, args.len(), span));
+                }
+                let recv = receiver.expect("read is a method");
+                let pointee = self.pointer_pointee_type(recv.ty);
+                let air_ref = make_intrinsic(air, &[recv.air_ref.as_u32()], pointee);
+                Ok(AnalysisResult::new(air_ref, pointee))
+            }
+            // p.write(v) — receiver: MutPtr(T); args: [v: T]; result: ()
+            IntrinsicId::PtrWrite => {
+                if args.len() != 1 {
+                    return Err(self.pointer_op_arg_count_err(op_name, 1, args.len(), span));
+                }
+                let recv = receiver.expect("write is a method");
+                let pointee = match recv.ty.kind() {
+                    TypeKind::PtrMut(id) => self.type_pool.ptr_mut_def(id),
+                    _ => unreachable!("write only available on MutPtr"),
+                };
+                let v = self.analyze_inst(air, args[0].value, ctx)?;
+                if v.ty != pointee && !v.ty.is_error() && !v.ty.is_never() {
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: self.format_type_name(pointee),
+                            found: self.format_type_name(v.ty),
+                        },
+                        span,
+                    ));
+                }
+                let air_ref = make_intrinsic(
+                    air,
+                    &[recv.air_ref.as_u32(), v.air_ref.as_u32()],
+                    Type::UNIT,
+                );
+                Ok(AnalysisResult::new(air_ref, Type::UNIT))
+            }
+            // p.offset(n) — receiver: pointer; args: [n: integer]; result: Self
+            IntrinsicId::PtrOffset => {
+                if args.len() != 1 {
+                    return Err(self.pointer_op_arg_count_err(op_name, 1, args.len(), span));
+                }
+                let recv = receiver.expect("offset is a method");
+                let n = self.analyze_inst(air, args[0].value, ctx)?;
+                if !n.ty.is_integer() && !n.ty.is_error() && !n.ty.is_never() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                            name: op_name.to_string(),
+                            expected: "integer offset".to_string(),
+                            found: self.format_type_name(n.ty),
+                        })),
+                        span,
+                    ));
+                }
+                let air_ref =
+                    make_intrinsic(air, &[recv.air_ref.as_u32(), n.air_ref.as_u32()], recv.ty);
+                Ok(AnalysisResult::new(air_ref, recv.ty))
+            }
+            // p.is_null() — receiver: pointer; args: 0; result: bool
+            IntrinsicId::IsNull => {
+                if !args.is_empty() {
+                    return Err(self.pointer_op_arg_count_err(op_name, 0, args.len(), span));
+                }
+                let recv = receiver.expect("is_null is a method");
+                let air_ref = make_intrinsic(air, &[recv.air_ref.as_u32()], Type::BOOL);
+                Ok(AnalysisResult::new(air_ref, Type::BOOL))
+            }
+            // p.to_int() — receiver: pointer; args: 0; result: u64
+            IntrinsicId::PtrToInt => {
+                if !args.is_empty() {
+                    return Err(self.pointer_op_arg_count_err(op_name, 0, args.len(), span));
+                }
+                let recv = receiver.expect("to_int is a method");
+                let air_ref = make_intrinsic(air, &[recv.air_ref.as_u32()], Type::U64);
+                Ok(AnalysisResult::new(air_ref, Type::U64))
+            }
+            // dst.copy_from(src, n) — receiver: MutPtr(T); args: [src: pointer-of-T, n: usize];
+            // result: ()
+            IntrinsicId::PtrCopy => {
+                if args.len() != 2 {
+                    return Err(self.pointer_op_arg_count_err(op_name, 2, args.len(), span));
+                }
+                let recv = receiver.expect("copy_from is a method");
+                let dst_pointee = self.pointer_pointee_type(recv.ty);
+                let src = self.analyze_inst(air, args[0].value, ctx)?;
+                let n = self.analyze_inst(air, args[1].value, ctx)?;
+                let src_pointee = self.pointer_pointee_type(src.ty);
+                if dst_pointee != src_pointee && !dst_pointee.is_error() && !src_pointee.is_error()
+                {
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: self.format_type_name(dst_pointee),
+                            found: self.format_type_name(src_pointee),
+                        },
+                        span,
+                    ));
+                }
+                if n.ty != Type::USIZE && !n.ty.is_error() && !n.ty.is_never() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                            name: op_name.to_string(),
+                            expected: "usize".to_string(),
+                            found: self.format_type_name(n.ty),
+                        })),
+                        span,
+                    ));
+                }
+                // ptr_copy intrinsic order: (dst, src, n).
+                let air_ref = make_intrinsic(
+                    air,
+                    &[
+                        recv.air_ref.as_u32(),
+                        src.air_ref.as_u32(),
+                        n.air_ref.as_u32(),
+                    ],
+                    Type::UNIT,
+                );
+                Ok(AnalysisResult::new(air_ref, Type::UNIT))
+            }
+            // Ptr(T)::from(r) — args: [r: Ref(T)]; result: Ptr(T)
+            // MutPtr(T)::from(r) — args: [r: MutRef(T)]; result: MutPtr(T)
+            IntrinsicId::Raw | IntrinsicId::RawMut => {
+                if args.len() != 1 {
+                    return Err(self.pointer_op_arg_count_err(op_name, 1, args.len(), span));
+                }
+                let target_kind = if intrinsic == IntrinsicId::RawMut {
+                    PointerKind::MutPtr
+                } else {
+                    PointerKind::Ptr
+                };
+                let result_type = lhs_type.ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::InternalError(
+                            "Ptr/MutPtr::from without LHS type context".to_string(),
+                        ),
+                        span,
+                    )
+                })?;
+                let pointee_from_lhs = self.pointer_pointee_type(result_type);
+                let r = self.analyze_inst(air, args[0].value, ctx)?;
+                let (ref_pointee, ref_kind) = match r.ty.kind() {
+                    TypeKind::Ref(id) => (self.type_pool.ref_def(id), PointerKind::Ptr),
+                    TypeKind::MutRef(id) => (self.type_pool.mut_ref_def(id), PointerKind::MutPtr),
+                    _ => {
+                        return Err(CompileError::new(
+                            ErrorKind::IntrinsicTypeMismatch(Box::new(
+                                IntrinsicTypeMismatchError {
+                                    name: format!("{}::from", pointer_kind_name(target_kind)),
+                                    expected: format!(
+                                        "{}({})",
+                                        if target_kind == PointerKind::Ptr {
+                                            "Ref"
+                                        } else {
+                                            "MutRef"
+                                        },
+                                        self.format_type_name(pointee_from_lhs)
+                                    ),
+                                    found: self.format_type_name(r.ty),
+                                },
+                            )),
+                            span,
+                        ));
+                    }
+                };
+                if ref_kind != target_kind {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                            name: format!("{}::from", pointer_kind_name(target_kind)),
+                            expected: format!(
+                                "{}({})",
+                                if target_kind == PointerKind::Ptr {
+                                    "Ref"
+                                } else {
+                                    "MutRef"
+                                },
+                                self.format_type_name(pointee_from_lhs)
+                            ),
+                            found: self.format_type_name(r.ty),
+                        })),
+                        span,
+                    ));
+                }
+                if ref_pointee != pointee_from_lhs
+                    && !ref_pointee.is_error()
+                    && !pointee_from_lhs.is_error()
+                {
+                    return Err(CompileError::new(
+                        ErrorKind::TypeMismatch {
+                            expected: self.format_type_name(pointee_from_lhs),
+                            found: self.format_type_name(ref_pointee),
+                        },
+                        span,
+                    ));
+                }
+                let air_ref = make_intrinsic(air, &[r.air_ref.as_u32()], result_type);
+                Ok(AnalysisResult::new(air_ref, result_type))
+            }
+            // Ptr(T)::null() / MutPtr(T)::null() — args: 0; result: Self (from LHS)
+            IntrinsicId::NullPtr => {
+                if !args.is_empty() {
+                    return Err(self.pointer_op_arg_count_err(op_name, 0, args.len(), span));
+                }
+                let result_type = lhs_type.ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::InternalError("null without LHS type context".to_string()),
+                        span,
+                    )
+                })?;
+                let air_ref = make_intrinsic(air, &[], result_type);
+                Ok(AnalysisResult::new(air_ref, result_type))
+            }
+            // Ptr(T)::from_int(addr) / MutPtr(T)::from_int(addr) — args: [addr: u64]; result: Self
+            IntrinsicId::IntToPtr => {
+                if args.len() != 1 {
+                    return Err(self.pointer_op_arg_count_err(op_name, 1, args.len(), span));
+                }
+                let result_type = lhs_type.ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::InternalError("from_int without LHS type context".to_string()),
+                        span,
+                    )
+                })?;
+                let addr = self.analyze_inst(air, args[0].value, ctx)?;
+                if addr.ty != Type::U64 && !addr.ty.is_error() && !addr.ty.is_never() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                            name: op_name.to_string(),
+                            expected: "u64".to_string(),
+                            found: self.format_type_name(addr.ty),
+                        })),
+                        span,
+                    ));
+                }
+                let air_ref = make_intrinsic(air, &[addr.air_ref.as_u32()], result_type);
+                Ok(AnalysisResult::new(air_ref, result_type))
+            }
+            other => Err(CompileError::new(
+                ErrorKind::InternalError(format!(
+                    "POINTER_METHODS entry references unhandled intrinsic {:?}",
+                    other
+                )),
+                span,
+            )),
+        }
+    }
+
+    fn pointer_op_arg_count_err(
+        &self,
+        name: &str,
+        expected: usize,
+        found: usize,
+        span: Span,
+    ) -> CompileError {
+        CompileError::new(ErrorKind::WrongArgumentCount { expected, found }, span)
+            .with_note(format!("`{}` expects {} argument(s)", name, expected))
+    }
+
+    fn pointer_pointee_type(&self, ty: Type) -> Type {
+        match ty.kind() {
+            TypeKind::PtrConst(id) => self.type_pool.ptr_const_def(id),
+            TypeKind::PtrMut(id) => self.type_pool.ptr_mut_def(id),
+            _ => Type::ERROR,
+        }
+    }
+}
+
+fn pointer_kind_name(kind: PointerKind) -> &'static str {
+    match kind {
+        PointerKind::Ptr => "Ptr",
+        PointerKind::MutPtr => "MutPtr",
+    }
+}
+
+impl<'a> Sema<'a> {
     /// Analyze @syscall intrinsic: perform a raw OS syscall.
     /// Signature: @syscall(syscall_num: u64, arg0?: u64, ..., arg5?: u64) -> i64
     ///

@@ -1,0 +1,156 @@
+# Pointer Methods (ADR-0063)
+#
+# Tests for the method / associated-fn surface form on `Ptr(T)` /
+# `MutPtr(T)`. Each test below exercises the new spelling; the existing
+# `@ptr_*` intrinsics remain accepted in parallel until ADR-0063 phase 6.
+
+[section]
+id = "runtime.pointer_methods"
+spec_chapter = "9.2"
+name = "Pointer Methods"
+description = "Tests for ADR-0063 method-call and associated-fn dispatch on Ptr/MutPtr."
+
+# =============================================================================
+# `p.read()` on a Ptr(T)
+# =============================================================================
+
+[[case]]
+name = "ptr_read_method"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    checked {
+        let p: Ptr(i32) = @raw(x);
+        p.read()
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# `p.write(v)` on a MutPtr(T)
+# =============================================================================
+
+[[case]]
+name = "mut_ptr_write_method"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 0;
+    checked {
+        let p: MutPtr(i32) = @raw_mut(x);
+        p.write(42);
+    };
+    x
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# `p.write(...)` on Ptr(T) is rejected.
+# =============================================================================
+
+[[case]]
+name = "ptr_write_on_const_rejected"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i32 = 0;
+    checked {
+        let p: Ptr(i32) = @raw(x);
+        p.write(1);
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "no method"
+
+# =============================================================================
+# `p.is_null()` returns bool
+# =============================================================================
+
+[[case]]
+name = "ptr_is_null_method"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i32 = 0;
+    checked {
+        let p: Ptr(i32) = @raw(x);
+        if p.is_null() { 1 } else { 42 }
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# `p.to_int()` returns u64
+# =============================================================================
+
+[[case]]
+name = "ptr_to_int_method"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    checked {
+        let p: Ptr(i32) = @raw(x);
+        let a: u64 = p.to_int();
+        if a == 0 { 0 } else { 42 }
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# `p.offset(n)` returns same pointer type
+# =============================================================================
+
+[[case]]
+name = "ptr_offset_method"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [10, 20, 12];
+    checked {
+        let p: Ptr(i32) = @raw(arr[0]);
+        let n: i64 = 2;
+        let q: Ptr(i32) = p.offset(n);
+        q.read() + 30
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Without `--preview pointer_methods`, the method form is rejected.
+# =============================================================================
+
+[[case]]
+name = "ptr_method_requires_preview"
+spec = ["9.2:1"]
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    checked {
+        let p: Ptr(i32) = @raw(x);
+        p.read()
+    }
+}
+"""
+compile_fail = true
+error_contains = "pointer_methods"

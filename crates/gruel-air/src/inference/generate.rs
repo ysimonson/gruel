@@ -12,7 +12,7 @@ use crate::Type;
 use crate::intern_pool::TypeInternPool;
 use crate::scope::ScopedContext;
 use crate::types::{
-    EnumId, PtrMutability, StructId, parse_array_type_syntax, parse_pointer_type_syntax,
+    EnumId, PtrMutability, StructId, TypeKind, parse_array_type_syntax, parse_pointer_type_syntax,
     parse_type_call_syntax,
 };
 use gruel_builtins::BuiltinTypeConstructorKind;
@@ -1379,6 +1379,36 @@ impl<'a> ConstraintGenerator<'a> {
                 // for the arguments and return a type variable (actual error is in sema)
 
                 if let InferType::Concrete(ty) = &receiver_info.ty {
+                    // ADR-0063: methods on `Ptr(T)` / `MutPtr(T)` resolve via
+                    // the POINTER_METHODS registry. Fan out per method here
+                    // so HM produces the right constraint shape; sema does
+                    // the real type-checking.
+                    if matches!(ty.kind(), TypeKind::PtrConst(_) | TypeKind::PtrMut(_)) {
+                        let method_str = self.interner.resolve(method);
+                        let pointee = match ty.kind() {
+                            TypeKind::PtrConst(id) => self.type_pool.ptr_const_def(id),
+                            TypeKind::PtrMut(id) => self.type_pool.ptr_mut_def(id),
+                            _ => unreachable!(),
+                        };
+                        // Generate inference for args (no constraints — sema
+                        // will type-check).
+                        for arg in args.iter() {
+                            self.generate(arg.value, ctx);
+                        }
+                        return ExprInfo {
+                            ty: match method_str {
+                                "read" => InferType::Concrete(pointee),
+                                "write" => InferType::Concrete(Type::UNIT),
+                                "offset" => InferType::Concrete(*ty),
+                                "is_null" => InferType::Concrete(Type::BOOL),
+                                "to_int" => InferType::Concrete(Type::U64),
+                                "copy_from" => InferType::Concrete(Type::UNIT),
+                                _ => InferType::Concrete(Type::ERROR),
+                            },
+                            span,
+                        };
+                    }
+
                     if let Some(struct_id) = ty.as_struct() {
                         // Use StructId directly for method lookup
                         let method_key = (struct_id, *method);
