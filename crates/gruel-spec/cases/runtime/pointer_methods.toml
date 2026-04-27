@@ -218,6 +218,30 @@ fn main() -> i32 {
 exit_code = 42
 
 # =============================================================================
+# `dst.copy_from(src, n)` — replacement for `@ptr_copy(dst, src, n)`.
+# =============================================================================
+
+[[case]]
+name = "mut_ptr_copy_from_method"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let src: [i32; 3] = [10, 20, 12];
+    let mut dst: [i32; 3] = [0, 0, 0];
+    checked {
+        let s = Ptr(i32)::from(&src[0]);
+        let d = MutPtr(i32)::from(&mut dst[0]);
+        let n: usize = 3;
+        d.copy_from(s, n);
+    };
+    dst[0] + dst[1] + dst[2]
+}
+"""
+exit_code = 42
+
+# =============================================================================
 # Without `--preview pointer_methods`, the method form is rejected.
 # =============================================================================
 

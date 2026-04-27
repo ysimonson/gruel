@@ -589,23 +589,19 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
-            // ADR-0062: `&x` / `&mut x` produces the address of the operand's
-            // slot. Sema has already enforced that the operand is an lvalue,
-            // so the AIR shape under it is a Load of a slot; we extract the
-            // slot directly rather than emitting a load and taking its address
-            // back.
+            // ADR-0062: `&x` / `&mut x` produces the address of the operand
+            // place. Sema has enforced that the operand is an lvalue, so the
+            // AIR shape under it is either a `Load { slot }` (plain local)
+            // or a `PlaceRead { place }` (field / index path). Recover the
+            // place directly rather than loading then taking its address.
             AirInstData::MakeRef { operand, is_mut } => {
-                let operand_inst = self.air.get(*operand);
-                let slot = match &operand_inst.data {
-                    AirInstData::Load { slot } => *slot,
-                    other => panic!(
-                        "MakeRef operand must lower to an lvalue Load, got {:?}",
-                        other
-                    ),
+                let place = match self.lower_air_lvalue_place(*operand) {
+                    Some(p) => p,
+                    None => return Self::diverged(),
                 };
                 let value = self.emit(
                     CfgInstData::MakeRef {
-                        slot,
+                        place,
                         is_mut: *is_mut,
                     },
                     ty,
@@ -2976,6 +2972,21 @@ impl<'a> CfgBuilder<'a> {
     /// This converts AirPlaceRef -> AirPlace -> CFG Place, translating projections
     /// and lowering any index expressions to CFG values.
     ///
+    /// ADR-0062 / ADR-0063: lower an AIR lvalue (`Load { slot }` or
+    /// `PlaceRead { place }`) to a CFG `Place`. Used when constructing
+    /// references / pointers to a place without first loading the value.
+    fn lower_air_lvalue_place(&mut self, air_ref: AirRef) -> Option<Place> {
+        let inst = self.air.get(air_ref);
+        match &inst.data {
+            AirInstData::Load { slot } => Some(Place::local(*slot)),
+            AirInstData::PlaceRead { place } => self.lower_air_place(*place),
+            other => panic!(
+                "lower_air_lvalue_place: expected Load or PlaceRead, got {:?}",
+                other
+            ),
+        }
+    }
+
     /// ADR-0030 Phase 8: This is the bridge between AIR's PlaceRead/PlaceWrite
     /// and CFG's PlaceRead/PlaceWrite.
     fn lower_air_place(&mut self, place_ref: AirPlaceRef) -> Option<Place> {

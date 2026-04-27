@@ -1803,12 +1803,17 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     }
                 }
             }
-            // ADR-0062: `&x` / `&mut x` lower to the local's alloca pointer.
-            // Same lowering as the borrow-arg `Load`-passthrough today; the
-            // borrow checker enforces exclusivity at sema time.
-            CfgInstData::MakeRef { slot, is_mut: _ } => {
-                let ptr = self.locals[slot as usize].expect("MakeRef before Alloc — invalid CFG");
-                Some(ptr.into())
+            // ADR-0062 / ADR-0063: `&x` / `&mut x` lower to the storage
+            // pointer of the operand place. For a plain local we return the
+            // alloca; for a field / index path we GEP into the local.
+            CfgInstData::MakeRef { place, is_mut: _ } => {
+                let elem_ty = ty;
+                let inner_ty = match elem_ty.kind() {
+                    gruel_air::TypeKind::Ref(id) => self.type_pool.ref_def(id),
+                    gruel_air::TypeKind::MutRef(id) => self.type_pool.mut_ref_def(id),
+                    _ => elem_ty,
+                };
+                self.build_place_gep_chain(&place, inner_ty).map(Into::into)
             }
             CfgInstData::Store { slot, value } => {
                 let value_ty = self.cfg.get_inst(value).ty;
