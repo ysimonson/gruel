@@ -2335,7 +2335,9 @@ impl<'a> Sema<'a> {
             }
 
             // Intrinsic operations
-            InstData::Intrinsic { .. } | InstData::TypeIntrinsic { .. } => {
+            InstData::Intrinsic { .. }
+            | InstData::TypeIntrinsic { .. }
+            | InstData::TypeInterfaceIntrinsic { .. } => {
                 self.analyze_intrinsic_ops(air, inst_ref, ctx)
             }
 
@@ -4098,6 +4100,7 @@ impl<'a> Sema<'a> {
             | IntrinsicId::TypeName
             | IntrinsicId::TypeInfo
             | IntrinsicId::Ownership
+            | IntrinsicId::Conforms
             | IntrinsicId::Range => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
@@ -8373,6 +8376,34 @@ impl<'a> Sema<'a> {
                             enum_id,
                             variant_idx,
                         })
+                    }
+                    _ => Err(not_const(inst_span)),
+                }
+            }
+
+            // ── Type+interface intrinsic (@conforms) ───────────────────────────
+            InstData::TypeInterfaceIntrinsic {
+                name,
+                type_arg,
+                interface_arg,
+            } => {
+                let ty = if let Some(&override_ty) = self.comptime_type_overrides.get(&type_arg) {
+                    override_ty
+                } else if let Some(&ctx_ty) = ctx.comptime_type_vars.get(&type_arg) {
+                    ctx_ty
+                } else {
+                    self.resolve_type(type_arg, inst_span)
+                        .map_err(|_| not_const(inst_span))?
+                };
+                match self.known.intrinsic_id(name) {
+                    Some(IntrinsicId::Conforms) => {
+                        let interface_id = self
+                            .interfaces
+                            .get(&interface_arg)
+                            .copied()
+                            .ok_or_else(|| not_const(inst_span))?;
+                        let value = self.check_conforms(ty, interface_id, inst_span).is_ok();
+                        Ok(ConstValue::Bool(value))
                     }
                     _ => Err(not_const(inst_span)),
                 }

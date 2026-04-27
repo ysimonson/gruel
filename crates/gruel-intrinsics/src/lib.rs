@@ -50,6 +50,7 @@ pub enum IntrinsicId {
     TypeName,
     TypeInfo,
     Ownership,
+    Conforms,
     Field,
     Import,
 
@@ -87,6 +88,10 @@ pub enum IntrinsicKind {
     Expr,
     /// Type intrinsic: `@name(Type)` where the argument is a type expression.
     Type,
+    /// Type-and-interface intrinsic: `@name(Type, Interface)` where the
+    /// first argument is a type expression and the second names an
+    /// interface (e.g. `@conforms(T, Drop)`).
+    TypeInterface,
 }
 
 /// High-level grouping used when rendering the documentation reference page.
@@ -376,6 +381,22 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         ],
     },
     IntrinsicDef {
+        id: IntrinsicId::Conforms,
+        name: "conforms",
+        kind: IntrinsicKind::TypeInterface,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Whether a type structurally conforms to an interface.",
+        description: "`@conforms(T, I)` returns `true` if type `T` satisfies every method requirement of interface `I` (see ADR-0056), and `false` otherwise. Built-in interfaces `Copy` and `Drop` use the language's ownership rules rather than user methods. The result is a `bool` evaluated at compile time, so `@conforms(...)` can be used to gate `comptime if` branches and other comptime decisions.",
+        examples: &[
+            "@conforms(i32, Copy) // true",
+            "@conforms(String, Copy) // false",
+            "@conforms(MyType, Drop)",
+        ],
+    },
+    IntrinsicDef {
         id: IntrinsicId::Field,
         name: "field",
         kind: IntrinsicKind::Expr,
@@ -641,6 +662,7 @@ pub fn render_reference_markdown() -> String {
         let kind = match d.kind {
             IntrinsicKind::Expr => "expr",
             IntrinsicKind::Type => "type",
+            IntrinsicKind::TypeInterface => "type+iface",
         };
         let preview = match d.preview {
             Some(f) => f.name(),
@@ -761,6 +783,7 @@ mod tests {
                 | IntrinsicId::TypeName
                 | IntrinsicId::TypeInfo
                 | IntrinsicId::Ownership
+                | IntrinsicId::Conforms
                 | IntrinsicId::Field
                 | IntrinsicId::Import
                 | IntrinsicId::TargetArch

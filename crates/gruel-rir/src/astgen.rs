@@ -5,7 +5,7 @@
 
 use lasso::{Spur, ThreadedRodeo};
 
-use gruel_intrinsics::is_type_intrinsic;
+use gruel_intrinsics::{IntrinsicKind, is_type_intrinsic, lookup_by_name};
 use gruel_parser::ast::{
     BlockExpr, ConstDecl, DeriveDecl, Directives, DropFn, FieldPattern, Ident, SelfParam,
     TupleElemPattern,
@@ -845,6 +845,7 @@ impl<'a> AstGen<'a> {
                 let intrinsic_name_str = self.interner.resolve(&name);
 
                 let is_type = is_type_intrinsic(intrinsic_name_str);
+                let kind = lookup_by_name(intrinsic_name_str).map(|d| d.kind);
 
                 if is_type && intrinsic.args.len() == 1 {
                     // Handle explicit type argument
@@ -863,6 +864,34 @@ impl<'a> AstGen<'a> {
                             data: InstData::TypeIntrinsic {
                                 name,
                                 type_arg: ident.name, // Already a Spur
+                            },
+                            span: intrinsic.span,
+                        });
+                    }
+                }
+
+                // Two-argument type+interface intrinsics like
+                // `@conforms(T, Iface)`. Both arguments must be type-name-shaped
+                // (an explicit type expr or a bare identifier) — anything else
+                // falls through to the generic expression intrinsic path so
+                // sema can produce the usual diagnostic.
+                if kind == Some(IntrinsicKind::TypeInterface) && intrinsic.args.len() == 2 {
+                    let type_arg = match &intrinsic.args[0] {
+                        IntrinsicArg::Type(ty) => Some(self.intern_type(ty)),
+                        IntrinsicArg::Expr(Expr::Ident(ident)) => Some(ident.name),
+                        _ => None,
+                    };
+                    let interface_arg = match &intrinsic.args[1] {
+                        IntrinsicArg::Type(ty) => Some(self.intern_type(ty)),
+                        IntrinsicArg::Expr(Expr::Ident(ident)) => Some(ident.name),
+                        _ => None,
+                    };
+                    if let (Some(type_arg), Some(interface_arg)) = (type_arg, interface_arg) {
+                        return self.rir.add_inst(Inst {
+                            data: InstData::TypeInterfaceIntrinsic {
+                                name,
+                                type_arg,
+                                interface_arg,
                             },
                             span: intrinsic.span,
                         });

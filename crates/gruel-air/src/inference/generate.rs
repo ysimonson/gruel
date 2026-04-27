@@ -841,6 +841,15 @@ impl<'a> ConstraintGenerator<'a> {
                 }
             }
 
+            // Type+interface intrinsic (@conforms)
+            InstData::TypeInterfaceIntrinsic { name, .. } => {
+                let intrinsic_name = self.interner.resolve(name);
+                match lookup_by_name(intrinsic_name).map(|d| d.id) {
+                    Some(IntrinsicId::Conforms) => InferType::Concrete(Type::BOOL),
+                    _ => InferType::Concrete(Type::ERROR),
+                }
+            }
+
             // Block
             InstData::Block { extra_start, len } => {
                 ctx.push_scope();

@@ -1634,6 +1634,15 @@ impl Rir {
                 name: *name,
                 type_arg: *type_arg,
             },
+            InstData::TypeInterfaceIntrinsic {
+                name,
+                type_arg,
+                interface_arg,
+            } => InstData::TypeInterfaceIntrinsic {
+                name: *name,
+                type_arg: *type_arg,
+                interface_arg: *interface_arg,
+            },
 
             // Binary operations - renumber both operands
             InstData::Add { lhs, rhs } => InstData::Add {
@@ -2329,6 +2338,7 @@ impl Rir {
                 | InstData::IndexGet { .. }
                 | InstData::IndexSet { .. }
                 | InstData::TypeIntrinsic { .. }
+                | InstData::TypeInterfaceIntrinsic { .. }
                 | InstData::InterfaceMethodSig { .. }
                 | InstData::DropFnDecl { .. }
                 | InstData::Comptime { .. }
@@ -2538,6 +2548,17 @@ pub enum InstData {
         name: Spur,
         /// Type argument (as an interned string, e.g., "i32", "Point", "[i32; 4]")
         type_arg: Spur,
+    },
+
+    /// Intrinsic call with a type argument and an interface argument
+    /// (e.g., `@conforms(T, Drop)`).
+    TypeInterfaceIntrinsic {
+        /// Intrinsic name (without @)
+        name: Spur,
+        /// Type argument (interned name).
+        type_arg: Spur,
+        /// Interface argument (interned name).
+        interface_arg: Spur,
     },
 
     /// Reference to a function parameter
@@ -3307,6 +3328,21 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     let name_str = self.interner.resolve(name);
                     let type_str = self.interner.resolve(type_arg);
                     writeln!(out, "type_intrinsic @{}({})", name_str, type_str).unwrap();
+                }
+                InstData::TypeInterfaceIntrinsic {
+                    name,
+                    type_arg,
+                    interface_arg,
+                } => {
+                    let name_str = self.interner.resolve(name);
+                    let type_str = self.interner.resolve(type_arg);
+                    let iface_str = self.interner.resolve(interface_arg);
+                    writeln!(
+                        out,
+                        "type_intrinsic @{}({}, {})",
+                        name_str, type_str, iface_str
+                    )
+                    .unwrap();
                 }
                 InstData::ParamRef { index, name } => {
                     writeln!(out, "param {} ({})", index, self.interner.resolve(name)).unwrap();

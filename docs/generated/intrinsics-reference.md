@@ -25,6 +25,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@type_name` | type | Compile-time Reflection | — | — | Name of a type as a comptime string. |
 | `@type_info` | type | Compile-time Reflection | — | — | Reflective info about a type. |
 | `@ownership` | type | Compile-time Reflection | — | — | Ownership posture of a type (`Copy`, `Affine`, or `Linear`). |
+| `@conforms` | type+iface | Compile-time Reflection | — | — | Whether a type structurally conforms to an interface. |
 | `@field` | expr | Compile-time Reflection | — | — | Access a field by comptime-known name. |
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
 | `@target_arch` | expr | Target Platform | — | — | Compile target CPU architecture. |
@@ -255,6 +256,25 @@ let r = @random_u64();
 
 ```gruel
 match @ownership(T) { Ownership::Copy => ..., Ownership::Affine => ..., Ownership::Linear => ... }
+```
+
+### `@conforms`
+
+`@conforms(T, I)` returns `true` if type `T` satisfies every method requirement of interface `I` (see ADR-0056), and `false` otherwise. Built-in interfaces `Copy` and `Drop` use the language's ownership rules rather than user methods. The result is a `bool` evaluated at compile time, so `@conforms(...)` can be used to gate `comptime if` branches and other comptime decisions.
+
+
+**Examples:**
+
+```gruel
+@conforms(i32, Copy) // true
+```
+
+```gruel
+@conforms(String, Copy) // false
+```
+
+```gruel
+@conforms(MyType, Drop)
 ```
 
 ### `@field`

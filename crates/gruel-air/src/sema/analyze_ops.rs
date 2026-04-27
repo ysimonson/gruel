@@ -5704,12 +5704,12 @@ impl<'a> Sema<'a> {
     }
 
     // ========================================================================
-    // Intrinsic operations: Intrinsic, TypeIntrinsic
+    // Intrinsic operations: Intrinsic, TypeIntrinsic, TypeInterfaceIntrinsic
     // ========================================================================
 
     /// Analyze an intrinsic operation instruction.
     ///
-    /// Handles: Intrinsic, TypeIntrinsic
+    /// Handles: Intrinsic, TypeIntrinsic, TypeInterfaceIntrinsic
     pub(crate) fn analyze_intrinsic_ops(
         &mut self,
         air: &mut Air,
@@ -5738,6 +5738,18 @@ impl<'a> Sema<'a> {
             InstData::TypeIntrinsic { name, type_arg } => {
                 self.analyze_type_intrinsic(air, *name, *type_arg, inst.span)
             }
+
+            InstData::TypeInterfaceIntrinsic {
+                name,
+                type_arg,
+                interface_arg,
+            } => self.analyze_type_interface_intrinsic(
+                air,
+                *name,
+                *type_arg,
+                *interface_arg,
+                inst.span,
+            ),
 
             _ => Err(CompileError::new(
                 ErrorKind::InternalError(format!(
@@ -5807,6 +5819,61 @@ impl<'a> Sema<'a> {
                     span,
                 });
                 Ok(AnalysisResult::new(air_ref, result_type))
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::UnknownIntrinsic(intrinsic_name.to_string()),
+                span,
+            )),
+        }
+    }
+
+    /// Analyze a type+interface intrinsic (`@conforms(T, I)`).
+    fn analyze_type_interface_intrinsic(
+        &mut self,
+        air: &mut Air,
+        name: Spur,
+        type_arg: Spur,
+        interface_arg: Spur,
+        span: Span,
+    ) -> CompileResult<AnalysisResult> {
+        let intrinsic_name = self.interner.resolve(&name);
+
+        let id = match self.known.intrinsic_id(name) {
+            Some(id) => id,
+            None => {
+                return Err(CompileError::new(
+                    ErrorKind::UnknownIntrinsic(intrinsic_name.to_string()),
+                    span,
+                ));
+            }
+        };
+
+        match id {
+            IntrinsicId::Conforms => {
+                let ty = self.resolve_type(type_arg, span)?;
+                let interface_id = match self.interfaces.get(&interface_arg).copied() {
+                    Some(id) => id,
+                    None => {
+                        let iface_name = self.interner.resolve(&interface_arg).to_string();
+                        return Err(CompileError::new(
+                            ErrorKind::UnknownType(iface_name.clone()),
+                            span,
+                        )
+                        .with_help(format!(
+                            "`{iface_name}` is not an interface. The second argument to `@conforms` must name an interface."
+                        )));
+                    }
+                };
+                let value: u64 = match self.check_conforms(ty, interface_id, span) {
+                    Ok(_) => 1,
+                    Err(_) => 0,
+                };
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Const(value),
+                    ty: Type::BOOL,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, Type::BOOL))
             }
             _ => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(intrinsic_name.to_string()),
