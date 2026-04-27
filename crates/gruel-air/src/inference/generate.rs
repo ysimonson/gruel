@@ -1889,11 +1889,6 @@ impl<'a> ConstraintGenerator<'a> {
         }
 
         // ADR-0061: built-in parameterized types (`Ptr(T)`, `MutPtr(T)`).
-        // Sema's `resolve_type` is the canonical entry that emits the
-        // `--preview generic_pointer_types` gate; here we just need to
-        // produce the right `InferType` so type checking succeeds. The gate
-        // is enforced separately when `analyze_alloc` calls `resolve_type`
-        // on the annotation.
         if let Some((callee_name, arg_strs)) = parse_type_call_syntax(name)
             && let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name)
             && arg_strs.len() == constructor.arity

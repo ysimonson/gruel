@@ -169,20 +169,6 @@ impl<'a> AstGen<'a> {
                 s.push_str(" }");
                 self.interner.get_or_intern(&s)
             }
-            TypeExpr::PointerConst { pointee, .. } => {
-                // ptr const T
-                let pointee_sym = self.intern_type(pointee);
-                let pointee_name = self.interner.resolve(&pointee_sym);
-                let s = format!("ptr const {}", pointee_name);
-                self.interner.get_or_intern(&s)
-            }
-            TypeExpr::PointerMut { pointee, .. } => {
-                // ptr mut T
-                let pointee_sym = self.intern_type(pointee);
-                let pointee_name = self.interner.resolve(&pointee_sym);
-                let s = format!("ptr mut {}", pointee_name);
-                self.interner.get_or_intern(&s)
-            }
             TypeExpr::Tuple { elems, .. } => {
                 // Phase 1: just produce a canonical tuple name symbol.
                 // Phase 2 will lower tuples to anon structs with numeric field names.
@@ -1195,10 +1181,6 @@ impl<'a> AstGen<'a> {
                             | TypeExpr::AnonymousEnum { .. }
                             | TypeExpr::AnonymousInterface { .. } => {
                                 unreachable!("handled above")
-                            }
-                            TypeExpr::PointerConst { .. } | TypeExpr::PointerMut { .. } => {
-                                // Pointer types as values - use intern_type to get representation
-                                self.intern_type(&type_lit.type_expr)
                             }
                             TypeExpr::TypeCall { .. } => {
                                 // ADR-0057: parameterized type call as a

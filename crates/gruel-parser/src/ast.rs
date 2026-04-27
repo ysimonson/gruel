@@ -468,10 +468,6 @@ pub enum TypeExpr {
         args: Vec<TypeExpr>,
         span: Span,
     },
-    /// Raw pointer to immutable data: ptr const T
-    PointerConst { pointee: Box<TypeExpr>, span: Span },
-    /// Raw pointer to mutable data: ptr mut T
-    PointerMut { pointee: Box<TypeExpr>, span: Span },
     /// Tuple type: `(T,)`, `(T, U)`, `(T, U, V)`, ... (ADR-0048)
     ///
     /// `()` remains the unit type. A 1-tuple requires a trailing comma (`(T,)`)
@@ -502,8 +498,6 @@ impl TypeExpr {
             TypeExpr::AnonymousEnum { span, .. } => *span,
             TypeExpr::AnonymousInterface { span, .. } => *span,
             TypeExpr::TypeCall { span, .. } => *span,
-            TypeExpr::PointerConst { span, .. } => *span,
-            TypeExpr::PointerMut { span, .. } => *span,
             TypeExpr::Tuple { span, .. } => *span,
         }
     }
@@ -574,8 +568,6 @@ impl fmt::Display for TypeExpr {
                 }
                 write!(f, ")")
             }
-            TypeExpr::PointerConst { pointee, .. } => write!(f, "ptr const {}", pointee),
-            TypeExpr::PointerMut { pointee, .. } => write!(f, "ptr mut {}", pointee),
             TypeExpr::Tuple { elems, .. } => {
                 write!(f, "(")?;
                 for (i, elem) in elems.iter().enumerate() {
@@ -2245,16 +2237,6 @@ pub enum NodeTag {
     /// - lhs: index into extra (field count + field nodes)
     /// - rhs: index into extra (method count + method nodes)
     TypeAnonStruct,
-
-    /// Const pointer type: ptr const T
-    /// - lhs: pointee type expression node
-    /// - rhs: 0 (unused)
-    TypePointerConst,
-
-    /// Mutable pointer type: ptr mut T
-    /// - lhs: pointee type expression node
-    /// - rhs: 0 (unused)
-    TypePointerMut,
 
     // ===== Patterns =====
     /// Wildcard pattern: _

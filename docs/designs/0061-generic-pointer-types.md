@@ -1,12 +1,12 @@
 ---
 id: 0061
 title: Generic Pointer Types
-status: accepted
+status: implemented
 tags: [types, syntax, pointers, comptime]
 feature-flag: generic_pointer_types
 created: 2026-04-26
 accepted: 2026-04-26
-implemented:
+implemented: 2026-04-27
 spec-sections: ["9.1"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Accepted
+Implemented
 
 ## Summary
 
@@ -83,7 +83,7 @@ Cut over once feature-complete:
 - [x] **Phase 3: Diagnostics** — error/info messages display `Ptr(T)` / `MutPtr(T)` instead of `ptr const T` / `ptr mut T`. The canonical format is unconditional (not gated on the preview flag), since the old surface form is being removed in phase 6. Intrinsic registry descriptions and examples updated in lockstep.
 - [x] **Phase 4: Codemod** — convert spec tests, UI tests, scratch programs to the new syntax. Each affected case picks up `preview = "generic_pointer_types"` and `preview_should_pass = true`; phase 6 removes both. ADR-0028 examples are left as-is for historical accuracy.
 - [x] **Phase 5: Spec rewrite** — update `docs/spec/src/09-unchecked-code/{01-syntax,02-intrinsics}.md` to document `Ptr(T)` / `MutPtr(T)`. ADR-0028's surface-syntax sections are now historical (noted inline in the spec); the rest of ADR-0028 remains accurate so the ADR itself is left unchanged.
-- [ ] **Phase 6: Remove old syntax and stabilize** — drop `TypeExpr::PointerConst`/`PointerMut`, the `ptr` keyword from the lexer/parser, all `require_preview()` calls for `generic_pointer_types`, and the `PreviewFeature::GenericPointerTypes` enum variant. Update ADR status to `implemented`.
+- [x] **Phase 6: Remove old syntax and stabilize** — drop `TypeExpr::PointerConst`/`PointerMut`, the `ptr` keyword from the lexer/parser, all `require_preview()` calls for `generic_pointer_types`, and the `PreviewFeature::GenericPointerTypes` enum variant. Update ADR status to `implemented`.
 
 ## Consequences
 
@@ -95,7 +95,6 @@ Cut over once feature-complete:
 ### Negative
 - **Test churn**: every spec test, UI test, and example mentioning pointers is rewritten.
 - **ADR-0028 partially superseded**: its surface-syntax sections become historical.
-- **Slightly more characters per use** (`MutPtr(i32)` vs `ptr mut i32`).
 
 ### Neutral
 - **No semantic change**: pointers work exactly as before.

@@ -392,23 +392,6 @@ where
                     span: span_from_extra(e),
                 });
 
-            // Pointer type: ptr const T or ptr mut T
-            let ptr_const_type = just(TokenKind::Ptr)
-                .ignore_then(just(TokenKind::Const))
-                .ignore_then(ty.clone())
-                .map_with(|pointee, e| TypeExpr::PointerConst {
-                    pointee: Box::new(pointee),
-                    span: span_from_extra(e),
-                });
-
-            let ptr_mut_type = just(TokenKind::Ptr)
-                .ignore_then(just(TokenKind::Mut))
-                .ignore_then(ty.clone())
-                .map_with(|pointee, e| TypeExpr::PointerMut {
-                    pointee: Box::new(pointee),
-                    span: span_from_extra(e),
-                });
-
             // Parameterized type call (ADR-0057): `Name(arg1, arg2, ...)`
             // in type position. Resolves at sema time by evaluating the
             // call as a comptime expression returning `type`.
@@ -463,18 +446,11 @@ where
                     }
                 });
 
-            // NOTE: Split into sub-groups to keep Choice<tuple> symbol length < 4K.
-            // 9 elements of Boxed<I,TypeExpr,E> in one tuple would produce ~5K symbols on macOS.
-            let types_a: GruelParser<'src, I, TypeExpr> = choice((
+            choice((
                 unit_type.boxed(),
                 never_type.boxed(),
                 array_type.boxed(),
                 anon_struct_type.boxed(),
-                ptr_const_type.boxed(),
-            ))
-            .boxed();
-            let types_b: GruelParser<'src, I, TypeExpr> = choice((
-                ptr_mut_type.boxed(),
                 primitive_type_parser().boxed(),
                 self_type.boxed(),
                 tuple_type.boxed(),
@@ -484,8 +460,7 @@ where
                 type_call.boxed(),
                 named_type.boxed(),
             ))
-            .boxed();
-            choice((types_a, types_b)).boxed()
+            .boxed()
         },
     )
     .boxed()

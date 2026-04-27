@@ -1,9 +1,6 @@
 # Generic Pointer Type Tests (ADR-0061)
 #
-# Tests for the `Ptr(T)` / `MutPtr(T)` surface syntax. These are
-# preview-gated tests; once the feature stabilizes (ADR-0061 phase 6),
-# the `preview = "..."` and `preview_should_pass = true` fields will be
-# removed and these tests will run unconditionally.
+# Tests for the `Ptr(T)` / `MutPtr(T)` surface syntax.
 
 [section]
 id = "runtime.generic_pointer_types"
@@ -18,8 +15,6 @@ description = "Tests for ADR-0061 Ptr(T) / MutPtr(T) generic pointer surface syn
 [[case]]
 name = "ptr_generic_raw_read"
 spec = ["9.1:10"]
-preview = "generic_pointer_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
@@ -37,8 +32,6 @@ exit_code = 42
 [[case]]
 name = "mut_ptr_generic_round_trip"
 spec = ["9.1:10"]
-preview = "generic_pointer_types"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut x: i32 = 0;
@@ -58,8 +51,6 @@ exit_code = 42
 [[case]]
 name = "ptr_generic_param"
 spec = ["9.1:12"]
-preview = "generic_pointer_types"
-preview_should_pass = true
 source = """
 unchecked fn deref(p: Ptr(i32)) -> i32 {
     checked { @ptr_read(p) }
@@ -72,21 +63,3 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
-
-# =============================================================================
-# Without --preview, Ptr(T) is rejected with the gating error.
-# =============================================================================
-
-[[case]]
-name = "ptr_generic_requires_preview"
-spec = ["9.1:10"]
-source = """
-fn main() -> i32 {
-    let x: i32 = 42;
-    let p: Ptr(i32) = checked { @raw(x) };
-    let val: i32 = checked { @ptr_read(p) };
-    val
-}
-"""
-compile_fail = true
-error_contains = "generic_pointer_types"

@@ -170,43 +170,6 @@ impl<'a> Sema<'a> {
         Ok(IfaceTy::Concrete(self.resolve_type(type_sym, span)?))
     }
 
-    /// Walk a type annotation symbol and fire any preview-feature gates that
-    /// apply to it (currently just `Ptr(T)` / `MutPtr(T)` from ADR-0061).
-    ///
-    /// Used by sema passes that want to enforce preview gates on type
-    /// annotations without performing a full `resolve_type` — useful for
-    /// `let` bindings whose annotation may refer to comptime locals that
-    /// `resolve_type` doesn't know about.
-    pub(crate) fn check_type_annotation_preview_gates(
-        &self,
-        type_sym: Spur,
-        span: Span,
-    ) -> CompileResult<()> {
-        let type_name = self.interner.resolve(&type_sym);
-        if let Some((callee_name, arg_strs)) = crate::types::parse_type_call_syntax(type_name)
-            && let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name)
-        {
-            use gruel_builtins::BuiltinTypeConstructorKind;
-            let feature = match constructor.kind {
-                BuiltinTypeConstructorKind::Ptr | BuiltinTypeConstructorKind::MutPtr => {
-                    gruel_error::PreviewFeature::GenericPointerTypes
-                }
-            };
-            self.require_preview(
-                feature,
-                &format!("`{}` type constructor", callee_name),
-                span,
-            )?;
-            // Recurse into argument annotations so nested constructors are
-            // gated too (e.g. `Ptr(MutPtr(i32))`).
-            for arg_str in &arg_strs {
-                let arg_sym = self.interner.get_or_intern(arg_str);
-                self.check_type_annotation_preview_gates(arg_sym, span)?;
-            }
-        }
-        Ok(())
-    }
-
     /// Resolve a type symbol to a Type.
     ///
     /// Handles array types with the syntax "[T; N]".
@@ -259,15 +222,9 @@ impl<'a> Sema<'a> {
             // ADR-0061: built-in parameterized types (`Ptr(T)`, `MutPtr(T)`).
             // These short-circuit the comptime-evaluation path because they
             // lower to fixed `TypeKind` variants rather than running through
-            // a `fn ... -> type` body. Gated behind the `generic_pointer_types`
-            // preview flag during the migration.
+            // a `fn ... -> type` body.
             if let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name) {
                 use gruel_builtins::BuiltinTypeConstructorKind;
-                self.require_preview(
-                    gruel_error::PreviewFeature::GenericPointerTypes,
-                    &format!("`{}` type constructor", callee_name),
-                    span,
-                )?;
                 if arg_strs.len() != constructor.arity {
                     return Err(CompileError::new(
                         ErrorKind::WrongArgumentCount {
