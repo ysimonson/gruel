@@ -1,4 +1,4 @@
-.PHONY: test quick-test fmt fmt-check check bench crate-docs \
+.PHONY: test quick-test doctest fmt fmt-check check bench crate-docs \
         check-intrinsic-docs gen-intrinsic-docs \
         website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler \
@@ -14,12 +14,19 @@ ifeq ($(shell test -d $(LLVM22_BREW) && echo yes),yes)
 endif
 
 # Run unit tests only (fast feedback during development).
+# Skips doctests — rustdoc's merged-doctest pass costs ~25s/crate even when
+# the crate has none. Run `make doctest` to exercise them.
 quick-test:
-	cargo test --workspace --exclude gruel-runtime
+	cargo test --workspace --exclude gruel-runtime --lib --bins --tests
 
-# Run all tests (unit + spec + traceability + UI tests).
+# Run doctests across the workspace. Slow (rustdoc per-crate overhead) so it's
+# split out from quick-test.
+doctest:
+	cargo test --workspace --exclude gruel-runtime --doc
+
+# Run all tests (unit + doctests + spec + traceability + UI tests).
 # Pass ARGS="pattern" to filter spec/UI tests, e.g.: make test ARGS="1.1"
-test: quick-test
+test: quick-test doctest
 	cargo build -p gruel
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_SPEC_CASES=crates/gruel-spec/cases \

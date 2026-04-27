@@ -11,10 +11,12 @@ This document covers how to build, test, and contribute to the Gruel compiler.
 | Platform | Requirements |
 |----------|--------------|
 | Linux x86_64 | None |
-| macOS ARM64 | Xcode Command Line Tools (`xcode-select --install`) |
+| macOS ARM64 | Xcode Command Line Tools (`xcode-select --install`), `lld` (`brew install lld`) |
 | macOS x86_64 | Xcode Command Line Tools (`xcode-select --install`) |
 
 **Why macOS needs Xcode**: The Gruel compiler uses the system `clang` to link executables on macOS. On Linux, Gruel uses its own internal ELF linker.
+
+**Why macOS ARM64 needs `lld`**: `.cargo/config.toml` configures the Rust toolchain to use `ld64.lld` on `aarch64-apple-darwin` because the default Apple linker (`ld64`) is dramatically slower for the workspace's many test/doctest binaries. Install with `brew install lld`. If you build for `aarch64-apple-darwin` without lld at `/opt/homebrew/opt/lld/bin/ld64.lld`, the link step will fail.
 
 ## Repository Structure
 

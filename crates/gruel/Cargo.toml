@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 description = "Gruel compiler CLI binary"
 
+[features]
+default = ["llvm-dynamic"]
+llvm-dynamic = ["gruel-compiler/llvm-dynamic"]
+llvm-static = ["gruel-compiler/llvm-static"]
+
 [dependencies]
 gruel-compiler.workspace = true
 gruel-rir.workspace = true

@@ -5,6 +5,11 @@ edition.workspace = true
 description = "Compiler pipeline orchestration"
 build = "build.rs"
 
+[features]
+default = ["llvm-dynamic"]
+llvm-dynamic = ["gruel-codegen-llvm/llvm-dynamic"]
+llvm-static = ["gruel-codegen-llvm/llvm-static"]
+
 [dependencies]
 gruel-air.workspace = true
 gruel-cfg.workspace = true

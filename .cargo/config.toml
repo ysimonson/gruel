@@ -1,0 +1,8 @@
+[target.aarch64-apple-darwin]
+rustflags = [
+    # Use Homebrew's lld (ld64.lld) for faster Mach-O linking on macOS.
+    "-C", "link-arg=-fuse-ld=/opt/homebrew/opt/lld/bin/ld64.lld",
+    # Embed an rpath so test/dev binaries find libLLVM.dylib without
+    # DYLD_LIBRARY_PATH. Matches LLVM_SYS_221_PREFIX from the Makefile.
+    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/opt/llvm@22/lib",
+]

@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 description = "LLVM-based code generation for the Gruel compiler"
 
+[features]
+# Default to dynamic linking against libLLVM.dylib for fast dev/test builds.
+# Distribution builds that want a self-contained binary should use:
+#   cargo build -p gruel --release --no-default-features --features llvm-static
+default = ["llvm-dynamic"]
+llvm-dynamic = ["inkwell/llvm22-1-prefer-dynamic"]
+llvm-static = ["inkwell/llvm22-1-force-static"]
+
 [dependencies]
 gruel-air.workspace = true
 gruel-cfg.workspace = true
