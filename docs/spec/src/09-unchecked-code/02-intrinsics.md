@@ -102,3 +102,51 @@ fn main() -> i32 {
     dst[1]
 }
 ```
+
+## Pointer Methods (ADR-0063)
+
+> **Migration note (informative):** The legacy `@…` pointer intrinsics
+> (`@ptr_read`, `@ptr_write`, `@ptr_offset`, `@ptr_to_int`,
+> `@int_to_ptr`, `@null_ptr`, `@is_null`, `@ptr_copy`, `@raw`,
+> `@raw_mut`) are accepted in parallel during the migration to ADR-0063.
+> Phase 6 of ADR-0063 removes them; the new surface form below is the
+> only spelling after that.
+
+{{ rule(id="9.2:14", cat="normative") }}
+
+The operations on `Ptr(T)` / `MutPtr(T)` defined by ADR-0028 are also exposed as method calls on a pointer value and as associated-function calls on a fully-applied pointer type. The method / associated-function form is **subject to the same `checked`-block requirement** the corresponding intrinsic has. The two forms are semantically identical; only the spelling differs.
+
+| Form | Defined on | Signature |
+|------|------------|-----------|
+| `p.read()` | `Ptr(T)`, `MutPtr(T)` | `(self) -> T` |
+| `p.write(v)` | `MutPtr(T)` only | `(self, v: T) -> ()` |
+| `p.offset(n)` | `Ptr(T)`, `MutPtr(T)` | `(self, n: i64) -> Self` |
+| `p.is_null()` | `Ptr(T)`, `MutPtr(T)` | `(self) -> bool` |
+| `p.to_int()` | `Ptr(T)`, `MutPtr(T)` | `(self) -> u64` |
+| `p.copy_from(src, n)` | `MutPtr(T)` | `(self, src: Ptr(T) \| MutPtr(T), n: u64) -> ()` |
+| `Ptr(T)::from(r)` | `Ptr(T)` | `(r: Ref(T)) -> Ptr(T)` |
+| `MutPtr(T)::from(r)` | `MutPtr(T)` | `(r: MutRef(T)) -> MutPtr(T)` |
+| `Ptr(T)::null()` | `Ptr(T)` | `() -> Ptr(T)` |
+| `MutPtr(T)::null()` | `MutPtr(T)` | `() -> MutPtr(T)` |
+| `Ptr(T)::from_int(addr)` | `Ptr(T)` | `(addr: u64) -> Ptr(T)` |
+| `MutPtr(T)::from_int(addr)` | `MutPtr(T)` | `(addr: u64) -> MutPtr(T)` |
+
+{{ rule(id="9.2:15", cat="syntax") }}
+
+```ebnf
+ptr_method_call = expr "." IDENT "(" [ args ] ")" ;
+ptr_assoc_fn_call = ptr_type "::" IDENT "(" [ args ] ")" ;
+```
+
+{{ rule(id="9.2:16", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    let mut x: i32 = 41;
+    checked {
+        let p = MutPtr(i32)::from(&mut x);
+        p.write(p.read() + 1);
+    };
+    x  // 42
+}
+```
