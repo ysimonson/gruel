@@ -126,6 +126,7 @@ impl ErrorCode {
     pub const INOUT_KEYWORD_MISSING: Self = Self(431);
     pub const BORROW_KEYWORD_MISSING: Self = Self(432);
     pub const EMPTY_STRUCT: Self = Self(433);
+    pub const REFERENCE_ESCAPES_FUNCTION: Self = Self(434);
 
     // ========================================================================
     // Control flow errors (E0500-E0599)
@@ -1050,6 +1051,10 @@ pub enum ErrorKind {
     /// Argument to borrow parameter is missing `borrow` keyword at call site
     #[error("argument to borrow parameter must use 'borrow' keyword")]
     BorrowKeywordMissing,
+    /// Reference (`Ref(T)` / `MutRef(T)`) escapes the function in which it
+    /// was constructed (ADR-0062).
+    #[error("reference type `{type_name}` cannot escape the function it was constructed in")]
+    ReferenceEscapesFunction { type_name: String },
 
     // Control flow errors
     #[error("'break' outside of loop")]
@@ -1265,6 +1270,7 @@ impl ErrorKind {
             ErrorKind::BorrowInoutConflict { .. } => ErrorCode::BORROW_INOUT_CONFLICT,
             ErrorKind::InoutKeywordMissing => ErrorCode::INOUT_KEYWORD_MISSING,
             ErrorKind::BorrowKeywordMissing => ErrorCode::BORROW_KEYWORD_MISSING,
+            ErrorKind::ReferenceEscapesFunction { .. } => ErrorCode::REFERENCE_ESCAPES_FUNCTION,
 
             // Control flow errors (E0500-E0599)
             ErrorKind::BreakOutsideLoop => ErrorCode::BREAK_OUTSIDE_LOOP,

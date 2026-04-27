@@ -111,7 +111,7 @@ This ADR depends on ADR-0061 Phase 1 (builtin type-constructor registry) being c
 
 - [x] **Phase 1: Type system** — introduce `TypeKind::Ref(TypeId)` and `TypeKind::MutRef(TypeId)` with intern-pool support, mirroring the existing pointer pool pattern.
 - [x] **Phase 2: Parser** — accept `Ref(T)` / `MutRef(T)` as type expressions (via the constructor registry from ADR-0061). Accept `&expr` and `&mut expr` as prefix expressions. Gate behind the `reference_types` preview flag.
-- [ ] **Phase 3: Borrow checker port** — adapt ADR-0013's exclusivity, non-escape, and no-mutate rules to operate on values of `Ref`/`MutRef` types instead of parameter modes. Bidirectional during migration: `borrow x: T` and `x: Ref(T)` produce identical AIR for the body of the borrow checker.
+- [x] **Phase 3: Borrow checker port** — adapt ADR-0013's exclusivity, non-escape, and no-mutate rules to operate on values of `Ref`/`MutRef` types instead of parameter modes. Bidirectional during migration: `borrow x: T` and `x: Ref(T)` produce identical AIR for the body of the borrow checker.
 - [ ] **Phase 4: Method receivers** — accept `self: Ref(Self)` and `self: MutRef(Self)`, plus the `&self` / `&mut self` sugar.
 - [ ] **Phase 5: Codegen** — confirm refs lower identically to today's borrows (LLVM pointer with appropriate `noalias`/`readonly` attrs). Verify with the test suite.
 - [ ] **Phase 6: Codemod** — convert all `borrow x: T` → `x: Ref(T)`, `inout x: T` → `x: MutRef(T)`, `borrow expr` → `&expr`, `inout expr` → `&mut expr`. Touches spec tests, UI tests, scratch programs, ADR examples.

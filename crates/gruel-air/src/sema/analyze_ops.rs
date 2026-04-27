@@ -609,13 +609,23 @@ impl<'a> Sema<'a> {
 
         // Operand must be an lvalue — track from the unanalyzed RIR so we
         // catch e.g. `&(1 + 2)` without depending on AIR shape.
-        if self.extract_root_variable(operand).is_none() {
+        let root_var = self.extract_root_variable(operand).ok_or_else(|| {
             let kind = if is_mut {
                 ErrorKind::InoutNonLvalue
             } else {
                 ErrorKind::BorrowNonLvalue
             };
-            return Err(CompileError::new(kind, self.rir.get(operand).span));
+            CompileError::new(kind, self.rir.get(operand).span)
+        })?;
+
+        // `&mut x` requires the root binding to be mutable, mirroring the
+        // existing `inout`/assignment rules.
+        if is_mut
+            && let Some(local) = ctx.locals.get(&root_var)
+            && !local.is_mut
+        {
+            let name = self.interner.resolve(&root_var).to_string();
+            return Err(CompileError::new(ErrorKind::AssignToImmutable(name), span));
         }
 
         let operand_result = self.analyze_inst(air, operand, ctx)?;
@@ -2822,6 +2832,18 @@ impl<'a> Sema<'a> {
             // Explicit return with value
             let inner_result = self.analyze_inst(air, inner, ctx)?;
             let inner_ty = inner_result.ty;
+
+            // ADR-0062: references are scope-bound — they cannot escape the
+            // function in which they are constructed. Reject any attempt to
+            // return a `Ref(T)` / `MutRef(T)` value.
+            if inner_ty.is_any_ref() {
+                return Err(CompileError::new(
+                    ErrorKind::ReferenceEscapesFunction {
+                        type_name: self.type_pool.format_type_name(inner_ty),
+                    },
+                    span,
+                ));
+            }
 
             // Type check: returned value must match function's return type.
             if !ctx.return_type.is_error()

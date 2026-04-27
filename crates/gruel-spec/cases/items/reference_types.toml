@@ -133,3 +133,95 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "must be a variable, field, or array element"
+
+# =============================================================================
+# `&mut x` requires `x` to be mutable
+# =============================================================================
+
+[[case]]
+name = "mut_ref_of_immutable_rejected"
+spec = ["6.1:34"]
+preview = "reference_types"
+preview_should_pass = true
+source = """
+fn write_42(r: MutRef(i32)) {
+}
+
+fn main() -> i32 {
+    let x: i32 = 0;
+    write_42(&mut x);
+    0
+}
+"""
+compile_fail = true
+error_contains = "immutable"
+
+# =============================================================================
+# `&x` does not move x — exclusivity / unmove semantics carry over from
+# ADR-0013, just triggered by the type instead of the param mode.
+# =============================================================================
+
+[[case]]
+name = "ref_does_not_move"
+spec = ["6.1:34"]
+preview = "reference_types"
+preview_should_pass = true
+source = """
+struct Point { x: i32, y: i32 }
+
+fn read(r: Ref(Point)) -> i32 {
+    21
+}
+
+fn main() -> i32 {
+    let p = Point { x: 1, y: 2 };
+    let a = read(&p);
+    let b = read(&p);
+    a + b
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Two `&mut x` to the same variable in one call → exclusivity error
+# =============================================================================
+
+[[case]]
+name = "two_mut_refs_same_var_rejected"
+spec = ["6.1:34"]
+preview = "reference_types"
+preview_should_pass = true
+source = """
+fn swap(a: MutRef(i32), b: MutRef(i32)) {
+}
+
+fn main() -> i32 {
+    let mut x: i32 = 0;
+    swap(&mut x, &mut x);
+    0
+}
+"""
+compile_fail = true
+error_contains = "multiple inout"
+
+# =============================================================================
+# Returning a `Ref(T)` from a function is rejected (non-escape rule).
+# =============================================================================
+
+[[case]]
+name = "ref_cannot_escape_function"
+spec = ["6.1:34"]
+preview = "reference_types"
+preview_should_pass = true
+source = """
+fn make_ref() -> Ref(i32) {
+    let x: i32 = 7;
+    return &x;
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot escape"

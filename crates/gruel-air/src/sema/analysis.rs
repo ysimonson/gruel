@@ -8981,24 +8981,32 @@ impl<'a> Sema<'a> {
         let mut borrow_vars: HashSet<Spur> = HashSet::new();
 
         for arg in args {
-            let maybe_var_symbol = self.extract_root_variable(arg.value);
+            // Classify the borrow/inout shape of this arg, considering both
+            // the legacy `borrow`/`inout` modes (ADR-0013) and the new `&x` /
+            // `&mut x` MakeRef expressions (ADR-0062). Both produce the same
+            // exclusivity obligations.
+            let (is_inout_like, is_borrow_like) = self.classify_borrowing_arg(arg);
 
-            // Check that inout/borrow arguments are lvalues
-            if arg.is_inout() && maybe_var_symbol.is_none() {
-                return Err(CompileError::new(
-                    ErrorKind::InoutNonLvalue,
-                    self.rir.get(arg.value).span,
-                ));
-            }
-            if arg.is_borrow() && maybe_var_symbol.is_none() {
+            // Lvalue check for legacy modes is here; for MakeRef the lvalue
+            // check happens in `analyze_make_ref`.
+            if arg.is_inout() {
+                if self.extract_root_variable(arg.value).is_none() {
+                    return Err(CompileError::new(
+                        ErrorKind::InoutNonLvalue,
+                        self.rir.get(arg.value).span,
+                    ));
+                }
+            } else if arg.is_borrow() && self.extract_root_variable(arg.value).is_none() {
                 return Err(CompileError::new(
                     ErrorKind::BorrowNonLvalue,
                     self.rir.get(arg.value).span,
                 ));
             }
 
+            let maybe_var_symbol = self.extract_borrowing_root_variable(arg.value);
+
             if let Some(var_symbol) = maybe_var_symbol {
-                if arg.is_inout() {
+                if is_inout_like {
                     // Check for duplicate inout access
                     if !inout_vars.insert(var_symbol) {
                         let var_name = self.interner.resolve(&var_symbol).to_string();
@@ -9015,7 +9023,7 @@ impl<'a> Sema<'a> {
                             call_span,
                         ));
                     }
-                } else if arg.is_borrow() {
+                } else if is_borrow_like {
                     borrow_vars.insert(var_symbol);
                     // Check for borrow/inout conflict
                     if inout_vars.contains(&var_symbol) {
@@ -9031,6 +9039,34 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
+    /// Classify a call argument's borrowing shape (ADR-0013 + ADR-0062).
+    ///
+    /// Returns `(is_inout_like, is_borrow_like)`. `inout`/`&mut x` count as
+    /// inout-like; `borrow`/`&x` count as borrow-like. Normal-mode arguments
+    /// where the value is not a MakeRef return `(false, false)`.
+    pub(crate) fn classify_borrowing_arg(&self, arg: &RirCallArg) -> (bool, bool) {
+        if arg.is_inout() {
+            return (true, false);
+        }
+        if arg.is_borrow() {
+            return (false, true);
+        }
+        if let InstData::MakeRef { is_mut, .. } = self.rir.get(arg.value).data {
+            return (is_mut, !is_mut);
+        }
+        (false, false)
+    }
+
+    /// Like `extract_root_variable`, but transparently descends through a
+    /// `MakeRef` wrapper so that `&x` / `&mut x` resolve to the same root as
+    /// `borrow x` / `inout x`.
+    pub(crate) fn extract_borrowing_root_variable(&self, inst_ref: InstRef) -> Option<Spur> {
+        if let InstData::MakeRef { operand, .. } = &self.rir.get(inst_ref).data {
+            return self.extract_root_variable(*operand);
+        }
+        self.extract_root_variable(inst_ref)
+    }
+
     /// Analyze a list of call arguments, handling inout unmove logic.
     ///
     /// For inout arguments, the variable is "unmoving" after analysis - this is because
@@ -9043,18 +9079,20 @@ impl<'a> Sema<'a> {
     ) -> CompileResult<Vec<AirCallArg>> {
         let mut air_args = Vec::new();
         for arg in args.iter() {
-            // For inout/borrow arguments, extract the variable name before analysis
-            // so we can "unmove" it after - these are borrows, not moves
-            let borrowed_var = if arg.is_inout() || arg.is_borrow() {
-                self.extract_root_variable(arg.value)
+            // For inout/borrow arguments and `&x` / `&mut x` constructions
+            // (ADR-0062), extract the underlying variable name so we can
+            // "unmove" it after analysis — these are borrows, not moves.
+            let (is_inout_like, is_borrow_like) = self.classify_borrowing_arg(arg);
+            let borrowed_var = if is_inout_like || is_borrow_like {
+                self.extract_borrowing_root_variable(arg.value)
             } else {
                 None
             };
 
             let arg_result = self.analyze_inst(air, arg.value, ctx)?;
 
-            // If this was an inout/borrow argument, the variable shouldn't be marked as moved
-            // because these are borrows - the value stays valid after the call
+            // If this was an inout/borrow/ref argument, the variable shouldn't
+            // be marked as moved — the value stays valid after the call.
             if let Some(var_symbol) = borrowed_var {
                 ctx.moved_vars.remove(&var_symbol);
             }
