@@ -1440,6 +1440,8 @@ enum IdentSuffix {
     Path(Ident),                          // ::Variant (for enum variants)
     PathCall(Ident, Vec<CallArg>),        // ::function() (for associated functions)
     PathStructLit(Ident, Vec<FieldInit>), // ::Variant { field: value } (for enum struct variants)
+    /// ADR-0063: `(type_args)::function(call_args)` — a type-call followed by a path call.
+    TypeCallPathCall(Vec<Expr>, Ident, Vec<CallArg>),
     None,
 }
 
@@ -1451,6 +1453,30 @@ where
     ident_parser()
         .then(
             choice((
+                // ADR-0063: type-call path call `Name(type_args)::method(args)`.
+                // Tried before plain `(args)` so it has a chance to match the
+                // `::method(args)` tail; chumsky backtracks if that tail
+                // isn't there.
+                {
+                    let type_args = expr
+                        .clone()
+                        .separated_by(just(TokenKind::Comma))
+                        .allow_trailing()
+                        .at_least(1)
+                        .collect::<Vec<_>>()
+                        .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen));
+                    type_args
+                        .then_ignore(just(TokenKind::ColonColon))
+                        .then(ident_parser())
+                        .then(
+                            call_args_parser(expr.clone())
+                                .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)),
+                        )
+                        .map(|((type_args, func), args)| {
+                            IdentSuffix::TypeCallPathCall(type_args, func, args)
+                        })
+                        .boxed()
+                },
                 // Function call: (args)
                 call_args_parser(expr.clone())
                     .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
@@ -1521,10 +1547,21 @@ where
             IdentSuffix::PathCall(function, args) => Expr::AssocFnCall(AssocFnCallExpr {
                 base: None, // No module prefix for simple `Type::function()`
                 type_name: name,
+                type_args: Vec::new(),
                 function,
                 args,
                 span: span_from_extra(e),
             }),
+            IdentSuffix::TypeCallPathCall(type_args, function, args) => {
+                Expr::AssocFnCall(AssocFnCallExpr {
+                    base: None,
+                    type_name: name,
+                    type_args,
+                    function,
+                    args,
+                    span: span_from_extra(e),
+                })
+            }
             IdentSuffix::PathStructLit(variant, fields) => Expr::EnumStructLit(EnumStructLitExpr {
                 base: None,
                 type_name: name,
@@ -1805,6 +1842,7 @@ where
                     Expr::AssocFnCall(AssocFnCallExpr {
                         base: Some(Box::new(base)),
                         type_name,
+                        type_args: Vec::new(),
                         function,
                         args,
                         span,
@@ -2152,6 +2190,7 @@ where
                     name: e.state().syms.self_type,
                     span,
                 },
+                type_args: Vec::new(),
                 function,
                 args,
                 span,

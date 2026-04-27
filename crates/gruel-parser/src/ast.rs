@@ -1132,12 +1132,21 @@ pub struct EnumStructLitExpr {
 }
 
 /// An associated function call expression (e.g., `Point::origin()` or `module.Point::origin()`).
+///
+/// ADR-0063 also accepts a type-call LHS: `Ptr(i32)::null()`. The
+/// parenthesised arguments after `type_name` are stored in `type_args`. They
+/// are empty for the legacy form (`Point::origin()`) and non-empty for the
+/// type-call form. Sema interprets each `type_args` entry as a type
+/// expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssocFnCallExpr {
     /// Optional module/namespace prefix (e.g., `utils` in `utils.Point::origin()`)
     pub base: Option<Box<Expr>>,
-    /// The type name (e.g., `Point`)
+    /// The type name (e.g., `Point` or `Ptr`)
     pub type_name: Ident,
+    /// Type arguments for a type-call LHS (e.g., `[i32]` in `Ptr(i32)::null()`).
+    /// Empty for the plain `Type::function()` form.
+    pub type_args: Vec<Expr>,
     /// The function name (e.g., `origin`)
     pub function: Ident,
     /// Arguments

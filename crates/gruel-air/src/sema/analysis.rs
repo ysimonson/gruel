@@ -3655,6 +3655,23 @@ impl<'a> Sema<'a> {
         let type_name_str = self.interner.resolve(&type_name).to_string();
         let function_name_str = self.interner.resolve(&function).to_string();
 
+        // ADR-0063: `Ptr(T)::name(args)` / `MutPtr(T)::name(args)`. The RIR
+        // path stores the LHS as the synthesized symbol `Ptr(T)`; sema's
+        // resolve_type already handles type-call syntax via the
+        // BuiltinTypeConstructor registry, so dispatch through there.
+        if let Some((callee_name, _)) = crate::types::parse_type_call_syntax(&type_name_str)
+            && gruel_builtins::get_builtin_type_constructor(&callee_name).is_some()
+        {
+            return self.dispatch_pointer_assoc_fn_call(
+                air,
+                type_name,
+                &function_name_str,
+                &args,
+                span,
+                ctx,
+            );
+        }
+
         // Check if this is an enum data variant construction (e.g., IntOption::Some(42)).
         // This must be checked before the struct lookup because enums and structs share the
         // same AssocFnCall syntax.
@@ -10169,6 +10186,79 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, result_type))
+    }
+
+    /// ADR-0063: dispatch an associated-function call `Ptr(T)::name(args)` /
+    /// `MutPtr(T)::name(args)` through the [`POINTER_METHODS`] registry.
+    ///
+    /// `lhs_type_sym` is the synthesized type-call symbol (e.g., `Ptr(i32)`)
+    /// that astgen produced for the AssocFnCall LHS. We resolve it through
+    /// `resolve_type` to recover the concrete pointer type, then look the
+    /// function up in the registry and lower as the equivalent intrinsic.
+    pub(crate) fn dispatch_pointer_assoc_fn_call(
+        &mut self,
+        air: &mut Air,
+        lhs_type_sym: Spur,
+        function_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        let lhs_type = self.resolve_type(lhs_type_sym, span)?;
+        let ptr_kind = match lhs_type.kind() {
+            TypeKind::PtrConst(_) => PointerKind::Ptr,
+            TypeKind::PtrMut(_) => PointerKind::MutPtr,
+            _ => {
+                // Resolved to a non-pointer type — fall through to the
+                // standard error path by reporting an unknown type.
+                return Err(CompileError::new(
+                    ErrorKind::UnknownType(self.format_type_name(lhs_type)),
+                    span,
+                ));
+            }
+        };
+
+        let entry = lookup_pointer_method(ptr_kind, function_name, PointerOpForm::AssocFn)
+            .ok_or_else(|| {
+                CompileError::new(
+                    ErrorKind::UndefinedMethod {
+                        type_name: self.format_type_name(lhs_type),
+                        method_name: function_name.to_string(),
+                    },
+                    span,
+                )
+            })?;
+
+        // ADR-0063: surface form is preview-gated until phase 6.
+        self.require_preview(
+            gruel_error::PreviewFeature::PointerMethods,
+            &format!(
+                "`{}({})::{}` associated function",
+                pointer_kind_name(ptr_kind),
+                self.format_type_name(self.pointer_pointee_type(lhs_type)),
+                function_name
+            ),
+            span,
+        )?;
+
+        // Pointer intrinsics all require a `checked` block.
+        let intrinsic_def = lookup_by_id(entry.intrinsic);
+        if intrinsic_def.requires_unchecked {
+            Self::require_checked_for_intrinsic(ctx, intrinsic_def.name, span)?;
+        }
+
+        let intrinsic_name_sym = self.interner.get_or_intern(intrinsic_def.name);
+        self.lower_pointer_op_to_air(
+            air,
+            entry.intrinsic,
+            intrinsic_name_sym,
+            function_name,
+            None,
+            Some(lhs_type),
+            args,
+            span,
+            ctx,
+        )
     }
 
     /// ADR-0063: dispatch a method call `p.name(args)` on a `Ptr(T)` /

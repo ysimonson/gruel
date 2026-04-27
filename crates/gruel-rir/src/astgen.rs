@@ -93,6 +93,41 @@ impl<'a> AstGen<'a> {
         }
     }
 
+    /// ADR-0063: rendering helper for type-call args inside `AssocFnCall`.
+    ///
+    /// `Ptr(i32)::null()` carries `i32` as a regular `Expr` in the AST (the
+    /// parser doesn't know it's a type at parse time). At RIR-gen we render
+    /// it back into a string fragment so sema's existing
+    /// `parse_type_call_syntax` can re-parse the whole `Ptr(i32)` shape.
+    ///
+    /// Only the limited set of expression shapes that can sensibly appear as
+    /// a type argument are supported. Anything else stringifies to the
+    /// literal source name path; sema will still report the eventual
+    /// "unknown type" error if the argument doesn't resolve.
+    fn expr_as_type_name(&mut self, expr: &Expr) -> String {
+        match expr {
+            Expr::Ident(ident) => self.interner.resolve(&ident.name).to_string(),
+            Expr::TypeLit(lit) => {
+                let sym = self.intern_type(&lit.type_expr);
+                self.interner.resolve(&sym).to_string()
+            }
+            Expr::Call(call) => {
+                let mut s = String::new();
+                s.push_str(self.interner.resolve(&call.name.name));
+                s.push('(');
+                for (i, arg) in call.args.iter().enumerate() {
+                    if i > 0 {
+                        s.push_str(", ");
+                    }
+                    s.push_str(&self.expr_as_type_name(&arg.expr));
+                }
+                s.push(')');
+                s
+            }
+            other => format!("<unsupported type-arg: {:?}>", other),
+        }
+    }
+
     /// Convert a TypeExpr to its symbol representation.
     /// For named types, returns the existing symbol. For compound types, interns a new string.
     fn intern_type(&mut self, ty: &TypeExpr) -> Spur {
@@ -980,10 +1015,29 @@ impl<'a> AstGen<'a> {
                     .collect();
                 let (args_start, args_len) = self.rir.add_call_args(&args);
 
+                // ADR-0063: when the LHS is a type-call (e.g. `Ptr(i32)::null()`),
+                // synthesize a `Name(arg, arg, ...)` symbol so sema's existing
+                // type-call resolution path picks up the fully-applied type.
+                let type_name = if assoc_fn_call.type_args.is_empty() {
+                    assoc_fn_call.type_name.name
+                } else {
+                    let mut s = String::new();
+                    s.push_str(self.interner.resolve(&assoc_fn_call.type_name.name));
+                    s.push('(');
+                    for (i, arg) in assoc_fn_call.type_args.iter().enumerate() {
+                        if i > 0 {
+                            s.push_str(", ");
+                        }
+                        s.push_str(&self.expr_as_type_name(arg));
+                    }
+                    s.push(')');
+                    self.interner.get_or_intern(&s)
+                };
+
                 self.rir.add_inst(Inst {
                     data: InstData::AssocFnCall {
-                        type_name: assoc_fn_call.type_name.name, // Already a Spur
-                        function: assoc_fn_call.function.name,   // Already a Spur
+                        type_name,
+                        function: assoc_fn_call.function.name, // Already a Spur
                         args_start,
                         args_len,
                     },

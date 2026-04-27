@@ -137,6 +137,87 @@ fn main() -> i32 {
 exit_code = 42
 
 # =============================================================================
+# `Ptr(T)::from(&x)` — ADR-0063 path-call replacement for `@raw(x)`.
+# =============================================================================
+
+[[case]]
+name = "ptr_from_path_call"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    checked {
+        let p = Ptr(i32)::from(&x);
+        p.read()
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# `MutPtr(T)::from(&mut x)` — replacement for `@raw_mut(x)`.
+# =============================================================================
+
+[[case]]
+name = "mut_ptr_from_path_call"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 0;
+    checked {
+        let p = MutPtr(i32)::from(&mut x);
+        p.write(42);
+    };
+    x
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# `Ptr(T)::null()` — replacement for `@null_ptr()`.
+# =============================================================================
+
+[[case]]
+name = "ptr_null_path_call"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    checked {
+        let p = Ptr(i32)::null();
+        if p.is_null() { 42 } else { 0 }
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# `Ptr(T)::from_int(addr)` — replacement for `@int_to_ptr(addr)`.
+# =============================================================================
+
+[[case]]
+name = "ptr_from_int_path_call"
+spec = ["9.2:1"]
+preview = "pointer_methods"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 42;
+    checked {
+        let addr: u64 = MutPtr(i32)::from(&mut x).to_int();
+        let p2 = MutPtr(i32)::from_int(addr);
+        p2.read()
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
 # Without `--preview pointer_methods`, the method form is rejected.
 # =============================================================================
 

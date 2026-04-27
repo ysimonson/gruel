@@ -3204,6 +3204,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         let elem_ty = lvalue_inst.ty;
                         self.build_place_gep_chain(&place, elem_ty).map(Into::into)
                     }
+                    // ADR-0063: `Ptr(T)::from(&x)` lowers via ADR-0062's
+                    // MakeRef, which already produces the alloca pointer.
+                    // Pass it through unchanged.
+                    CfgInstData::MakeRef { .. } => Some(self.get_value(lvalue_val)),
                     _ => {
                         // Fallback: return a null pointer.
                         gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero())
