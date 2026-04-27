@@ -187,9 +187,11 @@ fn main() -> i32 {
 
 ## Reference Types (ADR-0062, preview)
 
+> **Migration note (informative):** `Ref(T)` / `MutRef(T)` and the `&` / `&mut` prefix forms supersede the surface syntax of the `borrow` / `inout` parameter modes (sections 6.1:14..31, originally from ADR-0013). The rules in this subsection are equivalent to the corresponding `inout`/`borrow` rules — only the surface form differs. Both forms parse and type-check during the migration; phase 8 of ADR-0062 removes the keyword form.
+
 {{ rule(id="6.1:34", cat="normative") }}
 
-A `Ref(T)` value is a scope-bound immutable reference to a value of type `T`. A `MutRef(T)` value is a scope-bound exclusive mutable reference to a value of type `T`. References do not transfer ownership and cannot escape the function in which they are constructed.
+A `Ref(T)` value is a scope-bound immutable reference to a value of type `T`. A `MutRef(T)` value is a scope-bound exclusive mutable reference to a value of type `T`. References do not transfer ownership and **MUST NOT** escape the function in which they are constructed.
 
 {{ rule(id="6.1:35", cat="syntax") }}
 
@@ -217,6 +219,26 @@ fn main() -> i32 {
     let x: i32 = 7;
     read(&x)
 }
+```
+
+{{ rule(id="6.1:39", cat="legality-rule") }}
+
+Within a single function call, the same lvalue **MUST NOT** be the target of multiple `&mut` references, and **MUST NOT** be the target of both a `&` reference and a `&mut` reference. This is the same exclusivity rule that applies to `borrow` / `inout` arguments (6.1:20, 6.1:30) — the trigger is the type of the constructed reference, not the parameter mode.
+
+{{ rule(id="6.1:40", cat="legality-rule") }}
+
+The operand of `&mut` **MUST** be bound by `let mut` (or be a field/index of such a binding). Constructing `&mut x` of an immutable binding is a compile-time error.
+
+{{ rule(id="6.1:41", cat="legality-rule") }}
+
+A function **MUST NOT** return a value whose type is `Ref(T)` or `MutRef(T)`. References are scope-bound and cannot outlive the function in which they are constructed.
+
+{{ rule(id="6.1:42", cat="syntax") }}
+
+Method receivers accept the surface forms `&self` and `&mut self` as sugar for `borrow self` and `inout self` respectively.
+
+```ebnf
+self_param = ( "&" [ "mut" ] | "borrow" | "inout" )? "self" ;
 ```
 
 ## Parameter Immutability

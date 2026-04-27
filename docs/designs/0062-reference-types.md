@@ -115,7 +115,7 @@ This ADR depends on ADR-0061 Phase 1 (builtin type-constructor registry) being c
 - [x] **Phase 4: Method receivers** — accept `self: Ref(Self)` and `self: MutRef(Self)`, plus the `&self` / `&mut self` sugar.
 - [x] **Phase 5: Codegen** — confirm refs lower identically to today's borrows (LLVM pointer with appropriate `noalias`/`readonly` attrs). Verify with the test suite.
 - [x] **Phase 6: Codemod** — convert all `borrow x: T` → `x: Ref(T)`, `inout x: T` → `x: MutRef(T)`, `borrow expr` → `&expr`, `inout expr` → `&mut expr`. Touches spec tests, UI tests, scratch programs, ADR examples. *(Phase 6 lands a representative parallel test demonstrating the new syntax; the full sweep is bundled with phase 8 because two pre-existing limitations make a one-shot codemod infeasible: through-assignment tests like `a = b` on a `MutRef`-typed param need a deref operator that doesn't exist yet, and interface-typed params (`Sized(i32)`) require special ABI handling that doesn't compose with `Ref(...)`. Phase 8 deals with these alongside keyword removal so the test suite reaches a single coherent state.)*
-- [ ] **Phase 7: Spec rewrite** — update `docs/spec/src/06-items` and any borrow mentions in chapters 04/05. Mark ADR-0013's surface-syntax sections as superseded by this ADR.
+- [x] **Phase 7: Spec rewrite** — update `docs/spec/src/06-items` and any borrow mentions in chapters 04/05. Mark ADR-0013's surface-syntax sections as superseded by this ADR.
 - [ ] **Phase 8: Remove old syntax and stabilize** — drop `ParamMode::Borrow` / `ParamMode::Inout`; remove the `borrow` and `inout` keywords; remove all `require_preview()` calls for `reference_types` and the `PreviewFeature::ReferenceTypes` enum variant. Update ADR status to `implemented`.
 
 ## Consequences
