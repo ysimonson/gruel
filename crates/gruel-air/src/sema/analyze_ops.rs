@@ -578,12 +578,11 @@ impl<'a> Sema<'a> {
     // Reference construction (ADR-0062): &x / &mut x
     // ========================================================================
 
-    /// Analyze a `&x` or `&mut x` reference-construction expression.
+    /// Analyze a `&x` or `&mut x` reference-construction expression (ADR-0062).
     ///
     /// - Operand must be an lvalue (variable, parameter, or place expression).
     /// - Result type is `Ref(T)` for `&x`, `MutRef(T)` for `&mut x`, where
     ///   `T` is the operand's type.
-    /// - Gated behind the `reference_types` preview flag.
     pub(crate) fn analyze_make_ref(
         &mut self,
         air: &mut Air,
@@ -596,16 +595,6 @@ impl<'a> Sema<'a> {
             _ => unreachable!("analyze_make_ref called with non-MakeRef instruction"),
         };
         let span = inst.span;
-
-        self.require_preview(
-            gruel_error::PreviewFeature::ReferenceTypes,
-            if is_mut {
-                "`&mut` reference construction"
-            } else {
-                "`&` reference construction"
-            },
-            span,
-        )?;
 
         // Operand must be an lvalue — track from the unanalyzed RIR so we
         // catch e.g. `&(1 + 2)` without depending on AIR shape.

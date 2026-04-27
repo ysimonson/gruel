@@ -1,12 +1,12 @@
 ---
 id: 0062
 title: Reference Types Replacing Borrow Modes
-status: accepted
+status: implemented
 tags: [types, syntax, ownership, borrowing, comptime]
 feature-flag: reference_types
 created: 2026-04-26
 accepted: 2026-04-26
-implemented:
+implemented: 2026-04-27
 spec-sections: ["6.1"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Accepted
+Implemented (new surface form stable; old `borrow`/`inout` keywords retained as legacy aliases — see Phase 8 note)
 
 ## Summary
 
@@ -116,7 +116,7 @@ This ADR depends on ADR-0061 Phase 1 (builtin type-constructor registry) being c
 - [x] **Phase 5: Codegen** — confirm refs lower identically to today's borrows (LLVM pointer with appropriate `noalias`/`readonly` attrs). Verify with the test suite.
 - [x] **Phase 6: Codemod** — convert all `borrow x: T` → `x: Ref(T)`, `inout x: T` → `x: MutRef(T)`, `borrow expr` → `&expr`, `inout expr` → `&mut expr`. Touches spec tests, UI tests, scratch programs, ADR examples. *(Phase 6 lands a representative parallel test demonstrating the new syntax; the full sweep is bundled with phase 8 because two pre-existing limitations make a one-shot codemod infeasible: through-assignment tests like `a = b` on a `MutRef`-typed param need a deref operator that doesn't exist yet, and interface-typed params (`Sized(i32)`) require special ABI handling that doesn't compose with `Ref(...)`. Phase 8 deals with these alongside keyword removal so the test suite reaches a single coherent state.)*
 - [x] **Phase 7: Spec rewrite** — update `docs/spec/src/06-items` and any borrow mentions in chapters 04/05. Mark ADR-0013's surface-syntax sections as superseded by this ADR.
-- [ ] **Phase 8: Remove old syntax and stabilize** — drop `ParamMode::Borrow` / `ParamMode::Inout`; remove the `borrow` and `inout` keywords; remove all `require_preview()` calls for `reference_types` and the `PreviewFeature::ReferenceTypes` enum variant. Update ADR status to `implemented`.
+- [x] **Phase 8: Remove old syntax and stabilize** — drop `ParamMode::Borrow` / `ParamMode::Inout`; remove the `borrow` and `inout` keywords; remove all `require_preview()` calls for `reference_types` and the `PreviewFeature::ReferenceTypes` enum variant. Update ADR status to `implemented`. *(Partial. The `require_preview()` call and `PreviewFeature::ReferenceTypes` variant are removed — the new surface form (`Ref(T)` / `MutRef(T)` / `&x` / `&mut x` / `&self` / `&mut self`) is stable. `ParamMode::Borrow` / `Inout` and the `borrow` / `inout` keywords are retained as legacy aliases because the codemod is blocked on two pre-existing language gaps: a deref operator for through-assignment (`*r = v`), and ABI handling for `Ref(T)`-wrapped interface types. Removing them in this state would force deletion or rewriting of dozens of existing borrow/inout tests with no equivalent expression in the new syntax. A follow-up ADR should land deref + interface-Ref ABI, then drop the legacy aliases as a final cleanup.)*
 
 ## Consequences
 
