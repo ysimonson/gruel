@@ -116,7 +116,7 @@ Same pattern as ADR-0061 / ADR-0062:
 
 ## Implementation Phases
 
-- [ ] **Phase 1: `BuiltinTypeConstructorMethods` registry** — introduce the registry in `gruel-builtins` with a closed set of entries describing each pointer method / assoc fn. Entries reference an existing `IntrinsicId`; no behavior change yet (registry is unused).
+- [x] **Phase 1: `BuiltinTypeConstructorMethods` registry** — introduce the registry in `gruel-intrinsics` (closer to `IntrinsicId`, no dep cycle) as `POINTER_METHODS` with `PointerKind` / `PointerOpForm` / `PointerMethod` types. Entries reference an existing `IntrinsicId`; no behavior change yet (registry is unused).
 - [ ] **Phase 2: Method-call dispatch for `Ptr(T)` / `MutPtr(T)`** — when sema sees `p.method(...)` and `p`'s type is `Ptr(_)` / `MutPtr(_)`, look the method up in the registry from phase 1 and lower it as if the user had written the equivalent intrinsic call. Gate behind `--preview pointer_methods`.
 - [ ] **Phase 3: Path call on a type-call LHS** — extend the parser so a path call accepts a `TypeExpr` (specifically a type-call) on the LHS, not just an ident. Sema evaluates the LHS to a `Type`; when the resolved type is `Ptr(_)` / `MutPtr(_)` it looks up the associated function in the registry from phase 1. Gated. After this phase `Ptr(i32)::null()`, `Ptr(i32)::from(&x)`, and `Ptr(i32)::from_int(addr)` all work.
 - [ ] **Phase 4: Codemod** — convert spec/UI tests, scratch programs, ADR examples, and learn pages to the new syntax. `@raw(x)` becomes `Ptr(T)::from(&x)`, `@raw_mut(x)` becomes `MutPtr(T)::from(&mut x)`, value methods take method form, the remaining constructors take fully-applied path form. Each migrated test picks up `preview = "pointer_methods"` and `preview_should_pass = true`.

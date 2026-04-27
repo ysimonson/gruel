@@ -603,6 +603,166 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
 ];
 
 // ============================================================================
+// Pointer-method registry (ADR-0063)
+// ============================================================================
+
+/// Which builtin pointer constructor an entry is defined on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerKind {
+    /// Defined on `Ptr(T)`.
+    Ptr,
+    /// Defined on `MutPtr(T)`.
+    MutPtr,
+}
+
+/// Whether an entry is an instance method or an associated function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerOpForm {
+    /// Instance method called on a pointer value: `p.name(args)`.
+    Method,
+    /// Associated function called on the type: `Ptr(T)::name(args)`.
+    AssocFn,
+}
+
+/// One method or associated function on `Ptr(T)` / `MutPtr(T)` (ADR-0063).
+///
+/// Each entry is a pure metadata record describing the surface form. The
+/// actual semantic / codegen behaviour is reused from the existing intrinsic
+/// identified by [`PointerMethod::intrinsic`] — this registry exists only to
+/// give sema the surface-to-intrinsic mapping. No new runtime functions.
+#[derive(Debug, Clone, Copy)]
+pub struct PointerMethod {
+    /// Constructor this method/fn is defined on.
+    pub kind: PointerKind,
+    /// Name as written by the user (after `.` for methods, after `::` for
+    /// associated fns).
+    pub name: &'static str,
+    /// Method (`p.name(...)`) or associated fn (`Type(T)::name(...)`).
+    pub form: PointerOpForm,
+    /// Existing intrinsic the surface form lowers to.
+    pub intrinsic: IntrinsicId,
+}
+
+/// Closed registry of every pointer method / associated function (ADR-0063).
+///
+/// Sema's method-call path consults this when the receiver type is
+/// `Ptr(_)` / `MutPtr(_)`; the path-call path consults it when the LHS
+/// resolves to such a type.
+pub const POINTER_METHODS: &[PointerMethod] = &[
+    // ---- Methods on Ptr(T) ----
+    PointerMethod {
+        kind: PointerKind::Ptr,
+        name: "read",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrRead,
+    },
+    PointerMethod {
+        kind: PointerKind::Ptr,
+        name: "offset",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrOffset,
+    },
+    PointerMethod {
+        kind: PointerKind::Ptr,
+        name: "is_null",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::IsNull,
+    },
+    PointerMethod {
+        kind: PointerKind::Ptr,
+        name: "to_int",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrToInt,
+    },
+    // ---- Associated fns on Ptr(T) ----
+    PointerMethod {
+        kind: PointerKind::Ptr,
+        name: "from",
+        form: PointerOpForm::AssocFn,
+        intrinsic: IntrinsicId::Raw,
+    },
+    PointerMethod {
+        kind: PointerKind::Ptr,
+        name: "null",
+        form: PointerOpForm::AssocFn,
+        intrinsic: IntrinsicId::NullPtr,
+    },
+    PointerMethod {
+        kind: PointerKind::Ptr,
+        name: "from_int",
+        form: PointerOpForm::AssocFn,
+        intrinsic: IntrinsicId::IntToPtr,
+    },
+    // ---- Methods on MutPtr(T) ----
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "read",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrRead,
+    },
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "write",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrWrite,
+    },
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "offset",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrOffset,
+    },
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "is_null",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::IsNull,
+    },
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "to_int",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrToInt,
+    },
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "copy_from",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrCopy,
+    },
+    // ---- Associated fns on MutPtr(T) ----
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "from",
+        form: PointerOpForm::AssocFn,
+        intrinsic: IntrinsicId::RawMut,
+    },
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "null",
+        form: PointerOpForm::AssocFn,
+        intrinsic: IntrinsicId::NullPtr,
+    },
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "from_int",
+        form: PointerOpForm::AssocFn,
+        intrinsic: IntrinsicId::IntToPtr,
+    },
+];
+
+/// Look up a pointer method/assoc fn by `(kind, name, form)`.
+pub fn lookup_pointer_method(
+    kind: PointerKind,
+    name: &str,
+    form: PointerOpForm,
+) -> Option<&'static PointerMethod> {
+    POINTER_METHODS
+        .iter()
+        .find(|m| m.kind == kind && m.form == form && m.name == name)
+}
+
+// ============================================================================
 // Queries
 // ============================================================================
 
