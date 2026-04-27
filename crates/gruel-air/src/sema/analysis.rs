@@ -9550,7 +9550,7 @@ impl<'a> Sema<'a> {
                 return Err(CompileError::new(
                     ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                         name: "ptr_read".to_string(),
-                        expected: "ptr const T or ptr mut T".to_string(),
+                        expected: "Ptr(T) or MutPtr(T)".to_string(),
                         found: self.format_type_name(ptr_type),
                     })),
                     span,
@@ -9605,7 +9605,7 @@ impl<'a> Sema<'a> {
                 return Err(CompileError::new(
                     ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                         name: "ptr_write".to_string(),
-                        expected: "ptr mut T (cannot write through ptr const)".to_string(),
+                        expected: "MutPtr(T) (cannot write through Ptr)".to_string(),
                         found: self.format_type_name(ptr_type),
                     })),
                     span,
@@ -9615,7 +9615,7 @@ impl<'a> Sema<'a> {
                 return Err(CompileError::new(
                     ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                         name: "ptr_write".to_string(),
-                        expected: "ptr mut T".to_string(),
+                        expected: "MutPtr(T)".to_string(),
                         found: self.format_type_name(ptr_type),
                     })),
                     span,
@@ -9680,7 +9680,7 @@ impl<'a> Sema<'a> {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "ptr_offset".to_string(),
-                    expected: "ptr const T or ptr mut T".to_string(),
+                    expected: "Ptr(T) or MutPtr(T)".to_string(),
                     found: self.format_type_name(ptr_type),
                 })),
                 span,
@@ -9743,7 +9743,7 @@ impl<'a> Sema<'a> {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "ptr_to_int".to_string(),
-                    expected: "ptr const T or ptr mut T".to_string(),
+                    expected: "Ptr(T) or MutPtr(T)".to_string(),
                     found: self.format_type_name(ptr_type),
                 })),
                 span,
@@ -9810,7 +9810,7 @@ impl<'a> Sema<'a> {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "int_to_ptr".to_string(),
-                    expected: "ptr mut T".to_string(),
+                    expected: "MutPtr(T)".to_string(),
                     found: self.format_type_name(result_type),
                 })),
                 span,
@@ -9862,7 +9862,7 @@ impl<'a> Sema<'a> {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "null_ptr".to_string(),
-                    expected: "ptr const T or ptr mut T".to_string(),
+                    expected: "Ptr(T) or MutPtr(T)".to_string(),
                     found: self.format_type_name(result_type),
                 })),
                 span,
@@ -9912,7 +9912,7 @@ impl<'a> Sema<'a> {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "is_null".to_string(),
-                    expected: "ptr const T or ptr mut T".to_string(),
+                    expected: "Ptr(T) or MutPtr(T)".to_string(),
                     found: self.format_type_name(ptr_type),
                 })),
                 span,
@@ -9968,7 +9968,7 @@ impl<'a> Sema<'a> {
                 return Err(CompileError::new(
                     ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                         name: "ptr_copy".to_string(),
-                        expected: "ptr mut T (cannot copy into ptr const)".to_string(),
+                        expected: "MutPtr(T) (cannot copy into Ptr)".to_string(),
                         found: self.format_type_name(dst_type),
                     })),
                     span,
@@ -9979,7 +9979,7 @@ impl<'a> Sema<'a> {
                     return Err(CompileError::new(
                         ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                             name: "ptr_copy".to_string(),
-                            expected: "ptr mut T".to_string(),
+                            expected: "MutPtr(T)".to_string(),
                             found: self.format_type_name(dst_type),
                         })),
                         span,
@@ -9998,7 +9998,7 @@ impl<'a> Sema<'a> {
                     return Err(CompileError::new(
                         ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                             name: "ptr_copy".to_string(),
-                            expected: "ptr const T or ptr mut T".to_string(),
+                            expected: "Ptr(T) or MutPtr(T)".to_string(),
                             found: self.format_type_name(src_type),
                         })),
                         span,

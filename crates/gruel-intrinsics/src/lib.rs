@@ -453,8 +453,8 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         preview: None,
         runtime_fn: None,
         summary: "Load a value through a raw pointer.",
-        description: "`@ptr_read(p)` dereferences `p: ptr const T` or `ptr mut T` and returns `T`. Requires an `unchecked` block.",
-        examples: &["unchecked { let v = @ptr_read(p); }"],
+        description: "`@ptr_read(p)` dereferences `p: Ptr(T)` or `MutPtr(T)` and returns `T`. Requires a `checked` block.",
+        examples: &["checked { let v = @ptr_read(p); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::PtrWrite,
@@ -465,8 +465,8 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         preview: None,
         runtime_fn: None,
         summary: "Store a value through a raw mutable pointer.",
-        description: "`@ptr_write(p, v)` writes `v` through `p: ptr mut T`. Requires an `unchecked` block.",
-        examples: &["unchecked { @ptr_write(p, 42); }"],
+        description: "`@ptr_write(p, v)` writes `v` through `p: MutPtr(T)`. Requires a `checked` block.",
+        examples: &["checked { @ptr_write(p, 42); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::PtrOffset,
@@ -478,7 +478,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         runtime_fn: None,
         summary: "Pointer arithmetic by element count.",
         description: "`@ptr_offset(p, n)` advances `p` by `n * sizeof(*p)` bytes. Requires an `unchecked` block.",
-        examples: &["unchecked { let q = @ptr_offset(p, 3); }"],
+        examples: &["checked { let q = @ptr_offset(p, 3); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::PtrToInt,
@@ -490,7 +490,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         runtime_fn: None,
         summary: "Convert a pointer to its integer address.",
         description: "`@ptr_to_int(p)` returns the address of `p` as `u64`. Requires an `unchecked` block.",
-        examples: &["unchecked { let a = @ptr_to_int(p); }"],
+        examples: &["checked { let a = @ptr_to_int(p); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::IntToPtr,
@@ -502,7 +502,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         runtime_fn: None,
         summary: "Construct a pointer from an integer address.",
         description: "`@int_to_ptr(addr)` reinterprets `addr: u64` as a pointer. Target pointer type is inferred from context. Requires an `unchecked` block.",
-        examples: &["unchecked { let p: ptr mut u8 = @int_to_ptr(addr); }"],
+        examples: &["checked { let p: MutPtr(u8) = @int_to_ptr(addr); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::NullPtr,
@@ -514,7 +514,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         runtime_fn: None,
         summary: "A null pointer of the inferred type.",
         description: "`@null_ptr()` returns a pointer whose address is zero; the pointer type is inferred from context. Requires an `unchecked` block.",
-        examples: &["unchecked { let p: ptr const u8 = @null_ptr(); }"],
+        examples: &["checked { let p: Ptr(u8) = @null_ptr(); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::IsNull,
@@ -526,7 +526,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         runtime_fn: None,
         summary: "Test whether a pointer is null.",
         description: "`@is_null(p)` returns `true` iff `p`'s address is zero. Requires an `unchecked` block.",
-        examples: &["unchecked { if @is_null(p) { ... } }"],
+        examples: &["checked { if @is_null(p) { ... } }"],
     },
     IntrinsicDef {
         id: IntrinsicId::PtrCopy,
@@ -538,7 +538,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         runtime_fn: None,
         summary: "Bulk copy between pointers.",
         description: "`@ptr_copy(dst, src, n)` copies `n` elements of the pointee type from `src` to `dst` via LLVM `memcpy`. Requires an `unchecked` block.",
-        examples: &["unchecked { @ptr_copy(dst, src, 16); }"],
+        examples: &["checked { @ptr_copy(dst, src, 16); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::Raw,
@@ -549,8 +549,8 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         preview: None,
         runtime_fn: None,
         summary: "Take a const pointer to an lvalue.",
-        description: "`@raw(place)` returns `ptr const T` pointing to `place`. Requires an `unchecked` block.",
-        examples: &["unchecked { let p = @raw(x); }"],
+        description: "`@raw(place)` returns `Ptr(T)` pointing to `place`. Requires a `checked` block.",
+        examples: &["checked { let p = @raw(x); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::RawMut,
@@ -561,8 +561,8 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         preview: None,
         runtime_fn: None,
         summary: "Take a mutable pointer to an lvalue.",
-        description: "`@raw_mut(place)` returns `ptr mut T` pointing to `place`. Requires an `unchecked` block.",
-        examples: &["unchecked { let p = @raw_mut(x); }"],
+        description: "`@raw_mut(place)` returns `MutPtr(T)` pointing to `place`. Requires a `checked` block.",
+        examples: &["checked { let p = @raw_mut(x); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::Syscall,
@@ -574,7 +574,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         runtime_fn: None,
         summary: "Direct OS system call.",
         description: "`@syscall(num, arg1, ...)` issues a raw syscall. Takes the syscall number plus up to 6 arguments; returns `i64`. Requires an `unchecked` block.",
-        examples: &["unchecked { let ret = @syscall(1, 1, buf, n); }"],
+        examples: &["checked { let ret = @syscall(1, 1, buf, n); }"],
     },
     IntrinsicDef {
         id: IntrinsicId::Range,
@@ -715,7 +715,7 @@ pub fn render_reference_markdown() -> String {
                 ));
             }
             if d.requires_unchecked {
-                out.push_str("- **Requires:** `unchecked { ... }` block\n");
+                out.push_str("- **Requires:** `checked { ... }` block\n");
             }
             if !d.examples.is_empty() {
                 out.push_str("\n**Examples:**\n\n");

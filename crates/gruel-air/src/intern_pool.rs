@@ -1127,7 +1127,11 @@ impl TypeInternPool {
 
     /// Return the human-readable name of `ty`, suitable for error messages.
     ///
-    /// Examples: `"i32"`, `"bool"`, `"MyStruct"`, `"[i32; 4]"`, `"ptr const i32"`.
+    /// Examples: `"i32"`, `"bool"`, `"MyStruct"`, `"[i32; 4]"`, `"Ptr(i32)"`.
+    /// Pointer types are formatted in the ADR-0061 surface form
+    /// (`Ptr(T)` / `MutPtr(T)`) regardless of which syntax the user wrote;
+    /// the old `ptr const T` / `ptr mut T` form remains accepted by the
+    /// parser during the migration but is not produced by diagnostics.
     pub fn format_type_name(&self, ty: Type) -> String {
         match ty.kind() {
             TypeKind::I8 => "i8".to_string(),
@@ -1158,11 +1162,11 @@ impl TypeInternPool {
             }
             TypeKind::PtrConst(id) => {
                 let pointee = self.ptr_const_def(id);
-                format!("ptr const {}", self.format_type_name(pointee))
+                format!("Ptr({})", self.format_type_name(pointee))
             }
             TypeKind::PtrMut(id) => {
                 let pointee = self.ptr_mut_def(id);
-                format!("ptr mut {}", self.format_type_name(pointee))
+                format!("MutPtr({})", self.format_type_name(pointee))
             }
             TypeKind::Module(_) => "<module>".to_string(),
             // Interface names are stored on `Sema::interfaces`, not in the

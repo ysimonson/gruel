@@ -80,7 +80,7 @@ Cut over once feature-complete:
 
 - [x] **Phase 1: Builtin type-constructor infrastructure** — extend `gruel-builtins` with `BuiltinTypeConstructor { name, arity, lower }`. Inject into the global namespace alongside `BUILTIN_TYPES`. No behavior change yet (registry is empty/unused).
 - [x] **Phase 2: Parser/sema for `Ptr(T)` / `MutPtr(T)`** — accept call-style type expressions in type position when the callee resolves to a builtin constructor. Lower `Ptr(T)` to existing `TypeKind::PtrConst`, `MutPtr(T)` to `TypeKind::PtrMut`. Gate behind the `generic_pointer_types` preview flag.
-- [ ] **Phase 3: Diagnostics** — error/info messages display `Ptr(T)` / `MutPtr(T)` instead of `ptr const T` / `ptr mut T` when the new feature is enabled. Tests in `gruel-ui-tests`.
+- [x] **Phase 3: Diagnostics** — error/info messages display `Ptr(T)` / `MutPtr(T)` instead of `ptr const T` / `ptr mut T`. The canonical format is unconditional (not gated on the preview flag), since the old surface form is being removed in phase 6. Intrinsic registry descriptions and examples updated in lockstep.
 - [ ] **Phase 4: Codemod** — convert spec tests, UI tests, scratch programs, and ADR examples to the new syntax. Old syntax remains accepted (parallel grammars) until Phase 6.
 - [ ] **Phase 5: Spec rewrite** — update `docs/spec/src/09-runtime-behavior` (and any pointer mentions in `03-types`) to document `Ptr(T)` / `MutPtr(T)`. Mark ADR-0028's surface-syntax sections as superseded by this ADR.
 - [ ] **Phase 6: Remove old syntax and stabilize** — drop `TypeExpr::PointerConst`/`PointerMut`, the `ptr` keyword from the lexer/parser, all `require_preview()` calls for `generic_pointer_types`, and the `PreviewFeature::GenericPointerTypes` enum variant. Update ADR status to `implemented`.

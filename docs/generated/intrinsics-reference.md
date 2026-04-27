@@ -327,122 +327,122 @@ if @target_os() == Os::Linux { ... }
 
 ### `@ptr_read`
 
-`@ptr_read(p)` dereferences `p: ptr const T` or `ptr mut T` and returns `T`. Requires an `unchecked` block.
+`@ptr_read(p)` dereferences `p: Ptr(T)` or `MutPtr(T)` and returns `T`. Requires a `checked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { let v = @ptr_read(p); }
+checked { let v = @ptr_read(p); }
 ```
 
 ### `@ptr_write`
 
-`@ptr_write(p, v)` writes `v` through `p: ptr mut T`. Requires an `unchecked` block.
+`@ptr_write(p, v)` writes `v` through `p: MutPtr(T)`. Requires a `checked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { @ptr_write(p, 42); }
+checked { @ptr_write(p, 42); }
 ```
 
 ### `@ptr_offset`
 
 `@ptr_offset(p, n)` advances `p` by `n * sizeof(*p)` bytes. Requires an `unchecked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { let q = @ptr_offset(p, 3); }
+checked { let q = @ptr_offset(p, 3); }
 ```
 
 ### `@ptr_to_int`
 
 `@ptr_to_int(p)` returns the address of `p` as `u64`. Requires an `unchecked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { let a = @ptr_to_int(p); }
+checked { let a = @ptr_to_int(p); }
 ```
 
 ### `@int_to_ptr`
 
 `@int_to_ptr(addr)` reinterprets `addr: u64` as a pointer. Target pointer type is inferred from context. Requires an `unchecked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { let p: ptr mut u8 = @int_to_ptr(addr); }
+checked { let p: MutPtr(u8) = @int_to_ptr(addr); }
 ```
 
 ### `@null_ptr`
 
 `@null_ptr()` returns a pointer whose address is zero; the pointer type is inferred from context. Requires an `unchecked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { let p: ptr const u8 = @null_ptr(); }
+checked { let p: Ptr(u8) = @null_ptr(); }
 ```
 
 ### `@is_null`
 
 `@is_null(p)` returns `true` iff `p`'s address is zero. Requires an `unchecked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { if @is_null(p) { ... } }
+checked { if @is_null(p) { ... } }
 ```
 
 ### `@ptr_copy`
 
 `@ptr_copy(dst, src, n)` copies `n` elements of the pointee type from `src` to `dst` via LLVM `memcpy`. Requires an `unchecked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { @ptr_copy(dst, src, 16); }
+checked { @ptr_copy(dst, src, 16); }
 ```
 
 ### `@raw`
 
-`@raw(place)` returns `ptr const T` pointing to `place`. Requires an `unchecked` block.
+`@raw(place)` returns `Ptr(T)` pointing to `place`. Requires a `checked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { let p = @raw(x); }
+checked { let p = @raw(x); }
 ```
 
 ### `@raw_mut`
 
-`@raw_mut(place)` returns `ptr mut T` pointing to `place`. Requires an `unchecked` block.
+`@raw_mut(place)` returns `MutPtr(T)` pointing to `place`. Requires a `checked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { let p = @raw_mut(x); }
+checked { let p = @raw_mut(x); }
 ```
 
 ## System Calls
@@ -451,12 +451,12 @@ unchecked { let p = @raw_mut(x); }
 
 `@syscall(num, arg1, ...)` issues a raw syscall. Takes the syscall number plus up to 6 arguments; returns `i64`. Requires an `unchecked` block.
 
-- **Requires:** `unchecked { ... }` block
+- **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-unchecked { let ret = @syscall(1, 1, buf, n); }
+checked { let ret = @syscall(1, 1, buf, n); }
 ```
 
 ## Iteration
