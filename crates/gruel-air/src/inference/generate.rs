@@ -1020,8 +1020,17 @@ impl<'a> ConstraintGenerator<'a> {
                 // Determine the binding type from the iterable:
                 // - For @range: the iterable returns the integer type directly
                 // - For arrays: extract the element type from InferType::Array
+                // - For slices (ADR-0064): extract the element from
+                //   `Slice(T)` / `MutSlice(T)`
                 let binding_ty = match &iterable_info.ty {
                     InferType::Array { element, .. } => *element.clone(),
+                    InferType::Concrete(t) => match t.kind() {
+                        TypeKind::Slice(id) => InferType::Concrete(self.type_pool.slice_def(id)),
+                        TypeKind::MutSlice(id) => {
+                            InferType::Concrete(self.type_pool.mut_slice_def(id))
+                        }
+                        _ => iterable_info.ty.clone(),
+                    },
                     other => other.clone(),
                 };
 

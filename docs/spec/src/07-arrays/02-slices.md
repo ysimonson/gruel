@@ -153,3 +153,11 @@ For a slice `s` whose construction has been sentinel-checked, the method
 `s.terminated_ptr()` returns a `Ptr(T)` to the data and is permitted to
 read up to and including the sentinel byte at position `s.len()`. The
 method **MUST** appear inside a `checked` block.
+
+## Iteration
+
+{{ rule(id="7.2:21", cat="normative") }}
+
+`for x in s` over a slice `s: Slice(T)` (`T: Copy`) yields each element
+by value. The loop body sees `x: T`. The mutable form (over `MutSlice(T)`)
+depends on a deref-assignment operator and is currently not supported.

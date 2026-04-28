@@ -1208,6 +1208,33 @@ impl<'a> Sema<'a> {
                         span,
                         ctx,
                     )
+                } else if matches!(
+                    iterable_type.kind(),
+                    TypeKind::Slice(_) | TypeKind::MutSlice(_)
+                ) {
+                    // ADR-0064 phase 8: iterate over a slice. The mutable
+                    // form (which would yield `MutRef(T)`) requires the
+                    // deref-assignment operator from ADR-0062 phase 8 and
+                    // is deferred — for now we only support immutable
+                    // iteration that copies each element by value.
+                    if is_mut {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: "for-each over a slice (immutable form only)".to_string(),
+                                found: "mut binding".to_string(),
+                            },
+                            iterable_span,
+                        ));
+                    }
+                    self.analyze_slice_for_loop(
+                        air,
+                        binding,
+                        iterable_result.air_ref,
+                        iterable_type,
+                        body,
+                        span,
+                        ctx,
+                    )
                 } else {
                     Err(CompileError::new(
                         ErrorKind::TypeMismatch {
@@ -1684,6 +1711,233 @@ impl<'a> Sema<'a> {
             span,
         });
 
+        Ok(AnalysisResult::new(outer_block, Type::UNIT))
+    }
+
+    /// ADR-0064 phase 8: desugar `for x in s { body }` over a slice into
+    /// a counter-driven loop that reads each element via the slice
+    /// indexing intrinsic.
+    #[allow(clippy::too_many_arguments)]
+    fn analyze_slice_for_loop(
+        &mut self,
+        air: &mut Air,
+        binding: Spur,
+        slice_air: AirRef,
+        slice_type: Type,
+        body: InstRef,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        let elem_ty = match slice_type.kind() {
+            TypeKind::Slice(id) => self.type_pool.slice_def(id),
+            TypeKind::MutSlice(id) => self.type_pool.mut_slice_def(id),
+            _ => unreachable!("analyze_slice_for_loop called with non-slice type"),
+        };
+
+        if !self.is_type_copy(elem_ty) {
+            return Err(CompileError::new(
+                ErrorKind::MoveOutOfIndex {
+                    element_type: self.format_type_name(elem_ty),
+                },
+                span,
+            ));
+        }
+
+        ctx.push_scope();
+
+        // Spill the slice value to a slot.
+        let slice_slot = ctx.next_slot;
+        ctx.next_slot += self.abi_slot_count(slice_type);
+        let slice_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: slice_slot },
+            ty: slice_type,
+            span,
+        });
+        let slice_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: slice_slot,
+                init: slice_air,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Counter at slot+1, type usize.
+        let counter_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+        let zero = air.add_inst(AirInst {
+            data: AirInstData::Const(0),
+            ty: Type::USIZE,
+            span,
+        });
+        let counter_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: counter_slot },
+            ty: Type::USIZE,
+            span,
+        });
+        let counter_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: counter_slot,
+                init: zero,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // Condition: counter < slice.len()
+        let counter_load_for_cond = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: Type::USIZE,
+            span,
+        });
+        let slice_load_for_len = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: slice_slot },
+            ty: slice_type,
+            span,
+        });
+        let len_intrinsic_name = self.interner.get_or_intern("slice_len");
+        let len_args_start = air.add_extra(&[slice_load_for_len.as_u32()]);
+        let len_call = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name: len_intrinsic_name,
+                args_start: len_args_start,
+                args_len: 1,
+            },
+            ty: Type::USIZE,
+            span,
+        });
+        let cond_ref = air.add_inst(AirInst {
+            data: AirInstData::Lt(counter_load_for_cond, len_call),
+            ty: Type::BOOL,
+            span,
+        });
+
+        ctx.push_scope();
+        ctx.loop_depth += 1;
+
+        let binding_slot = ctx.next_slot;
+        ctx.next_slot += 1;
+        ctx.insert_local(
+            binding,
+            LocalVar {
+                slot: binding_slot,
+                ty: elem_ty,
+                is_mut: false,
+                span,
+                allow_unused: false,
+            },
+        );
+
+        // elem = @slice_index_read(slice, counter)
+        let counter_load_for_idx = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: Type::USIZE,
+            span,
+        });
+        let slice_load_for_read = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: slice_slot },
+            ty: slice_type,
+            span,
+        });
+        let read_name = self.interner.get_or_intern("slice_index_read");
+        let read_args_start =
+            air.add_extra(&[slice_load_for_read.as_u32(), counter_load_for_idx.as_u32()]);
+        let elem_read = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name: read_name,
+                args_start: read_args_start,
+                args_len: 2,
+            },
+            ty: elem_ty,
+            span,
+        });
+
+        let binding_storage_live = air.add_inst(AirInst {
+            data: AirInstData::StorageLive { slot: binding_slot },
+            ty: elem_ty,
+            span,
+        });
+        let binding_alloc = air.add_inst(AirInst {
+            data: AirInstData::Alloc {
+                slot: binding_slot,
+                init: elem_read,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        // counter += 1
+        let counter_load_for_inc = air.add_inst(AirInst {
+            data: AirInstData::Load { slot: counter_slot },
+            ty: Type::USIZE,
+            span,
+        });
+        let one = air.add_inst(AirInst {
+            data: AirInstData::Const(1),
+            ty: Type::USIZE,
+            span,
+        });
+        let inc = air.add_inst(AirInst {
+            data: AirInstData::Add(counter_load_for_inc, one),
+            ty: Type::USIZE,
+            span,
+        });
+        let counter_store = air.add_inst(AirInst {
+            data: AirInstData::Store {
+                slot: counter_slot,
+                value: inc,
+                had_live_value: true,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        let body_result = self.analyze_inst(air, body, ctx)?;
+
+        ctx.loop_depth -= 1;
+        self.check_unused_locals_in_current_scope(ctx);
+        ctx.pop_scope();
+
+        let body_stmts_start = air.add_extra(&[
+            binding_storage_live.as_u32(),
+            binding_alloc.as_u32(),
+            counter_store.as_u32(),
+        ]);
+        let body_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: body_stmts_start,
+                stmts_len: 3,
+                value: body_result.air_ref,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+        let loop_ref = air.add_inst(AirInst {
+            data: AirInstData::Loop {
+                cond: cond_ref,
+                body: body_block,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+
+        ctx.pop_scope();
+
+        let outer_stmts_start = air.add_extra(&[
+            slice_storage_live.as_u32(),
+            slice_alloc.as_u32(),
+            counter_storage_live.as_u32(),
+            counter_alloc.as_u32(),
+        ]);
+        let outer_block = air.add_inst(AirInst {
+            data: AirInstData::Block {
+                stmts_start: outer_stmts_start,
+                stmts_len: 4,
+                value: loop_ref,
+            },
+            ty: Type::UNIT,
+            span,
+        });
         Ok(AnalysisResult::new(outer_block, Type::UNIT))
     }
 
