@@ -45,6 +45,10 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@slice_len` | expr | Slices | slices | — | Length of a slice. |
 | `@slice_is_empty` | expr | Slices | slices | — | Whether a slice has length zero. |
 | `@slice_index_read` | expr | Slices | slices | — | Read an element from a slice with bounds checking. |
+| `@slice_ptr` | expr | Slices | slices | yes | Extract the data pointer from a slice. |
+| `@slice_ptr_mut` | expr | Slices | slices | yes | Extract the mutable data pointer from a mutable slice. |
+| `@parts_to_slice` | expr | Slices | slices | yes | Build a slice from a raw pointer and a length. |
+| `@parts_to_mut_slice` | expr | Slices | slices | yes | Build a mutable slice from a raw mutable pointer and a length. |
 | `@slice_index_write` | expr | Slices | slices | — | Write an element to a mutable slice with bounds checking. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
 
@@ -435,6 +439,34 @@ for i in @range(0, 10) { ... }
 `@slice_index_read(s, i)` returns `s[i]`. Bounds-checks at runtime; panics on out-of-range. Surface form: `s[i]`.
 
 - **Preview gate:** `--preview slices` (ADR-0064)
+
+### `@slice_ptr`
+
+`@slice_ptr(s)` returns a `Ptr(T)` to the slice's first element. Requires a `checked` block. Surface form: `s.ptr()`.
+
+- **Preview gate:** `--preview slices` (ADR-0064)
+- **Requires:** `checked { ... }` block
+
+### `@slice_ptr_mut`
+
+`@slice_ptr_mut(m)` returns a `MutPtr(T)` to a `MutSlice(T)`'s first element. Requires a `checked` block. Surface form: `m.ptr_mut()`.
+
+- **Preview gate:** `--preview slices` (ADR-0064)
+- **Requires:** `checked { ... }` block
+
+### `@parts_to_slice`
+
+`@parts_to_slice(p: Ptr(T), n: usize) -> Slice(T)` constructs a slice without checking that the underlying storage is valid. Requires a `checked` block.
+
+- **Preview gate:** `--preview slices` (ADR-0064)
+- **Requires:** `checked { ... }` block
+
+### `@parts_to_mut_slice`
+
+`@parts_to_mut_slice(p: MutPtr(T), n: usize) -> MutSlice(T)`. Requires a `checked` block.
+
+- **Preview gate:** `--preview slices` (ADR-0064)
+- **Requires:** `checked { ... }` block
 
 ### `@slice_index_write`
 

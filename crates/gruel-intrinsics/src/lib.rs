@@ -81,6 +81,10 @@ pub enum IntrinsicId {
     SliceIsEmpty,
     SliceIndexRead,
     SliceIndexWrite,
+    SlicePtr,
+    SlicePtrMut,
+    PartsToSlice,
+    PartsToMutSlice,
 
     // ---- Preview / test infra ----
     TestPreviewGate,
@@ -640,6 +644,54 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &[],
     },
     IntrinsicDef {
+        id: IntrinsicId::SlicePtr,
+        name: "slice_ptr",
+        kind: IntrinsicKind::Expr,
+        category: Category::Slice,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::Slices),
+        runtime_fn: None,
+        summary: "Extract the data pointer from a slice.",
+        description: "`@slice_ptr(s)` returns a `Ptr(T)` to the slice's first element. Requires a `checked` block. Surface form: `s.ptr()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::SlicePtrMut,
+        name: "slice_ptr_mut",
+        kind: IntrinsicKind::Expr,
+        category: Category::Slice,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::Slices),
+        runtime_fn: None,
+        summary: "Extract the mutable data pointer from a mutable slice.",
+        description: "`@slice_ptr_mut(m)` returns a `MutPtr(T)` to a `MutSlice(T)`'s first element. Requires a `checked` block. Surface form: `m.ptr_mut()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::PartsToSlice,
+        name: "parts_to_slice",
+        kind: IntrinsicKind::Expr,
+        category: Category::Slice,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::Slices),
+        runtime_fn: None,
+        summary: "Build a slice from a raw pointer and a length.",
+        description: "`@parts_to_slice(p: Ptr(T), n: usize) -> Slice(T)` constructs a slice without checking that the underlying storage is valid. Requires a `checked` block.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::PartsToMutSlice,
+        name: "parts_to_mut_slice",
+        kind: IntrinsicKind::Expr,
+        category: Category::Slice,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::Slices),
+        runtime_fn: None,
+        summary: "Build a mutable slice from a raw mutable pointer and a length.",
+        description: "`@parts_to_mut_slice(p: MutPtr(T), n: usize) -> MutSlice(T)`. Requires a `checked` block.",
+        examples: &[],
+    },
+    IntrinsicDef {
         id: IntrinsicId::SliceIndexWrite,
         name: "slice_index_write",
         kind: IntrinsicKind::Expr,
@@ -915,6 +967,13 @@ pub const SLICE_METHODS: &[SliceMethod] = &[
         intrinsic_name: "slice_is_empty",
         requires_checked: false,
     },
+    SliceMethod {
+        kind: SliceKind::Slice,
+        name: "ptr",
+        intrinsic: IntrinsicId::SlicePtr,
+        intrinsic_name: "slice_ptr",
+        requires_checked: true,
+    },
     // ---- Methods on MutSlice(T) ----
     SliceMethod {
         kind: SliceKind::MutSlice,
@@ -929,6 +988,20 @@ pub const SLICE_METHODS: &[SliceMethod] = &[
         intrinsic: IntrinsicId::SliceIsEmpty,
         intrinsic_name: "slice_is_empty",
         requires_checked: false,
+    },
+    SliceMethod {
+        kind: SliceKind::MutSlice,
+        name: "ptr",
+        intrinsic: IntrinsicId::SlicePtr,
+        intrinsic_name: "slice_ptr",
+        requires_checked: true,
+    },
+    SliceMethod {
+        kind: SliceKind::MutSlice,
+        name: "ptr_mut",
+        intrinsic: IntrinsicId::SlicePtrMut,
+        intrinsic_name: "slice_ptr_mut",
+        requires_checked: true,
     },
 ];
 
@@ -1142,6 +1215,10 @@ mod tests {
                 | IntrinsicId::SliceIsEmpty
                 | IntrinsicId::SliceIndexRead
                 | IntrinsicId::SliceIndexWrite
+                | IntrinsicId::SlicePtr
+                | IntrinsicId::SlicePtrMut
+                | IntrinsicId::PartsToSlice
+                | IntrinsicId::PartsToMutSlice
                 | IntrinsicId::TestPreviewGate => {}
             }
         }
@@ -1200,6 +1277,10 @@ mod tests {
             "raw",
             "raw_mut",
             "syscall",
+            "slice_ptr",
+            "slice_ptr_mut",
+            "parts_to_slice",
+            "parts_to_mut_slice",
         ]
         .into_iter()
         .collect();

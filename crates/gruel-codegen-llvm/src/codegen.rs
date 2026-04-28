@@ -3632,6 +3632,45 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 None
             }
 
+            // ADR-0064: extract the data pointer from a slice. The result
+            // is a `Ptr(T)` (or `MutPtr(T)`) backed by the same LLVM `ptr`.
+            IntrinsicId::SlicePtr | IntrinsicId::SlicePtrMut => {
+                let recv_val = self.get_value(args[0]).into_struct_value();
+                let ptr = self
+                    .builder
+                    .build_extract_value(recv_val, 0, "slice_ptr")
+                    .unwrap()
+                    .into_pointer_value();
+                Some(ptr.into())
+            }
+            // ADR-0064: build a slice from (raw_ptr, length).
+            IntrinsicId::PartsToSlice | IntrinsicId::PartsToMutSlice => {
+                let ptr_val = self.get_value(args[0]).into_pointer_value();
+                let raw_n = self.get_value(args[1]).into_int_value();
+                let i64_ty = self.ctx.i64_type();
+                let bits = raw_n.get_type().get_bit_width();
+                let n_i64 = if bits < 64 {
+                    self.builder.build_int_z_extend(raw_n, i64_ty, "n").unwrap()
+                } else if bits > 64 {
+                    self.builder.build_int_truncate(raw_n, i64_ty, "n").unwrap()
+                } else {
+                    raw_n
+                };
+                let slice_llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
+                    .expect("slice has LLVM lowering")
+                    .into_struct_type();
+                let undef = slice_llvm_ty.get_undef();
+                let with_ptr = self
+                    .builder
+                    .build_insert_value(undef, ptr_val, 0, "p2s_p")
+                    .unwrap();
+                let agg = self
+                    .builder
+                    .build_insert_value(with_ptr, n_i64, 1, "p2s")
+                    .unwrap();
+                Some(agg.into_struct_value().into())
+            }
+
             // ADR-0064: Slice operations.
             //
             // A slice is lowered to the LLVM aggregate `{ ptr, i64 }` (see

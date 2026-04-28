@@ -98,3 +98,19 @@ would move out of indexed position. (Mirrors the array rule from
 `s[i] = v` is an assignment to the element at position `i`. It is valid
 only when `s` has type `MutSlice(T)`. Bounds-check semantics follow
 7.2:11.
+
+## `checked`-block Operations
+
+{{ rule(id="7.2:14", cat="normative") }}
+
+The methods `s.ptr()` (on any slice) and `s.ptr_mut()` (on `MutSlice(T)`
+only) extract the underlying data pointer. Both **MUST** appear inside a
+`checked` block.
+
+{{ rule(id="7.2:15", cat="normative") }}
+
+The intrinsics `@parts_to_slice(p, n)` and `@parts_to_mut_slice(p, n)`
+build a slice from a raw pointer and a length. They **MUST** appear
+inside a `checked` block. `@parts_to_slice` accepts `Ptr(T)` and
+produces `Slice(T)`; `@parts_to_mut_slice` accepts `MutPtr(T)` and
+produces `MutSlice(T)`.

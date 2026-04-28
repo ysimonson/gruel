@@ -1,0 +1,131 @@
+# Slice checked-block operations (ADR-0064 phase 6)
+#
+# `s.ptr()`, `s.ptr_mut()`, `@parts_to_slice`, `@parts_to_mut_slice`.
+
+[section]
+id = "slices.checked_ops"
+spec_chapter = "7.2"
+name = "Slice checked operations"
+
+[[case]]
+name = "slice_ptr_in_checked"
+spec = ["7.2:14"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [10, 20, 30];
+    let s: Slice(i32) = &arr[..];
+    checked {
+        let p: Ptr(i32) = s.ptr();
+        p.read()
+    }
+}
+"""
+exit_code = 10
+
+[[case]]
+name = "slice_ptr_outside_checked_rejected"
+spec = ["7.2:14"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [10, 20, 30];
+    let s: Slice(i32) = &arr[..];
+    let p: Ptr(i32) = s.ptr();
+    0
+}
+"""
+compile_fail = true
+error_contains = "checked"
+
+[[case]]
+name = "mut_slice_ptr_mut_in_checked"
+spec = ["7.2:14"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut arr: [i32; 3] = [1, 2, 3];
+    let m: MutSlice(i32) = &mut arr[..];
+    checked {
+        let p: MutPtr(i32) = m.ptr_mut();
+        p.write(99);
+    };
+    arr[0]
+}
+"""
+exit_code = 99
+
+[[case]]
+name = "ptr_mut_on_immut_slice_rejected"
+spec = ["7.2:14"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [1, 2, 3];
+    let s: Slice(i32) = &arr[..];
+    checked {
+        let p: MutPtr(i32) = s.ptr_mut();
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "method"
+
+[[case]]
+name = "parts_to_slice_basic"
+spec = ["7.2:15"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    checked {
+        let p: Ptr(i32) = Ptr(i32)::from(&x);
+        let n: usize = 1;
+        let s: Slice(i32) = @parts_to_slice(p, n);
+        @cast(s.len(), i32)
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "parts_to_slice_outside_checked_rejected"
+spec = ["7.2:15"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    let p: Ptr(i32) = checked { Ptr(i32)::from(&x) };
+    let n: usize = 1;
+    let s: Slice(i32) = @parts_to_slice(p, n);
+    0
+}
+"""
+compile_fail = true
+error_contains = "checked"
+
+[[case]]
+name = "parts_to_mut_slice_basic"
+spec = ["7.2:15"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 42;
+    checked {
+        let p: MutPtr(i32) = MutPtr(i32)::from(&mut x);
+        let n: usize = 1;
+        let m: MutSlice(i32) = @parts_to_mut_slice(p, n);
+        m[0] = 99;
+    };
+    x
+}
+"""
+exit_code = 99

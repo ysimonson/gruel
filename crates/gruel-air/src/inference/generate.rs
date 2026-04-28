@@ -832,6 +832,32 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Var(self.fresh_var())
                     }
+                    // ADR-0064: slice intrinsics. Sema produces the actual
+                    // type once it has the receiver/argument types resolved;
+                    // here we just emit a fresh variable.
+                    Some(IntrinsicId::SliceLen) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::USIZE)
+                    }
+                    Some(IntrinsicId::SliceIsEmpty) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::BOOL)
+                    }
+                    Some(IntrinsicId::SliceIndexRead) => {
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
+                    Some(IntrinsicId::SliceIndexWrite) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::UNIT)
+                    }
+                    Some(IntrinsicId::SlicePtr)
+                    | Some(IntrinsicId::SlicePtrMut)
+                    | Some(IntrinsicId::PartsToSlice)
+                    | Some(IntrinsicId::PartsToMutSlice) => {
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
                     Some(IntrinsicId::Panic) | Some(IntrinsicId::CompileError) => {
                         // Diverging intrinsics return Never so they unify with any
                         // expected type (e.g. `if c { 42 } else { @panic("..") }`).

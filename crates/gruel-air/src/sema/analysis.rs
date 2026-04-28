@@ -4204,10 +4204,20 @@ impl<'a> Sema<'a> {
             | IntrinsicId::SliceLen
             | IntrinsicId::SliceIsEmpty
             | IntrinsicId::SliceIndexRead
-            | IntrinsicId::SliceIndexWrite => Err(CompileError::new(
+            | IntrinsicId::SliceIndexWrite
+            | IntrinsicId::SlicePtr
+            | IntrinsicId::SlicePtrMut => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),
+
+            // ADR-0064: build a slice from a raw pointer and a length.
+            IntrinsicId::PartsToSlice => {
+                self.analyze_parts_to_slice_intrinsic(air, &args, span, ctx, false)
+            }
+            IntrinsicId::PartsToMutSlice => {
+                self.analyze_parts_to_slice_intrinsic(air, &args, span, ctx, true)
+            }
         }
     }
 
@@ -10409,6 +10419,23 @@ impl<'a> Sema<'a> {
         let result_ty = match entry.intrinsic {
             IntrinsicId::SliceLen => Type::USIZE,
             IntrinsicId::SliceIsEmpty => Type::BOOL,
+            IntrinsicId::SlicePtr => {
+                let elem_ty = match receiver_result.ty.kind() {
+                    TypeKind::Slice(id) => self.type_pool.slice_def(id),
+                    TypeKind::MutSlice(id) => self.type_pool.mut_slice_def(id),
+                    _ => unreachable!("slice receiver"),
+                };
+                let id = self.type_pool.intern_ptr_const_from_type(elem_ty);
+                Type::new_ptr_const(id)
+            }
+            IntrinsicId::SlicePtrMut => {
+                let elem_ty = match receiver_result.ty.kind() {
+                    TypeKind::MutSlice(id) => self.type_pool.mut_slice_def(id),
+                    _ => unreachable!("ptr_mut requires MutSlice receiver"),
+                };
+                let id = self.type_pool.intern_ptr_mut_from_type(elem_ty);
+                Type::new_ptr_mut(id)
+            }
             _ => unreachable!("SLICE_METHODS only references slice intrinsics"),
         };
 
@@ -10419,6 +10446,79 @@ impl<'a> Sema<'a> {
                 name: intrinsic_name_sym,
                 args_start,
                 args_len: 1,
+            },
+            ty: result_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, result_ty))
+    }
+
+    /// ADR-0064: `@parts_to_slice(p, n)` / `@parts_to_mut_slice(p, n)`.
+    pub(crate) fn analyze_parts_to_slice_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+        is_mut: bool,
+    ) -> CompileResult<AnalysisResult> {
+        let intrinsic_name = if is_mut {
+            "parts_to_mut_slice"
+        } else {
+            "parts_to_slice"
+        };
+        if args.len() != 2 {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: 2,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+        let p = self.analyze_inst(air, args[0].value, ctx)?;
+        let n = self.analyze_inst(air, args[1].value, ctx)?;
+
+        let elem_ty = match (p.ty.kind(), is_mut) {
+            (TypeKind::PtrConst(id), false) => self.type_pool.ptr_const_def(id),
+            (TypeKind::PtrMut(id), true) => self.type_pool.ptr_mut_def(id),
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                        name: intrinsic_name.to_string(),
+                        expected: if is_mut { "MutPtr(T)" } else { "Ptr(T)" }.to_string(),
+                        found: self.format_type_name(p.ty),
+                    })),
+                    span,
+                ));
+            }
+        };
+        if n.ty != Type::USIZE && !n.ty.is_error() && !n.ty.is_never() {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
+                    name: intrinsic_name.to_string(),
+                    expected: "usize".to_string(),
+                    found: self.format_type_name(n.ty),
+                })),
+                span,
+            ));
+        }
+
+        let result_ty = if is_mut {
+            let id = self.type_pool.intern_mut_slice_from_type(elem_ty);
+            Type::new_mut_slice(id)
+        } else {
+            let id = self.type_pool.intern_slice_from_type(elem_ty);
+            Type::new_slice(id)
+        };
+
+        let name_sym = self.interner.get_or_intern(intrinsic_name);
+        let args_start = air.add_extra(&[p.air_ref.as_u32(), n.air_ref.as_u32()]);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name: name_sym,
+                args_start,
+                args_len: 2,
             },
             ty: result_ty,
             span,
