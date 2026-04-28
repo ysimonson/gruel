@@ -681,6 +681,31 @@ impl<'a> AstGen<'a> {
                 })
             }
             Expr::Unary(un) => {
+                // ADR-0064: `&arr[range]` / `&mut arr[range]` are lowered to
+                // `MakeSlice`, not `MakeRef`. Detect the shape before emitting
+                // any instructions for the operand so that the range
+                // sub-expressions don't escape into a stand-alone `Range` IR
+                // node (there is none).
+                if matches!(un.op, UnaryOp::Ref | UnaryOp::MutRef)
+                    && let Expr::Index(index_expr) = &*un.operand
+                    && let Expr::Range(range_expr) = &*index_expr.index
+                {
+                    let base = self.gen_expr(&index_expr.base);
+                    let lo = range_expr.lo.as_ref().map(|e| self.gen_expr(e));
+                    let hi = range_expr.hi.as_ref().map(|e| self.gen_expr(e));
+                    let sentinel = range_expr.sentinel.as_ref().map(|e| self.gen_expr(e));
+                    let is_mut = matches!(un.op, UnaryOp::MutRef);
+                    return self.rir.add_inst(Inst {
+                        data: InstData::MakeSlice {
+                            base,
+                            lo,
+                            hi,
+                            sentinel,
+                            is_mut,
+                        },
+                        span: un.span,
+                    });
+                }
                 let operand = self.gen_expr(&un.operand);
                 let data = match un.op {
                     UnaryOp::Neg => InstData::Neg { operand },
@@ -964,6 +989,18 @@ impl<'a> AstGen<'a> {
                 })
             }
             Expr::Index(index_expr) => {
+                // ADR-0064: a range subscript without `&` / `&mut` is
+                // rejected (no slice value without a borrow). Astgen
+                // produces a tagged "bad subscript" instruction which sema
+                // turns into a diagnostic; the borrow-form
+                // `&arr[range]` is intercepted in `Expr::Unary` above and
+                // never reaches this arm.
+                if matches!(&*index_expr.index, Expr::Range(_)) {
+                    return self.rir.add_inst(Inst {
+                        data: InstData::BareRangeSubscript,
+                        span: index_expr.span,
+                    });
+                }
                 let base = self.gen_expr(&index_expr.base);
                 let index = self.gen_expr(&index_expr.index);
 
@@ -1334,6 +1371,14 @@ impl<'a> AstGen<'a> {
                     span: anon_fn.span,
                 })
             }
+            // ADR-0064: stray range expressions outside of `arr[..]`
+            // subscript position. The parser only emits `Expr::Range` as the
+            // index of an `Expr::Index`; reaching this arm means the parser
+            // was extended without updating astgen.
+            Expr::Range(range_expr) => self.rir.add_inst(Inst {
+                data: InstData::BareRangeSubscript,
+                span: range_expr.span,
+            }),
         }
     }
 

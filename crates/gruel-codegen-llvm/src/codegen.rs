@@ -1815,6 +1815,119 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 };
                 self.build_place_gep_chain(&place, inner_ty).map(Into::into)
             }
+            // ADR-0064: build a fat pointer `{ptr, len}` over a sub-range
+            // of an array place. The base array's storage pointer is
+            // recovered from the place via `build_place_gep_chain`. `lo`
+            // defaults to 0 and `hi` defaults to `array_len`. We runtime
+            // check `lo <= hi <= array_len` and panic via
+            // `__gruel_bounds_check` on failure.
+            CfgInstData::MakeSlice(data) => {
+                let place = data.place;
+                let array_len = data.array_len;
+                let lo = data.lo;
+                let hi = data.hi;
+                use inkwell::IntPredicate;
+
+                let elem_ty = match ty.kind() {
+                    gruel_air::TypeKind::Slice(id) => self.type_pool.slice_def(id),
+                    gruel_air::TypeKind::MutSlice(id) => self.type_pool.mut_slice_def(id),
+                    _ => unreachable!("MakeSlice produces a slice type"),
+                };
+                let i64_ty = self.ctx.i64_type();
+                let array_len_val = i64_ty.const_int(array_len, false);
+
+                let coerce_to_i64 = |this: &Self,
+                                     v: inkwell::values::IntValue<'ctx>|
+                 -> inkwell::values::IntValue<'ctx> {
+                    let bits = v.get_type().get_bit_width();
+                    if bits < 64 {
+                        this.builder.build_int_z_extend(v, i64_ty, "slc").unwrap()
+                    } else if bits > 64 {
+                        this.builder.build_int_truncate(v, i64_ty, "slc").unwrap()
+                    } else {
+                        v
+                    }
+                };
+
+                let lo_val = match lo {
+                    Some(lo) => {
+                        let v = self.get_value(lo).into_int_value();
+                        coerce_to_i64(self, v)
+                    }
+                    None => i64_ty.const_zero(),
+                };
+                let hi_val = match hi {
+                    Some(hi) => {
+                        let v = self.get_value(hi).into_int_value();
+                        coerce_to_i64(self, v)
+                    }
+                    None => array_len_val,
+                };
+
+                // Runtime check: lo <= hi && hi <= array_len. Codegen reuses
+                // the array bounds-check helper.
+                let lo_ok = self
+                    .builder
+                    .build_int_compare(IntPredicate::ULE, lo_val, hi_val, "slc_lo_hi")
+                    .unwrap();
+                let hi_ok = self
+                    .builder
+                    .build_int_compare(IntPredicate::ULE, hi_val, array_len_val, "slc_hi_n")
+                    .unwrap();
+                let in_bounds = self.builder.build_and(lo_ok, hi_ok, "slc_ok").unwrap();
+                let in_bounds = self.build_expect_i1(in_bounds, true);
+                let current_fn = self
+                    .builder
+                    .get_insert_block()
+                    .unwrap()
+                    .get_parent()
+                    .unwrap();
+                let ok_bb = self.ctx.append_basic_block(current_fn, "slc_ok");
+                let oob_bb = self.ctx.append_basic_block(current_fn, "slc_oob");
+                self.builder
+                    .build_conditional_branch(in_bounds, ok_bb, oob_bb)
+                    .unwrap();
+                self.builder.position_at_end(oob_bb);
+                let check_fn = self.get_or_declare_noreturn_fn("__gruel_bounds_check");
+                self.builder.build_call(check_fn, &[], "").unwrap();
+                self.builder.build_unreachable().unwrap();
+                self.builder.position_at_end(ok_bb);
+
+                // ptr = GEP &arr[lo]; offset by `lo` elements.
+                let arr_ptr = match self.build_place_gep_chain(&place, elem_ty) {
+                    Some(p) => p,
+                    None => return Ok(()),
+                };
+                let elem_llvm_ty = gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool);
+                let data_ptr = match elem_llvm_ty {
+                    Some(ety) => unsafe {
+                        self.builder
+                            .build_gep(ety, arr_ptr, &[lo_val], "slc_ptr")
+                            .unwrap()
+                    },
+                    None => arr_ptr, // zero-sized element — pointer arithmetic is a no-op
+                };
+
+                let len_val = self
+                    .builder
+                    .build_int_sub(hi_val, lo_val, "slc_len")
+                    .unwrap();
+
+                // Build the {ptr, i64} aggregate.
+                let slice_llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
+                    .expect("slice type has LLVM lowering")
+                    .into_struct_type();
+                let undef = slice_llvm_ty.get_undef();
+                let with_ptr = self
+                    .builder
+                    .build_insert_value(undef, data_ptr, 0, "slc_p")
+                    .unwrap();
+                let agg = self
+                    .builder
+                    .build_insert_value(with_ptr, len_val, 1, "slc")
+                    .unwrap();
+                Some(agg.into_struct_value().into())
+            }
             CfgInstData::Store { slot, value } => {
                 let value_ty = self.cfg.get_inst(value).ty;
                 // Unit-typed stores have no LLVM representation — skip.

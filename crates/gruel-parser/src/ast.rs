@@ -664,6 +664,10 @@ pub enum Expr {
     Tuple(TupleExpr),
     /// Tuple index expression (e.g., `t.0`, `t.1`) (ADR-0048)
     TupleIndex(TupleIndexExpr),
+    /// Range expression for slice subscripts (ADR-0064): `..`, `a..`, `..b`,
+    /// `a..b`, `a..b :s`. Only legal as the index of an `IndexExpr`; sema
+    /// rejects bare ranges in other positions.
+    Range(RangeExpr),
     /// Anonymous function expression (e.g., `fn(x: i32) -> i32 { x + 1 }`) (ADR-0055)
     AnonFn(AnonFnExpr),
     /// Error node for recovered parse errors.
@@ -1100,8 +1104,23 @@ pub struct ArrayLitExpr {
 pub struct IndexExpr {
     /// The array being indexed
     pub base: Box<Expr>,
-    /// The index expression
+    /// The index expression. May be `Expr::Range(_)` for slice subscripts
+    /// (ADR-0064); sema enforces that range subscripts appear only as the
+    /// place under `&` / `&mut`.
     pub index: Box<Expr>,
+    pub span: Span,
+}
+
+/// A range expression used as a slice subscript (ADR-0064).
+///
+/// Ranges are recognized only inside `[ … ]`. `lo` and `hi` are optional
+/// (defaulting to 0 and `arr.len()` respectively). `sentinel` carries the
+/// `lo..hi :s` form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeExpr {
+    pub lo: Option<Box<Expr>>,
+    pub hi: Option<Box<Expr>>,
+    pub sentinel: Option<Box<Expr>>,
     pub span: Span,
 }
 
@@ -1345,6 +1364,7 @@ impl Expr {
             Expr::TypeLit(type_lit) => type_lit.span,
             Expr::Tuple(tuple) => tuple.span,
             Expr::TupleIndex(ti) => ti.span,
+            Expr::Range(range_expr) => range_expr.span,
             Expr::AnonFn(anon_fn) => anon_fn.span,
             Expr::Error(span) => *span,
         }
@@ -1778,6 +1798,25 @@ fn fmt_expr(f: &mut fmt::Formatter<'_>, expr: &Expr, level: usize) -> fmt::Resul
         Expr::TupleIndex(ti) => {
             writeln!(f, "TupleIndex .{}", ti.index)?;
             fmt_expr(f, &ti.base, level + 1)
+        }
+        Expr::Range(range_expr) => {
+            writeln!(f, "Range")?;
+            if let Some(lo) = &range_expr.lo {
+                indent(f, level + 1)?;
+                writeln!(f, "Lo:")?;
+                fmt_expr(f, lo, level + 2)?;
+            }
+            if let Some(hi) = &range_expr.hi {
+                indent(f, level + 1)?;
+                writeln!(f, "Hi:")?;
+                fmt_expr(f, hi, level + 2)?;
+            }
+            if let Some(s) = &range_expr.sentinel {
+                indent(f, level + 1)?;
+                writeln!(f, "Sentinel:")?;
+                fmt_expr(f, s, level + 2)?;
+            }
+            Ok(())
         }
         Expr::AnonFn(anon_fn) => {
             writeln!(f, "AnonFn (params: {})", anon_fn.params.len())?;

@@ -1038,6 +1038,20 @@ pub enum AirInstData {
     /// the address of the operand's slot.
     MakeRef { operand: AirRef, is_mut: bool },
 
+    /// Slice construction by borrow over a range subscript (ADR-0064).
+    ///
+    /// Lowered from `&arr[range]` / `&mut arr[range]`. `base` must
+    /// designate an array place. `lo` defaults to `0`, `hi` defaults to
+    /// `arr.len()` when absent. `sentinel` carries the optional `:s`
+    /// (Phase 7) — `None` for non-sentinel ranges.
+    MakeSlice {
+        base: AirRef,
+        lo: Option<AirRef>,
+        hi: Option<AirRef>,
+        sentinel: Option<AirRef>,
+        is_mut: bool,
+    },
+
     // Control flow
     /// Conditional branch
     Branch {
@@ -1474,6 +1488,30 @@ impl fmt::Display for Air {
                     if *is_mut { "_mut" } else { "" },
                     operand
                 )?,
+                AirInstData::MakeSlice {
+                    base,
+                    lo,
+                    hi,
+                    sentinel,
+                    is_mut,
+                } => {
+                    write!(
+                        f,
+                        "make_slice{} {}",
+                        if *is_mut { "_mut" } else { "" },
+                        base
+                    )?;
+                    if let Some(lo) = lo {
+                        write!(f, ", lo={}", lo)?;
+                    }
+                    if let Some(hi) = hi {
+                        write!(f, ", hi={}", hi)?;
+                    }
+                    if let Some(s) = sentinel {
+                        write!(f, ", sentinel={}", s)?;
+                    }
+                    writeln!(f)?;
+                }
                 AirInstData::Branch {
                     cond,
                     then_value,

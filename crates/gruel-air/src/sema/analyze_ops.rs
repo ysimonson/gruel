@@ -640,6 +640,174 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, result_ty))
     }
 
+    /// Analyze `&arr[range]` / `&mut arr[range]` (ADR-0064).
+    ///
+    /// The base must designate an lvalue place of array type. `lo` and `hi`
+    /// are optional integer expressions; when both are constant the bounds
+    /// are checked at compile time. The result type is `Slice(T)` /
+    /// `MutSlice(T)` over the array element type.
+    pub(crate) fn analyze_make_slice(
+        &mut self,
+        air: &mut Air,
+        inst_ref: InstRef,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        let inst = self.rir.get(inst_ref);
+        let (base, lo_opt, hi_opt, sentinel_opt, is_mut) = match &inst.data {
+            InstData::MakeSlice {
+                base,
+                lo,
+                hi,
+                sentinel,
+                is_mut,
+            } => (*base, *lo, *hi, *sentinel, *is_mut),
+            _ => unreachable!("analyze_make_slice called with non-MakeSlice instruction"),
+        };
+        let span = inst.span;
+
+        // Slice surface forms are gated behind --preview slices.
+        self.require_preview(
+            gruel_error::PreviewFeature::Slices,
+            "slice borrow over a range subscript",
+            span,
+        )?;
+
+        // The base must be an lvalue (variable, parameter, or place
+        // expression — same rule as `&x` / `&mut x`).
+        let root_var = self.extract_root_variable(base).ok_or_else(|| {
+            let kind = if is_mut {
+                ErrorKind::InoutNonLvalue
+            } else {
+                ErrorKind::BorrowNonLvalue
+            };
+            CompileError::new(kind, self.rir.get(base).span)
+        })?;
+
+        // `&mut arr[..]` requires the root binding to be mutable.
+        if is_mut
+            && let Some(local) = ctx.locals.get(&root_var)
+            && !local.is_mut
+        {
+            let name = self.interner.resolve(&root_var).to_string();
+            return Err(CompileError::new(ErrorKind::AssignToImmutable(name), span));
+        }
+
+        let base_result = self.analyze_inst(air, base, ctx)?;
+        let base_ty = base_result.ty;
+
+        let (elem_ty, array_len) = match base_ty.kind() {
+            TypeKind::Array(id) => {
+                let (elem, len) = self.type_pool.array_def(id);
+                (elem, len)
+            }
+            _ if base_ty.is_error() || base_ty.is_never() => (Type::ERROR, 0u64),
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::IndexOnNonArray {
+                        found: self.format_type_name(base_ty),
+                    },
+                    span,
+                ));
+            }
+        };
+
+        let analyze_endpoint = |this: &mut Self,
+                                air: &mut Air,
+                                ctx: &mut AnalysisContext,
+                                e_ref: Option<InstRef>|
+         -> CompileResult<Option<AnalysisResult>> {
+            match e_ref {
+                None => Ok(None),
+                Some(r) => {
+                    let result = this.analyze_inst(air, r, ctx)?;
+                    if !result.ty.is_integer() && !result.ty.is_error() && !result.ty.is_never() {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: "usize".to_string(),
+                                found: this.format_type_name(result.ty),
+                            },
+                            this.rir.get(r).span,
+                        ));
+                    }
+                    Ok(Some(result))
+                }
+            }
+        };
+
+        let lo_result = analyze_endpoint(self, air, ctx, lo_opt)?;
+        let hi_result = analyze_endpoint(self, air, ctx, hi_opt)?;
+        let sentinel_result = match sentinel_opt {
+            Some(r) => Some(self.analyze_inst(air, r, ctx)?),
+            None => None,
+        };
+
+        // Compile-time bounds check when both endpoints are integer
+        // constants and the array length is statically known.
+        let const_lo = lo_opt.and_then(|r| self.const_int_value(r));
+        let const_hi = hi_opt.and_then(|r| self.const_int_value(r));
+        let lo_default = const_lo.unwrap_or(0);
+        let hi_default = const_hi.or(if lo_opt.is_none() && hi_opt.is_none() {
+            Some(array_len as i128)
+        } else {
+            None
+        });
+        if !base_ty.is_error()
+            && let Some(hi_v) = hi_default
+        {
+            if lo_default < 0 || hi_v < 0 || lo_default > hi_v {
+                return Err(CompileError::new(
+                    ErrorKind::IndexOutOfBounds {
+                        index: lo_default as i64,
+                        length: array_len,
+                    },
+                    span,
+                ));
+            }
+            if (hi_v as u64) > array_len {
+                return Err(CompileError::new(
+                    ErrorKind::IndexOutOfBounds {
+                        index: hi_v as i64,
+                        length: array_len,
+                    },
+                    span,
+                ));
+            }
+        }
+
+        let result_ty = if base_ty.is_error() {
+            Type::ERROR
+        } else if is_mut {
+            let id = self.type_pool.intern_mut_slice_from_type(elem_ty);
+            Type::new_mut_slice(id)
+        } else {
+            let id = self.type_pool.intern_slice_from_type(elem_ty);
+            Type::new_slice(id)
+        };
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::MakeSlice {
+                base: base_result.air_ref,
+                lo: lo_result.as_ref().map(|r| r.air_ref),
+                hi: hi_result.as_ref().map(|r| r.air_ref),
+                sentinel: sentinel_result.as_ref().map(|r| r.air_ref),
+                is_mut,
+            },
+            ty: result_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, result_ty))
+    }
+
+    /// Recover the integer value of a RIR instruction if it's a literal
+    /// `IntConst`, with an inverted unary minus on top.
+    fn const_int_value(&self, inst_ref: InstRef) -> Option<i128> {
+        match &self.rir.get(inst_ref).data {
+            InstData::IntConst(v) => Some(*v as i128),
+            InstData::Neg { operand } => self.const_int_value(*operand).map(|v| -v),
+            _ => None,
+        }
+    }
+
     // ========================================================================
     // Logical operations: And, Or
     // ========================================================================

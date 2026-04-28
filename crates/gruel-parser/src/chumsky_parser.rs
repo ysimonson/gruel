@@ -11,9 +11,10 @@ use crate::ast::{
     EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function,
     Ident, IfExpr, IndexExpr, IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item,
     LetStatement, LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, MethodSig, NegIntLit,
-    Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, ReturnExpr, SelfExpr, SelfMode,
-    SelfParam, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern, TupleExpr,
-    TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
+    Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, RangeExpr, ReturnExpr, SelfExpr,
+    SelfMode, SelfParam, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern,
+    TupleExpr, TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility,
+    WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -1740,7 +1741,43 @@ where
             Suffix::TupleField(idx, span)
         });
 
-    let index_suffix = expr
+    // ADR-0064: range subscripts. Inside `[ … ]`, accept either a regular
+    // expression (existing array indexing) or a range form: `..`, `..hi`,
+    // `lo..`, `lo..hi`. The parser produces `Expr::Range(_)` for the range
+    // forms; sema enforces that ranges only appear under `&` / `&mut`.
+    //
+    // The lexer has no `DotDot` token — `..` is two adjacent `.` tokens
+    // (same convention as the rest-pattern parser).
+    let dot_dot = just(TokenKind::Dot).then(just(TokenKind::Dot));
+
+    let range_or_expr = choice((
+        // `..` or `..hi` — leading `..` makes this unambiguous.
+        dot_dot
+            .ignore_then(expr.clone().or_not())
+            .map_with(|hi, e| {
+                Expr::Range(RangeExpr {
+                    lo: None,
+                    hi: hi.map(Box::new),
+                    sentinel: None,
+                    span: span_from_extra(e),
+                })
+            }),
+        // `expr` optionally followed by `..` and optionally another expr.
+        // No `..` => plain index expression.
+        expr.clone()
+            .then(dot_dot.ignore_then(expr.clone().or_not()).or_not())
+            .map_with(|(lhs, suffix), e| match suffix {
+                Some(hi) => Expr::Range(RangeExpr {
+                    lo: Some(Box::new(lhs)),
+                    hi: hi.map(Box::new),
+                    sentinel: None,
+                    span: span_from_extra(e),
+                }),
+                None => lhs,
+            }),
+    ));
+
+    let index_suffix = range_or_expr
         .delimited_by(just(TokenKind::LBracket), just(TokenKind::RBracket))
         .map_with(|index, e| Suffix::Index(index, offset_to_u32(e.span().end)));
 
@@ -3613,6 +3650,17 @@ fn validate_expr(expr: &Expr, errors: &mut Vec<CompileError>, v: &AstValidator) 
         }
         Expr::Comptime(c) => validate_expr(&c.expr, errors, v),
         Expr::AnonFn(a) => validate_block(&a.body, errors, v),
+        Expr::Range(r) => {
+            if let Some(lo) = &r.lo {
+                validate_expr(lo, errors, v);
+            }
+            if let Some(hi) = &r.hi {
+                validate_expr(hi, errors, v);
+            }
+            if let Some(s) = &r.sentinel {
+                validate_expr(s, errors, v);
+            }
+        }
         Expr::ComptimeUnrollFor(_) | Expr::Checked(_) => {}
         Expr::TypeLit(_)
         | Expr::Int(_)

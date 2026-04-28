@@ -417,6 +417,32 @@ impl<'a> ConstraintGenerator<'a> {
                 InferType::Var(self.fresh_var())
             }
 
+            // ADR-0064: `&arr[range]` / `&mut arr[range]` produces a slice.
+            // Defer the actual `Slice(T)` / `MutSlice(T)` type to sema; record
+            // the sub-expressions so they receive types.
+            InstData::MakeSlice {
+                base,
+                lo,
+                hi,
+                sentinel,
+                ..
+            } => {
+                let _ = self.generate(*base, ctx);
+                if let Some(lo) = lo {
+                    self.generate(*lo, ctx);
+                }
+                if let Some(hi) = hi {
+                    self.generate(*hi, ctx);
+                }
+                if let Some(s) = sentinel {
+                    self.generate(*s, ctx);
+                }
+                InferType::Var(self.fresh_var())
+            }
+
+            // ADR-0064: a range subscript without `&` / `&mut`. Sema rejects.
+            InstData::BareRangeSubscript => InferType::Concrete(Type::ERROR),
+
             // Variable reference
             InstData::VarRef { name } => {
                 if let Some(local) = ctx.locals.get(name) {

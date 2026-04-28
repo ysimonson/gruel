@@ -1,0 +1,157 @@
+# Slice Construction (ADR-0064 phase 4)
+#
+# Tests for `&arr[range]` and `&mut arr[range]` borrow forms.
+
+[section]
+id = "slices.construction"
+spec_chapter = "7.2"
+name = "Slice Construction via Range Subscripts"
+
+[[case]]
+name = "whole_slice_immut"
+spec = ["7.2:5", "7.2:8"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 5] = [10, 20, 30, 40, 50];
+    let s: Slice(i32) = &arr[..];
+    @cast(s.len(), i32)
+}
+"""
+exit_code = 5
+
+[[case]]
+name = "whole_slice_mut"
+spec = ["7.2:5", "7.2:8"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut arr: [i32; 5] = [1, 2, 3, 4, 5];
+    let m: MutSlice(i32) = &mut arr[..];
+    @cast(m.len(), i32)
+}
+"""
+exit_code = 5
+
+[[case]]
+name = "subrange_immut"
+spec = ["7.2:5", "7.2:8"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 5] = [10, 20, 30, 40, 50];
+    let mid: Slice(i32) = &arr[1..4];
+    @cast(mid.len(), i32)
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "subrange_lo_only"
+spec = ["7.2:5"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 5] = [1, 2, 3, 4, 5];
+    let s: Slice(i32) = &arr[2..];
+    @cast(s.len(), i32)
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "subrange_hi_only"
+spec = ["7.2:5"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 5] = [1, 2, 3, 4, 5];
+    let s: Slice(i32) = &arr[..3];
+    @cast(s.len(), i32)
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "compile_time_oob_high"
+spec = ["7.2:6"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 5] = [1, 2, 3, 4, 5];
+    let s: Slice(i32) = &arr[0..10];
+    @cast(s.len(), i32)
+}
+"""
+compile_fail = true
+error_contains = "index out of bounds"
+
+[[case]]
+name = "compile_time_oob_inverted"
+spec = ["7.2:6"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 5] = [1, 2, 3, 4, 5];
+    let s: Slice(i32) = &arr[3..1];
+    @cast(s.len(), i32)
+}
+"""
+compile_fail = true
+error_contains = "index out of bounds"
+
+[[case]]
+name = "bare_range_rejected"
+spec = ["7.2:9"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 5] = [1, 2, 3, 4, 5];
+    let s = arr[1..3];
+    0
+}
+"""
+compile_fail = true
+error_contains = "must be borrowed"
+
+[[case]]
+name = "runtime_oob_panics"
+spec = ["7.2:7"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn pick_hi() -> usize {
+    10
+}
+
+fn main() -> i32 {
+    let arr: [i32; 5] = [1, 2, 3, 4, 5];
+    let hi: usize = pick_hi();
+    let s: Slice(i32) = &arr[0..hi];
+    @cast(s.len(), i32)
+}
+"""
+exit_code = 101
+
+[[case]]
+name = "mut_slice_immut_array_rejected"
+spec = ["7.2:8"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let arr: [i32; 5] = [1, 2, 3, 4, 5];
+    let m: MutSlice(i32) = &mut arr[..];
+    0
+}
+"""
+compile_fail = true
+error_contains = "immutable"

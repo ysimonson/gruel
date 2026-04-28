@@ -2300,6 +2300,19 @@ impl<'a> Sema<'a> {
             // Reference construction (ADR-0062): `&x` / `&mut x`.
             InstData::MakeRef { .. } => self.analyze_make_ref(air, inst_ref, ctx),
 
+            // ADR-0064: slice construction by borrow over a range subscript
+            // (`&arr[range]` / `&mut arr[range]`).
+            InstData::MakeSlice { .. } => self.analyze_make_slice(air, inst_ref, ctx),
+
+            // ADR-0064: range subscript without `&` / `&mut`.
+            InstData::BareRangeSubscript => Err(CompileError::new(
+                ErrorKind::ParseError(
+                    "range subscripts produce slices and must be borrowed with `&` or `&mut`"
+                        .to_string(),
+                ),
+                inst.span,
+            )),
+
             // Control flow
             InstData::Branch { .. }
             | InstData::Loop { .. }

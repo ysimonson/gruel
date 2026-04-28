@@ -1732,6 +1732,20 @@ impl Rir {
                 operand: renumber(*operand),
                 is_mut: *is_mut,
             },
+            InstData::BareRangeSubscript => InstData::BareRangeSubscript,
+            InstData::MakeSlice {
+                base,
+                lo,
+                hi,
+                sentinel,
+                is_mut,
+            } => InstData::MakeSlice {
+                base: renumber(*base),
+                lo: renumber_opt(*lo),
+                hi: renumber_opt(*hi),
+                sentinel: renumber_opt(*sentinel),
+                is_mut: *is_mut,
+            },
 
             // Control flow
             InstData::Branch {
@@ -2323,6 +2337,8 @@ impl Rir {
                 | InstData::Not { .. }
                 | InstData::BitNot { .. }
                 | InstData::MakeRef { .. }
+                | InstData::BareRangeSubscript
+                | InstData::MakeSlice { .. }
                 | InstData::Branch { .. }
                 | InstData::Loop { .. }
                 | InstData::For { .. }
@@ -2439,6 +2455,27 @@ pub enum InstData {
     /// `&mut x` (`is_mut = true`). Operand must be an lvalue. Result type
     /// is `Ref(T)` or `MutRef(T)` where `T` is the operand's type.
     MakeRef { operand: InstRef, is_mut: bool },
+
+    /// ADR-0064: a range-shaped subscript that wasn't borrowed by `&` or
+    /// `&mut`. There is no slice value without a borrow, so this carries
+    /// no operands; sema reports the error and continues.
+    BareRangeSubscript,
+
+    /// Slice construction by borrow over a range subscript (ADR-0064).
+    ///
+    /// Lowered from `&arr[range]` (`is_mut = false`) and
+    /// `&mut arr[range]` (`is_mut = true`). The `base` must be an lvalue
+    /// of array type. `lo` and `hi` are the range endpoints; `None` means
+    /// the implicit default (`0` for `lo`, `arr.len()` for `hi`).
+    /// `sentinel` carries the optional `:s` form (Phase 7) — `None` for
+    /// non-sentinel ranges.
+    MakeSlice {
+        base: InstRef,
+        lo: Option<InstRef>,
+        hi: Option<InstRef>,
+        sentinel: Option<InstRef>,
+        is_mut: bool,
+    },
 
     // Control flow
     /// Branch: if cond then then_block else else_block
@@ -3202,6 +3239,32 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     operand
                 )
                 .unwrap(),
+                InstData::BareRangeSubscript => writeln!(out, "bare_range_subscript").unwrap(),
+                InstData::MakeSlice {
+                    base,
+                    lo,
+                    hi,
+                    sentinel,
+                    is_mut,
+                } => {
+                    write!(
+                        out,
+                        "make_slice{} {}",
+                        if *is_mut { "_mut" } else { "" },
+                        base
+                    )
+                    .unwrap();
+                    if let Some(lo) = lo {
+                        write!(out, ", lo={}", lo).unwrap();
+                    }
+                    if let Some(hi) = hi {
+                        write!(out, ", hi={}", hi).unwrap();
+                    }
+                    if let Some(s) = sentinel {
+                        write!(out, ", sentinel={}", s).unwrap();
+                    }
+                    writeln!(out).unwrap();
+                }
 
                 // Control flow
                 InstData::Branch {

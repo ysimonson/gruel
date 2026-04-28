@@ -614,6 +614,67 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
+            // ADR-0064: lower the slice borrow into a place + range.
+            AirInstData::MakeSlice {
+                base,
+                lo,
+                hi,
+                sentinel,
+                is_mut,
+            } => {
+                let place = match self.lower_air_lvalue_place(*base) {
+                    Some(p) => p,
+                    None => return Self::diverged(),
+                };
+                // Determine the source array's compile-time length from the
+                // place's root type.
+                let array_len = match self.air.get(*base).ty.kind() {
+                    gruel_air::TypeKind::Array(id) => {
+                        let (_elem, len) = self.type_pool.array_def(id);
+                        len
+                    }
+                    _ => 0,
+                };
+                let lo_val = match lo {
+                    Some(lo) => Some(match self.lower_value(*lo) {
+                        Some(v) => v,
+                        None => return Self::diverged(),
+                    }),
+                    None => None,
+                };
+                let hi_val = match hi {
+                    Some(hi) => Some(match self.lower_value(*hi) {
+                        Some(v) => v,
+                        None => return Self::diverged(),
+                    }),
+                    None => None,
+                };
+                let sentinel_val = match sentinel {
+                    Some(s) => Some(match self.lower_value(*s) {
+                        Some(v) => v,
+                        None => return Self::diverged(),
+                    }),
+                    None => None,
+                };
+                let value = self.emit(
+                    CfgInstData::MakeSlice(Box::new(crate::MakeSliceData {
+                        place,
+                        array_len,
+                        lo: lo_val,
+                        hi: hi_val,
+                        sentinel: sentinel_val,
+                        is_mut: *is_mut,
+                    })),
+                    ty,
+                    span,
+                );
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
             AirInstData::BitAnd(lhs, rhs) => {
                 let Some(lhs_val) = self.lower_value(*lhs) else {
                     return Self::diverged();

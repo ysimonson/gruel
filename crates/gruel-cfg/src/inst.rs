@@ -28,6 +28,17 @@ use gruel_air::{AirParamMode, EnumId, StructId, Type};
 use gruel_span::Span;
 use lasso::{Key, Spur};
 
+/// Boxed payload for [`CfgInstData::MakeSlice`] (ADR-0064).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MakeSliceData {
+    pub place: Place,
+    pub array_len: u64,
+    pub lo: Option<CfgValue>,
+    pub hi: Option<CfgValue>,
+    pub sentinel: Option<CfgValue>,
+    pub is_mut: bool,
+}
+
 // ============================================================================
 // Place Expressions (ADR-0030)
 // ============================================================================
@@ -325,6 +336,11 @@ pub enum CfgInstData {
         place: Place,
         is_mut: bool,
     },
+
+    /// Slice construction (ADR-0064): produce a fat pointer `{ptr, len}`
+    /// over a sub-range of an array place. The payload is boxed to keep
+    /// `CfgInstData` small.
+    MakeSlice(Box<MakeSliceData>),
 
     // Variable operations
     /// Allocate local variable with initial value
@@ -1265,6 +1281,25 @@ impl Cfg {
             CfgInstData::BitNot(v) => write!(f, "bit_not {}", v),
             CfgInstData::MakeRef { place, is_mut } => {
                 write!(f, "make_ref{} {}", if *is_mut { "_mut" } else { "" }, place)
+            }
+            CfgInstData::MakeSlice(data) => {
+                write!(
+                    f,
+                    "make_slice{} {}/{}",
+                    if data.is_mut { "_mut" } else { "" },
+                    data.place,
+                    data.array_len
+                )?;
+                if let Some(lo) = data.lo {
+                    write!(f, ", lo={}", lo)?;
+                }
+                if let Some(hi) = data.hi {
+                    write!(f, ", hi={}", hi)?;
+                }
+                if let Some(s) = data.sentinel {
+                    write!(f, ", sentinel={}", s)?;
+                }
+                Ok(())
             }
             CfgInstData::Alloc { slot, init } => write!(f, "alloc ${} = {}", slot, init),
             CfgInstData::Load { slot } => write!(f, "load ${}", slot),

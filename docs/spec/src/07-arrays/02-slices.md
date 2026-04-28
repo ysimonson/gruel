@@ -24,3 +24,54 @@ A *slice type* is one of `Slice(T)` (immutable view) or `MutSlice(T)`
 
 A slice value is a *fat pointer* `{ ptr, len }` consisting of a pointer
 to the first element and a length in elements.
+
+## Range Subscripts
+
+{{ rule(id="7.2:3", cat="informative") }}
+
+```ebnf
+range  = expression ".." expression                  (* a..b *)
+       | expression ".."                             (* a..  *)
+       | ".." expression                             (* ..b  *)
+       | ".."                                        (* ..   *)
+       ;
+
+subscript = "[" ( expression | range ) "]" ;
+```
+
+{{ rule(id="7.2:4", cat="informative") }}
+
+Ranges are recognized **only** in subscript position. They are not yet a
+general-purpose expression form: `let r = 0..10;` and `for i in 0..n`
+are not valid uses of a bare range expression.
+
+{{ rule(id="7.2:5", cat="normative") }}
+
+A range subscript `arr[lo..hi]` is a *place expression* naming a
+sub-place of `arr`. The endpoints are half-open: the resulting view
+covers indices `[lo, hi)`. When `lo` is omitted it defaults to `0`;
+when `hi` is omitted it defaults to the array length.
+
+{{ rule(id="7.2:6", cat="legality-rule") }}
+
+For a range subscript on an array of length `N`, the program **MUST**
+satisfy `lo <= hi <= N`. When both endpoints are constant the check is
+performed at compile time; otherwise it is performed at runtime.
+
+{{ rule(id="7.2:7", cat="dynamic-semantics") }}
+
+When `lo > hi` or `hi > N` at runtime, the program panics.
+
+## Slice Construction via Borrow
+
+{{ rule(id="7.2:8", cat="normative") }}
+
+`&arr[range]` produces a `Slice(T)` view of the indexed sub-range.
+`&mut arr[range]` produces a `MutSlice(T)` view; the receiver **MUST**
+be a mutable place.
+
+{{ rule(id="7.2:9", cat="legality-rule") }}
+
+Range subscripts are valid only as the place under `&` / `&mut`. A range
+subscript used as an rvalue (e.g. `let s = arr[1..3];`) is rejected;
+there is no slice value without a borrow.
