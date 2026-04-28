@@ -4196,12 +4196,15 @@ impl<'a> Sema<'a> {
             | IntrinsicId::Ownership
             | IntrinsicId::Conforms
             | IntrinsicId::Range
-            // Slice methods are dispatched via the SLICE_METHODS registry,
-            // not as direct expression-position intrinsics. Reaching this
-            // arm means the user wrote `@slice_len(s)` directly — treat as
-            // unknown for now (the surface form is `s.len()`).
+            // Slice methods/indexing are dispatched via the SLICE_METHODS
+            // registry and `analyze_index_*`, not as direct expression-position
+            // intrinsics. Reaching this arm means the user wrote
+            // `@slice_len(s)` etc. directly — treat as unknown for now (the
+            // surface form is `s.len()` / `s[i]`).
             | IntrinsicId::SliceLen
-            | IntrinsicId::SliceIsEmpty => Err(CompileError::new(
+            | IntrinsicId::SliceIsEmpty
+            | IntrinsicId::SliceIndexRead
+            | IntrinsicId::SliceIndexWrite => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),

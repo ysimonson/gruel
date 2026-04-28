@@ -3497,6 +3497,141 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 result.try_as_basic_value().basic()
             }
 
+            // ADR-0064: bounds-checked slice indexing read.
+            //
+            // `args = [slice, index]`. The slice is the `{ptr, i64}` aggregate;
+            // we extract `ptr` and `len`, runtime-check `index < len`, then
+            // GEP+load the element.
+            IntrinsicId::SliceIndexRead => {
+                use inkwell::IntPredicate;
+                let slice_val = self.get_value(args[0]).into_struct_value();
+                let raw_idx = self.get_value(args[1]).into_int_value();
+                let i64_ty = self.ctx.i64_type();
+                let bits = raw_idx.get_type().get_bit_width();
+                let idx_i64 = if bits < 64 {
+                    self.builder
+                        .build_int_z_extend(raw_idx, i64_ty, "sidx")
+                        .unwrap()
+                } else if bits > 64 {
+                    self.builder
+                        .build_int_truncate(raw_idx, i64_ty, "sidx")
+                        .unwrap()
+                } else {
+                    raw_idx
+                };
+                let data_ptr = self
+                    .builder
+                    .build_extract_value(slice_val, 0, "sptr")
+                    .unwrap()
+                    .into_pointer_value();
+                let len = self
+                    .builder
+                    .build_extract_value(slice_val, 1, "slen")
+                    .unwrap()
+                    .into_int_value();
+                let in_bounds = self
+                    .builder
+                    .build_int_compare(IntPredicate::ULT, idx_i64, len, "sob")
+                    .unwrap();
+                let in_bounds = self.build_expect_i1(in_bounds, true);
+                let current_fn = self
+                    .builder
+                    .get_insert_block()
+                    .unwrap()
+                    .get_parent()
+                    .unwrap();
+                let ok_bb = self.ctx.append_basic_block(current_fn, "sok");
+                let oob_bb = self.ctx.append_basic_block(current_fn, "soob");
+                self.builder
+                    .build_conditional_branch(in_bounds, ok_bb, oob_bb)
+                    .unwrap();
+                self.builder.position_at_end(oob_bb);
+                let check_fn = self.get_or_declare_noreturn_fn("__gruel_bounds_check");
+                self.builder.build_call(check_fn, &[], "").unwrap();
+                self.builder.build_unreachable().unwrap();
+                self.builder.position_at_end(ok_bb);
+
+                let elem_ty = ty;
+                let elem_llvm_ty = gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool);
+                match elem_llvm_ty {
+                    Some(et) => {
+                        let elem_ptr = unsafe {
+                            self.builder
+                                .build_gep(et, data_ptr, &[idx_i64], "sgep")
+                                .unwrap()
+                        };
+                        let v = self.builder.build_load(et, elem_ptr, "sload").unwrap();
+                        Some(v)
+                    }
+                    None => None, // zero-sized element
+                }
+            }
+            // ADR-0064: bounds-checked slice indexing write.
+            // `args = [slice, index, value]`.
+            IntrinsicId::SliceIndexWrite => {
+                use inkwell::IntPredicate;
+                let slice_val = self.get_value(args[0]).into_struct_value();
+                let raw_idx = self.get_value(args[1]).into_int_value();
+                let value_inst_ty = self.cfg.get_inst(args[2]).ty;
+                let i64_ty = self.ctx.i64_type();
+                let bits = raw_idx.get_type().get_bit_width();
+                let idx_i64 = if bits < 64 {
+                    self.builder
+                        .build_int_z_extend(raw_idx, i64_ty, "sidx")
+                        .unwrap()
+                } else if bits > 64 {
+                    self.builder
+                        .build_int_truncate(raw_idx, i64_ty, "sidx")
+                        .unwrap()
+                } else {
+                    raw_idx
+                };
+                let data_ptr = self
+                    .builder
+                    .build_extract_value(slice_val, 0, "sptr")
+                    .unwrap()
+                    .into_pointer_value();
+                let len = self
+                    .builder
+                    .build_extract_value(slice_val, 1, "slen")
+                    .unwrap()
+                    .into_int_value();
+                let in_bounds = self
+                    .builder
+                    .build_int_compare(IntPredicate::ULT, idx_i64, len, "sob")
+                    .unwrap();
+                let in_bounds = self.build_expect_i1(in_bounds, true);
+                let current_fn = self
+                    .builder
+                    .get_insert_block()
+                    .unwrap()
+                    .get_parent()
+                    .unwrap();
+                let ok_bb = self.ctx.append_basic_block(current_fn, "sok");
+                let oob_bb = self.ctx.append_basic_block(current_fn, "soob");
+                self.builder
+                    .build_conditional_branch(in_bounds, ok_bb, oob_bb)
+                    .unwrap();
+                self.builder.position_at_end(oob_bb);
+                let check_fn = self.get_or_declare_noreturn_fn("__gruel_bounds_check");
+                self.builder.build_call(check_fn, &[], "").unwrap();
+                self.builder.build_unreachable().unwrap();
+                self.builder.position_at_end(ok_bb);
+
+                if let Some(elem_llvm_ty) =
+                    gruel_type_to_llvm(value_inst_ty, self.ctx, self.type_pool)
+                {
+                    let elem_ptr = unsafe {
+                        self.builder
+                            .build_gep(elem_llvm_ty, data_ptr, &[idx_i64], "sgep")
+                            .unwrap()
+                    };
+                    let v = self.get_value(args[2]);
+                    self.builder.build_store(elem_ptr, v).unwrap();
+                }
+                None
+            }
+
             // ADR-0064: Slice operations.
             //
             // A slice is lowered to the LLVM aggregate `{ ptr, i64 }` (see

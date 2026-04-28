@@ -44,6 +44,8 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@range` | expr | Iteration | — | — | Iterable range for `for`-loops. |
 | `@slice_len` | expr | Slices | slices | — | Length of a slice. |
 | `@slice_is_empty` | expr | Slices | slices | — | Whether a slice has length zero. |
+| `@slice_index_read` | expr | Slices | slices | — | Read an element from a slice with bounds checking. |
+| `@slice_index_write` | expr | Slices | slices | — | Write an element to a mutable slice with bounds checking. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
 
 ## Debug & Diagnostics
@@ -425,6 +427,18 @@ for i in @range(0, 10) { ... }
 ### `@slice_is_empty`
 
 `@slice_is_empty(s)` returns `s.len() == 0`. Surface form: `s.is_empty()`.
+
+- **Preview gate:** `--preview slices` (ADR-0064)
+
+### `@slice_index_read`
+
+`@slice_index_read(s, i)` returns `s[i]`. Bounds-checks at runtime; panics on out-of-range. Surface form: `s[i]`.
+
+- **Preview gate:** `--preview slices` (ADR-0064)
+
+### `@slice_index_write`
+
+`@slice_index_write(m, i, v)` performs `m[i] = v`. Requires `MutSlice(T)`. Bounds-checks at runtime. Surface form: `m[i] = v`.
 
 - **Preview gate:** `--preview slices` (ADR-0064)
 

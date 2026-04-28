@@ -79,6 +79,8 @@ pub enum IntrinsicId {
     // ---- Slice operations (ADR-0064) ----
     SliceLen,
     SliceIsEmpty,
+    SliceIndexRead,
+    SliceIndexWrite,
 
     // ---- Preview / test infra ----
     TestPreviewGate,
@@ -626,6 +628,30 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &[],
     },
     IntrinsicDef {
+        id: IntrinsicId::SliceIndexRead,
+        name: "slice_index_read",
+        kind: IntrinsicKind::Expr,
+        category: Category::Slice,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Slices),
+        runtime_fn: None,
+        summary: "Read an element from a slice with bounds checking.",
+        description: "`@slice_index_read(s, i)` returns `s[i]`. Bounds-checks at runtime; panics on out-of-range. Surface form: `s[i]`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::SliceIndexWrite,
+        name: "slice_index_write",
+        kind: IntrinsicKind::Expr,
+        category: Category::Slice,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Slices),
+        runtime_fn: None,
+        summary: "Write an element to a mutable slice with bounds checking.",
+        description: "`@slice_index_write(m, i, v)` performs `m[i] = v`. Requires `MutSlice(T)`. Bounds-checks at runtime. Surface form: `m[i] = v`.",
+        examples: &[],
+    },
+    IntrinsicDef {
         id: IntrinsicId::TestPreviewGate,
         name: "test_preview_gate",
         kind: IntrinsicKind::Expr,
@@ -1114,6 +1140,8 @@ mod tests {
                 | IntrinsicId::Range
                 | IntrinsicId::SliceLen
                 | IntrinsicId::SliceIsEmpty
+                | IntrinsicId::SliceIndexRead
+                | IntrinsicId::SliceIndexWrite
                 | IntrinsicId::TestPreviewGate => {}
             }
         }

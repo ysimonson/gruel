@@ -75,3 +75,26 @@ be a mutable place.
 Range subscripts are valid only as the place under `&` / `&mut`. A range
 subscript used as an rvalue (e.g. `let s = arr[1..3];`) is rejected;
 there is no slice value without a borrow.
+
+## Indexing
+
+{{ rule(id="7.2:10", cat="normative") }}
+
+For a slice `s` and index `i: usize`, the expression `s[i]` evaluates to
+the element at position `i`.
+
+{{ rule(id="7.2:11", cat="dynamic-semantics") }}
+
+When `i >= s.len()` at runtime, `s[i]` causes the program to panic.
+
+{{ rule(id="7.2:12", cat="legality-rule") }}
+
+`s[i]` for a slice whose element type is not `Copy` is rejected — it
+would move out of indexed position. (Mirrors the array rule from
+7.1:28.)
+
+{{ rule(id="7.2:13", cat="normative") }}
+
+`s[i] = v` is an assignment to the element at position `i`. It is valid
+only when `s` has type `MutSlice(T)`. Bounds-check semantics follow
+7.2:11.

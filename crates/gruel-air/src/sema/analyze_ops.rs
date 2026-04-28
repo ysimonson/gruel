@@ -5078,6 +5078,12 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        // ADR-0064: indexing on a `Slice(T)` / `MutSlice(T)` value goes
+        // through a dedicated runtime intrinsic instead of the array
+        // place-tracing path.
+        if let Some(result) = self.try_analyze_slice_index_read(air, base, index, span, ctx)? {
+            return Ok(result);
+        }
         // Check for constant out-of-bounds index early (before tracing)
         // We need the array type for bounds checking, so peek at the base first
         let _base_inst = self.rir.get(base);
@@ -5254,8 +5260,182 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        // ADR-0064: indexing on a `MutSlice(T)` value goes through a
+        // dedicated runtime intrinsic. `Slice(T)[i] = v` is rejected
+        // because reads-only.
+        if let Some(result) =
+            self.try_analyze_slice_index_write(air, base, index, value, span, ctx)?
+        {
+            return Ok(result);
+        }
         // Delegate to the main implementation in analysis.rs
         self.analyze_index_set_impl(air, base, index, value, span, ctx)
+    }
+
+    /// Peek at a base expression's resolved type without analysing it.
+    ///
+    /// Used by the slice-indexing fast paths so we don't accidentally emit
+    /// AIR for a base whose array path will re-analyse it. Only handles
+    /// the cases that can produce a slice value today: a local / parameter
+    /// holding a slice, or a slice-typed function-call result.
+    fn peek_inst_type(&self, inst_ref: InstRef, ctx: &AnalysisContext) -> Option<Type> {
+        match &self.rir.get(inst_ref).data {
+            InstData::VarRef { name } => ctx.locals.get(name).map(|l| l.ty),
+            InstData::ParamRef { name, .. } => {
+                ctx.params.iter().find(|p| p.name == *name).map(|p| p.ty)
+            }
+            _ => None,
+        }
+    }
+
+    /// ADR-0064: if `base` analyses to a `Slice(T)` / `MutSlice(T)` value,
+    /// emit a runtime `slice_index_read` intrinsic. Otherwise return
+    /// `Ok(None)` and let the array path handle it.
+    fn try_analyze_slice_index_read(
+        &mut self,
+        air: &mut Air,
+        base: InstRef,
+        index: InstRef,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<Option<AnalysisResult>> {
+        // Only take the slice path when the base's type is already known
+        // to be a slice. Otherwise we'd double-analyse the base for the
+        // array path, which can trigger spurious move-after-use errors.
+        let peek_ty = self.peek_inst_type(base, ctx);
+        if !matches!(
+            peek_ty.map(|t| t.kind()),
+            Some(TypeKind::Slice(_)) | Some(TypeKind::MutSlice(_))
+        ) {
+            return Ok(None);
+        }
+        let base_result = self.analyze_inst(air, base, ctx)?;
+        let base_ty = base_result.ty;
+        let elem_ty = match base_ty.kind() {
+            TypeKind::Slice(id) => self.type_pool.slice_def(id),
+            TypeKind::MutSlice(id) => self.type_pool.mut_slice_def(id),
+            _ => {
+                // Not a slice — defer to the array path. The analyzed AIR
+                // for `base` is already cached in `air.cache` via
+                // `analyze_inst`, so re-analysing in the place-tracing
+                // path is safe and idempotent.
+                return Ok(None);
+            }
+        };
+
+        if !self.is_type_copy(elem_ty) {
+            return Err(CompileError::new(
+                ErrorKind::MoveOutOfIndex {
+                    element_type: self.format_type_name(elem_ty),
+                },
+                span,
+            ));
+        }
+
+        let index_result = self.analyze_inst(air, index, ctx)?;
+        if !index_result.ty.is_integer()
+            && !index_result.ty.is_error()
+            && !index_result.ty.is_never()
+        {
+            return Err(CompileError::new(
+                ErrorKind::TypeMismatch {
+                    expected: "usize".to_string(),
+                    found: self.format_type_name(index_result.ty),
+                },
+                self.rir.get(index).span,
+            ));
+        }
+
+        let intrinsic_name = self.interner.get_or_intern("slice_index_read");
+        let args_start =
+            air.add_extra(&[base_result.air_ref.as_u32(), index_result.air_ref.as_u32()]);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name: intrinsic_name,
+                args_start,
+                args_len: 2,
+            },
+            ty: elem_ty,
+            span,
+        });
+        Ok(Some(AnalysisResult::new(air_ref, elem_ty)))
+    }
+
+    /// ADR-0064: if `base` analyses to a `MutSlice(T)` value, emit a
+    /// runtime `slice_index_write` intrinsic. `Slice(T)` (immutable) base
+    /// is rejected as a write target. Returns `Ok(None)` for non-slice
+    /// bases so the array path handles them.
+    fn try_analyze_slice_index_write(
+        &mut self,
+        air: &mut Air,
+        base: InstRef,
+        index: InstRef,
+        value: InstRef,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<Option<AnalysisResult>> {
+        let peek_ty = self.peek_inst_type(base, ctx);
+        if !matches!(
+            peek_ty.map(|t| t.kind()),
+            Some(TypeKind::Slice(_)) | Some(TypeKind::MutSlice(_))
+        ) {
+            return Ok(None);
+        }
+        let base_result = self.analyze_inst(air, base, ctx)?;
+        let base_ty = base_result.ty;
+        let elem_ty = match base_ty.kind() {
+            TypeKind::MutSlice(id) => self.type_pool.mut_slice_def(id),
+            TypeKind::Slice(_) => {
+                return Err(CompileError::new(
+                    ErrorKind::AssignToImmutable(self.format_type_name(base_ty)),
+                    span,
+                ));
+            }
+            _ => return Ok(None),
+        };
+
+        let index_result = self.analyze_inst(air, index, ctx)?;
+        if !index_result.ty.is_integer()
+            && !index_result.ty.is_error()
+            && !index_result.ty.is_never()
+        {
+            return Err(CompileError::new(
+                ErrorKind::TypeMismatch {
+                    expected: "usize".to_string(),
+                    found: self.format_type_name(index_result.ty),
+                },
+                self.rir.get(index).span,
+            ));
+        }
+
+        let value_result = self.analyze_inst(air, value, ctx)?;
+        if value_result.ty != elem_ty && !value_result.ty.is_error() && !value_result.ty.is_never()
+        {
+            return Err(CompileError::new(
+                ErrorKind::TypeMismatch {
+                    expected: self.format_type_name(elem_ty),
+                    found: self.format_type_name(value_result.ty),
+                },
+                self.rir.get(value).span,
+            ));
+        }
+
+        let intrinsic_name = self.interner.get_or_intern("slice_index_write");
+        let args_start = air.add_extra(&[
+            base_result.air_ref.as_u32(),
+            index_result.air_ref.as_u32(),
+            value_result.air_ref.as_u32(),
+        ]);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name: intrinsic_name,
+                args_start,
+                args_len: 3,
+            },
+            ty: Type::UNIT,
+            span,
+        });
+        Ok(Some(AnalysisResult::new(air_ref, Type::UNIT)))
     }
 
     // ========================================================================
