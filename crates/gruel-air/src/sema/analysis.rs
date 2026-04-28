@@ -3216,6 +3216,22 @@ impl<'a> Sema<'a> {
             );
         }
 
+        // ADR-0064: methods on `Slice(T)` / `MutSlice(T)` values dispatch
+        // through the SLICE_METHODS registry.
+        if matches!(
+            receiver_type.kind(),
+            TypeKind::Slice(_) | TypeKind::MutSlice(_)
+        ) {
+            return self.dispatch_slice_method_call(
+                air,
+                receiver_result,
+                &method_name_str,
+                &args,
+                span,
+                ctx,
+            );
+        }
+
         let struct_id = match receiver_type.kind() {
             TypeKind::Struct(id) => id,
             _ => {
@@ -4166,7 +4182,13 @@ impl<'a> Sema<'a> {
             | IntrinsicId::TypeInfo
             | IntrinsicId::Ownership
             | IntrinsicId::Conforms
-            | IntrinsicId::Range => Err(CompileError::new(
+            | IntrinsicId::Range
+            // Slice methods are dispatched via the SLICE_METHODS registry,
+            // not as direct expression-position intrinsics. Reaching this
+            // arm means the user wrote `@slice_len(s)` directly — treat as
+            // unknown for now (the surface form is `s.len()`).
+            | IntrinsicId::SliceLen
+            | IntrinsicId::SliceIsEmpty => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),
@@ -10323,6 +10345,69 @@ impl<'a> Sema<'a> {
             span,
             ctx,
         )
+    }
+
+    /// ADR-0064: dispatch a method call `s.name(args)` on a `Slice(T)` /
+    /// `MutSlice(T)` value through the SLICE_METHODS registry.
+    pub(crate) fn dispatch_slice_method_call(
+        &mut self,
+        air: &mut Air,
+        receiver_result: AnalysisResult,
+        method_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        use gruel_intrinsics::{SliceKind, lookup_slice_method};
+
+        let slice_kind = match receiver_result.ty.kind() {
+            TypeKind::Slice(_) => SliceKind::Slice,
+            TypeKind::MutSlice(_) => SliceKind::MutSlice,
+            _ => unreachable!("dispatch_slice_method_call called with non-slice receiver"),
+        };
+
+        let entry = lookup_slice_method(slice_kind, method_name).ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::UndefinedMethod {
+                    type_name: self.format_type_name(receiver_result.ty),
+                    method_name: method_name.to_string(),
+                },
+                span,
+            )
+        })?;
+
+        if entry.requires_checked {
+            Self::require_checked_for_intrinsic(ctx, entry.intrinsic_name, span)?;
+        }
+
+        if !args.is_empty() {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: 0,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        let result_ty = match entry.intrinsic {
+            IntrinsicId::SliceLen => Type::USIZE,
+            IntrinsicId::SliceIsEmpty => Type::BOOL,
+            _ => unreachable!("SLICE_METHODS only references slice intrinsics"),
+        };
+
+        let intrinsic_name_sym = self.interner.get_or_intern(entry.intrinsic_name);
+        let args_start = air.add_extra(&[receiver_result.air_ref.as_u32()]);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name: intrinsic_name_sym,
+                args_start,
+                args_len: 1,
+            },
+            ty: result_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, result_ty))
     }
 
     /// Shared lowering for ADR-0063 pointer methods and associated functions.

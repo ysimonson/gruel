@@ -42,6 +42,8 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@raw_mut` | expr | Raw Pointers | — | yes | Take a mutable pointer to an lvalue (internal). |
 | `@syscall` | expr | System Calls | — | yes | Direct OS system call. |
 | `@range` | expr | Iteration | — | — | Iterable range for `for`-loops. |
+| `@slice_len` | expr | Slices | slices | — | Length of a slice. |
+| `@slice_is_empty` | expr | Slices | slices | — | Whether a slice has length zero. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
 
 ## Debug & Diagnostics
@@ -411,6 +413,20 @@ checked { let ret = @syscall(1, 1, buf, n); }
 ```gruel
 for i in @range(0, 10) { ... }
 ```
+
+## Slices
+
+### `@slice_len`
+
+`@slice_len(s)` returns the number of elements in `s` (a `Slice(T)` or `MutSlice(T)`) as `usize`. Surface form: `s.len()`.
+
+- **Preview gate:** `--preview slices` (ADR-0064)
+
+### `@slice_is_empty`
+
+`@slice_is_empty(s)` returns `s.len() == 0`. Surface form: `s.is_empty()`.
+
+- **Preview gate:** `--preview slices` (ADR-0064)
 
 ## Preview / Meta
 

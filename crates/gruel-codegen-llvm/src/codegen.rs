@@ -3384,6 +3384,35 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 result.try_as_basic_value().basic()
             }
 
+            // ADR-0064: Slice operations.
+            //
+            // A slice is lowered to the LLVM aggregate `{ ptr, i64 }` (see
+            // `gruel_type_to_llvm`). `len` is field index 1; `is_empty` is
+            // `len == 0`.
+            IntrinsicId::SliceLen => {
+                let recv_val = self.get_value(args[0]).into_struct_value();
+                let len = self
+                    .builder
+                    .build_extract_value(recv_val, 1, "slice_len")
+                    .unwrap()
+                    .into_int_value();
+                Some(len.into())
+            }
+            IntrinsicId::SliceIsEmpty => {
+                let recv_val = self.get_value(args[0]).into_struct_value();
+                let len = self
+                    .builder
+                    .build_extract_value(recv_val, 1, "slice_len")
+                    .unwrap()
+                    .into_int_value();
+                let zero = self.ctx.i64_type().const_zero();
+                let is_empty = self
+                    .builder
+                    .build_int_compare(inkwell::IntPredicate::EQ, len, zero, "slice_is_empty")
+                    .unwrap();
+                Some(is_empty.into())
+            }
+
             // ---- Fallback: return zero value for unimplemented intrinsics ----
             _ => gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero()),
         }

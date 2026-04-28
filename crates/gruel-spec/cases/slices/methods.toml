@@ -1,0 +1,59 @@
+# Slice Methods (ADR-0064 phase 3)
+#
+# Tests for `s.len()` and `s.is_empty()` on `Slice(T)` and `MutSlice(T)`.
+# Construction syntax (Phase 4) is not yet available, so these tests
+# define functions that operate on slice parameters but never call them.
+
+[section]
+id = "slices.methods"
+spec_chapter = "7.2"
+name = "Slice Methods"
+description = "Tests for ADR-0064 s.len() and s.is_empty()."
+
+[[case]]
+name = "slice_len_compiles"
+spec = ["7.2:1"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn slice_len(s: Slice(i32)) -> usize {
+    s.len()
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "slice_is_empty_compiles"
+spec = ["7.2:1"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn slice_is_empty(s: Slice(i32)) -> bool {
+    s.is_empty()
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "mut_slice_len_compiles"
+spec = ["7.2:1"]
+preview = "slices"
+preview_should_pass = true
+source = """
+fn mut_slice_len(s: MutSlice(i32)) -> usize {
+    s.len()
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+exit_code = 0

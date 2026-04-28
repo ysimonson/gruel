@@ -76,6 +76,10 @@ pub enum IntrinsicId {
     // ---- For-loop iteration helpers ----
     Range,
 
+    // ---- Slice operations (ADR-0064) ----
+    SliceLen,
+    SliceIsEmpty,
+
     // ---- Preview / test infra ----
     TestPreviewGate,
 }
@@ -107,6 +111,7 @@ pub enum Category {
     Pointer,
     Syscall,
     Iteration,
+    Slice,
     Meta,
 }
 
@@ -124,6 +129,7 @@ impl Category {
             Category::Pointer => "Raw Pointers",
             Category::Syscall => "System Calls",
             Category::Iteration => "Iteration",
+            Category::Slice => "Slices",
             Category::Meta => "Preview / Meta",
         }
     }
@@ -596,6 +602,30 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &["for i in @range(0, 10) { ... }"],
     },
     IntrinsicDef {
+        id: IntrinsicId::SliceLen,
+        name: "slice_len",
+        kind: IntrinsicKind::Expr,
+        category: Category::Slice,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Slices),
+        runtime_fn: None,
+        summary: "Length of a slice.",
+        description: "`@slice_len(s)` returns the number of elements in `s` (a `Slice(T)` or `MutSlice(T)`) as `usize`. Surface form: `s.len()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::SliceIsEmpty,
+        name: "slice_is_empty",
+        kind: IntrinsicKind::Expr,
+        category: Category::Slice,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Slices),
+        runtime_fn: None,
+        summary: "Whether a slice has length zero.",
+        description: "`@slice_is_empty(s)` returns `s.len() == 0`. Surface form: `s.is_empty()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
         id: IntrinsicId::TestPreviewGate,
         name: "test_preview_gate",
         kind: IntrinsicKind::Expr,
@@ -812,6 +842,78 @@ pub fn lookup_pointer_method(
 }
 
 // ============================================================================
+// Slice-method registry (ADR-0064)
+// ============================================================================
+
+/// Which builtin slice constructor an entry is defined on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliceKind {
+    /// Defined on `Slice(T)`.
+    Slice,
+    /// Defined on `MutSlice(T)`.
+    MutSlice,
+}
+
+/// One method on `Slice(T)` / `MutSlice(T)` (ADR-0064).
+///
+/// Mirrors [`PointerMethod`]: each entry maps a surface name to an
+/// [`IntrinsicId`] that owns the actual semantic / codegen behaviour.
+#[derive(Debug, Clone, Copy)]
+pub struct SliceMethod {
+    /// Constructor this method is defined on.
+    pub kind: SliceKind,
+    /// Method name as written by the user (after `.`).
+    pub name: &'static str,
+    /// Stable identity used by codegen / IR analyzers.
+    pub intrinsic: IntrinsicId,
+    /// Symbol the AIR `Intrinsic` instruction is tagged with.
+    pub intrinsic_name: &'static str,
+    /// Whether the lowering requires a `checked` block.
+    pub requires_checked: bool,
+}
+
+/// Closed registry of every slice method (ADR-0064).
+pub const SLICE_METHODS: &[SliceMethod] = &[
+    // ---- Methods on Slice(T) ----
+    SliceMethod {
+        kind: SliceKind::Slice,
+        name: "len",
+        intrinsic: IntrinsicId::SliceLen,
+        intrinsic_name: "slice_len",
+        requires_checked: false,
+    },
+    SliceMethod {
+        kind: SliceKind::Slice,
+        name: "is_empty",
+        intrinsic: IntrinsicId::SliceIsEmpty,
+        intrinsic_name: "slice_is_empty",
+        requires_checked: false,
+    },
+    // ---- Methods on MutSlice(T) ----
+    SliceMethod {
+        kind: SliceKind::MutSlice,
+        name: "len",
+        intrinsic: IntrinsicId::SliceLen,
+        intrinsic_name: "slice_len",
+        requires_checked: false,
+    },
+    SliceMethod {
+        kind: SliceKind::MutSlice,
+        name: "is_empty",
+        intrinsic: IntrinsicId::SliceIsEmpty,
+        intrinsic_name: "slice_is_empty",
+        requires_checked: false,
+    },
+];
+
+/// Look up a slice method by `(kind, name)`.
+pub fn lookup_slice_method(kind: SliceKind, name: &str) -> Option<&'static SliceMethod> {
+    SLICE_METHODS
+        .iter()
+        .find(|m| m.kind == kind && m.name == name)
+}
+
+// ============================================================================
 // Queries
 // ============================================================================
 
@@ -902,6 +1004,7 @@ pub fn render_reference_markdown() -> String {
         Category::Pointer,
         Category::Syscall,
         Category::Iteration,
+        Category::Slice,
         Category::Meta,
     ];
     for cat in categories {
@@ -1009,6 +1112,8 @@ mod tests {
                 | IntrinsicId::RawMut
                 | IntrinsicId::Syscall
                 | IntrinsicId::Range
+                | IntrinsicId::SliceLen
+                | IntrinsicId::SliceIsEmpty
                 | IntrinsicId::TestPreviewGate => {}
             }
         }
