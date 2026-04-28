@@ -78,6 +78,10 @@ impl<'a> Sema<'a> {
             // borrow. Treating as Copy lets the receiver be used as a method
             // call argument without triggering "move out of borrow" errors.
             TypeKind::Interface(_) => true,
+            // Slices (ADR-0064) are Copy — they're scope-bound fat pointers
+            // (ptr + len). Bitwise-copying is safe; borrow-checking enforces
+            // exclusivity.
+            TypeKind::Slice(_) | TypeKind::MutSlice(_) => true,
         }
     }
 
@@ -570,6 +574,8 @@ impl<'a> Sema<'a> {
             // usage is erased before codegen, so this only fires for
             // runtime-dispatched interface params.
             TypeKind::Interface(_) => 2,
+            // Slices (ADR-0064): fat pointer `{ptr, len}` occupies 2 slots.
+            TypeKind::Slice(_) | TypeKind::MutSlice(_) => 2,
         }
     }
 }

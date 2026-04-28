@@ -217,7 +217,7 @@ Same pattern as ADR-0061 / 0062 / 0063:
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Type system** — add `TypeKind::Slice(TypeId)` and `TypeKind::MutSlice(TypeId)` with intern-pool support. LLVM lowering as `{ptr, i64}`. No surface form yet.
+- [x] **Phase 1: Type system** — add `TypeKind::Slice(TypeId)` and `TypeKind::MutSlice(TypeId)` with intern-pool support. LLVM lowering as `{ptr, i64}`. No surface form yet.
 - [ ] **Phase 2: Constructor registry** — add `SLICE_CONSTRUCTOR` and `MUT_SLICE_CONSTRUCTOR` to `BUILTIN_TYPE_CONSTRUCTORS`. Sema accepts `Slice(T)` and `MutSlice(T)` in type position. Gate behind `--preview slices`.
 - [ ] **Phase 3: `len` and `is_empty`** — add `SLICE_METHODS` registry; implement `s.len()` and `s.is_empty()` for both slice variants. Codegen extracts the length field from the fat pointer.
 - [ ] **Phase 4: Range subscripts in place position** — parser recognizes `..`, `a..b`, `a..`, `..b` inside `[ … ]`. AIR / sema add a "range subscript" place category. `&arr[range]` produces `Slice(T)`; `&mut arr[range]` produces `MutSlice(T)`. Bounds-check `lo <= hi <= N` (compile-time when constant; runtime otherwise). Borrow-check the receiver: `&mut` requires a mutable place; both forms produce a scope-bound borrow.

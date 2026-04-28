@@ -480,6 +480,8 @@ impl<'a> SemaContext<'a> {
             // Interface types: see Sema::is_type_copy. The fat pointer is
             // bitwise-Copy.
             TypeKind::Interface(_) => true,
+            // Slices (ADR-0064) are Copy — scope-bound fat pointers.
+            TypeKind::Slice(_) | TypeKind::MutSlice(_) => true,
         }
     }
 

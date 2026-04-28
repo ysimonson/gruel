@@ -135,6 +135,14 @@ pub fn type_name_component(ty: Type, type_pool: &TypeInternPool) -> String {
             let referent = type_pool.mut_ref_def(id);
             format!("mut_ref_{}", type_name_component(referent, type_pool))
         }
+        TypeKind::Slice(id) => {
+            let elem = type_pool.slice_def(id);
+            format!("slice_{}", type_name_component(elem, type_pool))
+        }
+        TypeKind::MutSlice(id) => {
+            let elem = type_pool.mut_slice_def(id);
+            format!("mut_slice_{}", type_name_component(elem, type_pool))
+        }
         TypeKind::Interface(id) => format!("interface{}", id.0),
     }
 }

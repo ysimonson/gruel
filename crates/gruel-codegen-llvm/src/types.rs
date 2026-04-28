@@ -22,6 +22,7 @@ pub fn type_alignment(ty: Type, type_pool: &TypeInternPool) -> u64 {
         TypeKind::F64 => 8,
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 8,
         TypeKind::Ref(_) | TypeKind::MutRef(_) => 8,
+        TypeKind::Slice(_) | TypeKind::MutSlice(_) => 8, // Fat pointer {ptr, i64}: 8-byte aligned
         TypeKind::Struct(id) => {
             let def = type_pool.struct_def(id);
             def.fields
@@ -69,6 +70,7 @@ pub fn type_byte_size(ty: Type, type_pool: &TypeInternPool) -> u64 {
         TypeKind::F64 => 8,
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => 8, // 64-bit target
         TypeKind::Ref(_) | TypeKind::MutRef(_) => 8,      // 64-bit target
+        TypeKind::Slice(_) | TypeKind::MutSlice(_) => 16, // Fat pointer {ptr, i64}: 16 bytes
         TypeKind::Struct(id) => {
             // Compute LLVM non-packed struct layout: fields are placed at
             // aligned offsets, and the struct is tail-padded to its alignment.
@@ -217,6 +219,14 @@ pub fn gruel_type_to_llvm<'ctx>(
         // opaque pointer. Borrow-check enforces the safety properties.
         TypeKind::Ref(_) | TypeKind::MutRef(_) => {
             Some(ctx.ptr_type(AddressSpace::default()).into())
+        }
+
+        // Slices (ADR-0064): fat pointer `{ ptr, i64 }`.
+        // First field is the data pointer, second is the length.
+        TypeKind::Slice(_) | TypeKind::MutSlice(_) => {
+            let ptr = ctx.ptr_type(AddressSpace::default()).into();
+            let len = ctx.i64_type().into();
+            Some(ctx.struct_type(&[ptr, len], false).into())
         }
 
         // Enums:

@@ -49,8 +49,9 @@ pub use sema_context::{
 };
 pub use types::{
     ArrayTypeId, EnumDef, EnumId, IfaceTy, InterfaceDef, InterfaceId, InterfaceMethodReq,
-    ModuleDef, ModuleId, PtrConstTypeId, PtrMutTypeId, ReceiverMode, StructDef, StructField,
-    StructId, Type, TypeKind, parse_array_type_syntax,
+    ModuleDef, ModuleId, MutRefTypeId, MutSliceTypeId, PtrConstTypeId, PtrMutTypeId, ReceiverMode,
+    RefTypeId, SliceTypeId, StructDef, StructField, StructId, Type, TypeKind,
+    parse_array_type_syntax,
 };
 
 /// Sentinel value used to encode parameter slots in AIR instructions.

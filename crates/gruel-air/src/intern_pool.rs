@@ -41,8 +41,8 @@ use std::sync::{PoisonError, RwLock};
 use lasso::Spur;
 
 use crate::types::{
-    ArrayTypeId, EnumDef, EnumId, MutRefTypeId, PtrConstTypeId, PtrMutTypeId, RefTypeId, StructDef,
-    StructId, Type, TypeKind,
+    ArrayTypeId, EnumDef, EnumId, MutRefTypeId, MutSliceTypeId, PtrConstTypeId, PtrMutTypeId,
+    RefTypeId, SliceTypeId, StructDef, StructId, Type, TypeKind,
 };
 
 /// Interned type index - 32 bits, Copy, cheap comparison.
@@ -210,6 +210,16 @@ pub enum TypeData {
     ///
     /// `MutRef(T)` - scope-bound exclusive mutating borrow.
     MutRef { referent: InternedType },
+
+    /// Immutable slice (structural type, ADR-0064).
+    ///
+    /// `Slice(T)` - scope-bound fat pointer `{ptr, len}`.
+    Slice { element: InternedType },
+
+    /// Mutable slice (structural type, ADR-0064).
+    ///
+    /// `MutSlice(T)` - scope-bound exclusive fat pointer `{ptr, len}`.
+    MutSlice { element: InternedType },
 }
 
 /// Data for a struct type in the intern pool.
@@ -296,6 +306,12 @@ struct TypeInternPoolInner {
     /// Structural type deduplication: referent -> InternedType for `MutRef(T)`.
     mut_ref_map: HashMap<InternedType, InternedType>,
 
+    /// Structural type deduplication: element -> InternedType for `Slice(T)`.
+    slice_map: HashMap<InternedType, InternedType>,
+
+    /// Structural type deduplication: element -> InternedType for `MutSlice(T)`.
+    mut_slice_map: HashMap<InternedType, InternedType>,
+
     /// Nominal type lookup: name -> InternedType for structs.
     struct_by_name: HashMap<Spur, InternedType>,
 
@@ -314,6 +330,8 @@ impl TypeInternPool {
                 ptr_mut_map: HashMap::new(),
                 ref_map: HashMap::new(),
                 mut_ref_map: HashMap::new(),
+                slice_map: HashMap::new(),
+                mut_slice_map: HashMap::new(),
                 struct_by_name: HashMap::new(),
                 enum_by_name: HashMap::new(),
             }),
@@ -601,6 +619,44 @@ impl TypeInternPool {
         let interned = InternedType::from_pool_index(pool_index);
         inner.types.push(TypeData::MutRef { referent });
         inner.mut_ref_map.insert(referent, interned);
+        interned
+    }
+
+    /// Intern a `Slice(T)` type (structural - deduplicates).
+    pub fn intern_slice(&self, element: InternedType) -> InternedType {
+        {
+            let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+            if let Some(&existing) = inner.slice_map.get(&element) {
+                return existing;
+            }
+        }
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(&existing) = inner.slice_map.get(&element) {
+            return existing;
+        }
+        let pool_index = inner.types.len() as u32;
+        let interned = InternedType::from_pool_index(pool_index);
+        inner.types.push(TypeData::Slice { element });
+        inner.slice_map.insert(element, interned);
+        interned
+    }
+
+    /// Intern a `MutSlice(T)` type (structural - deduplicates).
+    pub fn intern_mut_slice(&self, element: InternedType) -> InternedType {
+        {
+            let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+            if let Some(&existing) = inner.mut_slice_map.get(&element) {
+                return existing;
+            }
+        }
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(&existing) = inner.mut_slice_map.get(&element) {
+            return existing;
+        }
+        let pool_index = inner.types.len() as u32;
+        let interned = InternedType::from_pool_index(pool_index);
+        inner.types.push(TypeData::MutSlice { element });
+        inner.mut_slice_map.insert(element, interned);
         interned
     }
 
@@ -949,6 +1005,54 @@ impl TypeInternPool {
         }
     }
 
+    /// Intern a `Slice(T)` type from a Type element.
+    pub fn intern_slice_from_type(&self, element_type: Type) -> SliceTypeId {
+        let element_interned = Self::type_to_interned_recursive(element_type);
+        let slice_interned = self.intern_slice(element_interned);
+        SliceTypeId::from_pool_index(
+            slice_interned
+                .pool_index()
+                .expect("slice must have pool index"),
+        )
+    }
+
+    /// Intern a `MutSlice(T)` type from a Type element.
+    pub fn intern_mut_slice_from_type(&self, element_type: Type) -> MutSliceTypeId {
+        let element_interned = Self::type_to_interned_recursive(element_type);
+        let mut_slice_interned = self.intern_mut_slice(element_interned);
+        MutSliceTypeId::from_pool_index(
+            mut_slice_interned
+                .pool_index()
+                .expect("mut slice must have pool index"),
+        )
+    }
+
+    /// Get the element type of a `Slice(T)`.
+    pub fn slice_def(&self, slice_id: SliceTypeId) -> Type {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let pool_index = slice_id.0 as usize;
+        match &inner.types[pool_index] {
+            TypeData::Slice { element } => Self::interned_to_type_recursive(*element, &inner),
+            other => panic!(
+                "Expected slice at pool index {}, got {:?}",
+                pool_index, other
+            ),
+        }
+    }
+
+    /// Get the element type of a `MutSlice(T)`.
+    pub fn mut_slice_def(&self, slice_id: MutSliceTypeId) -> Type {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let pool_index = slice_id.0 as usize;
+        match &inner.types[pool_index] {
+            TypeData::MutSlice { element } => Self::interned_to_type_recursive(*element, &inner),
+            other => panic!(
+                "Expected mut slice at pool index {}, got {:?}",
+                pool_index, other
+            ),
+        }
+    }
+
     /// Convert InternedType to Type recursively (handles composite types).
     ///
     /// This is used to convert array element types from InternedType back to Type.
@@ -987,6 +1091,10 @@ impl TypeInternPool {
             TypeData::PtrMut { .. } => Type::new_ptr_mut(PtrMutTypeId::from_pool_index(pool_index)),
             TypeData::Ref { .. } => Type::new_ref(RefTypeId::from_pool_index(pool_index)),
             TypeData::MutRef { .. } => Type::new_mut_ref(MutRefTypeId::from_pool_index(pool_index)),
+            TypeData::Slice { .. } => Type::new_slice(SliceTypeId::from_pool_index(pool_index)),
+            TypeData::MutSlice { .. } => {
+                Type::new_mut_slice(MutSliceTypeId::from_pool_index(pool_index))
+            }
         }
     }
 
@@ -1020,6 +1128,8 @@ impl TypeInternPool {
             TypeKind::PtrMut(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::Ref(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::MutRef(id) => InternedType::from_pool_index(id.pool_index()),
+            TypeKind::Slice(id) => InternedType::from_pool_index(id.pool_index()),
+            TypeKind::MutSlice(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::Module(_) => panic!("Cannot intern module types"),
             TypeKind::Interface(_) => panic!("Cannot intern interface types"),
             TypeKind::ComptimeType => panic!("Cannot intern comptime types"),
@@ -1111,8 +1221,10 @@ impl TypeInternPool {
                 TypeData::PtrConst { .. }
                 | TypeData::PtrMut { .. }
                 | TypeData::Ref { .. }
-                | TypeData::MutRef { .. } => {
-                    // Pointer/reference types are not counted separately in stats
+                | TypeData::MutRef { .. }
+                | TypeData::Slice { .. }
+                | TypeData::MutSlice { .. } => {
+                    // Pointer/reference/slice types are not counted separately in stats
                 }
             }
         }
@@ -1168,6 +1280,8 @@ impl TypeInternPool {
             | TypeKind::PtrMut(_)
             | TypeKind::Ref(_)
             | TypeKind::MutRef(_)
+            | TypeKind::Slice(_)
+            | TypeKind::MutSlice(_)
             | TypeKind::Module(_)
             | TypeKind::Interface(_) => None,
             // Comptime-only types cannot be interned for runtime
@@ -1228,6 +1342,8 @@ impl TypeInternPool {
             | TypeKind::ComptimeStr
             | TypeKind::ComptimeInt
             | TypeKind::Module(_) => 0,
+            // Fat pointers: 2 slots (ptr + len or ptr + vtable)
+            TypeKind::Slice(_) | TypeKind::MutSlice(_) | TypeKind::Interface(_) => 2,
             _ => 1,
         }
     }
@@ -1283,6 +1399,14 @@ impl TypeInternPool {
                 let referent = self.mut_ref_def(id);
                 format!("MutRef({})", self.format_type_name(referent))
             }
+            TypeKind::Slice(id) => {
+                let element = self.slice_def(id);
+                format!("Slice({})", self.format_type_name(element))
+            }
+            TypeKind::MutSlice(id) => {
+                let element = self.mut_slice_def(id);
+                format!("MutSlice({})", self.format_type_name(element))
+            }
             TypeKind::Module(_) => "<module>".to_string(),
             // Interface names are stored on `Sema::interfaces`, not in the
             // type pool. Caller-side error messages should resolve them via
@@ -1314,6 +1438,8 @@ impl Clone for TypeInternPool {
                 ptr_mut_map: inner.ptr_mut_map.clone(),
                 ref_map: inner.ref_map.clone(),
                 mut_ref_map: inner.mut_ref_map.clone(),
+                slice_map: inner.slice_map.clone(),
+                mut_slice_map: inner.mut_slice_map.clone(),
                 struct_by_name: inner.struct_by_name.clone(),
                 enum_by_name: inner.enum_by_name.clone(),
             }),

@@ -150,6 +150,38 @@ impl MutRefTypeId {
     }
 }
 
+/// A unique identifier for a `Slice(T)` type (ADR-0064).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SliceTypeId(pub u32);
+
+impl SliceTypeId {
+    #[inline]
+    pub fn from_pool_index(pool_index: u32) -> Self {
+        SliceTypeId(pool_index)
+    }
+
+    #[inline]
+    pub fn pool_index(self) -> u32 {
+        self.0
+    }
+}
+
+/// A unique identifier for a `MutSlice(T)` type (ADR-0064).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MutSliceTypeId(pub u32);
+
+impl MutSliceTypeId {
+    #[inline]
+    pub fn from_pool_index(pool_index: u32) -> Self {
+        MutSliceTypeId(pool_index)
+    }
+
+    #[inline]
+    pub fn pool_index(self) -> u32 {
+        self.0
+    }
+}
+
 /// A unique identifier for an interface declaration (ADR-0056).
 ///
 /// Mirrors `StructId` / `EnumId`: the inner value is a pool index into
@@ -252,6 +284,10 @@ pub enum TypeKind {
     Ref(RefTypeId),
     /// Mutable reference (ADR-0062): `MutRef(T)` — scope-bound, exclusive.
     MutRef(MutRefTypeId),
+    /// Immutable slice (ADR-0064): `Slice(T)` — scope-bound fat pointer `{ptr, len}`.
+    Slice(SliceTypeId),
+    /// Mutable slice (ADR-0064): `MutSlice(T)` — scope-bound exclusive fat pointer.
+    MutSlice(MutSliceTypeId),
     /// A module type (from @import)
     Module(ModuleId),
     /// An error type (used during type checking to continue after errors)
@@ -340,6 +376,8 @@ impl std::fmt::Debug for Type {
             TypeKind::PtrMut(id) => write!(f, "Type::new_ptr_mut(PtrMutTypeId({}))", id.0),
             TypeKind::Ref(id) => write!(f, "Type::new_ref(RefTypeId({}))", id.0),
             TypeKind::MutRef(id) => write!(f, "Type::new_mut_ref(MutRefTypeId({}))", id.0),
+            TypeKind::Slice(id) => write!(f, "Type::new_slice(SliceTypeId({}))", id.0),
+            TypeKind::MutSlice(id) => write!(f, "Type::new_mut_slice(MutSliceTypeId({}))", id.0),
             TypeKind::Module(id) => write!(f, "Type::new_module(ModuleId({}))", id.0),
             TypeKind::Interface(id) => write!(f, "Type::new_interface(InterfaceId({}))", id.0),
         }
@@ -358,6 +396,8 @@ const TAG_PTR_MUT: u32 = 105;
 const TAG_INTERFACE: u32 = 106;
 const TAG_REF: u32 = 107;
 const TAG_MUT_REF: u32 = 108;
+const TAG_SLICE: u32 = 109;
+const TAG_MUT_SLICE: u32 = 110;
 
 // Primitive type constants
 impl Type {
@@ -445,6 +485,18 @@ impl Type {
     #[inline]
     pub const fn new_mut_ref(id: MutRefTypeId) -> Type {
         Type(TAG_MUT_REF | (id.0 << 8))
+    }
+
+    /// Create an immutable slice type (ADR-0064) from a SliceTypeId.
+    #[inline]
+    pub const fn new_slice(id: SliceTypeId) -> Type {
+        Type(TAG_SLICE | (id.0 << 8))
+    }
+
+    /// Create a mutable slice type (ADR-0064) from a MutSliceTypeId.
+    #[inline]
+    pub const fn new_mut_slice(id: MutSliceTypeId) -> Type {
+        Type(TAG_MUT_SLICE | (id.0 << 8))
     }
 
     /// Create a module type from a ModuleId.
@@ -872,6 +924,8 @@ impl Type {
             TAG_PTR_MUT => Some(TypeKind::PtrMut(PtrMutTypeId(self.0 >> 8))),
             TAG_REF => Some(TypeKind::Ref(RefTypeId(self.0 >> 8))),
             TAG_MUT_REF => Some(TypeKind::MutRef(MutRefTypeId(self.0 >> 8))),
+            TAG_SLICE => Some(TypeKind::Slice(SliceTypeId(self.0 >> 8))),
+            TAG_MUT_SLICE => Some(TypeKind::MutSlice(MutSliceTypeId(self.0 >> 8))),
             TAG_MODULE => Some(TypeKind::Module(ModuleId(self.0 >> 8))),
             TAG_INTERFACE => Some(TypeKind::Interface(InterfaceId(self.0 >> 8))),
             _ => None,
@@ -905,6 +959,8 @@ impl Type {
             TypeKind::PtrMut(_) => "<ptr mut>",
             TypeKind::Ref(_) => "<ref>",
             TypeKind::MutRef(_) => "<mut ref>",
+            TypeKind::Slice(_) => "<slice>",
+            TypeKind::MutSlice(_) => "<mut slice>",
             TypeKind::Module(_) => "<module>",
             TypeKind::Interface(_) => "<interface>",
             TypeKind::Error => "<error>",
@@ -1131,6 +1187,45 @@ impl Type {
     pub fn is_any_ref(&self) -> bool {
         let tag = self.0 & 0xFF;
         tag == TAG_REF || tag == TAG_MUT_REF
+    }
+
+    /// Check if this is an immutable slice type (`Slice(T)`, ADR-0064).
+    #[inline]
+    pub fn is_slice(&self) -> bool {
+        (self.0 & 0xFF) == TAG_SLICE
+    }
+
+    /// Get the slice type ID if this is a `Slice(T)`.
+    #[inline]
+    pub fn as_slice_type(&self) -> Option<SliceTypeId> {
+        if self.is_slice() {
+            Some(SliceTypeId(self.0 >> 8))
+        } else {
+            None
+        }
+    }
+
+    /// Check if this is a mutable slice type (`MutSlice(T)`, ADR-0064).
+    #[inline]
+    pub fn is_mut_slice(&self) -> bool {
+        (self.0 & 0xFF) == TAG_MUT_SLICE
+    }
+
+    /// Get the slice type ID if this is a `MutSlice(T)`.
+    #[inline]
+    pub fn as_mut_slice_type(&self) -> Option<MutSliceTypeId> {
+        if self.is_mut_slice() {
+            Some(MutSliceTypeId(self.0 >> 8))
+        } else {
+            None
+        }
+    }
+
+    /// Check if this is any slice type (`Slice(T)` or `MutSlice(T)`).
+    #[inline]
+    pub fn is_any_slice(&self) -> bool {
+        let tag = self.0 & 0xFF;
+        tag == TAG_SLICE || tag == TAG_MUT_SLICE
     }
 
     /// Check if this is a signed integer type.
