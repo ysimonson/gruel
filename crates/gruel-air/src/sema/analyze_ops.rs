@@ -754,7 +754,17 @@ impl<'a> Sema<'a> {
         if !base_ty.is_error()
             && let Some(hi_v) = hi_default
         {
-            if lo_default < 0 || hi_v < 0 || lo_default > hi_v {
+            // ADR-0064 phase 7: sentinel ranges have stricter bounds.
+            //   lo < hi   (non-empty: at least one element before the
+            //              sentinel byte)
+            //   hi < N    (sentinel byte must be in-bounds)
+            let strict = sentinel_opt.is_some();
+            let lo_hi_bad = if strict {
+                lo_default < 0 || hi_v < 0 || lo_default >= hi_v
+            } else {
+                lo_default < 0 || hi_v < 0 || lo_default > hi_v
+            };
+            if lo_hi_bad {
                 return Err(CompileError::new(
                     ErrorKind::IndexOutOfBounds {
                         index: lo_default as i64,
@@ -763,7 +773,12 @@ impl<'a> Sema<'a> {
                     span,
                 ));
             }
-            if (hi_v as u64) > array_len {
+            let hi_bad = if strict {
+                (hi_v as u64) >= array_len
+            } else {
+                (hi_v as u64) > array_len
+            };
+            if hi_bad {
                 return Err(CompileError::new(
                     ErrorKind::IndexOutOfBounds {
                         index: hi_v as i64,
