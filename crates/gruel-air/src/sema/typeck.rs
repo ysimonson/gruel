@@ -265,6 +265,24 @@ impl<'a> Sema<'a> {
                         let ref_id = self.type_pool.intern_mut_ref_from_type(arg_types[0]);
                         Ok(Type::new_mut_ref(ref_id))
                     }
+                    BuiltinTypeConstructorKind::Slice => {
+                        self.require_preview(
+                            gruel_error::PreviewFeature::Slices,
+                            "slice types",
+                            span,
+                        )?;
+                        let slice_id = self.type_pool.intern_slice_from_type(arg_types[0]);
+                        Ok(Type::new_slice(slice_id))
+                    }
+                    BuiltinTypeConstructorKind::MutSlice => {
+                        self.require_preview(
+                            gruel_error::PreviewFeature::Slices,
+                            "slice types",
+                            span,
+                        )?;
+                        let slice_id = self.type_pool.intern_mut_slice_from_type(arg_types[0]);
+                        Ok(Type::new_mut_slice(slice_id))
+                    }
                 };
             }
 

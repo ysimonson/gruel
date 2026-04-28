@@ -616,6 +616,10 @@ pub enum BuiltinTypeConstructorKind {
     Ref,
     /// Mutable reference (ADR-0062): `MutRef(T)` lowers to `TypeKind::MutRef`.
     MutRef,
+    /// Immutable slice (ADR-0064): `Slice(T)` lowers to `TypeKind::Slice`.
+    Slice,
+    /// Mutable slice (ADR-0064): `MutSlice(T)` lowers to `TypeKind::MutSlice`.
+    MutSlice,
 }
 
 /// Definition of a built-in parameterized type constructor.
@@ -666,6 +670,20 @@ pub static MUT_REF_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructor 
     kind: BuiltinTypeConstructorKind::MutRef,
 };
 
+/// `Slice(T)` — immutable slice (ADR-0064).
+pub static SLICE_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructor {
+    name: "Slice",
+    arity: 1,
+    kind: BuiltinTypeConstructorKind::Slice,
+};
+
+/// `MutSlice(T)` — mutable slice (ADR-0064).
+pub static MUT_SLICE_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructor {
+    name: "MutSlice",
+    arity: 1,
+    kind: BuiltinTypeConstructorKind::MutSlice,
+};
+
 /// All built-in type constructors.
 ///
 /// The compiler iterates over this slice when resolving type-call expressions
@@ -675,6 +693,8 @@ pub static BUILTIN_TYPE_CONSTRUCTORS: &[&BuiltinTypeConstructor] = &[
     &MUT_PTR_CONSTRUCTOR,
     &REF_CONSTRUCTOR,
     &MUT_REF_CONSTRUCTOR,
+    &SLICE_CONSTRUCTOR,
+    &MUT_SLICE_CONSTRUCTOR,
 ];
 
 /// Look up a built-in type constructor by name.
@@ -863,8 +883,8 @@ mod tests {
 
     #[test]
     fn test_builtin_type_constructors_registry() {
-        // ADR-0061: Ptr / MutPtr. ADR-0062: Ref / MutRef.
-        assert_eq!(BUILTIN_TYPE_CONSTRUCTORS.len(), 4);
+        // ADR-0061: Ptr / MutPtr. ADR-0062: Ref / MutRef. ADR-0064: Slice / MutSlice.
+        assert_eq!(BUILTIN_TYPE_CONSTRUCTORS.len(), 6);
     }
 
     #[test]

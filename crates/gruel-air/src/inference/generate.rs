@@ -1955,6 +1955,14 @@ impl<'a> ConstraintGenerator<'a> {
                     let id = self.type_pool.intern_mut_ref_from_type(arg_ty);
                     Type::new_mut_ref(id)
                 }
+                BuiltinTypeConstructorKind::Slice => {
+                    let id = self.type_pool.intern_slice_from_type(arg_ty);
+                    Type::new_slice(id)
+                }
+                BuiltinTypeConstructorKind::MutSlice => {
+                    let id = self.type_pool.intern_mut_slice_from_type(arg_ty);
+                    Type::new_mut_slice(id)
+                }
             };
             return Some(InferType::Concrete(ptr_ty));
         }
