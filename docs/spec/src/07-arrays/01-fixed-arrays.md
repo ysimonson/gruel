@@ -75,6 +75,13 @@ For variable indices, bounds **MUST** be checked at runtime.
 
 Out-of-bounds access **MUST** cause a runtime panic.
 
+{{ rule(id="7.1:11a", cat="informative") }}
+
+In addition to single-element indexing `arr[i]`, an array place can be
+subscripted by a *range* (`arr[lo..hi]`, `arr[..hi]`, etc.) when used as
+the operand of `&` or `&mut`. The result is a `Slice(T)` or
+`MutSlice(T)`; see [chapter 7.2](@/spec/src/07-arrays/02-slices.md).
+
 ## Mutable Arrays
 
 {{ rule(id="7.1:12", cat="normative") }}
