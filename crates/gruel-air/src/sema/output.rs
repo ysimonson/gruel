@@ -46,6 +46,9 @@ pub struct SemaOutput {
     pub functions: Vec<AnalyzedFunction>,
     /// String literals indexed by their AIR string_const index.
     pub strings: Vec<String>,
+    /// Byte-blob literals indexed by their AIR bytes_const index. Currently
+    /// populated by `@embed_file`.
+    pub bytes: Vec<Vec<u8>>,
     /// Warnings collected during analysis.
     pub warnings: Vec<CompileWarning>,
     /// Type intern pool (contains all types including arrays).

@@ -330,6 +330,7 @@ fn create_specialized_function(
         param_slot_types,
         _warnings,
         _local_strings,
+        _local_bytes,
         _ref_fns,
         _ref_meths,
     ) = sema.analyze_specialized_function(
@@ -445,6 +446,7 @@ fn create_specialized_method(
         param_slot_types,
         _warnings,
         _local_strings,
+        _local_bytes,
         _ref_fns,
         _ref_meths,
     ) = sema.analyze_specialized_function(

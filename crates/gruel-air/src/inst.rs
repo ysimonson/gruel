@@ -867,6 +867,19 @@ impl Air {
         }
     }
 
+    /// Remap byte-blob IDs after merging per-function bytes pools into a
+    /// single global pool (mirrors `remap_string_ids`).
+    pub fn remap_bytes_ids<F>(&mut self, map_fn: F)
+    where
+        F: Fn(u32) -> u32,
+    {
+        for inst in &mut self.instructions {
+            if let AirInstData::BytesConst(ref mut id) = inst.data {
+                *id = map_fn(*id);
+            }
+        }
+    }
+
     /// Get a reference to all instructions.
     #[inline]
     pub fn instructions(&self) -> &[AirInst] {
@@ -971,6 +984,10 @@ pub enum AirInstData {
 
     /// String constant (index into string table)
     StringConst(u32),
+
+    /// Byte-blob constant (index into the bytes table). Typed as `Slice(u8)`;
+    /// the slice borrows from a binary-baked global at codegen.
+    BytesConst(u32),
 
     /// Unit constant
     UnitConst,
@@ -1459,6 +1476,7 @@ impl fmt::Display for Air {
                 AirInstData::FloatConst(bits) => writeln!(f, "const {}", f64::from_bits(*bits))?,
                 AirInstData::BoolConst(v) => writeln!(f, "const {}", v)?,
                 AirInstData::StringConst(idx) => writeln!(f, "string_const @{}", idx)?,
+                AirInstData::BytesConst(idx) => writeln!(f, "bytes_const @{}", idx)?,
                 AirInstData::UnitConst => writeln!(f, "const ()")?,
                 AirInstData::TypeConst(ty) => writeln!(f, "type_const {}", ty.name())?,
                 AirInstData::Add(lhs, rhs) => writeln!(f, "add {}, {}", lhs, rhs)?,

@@ -1089,6 +1089,7 @@ fn handle_emit_multi_file(
                         &state.functions,
                         &state.type_pool,
                         &state.strings,
+                        &state.bytes,
                         &state.interner,
                         &state.interface_defs,
                         &state.interface_vtables,

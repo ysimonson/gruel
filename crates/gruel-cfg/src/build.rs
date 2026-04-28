@@ -230,6 +230,15 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
+            AirInstData::BytesConst(bytes_id) => {
+                let value = self.emit(CfgInstData::BytesConst(*bytes_id), ty, span);
+                self.cache(air_ref, value);
+                ExprResult {
+                    value: Some(value),
+                    continuation: Continuation::Continues,
+                }
+            }
+
             AirInstData::UnitConst => {
                 // Unit constants have no runtime representation.
                 // We emit a dummy const 0 with unit type for uniformity,

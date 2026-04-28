@@ -786,6 +786,8 @@ pub struct CompileState {
     pub type_pool: TypeInternPool,
     /// String literals indexed by their string_const index.
     pub strings: Vec<String>,
+    /// Byte-blob literals indexed by their bytes_const index (`@embed_file`).
+    pub bytes: Vec<Vec<u8>>,
     /// Warnings collected during compilation.
     pub warnings: Vec<CompileWarning>,
     /// Lines of `@dbg` output collected during comptime evaluation.
@@ -994,6 +996,7 @@ pub fn compile_frontend_from_ast_with_options_full(
         functions,
         type_pool: sema_output.type_pool,
         strings: sema_output.strings,
+        bytes: sema_output.bytes,
         warnings,
         comptime_dbg_output: sema_output.comptime_dbg_output,
         interface_defs: sema_output.interface_defs,
@@ -1107,6 +1110,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
         functions,
         type_pool: sema_output.type_pool,
         strings: sema_output.strings,
+        bytes: sema_output.bytes,
         warnings,
         comptime_dbg_output: sema_output.comptime_dbg_output,
         interface_defs: sema_output.interface_defs,
@@ -1129,6 +1133,8 @@ pub struct CompileStateFromRir {
     pub type_pool: TypeInternPool,
     /// String literals indexed by their string_const index.
     pub strings: Vec<String>,
+    /// Byte-blob literals indexed by their bytes_const index (`@embed_file`).
+    pub bytes: Vec<Vec<u8>>,
     /// Warnings collected during compilation.
     pub warnings: Vec<CompileWarning>,
     /// Lines of `@dbg` output collected during comptime evaluation.
@@ -1334,6 +1340,7 @@ pub fn compile_backend(
     functions: &[FunctionWithCfg],
     type_pool: &TypeInternPool,
     strings: &[String],
+    bytes: &[Vec<u8>],
     interner: &ThreadedRodeo,
     interface_defs: &[gruel_air::InterfaceDef],
     interface_vtables: &std::collections::HashMap<
@@ -1355,6 +1362,7 @@ pub fn compile_backend(
         functions,
         type_pool,
         strings,
+        bytes,
         interner,
         interface_defs,
         interface_vtables,
@@ -1374,6 +1382,7 @@ fn generate_llvm_objects_and_link(
     functions: &[FunctionWithCfg],
     type_pool: &TypeInternPool,
     strings: &[String],
+    bytes: &[Vec<u8>],
     interner: &ThreadedRodeo,
     interface_defs: &[gruel_air::InterfaceDef],
     interface_vtables: &std::collections::HashMap<
@@ -1390,6 +1399,7 @@ fn generate_llvm_objects_and_link(
         &cfgs,
         type_pool,
         strings,
+        bytes,
         interner,
         interface_defs,
         interface_vtables,
@@ -1413,10 +1423,12 @@ fn generate_llvm_objects_and_link(
 ///
 /// Returns the LLVM IR in human-readable `.ll` format. Used by `--emit asm`
 /// to produce inspectable IR in place of native assembly.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_llvm_ir(
     functions: &[FunctionWithCfg],
     type_pool: &TypeInternPool,
     strings: &[String],
+    bytes: &[Vec<u8>],
     interner: &ThreadedRodeo,
     interface_defs: &[gruel_air::InterfaceDef],
     interface_vtables: &std::collections::HashMap<
@@ -1430,6 +1442,7 @@ pub fn generate_llvm_ir(
         &cfgs,
         type_pool,
         strings,
+        bytes,
         interner,
         interface_defs,
         interface_vtables,
@@ -1459,6 +1472,8 @@ pub struct AirOutput {
     pub type_pool: TypeInternPool,
     /// String literals.
     pub strings: Vec<String>,
+    /// Byte-blob literals (`@embed_file`).
+    pub bytes: Vec<Vec<u8>>,
     /// Warnings collected during analysis.
     pub warnings: Vec<CompileWarning>,
 }
@@ -1501,6 +1516,7 @@ pub fn compile_to_air(source: &str) -> MultiErrorResult<AirOutput> {
         functions: sema_output.functions,
         type_pool: sema_output.type_pool,
         strings: sema_output.strings,
+        bytes: sema_output.bytes,
         warnings: sema_output.warnings,
     })
 }

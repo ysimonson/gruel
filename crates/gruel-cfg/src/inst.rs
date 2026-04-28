@@ -289,6 +289,10 @@ pub enum CfgInstData {
     /// String constant (index into string table)
     StringConst(u32),
 
+    /// Byte-blob constant (index into the bytes table). Typed as
+    /// `Slice(u8)`; lowered to a binary-baked global at codegen.
+    BytesConst(u32),
+
     /// Reference to a function parameter
     Param {
         index: u32,
@@ -1258,6 +1262,7 @@ impl Cfg {
             CfgInstData::FloatConst(bits) => write!(f, "const {}", f64::from_bits(*bits)),
             CfgInstData::BoolConst(v) => write!(f, "const {}", v),
             CfgInstData::StringConst(idx) => write!(f, "string_const @{}", idx),
+            CfgInstData::BytesConst(idx) => write!(f, "bytes_const @{}", idx),
             CfgInstData::Param { index } => write!(f, "param {}", index),
             CfgInstData::BlockParam { index } => write!(f, "block_param {}", index),
             CfgInstData::Add(lhs, rhs) => write!(f, "add {}, {}", lhs, rhs),

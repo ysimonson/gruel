@@ -55,17 +55,18 @@ struct MethodBodySpec<'a> {
 }
 
 /// Result of analyzing a function: analyzed function, warnings, local strings,
-/// referenced functions, and referenced methods.
+/// local byte blobs, referenced functions, and referenced methods.
 type AnalyzedFnResult = CompileResult<(
     AnalyzedFunction,
     Vec<CompileWarning>,
     Vec<String>,
+    Vec<Vec<u8>>,
     HashSet<Spur>,
     HashSet<(StructId, Spur)>,
 )>;
 
 /// Raw analysis output: air, local count, param slots, param modes, param slot types,
-/// warnings, local strings, referenced functions, and referenced methods.
+/// warnings, local strings, local byte blobs, referenced functions, and referenced methods.
 type RawFnAnalysis = CompileResult<(
     Air,
     u32,
@@ -74,6 +75,7 @@ type RawFnAnalysis = CompileResult<(
     Vec<Type>,
     Vec<CompileWarning>,
     Vec<String>,
+    Vec<Vec<u8>>,
     HashSet<Spur>,
     HashSet<(StructId, Spur)>,
 )>;
@@ -117,7 +119,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     let infer_ctx = sema.build_inference_context();
 
     // Collect analyzed functions with their local strings.
-    let mut functions_with_strings: Vec<(AnalyzedFunction, Vec<String>)> = Vec::new();
+    let mut functions_with_strings: Vec<(AnalyzedFunction, Vec<String>, Vec<Vec<u8>>)> = Vec::new();
     let mut errors = CompileErrors::new();
     let mut all_warnings = Vec::new();
 
@@ -204,8 +206,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                 *body,
                 inst.span,
             ) {
-                Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
-                    functions_with_strings.push((analyzed, local_strings));
+                Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                    functions_with_strings.push((analyzed, local_strings, local_bytes));
                     all_warnings.extend(warnings);
                 }
                 Err(e) => errors.push(e),
@@ -271,8 +273,15 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         },
                         method_inst.span,
                     ) {
-                        Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
-                            functions_with_strings.push((analyzed, local_strings));
+                        Ok((
+                            analyzed,
+                            warnings,
+                            local_strings,
+                            local_bytes,
+                            _ref_fns,
+                            _ref_meths,
+                        )) => {
+                            functions_with_strings.push((analyzed, local_strings, local_bytes));
                             all_warnings.extend(warnings);
                         }
                         Err(e) => errors.push(e),
@@ -344,8 +353,15 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         },
                         method_inst.span,
                     ) {
-                        Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
-                            functions_with_strings.push((analyzed, local_strings));
+                        Ok((
+                            analyzed,
+                            warnings,
+                            local_strings,
+                            local_bytes,
+                            _ref_fns,
+                            _ref_meths,
+                        )) => {
+                            functions_with_strings.push((analyzed, local_strings, local_bytes));
                             all_warnings.extend(warnings);
                         }
                         Err(e) => errors.push(e),
@@ -409,8 +425,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     },
                     m.span,
                 ) {
-                    Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
-                        functions_with_strings.push((analyzed, local_strings));
+                    Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                        functions_with_strings.push((analyzed, local_strings, local_bytes));
                         all_warnings.extend(warnings);
                     }
                     Err(e) => errors.push(e),
@@ -455,8 +471,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     },
                     m.span,
                 ) {
-                    Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
-                        functions_with_strings.push((analyzed, local_strings));
+                    Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                        functions_with_strings.push((analyzed, local_strings, local_bytes));
                         all_warnings.extend(warnings);
                     }
                     Err(e) => errors.push(e),
@@ -479,8 +495,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
 
         match sema.analyze_destructor_function(&infer_ctx, &full_name, body, drop_span, struct_type)
         {
-            Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
-                functions_with_strings.push((analyzed, local_strings));
+            Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                functions_with_strings.push((analyzed, local_strings, local_bytes));
                 all_warnings.extend(warnings);
             }
             Err(e) => errors.push(e),
@@ -500,8 +516,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
         let enum_type = Type::new_enum(enum_id);
 
         match sema.analyze_destructor_function(&infer_ctx, &full_name, body, drop_span, enum_type) {
-            Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
-                functions_with_strings.push((analyzed, local_strings));
+            Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                functions_with_strings.push((analyzed, local_strings, local_bytes));
                 all_warnings.extend(warnings);
             }
             Err(e) => errors.push(e),
@@ -535,8 +551,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                 inst.span,
                 struct_type,
             ) {
-                Ok((analyzed, warnings, local_strings, _ref_fns, _ref_meths)) => {
-                    functions_with_strings.push((analyzed, local_strings));
+                Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                    functions_with_strings.push((analyzed, local_strings, local_bytes));
                     all_warnings.extend(warnings);
                 }
                 Err(e) => errors.push(e),
@@ -655,6 +671,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     param_slot_types,
                     warnings,
                     local_strings,
+                    local_bytes,
                     _ref_fns,
                     _ref_meths,
                 )) => {
@@ -667,7 +684,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         param_slot_types,
                         is_destructor: false,
                     };
-                    functions_with_strings.push((analyzed, local_strings));
+                    functions_with_strings.push((analyzed, local_strings, local_bytes));
                     all_warnings.extend(warnings);
                 }
                 Err(e) => errors.push(e),
@@ -725,6 +742,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     param_slot_types,
                     warnings,
                     local_strings,
+                    local_bytes,
                     _ref_fns,
                     _ref_meths,
                 )) => {
@@ -737,7 +755,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         param_slot_types,
                         is_destructor: false,
                     };
-                    functions_with_strings.push((analyzed, local_strings));
+                    functions_with_strings.push((analyzed, local_strings, local_bytes));
                     all_warnings.extend(warnings);
                 }
                 Err(e) => errors.push(e),
@@ -746,11 +764,14 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     }
 
     // Merge strings from all functions into a global table with deduplication.
+    // Bytes pools are concatenated (no dedup) — each `@embed_file` call gets
+    // a fresh entry since these are rare and may legitimately repeat.
     let mut global_string_table: HashMap<String, u32> = HashMap::new();
     let mut global_strings: Vec<String> = Vec::new();
+    let mut global_bytes: Vec<Vec<u8>> = Vec::new();
 
     let mut functions: Vec<AnalyzedFunction> = Vec::new();
-    for (mut analyzed, local_strings) in functions_with_strings {
+    for (mut analyzed, local_strings, local_bytes) in functions_with_strings {
         if !local_strings.is_empty() {
             let local_to_global: Vec<u32> = local_strings
                 .into_iter()
@@ -766,6 +787,13 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
             analyzed
                 .air
                 .remap_string_ids(|local_id| local_to_global[local_id as usize]);
+        }
+        if !local_bytes.is_empty() {
+            let bytes_offset = global_bytes.len() as u32;
+            global_bytes.extend(local_bytes);
+            analyzed
+                .air
+                .remap_bytes_ids(|local_id| local_id + bytes_offset);
         }
         functions.push(analyzed);
     }
@@ -783,6 +811,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     let mut output = SemaOutput {
         functions,
         strings: global_strings,
+        bytes: global_bytes,
         warnings: all_warnings,
         type_pool: sema.type_pool.clone(),
         comptime_dbg_output: std::mem::take(&mut sema.comptime_dbg_output),
@@ -836,7 +865,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
     let mut analyzed_methods: HashSet<(StructId, Spur)> = HashSet::new();
 
     // Collect results
-    let mut functions_with_strings: Vec<(AnalyzedFunction, Vec<String>)> = Vec::new();
+    let mut functions_with_strings: Vec<(AnalyzedFunction, Vec<String>, Vec<Vec<u8>>)> = Vec::new();
     let mut errors = CompileErrors::new();
     let mut all_warnings = Vec::new();
 
@@ -907,10 +936,11 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                             analyzed,
                             warnings,
                             local_strings,
+                            local_bytes,
                             referenced_fns,
                             referenced_meths,
                         )) => {
-                            functions_with_strings.push((analyzed, local_strings));
+                            functions_with_strings.push((analyzed, local_strings, local_bytes));
                             all_warnings.extend(warnings);
 
                             // Add newly referenced functions to the work queue
@@ -1015,6 +1045,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                         param_slot_types,
                         warnings,
                         local_strings,
+                        local_bytes,
                         referenced_fns,
                         referenced_meths,
                     )) => {
@@ -1027,7 +1058,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                             param_slot_types,
                             is_destructor: false,
                         };
-                        functions_with_strings.push((analyzed, local_strings));
+                        functions_with_strings.push((analyzed, local_strings, local_bytes));
                         all_warnings.extend(warnings);
 
                         for ref_fn in referenced_fns {
@@ -1098,10 +1129,15 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                                     analyzed,
                                     warnings,
                                     local_strings,
+                                    local_bytes,
                                     referenced_fns,
                                     referenced_meths,
                                 )) => {
-                                    functions_with_strings.push((analyzed, local_strings));
+                                    functions_with_strings.push((
+                                        analyzed,
+                                        local_strings,
+                                        local_bytes,
+                                    ));
                                     all_warnings.extend(warnings);
 
                                     for ref_fn in referenced_fns {
@@ -1198,6 +1234,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                     param_slot_types,
                     warnings,
                     local_strings,
+                    local_bytes,
                     _ref_fns,
                     _ref_meths,
                 )) => {
@@ -1210,7 +1247,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                         param_slot_types,
                         is_destructor: false,
                     };
-                    functions_with_strings.push((analyzed, local_strings));
+                    functions_with_strings.push((analyzed, local_strings, local_bytes));
                     all_warnings.extend(warnings);
                 }
                 Err(e) => errors.push(e),
@@ -1237,8 +1274,8 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 inst.span,
                 struct_type,
             ) {
-                Ok((analyzed, warnings, local_strings, _, _)) => {
-                    functions_with_strings.push((analyzed, local_strings));
+                Ok((analyzed, warnings, local_strings, local_bytes, _, _)) => {
+                    functions_with_strings.push((analyzed, local_strings, local_bytes));
                     all_warnings.extend(warnings);
                 }
                 Err(e) => errors.push(e),
@@ -1247,11 +1284,14 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
     }
 
     // Merge strings from all functions into a global table with deduplication.
+    // Bytes pools are concatenated (no dedup) — each `@embed_file` call gets
+    // a fresh entry since these are rare and may legitimately repeat.
     let mut global_string_table: HashMap<String, u32> = HashMap::new();
     let mut global_strings: Vec<String> = Vec::new();
+    let mut global_bytes: Vec<Vec<u8>> = Vec::new();
 
     let mut functions: Vec<AnalyzedFunction> = Vec::new();
-    for (mut analyzed, local_strings) in functions_with_strings {
+    for (mut analyzed, local_strings, local_bytes) in functions_with_strings {
         if !local_strings.is_empty() {
             let local_to_global: Vec<u32> = local_strings
                 .into_iter()
@@ -1267,6 +1307,13 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
             analyzed
                 .air
                 .remap_string_ids(|local_id| local_to_global[local_id as usize]);
+        }
+        if !local_bytes.is_empty() {
+            let bytes_offset = global_bytes.len() as u32;
+            global_bytes.extend(local_bytes);
+            analyzed
+                .air
+                .remap_bytes_ids(|local_id| local_id + bytes_offset);
         }
         functions.push(analyzed);
     }
@@ -1284,6 +1331,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
     let mut output = SemaOutput {
         functions,
         strings: global_strings,
+        bytes: global_bytes,
         warnings: all_warnings,
         type_pool: sema.type_pool.clone(),
         comptime_dbg_output: std::mem::take(&mut sema.comptime_dbg_output),
@@ -1394,6 +1442,7 @@ impl<'a> Sema<'a> {
             param_slot_types,
             warnings,
             local_strings,
+            local_bytes,
             ref_fns,
             ref_meths,
         ) = self.analyze_function(infer_ctx, ret_type, &param_info, body)?;
@@ -1410,6 +1459,7 @@ impl<'a> Sema<'a> {
             },
             warnings,
             local_strings,
+            local_bytes,
             ref_fns,
             ref_meths,
         ))
@@ -1453,6 +1503,7 @@ impl<'a> Sema<'a> {
             param_slot_types,
             warnings,
             local_strings,
+            local_bytes,
             ref_fns,
             ref_meths,
         ) = self.analyze_function(infer_ctx, ret_type, &param_info, spec.body)?;
@@ -1469,6 +1520,7 @@ impl<'a> Sema<'a> {
             },
             warnings,
             local_strings,
+            local_bytes,
             ref_fns,
             ref_meths,
         ))
@@ -1500,6 +1552,7 @@ impl<'a> Sema<'a> {
             param_slot_types,
             warnings,
             local_strings,
+            local_bytes,
             ref_fns,
             ref_meths,
         ) = self.analyze_function(infer_ctx, Type::UNIT, &param_info, body)?;
@@ -1516,6 +1569,7 @@ impl<'a> Sema<'a> {
             },
             warnings,
             local_strings,
+            local_bytes,
             ref_fns,
             ref_meths,
         ))
@@ -1620,6 +1674,7 @@ impl<'a> Sema<'a> {
             warnings: Vec::new(),
             local_string_table: HashMap::new(),
             local_strings: Vec::new(),
+            local_bytes: Vec::new(),
             comptime_type_vars,
             comptime_value_vars,
             referenced_functions: HashSet::new(),
@@ -1649,6 +1704,7 @@ impl<'a> Sema<'a> {
             param_slot_types,
             ctx.warnings,
             ctx.local_strings,
+            ctx.local_bytes,
             ctx.referenced_functions,
             ctx.referenced_methods,
         ))
@@ -4162,6 +4218,7 @@ impl<'a> Sema<'a> {
             IntrinsicId::Panic => self.analyze_panic_intrinsic(air, &args, span, ctx),
             IntrinsicId::Assert => self.analyze_assert_intrinsic(air, &args, span, ctx),
             IntrinsicId::Import => self.analyze_import_intrinsic(air, &args, span),
+            IntrinsicId::EmbedFile => self.analyze_embed_file_intrinsic(air, &args, span, ctx),
             IntrinsicId::RandomU32 => self.analyze_random_u32_intrinsic(air, name, &args, span),
             IntrinsicId::RandomU64 => self.analyze_random_u64_intrinsic(air, name, &args, span),
             IntrinsicId::PtrRead => self.analyze_ptr_read_intrinsic(air, name, &args, span, ctx),
@@ -4786,6 +4843,86 @@ impl<'a> Sema<'a> {
     /// Analyze @import intrinsic.
     ///
     /// This requires the `modules` preview feature and takes a single string literal
+    /// Analyze `@embed_file("path")`.
+    ///
+    /// Reads the file at compile time and emits a `BytesConst` instruction
+    /// whose type is `Slice(u8)`. The bytes live in a binary-baked global
+    /// at codegen — the slice borrows them with effectively static lifetime.
+    /// Path resolution mirrors `@import`: relative to the source file
+    /// containing the call, with a fallback to the cwd if the source path
+    /// is unknown.
+    fn analyze_embed_file_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicWrongArgCount {
+                    name: "embed_file".to_string(),
+                    expected: 1,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        // Argument must be a string literal — we keep diagnostics anchored
+        // on the literal and avoid running the comptime interpreter for a
+        // file-system side-effect.
+        let arg_inst = self.rir.get(args[0].value);
+        let path_str = if let gruel_rir::InstData::StringConst(spur) = &arg_inst.data {
+            self.interner.resolve(spur).to_string()
+        } else {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "@embed_file requires a string literal argument".to_string(),
+                },
+                arg_inst.span,
+            ));
+        };
+
+        // Resolve relative to the calling source file, falling back to cwd.
+        use std::path::{Path, PathBuf};
+        let resolved: PathBuf = {
+            let candidate = Path::new(&path_str);
+            if candidate.is_absolute() {
+                candidate.to_path_buf()
+            } else if let Some(source_path) = self.get_source_path(span) {
+                Path::new(source_path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join(candidate)
+            } else {
+                candidate.to_path_buf()
+            }
+        };
+
+        let bytes = std::fs::read(&resolved).map_err(|e| {
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("@embed_file: cannot read '{}': {}", resolved.display(), e),
+                },
+                span,
+            )
+        })?;
+
+        let local_id = ctx.add_local_bytes(bytes);
+
+        // Type: `Slice(u8)`. Reuse the slice intern pool used by `@parts_to_slice`.
+        let slice_id = self.type_pool.intern_slice_from_type(Type::U8);
+        let result_ty = Type::new_slice(slice_id);
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::BytesConst(local_id),
+            ty: result_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, result_ty))
+    }
+
     /// argument specifying the module path to import.
     fn analyze_import_intrinsic(
         &mut self,
@@ -6801,6 +6938,7 @@ impl<'a> Sema<'a> {
             warnings: Vec::new(),
             local_string_table: HashMap::new(),
             local_strings: Vec::new(),
+            local_bytes: Vec::new(),
             comptime_type_vars: HashMap::new(),
             comptime_value_vars: HashMap::new(),
             referenced_functions: HashSet::new(),

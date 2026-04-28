@@ -42,6 +42,9 @@ pub struct FunctionAnalysisState {
     pub string_table: HashMap<String, u32>,
     /// String literals in order of creation.
     pub strings: Vec<String>,
+    /// Byte-blob literals (from `@embed_file`) in order of creation. Not
+    /// deduplicated — see `AnalysisContext::add_local_bytes`.
+    pub bytes: Vec<Vec<u8>>,
     /// Warnings collected during analysis.
     pub warnings: Vec<CompileWarning>,
 }
@@ -88,6 +91,8 @@ pub struct MergedAnalysisState {
     pub strings: Vec<String>,
     /// Mapping from string content to final index.
     pub string_map: HashMap<String, u32>,
+    /// All byte-blob literals (concatenated, never deduplicated).
+    pub bytes: Vec<Vec<u8>>,
     /// All warnings from all functions.
     pub warnings: Vec<CompileWarning>,
 }
@@ -125,10 +130,25 @@ impl MergedAnalysisState {
             }
         }
 
+        // Merge bytes (no deduplication — embed_file is rare and each call
+        // gets a fresh entry). Local IDs shift by the current pool size.
+        let mut bytes_remap = HashMap::new();
+        let bytes_offset = self.bytes.len() as u32;
+        for (local_id, blob) in state.bytes.into_iter().enumerate() {
+            let new_id = bytes_offset + local_id as u32;
+            self.bytes.push(blob);
+            if (local_id as u32) != new_id {
+                bytes_remap.insert(local_id as u32, new_id);
+            }
+        }
+
         // Merge warnings (no deduplication needed)
         self.warnings.extend(state.warnings);
 
-        AnalysisStateRemapping { string_remap }
+        AnalysisStateRemapping {
+            string_remap,
+            bytes_remap,
+        }
     }
 }
 
@@ -146,16 +166,23 @@ pub struct AnalysisStateRemapping {
     /// Mapping from old string index to new string index.
     /// Only contains entries where the index changed.
     pub string_remap: HashMap<u32, u32>,
+    /// Mapping from old byte-blob index to new byte-blob index.
+    pub bytes_remap: HashMap<u32, u32>,
 }
 
 impl AnalysisStateRemapping {
     /// Check if any remapping is needed.
     pub fn is_empty(&self) -> bool {
-        self.string_remap.is_empty()
+        self.string_remap.is_empty() && self.bytes_remap.is_empty()
     }
 
     /// Remap a string index if needed.
     pub fn remap_string(&self, id: u32) -> u32 {
         self.string_remap.get(&id).copied().unwrap_or(id)
+    }
+
+    /// Remap a byte-blob index if needed.
+    pub fn remap_bytes(&self, id: u32) -> u32 {
+        self.bytes_remap.get(&id).copied().unwrap_or(id)
     }
 }

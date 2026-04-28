@@ -37,10 +37,12 @@ use lasso::ThreadedRodeo;
 /// # Errors
 ///
 /// Returns an error if an LLVM compilation error occurs.
+#[allow(clippy::too_many_arguments)]
 pub fn generate(
     functions: &[&Cfg],
     type_pool: &TypeInternPool,
     strings: &[String],
+    bytes: &[Vec<u8>],
     interner: &ThreadedRodeo,
     interface_defs: &[gruel_air::InterfaceDef],
     interface_vtables: &std::collections::HashMap<
@@ -53,6 +55,7 @@ pub fn generate(
         functions,
         type_pool,
         strings,
+        bytes,
         interner,
         interface_defs,
         interface_vtables,
@@ -65,10 +68,12 @@ pub fn generate(
 /// Returns the LLVM IR in human-readable `.ll` format. Used by `--emit asm`
 /// to produce inspectable IR in place of native assembly. At `-O1+` the
 /// returned IR is the post-optimization form.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_ir(
     functions: &[&Cfg],
     type_pool: &TypeInternPool,
     strings: &[String],
+    bytes: &[Vec<u8>],
     interner: &ThreadedRodeo,
     interface_defs: &[gruel_air::InterfaceDef],
     interface_vtables: &std::collections::HashMap<
@@ -81,6 +86,7 @@ pub fn generate_ir(
         functions,
         type_pool,
         strings,
+        bytes,
         interner,
         interface_defs,
         interface_vtables,

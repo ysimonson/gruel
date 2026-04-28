@@ -91,6 +91,8 @@ pub struct CompilationUnit<'src> {
     type_pool: Option<TypeInternPool>,
     /// String literals indexed by their string_const index.
     strings: Option<Vec<String>>,
+    /// Byte-blob literals from `@embed_file`, indexed by bytes_const index.
+    bytes: Option<Vec<Vec<u8>>>,
     /// Warnings collected during compilation.
     warnings: Vec<CompileWarning>,
     /// Interface definitions (ADR-0056), indexed by InterfaceId.0.
@@ -134,6 +136,7 @@ impl<'src> CompilationUnit<'src> {
             functions: None,
             type_pool: None,
             strings: None,
+            bytes: None,
             warnings: Vec::new(),
             interface_defs: None,
             interface_vtables: None,
@@ -443,6 +446,7 @@ impl<'src> CompilationUnit<'src> {
         self.functions = Some(functions);
         self.type_pool = Some(sema_output.type_pool);
         self.strings = Some(sema_output.strings);
+        self.bytes = Some(sema_output.bytes);
         self.warnings.extend(sema_output.warnings);
         self.warnings.extend(cfg_warnings);
         self.interface_defs = Some(sema_output.interface_defs);
@@ -508,6 +512,7 @@ impl<'src> CompilationUnit<'src> {
             .expect("compile() called before analyze()");
         let type_pool = self.type_pool.as_ref().expect("type_pool not available");
         let strings = self.strings.as_ref().expect("strings not available");
+        let bytes = self.bytes.as_ref().expect("bytes not available");
         let interner = self.interner.as_ref().expect("interner not available");
 
         let empty_iface_defs: Vec<gruel_air::InterfaceDef> = Vec::new();
@@ -524,6 +529,7 @@ impl<'src> CompilationUnit<'src> {
             functions,
             type_pool,
             strings,
+            bytes,
             interner,
             interface_defs,
             interface_vtables,

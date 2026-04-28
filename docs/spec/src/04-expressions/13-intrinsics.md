@@ -57,6 +57,7 @@ The following table provides a quick reference to all available intrinsics:
 | `@target_os` | Get target OS | none | `Os` |
 | `@range` | Construct integer range | 1-3 expressions (integers) | `Range(T)` |
 | `@import` | Import module | 1 expression (string literal or `comptime_str`) | module type |
+| `@embed_file` | Embed a file's bytes at compile time | 1 expression (string literal) | `Slice(u8)` |
 
 ## `@dbg`
 
@@ -972,5 +973,32 @@ fn main() -> i32 {
         }
     });
     0
+}
+```
+
+## `@embed_file`
+
+{{ rule(id="4.13:130", cat="normative") }}
+
+The `@embed_file` intrinsic embeds the contents of a file at compile time as a read-only byte slice.
+
+{{ rule(id="4.13:131", cat="normative") }}
+
+`@embed_file` accepts exactly one argument. The argument **MUST** be a string literal specifying the path to the file. Path resolution is relative to the source file containing the `@embed_file` call; absolute paths are used as-is.
+
+{{ rule(id="4.13:132", cat="normative") }}
+
+The return type of `@embed_file` is `Slice(u8)`. The slice's pointer references a binary-baked global; the bytes have effectively static lifetime and **MUST NOT** be mutated.
+
+{{ rule(id="4.13:133", cat="legality-rule") }}
+
+It is a compile-time error if the path argument is not a string literal, or if the file cannot be read at the time semantic analysis runs.
+
+{{ rule(id="4.13:134") }}
+
+```gruel
+fn main() -> i32 {
+    let data: Slice(u8) = @embed_file("greeting.txt");
+    @cast(data[0], i32)  // first byte of greeting.txt
 }
 ```

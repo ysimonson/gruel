@@ -180,6 +180,10 @@ pub(crate) struct AnalysisContext<'a> {
     /// Local string data indexed by local string table index.
     /// After analysis, these are merged into the global string table with ID remapping.
     pub local_strings: Vec<String>,
+    /// Local byte-blob data indexed by local bytes table index. Used by
+    /// `@embed_file`. After analysis these are merged into the global bytes
+    /// table with ID remapping in the AIR instructions.
+    pub local_bytes: Vec<Vec<u8>>,
     /// Comptime type variables: maps variable symbols to their compile-time type values.
     /// When a variable is bound to a comptime type (e.g., `let P = make_point()` where
     /// `make_point() -> type`), this map stores the resolved type so it can be used
@@ -321,6 +325,16 @@ impl AnalysisContext<'_> {
                 id
             }
         }
+    }
+
+    /// Append a byte blob to the local bytes table, returning its local
+    /// index. Bytes are not deduplicated — each `@embed_file` call gets a
+    /// fresh entry, since users may legitimately embed two files with
+    /// identical contents from different paths.
+    pub fn add_local_bytes(&mut self, bytes: Vec<u8>) -> u32 {
+        let id = self.local_bytes.len() as u32;
+        self.local_bytes.push(bytes);
+        id
     }
 }
 

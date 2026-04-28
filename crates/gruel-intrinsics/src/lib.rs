@@ -53,6 +53,7 @@ pub enum IntrinsicId {
     Conforms,
     Field,
     Import,
+    EmbedFile,
 
     // ---- Target platform ----
     TargetArch,
@@ -431,6 +432,18 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         summary: "Import another source file (placeholder).",
         description: "`@import(\"path\")` — planned module-system hook; currently accepted by the compiler as a placeholder.",
         examples: &["@import(\"utils.gruel\")"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::EmbedFile,
+        name: "embed_file",
+        kind: IntrinsicKind::Expr,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Embed a file's contents at compile time as `Slice(u8)`.",
+        description: "`@embed_file(\"path\")` reads the file at compile time and produces a `Slice(u8)` whose bytes are baked into the binary as a read-only global. The path is resolved relative to the source file containing the call.",
+        examples: &["let data: Slice(u8) = @embed_file(\"asset.bin\");"],
     },
     IntrinsicDef {
         id: IntrinsicId::TargetArch,
@@ -1211,6 +1224,7 @@ mod tests {
                 | IntrinsicId::Conforms
                 | IntrinsicId::Field
                 | IntrinsicId::Import
+                | IntrinsicId::EmbedFile
                 | IntrinsicId::TargetArch
                 | IntrinsicId::TargetOs
                 | IntrinsicId::PtrRead

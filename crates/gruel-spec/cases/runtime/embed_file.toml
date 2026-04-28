@@ -1,0 +1,69 @@
+# @embed_file intrinsic tests
+#
+# `@embed_file("path")` reads the file at compile time and returns
+# `Slice(u8)` whose bytes live in a binary-baked global.
+
+[section]
+id = "runtime.embed_file"
+spec_chapter = "4.13"
+name = "@embed_file Intrinsic"
+
+[[case]]
+name = "embed_file_length"
+spec = ["4.13:130", "4.13:131", "4.13:132"]
+aux_files = { "embedded.bin" = "hello" }
+source = """
+fn main() -> i32 {
+    let data: Slice(u8) = @embed_file("embedded.bin");
+    @cast(data.len(), i32)
+}
+"""
+exit_code = 5
+
+[[case]]
+name = "embed_file_first_byte"
+spec = ["4.13:132"]
+aux_files = { "embedded.bin" = "hello" }
+source = """
+fn main() -> i32 {
+    let data: Slice(u8) = @embed_file("embedded.bin");
+    @cast(data[0], i32)
+}
+"""
+exit_code = 104
+
+[[case]]
+name = "embed_file_empty"
+spec = ["4.13:132"]
+aux_files = { "empty.bin" = "" }
+source = """
+fn main() -> i32 {
+    let data: Slice(u8) = @embed_file("empty.bin");
+    @cast(data.len(), i32)
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "embed_file_missing_file_rejected"
+spec = ["4.13:133"]
+source = """
+fn main() -> i32 {
+    let data: Slice(u8) = @embed_file("does_not_exist.bin");
+    @cast(data.len(), i32)
+}
+"""
+compile_fail = true
+error_contains = "embed_file"
+
+[[case]]
+name = "embed_file_non_literal_rejected"
+spec = ["4.13:133"]
+source = """
+fn pick(s: String) -> Slice(u8) {
+    @embed_file(s)
+}
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "string literal"

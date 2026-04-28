@@ -28,6 +28,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@conforms` | type+iface | Compile-time Reflection | — | — | Whether a type structurally conforms to an interface. |
 | `@field` | expr | Compile-time Reflection | — | — | Access a field by comptime-known name. |
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
+| `@embed_file` | expr | Compile-time Reflection | — | — | Embed a file's contents at compile time as `Slice(u8)`. |
 | `@target_arch` | expr | Target Platform | — | — | Compile target CPU architecture. |
 | `@target_os` | expr | Target Platform | — | — | Compile target operating system. |
 | `@ptr_read` | expr | Raw Pointers | — | yes | Load a value through a raw pointer (internal). |
@@ -305,6 +306,17 @@ match @ownership(T) { Ownership::Copy => ..., Ownership::Affine => ..., Ownershi
 
 ```gruel
 @import("utils.gruel")
+```
+
+### `@embed_file`
+
+`@embed_file("path")` reads the file at compile time and produces a `Slice(u8)` whose bytes are baked into the binary as a read-only global. The path is resolved relative to the source file containing the call.
+
+
+**Examples:**
+
+```gruel
+let data: Slice(u8) = @embed_file("asset.bin");
 ```
 
 ## Target Platform

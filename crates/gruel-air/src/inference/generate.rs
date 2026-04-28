@@ -858,6 +858,14 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Var(self.fresh_var())
                     }
+                    Some(IntrinsicId::EmbedFile) => {
+                        // `@embed_file("path")` always produces a `Slice(u8)`,
+                        // independent of context. Visiting args is a no-op
+                        // here (string literal) but kept for consistency.
+                        visit_args(self, ctx);
+                        let slice_id = self.type_pool.intern_slice_from_type(Type::U8);
+                        InferType::Concrete(Type::new_slice(slice_id))
+                    }
                     Some(IntrinsicId::Panic) | Some(IntrinsicId::CompileError) => {
                         // Diverging intrinsics return Never so they unify with any
                         // expected type (e.g. `if c { 42 } else { @panic("..") }`).

@@ -40,11 +40,13 @@ fn llvm_error(msg: impl Into<String>) -> CompileError {
 ///
 /// This is the shared core for both [`generate`] (object emission) and
 /// [`generate_ir`] (textual IR emission). Callers decide what to emit.
+#[allow(clippy::too_many_arguments)]
 fn build_module<'ctx>(
     context: &'ctx Context,
     functions: &[&Cfg],
     type_pool: &TypeInternPool,
     strings: &[String],
+    bytes: &[Vec<u8>],
     interner: &ThreadedRodeo,
     interface_defs: &[gruel_air::InterfaceDef],
     interface_vtables: &std::collections::HashMap<
@@ -66,6 +68,35 @@ fn build_module<'ctx>(
                 context.i8_type().array_type(bytes.len() as u32),
                 None,
                 &format!(".str.{}", i),
+            );
+            global.set_constant(true);
+            global.set_linkage(inkwell::module::Linkage::Private);
+            global.set_initializer(&array_val);
+            global
+        })
+        .collect();
+
+    // Create LLVM global constants for each byte blob (`@embed_file`).
+    // These live in the binary's read-only segment; `BytesConst` lowers to
+    // a `Slice(u8)` aggregate `{ ptr, i64 len }` pointing at the global.
+    // Empty blobs still emit a 1-byte placeholder global so the slice's
+    // pointer is non-null; the slice's reported length comes from
+    // `bytes_lens`, which is the *real* (unpadded) blob length.
+    let bytes_lens: Vec<u64> = bytes.iter().map(|b| b.len() as u64).collect();
+    let bytes_globals: Vec<GlobalValue<'_>> = bytes
+        .iter()
+        .enumerate()
+        .map(|(i, blob)| {
+            let raw: &[u8] = if blob.is_empty() {
+                &[0u8]
+            } else {
+                blob.as_slice()
+            };
+            let array_val = context.const_string(raw, false);
+            let global = module.add_global(
+                context.i8_type().array_type(raw.len() as u32),
+                None,
+                &format!(".embed.{}", i),
             );
             global.set_constant(true);
             global.set_linkage(inkwell::module::Linkage::Private);
@@ -140,6 +171,8 @@ fn build_module<'ctx>(
             type_pool,
             strings,
             &string_globals,
+            &bytes_globals,
+            &bytes_lens,
             interner,
             &fn_map,
             &vtable_map,
@@ -190,10 +223,12 @@ fn run_llvm_passes(
 /// All functions are lowered into a single LLVM module. The module is then
 /// compiled to an in-memory object file buffer by the host machine's LLVM
 /// code generator.
+#[allow(clippy::too_many_arguments)]
 pub fn generate(
     functions: &[&Cfg],
     type_pool: &TypeInternPool,
     strings: &[String],
+    bytes: &[Vec<u8>],
     interner: &ThreadedRodeo,
     interface_defs: &[gruel_air::InterfaceDef],
     interface_vtables: &std::collections::HashMap<
@@ -211,6 +246,7 @@ pub fn generate(
         functions,
         type_pool,
         strings,
+        bytes,
         interner,
         interface_defs,
         interface_vtables,
@@ -244,10 +280,12 @@ pub fn generate(
 /// Returns the human-readable LLVM IR as a string. This is used by
 /// `--emit asm` to produce inspectable IR in place of native assembly.
 /// At `-O1+` the IR is the post-optimization form.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_ir(
     functions: &[&Cfg],
     type_pool: &TypeInternPool,
     strings: &[String],
+    bytes: &[Vec<u8>],
     interner: &ThreadedRodeo,
     interface_defs: &[gruel_air::InterfaceDef],
     interface_vtables: &std::collections::HashMap<
@@ -262,6 +300,7 @@ pub fn generate_ir(
         functions,
         type_pool,
         strings,
+        bytes,
         interner,
         interface_defs,
         interface_vtables,
@@ -460,6 +499,11 @@ struct FnCodegen<'ctx, 'a> {
     strings: &'a [String],
     /// LLVM globals holding the raw bytes of each string literal.
     string_globals: &'a [GlobalValue<'ctx>],
+    /// LLVM globals holding the raw bytes of each `@embed_file` blob.
+    bytes_globals: &'a [GlobalValue<'ctx>],
+    /// Real (unpadded) length of each `@embed_file` blob in bytes; parallel
+    /// to `bytes_globals`. The slice's `len` field is built from this.
+    bytes_lens: &'a [u64],
     /// Maps CFG block IDs to LLVM basic blocks.
     llvm_blocks: Vec<LlvmBlock<'ctx>>,
     /// Maps CFG value indices to LLVM values.
@@ -501,6 +545,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         type_pool: &'a TypeInternPool,
         strings: &'a [String],
         string_globals: &'a [GlobalValue<'ctx>],
+        bytes_globals: &'a [GlobalValue<'ctx>],
+        bytes_lens: &'a [u64],
         interner: &'a ThreadedRodeo,
         fn_map: &'a HashMap<&'a str, FunctionValue<'ctx>>,
         vtable_map: &'a HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
@@ -529,6 +575,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             fn_map,
             strings,
             string_globals,
+            bytes_globals,
+            bytes_lens,
             llvm_blocks,
             values: vec![None; value_count],
             locals: vec![None; num_locals],
@@ -1459,6 +1507,34 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let agg = self
                     .builder
                     .build_insert_value(agg, cap_val, 2, "sc_cap")
+                    .unwrap();
+                Some(agg.as_basic_value_enum())
+            }
+
+            CfgInstData::BytesConst(idx) => {
+                // Build a `Slice(u8)` aggregate `{ ptr, i64 len }` pointing
+                // at the LLVM global that holds the embedded bytes.
+                let idx = idx as usize;
+                let len_value = self.bytes_lens.get(idx).copied().unwrap_or(0);
+                let i64_ty = self.ctx.i64_type();
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let data_ptr: inkwell::values::PointerValue<'ctx> =
+                    if let Some(g) = self.bytes_globals.get(idx) {
+                        g.as_pointer_value()
+                    } else {
+                        ptr_ty.const_null()
+                    };
+                let slice_llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
+                    .expect("Slice(u8) has LLVM lowering")
+                    .into_struct_type();
+                let undef = slice_llvm_ty.get_undef();
+                let with_ptr = self
+                    .builder
+                    .build_insert_value(undef, data_ptr, 0, "embed_p")
+                    .unwrap();
+                let agg = self
+                    .builder
+                    .build_insert_value(with_ptr, i64_ty.const_int(len_value, false), 1, "embed_s")
                     .unwrap();
                 Some(agg.as_basic_value_enum())
             }
@@ -3924,6 +4000,8 @@ fn define_function<'ctx>(
     type_pool: &TypeInternPool,
     strings: &[String],
     string_globals: &[GlobalValue<'ctx>],
+    bytes_globals: &[GlobalValue<'ctx>],
+    bytes_lens: &[u64],
     interner: &ThreadedRodeo,
     fn_map: &HashMap<&str, FunctionValue<'ctx>>,
     vtable_map: &HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
@@ -3938,6 +4016,8 @@ fn define_function<'ctx>(
         type_pool,
         strings,
         string_globals,
+        bytes_globals,
+        bytes_lens,
         interner,
         fn_map,
         vtable_map,
