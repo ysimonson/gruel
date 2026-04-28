@@ -1,12 +1,12 @@
 ---
 id: 0064
 title: Slices
-status: proposal
+status: implemented
 tags: [types, syntax, slices, arrays, pointers]
 feature-flag: slices
 created: 2026-04-27
-accepted:
-implemented:
+accepted: 2026-04-27
+implemented: 2026-04-27
 spec-sections: ["7.2"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -226,7 +226,7 @@ Same pattern as ADR-0061 / 0062 / 0063:
 - [x] **Phase 7: Sentinel subscripts** — extend the range subscript parser with `:s` suffix; `&arr[lo..hi :s]` / `&mut arr[lo..hi :s]` lower to a sentinel-checking borrow construction. `s.terminated_ptr()` (checked) lands here. Construction-time sentinel verification panics on mismatch; the runtime helper for the panic message lives in `gruel-runtime`.
 - [x] **Phase 8: Iteration** — for-each over `Slice(T)` (yields `T` for Copy types) and `MutSlice(T)` (yields `MutRef(T)`). The mut form is gated on the deref-assignment operator that ADR-0062 phase 8 calls out as a prerequisite — if that hasn't landed, this phase ships the immutable iteration only and the mut form follows up. *Status: immutable form shipped; mutable form deferred until ADR-0062 phase 8 lands the deref-assignment operator.*
 - [x] **Phase 9: Spec** — author a new `docs/spec/src/07-arrays/02-slices.md` covering types, construction, methods, sentinel discipline, scope-bound rules, and iteration. Update `01-fixed-arrays.md` with the new range-subscript place form.
-- [ ] **Phase 10: Stabilize** — remove the `slices` preview gate, drop `PreviewFeature::Slices`, update ADR status to `implemented`.
+- [x] **Phase 10: Stabilize** — remove the `slices` preview gate, drop `PreviewFeature::Slices`, update ADR status to `implemented`.
 
 ## Consequences
 

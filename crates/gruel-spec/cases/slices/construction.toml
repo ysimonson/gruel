@@ -10,8 +10,6 @@ name = "Slice Construction via Range Subscripts"
 [[case]]
 name = "whole_slice_immut"
 spec = ["7.2:5", "7.2:8"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [10, 20, 30, 40, 50];
@@ -24,8 +22,6 @@ exit_code = 5
 [[case]]
 name = "whole_slice_mut"
 spec = ["7.2:5", "7.2:8"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut arr: [i32; 5] = [1, 2, 3, 4, 5];
@@ -38,8 +34,6 @@ exit_code = 5
 [[case]]
 name = "subrange_immut"
 spec = ["7.2:5", "7.2:8"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [10, 20, 30, 40, 50];
@@ -52,8 +46,6 @@ exit_code = 3
 [[case]]
 name = "subrange_lo_only"
 spec = ["7.2:5"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [1, 2, 3, 4, 5];
@@ -66,8 +58,6 @@ exit_code = 3
 [[case]]
 name = "subrange_hi_only"
 spec = ["7.2:5"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [1, 2, 3, 4, 5];
@@ -80,8 +70,6 @@ exit_code = 3
 [[case]]
 name = "compile_time_oob_high"
 spec = ["7.2:6"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [1, 2, 3, 4, 5];
@@ -95,8 +83,6 @@ error_contains = "index out of bounds"
 [[case]]
 name = "compile_time_oob_inverted"
 spec = ["7.2:6"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [1, 2, 3, 4, 5];
@@ -110,8 +96,6 @@ error_contains = "index out of bounds"
 [[case]]
 name = "bare_range_rejected"
 spec = ["7.2:9"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [1, 2, 3, 4, 5];
@@ -125,8 +109,6 @@ error_contains = "must be borrowed"
 [[case]]
 name = "runtime_oob_panics"
 spec = ["7.2:7"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn pick_hi() -> usize {
     10
@@ -144,8 +126,6 @@ exit_code = 101
 [[case]]
 name = "mut_slice_immut_array_rejected"
 spec = ["7.2:8"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [1, 2, 3, 4, 5];

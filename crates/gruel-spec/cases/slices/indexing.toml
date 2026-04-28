@@ -11,8 +11,6 @@ name = "Slice Indexing"
 [[case]]
 name = "slice_read_subrange"
 spec = ["7.2:10"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [10, 20, 30, 40, 50];
@@ -25,8 +23,6 @@ exit_code = 30
 [[case]]
 name = "mut_slice_write"
 spec = ["7.2:13"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut arr: [i32; 5] = [1, 2, 3, 4, 5];
@@ -40,8 +36,6 @@ exit_code = 42
 [[case]]
 name = "slice_oob_panics"
 spec = ["7.2:11"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn pick_idx() -> usize {
     7
@@ -59,8 +53,6 @@ exit_code = 101
 [[case]]
 name = "non_copy_element_move_rejected"
 spec = ["7.2:12"]
-preview = "slices"
-preview_should_pass = true
 source = """
 struct Heavy {
     value: i32,
@@ -81,8 +73,6 @@ error_contains = "move out of"
 [[case]]
 name = "immut_slice_write_rejected"
 spec = ["7.2:13"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 5] = [1, 2, 3, 4, 5];

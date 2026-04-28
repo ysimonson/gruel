@@ -665,13 +665,6 @@ impl<'a> Sema<'a> {
         };
         let span = inst.span;
 
-        // Slice surface forms are gated behind --preview slices.
-        self.require_preview(
-            gruel_error::PreviewFeature::Slices,
-            "slice borrow over a range subscript",
-            span,
-        )?;
-
         // The base must be an lvalue (variable, parameter, or place
         // expression — same rule as `&x` / `&mut x`).
         let root_var = self.extract_root_variable(base).ok_or_else(|| {

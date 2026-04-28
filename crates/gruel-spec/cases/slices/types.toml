@@ -1,8 +1,6 @@
 # Slice Types (ADR-0064)
 #
-# Tests for the `Slice(T)` and `MutSlice(T)` type-position forms behind
-# the `slices` preview feature. Construction syntax lands in later
-# phases; these tests cover only the type names being recognized.
+# Tests for the `Slice(T)` and `MutSlice(T)` type-position forms.
 
 [section]
 id = "slices.types"
@@ -13,8 +11,6 @@ description = "Tests for ADR-0064 Slice(T) / MutSlice(T) names in type position.
 [[case]]
 name = "slice_type_in_param"
 spec = ["7.2:1", "7.2:2"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn take(s: Slice(i32)) -> i32 {
     7
@@ -29,8 +25,6 @@ exit_code = 7
 [[case]]
 name = "mut_slice_type_in_param"
 spec = ["7.2:1", "7.2:2"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn take(s: MutSlice(i32)) -> i32 {
     7
@@ -41,33 +35,3 @@ fn main() -> i32 {
 }
 """
 exit_code = 7
-
-[[case]]
-name = "slice_type_requires_preview"
-spec = ["7.2:1"]
-source = """
-fn take(s: Slice(i32)) -> i32 {
-    0
-}
-
-fn main() -> i32 {
-    0
-}
-"""
-compile_fail = true
-error_contains = "requires preview feature"
-
-[[case]]
-name = "mut_slice_type_requires_preview"
-spec = ["7.2:1"]
-source = """
-fn take(s: MutSlice(i32)) -> i32 {
-    0
-}
-
-fn main() -> i32 {
-    0
-}
-"""
-compile_fail = true
-error_contains = "requires preview feature"

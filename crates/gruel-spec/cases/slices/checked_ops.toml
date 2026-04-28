@@ -10,8 +10,6 @@ name = "Slice checked operations"
 [[case]]
 name = "slice_ptr_in_checked"
 spec = ["7.2:14"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 30];
@@ -27,8 +25,6 @@ exit_code = 10
 [[case]]
 name = "slice_ptr_outside_checked_rejected"
 spec = ["7.2:14"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [10, 20, 30];
@@ -43,8 +39,6 @@ error_contains = "checked"
 [[case]]
 name = "mut_slice_ptr_mut_in_checked"
 spec = ["7.2:14"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut arr: [i32; 3] = [1, 2, 3];
@@ -61,8 +55,6 @@ exit_code = 99
 [[case]]
 name = "ptr_mut_on_immut_slice_rejected"
 spec = ["7.2:14"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
@@ -79,8 +71,6 @@ error_contains = "method"
 [[case]]
 name = "parts_to_slice_basic"
 spec = ["7.2:15"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
@@ -97,8 +87,6 @@ exit_code = 1
 [[case]]
 name = "parts_to_slice_outside_checked_rejected"
 spec = ["7.2:15"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: i32 = 42;
@@ -114,8 +102,6 @@ error_contains = "checked"
 [[case]]
 name = "parts_to_mut_slice_basic"
 spec = ["7.2:15"]
-preview = "slices"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut x: i32 = 42;
