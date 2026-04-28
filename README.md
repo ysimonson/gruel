@@ -3,29 +3,21 @@
 Gruel is a programming language. It's like
 [rue](https://github.com/rue-language/rue) but worse.
 
-## Why Fork
-
-I think the bones of a really compelling language are there with Rue. But the
-project is not contributor-friendly. This is by design: Steve wants to
-experiment largely in isolation with some ideas. To make it more contributor
-friendly, and hopefully iterate on a language faster, this fork originally got
-rid of as much off-the-beaten path infrastructure as possible in favor of more
-pedestrian variants: git instead of jj, just ADRs without beads workflows,
-cargo instead of buck, etc. Since then, the languages have diverged
-substantially.
-
 ## Differences from Rue
 
 ### Language
+
+Theme: Build upon Rue's bones, keeping a lot of the broad ideas but making breaking changes to maintain cohesion as it evolves.
 
 - Added for loops and first class `Range`s (ADR-0041)
 - Several new numeric primitives - `f16`/`f32`/`f64` and `isize`/`usize` (ADR-0046)
 - Use of `usize` for indexing (ADR-0054)
 - Tuples (ADR-0048)
+- Slices (ADR-0064)
 - Anonymous functions (ADR-0055)
 - Go-like structurally typed interfaces (ADR-0056, ADR-0057, ADR-0060)
-- Rust-like @derive for structs and enums (ADR-0058)
-- Reworked pointers and references to a less keyword-driven syntax to accomodate the growing number of variants (ADR-0061, ADR-0062)
+- Rust-like `@derive` for structs and enums (ADR-0058)
+- Reworked pointers and references to a less keyword-driven syntax to accomodate the growing number of variants (ADR-0061, ADR-0062, ADR-0063)
 - Stabilized anonymous struct methods (ADR-0029)
 - All struct/enum methods, including destructors, are inlined - there are no `impl` blocks (ADR-0053)
 - Added struct destructuring (ADR-0036)
@@ -36,12 +28,17 @@ substantially.
 
 ### Language Tooling
 
+Theme: rely on LLVM / libc to provide better performance and more diverse platform support.
+
 - Replaced custom x86-64 and AArch64 backends with LLVM (ADR-0033)
 - Removed the custom linker in favor of the system linker LLVM (ADR-0033)
 - Replaced inline syscalls with libc-based platform abstraction (ADR-0035)
 - Significantly expanded benchmarks to track comptime and runtime performance (ADR-0043)
 
 ### Infrastructure
+
+Theme: get rid of as much off-the-beaten-path infrastructure as possible in favor of more pedestrian variants: git instead of jj, just ADRs without beads workflows,
+cargo instead of buck, etc. The goal is to make this more contributor-friendly.
 
 - Replaced jj with git
 - Replaced buck2 with cargo and vendored deps with crates.io
