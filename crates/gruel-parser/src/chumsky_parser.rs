@@ -2418,67 +2418,86 @@ where
         .delimited_by(just(TokenKind::LBracket), just(TokenKind::RBracket))
         .map(AssignSuffix::Index);
 
-    ident_parser()
+    // Assignment base: a regular identifier OR `self` (so a method body can
+    // write through `&mut self`, e.g. `self.value = ...`). Plain `self =
+    // expr;` is rejected later in sema since `self` is not a place that can
+    // be rebound.
+    let self_base = just(TokenKind::SelfValue)
+        .map_with(|_, e| {
+            Expr::SelfExpr(SelfExpr {
+                span: span_from_extra(e),
+            })
+        })
+        .boxed();
+    let ident_base = ident_parser().map(Expr::Ident).boxed();
+    let assign_base = choice((self_base, ident_base)).boxed();
+
+    assign_base
         .then(
             choice((field_suffix.boxed(), index_suffix.boxed()))
                 .repeated()
                 .collect::<Vec<_>>(),
         )
-        .map(|(base_ident, suffixes)| {
+        .try_map(|(base_expr_init, suffixes), span| {
             if suffixes.is_empty() {
-                // Simple variable: x
-                AssignTarget::Var(base_ident)
-            } else {
-                // Chain of field/index accesses: x.a[0].b...
-                // Build up the expression from left to right, consuming suffixes by value
-                let mut base_expr = Expr::Ident(base_ident);
-                let mut suffixes = suffixes.into_iter().peekable();
-                while let Some(suffix) = suffixes.next() {
-                    let is_last = suffixes.peek().is_none();
-                    if is_last {
-                        // The last suffix determines the target type
-                        return match suffix {
-                            AssignSuffix::Field(field) => {
-                                let span = Span::new(base_expr.span().start, field.span.end);
-                                AssignTarget::Field(FieldExpr {
-                                    base: Box::new(base_expr),
-                                    field,
-                                    span,
-                                })
-                            }
-                            AssignSuffix::Index(index) => {
-                                let span = Span::new(base_expr.span().start, index.span().end);
-                                AssignTarget::Index(IndexExpr {
-                                    base: Box::new(base_expr),
-                                    index: Box::new(index),
-                                    span,
-                                })
-                            }
-                        };
-                    }
-                    // Build intermediate expressions
-                    match suffix {
+                // Simple variable target: only `name = ...` is legal.
+                // `self = ...` is not — `self` is a parameter binding that
+                // can't be rebound. Reject at parse time.
+                return match base_expr_init {
+                    Expr::Ident(ident) => Ok(AssignTarget::Var(ident)),
+                    _ => Err(chumsky::error::Rich::custom(
+                        span,
+                        "cannot assign to `self`",
+                    )),
+                };
+            }
+            // Chain of field/index accesses: x.a[0].b...
+            // Build up the expression from left to right, consuming suffixes by value.
+            let mut base_expr = base_expr_init;
+            let mut suffixes_iter = suffixes.into_iter().peekable();
+            while let Some(suffix) = suffixes_iter.next() {
+                let is_last = suffixes_iter.peek().is_none();
+                if is_last {
+                    return Ok(match suffix {
                         AssignSuffix::Field(field) => {
                             let span = Span::new(base_expr.span().start, field.span.end);
-                            base_expr = Expr::Field(FieldExpr {
+                            AssignTarget::Field(FieldExpr {
                                 base: Box::new(base_expr),
                                 field,
                                 span,
-                            });
+                            })
                         }
                         AssignSuffix::Index(index) => {
                             let span = Span::new(base_expr.span().start, index.span().end);
-                            base_expr = Expr::Index(IndexExpr {
+                            AssignTarget::Index(IndexExpr {
                                 base: Box::new(base_expr),
                                 index: Box::new(index),
                                 span,
-                            });
+                            })
                         }
+                    });
+                }
+                // Build intermediate expressions
+                match suffix {
+                    AssignSuffix::Field(field) => {
+                        let span = Span::new(base_expr.span().start, field.span.end);
+                        base_expr = Expr::Field(FieldExpr {
+                            base: Box::new(base_expr),
+                            field,
+                            span,
+                        });
+                    }
+                    AssignSuffix::Index(index) => {
+                        let span = Span::new(base_expr.span().start, index.span().end);
+                        base_expr = Expr::Index(IndexExpr {
+                            base: Box::new(base_expr),
+                            index: Box::new(index),
+                            span,
+                        });
                     }
                 }
-                // This is unreachable since we already checked suffixes.is_empty()
-                unreachable!()
             }
+            unreachable!("suffixes was non-empty so the loop must have returned")
         })
         .boxed()
 }

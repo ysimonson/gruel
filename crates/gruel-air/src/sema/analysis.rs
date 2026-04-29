@@ -79,6 +79,10 @@ struct MethodBodySpec<'a> {
     body: InstRef,
     /// The type of `self`, or `None` if this is a static/associated function.
     self_type: Option<Type>,
+    /// Receiver mode (`self` / `&self` / `&mut self`). Encoded as
+    /// `RirParamMode` (0 = Normal, 1 = Inout, 2 = Borrow). Ignored when
+    /// `self_type` is `None`.
+    self_mode: u8,
 }
 
 /// Result of analyzing a function: analyzed function, warnings, local strings,
@@ -277,6 +281,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     return_type,
                     body,
                     has_self,
+                    receiver_mode,
                     ..
                 } = &method_inst.data
                 {
@@ -297,6 +302,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                             params: &params,
                             body: *body,
                             self_type: has_self.then_some(struct_type),
+                            self_mode: *receiver_mode,
                         },
                         method_inst.span,
                     ) {
@@ -357,6 +363,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     return_type,
                     body,
                     has_self,
+                    receiver_mode,
                     ..
                 } = &method_inst.data
                 {
@@ -377,6 +384,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                             params: &params,
                             body: *body,
                             self_type: has_self.then_some(enum_type),
+                            self_mode: *receiver_mode,
                         },
                         method_inst.span,
                     ) {
@@ -429,6 +437,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     return_type,
                     body,
                     has_self,
+                    receiver_mode,
                     ..
                 } = &m.data
                 else {
@@ -449,6 +458,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         params: &params,
                         body: *body,
                         self_type: has_self.then_some(enum_type),
+                        self_mode: *receiver_mode,
                     },
                     m.span,
                 ) {
@@ -475,6 +485,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                     return_type,
                     body,
                     has_self,
+                    receiver_mode,
                     ..
                 } = &m.data
                 else {
@@ -495,6 +506,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         params: &params,
                         body: *body,
                         self_type: has_self.then_some(struct_type),
+                        self_mode: *receiver_mode,
                     },
                     m.span,
                 ) {
@@ -1127,6 +1139,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                             return_type,
                             body,
                             has_self,
+                            receiver_mode,
                             ..
                         } = &method_inst.data
                         {
@@ -1149,6 +1162,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                                     params: &params,
                                     body: *body,
                                     self_type: has_self.then_some(method_info.struct_type),
+                                    self_mode: *receiver_mode,
                                 },
                                 method_inst.span,
                             ) {
@@ -1510,9 +1524,19 @@ impl<'a> Sema<'a> {
         let mut param_info: Vec<(Spur, Type, RirParamMode)> = Vec::new();
 
         if let Some(struct_type) = spec.self_type {
-            // Add self parameter (Normal mode - passed by value)
+            // Decode the receiver mode set by the parser (`self` / `&self` /
+            // `&mut self` — see ADR-0062). Receiver normalization parallels
+            // the regular-parameter normalization in
+            // `analyze_function_internal`: a `&self` (`SelfMode::Borrow`) self
+            // param becomes `(Self, Borrow)` and `&mut self`
+            // (`SelfMode::Inout`) becomes `(Self, Inout)`.
+            let self_mode = match spec.self_mode {
+                1 => RirParamMode::Inout,
+                2 => RirParamMode::Borrow,
+                _ => RirParamMode::Normal,
+            };
             let self_sym = self.interner.get_or_intern("self");
-            param_info.push((self_sym, struct_type, RirParamMode::Normal));
+            param_info.push((self_sym, struct_type, self_mode));
         }
 
         // Add regular parameters with their modes. Use `resolve_param_type`
@@ -1632,6 +1656,27 @@ impl<'a> Sema<'a> {
         type_subst: Option<&rustc_hash::FxHashMap<Spur, Type>>,
         value_subst: Option<&rustc_hash::FxHashMap<Spur, ConstValue>>,
     ) -> RawFnAnalysis {
+        // ADR-0062: a parameter typed `Ref(T)` / `MutRef(T)` with the default
+        // `Normal` mode is the new-form spelling of the legacy `borrow x: T` /
+        // `inout x: T` keyword forms. Lower it to the legacy mode so the rest
+        // of sema (place tracing, exclusivity, mutability, codegen) handles
+        // both surface forms uniformly. Function bodies then see the bare `T`
+        // and field projection / indexing / scalar reads / through-assignment
+        // all work without a user-facing deref operator.
+        let normalized_params: Vec<(Spur, Type, RirParamMode)> = params
+            .iter()
+            .map(|(name, ty, mode)| match (mode, ty.try_kind()) {
+                (RirParamMode::Normal, Some(TypeKind::Ref(id))) => {
+                    (*name, self.type_pool.ref_def(id), RirParamMode::Borrow)
+                }
+                (RirParamMode::Normal, Some(TypeKind::MutRef(id))) => {
+                    (*name, self.type_pool.mut_ref_def(id), RirParamMode::Inout)
+                }
+                _ => (*name, *ty, *mode),
+            })
+            .collect();
+        let params: &[(Spur, Type, RirParamMode)] = &normalized_params;
+
         let mut air = Air::new(return_type);
         let mut param_vec: Vec<ParamInfo> = Vec::new();
         let mut param_modes: Vec<crate::inst::AirParamMode> = Vec::new();
@@ -3178,11 +3223,25 @@ impl<'a> Sema<'a> {
 
             self.check_exclusive_access(&args, span)?;
 
+            // ADR-0062: undo the receiver move and pass it by-pointer when the
+            // method takes `&self` / `&mut self`. Mirrors the struct-method
+            // path below.
+            let recv_pass_mode = match method_info.receiver {
+                crate::types::ReceiverMode::ByValue => AirArgMode::Normal,
+                crate::types::ReceiverMode::Borrow => AirArgMode::Borrow,
+                crate::types::ReceiverMode::Inout => AirArgMode::Inout,
+            };
+            if !matches!(method_info.receiver, crate::types::ReceiverMode::ByValue)
+                && let Some(var) = receiver_var
+            {
+                ctx.moved_vars.remove(&var);
+            }
+
             let return_type = method_info.return_type;
 
             let mut air_args = vec![AirCallArg {
                 value: receiver_result.air_ref,
-                mode: AirArgMode::Normal,
+                mode: recv_pass_mode,
             }];
             air_args.extend(self.analyze_call_args(air, &args, ctx)?);
 
@@ -3383,6 +3442,23 @@ impl<'a> Sema<'a> {
             ));
         }
 
+        // ADR-0062: a `&self` / `&mut self` receiver is sugar for a borrow
+        // (immutable / mutable). The receiver expression's `analyze_inst`
+        // already recorded a move on the root variable since it was
+        // evaluated as a value; undo it so the caller can keep using the
+        // value after the call. This mirrors the interface-dispatch and
+        // builtin-method paths above.
+        let recv_pass_mode = match method_info.receiver {
+            crate::types::ReceiverMode::ByValue => AirArgMode::Normal,
+            crate::types::ReceiverMode::Borrow => AirArgMode::Borrow,
+            crate::types::ReceiverMode::Inout => AirArgMode::Inout,
+        };
+        if !matches!(method_info.receiver, crate::types::ReceiverMode::ByValue)
+            && let Some(var) = receiver_var
+        {
+            ctx.moved_vars.remove(&var);
+        }
+
         // Check if calling an unchecked method requires a checked block
         if method_info.is_unchecked && ctx.checked_depth == 0 {
             return Err(CompileError::new(
@@ -3555,7 +3631,7 @@ impl<'a> Sema<'a> {
             // Build the AIR call args: receiver first, then runtime args.
             let mut air_args = vec![AirCallArg {
                 value: receiver_result.air_ref,
-                mode: AirArgMode::Normal,
+                mode: recv_pass_mode,
             }];
             air_args.extend(air_runtime_args);
 
@@ -3595,7 +3671,7 @@ impl<'a> Sema<'a> {
         // Analyze arguments - receiver first, then remaining args
         let mut air_args = vec![AirCallArg {
             value: receiver_result.air_ref,
-            mode: AirArgMode::Normal,
+            mode: recv_pass_mode,
         }];
         air_args.extend(self.analyze_call_args(air, &args, ctx)?);
 

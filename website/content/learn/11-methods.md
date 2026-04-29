@@ -32,9 +32,83 @@ fn main() -> i32 {
 
 The first parameter `self` is the receiver. Methods are called with dot syntax: `p.distance_squared()`.
 
-## `self` Consumes the Receiver
+## Receiver Modes
 
-By default, calling a method moves the receiver — after the call, the original binding is no longer usable. This matches the move semantics of regular function arguments:
+The `self` parameter has three forms, mirroring how arguments work in regular function signatures:
+
+| Receiver | Meaning | Use when |
+|----------|---------|----------|
+| `self` | The method takes ownership of the value | The method consumes or transforms the value |
+| `&self` | Read-only reference (sugar for `self: Ref(Self)`) | The method only reads from the value |
+| `&mut self` | Mutable reference (sugar for `self: MutRef(Self)`) | The method modifies the value in place |
+
+The `&self` / `&mut self` shorthand is the same idea as the `&` and `&mut` operators introduced in [References](@/learn/09-borrow-and-inout.md), just applied to the receiver.
+
+### Read-Only Methods (`&self`)
+
+Use `&self` when a method only needs to read. The caller's value remains usable after the call:
+
+```gruel
+struct Rectangle {
+    width: i32,
+    height: i32,
+
+    fn area(&self) -> i32 {
+        self.width * self.height
+    }
+
+    fn perimeter(&self) -> i32 {
+        2 * (self.width + self.height)
+    }
+}
+
+fn main() -> i32 {
+    let r = Rectangle { width: 6, height: 4 };
+
+    @dbg(r.area());       // prints: 24
+    @dbg(r.perimeter());  // prints: 20
+
+    // r is still usable — &self didn't consume it
+    r.area()
+}
+```
+
+### Mutating Methods (`&mut self`)
+
+Use `&mut self` when a method modifies the struct. Unlike free functions (where the caller writes `&mut` at the call site), method receivers are implicit — call the method on a `let mut` binding:
+
+```gruel
+struct Counter {
+    value: i32,
+
+    fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+
+    fn reset(&mut self) {
+        self.value = 0;
+    }
+}
+
+fn main() -> i32 {
+    let mut c = Counter { value: 0 };
+    c.increment();
+    c.increment();
+    c.increment();
+
+    @dbg(c.value);  // prints: 3
+
+    c.reset();
+
+    @dbg(c.value);  // prints: 0
+
+    0
+}
+```
+
+### By-Value (`self`)
+
+A bare `self` consumes the receiver. After the call, the original binding is no longer usable. This form is useful for transformations that produce a new value:
 
 ```gruel
 struct Counter {
@@ -53,40 +127,6 @@ fn main() -> i32 {
     c.value
 }
 ```
-
-This works well for transformations: each call returns a new value. The shadowing rebinding (`let c = c.incremented()`) keeps the surface name in scope.
-
-## Calling a Method Many Times: `@derive(Copy)`
-
-When a type is small and stateless, mark it `@derive(Copy)` so values are duplicated rather than moved when used:
-
-```gruel
-@derive(Copy)
-struct Rectangle {
-    width: i32,
-    height: i32,
-
-    fn area(self) -> i32 {
-        self.width * self.height
-    }
-
-    fn perimeter(self) -> i32 {
-        2 * (self.width + self.height)
-    }
-}
-
-fn main() -> i32 {
-    let r = Rectangle { width: 6, height: 4 };
-
-    @dbg(r.area());       // prints: 24
-    @dbg(r.perimeter());  // prints: 20
-
-    // r is still usable because Rectangle is Copy
-    r.area()
-}
-```
-
-A Copy type can have all its fields read freely, methods called any number of times, and instances passed to functions without thinking about ownership. Most types with only primitive fields are good candidates for `@derive(Copy)`. See [Interfaces and Derives](@/learn/21-interfaces.md) for more on derive.
 
 ## Associated Functions
 
@@ -157,7 +197,7 @@ enum Shape {
     Circle(i32),
     Square(i32),
 
-    fn area(self) -> i32 {
+    fn area(&self) -> i32 {
         match self {
             Shape::Circle(r) => 3 * r * r,   // close enough
             Shape::Square(s) => s * s,
@@ -171,10 +211,6 @@ fn main() -> i32 {
 }
 ```
 
-## A Note on `&self` and `&mut self`
-
-Gruel's grammar accepts `&self` and `&mut self` as method receivers (sugar for `self: Ref(Self)` and `self: MutRef(Self)`; see [ADR-0062](@/learn/references/adrs/0062-reference-types.md)). They will eventually allow you to call multiple methods on a non-Copy value without consuming it. In the current implementation they parse but the borrow-checker still treats the call as a move, and method bodies cannot yet write through `&mut self`. For now, prefer `@derive(Copy)` when you need repeated method calls, and write transformations as `fn name(self) -> Self` that return new values.
-
 ## Summary
 
-Methods live inline in struct or enum bodies. By default `self` consumes the receiver, so methods are typically transformations that return a new value. Use `@derive(Copy)` to opt into duplication when calling many methods on the same value. Functions without a `self` parameter become associated functions, called with `Type::name()`.
+Methods live inline in struct or enum bodies. The receiver is one of `self` / `&self` / `&mut self`, depending on whether the method consumes, reads, or mutates the value. Functions without a `self` parameter become associated functions, called with `Type::name()`.

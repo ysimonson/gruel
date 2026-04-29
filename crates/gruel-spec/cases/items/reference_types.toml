@@ -171,23 +171,104 @@ fn main() -> i32 {
 """
 exit_code = 42
 
-# `&mut self` parses and lowers to `inout self`. Mutation inside a struct
-# method body is a separate (pre-existing) restriction shared with the
-# legacy `inout self` form, so this test only exercises a method whose
-# body does not modify `self`.
+# `&mut self` lowers to a mutable receiver: the method body can write
+# through `self.field`, and the receiver isn't consumed at the call site.
 [[case]]
-name = "mut_ref_self_method_receiver_parses"
-spec = ["6.1:34"]
+name = "mut_ref_self_method_mutates"
+spec = ["6.1:34", "6.1:42"]
 source = """
 struct Counter {
     n: i32,
 
-    fn touch(&mut self) -> i32 { 42 }
+    fn bump(&mut self) {
+        self.n = self.n + 1;
+    }
 }
 
 fn main() -> i32 {
     let mut c = Counter { n: 0 };
-    c.touch()
+    c.bump();
+    c.bump();
+    c.bump();
+    c.n
+}
+"""
+exit_code = 3
+
+# `&self` borrows the receiver: a method can be called many times in a row
+# on the same non-Copy value without consuming it.
+[[case]]
+name = "ref_self_method_does_not_consume"
+spec = ["6.1:34", "6.1:42"]
+source = """
+struct R {
+    n: i32,
+
+    fn get(&self) -> i32 { self.n }
+}
+
+fn main() -> i32 {
+    let r = R { n: 21 };
+    let a = r.get();
+    let b = r.get();
+    a + b
+}
+"""
+exit_code = 42
+
+# Through-read of a struct via `Ref(T)` parameter: field projection works.
+[[case]]
+name = "ref_param_field_projection"
+spec = ["6.1:34", "6.1:38"]
+source = """
+struct Point { x: i32, y: i32 }
+
+fn add_xy(p: Ref(Point)) -> i32 {
+    p.x + p.y
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    add_xy(&p)
+}
+"""
+exit_code = 42
+
+# Through-write of an array via `MutRef(T)` parameter: writing through the
+# reference modifies the caller's value.
+[[case]]
+name = "mut_ref_param_writes_through"
+spec = ["6.1:34", "6.1:35"]
+source = """
+fn double_all(arr: MutRef([i32; 3])) {
+    let mut i: usize = 0;
+    while i < 3 {
+        arr[i] = arr[i] * 2;
+        i = i + 1;
+    }
+}
+
+fn main() -> i32 {
+    let mut values = [10, 20, 12];
+    double_all(&mut values);
+    values[0] + values[1] + values[2]
+}
+"""
+exit_code = 84
+
+# Through-read of a scalar via `Ref(i32)`: the parameter behaves like a
+# value of the referent type at use sites.
+[[case]]
+name = "ref_param_scalar_read"
+spec = ["6.1:34"]
+source = """
+fn double_int(r: Ref(i32)) -> i32 {
+    r * 2
+}
+
+fn main() -> i32 {
+    let x: i32 = 21;
+    double_int(&x)
 }
 """
 exit_code = 42

@@ -1,12 +1,12 @@
 +++
-title = "Borrow and Inout"
+title = "References"
 weight = 9
 template = "learn/page.html"
 +++
 
-# Borrow and Inout Parameters
+# References
 
-When you read code, you want to understand what it does without tracing through every function. Gruel makes mutation visible at the call site by requiring you to spell out when a function is allowed to read or write a borrowed value.
+When you read code, you want to understand what it does without tracing through every function. Gruel makes mutation visible at the call site by requiring you to spell out when a function is allowed to read or write through a borrowed value.
 
 ## Reading Code at a Glance
 
@@ -15,12 +15,12 @@ Look at this code:
 ```gruel
 fn main() -> i32 {
     let mut values = [10, 20, 30];
-    double_all(inout values);
+    double_all(&mut values);
     values[0]
 }
 ```
 
-Without seeing `double_all`'s definition, you already know it modifies `values`. The `inout` keyword tells you: this function will change my data.
+Without seeing `double_all`'s definition, you already know it modifies `values`. The `&mut` operator at the call site says: this function is being given mutable access to my data.
 
 Compare that to languages where mutation is invisible:
 
@@ -38,39 +38,19 @@ In Gruel, mutation is always explicit at the call site.
 
 ## How It Works
 
-### `inout`: Modify in Place
+Gruel has two reference types:
 
-Use `inout` when a function needs to modify its argument. Both the parameter declaration and the call site spell out the keyword:
+- `Ref(T)` — read-only access to a `T`. Construct with `&value`.
+- `MutRef(T)` — read/write access to a `T`. Construct with `&mut value`.
 
-```gruel
-fn double_all(inout arr: [i32; 3]) {
-    let mut i: usize = 0;
-    while i < 3 {
-        arr[i] = arr[i] * 2;
-        i = i + 1;
-    }
-}
+The receiving function declares which kind of reference it expects, and the caller writes the matching operator.
 
-fn main() -> i32 {
-    let mut values = [10, 20, 30];
-    double_all(inout values);
+### `Ref(T)`: Read Without Copying
 
-    @dbg(values[0]);  // prints: 20
-    @dbg(values[1]);  // prints: 40
-    @dbg(values[2]);  // prints: 60
-
-    values[0]
-}
-```
-
-There's no way to accidentally miss that mutation is happening.
-
-### `borrow`: Read Without Copying
-
-Use `borrow` when a function only needs to read:
+Use `Ref(T)` when a function only needs to read:
 
 ```gruel
-fn sum_array(borrow arr: [i32; 5]) -> i32 {
+fn sum_array(arr: Ref([i32; 5])) -> i32 {
     let mut total = 0;
     let mut i: usize = 0;
     while i < 5 {
@@ -82,20 +62,47 @@ fn sum_array(borrow arr: [i32; 5]) -> i32 {
 
 fn main() -> i32 {
     let numbers = [1, 2, 3, 4, 5];
-    let sum = sum_array(borrow numbers);
+    let sum = sum_array(&numbers);
     @dbg(sum);  // prints: 15
     sum
 }
 ```
 
-With `borrow`, the function won't change your data, and the original binding is still usable after the call.
+A `Ref(T)` parameter is read-only — the function can't change the data and the original binding is still usable after the call.
+
+### `MutRef(T)`: Modify in Place
+
+Use `MutRef(T)` when a function needs to modify its argument:
+
+```gruel
+fn double_all(arr: MutRef([i32; 3])) {
+    let mut i: usize = 0;
+    while i < 3 {
+        arr[i] = arr[i] * 2;
+        i = i + 1;
+    }
+}
+
+fn main() -> i32 {
+    let mut values = [10, 20, 30];
+    double_all(&mut values);
+
+    @dbg(values[0]);  // prints: 20
+    @dbg(values[1]);  // prints: 40
+    @dbg(values[2]);  // prints: 60
+
+    values[0]
+}
+```
+
+Both the function signature (`MutRef(...)`) and the call site (`&mut ...`) make the mutation visible. There's no way to accidentally miss it.
 
 ## Combining Them
 
-You can mix borrow and inout in a single function:
+A function can mix references:
 
 ```gruel
-fn copy_into(borrow src: [i32; 3], inout dst: [i32; 3]) {
+fn copy_into(src: Ref([i32; 3]), dst: MutRef([i32; 3])) {
     let mut i: usize = 0;
     while i < 3 {
         dst[i] = src[i];
@@ -107,7 +114,7 @@ fn main() -> i32 {
     let source = [1, 2, 3];
     let mut dest = [0, 0, 0];
 
-    copy_into(borrow source, inout dest);
+    copy_into(&source, &mut dest);
 
     @dbg(dest[0]);  // prints: 1
     @dbg(dest[1]);  // prints: 2
@@ -121,7 +128,7 @@ Reading the call site, you immediately know: `source` is read, `dest` is modifie
 
 ## With Structs
 
-These work with any type, not just arrays:
+References work with any type:
 
 ```gruel
 struct Point {
@@ -129,12 +136,12 @@ struct Point {
     y: i32,
 }
 
-fn translate(inout p: Point, dx: i32, dy: i32) {
+fn translate(p: MutRef(Point), dx: i32, dy: i32) {
     p.x = p.x + dx;
     p.y = p.y + dy;
 }
 
-fn print_point(borrow p: Point) {
+fn print_point(p: Ref(Point)) {
     @dbg(p.x);
     @dbg(p.y);
 }
@@ -142,9 +149,9 @@ fn print_point(borrow p: Point) {
 fn main() -> i32 {
     let mut pos = Point { x: 10, y: 20 };
 
-    print_point(borrow pos);          // prints: 10, 20
-    translate(inout pos, 5, -3);
-    print_point(borrow pos);          // prints: 15, 17
+    print_point(&pos);          // prints: 10, 20
+    translate(&mut pos, 5, -3);
+    print_point(&pos);          // prints: 15, 17
 
     0
 }
@@ -152,27 +159,43 @@ fn main() -> i32 {
 
 ## Aliasing Rules
 
-`borrow` and `inout` are scope-bound, and the compiler enforces a few rules to keep them safe:
+References are scope-bound, and the compiler enforces a few rules to keep them safe:
 
-1. **`inout` requires `let mut`.** You can only pass a binding declared with `let mut` as `inout`. Passing an immutable binding is a compile-time error.
-2. **No overlapping mutable views.** Within a single call, the same value cannot be passed twice as `inout`, nor as both `borrow` and `inout`.
-3. **References don't escape.** A function cannot return a borrowed parameter — the view exists only for the call.
-
-These rules prevent the data races and aliasing bugs that show up in unrestricted-mutation languages, without requiring a garbage collector.
-
-## A Note on Reference Types
-
-Gruel also has reference *types* spelled `Ref(T)` and `MutRef(T)`, with construction operators `&x` and `&mut x` (see [ADR-0062](@/learn/references/adrs/0062-reference-types.md)). These are the long-term direction for borrowing in Gruel and you may see them in newer code:
+1. **`&mut` requires `let mut`.** You can only construct `&mut x` when `x` was bound with `let mut`. Building a mutable reference to an immutable binding is a compile-time error.
+2. **No overlapping mutable references.** Within a single call, the same value cannot be passed twice as `&mut`, nor as both `&` and `&mut`.
+3. **References cannot escape.** A function cannot return a `Ref(T)` or `MutRef(T)` — references only live for the call.
 
 ```gruel
-fn touch(r: MutRef(i32)) -> i32 { 42 }   // parses, but can't yet write through r
+fn bad(_a: MutRef(i32), _b: MutRef(i32)) {}
 
 fn main() -> i32 {
     let mut x: i32 = 0;
-    touch(&mut x)
+    bad(&mut x, &mut x);  // error: x is mutably borrowed twice
+    0
 }
 ```
 
-In the current implementation, reference types work as type-level pass-through — you can construct a reference and forward it — but reading or writing through one inside the callee is gated on a deref operator that is still future work. Until that lands, use `borrow` / `inout` as shown above when the function body actually needs to use the value.
+These rules prevent the data races and aliasing bugs that show up in unrestricted-mutation languages, without requiring a garbage collector.
 
-Method receivers are the exception: `&self` and `&mut self` are sugar for `borrow self` and `inout self` and read-access through `&self` works today. See [Methods](@/learn/11-methods.md).
+## Legacy `borrow` and `inout` Keywords
+
+Gruel also accepts an older keyword form, where the parameter is annotated with `borrow` or `inout` and the call site repeats the keyword:
+
+```gruel
+fn sum_array(borrow arr: [i32; 5]) -> i32 { /* ... */ }
+fn double_all(inout arr: [i32; 3]) { /* ... */ }
+
+fn main() -> i32 {
+    let xs = [1, 2, 3, 4, 5];
+    let s = sum_array(borrow xs);
+    let mut ys = [10, 20, 30];
+    double_all(inout ys);
+    s
+}
+```
+
+The two forms are equivalent and produce identical code. New code should prefer `Ref(T)` / `MutRef(T)` and `&` / `&mut` for consistency with the rest of the type system, but you'll still see the keyword form in older code and tests (see [ADR-0062](@/learn/references/adrs/0062-reference-types.md)).
+
+## Methods
+
+Method receivers use a shorthand: `&self` is sugar for `self: Ref(Self)` and `&mut self` is sugar for `self: MutRef(Self)`. See [Methods](@/learn/11-methods.md) for the full picture.
