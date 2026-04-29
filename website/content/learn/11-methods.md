@@ -10,15 +10,13 @@ Methods let you define functions that belong to a type, called with dot syntax. 
 
 ## Defining Methods
 
-Use `impl` blocks to add methods to a struct:
+In Gruel, methods are defined **inside** the struct body, alongside its fields:
 
 ```gruel
 struct Point {
     x: i32,
     y: i32,
-}
 
-impl Point {
     fn distance_squared(self) -> i32 {
         self.x * self.x + self.y * self.y
     }
@@ -32,86 +30,47 @@ fn main() -> i32 {
 }
 ```
 
-The first parameter `self` receives the struct value. Methods are called with dot syntax: `p.distance_squared()`.
+The first parameter `self` is the receiver. Methods are called with dot syntax: `p.distance_squared()`.
 
-## Methods with Parameters
+## `self` Consumes the Receiver
 
-Methods can take additional parameters beyond `self`:
-
-```gruel
-struct Point {
-    x: i32,
-    y: i32,
-}
-
-impl Point {
-    fn translate(self, dx: i32, dy: i32) -> Point {
-        Point { x: self.x + dx, y: self.y + dy }
-    }
-}
-
-fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
-    let q = p.translate(3, 4);
-
-    @dbg(q.x);  // prints: 4
-    @dbg(q.y);  // prints: 6
-
-    q.x
-}
-```
-
-## Mutating Methods with `inout self`
-
-To modify a struct through a method, use `inout self`. Unlike free functions (where the caller writes `inout` at the call site), method receivers are implicit — you just call the method normally on a mutable variable:
+By default, calling a method moves the receiver — after the call, the original binding is no longer usable. This matches the move semantics of regular function arguments:
 
 ```gruel
 struct Counter {
     value: i32,
-}
 
-impl Counter {
-    fn increment(inout self) {
-        self.value = self.value + 1;
-    }
-
-    fn reset(inout self) {
-        self.value = 0;
+    fn incremented(self) -> Counter {
+        Counter { value: self.value + 1 }
     }
 }
 
 fn main() -> i32 {
-    let mut c = Counter { value: 0 };
-    c.increment();
-    c.increment();
-    c.increment();
+    let c = Counter { value: 0 };
+    let c = c.incremented().incremented().incremented();
 
     @dbg(c.value);  // prints: 3
-
-    c.reset();
-
-    @dbg(c.value);  // prints: 0
-
-    0
+    c.value
 }
 ```
 
-## Read-Only Methods with `borrow self`
+This works well for transformations: each call returns a new value. The shadowing rebinding (`let c = c.incremented()`) keeps the surface name in scope.
 
-Use `borrow self` when a method only needs to read, not modify, the struct. This lets you call the method without consuming the value:
+## Calling a Method Many Times: `@derive(Copy)`
+
+When a type is small and stateless, mark it `@derive(Copy)` so values are duplicated rather than moved when used:
 
 ```gruel
+@derive(Copy)
 struct Rectangle {
     width: i32,
     height: i32,
-}
 
-impl Rectangle {
-    fn area(borrow self) -> i32 {
+    fn area(self) -> i32 {
         self.width * self.height
     }
 
-    fn perimeter(borrow self) -> i32 {
+    fn perimeter(self) -> i32 {
         2 * (self.width + self.height)
     }
 }
@@ -122,22 +81,22 @@ fn main() -> i32 {
     @dbg(r.area());       // prints: 24
     @dbg(r.perimeter());  // prints: 20
 
-    // r is still usable because borrow self didn't consume it
+    // r is still usable because Rectangle is Copy
     r.area()
 }
 ```
 
+A Copy type can have all its fields read freely, methods called any number of times, and instances passed to functions without thinking about ownership. Most types with only primitive fields are good candidates for `@derive(Copy)`. See [Interfaces and Derives](@/learn/21-interfaces.md) for more on derive.
+
 ## Associated Functions
 
-Functions inside `impl` blocks without a `self` parameter are associated functions. They're called with `Type::function()` syntax and are useful for constructors:
+Functions inside a struct body without a `self` parameter are *associated functions*. They're called with `Type::function()` syntax and are typically used for constructors:
 
 ```gruel
 struct Point {
     x: i32,
     y: i32,
-}
 
-impl Point {
     fn origin() -> Point {
         Point { x: 0, y: 0 }
     }
@@ -158,7 +117,7 @@ fn main() -> i32 {
 }
 ```
 
-## Chaining Methods
+## Method Chaining
 
 Methods that return the struct can be chained:
 
@@ -166,39 +125,56 @@ Methods that return the struct can be chained:
 struct Point {
     x: i32,
     y: i32,
-}
 
-impl Point {
-    fn translate(self, dx: i32, dy: i32) -> Point {
+    fn new(x: i32, y: i32) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn translated(self, dx: i32, dy: i32) -> Point {
         Point { x: self.x + dx, y: self.y + dy }
     }
 
-    fn scale(self, factor: i32) -> Point {
+    fn scaled(self, factor: i32) -> Point {
         Point { x: self.x * factor, y: self.y * factor }
     }
 }
 
 fn main() -> i32 {
-    let p = Point::new(1, 2).translate(3, 4).scale(2);
+    let p = Point::new(1, 2).translated(3, 4).scaled(2);
     // (1+3)*2=8, (2+4)*2=12
     @dbg(p.x);  // prints: 8
     @dbg(p.y);  // prints: 12
     p.x
 }
+```
 
-impl Point {
-    fn new(x: i32, y: i32) -> Point {
-        Point { x: x, y: y }
+## Methods on Enums
+
+Enums use the same syntax — methods go inside the enum body:
+
+```gruel
+enum Shape {
+    Circle(i32),
+    Square(i32),
+
+    fn area(self) -> i32 {
+        match self {
+            Shape::Circle(r) => 3 * r * r,   // close enough
+            Shape::Square(s) => s * s,
+        }
     }
+}
+
+fn main() -> i32 {
+    let s = Shape::Square(5);
+    s.area()  // 25
 }
 ```
 
+## A Note on `&self` and `&mut self`
+
+Gruel's grammar accepts `&self` and `&mut self` as method receivers (sugar for `self: Ref(Self)` and `self: MutRef(Self)`; see [ADR-0062](@/learn/references/adrs/0062-reference-types.md)). They will eventually allow you to call multiple methods on a non-Copy value without consuming it. In the current implementation they parse but the borrow-checker still treats the call as a move, and method bodies cannot yet write through `&mut self`. For now, prefer `@derive(Copy)` when you need repeated method calls, and write transformations as `fn name(self) -> Self` that return new values.
+
 ## Summary
 
-| Parameter | Syntax | Use When |
-|-----------|--------|----------|
-| By value | `self` | Method consumes or transforms the value |
-| Mutable | `inout self` | Method modifies the struct in place |
-| Read-only | `borrow self` | Method only reads from the struct |
-
-Methods keep related operations next to the data they work on, making code easier to discover and organize.
+Methods live inline in struct or enum bodies. By default `self` consumes the receiver, so methods are typically transformations that return a new value. Use `@derive(Copy)` to opt into duplication when calling many methods on the same value. Functions without a `self` parameter become associated functions, called with `Type::name()`.

@@ -63,10 +63,12 @@ fn main() -> i32 {
 When multiple values go out of scope at the same point, they are dropped in **reverse declaration order** — last declared, first dropped:
 
 ```gruel
-struct Data { value: i32 }
+struct Data {
+    value: i32,
 
-drop fn Data(self) {
-    @dbg(self.value);
+    fn drop(self) {
+        @dbg(self.value);
+    }
 }
 
 fn main() -> i32 {
@@ -156,15 +158,15 @@ fn main() -> i32 {
 
 ## Custom Destructors
 
-Define a destructor with `drop fn` to run custom cleanup logic when a value is dropped:
+Define a destructor by adding a `fn drop(self)` method to the struct body. It runs automatically when a value of that type is dropped:
 
 ```gruel
 struct FileHandle {
     fd: i32,
-}
 
-drop fn FileHandle(self) {
-    @dbg(self.fd);  // cleanup logic here
+    fn drop(self) {
+        @dbg(self.fd);  // cleanup logic here
+    }
 }
 
 fn main() -> i32 {
@@ -173,7 +175,9 @@ fn main() -> i32 {
 }  // prints: 3
 ```
 
-A destructor must be declared at the top level (not inside an `impl` block), take exactly one parameter named `self`, and return nothing. Each type can have at most one destructor.
+A destructor takes exactly one parameter (`self`), returns nothing, and each type can have at most one. The destructor cannot be invoked directly with method-call syntax — only the compiler calls it, when the value goes out of scope.
+
+> **Legacy syntax.** The older top-level form `drop fn TypeName(self) { ... }` still parses for backward compatibility, but new code should prefer the inline `fn drop(self)` method (see [ADR-0053](@/learn/references/adrs/0053-inline-methods-and-drop.md)).
 
 Linear types (`linear struct`) cannot have destructors. A linear value must be explicitly consumed — the compiler rejects any code where one reaches scope exit unconsumed, so a destructor would never run.
 
@@ -185,11 +189,11 @@ When a value with a custom destructor is dropped, the custom destructor runs **f
 struct Buffer {
     data: String,
     size: i32,
-}
 
-drop fn Buffer(self) {
-    @dbg(self.size);
-    // After this runs, self.data (a String) is dropped automatically
+    fn drop(self) {
+        @dbg(self.size);
+        // After this runs, self.data (a String) is dropped automatically
+    }
 }
 
 fn main() -> i32 {
@@ -205,10 +209,12 @@ You don't need to manually drop fields — the compiler handles it.
 Parameters passed by value are owned by the callee. If the parameter isn't moved away, it's dropped when the function returns:
 
 ```gruel
-struct Data { value: i32 }
+struct Data {
+    value: i32,
 
-drop fn Data(self) {
-    @dbg(self.value);
+    fn drop(self) {
+        @dbg(self.value);
+    }
 }
 
 fn inspect(d: Data) -> i32 {

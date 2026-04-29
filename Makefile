@@ -1,5 +1,6 @@
 .PHONY: test quick-test doctest fmt fmt-check check bench crate-docs \
         check-intrinsic-docs gen-intrinsic-docs \
+        check-builtins-docs gen-builtins-docs \
         website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler \
         fuzz-structured-compiler fuzz-structured-invalid \
@@ -43,7 +44,7 @@ fmt:
 	cargo fmt --all
 
 # Check formatting without making changes (for CI).
-check: check-intrinsic-docs
+check: check-intrinsic-docs check-builtins-docs
 	cargo check --workspace --all-targets --exclude gruel-runtime
 	cargo check --manifest-path fuzz/Cargo.toml --all-targets
 	cargo clippy --workspace --all-targets --exclude gruel-runtime
@@ -66,6 +67,27 @@ check-intrinsic-docs:
 		echo "Run 'make gen-intrinsic-docs' and commit the result."; \
 		diff -u docs/generated/intrinsics-reference.md \
 			target/intrinsics-reference.md.generated || true; \
+		exit 1; \
+	fi
+
+# Regenerate docs/generated/builtins-reference.md from the gruel-builtins
+# registries. Run this after editing BuiltinTypeDef / BuiltinEnumDef /
+# BuiltinTypeConstructor entries.
+gen-builtins-docs:
+	cargo run -q -p gruel-builtins --bin gruel-builtins-docs
+
+# Fail if the checked-in built-in types reference has drifted from what the
+# registry would generate.
+check-builtins-docs:
+	@mkdir -p target
+	@cargo run -q -p gruel-builtins --bin gruel-builtins-docs -- \
+		target/builtins-reference.md.generated
+	@if ! diff -u docs/generated/builtins-reference.md \
+		target/builtins-reference.md.generated >/dev/null; then \
+		echo "docs/generated/builtins-reference.md is out of date."; \
+		echo "Run 'make gen-builtins-docs' and commit the result."; \
+		diff -u docs/generated/builtins-reference.md \
+			target/builtins-reference.md.generated || true; \
 		exit 1; \
 	fi
 

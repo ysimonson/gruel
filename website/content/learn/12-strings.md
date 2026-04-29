@@ -77,7 +77,7 @@ fn main() -> i32 {
 
 ## Querying a String
 
-Query methods use `borrow self`, so they don't consume the string:
+Query methods take `&self`, so they don't consume the string:
 
 ```gruel
 fn main() -> i32 {
@@ -133,7 +133,7 @@ fn main() -> i32 {
 
 ## Custom Destructors
 
-If your struct holds a String or other resource that needs cleanup, you can define a custom destructor with `drop fn`. See [Destructors](/learn/destructors/) for details on drop semantics, drop order, and how to write your own.
+If your struct holds a String or other resource that needs cleanup, define a custom destructor by adding a `fn drop(self)` method to the struct body. See [Destructors](@/learn/destructors.md) for details on drop semantics, drop order, and how to write your own.
 
 ## Pre-allocating Capacity
 

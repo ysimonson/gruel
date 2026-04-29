@@ -12,18 +12,20 @@ The name `checked` reflects that *you* are taking responsibility for checking th
 
 ## Checked Blocks
 
-Wrap low-level operations in a `checked` block:
+`checked { ... }` is a block expression that allows raw-pointer and syscall operations inside it. Its value is the value of the block:
 
 ```gruel
-fn example() -> i32 {
-    // Normal safe code here
+fn main() -> i32 {
+    let mut value: i32 = 10;
 
-    checked {
-        // Raw pointer operations permitted here
-    }
+    let v: i32 = checked {
+        let p: MutPtr(i32) = MutPtr(i32)::from(&mut value);
+        p.write(42);
+        p.read()
+    };
 
-    // Normal safe code resumes
-    0
+    @dbg(v);   // 42
+    value
 }
 ```
 
@@ -31,136 +33,101 @@ Code outside `checked` blocks is completely unaffected — all of Gruel's safety
 
 ## Raw Pointer Types
 
-Two raw pointer types are available inside `checked` blocks:
+Two raw pointer types are available, parameterized by the pointee:
 
-```gruel
-ptr const T   // read-only pointer to T
-ptr mut T     // read-write pointer to T
+```
+Ptr(T)      // read-only pointer to T
+MutPtr(T)   // read-write pointer to T
 ```
 
-## Getting Pointers from Values
+## Getting a Pointer from a Value
 
-Use `@raw` and `@raw_mut` to obtain pointers from existing values:
-
-```gruel
-fn inspect(borrow s: String) {
-    checked {
-        let p: ptr const String = @raw(s);
-        // p is valid while s is in scope
-    }
-}
-
-fn modify(inout s: String) {
-    checked {
-        let p: ptr mut String = @raw_mut(s);
-    }
-}
-```
-
-| Intrinsic | Input | Result |
-|-----------|-------|--------|
-| `@raw(x)` | `borrow T` or owned `T` | `ptr const T` |
-| `@raw_mut(x)` | `inout T` or owned `T` | `ptr mut T` |
-
-## Reading and Writing Through Pointers
+Construct a pointer from a reference using the type's `from` associated function. Combine it with the `&` and `&mut` operators from [Borrow and Inout](@/learn/09-borrow-and-inout.md):
 
 ```gruel
 fn main() -> i32 {
-    let mut value: i32 = 10;
-    checked {
-        let p: ptr mut i32 = @raw_mut(value);
+    let x: i32 = 7;
+    let mut y: i32 = 0;
 
-        // Write through pointer
-        @ptr_write(p, 42);
+    let result = checked {
+        let p: Ptr(i32) = Ptr(i32)::from(&x);
+        let q: MutPtr(i32) = MutPtr(i32)::from(&mut y);
+        q.write(p.read() * 6);
+        q.read()
+    };
 
-        // Read through pointer
-        let v: i32 = @ptr_read(p);
-        @dbg(v);  // prints: 42
-    }
-    value
+    @dbg(result);  // 42
+    result
 }
 ```
+
+## Pointer Methods
+
+Once you have a pointer, the operations are methods on the pointer type:
+
+| Method | Available on | Description |
+|--------|--------------|-------------|
+| `p.read()` | `Ptr(T)`, `MutPtr(T)` | Load the value at `p` |
+| `p.write(v)` | `MutPtr(T)` | Store `v` at `p` |
+| `p.offset(n)` | `Ptr(T)`, `MutPtr(T)` | Advance by `n` *elements* (not bytes) |
+| `p.is_null()` | `Ptr(T)`, `MutPtr(T)` | Test whether `p` is null |
+| `p.to_int()` | `Ptr(T)`, `MutPtr(T)` | Pointer's address as `u64` |
+
+Constructors live on the type itself:
+
+| Constructor | Description |
+|-------------|-------------|
+| `Ptr(T)::null()` / `MutPtr(T)::null()` | Null pointer |
+| `Ptr(T)::from(r)` / `MutPtr(T)::from(r)` | Wrap a `Ref(T)` / `MutRef(T)` |
+| `Ptr(T)::from_int(addr)` / `MutPtr(T)::from_int(addr)` | Reinterpret an integer address |
 
 ## Pointer Arithmetic
 
-`@ptr_offset` advances a pointer by a number of *elements* (not bytes):
+`p.offset(n)` advances by `n` *elements*, not bytes — the pointee type determines the stride:
 
 ```gruel
-fn sum_array(p: ptr const i32, len: u64) -> i32 {
-    let mut total = 0;
-    let mut i: u64 = 0;
-    checked {
-        while i < len {
-            let elem_ptr = @ptr_offset(p, @intCast(i));
-            total = total + @ptr_read(elem_ptr);
-            i = i + 1;
-        }
-    }
-    total
-}
-
 fn main() -> i32 {
     let arr = [1, 2, 3, 4, 5];
-    checked {
-        let p: ptr const i32 = @raw(arr);
-        sum_array(p, 5)
-    }
+
+    let third = checked {
+        let base: Ptr(i32) = Ptr(i32)::from(&arr[0]);
+        let p = base.offset(2);   // points at arr[2]
+        p.read()
+    };
+
+    third  // 3
 }
 ```
-
-## All Pointer Intrinsics
-
-| Intrinsic | Signature | Description |
-|-----------|-----------|-------------|
-| `@ptr_read(p)` | `(ptr const T) -> T` | Read value at pointer |
-| `@ptr_write(p, v)` | `(ptr mut T, T) -> ()` | Write value at pointer |
-| `@ptr_offset(p, n)` | `(ptr T, i64) -> ptr T` | Advance by n elements |
-| `@ptr_to_int(p)` | `(ptr T) -> u64` | Pointer as integer address |
-| `@int_to_ptr(n)` | `(u64) -> ptr mut T` | Integer address as pointer |
-| `@null_ptr()` | `() -> ptr const T` | Null pointer |
-| `@is_null(p)` | `(ptr T) -> bool` | Test for null |
-| `@ptr_copy(dst, src, n)` | `(ptr mut T, ptr const T, u64) -> ()` | Copy n elements |
-| `@raw(x)` | `borrow T` or `T` | `ptr const T` from value |
-| `@raw_mut(x)` | `inout T` or `T` | `ptr mut T` from value |
 
 ## Syscalls
 
 `@syscall` makes a direct OS system call. The first argument is the syscall number; the rest are arguments (up to six). It returns `i64`:
 
 ```gruel
-fn write_stdout(borrow s: String) {
-    checked {
-        let ptr = @raw(s);
-        // syscall 1 = write(fd, buf, len) on Linux
-        @syscall(1, 1, @ptr_to_int(ptr), s.len());
-    }
-}
-
 fn main() -> i32 {
-    write_stdout(borrow "hello from syscall\n");
+    checked {
+        // syscall 1 = write(fd, buf, len) on Linux
+        @syscall(1, 1, 0, 0);
+    }
     0
 }
 ```
 
-Syscall numbers are platform-specific. Use `@target_os()` to branch between Linux and macOS if needed.
+Syscall numbers and ABI conventions are platform-specific. Use `@target_os()` and `@target_arch()` to branch between platforms.
 
 ## Unchecked Functions
 
-Mark a function `unchecked` to signal that it performs low-level operations. Callers must call it from inside a `checked` block:
+Mark a function `unchecked` to signal that it performs low-level operations. Callers must invoke it from inside a `checked` block:
 
 ```gruel
-unchecked fn raw_copy(dst: ptr mut i32, src: ptr const i32, n: u64) {
-    checked {
-        @ptr_copy(dst, src, n);
-    }
-}
+unchecked fn dangerous_op() -> i32 { 42 }
 
-fn use_it(inout dst: [i32; 4], borrow src: [i32; 4]) {
-    checked {
-        raw_copy(@raw_mut(dst), @raw(src), 4);
-    }
+fn main() -> i32 {
+    checked { dangerous_op() }
 }
 ```
+
+Calling an `unchecked` function outside a `checked` block is a compile-time error.
 
 ## What You Are Responsible For
 
@@ -168,8 +135,8 @@ Inside `checked` blocks the compiler does not verify:
 
 - That pointers are non-null before dereferencing
 - That pointers point to valid, correctly-typed memory
-- That there are no aliasing violations (two `ptr mut` to the same location)
-- That pointers from `@raw`/`@raw_mut` don't outlive the value they came from
+- That there are no aliasing violations (two `MutPtr` to the same location)
+- That pointers don't outlive the value they came from
 
 These are your responsibility. Outside `checked` blocks, Gruel's normal guarantees are fully in force.
 

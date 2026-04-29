@@ -22,7 +22,7 @@ fn main() -> i32 {
 }
 ```
 
-Array indices are zero-based and must be `u64`.
+Array indices are zero-based and have type `usize`.
 
 ## Array Types
 
@@ -47,7 +47,7 @@ fn main() -> i32 {
     let numbers = [10, 20, 30, 40, 50];
 
     let mut sum = 0;
-    let mut i: u64 = 0;
+    let mut i: usize = 0;
     while i < 5 {
         sum = sum + numbers[i];
         i = i + 1;
@@ -95,7 +95,7 @@ fn main() -> i32 {
     let numbers = [64, 34, 25, 12, 22];
 
     let mut max = numbers[0];
-    let mut i: u64 = 1;
+    let mut i: usize = 1;
     while i < 5 {
         if numbers[i] > max {
             max = numbers[i];

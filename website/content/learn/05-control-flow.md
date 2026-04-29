@@ -100,6 +100,38 @@ fn main() -> i32 {
 
 `loop` is equivalent to `while true` but more clearly signals intent.
 
+## For-Each Loops
+
+When you want to iterate over a sequence of values rather than manage an index by hand, use `for x in iterable`:
+
+```gruel
+fn main() -> i32 {
+    let mut sum = 0;
+    for i in @range(0, 10) {
+        sum = sum + i;
+    }
+    @dbg(sum);  // prints: 45  (0+1+2+...+9)
+    sum
+}
+```
+
+`@range(start, end)` produces the integers `start..end` (`end` excluded). The single-argument form `@range(n)` is equivalent to `@range(0, n)`, and `@range(start, end, step)` advances by `step` each iteration.
+
+For-each works directly over arrays, too:
+
+```gruel
+fn main() -> i32 {
+    let scores = [10, 20, 30, 40, 50];
+    let mut total = 0;
+    for score in scores {
+        total = total + score;
+    }
+    total  // 150
+}
+```
+
+The loop variable is a fresh binding for each iteration. Use `break` and `continue` the same way as in `while`.
+
 ## Match Expressions
 
 For multi-way branching, use `match`:
@@ -121,7 +153,9 @@ fn main() -> i32 {
 }
 ```
 
-The `_` is a wildcard that matches anything. Match expressions must be exhaustive—every possible value must be handled.
+The `_` is a wildcard that matches anything. Match expressions must be exhaustive — every possible value must be handled.
+
+`match` is more powerful than this simple example suggests. It can destructure tuples, bind enum payloads, and nest patterns. We come back to it in [Enums](@/learn/08-enums.md) and [Tuples and Destructuring](@/learn/19-tuples.md).
 
 ## Example: FizzBuzz
 
