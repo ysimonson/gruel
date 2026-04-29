@@ -51,6 +51,24 @@ EOF
         | sed -e 's|(\.\./designs/\([0-9][0-9][0-9][0-9]\)-\([^)]*\)\.md)|(@/learn/references/adrs/\1-\2.md)|g'
 } > "$INTRINSICS_DST"
 
+# Copy the generated built-in types reference into the website. Generated
+# from the gruel-builtins registries (see ADR-0020) and committed under
+# docs/generated/; `make check-builtins-docs` enforces it stays in sync.
+echo "Copying built-in types reference..."
+BUILTINS_DST=website/content/learn/references/builtins.md
+{
+    cat <<'EOF'
++++
+title = "Built-in Types"
+weight = 2
+template = "learn/page.html"
++++
+
+EOF
+    tail -n +2 docs/generated/builtins-reference.md \
+        | sed -e 's|(\.\./designs/\([0-9][0-9][0-9][0-9]\)-\([^)]*\)\.md)|(@/learn/references/adrs/\1-\2.md)|g'
+} > "$BUILTINS_DST"
+
 # Copy ADRs. Each ADR becomes a page under references/adrs/. The section
 # index is authored in-tree (see content/learn/references/adrs/_index.md);
 # we just copy the individual ADR files.
