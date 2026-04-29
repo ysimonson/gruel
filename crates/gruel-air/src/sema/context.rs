@@ -4,7 +4,7 @@
 //! analysis, including local variable tracking, scope management, and move
 //! state tracking for affine types.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_builtins::BuiltinTypeDef;
 use gruel_error::CompileWarning;
@@ -279,7 +279,7 @@ impl AnalysisContext<'_> {
             (false, false) => {
                 // Neither diverges - merge the moves (union).
                 // A variable is moved after if-else if moved in EITHER branch.
-                let mut merged = HashMap::new();
+                let mut merged = HashMap::default();
 
                 // Include all moves from then-branch
                 for (symbol, then_state) in &then_moves {

@@ -1180,11 +1180,11 @@ pub fn render_reference_markdown() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
+    use rustc_hash::FxHashSet as HashSet;
 
     #[test]
     fn no_duplicate_names() {
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         for d in INTRINSICS {
             assert!(seen.insert(d.name), "duplicate intrinsic name: {}", d.name);
         }
@@ -1192,7 +1192,7 @@ mod tests {
 
     #[test]
     fn no_duplicate_ids() {
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         for d in INTRINSICS {
             assert!(seen.insert(d.id), "duplicate IntrinsicId: {:?}", d.id);
         }

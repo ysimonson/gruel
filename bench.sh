@@ -205,8 +205,10 @@ for i in "${!benchmark_names[@]}"; do
 
     log_info "Running: $name"
 
-    # Build the opt-level flag (e.g., -O0, -O3)
-    opt_flag="-${opt_level}"
+    # Build the opt-level flag (e.g., --opt-level=0). The benchmark config
+    # may specify levels as either "0".."3" or the legacy "O0".."O3"; strip
+    # any leading "O" so we always pass a numeric value.
+    opt_flag="--opt-level=${opt_level#O}"
 
     # Run multiple iterations and collect timing data
     iteration_results=()

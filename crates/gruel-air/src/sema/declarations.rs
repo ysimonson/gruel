@@ -9,7 +9,7 @@
 //! - Collecting method signatures from impl blocks
 //! - Validating @copy and @handle structs
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_builtins::{is_reserved_type_constructor_name, is_reserved_type_name};
 use gruel_error::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
@@ -248,7 +248,7 @@ impl<'a> Sema<'a> {
             } = &inst.data
             {
                 let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
-                let mut seen: HashSet<Spur> = HashSet::new();
+                let mut seen: HashSet<Spur> = HashSet::default();
                 let mut methods = Vec::new();
                 for method_ref in method_refs {
                     let m = self.rir.get(method_ref);
@@ -389,7 +389,7 @@ impl<'a> Sema<'a> {
                         .get_enum_variant_decls(*variants_start, *variants_len);
 
                     // Check for duplicate variant names
-                    let mut seen_variants: HashSet<Spur> = HashSet::new();
+                    let mut seen_variants: HashSet<Spur> = HashSet::default();
                     for (variant_name, _, field_names) in &raw_variants {
                         if !seen_variants.insert(*variant_name) {
                             let variant_name_str = self.interner.resolve(variant_name).to_string();
@@ -405,7 +405,7 @@ impl<'a> Sema<'a> {
                         if !field_names.is_empty() {
                             // Check for duplicate field names within the struct variant
                             let variant_str = self.interner.resolve(variant_name).to_string();
-                            let mut seen_fields: HashSet<Spur> = HashSet::new();
+                            let mut seen_fields: HashSet<Spur> = HashSet::default();
                             for field_name in field_names {
                                 if !seen_fields.insert(*field_name) {
                                     let field_str = self.interner.resolve(field_name).to_string();
@@ -1082,7 +1082,7 @@ impl<'a> Sema<'a> {
             }
 
             let method_refs = self.rir.get_inst_refs(d.methods_start, d.methods_len);
-            let mut seen: HashSet<Spur> = HashSet::new();
+            let mut seen: HashSet<Spur> = HashSet::default();
             let mut methods: Vec<DeriveMethod> = Vec::with_capacity(method_refs.len());
             for method_ref in method_refs {
                 let m = self.rir.get(method_ref);
@@ -1285,7 +1285,7 @@ impl<'a> Sema<'a> {
                 let fields = self.rir.get_field_decls(*fields_start, *fields_len);
 
                 // Check for duplicate field names
-                let mut seen_fields: HashSet<Spur> = HashSet::new();
+                let mut seen_fields: HashSet<Spur> = HashSet::default();
                 for (field_name, _) in &fields {
                     if !seen_fields.insert(*field_name) {
                         let field_name_str = self.interner.resolve(field_name).to_string();
@@ -1324,7 +1324,7 @@ impl<'a> Sema<'a> {
         // These need to be skipped during function declaration collection because:
         // - They may use `Self` type which requires struct/enum context
         // - They are registered later during comptime evaluation with proper Self resolution
-        let mut anon_type_method_refs = std::collections::HashSet::new();
+        let mut anon_type_method_refs = rustc_hash::FxHashSet::default();
         for (_, inst) in self.rir.iter() {
             let (methods_start, methods_len) = match &inst.data {
                 InstData::AnonStructType {
@@ -1910,13 +1910,13 @@ impl<'a> Sema<'a> {
                     if method_type_param_names.contains(&ty_sym) {
                         return true;
                     }
-                    let subst: std::collections::HashMap<Spur, Type> = method_type_param_names
+                    let subst: rustc_hash::FxHashMap<Spur, Type> = method_type_param_names
                         .iter()
                         .map(|&n| (n, Type::I32))
                         .collect();
                     let with_subst = sema.resolve_type_for_comptime_with_subst(ty_sym, &subst);
                     let without_subst =
-                        sema.resolve_type_for_comptime_with_subst(ty_sym, &HashMap::new());
+                        sema.resolve_type_for_comptime_with_subst(ty_sym, &HashMap::default());
                     with_subst.is_some() && without_subst.is_none()
                 };
 

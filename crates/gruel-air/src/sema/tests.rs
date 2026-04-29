@@ -18,7 +18,7 @@ mod tests {
         let astgen = AstGen::new(&ast, &interner);
         let rir = astgen.generate();
 
-        let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+        let sema = Sema::new(&rir, &interner, PreviewFeatures::default());
         sema.analyze_all()
     }
 
@@ -874,7 +874,7 @@ mod tests {
         let rir = Box::leak(Box::new(rir));
         let interner = Box::leak(Box::new(interner));
 
-        let mut sema = Sema::new(rir, interner, PreviewFeatures::new());
+        let mut sema = Sema::new(rir, interner, PreviewFeatures::default());
         sema.inject_builtin_types();
         sema.register_type_names().unwrap();
         sema.resolve_declarations().unwrap();
@@ -1065,7 +1065,7 @@ mod tests {
             let astgen = AstGen::new(&ast, &interner);
             let rir = astgen.generate();
 
-            let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+            let sema = Sema::new(&rir, &interner, PreviewFeatures::default());
             sema.analyze_all().unwrap()
         }
 

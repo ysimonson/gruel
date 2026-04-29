@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -7,6 +6,7 @@ use std::path::Path;
 #[cfg(target_os = "macos")]
 use std::process::Command;
 
+use clap::Parser;
 use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -23,7 +23,7 @@ use gruel_rir::RirPrinter;
 use gruel_target::Target;
 
 /// Compilation stages that can be emitted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 enum EmitStage {
     /// Emit tokens from the lexer.
     Tokens,
@@ -39,91 +39,20 @@ enum EmitStage {
     Asm,
 }
 
-/// Error returned when parsing an emit stage name fails.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParseEmitStageError(String);
-
-impl std::fmt::Display for ParseEmitStageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "unknown emit stage '{}'", self.0)
-    }
-}
-
-impl std::error::Error for ParseEmitStageError {}
-
-impl std::str::FromStr for EmitStage {
-    type Err = ParseEmitStageError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "tokens" => Ok(EmitStage::Tokens),
-            "ast" => Ok(EmitStage::Ast),
-            "rir" => Ok(EmitStage::Rir),
-            "air" => Ok(EmitStage::Air),
-            "cfg" => Ok(EmitStage::Cfg),
-            "asm" => Ok(EmitStage::Asm),
-            _ => Err(ParseEmitStageError(s.to_string())),
-        }
-    }
-}
-
-impl EmitStage {
-    fn all_names() -> &'static str {
-        "tokens, ast, rir, air, cfg, asm"
-    }
-}
-
 /// Log level for tracing output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 enum LogLevel {
     /// No logging output (default).
     #[default]
     Off,
-    /// Only errors.
     Error,
-    /// Errors and warnings.
     Warn,
-    /// Errors, warnings, and info.
     Info,
-    /// Errors, warnings, info, and debug.
     Debug,
-    /// All logging including trace.
     Trace,
 }
 
-/// Error returned when parsing a log level fails.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParseLogLevelError(String);
-
-impl std::fmt::Display for ParseLogLevelError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "unknown log level '{}'", self.0)
-    }
-}
-
-impl std::error::Error for ParseLogLevelError {}
-
-impl std::str::FromStr for LogLevel {
-    type Err = ParseLogLevelError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "off" => Ok(LogLevel::Off),
-            "error" => Ok(LogLevel::Error),
-            "warn" => Ok(LogLevel::Warn),
-            "info" => Ok(LogLevel::Info),
-            "debug" => Ok(LogLevel::Debug),
-            "trace" => Ok(LogLevel::Trace),
-            _ => Err(ParseLogLevelError(s.to_string())),
-        }
-    }
-}
-
 impl LogLevel {
-    fn all_names() -> &'static str {
-        "off, error, warn, info, debug, trace"
-    }
-
     /// Convert to tracing Level, returns None for Off.
     fn to_tracing_level(self) -> Option<Level> {
         match self {
@@ -138,7 +67,7 @@ impl LogLevel {
 }
 
 /// Log format for tracing output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 enum LogFormat {
     /// Human-readable text format (default).
     #[default]
@@ -147,34 +76,81 @@ enum LogFormat {
     Json,
 }
 
-/// Error returned when parsing a log format fails.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParseLogFormatError(String);
+/// Version string for the gruel compiler.
+const VERSION: &str = "0.1.0";
 
-impl std::fmt::Display for ParseLogFormatError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "unknown log format '{}'", self.0)
-    }
-}
+#[derive(Parser, Debug)]
+#[command(
+    name = "gruel",
+    version = VERSION,
+    about = "Gruel compiler",
+    long_about = "Usage: gruel [options] <source.gruel> [output]\n       gruel [options] <source1.gruel> <source2.gruel> ... -o <output>",
+    disable_help_subcommand = true,
+)]
+struct Cli {
+    /// Source files to compile. Multiple files require -o/--output.
+    sources: Vec<String>,
 
-impl std::error::Error for ParseLogFormatError {}
+    /// Output path (required for multiple source files).
+    #[arg(short, long, value_name = "PATH")]
+    output: Option<String>,
 
-impl std::str::FromStr for LogFormat {
-    type Err = ParseLogFormatError;
+    /// Compilation target.
+    #[arg(long, value_name = "TARGET", default_value_t = Target::host())]
+    target: Target,
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "text" => Ok(LogFormat::Text),
-            "json" => Ok(LogFormat::Json),
-            _ => Err(ParseLogFormatError(s.to_string())),
-        }
-    }
-}
+    /// Linker to use: "internal" or a system command like "clang".
+    #[arg(long, value_name = "LINKER")]
+    linker: Option<String>,
 
-impl LogFormat {
-    fn all_names() -> &'static str {
-        "text, json"
-    }
+    /// Optimization level (0..3).
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = clap::value_parser!(u8).range(0..=3),
+        conflicts_with_all = ["debug", "release"],
+    )]
+    opt_level: Option<u8>,
+
+    /// Build without optimizations (equivalent to --opt-level=0).
+    #[arg(long, conflicts_with = "release")]
+    debug: bool,
+
+    /// Build with full optimizations (equivalent to --opt-level=3).
+    #[arg(long)]
+    release: bool,
+
+    /// Number of parallel jobs (0 = auto-detect).
+    #[arg(short = 'j', long, value_name = "N", default_value_t = 0)]
+    jobs: usize,
+
+    /// Emit intermediate representation and exit (can be repeated).
+    #[arg(long, value_name = "STAGE")]
+    emit: Vec<EmitStage>,
+
+    /// Enable a preview feature (can be repeated).
+    #[arg(long, value_name = "FEATURE")]
+    preview: Vec<PreviewFeature>,
+
+    /// Set logging level.
+    #[arg(long, value_name = "LEVEL", default_value = "off")]
+    log_level: LogLevel,
+
+    /// Set logging format.
+    #[arg(long, value_name = "FMT", default_value = "text")]
+    log_format: LogFormat,
+
+    /// Suppress stderr printing of comptime @dbg output (still buffered).
+    #[arg(long)]
+    capture_comptime_dbg: bool,
+
+    /// Show timing for each compilation pass.
+    #[arg(long)]
+    time_passes: bool,
+
+    /// Output timing as JSON (for benchmarking).
+    #[arg(long)]
+    benchmark_json: bool,
 }
 
 struct Options {
@@ -193,338 +169,129 @@ struct Options {
     benchmark_json: bool,
     /// Number of parallel jobs (0 = auto-detect, use all cores).
     jobs: usize,
-    /// When true, suppress stderr printing of comptime `@dbg` output. The
-    /// output is still buffered on `SemaOutput` and a warning is still emitted.
-    /// Used by fuzz harnesses that want structured access to the output.
+    /// When true, suppress stderr printing of comptime `@dbg` output.
     capture_comptime_dbg: bool,
 }
 
-/// Version string for the gruel compiler.
-const VERSION: &str = "0.1.0";
-
-fn print_version() {
-    println!("gruel {}", VERSION);
-}
-
-fn print_usage() {
-    eprintln!("Usage: gruel [options] <source.gruel> [output]");
-    eprintln!("       gruel [options] <source1.gruel> <source2.gruel> ... -o <output>");
-    eprintln!();
-    eprintln!("Options:");
-    eprintln!("  -o, --output <path>  Set output path (required for multiple source files)");
-    eprintln!("  --target <target>    Set compilation target (default: host)");
-    eprintln!(
-        "                       Valid targets: {}",
-        Target::all_names()
-    );
-    eprintln!("  --linker <linker>    Set linker to use (default: internal)");
-    eprintln!("                       Use 'internal' for built-in linker, or a command");
-    eprintln!("                       like 'clang', 'gcc', or 'ld' for system linker");
-    eprintln!("  --debug              Build without optimizations (equivalent to -O0)");
-    eprintln!("  --release            Build with full optimizations (equivalent to -O3)");
-    eprintln!("  -O<level>            Set optimization level (default: -O0)");
-    eprintln!("                       Levels: {}", OptLevel::all_names());
-    eprintln!("                       Cannot be used with --debug or --release");
-    eprintln!("  -j, --jobs <N>       Set number of parallel jobs (default: 0 = auto)");
-    eprintln!("                       Use -j1 for single-threaded compilation");
-    eprintln!("  --emit <stage>       Emit intermediate representation and exit");
-    eprintln!("                       Can be specified multiple times for multiple outputs");
-    eprintln!("                       Stages: tokens, ast, rir, air, cfg, asm");
-    eprintln!("  --preview <feature>  Enable a preview feature (can be repeated)");
-    eprintln!(
-        "                       Features: {}",
-        PreviewFeature::all_names()
-    );
-    eprintln!("  --log-level <level>  Set logging level (default: off)");
-    eprintln!("                       Levels: {}", LogLevel::all_names());
-    eprintln!("                       Can also use RUST_LOG environment variable");
-    eprintln!("  --log-format <fmt>   Set logging format (default: text)");
-    eprintln!("                       Formats: {}", LogFormat::all_names());
-    eprintln!("  --capture-comptime-dbg");
-    eprintln!("                       Suppress stderr printing of comptime @dbg");
-    eprintln!("                       output (still buffered; warning still emitted)");
-    eprintln!("  --time-passes        Show timing for each compilation pass");
-    eprintln!("  --benchmark-json     Output timing as JSON (for benchmarking)");
-    eprintln!("  --version            Show version information");
-    eprintln!("  --help               Show this help message");
-}
-
-/// Result of parsing command-line arguments.
+/// Result of parsing command-line arguments (used only by tests).
+#[cfg(test)]
 enum ParseResult {
     /// Successfully parsed options.
     Options(Options),
-    /// Parsing failed with an error.
+    /// Parsing failed with an error (already printed).
     Error,
     /// User requested help or version (already printed, should exit 0).
     Exit,
 }
 
-/// Parse arguments from a slice of strings (for testing).
-fn parse_args_from(args: &[&str]) -> ParseResult {
-    if args.is_empty() {
-        print_usage();
-        return ParseResult::Error;
-    }
-
-    let mut emit_stages = Vec::new();
-    let mut target: Option<Target> = None;
-    let mut linker: Option<LinkerMode> = None;
-    let mut opt_level: Option<OptLevel> = None;
-    let mut build_profile: Option<&str> = None; // "debug" or "release"
-    let mut preview_features = PreviewFeatures::new();
-    let mut log_level: Option<LogLevel> = None;
-    let mut log_format: Option<LogFormat> = None;
-    let mut time_passes = false;
-    let mut benchmark_json = false;
-    let mut jobs: Option<usize> = None;
-    let mut capture_comptime_dbg = false;
-    let mut output_path: Option<String> = None;
-    let mut positional = Vec::new();
-    let mut args_iter = args.iter().peekable();
-
-    while let Some(arg) = args_iter.next() {
-        match *arg {
-            "--emit" => {
-                let Some(stage_str) = args_iter.next() else {
-                    eprintln!("Error: --emit requires a value");
-                    eprintln!("Valid stages: {}", EmitStage::all_names());
-                    return ParseResult::Error;
-                };
-                match stage_str.parse::<EmitStage>() {
-                    Ok(stage) => emit_stages.push(stage),
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        eprintln!("Valid stages: {}", EmitStage::all_names());
-                        return ParseResult::Error;
-                    }
-                }
-            }
-            "--target" => {
-                let Some(target_str) = args_iter.next() else {
-                    eprintln!("Error: --target requires a value");
-                    eprintln!("Valid targets: {}", Target::all_names());
-                    return ParseResult::Error;
-                };
-                match target_str.parse::<Target>() {
-                    Ok(t) => target = Some(t),
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        return ParseResult::Error;
-                    }
-                }
-            }
-            "--linker" => {
-                let Some(linker_str) = args_iter.next() else {
-                    eprintln!("Error: --linker requires a value");
-                    eprintln!("Use 'internal' or a system linker command like 'clang'");
-                    return ParseResult::Error;
-                };
-                linker = Some(if *linker_str == "internal" {
-                    LinkerMode::Internal
-                } else {
-                    LinkerMode::System(linker_str.to_string())
-                });
-            }
-            "--preview" => {
-                let Some(feature_str) = args_iter.next() else {
-                    eprintln!("Error: --preview requires a feature name");
-                    eprintln!("Available features: {}", PreviewFeature::all_names());
-                    return ParseResult::Error;
-                };
-                match feature_str.parse::<PreviewFeature>() {
-                    Ok(feature) => {
-                        preview_features.insert(feature);
-                    }
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        eprintln!("Available features: {}", PreviewFeature::all_names());
-                        return ParseResult::Error;
-                    }
-                }
-            }
-            "--log-level" => {
-                let Some(level_str) = args_iter.next() else {
-                    eprintln!("Error: --log-level requires a value");
-                    eprintln!("Valid levels: {}", LogLevel::all_names());
-                    return ParseResult::Error;
-                };
-                match level_str.parse::<LogLevel>() {
-                    Ok(level) => log_level = Some(level),
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        eprintln!("Valid levels: {}", LogLevel::all_names());
-                        return ParseResult::Error;
-                    }
-                }
-            }
-            "--log-format" => {
-                let Some(format_str) = args_iter.next() else {
-                    eprintln!("Error: --log-format requires a value");
-                    eprintln!("Valid formats: {}", LogFormat::all_names());
-                    return ParseResult::Error;
-                };
-                match format_str.parse::<LogFormat>() {
-                    Ok(format) => log_format = Some(format),
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        eprintln!("Valid formats: {}", LogFormat::all_names());
-                        return ParseResult::Error;
-                    }
-                }
-            }
-            "--jobs" | "-j" => {
-                let Some(jobs_str) = args_iter.next() else {
-                    eprintln!("Error: --jobs requires a value");
-                    return ParseResult::Error;
-                };
-                match jobs_str.parse::<usize>() {
-                    Ok(j) => jobs = Some(j),
-                    Err(_) => {
-                        eprintln!("Error: --jobs value must be a non-negative integer");
-                        return ParseResult::Error;
-                    }
-                }
-            }
-            "-o" | "--output" => {
-                let Some(out_str) = args_iter.next() else {
-                    eprintln!("Error: -o requires an output path");
-                    return ParseResult::Error;
-                };
-                output_path = Some(out_str.to_string());
-            }
-            "--debug" => {
-                if build_profile == Some("release") {
-                    eprintln!("Error: cannot use both --debug and --release");
-                    return ParseResult::Error;
-                }
-                if opt_level.is_some() {
-                    eprintln!("Error: cannot use --debug with an explicit -O level");
-                    return ParseResult::Error;
-                }
-                build_profile = Some("debug");
-            }
-            "--release" => {
-                if build_profile == Some("debug") {
-                    eprintln!("Error: cannot use both --debug and --release");
-                    return ParseResult::Error;
-                }
-                if opt_level.is_some() {
-                    eprintln!("Error: cannot use --release with an explicit -O level");
-                    return ParseResult::Error;
-                }
-                build_profile = Some("release");
-            }
-            "--capture-comptime-dbg" => {
-                capture_comptime_dbg = true;
-            }
-            "--time-passes" => {
-                time_passes = true;
-            }
-            "--benchmark-json" => {
-                benchmark_json = true;
-            }
-            "--help" | "-h" => {
-                print_usage();
-                return ParseResult::Exit;
-            }
-            "--version" | "-V" => {
-                print_version();
-                return ParseResult::Exit;
-            }
-            _ if arg.starts_with("-O") => {
-                if let Some(profile) = build_profile {
-                    eprintln!("Error: cannot use -O with --{}", profile);
-                    return ParseResult::Error;
-                }
-                // Parse -O0, -O1, -O2, -O3
-                let level_str = &arg[2..];
-                match level_str.parse::<OptLevel>() {
-                    Ok(level) => opt_level = Some(level),
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        eprintln!("Valid levels: {}", OptLevel::all_names());
-                        return ParseResult::Error;
-                    }
-                }
-            }
-            _ if arg.starts_with("-j") && arg.len() > 2 => {
-                // Parse -j1, -j4, etc. (attached form)
-                let jobs_str = &arg[2..];
-                match jobs_str.parse::<usize>() {
-                    Ok(j) => jobs = Some(j),
-                    Err(_) => {
-                        eprintln!("Error: --jobs value must be a non-negative integer");
-                        return ParseResult::Error;
-                    }
-                }
-            }
-            _ if arg.starts_with('-') => {
-                eprintln!("Unknown option: {}", arg);
-                print_usage();
-                return ParseResult::Error;
-            }
-            _ => positional.push(arg.to_string()),
-        }
-    }
-
-    if positional.is_empty() {
-        eprintln!("Error: No source file specified");
-        print_usage();
-        return ParseResult::Error;
-    }
-
-    // Determine source files and output path based on argument count and -o flag
-    let (source_paths, final_output_path) = if let Some(out) = output_path {
-        // -o was specified: all positional args are source files
-        (positional, out)
-    } else if positional.len() == 1 {
-        // Single source file, no -o: default output to a.out
-        (positional, "a.out".to_string())
-    } else if positional.len() == 2 {
-        // Two positional args, no -o: backwards compatible mode
-        // First is source, second is output
-        let mut pos = positional;
-        let out = pos.pop().unwrap();
-        (pos, out)
+fn cli_to_options(cli: Cli) -> Result<Options, String> {
+    // Resolve --debug/--release/--opt-level into a single OptLevel.
+    let opt_level = if cli.debug {
+        OptLevel::O0
+    } else if cli.release {
+        OptLevel::O3
     } else {
-        // Multiple source files without -o: error
-        eprintln!("Error: multiple source files require -o to specify output path");
-        eprintln!("Usage: gruel a.gruel b.gruel -o output");
-        return ParseResult::Error;
+        match cli.opt_level {
+            Some(0) => OptLevel::O0,
+            Some(1) => OptLevel::O1,
+            Some(2) => OptLevel::O2,
+            Some(3) => OptLevel::O3,
+            None => OptLevel::default(),
+            Some(_) => unreachable!("clap value_parser bounds to 0..=3"),
+        }
     };
 
-    // Resolve --debug/--release into opt_level.
-    let resolved_opt_level = match build_profile {
-        Some("debug") => OptLevel::O0,
-        Some("release") => OptLevel::O3,
-        _ => opt_level.unwrap_or_default(),
+    let (source_paths, output_path) = if let Some(out) = cli.output {
+        if cli.sources.is_empty() {
+            return Err("Error: No source file specified".to_string());
+        }
+        (cli.sources, out)
+    } else {
+        match cli.sources.len() {
+            0 => return Err("Error: No source file specified".to_string()),
+            1 => (cli.sources, "a.out".to_string()),
+            2 => {
+                let mut s = cli.sources;
+                let out = s.pop().unwrap();
+                (s, out)
+            }
+            _ => {
+                return Err(
+                    "Error: multiple source files require -o to specify output path\n\
+                     Usage: gruel a.gruel b.gruel -o output"
+                        .to_string(),
+                );
+            }
+        }
     };
 
-    ParseResult::Options(Options {
+    let linker = match cli.linker.as_deref() {
+        None => LinkerMode::default(),
+        Some("internal") => LinkerMode::Internal,
+        Some(cmd) => LinkerMode::System(cmd.to_string()),
+    };
+
+    let preview_features: PreviewFeatures = cli.preview.into_iter().collect();
+
+    Ok(Options {
         source_paths,
-        output_path: final_output_path,
-        emit_stages,
-        target: target.unwrap_or_else(Target::host),
-        linker: linker.unwrap_or_default(),
-        opt_level: resolved_opt_level,
+        output_path,
+        emit_stages: cli.emit,
+        target: cli.target,
+        linker,
+        opt_level,
         preview_features,
-        log_level: log_level.unwrap_or_default(),
-        log_format: log_format.unwrap_or_default(),
-        time_passes,
-        benchmark_json,
-        jobs: jobs.unwrap_or(0),
-        capture_comptime_dbg,
+        log_level: cli.log_level,
+        log_format: cli.log_format,
+        time_passes: cli.time_passes,
+        benchmark_json: cli.benchmark_json,
+        jobs: cli.jobs,
+        capture_comptime_dbg: cli.capture_comptime_dbg,
     })
 }
 
-fn parse_args() -> Option<Options> {
-    let args: Vec<String> = env::args().skip(1).collect();
-    let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+/// Parse arguments from a slice of strings (for testing).
+#[cfg(test)]
+fn parse_args_from(args: &[&str]) -> ParseResult {
+    let argv = std::iter::once("gruel").chain(args.iter().copied());
+    let cli = match Cli::try_parse_from(argv) {
+        Ok(c) => c,
+        Err(e) => {
+            use clap::error::ErrorKind;
+            let _ = e.print();
+            return match e.kind() {
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => ParseResult::Exit,
+                _ => ParseResult::Error,
+            };
+        }
+    };
+    match cli_to_options(cli) {
+        Ok(opts) => ParseResult::Options(opts),
+        Err(msg) => {
+            eprintln!("{}", msg);
+            ParseResult::Error
+        }
+    }
+}
 
-    match parse_args_from(&args_refs) {
-        ParseResult::Options(opts) => Some(opts),
-        ParseResult::Error => None,
-        ParseResult::Exit => std::process::exit(0),
+fn parse_args() -> Option<Options> {
+    let cli = match Cli::try_parse() {
+        Ok(c) => c,
+        Err(e) => {
+            use clap::error::ErrorKind;
+            let _ = e.print();
+            match e.kind() {
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => std::process::exit(0),
+                _ => return None,
+            }
+        }
+    };
+    match cli_to_options(cli) {
+        Ok(opts) => Some(opts),
+        Err(msg) => {
+            eprintln!("{}", msg);
+            None
+        }
     }
 }
 
@@ -545,7 +312,7 @@ fn init_tracing(
     use tracing_subscriber::layer::SubscriberExt;
 
     // Check if RUST_LOG is set - it takes priority
-    let rust_log = env::var("RUST_LOG").ok();
+    let rust_log = std::env::var("RUST_LOG").ok();
 
     // Determine if we should enable logging
     let effective_level = if rust_log.is_some() {
@@ -1181,7 +948,7 @@ mod tests {
     #[test]
     fn parse_multi_file_with_options() {
         let opts = unwrap_options(parse_args_from(&[
-            "-O2",
+            "--opt-level=2",
             "main.gruel",
             "utils.gruel",
             "lib.gruel",
@@ -1355,31 +1122,34 @@ mod tests {
 
     #[test]
     fn parse_opt_level_0() {
-        let opts = unwrap_options(parse_args_from(&["-O0", "source.gruel"]));
+        let opts = unwrap_options(parse_args_from(&["--opt-level=0", "source.gruel"]));
         assert_eq!(opts.opt_level, OptLevel::O0);
     }
 
     #[test]
     fn parse_opt_level_1() {
-        let opts = unwrap_options(parse_args_from(&["-O1", "source.gruel"]));
+        let opts = unwrap_options(parse_args_from(&["--opt-level=1", "source.gruel"]));
         assert_eq!(opts.opt_level, OptLevel::O1);
     }
 
     #[test]
     fn parse_opt_level_2() {
-        let opts = unwrap_options(parse_args_from(&["-O2", "source.gruel"]));
+        let opts = unwrap_options(parse_args_from(&["--opt-level=2", "source.gruel"]));
         assert_eq!(opts.opt_level, OptLevel::O2);
     }
 
     #[test]
     fn parse_opt_level_3() {
-        let opts = unwrap_options(parse_args_from(&["-O3", "source.gruel"]));
+        let opts = unwrap_options(parse_args_from(&["--opt-level=3", "source.gruel"]));
         assert_eq!(opts.opt_level, OptLevel::O3);
     }
 
     #[test]
     fn parse_opt_level_invalid() {
-        assert!(is_error(&parse_args_from(&["-O9", "source.gruel"])));
+        assert!(is_error(&parse_args_from(&[
+            "--opt-level=9",
+            "source.gruel"
+        ])));
     }
 
     // ========== --preview tests ==========
@@ -1549,7 +1319,7 @@ mod tests {
             "x86_64-linux",
             "--linker",
             "clang",
-            "-O2",
+            "--opt-level=2",
             "--emit",
             "air",
             "source.gruel",
@@ -1566,7 +1336,7 @@ mod tests {
     #[test]
     fn parse_options_after_source() {
         // Options can appear after the source file
-        let opts = unwrap_options(parse_args_from(&["source.gruel", "-O1"]));
+        let opts = unwrap_options(parse_args_from(&["source.gruel", "--opt-level=1"]));
         assert_eq!(opts.source_paths, vec!["source.gruel"]);
         assert_eq!(opts.opt_level, OptLevel::O1);
     }
@@ -1574,7 +1344,7 @@ mod tests {
     #[test]
     fn parse_mixed_option_positions() {
         let opts = unwrap_options(parse_args_from(&[
-            "-O1",
+            "--opt-level=1",
             "source.gruel",
             "--target",
             "x86_64-linux",
@@ -1642,7 +1412,7 @@ mod tests {
     fn parse_time_passes_with_other_options() {
         let opts = unwrap_options(parse_args_from(&[
             "--time-passes",
-            "-O2",
+            "--opt-level=2",
             "--target",
             "x86_64-linux",
             "source.gruel",
@@ -1664,7 +1434,7 @@ mod tests {
     fn parse_benchmark_json_with_other_options() {
         let opts = unwrap_options(parse_args_from(&[
             "--benchmark-json",
-            "-O2",
+            "--opt-level=2",
             "--target",
             "x86_64-linux",
             "source.gruel",
@@ -1757,7 +1527,7 @@ mod tests {
     fn parse_jobs_with_other_options() {
         let opts = unwrap_options(parse_args_from(&[
             "-j4",
-            "-O2",
+            "--opt-level=2",
             "--target",
             "x86_64-linux",
             "source.gruel",
@@ -1771,84 +1541,6 @@ mod tests {
     fn parse_defaults_jobs() {
         let opts = unwrap_options(parse_args_from(&["source.gruel"]));
         assert_eq!(opts.jobs, 0);
-    }
-
-    // ========== EmitStage FromStr tests ==========
-
-    #[test]
-    fn emit_stage_from_str_all_valid() {
-        assert_eq!("tokens".parse::<EmitStage>().unwrap(), EmitStage::Tokens);
-        assert_eq!("ast".parse::<EmitStage>().unwrap(), EmitStage::Ast);
-        assert_eq!("rir".parse::<EmitStage>().unwrap(), EmitStage::Rir);
-        assert_eq!("air".parse::<EmitStage>().unwrap(), EmitStage::Air);
-        assert_eq!("cfg".parse::<EmitStage>().unwrap(), EmitStage::Cfg);
-        assert_eq!("asm".parse::<EmitStage>().unwrap(), EmitStage::Asm);
-    }
-
-    #[test]
-    fn emit_stage_from_str_invalid() {
-        let err = "invalid".parse::<EmitStage>().unwrap_err();
-        assert_eq!(err.to_string(), "unknown emit stage 'invalid'");
-    }
-
-    #[test]
-    fn emit_stage_all_names() {
-        assert_eq!(EmitStage::all_names(), "tokens, ast, rir, air, cfg, asm");
-    }
-
-    // ========== LogLevel FromStr tests ==========
-
-    #[test]
-    fn log_level_from_str_all_valid() {
-        assert_eq!("off".parse::<LogLevel>().unwrap(), LogLevel::Off);
-        assert_eq!("error".parse::<LogLevel>().unwrap(), LogLevel::Error);
-        assert_eq!("warn".parse::<LogLevel>().unwrap(), LogLevel::Warn);
-        assert_eq!("info".parse::<LogLevel>().unwrap(), LogLevel::Info);
-        assert_eq!("debug".parse::<LogLevel>().unwrap(), LogLevel::Debug);
-        assert_eq!("trace".parse::<LogLevel>().unwrap(), LogLevel::Trace);
-    }
-
-    #[test]
-    fn log_level_from_str_invalid() {
-        let err = "invalid".parse::<LogLevel>().unwrap_err();
-        assert_eq!(err.to_string(), "unknown log level 'invalid'");
-    }
-
-    #[test]
-    fn log_level_all_names() {
-        assert_eq!(
-            LogLevel::all_names(),
-            "off, error, warn, info, debug, trace"
-        );
-    }
-
-    #[test]
-    fn log_level_to_tracing_level() {
-        assert!(LogLevel::Off.to_tracing_level().is_none());
-        assert_eq!(LogLevel::Error.to_tracing_level(), Some(Level::ERROR));
-        assert_eq!(LogLevel::Warn.to_tracing_level(), Some(Level::WARN));
-        assert_eq!(LogLevel::Info.to_tracing_level(), Some(Level::INFO));
-        assert_eq!(LogLevel::Debug.to_tracing_level(), Some(Level::DEBUG));
-        assert_eq!(LogLevel::Trace.to_tracing_level(), Some(Level::TRACE));
-    }
-
-    // ========== LogFormat FromStr tests ==========
-
-    #[test]
-    fn log_format_from_str_all_valid() {
-        assert_eq!("text".parse::<LogFormat>().unwrap(), LogFormat::Text);
-        assert_eq!("json".parse::<LogFormat>().unwrap(), LogFormat::Json);
-    }
-
-    #[test]
-    fn log_format_from_str_invalid() {
-        let err = "invalid".parse::<LogFormat>().unwrap_err();
-        assert_eq!(err.to_string(), "unknown log format 'invalid'");
-    }
-
-    #[test]
-    fn log_format_all_names() {
-        assert_eq!(LogFormat::all_names(), "text, json");
     }
 
     // ========== --debug / --release tests ==========
@@ -1887,7 +1579,7 @@ mod tests {
     fn parse_debug_with_opt_level_conflict() {
         assert!(is_error(&parse_args_from(&[
             "--debug",
-            "-O2",
+            "--opt-level=2",
             "source.gruel"
         ])));
     }
@@ -1896,7 +1588,7 @@ mod tests {
     fn parse_release_with_opt_level_conflict() {
         assert!(is_error(&parse_args_from(&[
             "--release",
-            "-O1",
+            "--opt-level=1",
             "source.gruel"
         ])));
     }
@@ -1904,7 +1596,7 @@ mod tests {
     #[test]
     fn parse_opt_level_then_debug_conflict() {
         assert!(is_error(&parse_args_from(&[
-            "-O2",
+            "--opt-level=2",
             "--debug",
             "source.gruel"
         ])));
@@ -1913,7 +1605,7 @@ mod tests {
     #[test]
     fn parse_opt_level_then_release_conflict() {
         assert!(is_error(&parse_args_from(&[
-            "-O1",
+            "--opt-level=1",
             "--release",
             "source.gruel"
         ])));

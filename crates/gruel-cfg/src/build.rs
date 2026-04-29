@@ -3156,7 +3156,7 @@ mod tests {
         let astgen = AstGen::new(&ast, &interner);
         let rir = astgen.generate();
 
-        let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+        let sema = Sema::new(&rir, &interner, PreviewFeatures::default());
         let output = sema.analyze_all().unwrap();
 
         let func = &output.functions[0];

@@ -342,7 +342,7 @@ fn is_useful(
     match head_ctor(q_head) {
         Ctor::Wildcard => {
             // Check completeness of the head type signature in P.
-            let used: std::collections::HashSet<Ctor> = rows
+            let used: rustc_hash::FxHashSet<Ctor> = rows
                 .iter()
                 .filter_map(|r| r.first().map(head_ctor))
                 .filter(|c| !matches!(c, Ctor::Wildcard))

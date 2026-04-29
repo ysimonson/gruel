@@ -14,7 +14,7 @@
 //! 3. Jobs are processed in parallel using `par_iter`
 //! 4. Results are merged (strings deduplicated, warnings collected)
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_builtins::BuiltinTypeDef;
 use gruel_error::{
@@ -151,7 +151,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     let mut all_warnings = Vec::new();
 
     // Collect method refs from struct declarations to skip them when analyzing regular functions
-    let mut method_refs: HashSet<InstRef> = HashSet::new();
+    let mut method_refs: HashSet<InstRef> = HashSet::default();
     for (_, inst) in sema.rir.iter() {
         match &inst.data {
             InstData::StructDecl {
@@ -591,8 +591,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     // These are registered during comptime evaluation of function bodies, so they
     // aren't in any named StructDecl. We use a fixed-point loop since analyzing one
     // method may create new anonymous struct types with their own methods.
-    let mut analyzed_anon_methods: HashSet<(StructId, Spur)> = HashSet::new();
-    let mut analyzed_anon_enum_methods: HashSet<(EnumId, Spur)> = HashSet::new();
+    let mut analyzed_anon_methods: HashSet<(StructId, Spur)> = HashSet::default();
+    let mut analyzed_anon_enum_methods: HashSet<(EnumId, Spur)> = HashSet::default();
     loop {
         // Collect anonymous struct methods that haven't been analyzed yet
         let pending_anon_methods: Vec<(StructId, Spur, MethodInfo)> = sema
@@ -680,7 +680,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                 .anon_struct_captured_values
                 .get(&struct_id)
                 .cloned()
-                .unwrap_or_else(HashMap::new);
+                .unwrap_or_else(HashMap::default);
 
             match sema.analyze_method_body(
                 &infer_ctx,
@@ -751,7 +751,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                 .anon_enum_captured_values
                 .get(&enum_id)
                 .cloned()
-                .unwrap_or_else(HashMap::new);
+                .unwrap_or_else(HashMap::default);
 
             match sema.analyze_method_body(
                 &infer_ctx,
@@ -793,7 +793,7 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     // Merge strings from all functions into a global table with deduplication.
     // Bytes pools are concatenated (no dedup) — each `@embed_file` call gets
     // a fresh entry since these are rare and may legitimately repeat.
-    let mut global_string_table: HashMap<String, u32> = HashMap::new();
+    let mut global_string_table: HashMap<String, u32> = HashMap::default();
     let mut global_strings: Vec<String> = Vec::new();
     let mut global_bytes: Vec<Vec<u8>> = Vec::new();
 
@@ -887,9 +887,9 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
     // Work queue: functions/methods to analyze
     // Start with main()
     let mut pending_functions: Vec<Spur> = vec![main_sym];
-    let mut analyzed_functions: HashSet<Spur> = HashSet::new();
+    let mut analyzed_functions: HashSet<Spur> = HashSet::default();
     let mut pending_methods: Vec<(StructId, Spur)> = Vec::new();
-    let mut analyzed_methods: HashSet<(StructId, Spur)> = HashSet::new();
+    let mut analyzed_methods: HashSet<(StructId, Spur)> = HashSet::default();
 
     // Collect results
     let mut functions_with_strings: Vec<(AnalyzedFunction, Vec<String>, Vec<Vec<u8>>)> = Vec::new();
@@ -897,7 +897,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
     let mut all_warnings = Vec::new();
 
     // Collect method refs from struct declarations (for later lookup)
-    let mut method_refs: HashSet<InstRef> = HashSet::new();
+    let mut method_refs: HashSet<InstRef> = HashSet::default();
     for (_, inst) in sema.rir.iter() {
         if let InstData::StructDecl {
             methods_start,
@@ -1054,7 +1054,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                     .anon_struct_captured_values
                     .get(&struct_id)
                     .cloned()
-                    .unwrap_or_else(HashMap::new);
+                    .unwrap_or_else(HashMap::default);
 
                 match sema.analyze_method_body(
                     &infer_ctx,
@@ -1190,7 +1190,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
     // Analyze anonymous enum methods that were registered during comptime evaluation.
     // These are not tracked by the work queue (which only handles struct methods),
     // so we process them in a fixed-point loop similar to the eager path.
-    let mut analyzed_anon_enum_methods: HashSet<(EnumId, Spur)> = HashSet::new();
+    let mut analyzed_anon_enum_methods: HashSet<(EnumId, Spur)> = HashSet::default();
     loop {
         let pending_anon_enum_methods: Vec<(EnumId, Spur, MethodInfo)> = sema
             .enum_methods
@@ -1243,7 +1243,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 .anon_enum_captured_values
                 .get(&enum_id)
                 .cloned()
-                .unwrap_or_else(HashMap::new);
+                .unwrap_or_else(HashMap::default);
 
             match sema.analyze_method_body(
                 &infer_ctx,
@@ -1313,7 +1313,7 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
     // Merge strings from all functions into a global table with deduplication.
     // Bytes pools are concatenated (no dedup) — each `@embed_file` call gets
     // a fresh entry since these are rare and may legitimately repeat.
-    let mut global_string_table: HashMap<String, u32> = HashMap::new();
+    let mut global_string_table: HashMap<String, u32> = HashMap::default();
     let mut global_strings: Vec<String> = Vec::new();
     let mut global_bytes: Vec<Vec<u8>> = Vec::new();
 
@@ -1629,8 +1629,8 @@ impl<'a> Sema<'a> {
         return_type: Type,
         params: &[(Spur, Type, RirParamMode)],
         body: InstRef,
-        type_subst: Option<&std::collections::HashMap<Spur, Type>>,
-        value_subst: Option<&std::collections::HashMap<Spur, ConstValue>>,
+        type_subst: Option<&rustc_hash::FxHashMap<Spur, Type>>,
+        value_subst: Option<&rustc_hash::FxHashMap<Spur, ConstValue>>,
     ) -> RawFnAnalysis {
         let mut air = Air::new(return_type);
         let mut param_vec: Vec<ParamInfo> = Vec::new();
@@ -1687,25 +1687,25 @@ impl<'a> Sema<'a> {
         let comptime_type_vars = type_subst.cloned().unwrap_or_default();
         let comptime_value_vars = value_subst.cloned().unwrap_or_default();
         let mut ctx = AnalysisContext {
-            locals: HashMap::new(),
+            locals: HashMap::default(),
             params: &param_vec,
             next_slot: 0,
             loop_depth: 0,
             forbid_break: None,
             checked_depth: 0,
-            used_locals: HashSet::new(),
+            used_locals: HashSet::default(),
             return_type,
             scope_stack: Vec::new(),
             resolved_types: &resolved_types,
-            moved_vars: HashMap::new(),
+            moved_vars: HashMap::default(),
             warnings: Vec::new(),
-            local_string_table: HashMap::new(),
+            local_string_table: HashMap::default(),
             local_strings: Vec::new(),
             local_bytes: Vec::new(),
             comptime_type_vars,
             comptime_value_vars,
-            referenced_functions: HashSet::new(),
-            referenced_methods: HashSet::new(),
+            referenced_functions: HashSet::default(),
+            referenced_methods: HashSet::default(),
         };
 
         // ======================================================================
@@ -1751,7 +1751,7 @@ impl<'a> Sema<'a> {
         return_type: Type,
         params: &[(Spur, Type, RirParamMode)],
         body: InstRef,
-        type_subst: &std::collections::HashMap<Spur, Type>,
+        type_subst: &rustc_hash::FxHashMap<Spur, Type>,
     ) -> RawFnAnalysis {
         // For specialized functions, we need to populate comptime_type_vars with the
         // type substitutions so that references to type parameters (like `P { ... }`)
@@ -1771,11 +1771,11 @@ impl<'a> Sema<'a> {
         params: &[(Spur, Type, RirParamMode)],
         body: InstRef,
         self_type: Type,
-        captured_comptime_values: &std::collections::HashMap<Spur, ConstValue>,
+        captured_comptime_values: &rustc_hash::FxHashMap<Spur, ConstValue>,
     ) -> RawFnAnalysis {
         // Create a type substitution map with Self -> the struct type
         let self_sym = self.interner.get_or_intern("Self");
-        let mut type_subst = HashMap::new();
+        let mut type_subst = HashMap::default();
         type_subst.insert(self_sym, self_type);
 
         self.analyze_function_internal(
@@ -1951,7 +1951,7 @@ impl<'a> Sema<'a> {
         // Build the resolved types map, converting InferType to Type.
         // Since we pre-created all array types above, infer_type_to_type only
         // performs lookups (no mutation).
-        let mut resolved_types = HashMap::new();
+        let mut resolved_types = HashMap::default();
         for (inst_ref, infer_ty) in &expr_types {
             let resolved = unifier.resolve_infer_type(infer_ty);
             let concrete_ty = self.infer_type_to_type(&resolved);
@@ -2682,8 +2682,11 @@ impl<'a> Sema<'a> {
 
                 // Check if an equivalent anonymous struct already exists (structural equality)
                 // This now compares fields, method signatures, AND captured comptime values
-                let (struct_ty, _is_new) =
-                    self.find_or_create_anon_struct(&struct_fields, &method_sigs, &HashMap::new());
+                let (struct_ty, _is_new) = self.find_or_create_anon_struct(
+                    &struct_fields,
+                    &method_sigs,
+                    &HashMap::default(),
+                );
 
                 // DON'T register methods here - they should be registered during const evaluation
                 // (either try_evaluate_const for non-comptime, or try_evaluate_const_with_subst for comptime).
@@ -2727,7 +2730,7 @@ impl<'a> Sema<'a> {
                     *methods_start,
                     *methods_len,
                     inst.span,
-                    &std::collections::HashMap::new(),
+                    &rustc_hash::FxHashMap::default(),
                 )?;
                 let iface_id = self.find_or_create_anon_interface(req);
                 let iface_ty = Type::new_interface(iface_id);
@@ -2781,8 +2784,8 @@ impl<'a> Sema<'a> {
                 // Check for duplicate method names
                 if *methods_len > 0 {
                     let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
-                    let mut seen_method_names: std::collections::HashSet<Spur> =
-                        std::collections::HashSet::new();
+                    let mut seen_method_names: rustc_hash::FxHashSet<Spur> =
+                        rustc_hash::FxHashSet::default();
                     for mref in method_refs {
                         let minst = self.rir.get(mref);
                         if let InstData::FnDecl {
@@ -2806,8 +2809,11 @@ impl<'a> Sema<'a> {
                 let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
 
                 // Check if an equivalent anonymous enum already exists (structural equality)
-                let (enum_ty, _is_new) =
-                    self.find_or_create_anon_enum(&enum_variants, &method_sigs, &HashMap::new());
+                let (enum_ty, _is_new) = self.find_or_create_anon_enum(
+                    &enum_variants,
+                    &method_sigs,
+                    &HashMap::default(),
+                );
 
                 let air_ref = air.add_inst(AirInst {
                     data: AirInstData::TypeConst(enum_ty),
@@ -3445,8 +3451,8 @@ impl<'a> Sema<'a> {
             // Phase 1: extract or analyze, in two paths that converge on
             // (type_args, type_subst, air_runtime_args).
             let mut type_args: Vec<Type> = Vec::new();
-            let mut type_subst: std::collections::HashMap<Spur, Type> =
-                std::collections::HashMap::new();
+            let mut type_subst: rustc_hash::FxHashMap<Spur, Type> =
+                rustc_hash::FxHashMap::default();
             let air_runtime_args: Vec<AirCallArg>;
 
             if !infer_comptimes {
@@ -5467,8 +5473,11 @@ impl<'a> Sema<'a> {
                 let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
 
                 // Find or create the anonymous struct type
-                let (struct_ty, is_new) =
-                    self.find_or_create_anon_struct(&struct_fields, &method_sigs, &HashMap::new());
+                let (struct_ty, is_new) = self.find_or_create_anon_struct(
+                    &struct_fields,
+                    &method_sigs,
+                    &HashMap::default(),
+                );
 
                 // Register methods if present and struct is new
                 // This handles non-comptime functions like `fn Counter() -> type { struct { fn get() {} } }`
@@ -5484,8 +5493,8 @@ impl<'a> Sema<'a> {
                             methods_len: *methods_len,
                         },
                         inst.span,
-                        &HashMap::new(), // Empty type substitution
-                        &HashMap::new(), // Empty value substitution (non-comptime)
+                        &HashMap::default(), // Empty type substitution
+                        &HashMap::default(), // Empty value substitution (non-comptime)
                     )?;
                 }
                 // ADR-0058: splice `@derive(...)` directives on the anon
@@ -5519,7 +5528,7 @@ impl<'a> Sema<'a> {
                         *methods_start,
                         *methods_len,
                         inst.span,
-                        &HashMap::new(),
+                        &HashMap::default(),
                     )
                     .ok()?;
                 let iface_id = self.find_or_create_anon_interface(methods);
@@ -5560,8 +5569,11 @@ impl<'a> Sema<'a> {
 
                 let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
 
-                let (enum_ty, is_new) =
-                    self.find_or_create_anon_enum(&enum_variants, &method_sigs, &HashMap::new());
+                let (enum_ty, is_new) = self.find_or_create_anon_enum(
+                    &enum_variants,
+                    &method_sigs,
+                    &HashMap::default(),
+                );
 
                 // Register methods for newly created anonymous enums
                 if is_new
@@ -5573,7 +5585,7 @@ impl<'a> Sema<'a> {
                         enum_ty,
                         *methods_start,
                         *methods_len,
-                        &HashMap::new(),
+                        &HashMap::default(),
                     );
                 }
                 // ADR-0058: splice `@derive(...)` on the anon enum
@@ -5673,8 +5685,8 @@ impl<'a> Sema<'a> {
     pub(crate) fn try_evaluate_const_with_subst(
         &mut self,
         inst_ref: InstRef,
-        type_subst: &std::collections::HashMap<Spur, Type>,
-        value_subst: &std::collections::HashMap<Spur, ConstValue>,
+        type_subst: &rustc_hash::FxHashMap<Spur, Type>,
+        value_subst: &rustc_hash::FxHashMap<Spur, ConstValue>,
     ) -> Option<ConstValue> {
         let inst = self.rir.get(inst_ref);
         match &inst.data {
@@ -6565,7 +6577,7 @@ impl<'a> Sema<'a> {
                 ty: Type::COMPTIME_STR,
             },
         ];
-        let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::new());
+        let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::default());
         let info_struct_id = match info_type.kind() {
             TypeKind::Struct(id) => id,
             _ => unreachable!(),
@@ -6607,7 +6619,7 @@ impl<'a> Sema<'a> {
                 ty: Type::BOOL,
             },
         ];
-        let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::new());
+        let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::default());
         let info_struct_id = match info_type.kind() {
             TypeKind::Struct(id) => id,
             _ => unreachable!(),
@@ -6660,7 +6672,7 @@ impl<'a> Sema<'a> {
             },
         ];
         let (field_info_type, _) =
-            self.find_or_create_anon_struct(&field_info_fields, &[], &HashMap::new());
+            self.find_or_create_anon_struct(&field_info_fields, &[], &HashMap::default());
         let field_info_struct_id = match field_info_type.kind() {
             TypeKind::Struct(id) => id,
             _ => unreachable!(),
@@ -6702,7 +6714,8 @@ impl<'a> Sema<'a> {
                 ty: fields_array_type,
             },
         ];
-        let (info_type, _) = self.find_or_create_anon_struct(&info_fields, &[], &HashMap::new());
+        let (info_type, _) =
+            self.find_or_create_anon_struct(&info_fields, &[], &HashMap::default());
         let info_struct_id = match info_type.kind() {
             TypeKind::Struct(id) => id,
             _ => unreachable!(),
@@ -6772,7 +6785,7 @@ impl<'a> Sema<'a> {
             },
         ];
         let (field_info_type, _) =
-            self.find_or_create_anon_struct(&field_info_fields, &[], &HashMap::new());
+            self.find_or_create_anon_struct(&field_info_fields, &[], &HashMap::default());
         let field_info_struct_id = match field_info_type.kind() {
             TypeKind::Struct(id) => id,
             _ => unreachable!(),
@@ -6814,7 +6827,7 @@ impl<'a> Sema<'a> {
                 },
             ];
             let (variant_info_type, _) =
-                self.find_or_create_anon_struct(&variant_info_fields, &[], &HashMap::new());
+                self.find_or_create_anon_struct(&variant_info_fields, &[], &HashMap::default());
             let variant_info_struct_id = match variant_info_type.kind() {
                 TypeKind::Struct(id) => id,
                 _ => unreachable!(),
@@ -6852,7 +6865,7 @@ impl<'a> Sema<'a> {
             },
         ];
         let (variant_info_type, _) =
-            self.find_or_create_anon_struct(&variant_info_fields, &[], &HashMap::new());
+            self.find_or_create_anon_struct(&variant_info_fields, &[], &HashMap::default());
         let variants_array_type =
             Type::new_array(self.get_or_create_array_type(variant_info_type, variant_count as u64));
 
@@ -6875,7 +6888,8 @@ impl<'a> Sema<'a> {
                 ty: variants_array_type,
             },
         ];
-        let (info_type, _) = self.find_or_create_anon_struct(&info_fields, &[], &HashMap::new());
+        let (info_type, _) =
+            self.find_or_create_anon_struct(&info_fields, &[], &HashMap::default());
         let info_struct_id = match info_type.kind() {
             TypeKind::Struct(id) => id,
             _ => unreachable!(),
@@ -6942,27 +6956,27 @@ impl<'a> Sema<'a> {
         span: Span,
     ) -> CompileResult<ConstValue> {
         let empty_params: Vec<ParamInfo> = Vec::new();
-        let empty_resolved: HashMap<InstRef, Type> = HashMap::new();
+        let empty_resolved: HashMap<InstRef, Type> = HashMap::default();
         let stub = AnalysisContext {
-            locals: HashMap::new(),
+            locals: HashMap::default(),
             params: &empty_params,
             next_slot: 0,
             loop_depth: 0,
             forbid_break: None,
             checked_depth: 0,
-            used_locals: HashSet::new(),
+            used_locals: HashSet::default(),
             return_type: Type::UNIT,
             scope_stack: Vec::new(),
             resolved_types: &empty_resolved,
-            moved_vars: HashMap::new(),
+            moved_vars: HashMap::default(),
             warnings: Vec::new(),
-            local_string_table: HashMap::new(),
+            local_string_table: HashMap::default(),
             local_strings: Vec::new(),
             local_bytes: Vec::new(),
-            comptime_type_vars: HashMap::new(),
-            comptime_value_vars: HashMap::new(),
-            referenced_functions: HashSet::new(),
-            referenced_methods: HashSet::new(),
+            comptime_type_vars: HashMap::default(),
+            comptime_value_vars: HashMap::default(),
+            referenced_functions: HashSet::default(),
+            referenced_methods: HashSet::default(),
         };
         self.evaluate_comptime_block(inst_ref, &stub, span)
     }
@@ -7632,7 +7646,7 @@ impl<'a> Sema<'a> {
                 // struct/enum resolution inside the callee body can find them.
                 let param_comptime = self.param_arena.comptime(fn_info.params).to_vec();
                 let param_names = self.param_arena.names(fn_info.params).to_vec();
-                let mut type_overrides: HashMap<Spur, Type> = HashMap::new();
+                let mut type_overrides: HashMap<Spur, Type> = HashMap::default();
                 if fn_info.is_generic {
                     for (i, is_comptime) in param_comptime.iter().enumerate() {
                         if *is_comptime && let Some(ConstValue::Type(ty)) = arg_values.get(i) {
@@ -7657,8 +7671,11 @@ impl<'a> Sema<'a> {
                 // Bind non-comptime parameters to argument values in a fresh call frame.
                 // Comptime (type) parameters are not bound as locals — they are
                 // available through comptime_type_overrides.
-                let mut call_locals: HashMap<Spur, ConstValue> =
-                    HashMap::with_capacity(param_names.len());
+                let mut call_locals: HashMap<Spur, ConstValue> = {
+                    let mut m = HashMap::default();
+                    m.reserve(param_names.len());
+                    m
+                };
                 for (i, (param_name, arg_val)) in
                     param_names.iter().zip(arg_values.iter()).enumerate()
                 {
@@ -7731,7 +7748,7 @@ impl<'a> Sema<'a> {
                 let field_count = struct_def.fields.len();
 
                 // Build a map from field name string to declaration index.
-                let field_index_map: std::collections::HashMap<String, usize> = struct_def
+                let field_index_map: rustc_hash::FxHashMap<String, usize> = struct_def
                     .fields
                     .iter()
                     .enumerate()
@@ -8367,8 +8384,11 @@ impl<'a> Sema<'a> {
 
                 // Bind self and parameters.
                 let param_names = self.param_arena.names(method_info.params).to_vec();
-                let mut call_locals: HashMap<Spur, ConstValue> =
-                    HashMap::with_capacity(param_names.len() + 1);
+                let mut call_locals: HashMap<Spur, ConstValue> = {
+                    let mut m = HashMap::default();
+                    m.reserve(param_names.len() + 1);
+                    m
+                };
                 // Bind `self`.
                 let self_sym = self.interner.get_or_intern("self");
                 call_locals.insert(self_sym, receiver_val);
@@ -9245,9 +9265,9 @@ impl<'a> Sema<'a> {
         args: &[RirCallArg],
         call_span: Span,
     ) -> CompileResult<()> {
-        use std::collections::HashSet;
-        let mut inout_vars: HashSet<Spur> = HashSet::new();
-        let mut borrow_vars: HashSet<Spur> = HashSet::new();
+        use rustc_hash::FxHashSet as HashSet;
+        let mut inout_vars: HashSet<Spur> = HashSet::default();
+        let mut borrow_vars: HashSet<Spur> = HashSet::default();
 
         for arg in args {
             // Classify the borrow/inout shape of this arg, considering both
@@ -9383,8 +9403,8 @@ impl<'a> Sema<'a> {
         &mut self,
         spec: AnonStructSpec,
         _span: Span,
-        type_subst: &std::collections::HashMap<Spur, Type>,
-        _value_subst: &std::collections::HashMap<Spur, ConstValue>,
+        type_subst: &rustc_hash::FxHashMap<Spur, Type>,
+        _value_subst: &rustc_hash::FxHashMap<Spur, ConstValue>,
     ) -> Option<()> {
         let AnonStructSpec {
             struct_id,
@@ -9394,7 +9414,7 @@ impl<'a> Sema<'a> {
         } = spec;
         let method_refs = self.rir.get_inst_refs(methods_start, methods_len);
 
-        let mut seen_methods: std::collections::HashSet<Spur> = std::collections::HashSet::new();
+        let mut seen_methods: rustc_hash::FxHashSet<Spur> = rustc_hash::FxHashSet::default();
 
         for method_ref in method_refs {
             let method_inst = self.rir.get(method_ref);
@@ -9446,7 +9466,7 @@ impl<'a> Sema<'a> {
                 // method-level type param, used to detect whether a given
                 // type symbol references any of them (including through
                 // array / pointer / tuple wrappers).
-                let sentinel_subst: std::collections::HashMap<Spur, Type> = method_type_param_names
+                let sentinel_subst: rustc_hash::FxHashMap<Spur, Type> = method_type_param_names
                     .iter()
                     .map(|&n| (n, Type::I32))
                     .collect();
@@ -9532,10 +9552,10 @@ impl<'a> Sema<'a> {
         match &arg_inst.data {
             InstData::TypeConst { type_name } => self.resolve_type(*type_name, arg_inst.span),
             InstData::AnonStructType { .. } => {
-                let empty_type_subst: std::collections::HashMap<Spur, Type> =
-                    std::collections::HashMap::new();
-                let empty_value_subst: std::collections::HashMap<Spur, ConstValue> =
-                    std::collections::HashMap::new();
+                let empty_type_subst: rustc_hash::FxHashMap<Spur, Type> =
+                    rustc_hash::FxHashMap::default();
+                let empty_value_subst: rustc_hash::FxHashMap<Spur, ConstValue> =
+                    rustc_hash::FxHashMap::default();
                 match self.try_evaluate_const_with_subst(arg, &empty_type_subst, &empty_value_subst)
                 {
                     Some(ConstValue::Type(ty)) => Ok(ty),
@@ -9705,11 +9725,11 @@ impl<'a> Sema<'a> {
         enum_type: crate::types::Type,
         methods_start: u32,
         methods_len: u32,
-        type_subst: &std::collections::HashMap<Spur, Type>,
+        type_subst: &rustc_hash::FxHashMap<Spur, Type>,
     ) -> Option<()> {
         let method_refs = self.rir.get_inst_refs(methods_start, methods_len);
 
-        let mut seen_methods: std::collections::HashSet<Spur> = std::collections::HashSet::new();
+        let mut seen_methods: rustc_hash::FxHashSet<Spur> = rustc_hash::FxHashSet::default();
 
         for method_ref in method_refs {
             let method_inst = self.rir.get(method_ref);

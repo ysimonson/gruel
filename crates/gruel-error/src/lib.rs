@@ -20,8 +20,8 @@
 pub mod ice;
 
 use gruel_span::Span;
+use rustc_hash::FxHashSet as HashSet;
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::fmt;
 use thiserror::Error;
 
@@ -311,8 +311,20 @@ pub struct FieldWrongOrderError {
 ///
 /// When all preview features are stabilized, this enum may be empty.
 /// New preview features are added here as development begins.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::Display,
+    strum::EnumString,
+    strum::EnumIter,
+    strum::IntoStaticStr,
+)]
 #[non_exhaustive]
+#[strum(serialize_all = "snake_case")]
 pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
@@ -338,24 +350,10 @@ pub struct InterfaceMethodSignatureMismatchData {
     pub found_signature: String,
 }
 
-/// Error returned when parsing a preview feature name fails.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsePreviewFeatureError(String);
-
-impl fmt::Display for ParsePreviewFeatureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unknown preview feature '{}'", self.0)
-    }
-}
-
-impl std::error::Error for ParsePreviewFeatureError {}
-
 impl PreviewFeature {
     /// Get the CLI name for this feature (used with `--preview`).
     pub fn name(&self) -> &'static str {
-        match *self {
-            PreviewFeature::TestInfra => "test_infra",
-        }
+        (*self).into()
     }
 
     /// Get the ADR number documenting this feature.
@@ -366,38 +364,19 @@ impl PreviewFeature {
     }
 
     /// Get all available preview features.
-    pub fn all() -> &'static [PreviewFeature] {
-        &[PreviewFeature::TestInfra]
+    pub fn all() -> Vec<PreviewFeature> {
+        use strum::IntoEnumIterator;
+        PreviewFeature::iter().collect()
     }
 
     /// Get a comma-separated list of all feature names (for help text).
     pub fn all_names() -> String {
-        if Self::all().is_empty() {
+        let names: Vec<&'static str> = Self::all().iter().map(|f| f.name()).collect();
+        if names.is_empty() {
             "(none)".to_string()
         } else {
-            Self::all()
-                .iter()
-                .map(|f| f.name())
-                .collect::<Vec<_>>()
-                .join(", ")
+            names.join(", ")
         }
-    }
-}
-
-impl std::str::FromStr for PreviewFeature {
-    type Err = ParsePreviewFeatureError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "test_infra" => Ok(PreviewFeature::TestInfra),
-            _ => Err(ParsePreviewFeatureError(s.to_string())),
-        }
-    }
-}
-
-impl fmt::Display for PreviewFeature {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name())
     }
 }
 
@@ -1986,15 +1965,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_preview_feature_error_display() {
-        let err = "bad_feature".parse::<PreviewFeature>().unwrap_err();
-        assert_eq!(err.to_string(), "unknown preview feature 'bad_feature'");
-    }
-
-    #[test]
     fn test_preview_feature_all_contains_test_infra() {
-        let all = PreviewFeature::all();
-        assert!(all.contains(&PreviewFeature::TestInfra));
+        assert!(PreviewFeature::all().contains(&PreviewFeature::TestInfra));
     }
 
     #[test]
@@ -2287,8 +2259,8 @@ mod tests {
 
     #[test]
     fn test_error_code_hash() {
-        use std::collections::HashSet;
-        let mut set = HashSet::new();
+        use rustc_hash::FxHashSet as HashSet;
+        let mut set = HashSet::default();
         set.insert(ErrorCode::TYPE_MISMATCH);
         set.insert(ErrorCode::UNDEFINED_VARIABLE);
         assert_eq!(set.len(), 2);

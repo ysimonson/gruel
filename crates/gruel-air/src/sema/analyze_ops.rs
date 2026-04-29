@@ -20,7 +20,7 @@
 //! - `analyze_comparison` - Eq, Ne, Lt, Gt, Le, Ge
 //! - Logical And/Or are simple enough to remain inline
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_error::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
@@ -2347,8 +2347,11 @@ impl<'a> Sema<'a> {
                     let sv_has_rest = field_bindings
                         .iter()
                         .any(|fb| fb.field_name == rest_marker_sv);
-                    let mut seen_fields =
-                        std::collections::HashSet::with_capacity(field_bindings.len());
+                    let mut seen_fields: rustc_hash::FxHashSet<_> = {
+                        let mut s = rustc_hash::FxHashSet::default();
+                        s.reserve(field_bindings.len());
+                        s
+                    };
                     let qualified_name = format!("{}::{}", enum_def.name, variant_name);
                     for fb in field_bindings {
                         if fb.field_name == rest_marker_sv {
@@ -2490,7 +2493,7 @@ impl<'a> Sema<'a> {
                         resolved_enum.expect("resolved_enum set during validation");
                     let enum_def = self.type_pool.enum_def(enum_id);
                     let variant_def = &enum_def.variants[variant_index as usize];
-                    let listed: std::collections::HashSet<&str> = field_bindings
+                    let listed: rustc_hash::FxHashSet<&str> = field_bindings
                         .iter()
                         .filter(|fb| fb.field_name != rest_marker_sp)
                         .map(|fb| self.interner.resolve(&fb.field_name))
@@ -2530,7 +2533,7 @@ impl<'a> Sema<'a> {
                         .expect("resolved_enum must be set for StructVariant patterns");
                     let enum_def = self.type_pool.enum_def(enum_id);
                     let variant_def = &enum_def.variants[variant_index as usize];
-                    let listed_indices: std::collections::HashSet<usize> = field_bindings
+                    let listed_indices: rustc_hash::FxHashSet<usize> = field_bindings
                         .iter()
                         .filter(|fb| fb.field_name != rest_marker_sp)
                         .filter_map(|fb| {
@@ -3718,7 +3721,7 @@ impl<'a> Sema<'a> {
         };
 
         // Validate: no duplicate fields
-        let mut seen_fields = std::collections::HashSet::new();
+        let mut seen_fields = rustc_hash::FxHashSet::default();
         for field in &rir_fields {
             let field_name = self.interner.resolve(&field.field_name).to_string();
             if !seen_fields.insert(field_name.clone()) {
@@ -4405,7 +4408,7 @@ impl<'a> Sema<'a> {
         let struct_type = Type::new_struct(struct_id);
 
         // Build a map from field name to struct field index
-        let field_index_map: std::collections::HashMap<&str, usize> = struct_def
+        let field_index_map: rustc_hash::FxHashMap<&str, usize> = struct_def
             .fields
             .iter()
             .enumerate()
@@ -4413,7 +4416,7 @@ impl<'a> Sema<'a> {
             .collect();
 
         // Check for unknown or duplicate fields
-        let mut seen_fields = std::collections::HashSet::new();
+        let mut seen_fields = rustc_hash::FxHashSet::default();
         for (init_field_name, _) in field_inits.iter() {
             let init_name = self.interner.resolve(init_field_name);
 
@@ -4565,7 +4568,7 @@ impl<'a> Sema<'a> {
 
         // Find or create the anon struct via the existing structural-dedup helper.
         let (struct_ty, _is_new) =
-            self.find_or_create_anon_struct(&struct_fields, &[], &HashMap::new());
+            self.find_or_create_anon_struct(&struct_fields, &[], &HashMap::default());
         let struct_id = struct_ty
             .as_struct()
             .expect("find_or_create_anon_struct returned non-struct type");
@@ -4641,7 +4644,7 @@ impl<'a> Sema<'a> {
         let struct_ty = self.create_unique_anon_struct(
             &struct_fields,
             std::slice::from_ref(&method_sig),
-            &HashMap::new(),
+            &HashMap::default(),
         );
         let struct_id = struct_ty
             .as_struct()
@@ -5917,7 +5920,7 @@ impl<'a> Sema<'a> {
         let qualified_name = format!("{}::{}", enum_name, variant_name);
 
         // Build field name to index map
-        let field_index_map: std::collections::HashMap<&str, usize> = field_names
+        let field_index_map: rustc_hash::FxHashMap<&str, usize> = field_names
             .iter()
             .enumerate()
             .map(|(i, n)| (n.as_str(), i))
@@ -5927,7 +5930,7 @@ impl<'a> Sema<'a> {
         let field_inits = self.rir.get_field_inits(fields_start, fields_len);
 
         // Check for unknown and duplicate fields
-        let mut seen_fields = std::collections::HashSet::new();
+        let mut seen_fields = rustc_hash::FxHashSet::default();
         for (init_field_name, _) in &field_inits {
             let init_name = self.interner.resolve(init_field_name);
 
@@ -6180,8 +6183,8 @@ impl<'a> Sema<'a> {
         let all_params_comptime = param_comptime.iter().all(|&c| c);
         if base_return_type == Type::COMPTIME_TYPE && (args.is_empty() || all_params_comptime) {
             // Build value_subst from comptime VALUE parameters (e.g., comptime N: i32)
-            let mut value_subst: std::collections::HashMap<Spur, ConstValue> =
-                std::collections::HashMap::new();
+            let mut value_subst: rustc_hash::FxHashMap<Spur, ConstValue> =
+                rustc_hash::FxHashMap::default();
             for (i, is_comptime) in param_comptime.iter().enumerate() {
                 if *is_comptime && param_types[i] != Type::COMPTIME_TYPE {
                     // This is a comptime VALUE parameter - extract its const value.
@@ -6196,7 +6199,7 @@ impl<'a> Sema<'a> {
             // Try to evaluate the function body at compile time
             if let Some(ConstValue::Type(ty)) = self.try_evaluate_const_with_subst(
                 fn_body,
-                &std::collections::HashMap::new(),
+                &rustc_hash::FxHashMap::default(),
                 &value_subst,
             ) {
                 // Success! Return a TypeConst instruction instead of a runtime call
@@ -6290,8 +6293,8 @@ impl<'a> Sema<'a> {
             // Separate type arguments from runtime arguments
             let mut type_args: Vec<Type> = Vec::new();
             let mut runtime_args: Vec<AirCallArg> = Vec::new();
-            let mut type_subst: std::collections::HashMap<Spur, Type> =
-                std::collections::HashMap::new();
+            let mut type_subst: rustc_hash::FxHashMap<Spur, Type> =
+                rustc_hash::FxHashMap::default();
 
             for (i, (air_arg, is_comptime)) in
                 air_args.iter().zip(param_comptime.iter()).enumerate()
@@ -6348,8 +6351,8 @@ impl<'a> Sema<'a> {
                 // The return type is literally `type`, not a type parameter that was substituted.
                 // Try to evaluate the function body at compile time with type substitutions.
                 // Also build value_subst from comptime VALUE parameters (e.g., comptime N: i32)
-                let mut value_subst: std::collections::HashMap<Spur, ConstValue> =
-                    std::collections::HashMap::new();
+                let mut value_subst: rustc_hash::FxHashMap<Spur, ConstValue> =
+                    rustc_hash::FxHashMap::default();
                 for (i, is_comptime) in param_comptime.iter().enumerate() {
                     if *is_comptime && param_types[i] != Type::COMPTIME_TYPE {
                         // This is a comptime VALUE parameter - extract its const value.

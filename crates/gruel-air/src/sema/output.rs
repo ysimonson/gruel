@@ -9,7 +9,7 @@ use crate::intern_pool::TypeInternPool;
 use crate::types::{InterfaceDef, InterfaceId, StructId, Type};
 use gruel_error::CompileWarning;
 use lasso::Spur;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 /// Vtable witnesses keyed by `(struct_id, interface_id)`. The value is the
 /// conforming type's method-key list in interface declaration order; codegen

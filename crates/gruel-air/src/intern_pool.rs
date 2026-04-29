@@ -35,7 +35,7 @@
 //! - Read lock for lookups (common case)
 //! - Write lock for insertions (rare, during declaration gathering)
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::sync::{PoisonError, RwLock};
 
 use lasso::Spur;
@@ -325,15 +325,15 @@ impl TypeInternPool {
         Self {
             inner: RwLock::new(TypeInternPoolInner {
                 types: Vec::new(),
-                array_map: HashMap::new(),
-                ptr_const_map: HashMap::new(),
-                ptr_mut_map: HashMap::new(),
-                ref_map: HashMap::new(),
-                mut_ref_map: HashMap::new(),
-                slice_map: HashMap::new(),
-                mut_slice_map: HashMap::new(),
-                struct_by_name: HashMap::new(),
-                enum_by_name: HashMap::new(),
+                array_map: HashMap::default(),
+                ptr_const_map: HashMap::default(),
+                ptr_mut_map: HashMap::default(),
+                ref_map: HashMap::default(),
+                mut_ref_map: HashMap::default(),
+                slice_map: HashMap::default(),
+                mut_slice_map: HashMap::default(),
+                struct_by_name: HashMap::default(),
+                enum_by_name: HashMap::default(),
             }),
         }
     }

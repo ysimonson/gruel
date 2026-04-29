@@ -2,7 +2,7 @@
 //!
 //! This module generates LLVM IR from the Gruel CFG.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_air::{StructId, Type, TypeInternPool, TypeKind};
 use gruel_cfg::{
@@ -141,7 +141,7 @@ fn build_module<'ctx>(
     // `(StructId, InterfaceId)` pair. The vtable holds function pointers
     // for each interface method, in declaration order.
     let mut vtable_map: HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>> =
-        HashMap::new();
+        HashMap::default();
     for (&(struct_id, interface_id), witness) in interface_vtables.iter() {
         let iface_def = &interface_defs[interface_id.0 as usize];
         let n_methods = iface_def.methods.len();
@@ -3931,7 +3931,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let cases = self.cfg.get_switch_cases(cases_start, cases_len);
                 // Deduplicate case values: LLVM forbids duplicate case values.
                 // Keep only the first occurrence (same behavior as native backend).
-                let mut seen = std::collections::HashSet::new();
+                let mut seen = rustc_hash::FxHashSet::default();
                 let llvm_cases: Vec<_> = cases
                     .iter()
                     .filter(|(case_val, _)| seen.insert(*case_val))

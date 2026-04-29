@@ -14,7 +14,7 @@ pub const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 /// This matches the convention used by Rust's test harness and the Gruel runtime.
 /// When a Gruel program encounters a runtime error, it exits with this code.
 pub const RUNTIME_ERROR_EXIT_CODE: i32 = 101;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::fs;
 use std::io::{Read as IoRead, Write};
 use std::path::{Path, PathBuf};
@@ -520,24 +520,20 @@ pub fn validate_preview_features(test_file: &TestFile) -> Vec<UnknownPreviewFeat
 }
 
 /// Recursively collect all files with the given extension from a directory.
-pub fn collect_files_by_ext(dir: &Path, ext: &str, files: &mut Vec<PathBuf>) {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                collect_files_by_ext(&path, ext, files);
-            } else if path.extension().is_some_and(|e| e == ext) {
-                files.push(path);
-            }
-        }
-    }
+pub fn collect_files_by_ext(dir: &Path, ext: &str) -> Vec<PathBuf> {
+    walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file() && e.path().extension().is_some_and(|x| x == ext))
+        .map(|e| e.into_path())
+        .collect()
 }
 
 /// Recursively collect all TOML files from a directory.
 ///
 /// This is a convenience wrapper around [`collect_files_by_ext`].
-pub fn collect_toml_files(dir: &Path, files: &mut Vec<PathBuf>) {
-    collect_files_by_ext(dir, "toml", files);
+pub fn collect_toml_files(dir: &Path) -> Vec<PathBuf> {
+    collect_files_by_ext(dir, "toml")
 }
 
 /// Load all test files from a directory (including subdirectories).
@@ -563,8 +559,7 @@ pub fn load_test_files(cases_dir: &Path) -> Vec<(String, TestFile)> {
     }
 
     // Collect all TOML files recursively
-    let mut toml_files = Vec::new();
-    collect_toml_files(cases_dir, &mut toml_files);
+    let toml_files = collect_toml_files(cases_dir);
 
     for path in toml_files {
         let content = match fs::read_to_string(&path) {
@@ -1328,7 +1323,7 @@ mod tests {
 
     #[test]
     fn test_substitute_placeholders_basic() {
-        let mut params = HashMap::new();
+        let mut params = HashMap::default();
         params.insert("type".to_string(), toml::Value::String("i32".to_string()));
         params.insert("value".to_string(), toml::Value::Integer(42));
 
@@ -1338,7 +1333,7 @@ mod tests {
 
     #[test]
     fn test_substitute_placeholders_multiple_occurrences() {
-        let mut params = HashMap::new();
+        let mut params = HashMap::default();
         params.insert("type".to_string(), toml::Value::String("i64".to_string()));
 
         let result = substitute_placeholders("{type} and {type} again", &params);
@@ -1347,7 +1342,7 @@ mod tests {
 
     #[test]
     fn test_substitute_placeholders_no_match() {
-        let params = HashMap::new();
+        let params = HashMap::default();
         let result = substitute_placeholders("no placeholders here", &params);
         assert_eq!(result, "no placeholders here");
     }
@@ -1384,7 +1379,7 @@ mod tests {
             stdin: None,
             stderr_contains: None,
             params: vec![],
-            aux_files: HashMap::new(),
+            aux_files: HashMap::default(),
             pass_aux_files: false,
             only_on: vec![],
             toml_path: PathBuf::new(),
@@ -1397,11 +1392,11 @@ mod tests {
 
     #[test]
     fn test_expand_case_with_params() {
-        let mut param1 = HashMap::new();
+        let mut param1 = HashMap::default();
         param1.insert("type".to_string(), toml::Value::String("i8".to_string()));
         param1.insert("exit_code".to_string(), toml::Value::Integer(42));
 
-        let mut param2 = HashMap::new();
+        let mut param2 = HashMap::default();
         param2.insert("type".to_string(), toml::Value::String("i16".to_string()));
         param2.insert("exit_code".to_string(), toml::Value::Integer(100));
 
@@ -1435,7 +1430,7 @@ mod tests {
             stdin: None,
             stderr_contains: None,
             params: vec![ParamSet { values: param1 }, ParamSet { values: param2 }],
-            aux_files: HashMap::new(),
+            aux_files: HashMap::default(),
             pass_aux_files: false,
             only_on: vec![],
             toml_path: PathBuf::new(),
@@ -1457,7 +1452,7 @@ mod tests {
 
     #[test]
     fn test_expand_case_spec_extra() {
-        let mut params = HashMap::new();
+        let mut params = HashMap::default();
         params.insert("type".to_string(), toml::Value::String("i8".to_string()));
         params.insert(
             "spec_extra".to_string(),
@@ -1494,7 +1489,7 @@ mod tests {
             stdin: None,
             stderr_contains: None,
             params: vec![ParamSet { values: params }],
-            aux_files: HashMap::new(),
+            aux_files: HashMap::default(),
             pass_aux_files: false,
             only_on: vec![],
             toml_path: PathBuf::new(),
@@ -1507,7 +1502,7 @@ mod tests {
 
     #[test]
     fn test_expand_case_compile_fail_override() {
-        let mut params = HashMap::new();
+        let mut params = HashMap::default();
         params.insert("type".to_string(), toml::Value::String("i8".to_string()));
         params.insert("compile_fail".to_string(), toml::Value::Boolean(true));
         params.insert(
@@ -1545,7 +1540,7 @@ mod tests {
             stdin: None,
             stderr_contains: None,
             params: vec![ParamSet { values: params }],
-            aux_files: HashMap::new(),
+            aux_files: HashMap::default(),
             pass_aux_files: false,
             only_on: vec![],
             toml_path: PathBuf::new(),
@@ -1854,7 +1849,7 @@ mod tests {
             stdin: None,
             stderr_contains: None,
             params: vec![],
-            aux_files: HashMap::new(),
+            aux_files: HashMap::default(),
             pass_aux_files: false,
             only_on: vec![],
             toml_path: PathBuf::new(),

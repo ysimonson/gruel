@@ -4,7 +4,7 @@
 //! Two anonymous structs with the same field names/types (in order) AND
 //! the same method signatures AND the same captured comptime values are the same type.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use lasso::Spur;
 
@@ -75,7 +75,7 @@ impl Sema<'_> {
                 }
 
                 // Check captured comptime values match
-                let empty_map = HashMap::new();
+                let empty_map = HashMap::default();
                 let existing_captures = self
                     .anon_struct_captured_values
                     .get(&struct_id)

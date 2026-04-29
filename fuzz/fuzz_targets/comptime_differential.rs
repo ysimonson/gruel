@@ -14,7 +14,7 @@ use libfuzzer_sys::fuzz_target;
 use std::io::Write;
 
 fuzz_target!(|prog: ComptimeProgram| {
-    let preview = gruel_error::PreviewFeatures::new();
+    let preview = gruel_error::PreviewFeatures::default();
 
     // Path A: comptime evaluation — @dbg output collected in compiler buffer.
     // Suppress on-the-fly stderr printing so the fuzzer doesn't flood the

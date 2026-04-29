@@ -22,7 +22,7 @@
 //! eprintln!("{}", warning_output);
 //! ```
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::io::IsTerminal;
 
 use annotate_snippets::{Level, Renderer, Snippet};
@@ -211,7 +211,7 @@ impl<'a> MultiFileFormatter<'a> {
         }
 
         // Count occurrences of each unused variable name
-        let mut var_name_counts: HashMap<&str, usize> = HashMap::new();
+        let mut var_name_counts: HashMap<&str, usize> = HashMap::default();
         for warning in warnings {
             if let Some(name) = warning.kind.unused_variable_name() {
                 *var_name_counts.entry(name).or_insert(0) += 1;
@@ -292,7 +292,7 @@ impl<'a> MultiFileFormatter<'a> {
         };
 
         // Collect all file IDs we need to show
-        let mut file_spans = FileSpanMap::new();
+        let mut file_spans = FileSpanMap::default();
 
         // Add primary span
         file_spans

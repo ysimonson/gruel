@@ -39,7 +39,7 @@
 //! println!("{}", timing_data.to_json());
 //! ```
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -129,7 +129,7 @@ impl TimingData {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(TimingDataInner {
-                passes: HashMap::new(),
+                passes: HashMap::default(),
                 pass_order: Vec::new(),
             })),
         }

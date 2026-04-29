@@ -28,7 +28,7 @@
 //! - Read lock for lookups (most common case)
 //! - Write lock for insertions (rare, only for new array types)
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::sync::{PoisonError, RwLock};
 
 use gruel_error::PreviewFeatures;
@@ -61,7 +61,7 @@ impl ModuleRegistry {
     /// Create a new empty registry.
     pub fn new() -> Self {
         Self {
-            paths: RwLock::new(HashMap::new()),
+            paths: RwLock::new(HashMap::default()),
             defs: RwLock::new(Vec::new()),
         }
     }

@@ -10,7 +10,7 @@
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use rustc_hash::FxHashSet as HashSet;
 
     /// All InstData variants that exist in the RIR.
     ///
@@ -99,7 +99,7 @@ mod tests {
     /// Looks for patterns like `InstData::VariantName` and extracts `VariantName`.
     /// Excludes matches that are actually `AirInstData::` (which contains `InstData::` as substring).
     fn extract_instdata_variants(source: &str) -> HashSet<String> {
-        let mut variants = HashSet::new();
+        let mut variants = HashSet::default();
 
         // Simple regex-like extraction using string matching
         // Looking for "InstData::" followed by variant name (alphanumeric)

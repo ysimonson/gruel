@@ -12,7 +12,7 @@
 //! The specialization pass runs after semantic analysis but before CFG building.
 //! It transforms the AIR in-place and adds new specialized functions to the output.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_error::{CompileError, CompileResult, ErrorKind};
 use gruel_rir::RirParamMode;
@@ -51,7 +51,7 @@ pub fn specialize(
     interner: &ThreadedRodeo,
 ) -> CompileResult<()> {
     // Phase 1: Collect all specialization requests
-    let mut specializations: HashMap<SpecializationKey, SpecializationInfo> = HashMap::new();
+    let mut specializations: HashMap<SpecializationKey, SpecializationInfo> = HashMap::default();
 
     for func in &output.functions {
         collect_specializations(&func.air, interner, &mut specializations);
@@ -260,7 +260,7 @@ fn create_specialized_function(
     let param_comptime = sema.param_arena.comptime(base_info.params);
 
     // Build the type substitution map: comptime param name -> concrete Type
-    let mut type_subst: HashMap<Spur, Type> = HashMap::new();
+    let mut type_subst: HashMap<Spur, Type> = HashMap::default();
     let mut type_arg_idx = 0;
     let param_names_owned: Vec<Spur> = param_names.to_vec();
     for (i, is_comptime) in param_comptime.iter().enumerate() {
@@ -376,7 +376,7 @@ fn create_specialized_method(
     // Build method-level type substitution from comptime type params ->
     // concrete type args (positional, in the order the comptime params
     // appear).
-    let mut type_subst: HashMap<Spur, Type> = HashMap::new();
+    let mut type_subst: HashMap<Spur, Type> = HashMap::default();
     let mut type_arg_idx = 0;
     for (i, is_comptime) in param_comptime.iter().enumerate() {
         if *is_comptime && type_arg_idx < key.type_args.len() {

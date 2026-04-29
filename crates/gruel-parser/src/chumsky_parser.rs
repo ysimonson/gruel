@@ -3434,7 +3434,7 @@ impl ChumskyParser {
             source_len,
             interner,
             file_id,
-            preview_features: PreviewFeatures::new(),
+            preview_features: PreviewFeatures::default(),
         }
     }
 

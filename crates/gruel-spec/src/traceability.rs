@@ -476,10 +476,7 @@ fn parse_spec_file(path: &Path, paragraphs: &mut BTreeMap<String, SpecParagraph>
 pub fn parse_spec_paragraphs(spec_dir: &Path) -> BTreeMap<String, SpecParagraph> {
     let mut paragraphs = BTreeMap::new();
 
-    let mut md_files = Vec::new();
-    collect_files_by_ext(spec_dir, "md", &mut md_files);
-
-    for path in md_files {
+    for path in collect_files_by_ext(spec_dir, "md") {
         parse_spec_file(&path, &mut paragraphs);
     }
 
@@ -529,10 +526,7 @@ pub struct TestCase {
 pub fn parse_test_files(cases_dir: &Path) -> Vec<TestFile> {
     let mut test_files = Vec::new();
 
-    let mut toml_files = Vec::new();
-    collect_files_by_ext(cases_dir, "toml", &mut toml_files);
-
-    for path in toml_files {
+    for path in collect_files_by_ext(cases_dir, "toml") {
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
             Err(e) => {

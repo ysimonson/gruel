@@ -320,15 +320,15 @@ impl<'a> Sema<'a> {
                     span,
                 ));
             }
-            let mut subst: std::collections::HashMap<lasso::Spur, Type> =
-                std::collections::HashMap::new();
+            let mut subst: rustc_hash::FxHashMap<lasso::Spur, Type> =
+                rustc_hash::FxHashMap::default();
             for (n, t) in comptime_param_names.iter().zip(arg_types.iter()) {
                 subst.insert(*n, *t);
             }
             // Evaluate the function body at comptime with the substitution.
             // The body must produce a `Type` value.
-            let value_subst: std::collections::HashMap<lasso::Spur, super::ConstValue> =
-                std::collections::HashMap::new();
+            let value_subst: rustc_hash::FxHashMap<lasso::Spur, super::ConstValue> =
+                rustc_hash::FxHashMap::default();
             match self.try_evaluate_const_with_subst(fn_info.body, &subst, &value_subst) {
                 Some(super::ConstValue::Type(t)) => Ok(t),
                 _ => Err(
@@ -375,7 +375,7 @@ impl<'a> Sema<'a> {
                 let (ty, _is_new) = self.find_or_create_anon_struct(
                     &struct_fields,
                     &[],
-                    &std::collections::HashMap::new(),
+                    &rustc_hash::FxHashMap::default(),
                 );
                 Ok(ty)
             } else {
@@ -391,7 +391,7 @@ impl<'a> Sema<'a> {
     ///
     /// This is used in comptime evaluation where we can't produce a compile error.
     pub(crate) fn resolve_type_for_comptime(&mut self, type_sym: Spur) -> Option<Type> {
-        self.resolve_type_for_comptime_with_subst(type_sym, &std::collections::HashMap::new())
+        self.resolve_type_for_comptime_with_subst(type_sym, &rustc_hash::FxHashMap::default())
     }
 
     /// Resolve a type symbol to a Type with type parameter substitution.
@@ -403,7 +403,7 @@ impl<'a> Sema<'a> {
     pub(crate) fn resolve_type_for_comptime_with_subst(
         &mut self,
         type_sym: Spur,
-        type_subst: &std::collections::HashMap<Spur, Type>,
+        type_subst: &rustc_hash::FxHashMap<Spur, Type>,
     ) -> Option<Type> {
         // First check the substitution map for type parameters
         if let Some(&ty) = type_subst.get(&type_sym) {

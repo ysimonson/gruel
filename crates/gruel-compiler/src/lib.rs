@@ -245,7 +245,7 @@ pub struct ParsedProgram {
 /// let program = parse_all_files(&sources)?;
 /// ```
 pub fn parse_all_files(sources: &[SourceFile<'_>]) -> MultiErrorResult<ParsedProgram> {
-    parse_all_files_with_preview(sources, &PreviewFeatures::new())
+    parse_all_files_with_preview(sources, &PreviewFeatures::default())
 }
 
 /// Parse all files with an explicit set of preview features for the parser (ADR-0049).
@@ -309,7 +309,7 @@ pub struct ValidatedProgram {
     /// Merged interner containing all symbols from all files.
     pub interner: ThreadedRodeo,
     /// Maps FileId to source file path (for module resolution).
-    pub file_paths: std::collections::HashMap<FileId, String>,
+    pub file_paths: rustc_hash::FxHashMap<FileId, String>,
 }
 
 /// Information about a symbol definition for duplicate detection.
@@ -351,15 +351,15 @@ struct SymbolDef {
 /// // merged.ast now contains both functions
 /// ```
 pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> {
-    use std::collections::HashMap;
+    use rustc_hash::FxHashMap as HashMap;
 
     let _span = info_span!("merge_symbols", file_count = program.files.len()).entered();
 
     // Track seen symbols for duplicate detection.
     // Key: symbol name (resolved string), Value: first definition info
-    let mut functions: HashMap<String, SymbolDef> = HashMap::new();
-    let mut structs: HashMap<String, SymbolDef> = HashMap::new();
-    let mut enums: HashMap<String, SymbolDef> = HashMap::new();
+    let mut functions: HashMap<String, SymbolDef> = HashMap::default();
+    let mut structs: HashMap<String, SymbolDef> = HashMap::default();
+    let mut enums: HashMap<String, SymbolDef> = HashMap::default();
 
     // Collect all items and detect duplicates
     let mut all_items = Vec::new();
@@ -526,7 +526,7 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
 pub fn validate_and_generate_rir_parallel(
     program: ParsedProgram,
 ) -> MultiErrorResult<ValidatedProgram> {
-    use std::collections::HashMap;
+    use rustc_hash::FxHashMap as HashMap;
 
     let _span = info_span!(
         "validate_and_generate_rir",
@@ -542,9 +542,9 @@ pub fn validate_and_generate_rir_parallel(
         .collect();
 
     // Step 1: Validate symbols for duplicates (same logic as merge_symbols)
-    let mut functions: HashMap<String, SymbolDef> = HashMap::new();
-    let mut structs: HashMap<String, SymbolDef> = HashMap::new();
-    let mut enums: HashMap<String, SymbolDef> = HashMap::new();
+    let mut functions: HashMap<String, SymbolDef> = HashMap::default();
+    let mut structs: HashMap<String, SymbolDef> = HashMap::default();
+    let mut enums: HashMap<String, SymbolDef> = HashMap::default();
     let mut errors: Vec<CompileError> = Vec::new();
 
     let interner = &program.interner;
@@ -722,7 +722,7 @@ pub enum LinkerMode {
 ///     target: Target::host(),
 ///     linker: LinkerMode::System("cc".to_string()),
 ///     opt_level: OptLevel::O1,
-///     preview_features: PreviewFeatures::new(),
+///     preview_features: PreviewFeatures::default(),
 ///     jobs: 0, // 0 = auto-detect
 /// };
 /// let output = compile_with_options(source, &options)?;
@@ -751,7 +751,7 @@ impl Default for CompileOptions {
             target: Target::host(),
             linker: LinkerMode::Internal,
             opt_level: OptLevel::default(),
-            preview_features: PreviewFeatures::new(),
+            preview_features: PreviewFeatures::default(),
             jobs: 0,
             capture_comptime_dbg: false,
         }
@@ -855,7 +855,7 @@ pub struct CompileOutput {
 /// Uses default optimization level (O0) and no preview features. For custom options,
 /// use [`compile_frontend_with_options`].
 pub fn compile_frontend(source: &str) -> MultiErrorResult<CompileState> {
-    compile_frontend_with_options(source, &PreviewFeatures::new())
+    compile_frontend_with_options(source, &PreviewFeatures::default())
 }
 
 /// Compile source code through all frontend phases.
@@ -921,7 +921,7 @@ pub fn compile_frontend_from_ast(
     ast: Ast,
     interner: ThreadedRodeo,
 ) -> MultiErrorResult<CompileState> {
-    compile_frontend_from_ast_with_options(ast, interner, &PreviewFeatures::new())
+    compile_frontend_from_ast_with_options(ast, interner, &PreviewFeatures::default())
 }
 
 /// Compile from an already-parsed AST through all remaining frontend phases.
@@ -1058,7 +1058,7 @@ pub fn compile_frontend_from_rir_with_options(
         rir,
         interner,
         preview_features,
-        std::collections::HashMap::new(),
+        rustc_hash::FxHashMap::default(),
     )
 }
 
@@ -1070,7 +1070,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
     rir: Rir,
     interner: ThreadedRodeo,
     preview_features: &PreviewFeatures,
-    file_paths: std::collections::HashMap<FileId, String>,
+    file_paths: rustc_hash::FxHashMap<FileId, String>,
 ) -> MultiErrorResult<CompileStateFromRir> {
     // Semantic analysis (RIR to AIR)
     let sema_output = {
@@ -1474,7 +1474,7 @@ pub fn compile_to_air(source: &str) -> MultiErrorResult<AirOutput> {
     let rir = astgen.generate();
 
     // Semantic analysis (RIR to AIR)
-    let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+    let sema = Sema::new(&rir, &interner, PreviewFeatures::default());
     let sema_output = sema.analyze_all()?;
 
     Ok(AirOutput {
@@ -3379,7 +3379,7 @@ mod integration_tests {
             let astgen = AstGen::new(&ast, &interner);
             let rir = astgen.generate();
 
-            let sema = Sema::new(&rir, &interner, PreviewFeatures::new());
+            let sema = Sema::new(&rir, &interner, PreviewFeatures::default());
             let sema_output = sema.analyze_all().unwrap();
 
             let mut count = 0;

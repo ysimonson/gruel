@@ -361,7 +361,7 @@ mod tests {
         let rir = Box::leak(Box::new(rir));
         let interner = Box::leak(Box::new(interner));
 
-        let preview = PreviewFeatures::new();
+        let preview = PreviewFeatures::default();
         let mut sema = Sema::new(rir, interner, preview);
         sema.inject_builtin_types();
         sema.register_type_names().unwrap();

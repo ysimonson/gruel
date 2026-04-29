@@ -3,7 +3,7 @@
 //! This module contains methods for building a [`SemaContext`] from a [`Sema`]
 //! for use in parallel function body analysis.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_target::Target;
 use lasso::Spur;

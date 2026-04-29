@@ -4,7 +4,7 @@
 //! and method signature maps in `InferType` format for use in Hindley-Milner
 //! type inference.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use lasso::Spur;
 

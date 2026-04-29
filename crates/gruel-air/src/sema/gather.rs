@@ -3,7 +3,7 @@
 //! This module contains the [`GatherOutput`] struct which holds the state built
 //! during declaration gathering that is needed for function body analysis.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_error::PreviewFeatures;
 use gruel_rir::Rir;
@@ -90,13 +90,13 @@ impl<'a> GatherOutput<'a> {
             functions: self.functions,
             structs: self.structs,
             enums: self.enums,
-            interfaces: HashMap::new(),
+            interfaces: HashMap::default(),
             interface_defs: Vec::new(),
-            comptime_interface_bounds: HashMap::new(),
-            interface_vtables_needed: HashMap::new(),
+            comptime_interface_bounds: HashMap::default(),
+            interface_vtables_needed: HashMap::default(),
             methods: self.methods,
-            enum_methods: HashMap::new(),
-            derives: HashMap::new(),
+            enum_methods: HashMap::default(),
+            derives: HashMap::default(),
             derive_bindings: Vec::new(),
             pending_anon_derive_errors: Vec::new(),
             constants: self.constants,
@@ -109,19 +109,19 @@ impl<'a> GatherOutput<'a> {
             known: KnownSymbols::new(self.interner),
             type_pool: self.type_pool,
             module_registry: crate::sema_context::ModuleRegistry::new(),
-            file_paths: HashMap::new(),
+            file_paths: HashMap::default(),
             param_arena: self.param_arena,
-            inline_struct_drops: HashMap::new(),
-            inline_enum_drops: HashMap::new(),
-            anon_struct_method_sigs: HashMap::new(),
-            anon_struct_captured_values: HashMap::new(),
-            anon_enum_method_sigs: HashMap::new(),
-            anon_enum_captured_values: HashMap::new(),
+            inline_struct_drops: HashMap::default(),
+            inline_enum_drops: HashMap::default(),
+            anon_struct_method_sigs: HashMap::default(),
+            anon_struct_captured_values: HashMap::default(),
+            anon_enum_method_sigs: HashMap::default(),
+            anon_enum_captured_values: HashMap::default(),
             comptime_steps_used: 0,
             comptime_return_value: None,
             comptime_call_depth: 0,
             comptime_heap: Vec::new(),
-            comptime_type_overrides: HashMap::new(),
+            comptime_type_overrides: HashMap::default(),
             comptime_dbg_output: Vec::new(),
             comptime_log_output: Vec::new(),
             suppress_comptime_dbg_print: false,

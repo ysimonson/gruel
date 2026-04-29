@@ -15,7 +15,7 @@
 //! Array types are managed by the thread-safe `TypeInternPool` in `SemaContext`,
 //! allowing parallel creation without local buffering or post-merge remapping.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_error::{CompileError, CompileResult, CompileWarning, ErrorKind, PreviewFeature};
 use gruel_span::Span;
@@ -67,7 +67,7 @@ impl<'a, 'ctx> FunctionAnalyzer<'a, 'ctx> {
     pub fn new(ctx: &'a SemaContext<'ctx>) -> Self {
         Self {
             ctx,
-            string_table: HashMap::new(),
+            string_table: HashMap::default(),
             strings: Vec::new(),
             warnings: Vec::new(),
         }
@@ -322,7 +322,7 @@ impl MergedFunctionOutput {
         &mut self,
         output: FunctionAnalyzerOutput,
     ) -> FunctionOutputRemapping {
-        let mut string_remap = HashMap::new();
+        let mut string_remap = HashMap::default();
 
         // Merge strings (deduplicate by content)
         for (idx, content) in output.strings.into_iter().enumerate() {

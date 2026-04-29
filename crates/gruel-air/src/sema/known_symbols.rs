@@ -12,7 +12,7 @@
 //! significant. Pre-interning known symbols and looking up intrinsic ids
 //! directly by `Spur` avoids repeated string resolution in hot paths.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_intrinsics::{INTRINSICS, IntrinsicId};
 use lasso::{Spur, ThreadedRodeo};

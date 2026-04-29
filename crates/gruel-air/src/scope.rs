@@ -25,7 +25,7 @@
 //! }
 //! ```
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use lasso::Spur;
 
@@ -116,7 +116,7 @@ mod tests {
     impl TestContext {
         fn new() -> Self {
             Self {
-                locals: HashMap::new(),
+                locals: HashMap::default(),
                 scope_stack: Vec::new(),
             }
         }

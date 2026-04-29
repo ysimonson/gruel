@@ -815,7 +815,7 @@ pub struct ModuleDef {
     pub file_path: String,
     /// Public functions in this module: name -> mangled name
     /// The mangled name includes the module path (e.g., "math::add")
-    pub functions: std::collections::HashMap<String, String>,
+    pub functions: rustc_hash::FxHashMap<String, String>,
     /// Public structs in this module
     pub structs: Vec<String>,
     /// Public enums in this module
@@ -828,7 +828,7 @@ impl ModuleDef {
         Self {
             import_path,
             file_path,
-            functions: std::collections::HashMap::new(),
+            functions: rustc_hash::FxHashMap::default(),
             structs: Vec::new(),
             enums: Vec::new(),
         }

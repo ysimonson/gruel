@@ -248,6 +248,7 @@ dependencies = [
  "gruel-target",
  "lasso",
  "rayon",
+ "rustc-hash",
  "tracing",
 ]
 
@@ -263,6 +264,7 @@ dependencies = [
  "gruel-error",
  "gruel-span",
  "lasso",
+ "strum",
 ]
 
 [[package]]
@@ -275,6 +277,7 @@ dependencies = [
  "gruel-intrinsics",
  "inkwell",
  "lasso",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -293,6 +296,7 @@ dependencies = [
  "gruel-target",
  "lasso",
  "rayon",
+ "rustc-hash",
  "serde_json",
  "tracing",
 ]
@@ -302,6 +306,8 @@ name = "gruel-error"
 version = "0.1.0"
 dependencies = [
  "gruel-span",
+ "rustc-hash",
+ "strum",
  "thiserror",
 ]
 
@@ -323,6 +329,7 @@ name = "gruel-intrinsics"
 version = "0.1.0"
 dependencies = [
  "gruel-error",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -365,6 +372,9 @@ version = "0.1.0"
 [[package]]
 name = "gruel-target"
 version = "0.1.0"
+dependencies = [
+ "strum",
+]
 
 [[package]]
 name = "hashbrown"
@@ -712,6 +722,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
+name = "rustc-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
+
+[[package]]
 name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -802,6 +818,27 @@ dependencies = [
  "libc",
  "psm",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+dependencies = [
+ "strum_macros",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

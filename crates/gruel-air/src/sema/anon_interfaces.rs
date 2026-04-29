@@ -8,7 +8,7 @@
 //! param types + return type, in declaration order) are the same type.
 //! Names are synthetic (`__anon_iface_<n>`) but never affect identity.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_error::{CompileError, CompileResult, ErrorKind};
 use gruel_rir::InstData;
@@ -47,8 +47,11 @@ impl<'a> Sema<'a> {
     ) -> CompileResult<Vec<InterfaceMethodReq>> {
         let method_refs = self.rir.get_inst_refs(methods_start, methods_len).to_vec();
         let mut out: Vec<InterfaceMethodReq> = Vec::with_capacity(method_refs.len());
-        let mut seen: std::collections::HashSet<String> =
-            std::collections::HashSet::with_capacity(method_refs.len());
+        let mut seen: rustc_hash::FxHashSet<String> = {
+            let mut s = rustc_hash::FxHashSet::default();
+            s.reserve(method_refs.len());
+            s
+        };
         for method_ref in method_refs {
             let m = self.rir.get(method_ref);
             let m_span = m.span;

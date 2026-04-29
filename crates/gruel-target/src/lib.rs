@@ -5,16 +5,40 @@
 //! to be used by the CLI, compiler, codegen, and linker crates.
 
 use std::fmt;
-use std::str::FromStr;
 
 /// A compilation target consisting of an architecture and operating system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::EnumString,
+    strum::EnumIter,
+    strum::IntoStaticStr,
+)]
 pub enum Target {
     /// x86-64 Linux (System V AMD64 ABI)
+    #[strum(
+        to_string = "x86-64-linux",
+        serialize = "x86_64-linux",
+        serialize = "x86_64-unknown-linux-gnu"
+    )]
     X86_64Linux,
     /// AArch64 Linux (AAPCS64 ABI)
+    #[strum(
+        to_string = "aarch64-linux",
+        serialize = "arm64-linux",
+        serialize = "aarch64-unknown-linux-gnu"
+    )]
     Aarch64Linux,
     /// AArch64 macOS (Apple Silicon, AAPCS64 with Apple extensions)
+    #[strum(
+        to_string = "aarch64-macos",
+        serialize = "arm64-macos",
+        serialize = "aarch64-apple-darwin"
+    )]
     Aarch64Macos,
 }
 
@@ -160,52 +184,27 @@ impl Target {
     }
 
     /// Returns all supported targets.
-    pub fn all() -> &'static [Target] {
-        &[
-            Target::X86_64Linux,
-            Target::Aarch64Linux,
-            Target::Aarch64Macos,
-        ]
+    pub fn all() -> Vec<Target> {
+        use strum::IntoEnumIterator;
+        Target::iter().collect()
     }
 
     /// Returns a comma-separated string of all target names for help text.
-    pub fn all_names() -> &'static str {
-        "x86-64-linux, aarch64-linux, aarch64-macos"
+    pub fn all_names() -> String {
+        Self::all()
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Target::X86_64Linux => write!(f, "x86-64-linux"),
-            Target::Aarch64Linux => write!(f, "aarch64-linux"),
-            Target::Aarch64Macos => write!(f, "aarch64-macos"),
-        }
+        let s: &'static str = (*self).into();
+        write!(f, "{}", s)
     }
 }
-
-/// Error returned when parsing an invalid target string.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseTargetError {
-    input: String,
-}
-
-impl fmt::Display for ParseTargetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "unknown target '{}'. Valid targets: {}",
-            self.input,
-            Target::all()
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
-}
-
-impl std::error::Error for ParseTargetError {}
 
 impl Default for Target {
     /// Returns the host target as the default.
@@ -214,23 +213,6 @@ impl Default for Target {
     /// which is useful for struct initialization with `..Default::default()`.
     fn default() -> Self {
         Self::host()
-    }
-}
-
-impl FromStr for Target {
-    type Err = ParseTargetError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "x86-64-linux" | "x86_64-linux" | "x86_64-unknown-linux-gnu" => Ok(Target::X86_64Linux),
-            "aarch64-linux" | "arm64-linux" | "aarch64-unknown-linux-gnu" => {
-                Ok(Target::Aarch64Linux)
-            }
-            "aarch64-macos" | "arm64-macos" | "aarch64-apple-darwin" => Ok(Target::Aarch64Macos),
-            _ => Err(ParseTargetError {
-                input: s.to_string(),
-            }),
-        }
     }
 }
 
@@ -403,7 +385,7 @@ mod tests {
                 .parse()
                 .expect("Display output should be parseable");
             assert_eq!(
-                *target, parsed,
+                target, parsed,
                 "Round-trip failed for {}: displayed as '{}', parsed back as {:?}",
                 target, displayed, parsed
             );

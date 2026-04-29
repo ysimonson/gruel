@@ -22,7 +22,7 @@
 //! let output = unit.compile()?;
 //! ```
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use lasso::ThreadedRodeo;
 use rayon::prelude::*;
@@ -211,9 +211,9 @@ impl<'src> CompilationUnit<'src> {
 
         let _span = info_span!("merge_symbols", file_count = files.len()).entered();
 
-        let mut functions: HashMap<String, SymbolDef> = HashMap::new();
-        let mut structs: HashMap<String, SymbolDef> = HashMap::new();
-        let mut enums: HashMap<String, SymbolDef> = HashMap::new();
+        let mut functions: HashMap<String, SymbolDef> = HashMap::default();
+        let mut structs: HashMap<String, SymbolDef> = HashMap::default();
+        let mut enums: HashMap<String, SymbolDef> = HashMap::default();
         let mut all_items = Vec::new();
         let mut errors = Vec::new();
 
@@ -510,7 +510,7 @@ impl<'src> CompilationUnit<'src> {
         let interner = self.interner.as_ref().expect("interner not available");
 
         let empty_iface_defs: Vec<gruel_air::InterfaceDef> = Vec::new();
-        let empty_iface_vtables: gruel_air::InterfaceVtables = std::collections::HashMap::new();
+        let empty_iface_vtables: gruel_air::InterfaceVtables = rustc_hash::FxHashMap::default();
         let interface_defs = self.interface_defs.as_ref().unwrap_or(&empty_iface_defs);
         let interface_vtables = self
             .interface_vtables

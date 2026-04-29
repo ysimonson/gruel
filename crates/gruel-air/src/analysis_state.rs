@@ -11,7 +11,7 @@
 //! array tracking has been removed - array types created during function analysis
 //! go directly to the shared pool.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_error::CompileWarning;
 
@@ -113,7 +113,7 @@ impl MergedAnalysisState {
     /// Array type merging is no longer needed.
     /// Array types go directly to the shared `TypeInternPool`.
     pub fn merge_function_state(&mut self, state: FunctionAnalysisState) -> AnalysisStateRemapping {
-        let mut string_remap = HashMap::new();
+        let mut string_remap = HashMap::default();
 
         // Merge strings (deduplicate by content)
         for (content, old_id) in state.string_table {
@@ -132,7 +132,7 @@ impl MergedAnalysisState {
 
         // Merge bytes (no deduplication — embed_file is rare and each call
         // gets a fresh entry). Local IDs shift by the current pool size.
-        let mut bytes_remap = HashMap::new();
+        let mut bytes_remap = HashMap::default();
         let bytes_offset = self.bytes.len() as u32;
         for (local_id, blob) in state.bytes.into_iter().enumerate() {
             let new_id = bytes_offset + local_id as u32;

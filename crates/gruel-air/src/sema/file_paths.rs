@@ -3,7 +3,7 @@
 //! This module handles mapping FileIds to source file paths, which is needed
 //! for module resolution and relative imports.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use gruel_span::FileId;
 
