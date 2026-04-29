@@ -10,16 +10,16 @@ Gruel is statically typed—every variable has a type known at compile time.
 
 ## Integer Types
 
-Gruel has the integer types you'd expect:
+Gruel has the integer types you'd expect, plus pointer-sized variants:
 
 ```gruel
 fn main() -> i32 {
-    // Signed integers: i8, i16, i32, i64
+    // Signed integers: i8, i16, i32, i64, isize
     let x: i32 = 42;
     let big: i64 = 1000000000000;
 
-    // Unsigned integers: u8, u16, u32, u64
-    let index: u64 = 0;
+    // Unsigned integers: u8, u16, u32, u64, usize
+    let index: usize = 0;     // pointer-sized — used for array/slice indexing
     let byte: u8 = 255;
 
     @dbg(x);
@@ -27,7 +27,20 @@ fn main() -> i32 {
 }
 ```
 
-The number after `i` or `u` is the bit width. Signed integers (`i`) can be negative; unsigned integers (`u`) cannot.
+The number after `i` or `u` is the bit width. Signed integers (`i`) can be negative; unsigned integers (`u`) cannot. `isize` and `usize` are pointer-sized — `usize` is the type used for array and slice indices.
+
+## Floating-Point Types
+
+Gruel has three floating-point types: `f16`, `f32`, and `f64`. Float literals contain a decimal point or exponent; without one, a literal is an integer.
+
+```gruel
+fn main() -> i32 {
+    let pi: f64 = 3.14159;
+    let small: f32 = 1.5;
+    @dbg(pi);
+    0
+}
+```
 
 ## Type Inference
 
@@ -61,20 +74,21 @@ fn main() -> i32 {
 }
 ```
 
-## Integer Casts
+## Numeric Casts
 
-To convert between integer types, use `@intCast`. The target type is inferred from context:
+To convert between integer or float types, use `@cast`. The target type is inferred from context:
 
 ```gruel
 fn main() -> i32 {
     let big: i64 = 1000;
-    let small: i32 = @intCast(big);  // i64 -> i32
+    let small: i32 = @cast(big);     // i64 -> i32
 
     let index: i32 = 5;
-    let as_u64: u64 = @intCast(index);  // i32 -> u64
+    let as_u64: u64 = @cast(index);  // i32 -> u64
 
     @dbg(small);   // prints: 1000
-    @dbg(as_u64);  // prints: 5
+    let n: i32 = @cast(as_u64);
+    @dbg(n);       // prints: 5
     0
 }
 ```
@@ -84,8 +98,8 @@ If the value doesn't fit in the target type, the program panics at runtime:
 ```gruel
 fn main() -> i32 {
     let x: i32 = 300;
-    let y: u8 = @intCast(x);  // panics: 300 doesn't fit in u8 (max 255)
-    @intCast(y)
+    let y: u8 = @cast(x);  // panics: 300 doesn't fit in u8 (max 255)
+    @cast(y)
 }
 ```
 
