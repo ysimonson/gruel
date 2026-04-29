@@ -18,6 +18,24 @@ use crate::inst::{
 /// A traced place: (base, list of (projection, optional index value)).
 type TracedPlace = Option<(PlaceBase, Vec<(Projection, Option<CfgValue>)>)>;
 
+/// The scrutinee location currently being matched against — base slot, the
+/// projected type after applying `projection`, and the projection chain
+/// itself. Threaded through the pattern dispatch tree so each level can
+/// extend the projection without ballooning argument lists.
+#[derive(Clone, Copy)]
+struct Scrutinee<'a> {
+    slot: u32,
+    ty: Type,
+    projection: &'a [Projection],
+}
+
+/// Where to branch on match / mismatch in the pattern dispatch tree.
+#[derive(Clone, Copy)]
+struct BranchTargets {
+    matched: BlockId,
+    unmatched: BlockId,
+}
+
 /// ADR-0052 Phase 1: a pattern is "trivial" for CFG dispatch purposes
 /// when it contributes no runtime test — it's either a wildcard or a
 /// plain binding whose inner pattern (if any) is itself trivial. Binding
@@ -1604,15 +1622,16 @@ impl<'a> CfgBuilder<'a> {
                     for (i, (pattern, _)) in arms.iter().enumerate() {
                         let fallthrough = test_blocks.get(i + 1).copied().unwrap_or(fallback);
                         self.current_block = test_blocks[i];
-                        self.emit_pattern_test(
-                            scr_slot,
-                            scrutinee_ty,
-                            &[],
-                            pattern,
-                            arm_blocks[i],
-                            fallthrough,
-                            span,
-                        );
+                        let scrut = Scrutinee {
+                            slot: scr_slot,
+                            ty: scrutinee_ty,
+                            projection: &[],
+                        };
+                        let targets = BranchTargets {
+                            matched: arm_blocks[i],
+                            unmatched: fallthrough,
+                        };
+                        self.emit_pattern_test(scrut, pattern, targets, span);
                     }
 
                     // Arm body lowering + join wiring happens at the shared
@@ -2380,17 +2399,19 @@ impl<'a> CfgBuilder<'a> {
     /// conditional one. `unmatched` is used for the false side of
     /// conditional branches. `scr_ty` is the type of the (projected)
     /// value currently in focus.
-    #[allow(clippy::too_many_arguments)]
     fn emit_pattern_test(
         &mut self,
-        scr_slot: u32,
-        scr_ty: Type,
-        projection: &[Projection],
+        scrut: Scrutinee<'_>,
         pattern: &AirPattern,
-        matched: BlockId,
-        unmatched: BlockId,
+        targets: BranchTargets,
         span: gruel_span::Span,
     ) {
+        let Scrutinee {
+            slot: scr_slot,
+            ty: scr_ty,
+            projection,
+        } = scrut;
+        let BranchTargets { matched, unmatched } = targets;
         match pattern {
             AirPattern::Wildcard => {
                 // Unconditional match.
@@ -2450,13 +2471,10 @@ impl<'a> CfgBuilder<'a> {
                     self.branch_to(cond, checked, unmatched, span);
                     self.current_block = checked;
                     self.emit_enum_field_tests(
-                        scr_slot,
-                        scr_ty,
-                        projection,
+                        scrut,
                         *variant_index,
                         fields.iter().enumerate().map(|(i, p)| (i as u32, p)),
-                        matched,
-                        unmatched,
+                        targets,
                         span,
                     );
                 }
@@ -2479,13 +2497,10 @@ impl<'a> CfgBuilder<'a> {
                     self.branch_to(cond, checked, unmatched, span);
                     self.current_block = checked;
                     self.emit_enum_field_tests(
-                        scr_slot,
-                        scr_ty,
-                        projection,
+                        scrut,
                         *variant_index,
                         fields.iter().map(|(idx, p)| (*idx, p)),
-                        matched,
-                        unmatched,
+                        targets,
                         span,
                     );
                 }
@@ -2516,9 +2531,16 @@ impl<'a> CfgBuilder<'a> {
                         .get(i)
                         .copied()
                         .expect("tuple pattern arity mismatches scrutinee");
-                    self.emit_pattern_test(
-                        scr_slot, field_ty, &sub_proj, elem, next, unmatched, span,
-                    );
+                    let sub_scrut = Scrutinee {
+                        slot: scr_slot,
+                        ty: field_ty,
+                        projection: &sub_proj,
+                    };
+                    let sub_targets = BranchTargets {
+                        matched: next,
+                        unmatched,
+                    };
+                    self.emit_pattern_test(sub_scrut, elem, sub_targets, span);
                     if !is_last {
                         self.current_block = next;
                     }
@@ -2544,9 +2566,16 @@ impl<'a> CfgBuilder<'a> {
                         .get(*field_index as usize)
                         .map(|f| f.ty)
                         .expect("struct pattern field index out of range");
-                    self.emit_pattern_test(
-                        scr_slot, field_ty, &sub_proj, sub_pat, next, unmatched, span,
-                    );
+                    let sub_scrut = Scrutinee {
+                        slot: scr_slot,
+                        ty: field_ty,
+                        projection: &sub_proj,
+                    };
+                    let sub_targets = BranchTargets {
+                        matched: next,
+                        unmatched,
+                    };
+                    self.emit_pattern_test(sub_scrut, sub_pat, sub_targets, span);
                     if !is_last {
                         self.current_block = next;
                     }
@@ -2564,9 +2593,7 @@ impl<'a> CfgBuilder<'a> {
                 // a transparent wrapper around its inner pattern.
                 match inner {
                     Some(inner_pat) => {
-                        self.emit_pattern_test(
-                            scr_slot, scr_ty, projection, inner_pat, matched, unmatched, span,
-                        );
+                        self.emit_pattern_test(scrut, inner_pat, targets, span);
                     }
                     None => {
                         // `x` bare binding acts like `_` for dispatch.
@@ -2606,20 +2633,22 @@ impl<'a> CfgBuilder<'a> {
     /// spilled into a fresh temp slot so the existing projection-based
     /// helpers apply. On any mismatch the chain jumps to `unmatched`;
     /// the final field's matched branch lands in `matched`.
-    #[allow(clippy::too_many_arguments)]
     fn emit_enum_field_tests<'p, I>(
         &mut self,
-        scr_slot: u32,
-        scr_ty: Type,
-        projection: &[Projection],
+        scrut: Scrutinee<'_>,
         variant_index: u32,
         fields: I,
-        matched: BlockId,
-        unmatched: BlockId,
+        targets: BranchTargets,
         span: gruel_span::Span,
     ) where
         I: IntoIterator<Item = (u32, &'p AirPattern)>,
     {
+        let Scrutinee {
+            slot: scr_slot,
+            ty: scr_ty,
+            projection,
+        } = scrut;
+        let BranchTargets { matched, unmatched } = targets;
         let enum_id = scr_ty
             .as_enum()
             .expect("enum-variant pattern requires an enum scrutinee");
@@ -2683,7 +2712,16 @@ impl<'a> CfgBuilder<'a> {
                 Type::UNIT,
                 span,
             );
-            self.emit_pattern_test(field_slot, field_ty, &[], sub_pat, next, unmatched, span);
+            let sub_scrut = Scrutinee {
+                slot: field_slot,
+                ty: field_ty,
+                projection: &[],
+            };
+            let sub_targets = BranchTargets {
+                matched: next,
+                unmatched,
+            };
+            self.emit_pattern_test(sub_scrut, sub_pat, sub_targets, span);
             if !is_last {
                 self.current_block = next;
             }

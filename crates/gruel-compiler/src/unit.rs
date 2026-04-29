@@ -99,13 +99,7 @@ pub struct CompilationUnit<'src> {
     interface_defs: Option<Vec<gruel_air::InterfaceDef>>,
     /// (StructId, InterfaceId) → conformance witness; codegen uses this to
     /// emit one vtable global per pair.
-    #[allow(clippy::type_complexity)]
-    interface_vtables: Option<
-        std::collections::HashMap<
-            (gruel_air::StructId, gruel_air::InterfaceId),
-            Vec<(gruel_air::StructId, lasso::Spur)>,
-        >,
-    >,
+    interface_vtables: Option<gruel_air::InterfaceVtables>,
 }
 
 impl<'src> CompilationUnit<'src> {
@@ -516,16 +510,13 @@ impl<'src> CompilationUnit<'src> {
         let interner = self.interner.as_ref().expect("interner not available");
 
         let empty_iface_defs: Vec<gruel_air::InterfaceDef> = Vec::new();
-        let empty_iface_vtables: std::collections::HashMap<
-            (gruel_air::StructId, gruel_air::InterfaceId),
-            Vec<(gruel_air::StructId, lasso::Spur)>,
-        > = std::collections::HashMap::new();
+        let empty_iface_vtables: gruel_air::InterfaceVtables = std::collections::HashMap::new();
         let interface_defs = self.interface_defs.as_ref().unwrap_or(&empty_iface_defs);
         let interface_vtables = self
             .interface_vtables
             .as_ref()
             .unwrap_or(&empty_iface_vtables);
-        compile_backend(
+        let inputs = crate::BackendInputs {
             functions,
             type_pool,
             strings,
@@ -533,9 +524,8 @@ impl<'src> CompilationUnit<'src> {
             interner,
             interface_defs,
             interface_vtables,
-            &self.options,
-            &self.warnings,
-        )
+        };
+        compile_backend(&inputs, &self.options, &self.warnings)
     }
 
     // =========================================================================

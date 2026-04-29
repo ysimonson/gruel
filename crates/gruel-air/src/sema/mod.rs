@@ -58,7 +58,7 @@ pub use gather::GatherOutput;
 pub use inference_ctx::InferenceContext;
 pub use info::{AnonMethodSig, ConstInfo, DeriveBinding, DeriveInfo, FunctionInfo, MethodInfo};
 pub use known_symbols::KnownSymbols;
-pub use output::{AnalyzedFunction, SemaOutput};
+pub use output::{AnalyzedFunction, InterfaceVtables, SemaOutput};
 
 use std::collections::HashMap;
 
@@ -99,7 +99,7 @@ pub struct Sema<'a> {
     /// The value is the conformance witness — the conforming type's method
     /// keys in interface declaration order, ready for codegen to look up the
     /// LLVM function.
-    pub(crate) interface_vtables_needed: HashMap<(StructId, InterfaceId), Vec<(StructId, Spur)>>,
+    pub(crate) interface_vtables_needed: InterfaceVtables,
     /// Method table: maps (struct_id, method_name) to method info
     pub(crate) methods: HashMap<(StructId, Spur), MethodInfo>,
     /// Enum method table: maps (enum_id, method_name) to method info

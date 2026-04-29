@@ -40,7 +40,8 @@ pub use intern_pool::{
 };
 pub use param_arena::{ParamArena, ParamRange};
 pub use sema::{
-    AnalyzedFunction, ConstValue, FunctionInfo, GatherOutput, MethodInfo, Sema, SemaOutput,
+    AnalyzedFunction, ConstValue, FunctionInfo, GatherOutput, InterfaceVtables, MethodInfo, Sema,
+    SemaOutput,
 };
 // Note: FunctionInfo and MethodInfo are defined in sema and re-exported by sema_context.
 // We export InferenceContext and SemaContext from sema_context.

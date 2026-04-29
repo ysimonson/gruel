@@ -45,6 +45,33 @@ use crate::inst::{
 };
 use crate::types::{EnumId, EnumVariantDef, StructField, StructId, Type, TypeKind};
 
+/// Span context for comptime evaluation: the outer eval site (used for
+/// errors that bubble up through nested calls) and the current
+/// instruction's span (used for diagnostics specific to this call).
+#[derive(Clone, Copy)]
+struct ComptimeSpans {
+    outer: Span,
+    inst: Span,
+}
+
+/// Identifies a pointer-method intrinsic in the registry by its compiler-side
+/// `IntrinsicId`, the interned symbol used at the call site, and the
+/// human-readable operator name (e.g. `"read"`, `"add"`) used in error
+/// messages. All three travel together.
+pub(crate) struct PointerOpKind<'a> {
+    pub(crate) intrinsic: IntrinsicId,
+    pub(crate) name: Spur,
+    pub(crate) op_name: &'a str,
+}
+
+/// Origin of the pointer value for a pointer-op lowering: either a
+/// receiver from a method call (`Some(_), None`) or a left-hand-side type
+/// from an associated-function call (`None, Some(_)`).
+pub(crate) struct PointerOpOrigin {
+    pub(crate) receiver: Option<AnalysisResult>,
+    pub(crate) lhs_type: Option<Type>,
+}
+
 /// Data describing a method body for analysis.
 struct MethodBodySpec<'a> {
     return_type: Spur,
@@ -1782,17 +1809,9 @@ impl<'a> Sema<'a> {
         value_subst: Option<&HashMap<Spur, ConstValue>>,
     ) -> CompileResult<HashMap<InstRef, Type>> {
         // Create constraint generator using pre-computed inference context
-        let mut cgen = ConstraintGenerator::new(
-            self.rir,
-            self.interner,
-            &infer_ctx.func_sigs,
-            &infer_ctx.struct_types,
-            &infer_ctx.enum_types,
-            &infer_ctx.method_sigs,
-            &infer_ctx.enum_method_sigs,
-            &self.type_pool,
-        )
-        .with_type_subst(type_subst);
+        let mut cgen =
+            ConstraintGenerator::new(self.rir, self.interner, infer_ctx, &self.type_pool)
+                .with_type_subst(type_subst);
 
         // Build parameter map for constraint context.
         // Convert Type to InferType so arrays are represented structurally.
@@ -6235,7 +6254,6 @@ impl<'a> Sema<'a> {
     ///
     /// Dispatches methods like `len`, `is_empty`, `contains`, `starts_with`,
     /// `ends_with`, `eq`, `ne`, `lt`, `le`, `gt`, `ge`, and `concat`.
-    #[allow(clippy::too_many_arguments)]
     fn evaluate_comptime_str_method(
         &mut self,
         str_idx: u32,
@@ -6243,9 +6261,12 @@ impl<'a> Sema<'a> {
         call_args: &[gruel_rir::RirCallArg],
         locals: &mut HashMap<Spur, ConstValue>,
         ctx: &AnalysisContext,
-        outer_span: Span,
-        inst_span: Span,
+        spans: ComptimeSpans,
     ) -> CompileResult<ConstValue> {
+        let ComptimeSpans {
+            outer: outer_span,
+            inst: inst_span,
+        } = spans;
         let s = self.resolve_comptime_str(str_idx, inst_span)?.to_string();
 
         match method_name {
@@ -6554,7 +6575,6 @@ impl<'a> Sema<'a> {
     }
 
     /// Build type info for an integer type (includes `bits` and `is_signed`).
-    #[allow(clippy::too_many_arguments)]
     fn build_int_type_info(
         &mut self,
         type_name: &str,
@@ -6984,7 +7004,6 @@ impl<'a> Sema<'a> {
     /// `locals` holds variables declared within the current comptime block.
     /// Returns the evaluated `ConstValue`, or a `CompileError` if the
     /// instruction is not compile-time evaluable.
-    #[allow(clippy::only_used_in_recursion)]
     fn evaluate_comptime_inst(
         &mut self,
         inst_ref: InstRef,
@@ -8301,8 +8320,10 @@ impl<'a> Sema<'a> {
                         &call_args,
                         locals,
                         ctx,
-                        outer_span,
-                        inst_span,
+                        ComptimeSpans {
+                            outer: outer_span,
+                            inst: inst_span,
+                        },
                     );
                 }
 
@@ -10449,11 +10470,15 @@ impl<'a> Sema<'a> {
         let intrinsic_name_sym = self.interner.get_or_intern(entry.intrinsic_name);
         self.lower_pointer_op_to_air(
             air,
-            entry.intrinsic,
-            intrinsic_name_sym,
-            function_name,
-            None,
-            Some(lhs_type),
+            PointerOpKind {
+                intrinsic: entry.intrinsic,
+                name: intrinsic_name_sym,
+                op_name: function_name,
+            },
+            PointerOpOrigin {
+                receiver: None,
+                lhs_type: Some(lhs_type),
+            },
             args,
             span,
             ctx,
@@ -10500,11 +10525,15 @@ impl<'a> Sema<'a> {
         let intrinsic_name_sym = self.interner.get_or_intern(entry.intrinsic_name);
         self.lower_pointer_op_to_air(
             air,
-            entry.intrinsic,
-            intrinsic_name_sym,
-            method_name,
-            Some(receiver_result),
-            None,
+            PointerOpKind {
+                intrinsic: entry.intrinsic,
+                name: intrinsic_name_sym,
+                op_name: method_name,
+            },
+            PointerOpOrigin {
+                receiver: Some(receiver_result),
+                lhs_type: None,
+            },
             args,
             span,
             ctx,
@@ -10671,19 +10700,21 @@ impl<'a> Sema<'a> {
     /// function uses. The receiver, when present, must already be analysed —
     /// for method calls the caller is `dispatch_pointer_method_call` and for
     /// associated-function calls it is the path-call dispatch.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn lower_pointer_op_to_air(
         &mut self,
         air: &mut Air,
-        intrinsic: IntrinsicId,
-        intrinsic_name: Spur,
-        op_name: &str,
-        receiver: Option<AnalysisResult>,
-        lhs_type: Option<Type>,
+        op: PointerOpKind<'_>,
+        origin: PointerOpOrigin,
         args: &[RirCallArg],
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        let PointerOpKind {
+            intrinsic,
+            name: intrinsic_name,
+            op_name,
+        } = op;
+        let PointerOpOrigin { receiver, lhs_type } = origin;
         // ---- Helpers ----
         let make_intrinsic = |air: &mut Air, arg_refs: &[u32], ty: Type| -> AirRef {
             let args_start = air.add_extra(arg_refs);

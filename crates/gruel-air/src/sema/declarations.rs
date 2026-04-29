@@ -25,6 +25,22 @@ use crate::types::{
     StructDef, StructField, StructId, Type,
 };
 
+/// Signature data for a `drop` method, bundled for inline-drop registration.
+struct DropSignature {
+    has_self: bool,
+    params_len: u32,
+    return_type: Spur,
+    body: InstRef,
+    span: Span,
+}
+
+/// Visibility / safety flags on a top-level function declaration.
+#[derive(Clone, Copy)]
+struct FnFlags {
+    is_pub: bool,
+    is_unchecked: bool,
+}
+
 impl<'a> Sema<'a> {
     /// Build an `InferenceContext` from the collected type information.
     ///
@@ -1400,8 +1416,10 @@ impl<'a> Sema<'a> {
                         *return_type,
                         *body,
                         inst.span,
-                        *is_pub,
-                        *is_unchecked,
+                        FnFlags {
+                            is_pub: *is_pub,
+                            is_unchecked: *is_unchecked,
+                        },
                     )?;
                 }
 
@@ -1665,7 +1683,6 @@ impl<'a> Sema<'a> {
     }
 
     /// Collect a function signature for forward reference.
-    #[allow(clippy::too_many_arguments)]
     fn collect_function_signature(
         &mut self,
         name: Spur,
@@ -1673,9 +1690,12 @@ impl<'a> Sema<'a> {
         return_type_sym: Spur,
         body: InstRef,
         span: Span,
-        is_pub: bool,
-        is_unchecked: bool,
+        flags: FnFlags,
     ) -> CompileResult<()> {
+        let FnFlags {
+            is_pub,
+            is_unchecked,
+        } = flags;
         let params = self.rir.get_params(params_start, params_len);
 
         let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
@@ -1812,13 +1832,13 @@ impl<'a> Sema<'a> {
                     self.register_inline_struct_drop(
                         type_name,
                         struct_id,
-                        method_ref,
-                        *has_self,
-                        *params_start,
-                        *params_len,
-                        *return_type,
-                        *body,
-                        method_inst.span,
+                        DropSignature {
+                            has_self: *has_self,
+                            params_len: *params_len,
+                            return_type: *return_type,
+                            body: *body,
+                            span: method_inst.span,
+                        },
                     )?;
                     continue;
                 }
@@ -1949,19 +1969,19 @@ impl<'a> Sema<'a> {
     /// Validates the signature (must be exactly `fn drop(self)`, no extra
     /// params, returns unit) and the type's copy/linear status (a destructor
     /// is illegal on `@copy` and `linear` types per ADR-0053).
-    #[allow(clippy::too_many_arguments)]
     fn register_inline_struct_drop(
         &mut self,
         type_name: Spur,
         struct_id: StructId,
-        _method_ref: InstRef,
-        has_self: bool,
-        _params_start: u32,
-        params_len: u32,
-        return_type: Spur,
-        body: InstRef,
-        span: Span,
+        sig: DropSignature,
     ) -> CompileResult<()> {
+        let DropSignature {
+            has_self,
+            params_len,
+            return_type,
+            body,
+            span,
+        } = sig;
         let type_name_str = self.interner.resolve(&type_name).to_string();
 
         // Signature check: `fn drop(self)`, no extra params, no non-unit return.
@@ -2042,17 +2062,19 @@ impl<'a> Sema<'a> {
     /// Mirrors `register_inline_struct_drop`. Validates the signature
     /// (must be `fn drop(self)` returning unit, only one per type) and
     /// stores the destructor metadata in `EnumDef.destructor`.
-    #[allow(clippy::too_many_arguments)]
     fn register_inline_enum_drop(
         &mut self,
         type_name: Spur,
         enum_id: EnumId,
-        has_self: bool,
-        params_len: u32,
-        return_type: Spur,
-        body: InstRef,
-        span: Span,
+        sig: DropSignature,
     ) -> CompileResult<()> {
+        let DropSignature {
+            has_self,
+            params_len,
+            return_type,
+            body,
+            span,
+        } = sig;
         let type_name_str = self.interner.resolve(&type_name).to_string();
 
         if !has_self {
@@ -2151,11 +2173,13 @@ impl<'a> Sema<'a> {
                     self.register_inline_enum_drop(
                         type_name,
                         enum_id,
-                        *has_self,
-                        *params_len,
-                        *return_type,
-                        *body,
-                        method_inst.span,
+                        DropSignature {
+                            has_self: *has_self,
+                            params_len: *params_len,
+                            return_type: *return_type,
+                            body: *body,
+                            span: method_inst.span,
+                        },
                     )?;
                     continue;
                 }

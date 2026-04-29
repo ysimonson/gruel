@@ -25,6 +25,20 @@ use gruel_cfg::{Cfg, OptLevel};
 use gruel_error::CompileResult;
 use lasso::ThreadedRodeo;
 
+/// Inputs to LLVM codegen, bundled to keep function signatures readable.
+///
+/// All borrows are produced upstream by sema/CFG construction; codegen reads
+/// from them but does not own or mutate them.
+pub struct CodegenInputs<'a> {
+    pub functions: &'a [&'a Cfg],
+    pub type_pool: &'a TypeInternPool,
+    pub strings: &'a [String],
+    pub bytes: &'a [Vec<u8>],
+    pub interner: &'a ThreadedRodeo,
+    pub interface_defs: &'a [gruel_air::InterfaceDef],
+    pub interface_vtables: &'a gruel_air::InterfaceVtables,
+}
+
 /// Generate a native object file from a collection of function CFGs using LLVM.
 ///
 /// All functions are compiled into a single LLVM module, which is then lowered
@@ -37,30 +51,8 @@ use lasso::ThreadedRodeo;
 /// # Errors
 ///
 /// Returns an error if an LLVM compilation error occurs.
-#[allow(clippy::too_many_arguments)]
-pub fn generate(
-    functions: &[&Cfg],
-    type_pool: &TypeInternPool,
-    strings: &[String],
-    bytes: &[Vec<u8>],
-    interner: &ThreadedRodeo,
-    interface_defs: &[gruel_air::InterfaceDef],
-    interface_vtables: &std::collections::HashMap<
-        (gruel_air::StructId, gruel_air::InterfaceId),
-        Vec<(gruel_air::StructId, lasso::Spur)>,
-    >,
-    opt_level: OptLevel,
-) -> CompileResult<Vec<u8>> {
-    codegen::generate(
-        functions,
-        type_pool,
-        strings,
-        bytes,
-        interner,
-        interface_defs,
-        interface_vtables,
-        opt_level,
-    )
+pub fn generate(inputs: &CodegenInputs<'_>, opt_level: OptLevel) -> CompileResult<Vec<u8>> {
+    codegen::generate(inputs, opt_level)
 }
 
 /// Generate LLVM textual IR from a collection of function CFGs.
@@ -68,28 +60,6 @@ pub fn generate(
 /// Returns the LLVM IR in human-readable `.ll` format. Used by `--emit asm`
 /// to produce inspectable IR in place of native assembly. At `-O1+` the
 /// returned IR is the post-optimization form.
-#[allow(clippy::too_many_arguments)]
-pub fn generate_ir(
-    functions: &[&Cfg],
-    type_pool: &TypeInternPool,
-    strings: &[String],
-    bytes: &[Vec<u8>],
-    interner: &ThreadedRodeo,
-    interface_defs: &[gruel_air::InterfaceDef],
-    interface_vtables: &std::collections::HashMap<
-        (gruel_air::StructId, gruel_air::InterfaceId),
-        Vec<(gruel_air::StructId, lasso::Spur)>,
-    >,
-    opt_level: OptLevel,
-) -> CompileResult<String> {
-    codegen::generate_ir(
-        functions,
-        type_pool,
-        strings,
-        bytes,
-        interner,
-        interface_defs,
-        interface_vtables,
-        opt_level,
-    )
+pub fn generate_ir(inputs: &CodegenInputs<'_>, opt_level: OptLevel) -> CompileResult<String> {
+    codegen::generate_ir(inputs, opt_level)
 }

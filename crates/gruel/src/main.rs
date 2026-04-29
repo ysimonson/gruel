@@ -1085,16 +1085,16 @@ fn handle_emit_multi_file(
             EmitStage::Asm => {
                 println!("=== LLVM IR ===");
                 if let Some(ref state) = frontend_state {
-                    match generate_llvm_ir(
-                        &state.functions,
-                        &state.type_pool,
-                        &state.strings,
-                        &state.bytes,
-                        &state.interner,
-                        &state.interface_defs,
-                        &state.interface_vtables,
-                        options.opt_level,
-                    ) {
+                    let inputs = gruel_compiler::BackendInputs {
+                        functions: &state.functions,
+                        type_pool: &state.type_pool,
+                        strings: &state.strings,
+                        bytes: &state.bytes,
+                        interner: &state.interner,
+                        interface_defs: &state.interface_defs,
+                        interface_vtables: &state.interface_vtables,
+                    };
+                    match generate_llvm_ir(&inputs, options.opt_level) {
                         Ok(ir) => print!("{}", ir),
                         Err(e) => {
                             eprintln!("{}", formatter.format_error(&e));

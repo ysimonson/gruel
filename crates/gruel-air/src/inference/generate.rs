@@ -11,6 +11,7 @@ use super::types::{InferType, TypeVarAllocator, TypeVarId};
 use crate::Type;
 use crate::intern_pool::TypeInternPool;
 use crate::scope::ScopedContext;
+use crate::sema::InferenceContext;
 use crate::types::{
     EnumId, PtrMutability, StructId, TypeKind, parse_array_type_syntax, parse_pointer_type_syntax,
     parse_type_call_syntax,
@@ -186,15 +187,10 @@ pub struct ConstraintGenerator<'a> {
 
 impl<'a> ConstraintGenerator<'a> {
     /// Create a new constraint generator.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rir: &'a Rir,
         interner: &'a ThreadedRodeo,
-        functions: &'a HashMap<Spur, FunctionSig>,
-        structs: &'a HashMap<Spur, Type>,
-        enums: &'a HashMap<Spur, Type>,
-        methods: &'a HashMap<(StructId, Spur), MethodSig>,
-        enum_methods: &'a HashMap<(EnumId, Spur), MethodSig>,
+        infer_ctx: &'a InferenceContext,
         type_pool: &'a TypeInternPool,
     ) -> Self {
         Self {
@@ -203,11 +199,11 @@ impl<'a> ConstraintGenerator<'a> {
             type_vars: TypeVarAllocator::new(),
             constraints: Vec::new(),
             expr_types: HashMap::new(),
-            functions,
-            structs,
-            enums,
-            methods,
-            enum_methods,
+            functions: &infer_ctx.func_sigs,
+            structs: &infer_ctx.struct_types,
+            enums: &infer_ctx.enum_types,
+            methods: &infer_ctx.method_sigs,
+            enum_methods: &infer_ctx.enum_method_sigs,
             int_literal_vars: Vec::new(),
             float_literal_vars: Vec::new(),
             type_subst: None,
@@ -2124,16 +2120,14 @@ mod tests {
             span: Span::new(0, 2),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
 
@@ -2161,16 +2155,14 @@ mod tests {
             span: Span::new(0, 4),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
 
@@ -2203,16 +2195,14 @@ mod tests {
             span: Span::new(0, 5),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
 
@@ -2252,16 +2242,14 @@ mod tests {
             span: Span::new(0, 5),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
 
@@ -2296,16 +2284,14 @@ mod tests {
             span: Span::new(0, 13),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
 
@@ -2336,16 +2322,14 @@ mod tests {
             span: Span::new(0, 3),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
 
@@ -2381,16 +2365,14 @@ mod tests {
             span: Span::new(0, 9),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
 
@@ -2433,16 +2415,14 @@ mod tests {
             span: Span::new(0, 25),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
 
@@ -2477,16 +2457,14 @@ mod tests {
             span: Span::new(0, 15),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
 
@@ -2593,16 +2571,14 @@ mod tests {
             span: Span::new(0, 10),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
 
@@ -2628,16 +2604,14 @@ mod tests {
             span: Span::new(0, 5),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
 
@@ -2671,16 +2645,14 @@ mod tests {
             span: Span::new(0, 6),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
 
@@ -2725,16 +2697,14 @@ mod tests {
             span: Span::new(0, 11),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
 
@@ -2770,16 +2740,14 @@ mod tests {
             span: Span::new(0, 2),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::UNIT);
 
@@ -2809,16 +2777,14 @@ mod tests {
             span: Span::new(0, 3),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
 
@@ -2874,16 +2840,14 @@ mod tests {
             span: Span::new(0, 7),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::BOOL);
 
@@ -2923,16 +2887,14 @@ mod tests {
             span: Span::new(0, 11),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
 
@@ -2991,16 +2953,14 @@ mod tests {
             span: Span::new(0, 40),
         });
 
-        let mut cgen = ConstraintGenerator::new(
-            &rir,
-            &interner,
-            &functions,
-            &structs,
-            &enums,
-            &methods,
-            &enum_methods,
-            &type_pool,
-        );
+        let infer_ctx = InferenceContext {
+            func_sigs: functions.clone(),
+            struct_types: structs.clone(),
+            enum_types: enums.clone(),
+            method_sigs: methods.clone(),
+            enum_method_sigs: enum_methods.clone(),
+        };
+        let mut cgen = ConstraintGenerator::new(&rir, &interner, &infer_ctx, &type_pool);
         let params = HashMap::new();
         let mut ctx = ConstraintContext::new(&params, Type::I32);
 

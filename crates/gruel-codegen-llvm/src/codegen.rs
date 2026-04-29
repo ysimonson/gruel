@@ -29,6 +29,7 @@ use inkwell::values::{
 };
 use lasso::ThreadedRodeo;
 
+use crate::CodegenInputs;
 use crate::types::{gruel_type_to_llvm, gruel_type_to_llvm_param};
 
 /// Convert an LLVM-related error string into a [`CompileError`].
@@ -36,24 +37,42 @@ fn llvm_error(msg: impl Into<String>) -> CompileError {
     CompileError::without_span(ErrorKind::InternalError(msg.into()))
 }
 
+/// Module-level state shared across every function being codegen'd.
+///
+/// Built once in `build_module` after globals are emitted, then handed to
+/// `define_function` for each function. Bundled to avoid 14-arg signatures.
+struct ModuleCtx<'ctx, 'a> {
+    ctx: &'ctx Context,
+    builder: &'a Builder<'ctx>,
+    module: &'a Module<'ctx>,
+    type_pool: &'a TypeInternPool,
+    interner: &'a ThreadedRodeo,
+    strings: &'a [String],
+    string_globals: &'a [GlobalValue<'ctx>],
+    bytes_globals: &'a [GlobalValue<'ctx>],
+    bytes_lens: &'a [u64],
+    fn_map: &'a HashMap<&'a str, FunctionValue<'ctx>>,
+    vtable_map: &'a HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
+    interface_defs: &'a [gruel_air::InterfaceDef],
+}
+
 /// Build an LLVM module from a set of function CFGs.
 ///
 /// This is the shared core for both [`generate`] (object emission) and
 /// [`generate_ir`] (textual IR emission). Callers decide what to emit.
-#[allow(clippy::too_many_arguments)]
 fn build_module<'ctx>(
     context: &'ctx Context,
-    functions: &[&Cfg],
-    type_pool: &TypeInternPool,
-    strings: &[String],
-    bytes: &[Vec<u8>],
-    interner: &ThreadedRodeo,
-    interface_defs: &[gruel_air::InterfaceDef],
-    interface_vtables: &std::collections::HashMap<
-        (gruel_air::StructId, gruel_air::InterfaceId),
-        Vec<(gruel_air::StructId, lasso::Spur)>,
-    >,
+    inputs: &CodegenInputs<'_>,
 ) -> CompileResult<Module<'ctx>> {
+    let CodegenInputs {
+        functions,
+        type_pool,
+        strings,
+        bytes,
+        interner,
+        interface_defs,
+        interface_vtables,
+    } = *inputs;
     let module = context.create_module("gruel_module");
     let builder = context.create_builder();
 
@@ -160,24 +179,24 @@ fn build_module<'ctx>(
         vtable_map.insert((struct_id, interface_id), global);
     }
 
+    let mod_ctx = ModuleCtx {
+        ctx: context,
+        builder: &builder,
+        module: &module,
+        type_pool,
+        interner,
+        strings,
+        string_globals: &string_globals,
+        bytes_globals: &bytes_globals,
+        bytes_lens: &bytes_lens,
+        fn_map: &fn_map,
+        vtable_map: &vtable_map,
+        interface_defs,
+    };
+
     // Define each function body.
     for (cfg, fn_value) in &declared {
-        define_function(
-            cfg,
-            fn_value,
-            context,
-            &builder,
-            &module,
-            type_pool,
-            strings,
-            &string_globals,
-            &bytes_globals,
-            &bytes_lens,
-            interner,
-            &fn_map,
-            &vtable_map,
-            interface_defs,
-        )?;
+        define_function(cfg, fn_value, &mod_ctx)?;
     }
 
     // Verify the module.
@@ -223,34 +242,12 @@ fn run_llvm_passes(
 /// All functions are lowered into a single LLVM module. The module is then
 /// compiled to an in-memory object file buffer by the host machine's LLVM
 /// code generator.
-#[allow(clippy::too_many_arguments)]
-pub fn generate(
-    functions: &[&Cfg],
-    type_pool: &TypeInternPool,
-    strings: &[String],
-    bytes: &[Vec<u8>],
-    interner: &ThreadedRodeo,
-    interface_defs: &[gruel_air::InterfaceDef],
-    interface_vtables: &std::collections::HashMap<
-        (gruel_air::StructId, gruel_air::InterfaceId),
-        Vec<(gruel_air::StructId, lasso::Spur)>,
-    >,
-    opt_level: OptLevel,
-) -> CompileResult<Vec<u8>> {
+pub fn generate(inputs: &CodegenInputs<'_>, opt_level: OptLevel) -> CompileResult<Vec<u8>> {
     LlvmTarget::initialize_native(&InitializationConfig::default())
         .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
 
     let context = Context::create();
-    let module = build_module(
-        &context,
-        functions,
-        type_pool,
-        strings,
-        bytes,
-        interner,
-        interface_defs,
-        interface_vtables,
-    )?;
+    let module = build_module(&context, inputs)?;
     let target_triple = TargetMachine::get_default_triple();
     let llvm_target = LlvmTarget::from_triple(&target_triple)
         .map_err(|e| llvm_error(format!("failed to get LLVM target: {}", e)))?;
@@ -280,31 +277,9 @@ pub fn generate(
 /// Returns the human-readable LLVM IR as a string. This is used by
 /// `--emit asm` to produce inspectable IR in place of native assembly.
 /// At `-O1+` the IR is the post-optimization form.
-#[allow(clippy::too_many_arguments)]
-pub fn generate_ir(
-    functions: &[&Cfg],
-    type_pool: &TypeInternPool,
-    strings: &[String],
-    bytes: &[Vec<u8>],
-    interner: &ThreadedRodeo,
-    interface_defs: &[gruel_air::InterfaceDef],
-    interface_vtables: &std::collections::HashMap<
-        (gruel_air::StructId, gruel_air::InterfaceId),
-        Vec<(gruel_air::StructId, lasso::Spur)>,
-    >,
-    opt_level: OptLevel,
-) -> CompileResult<String> {
+pub fn generate_ir(inputs: &CodegenInputs<'_>, opt_level: OptLevel) -> CompileResult<String> {
     let context = Context::create();
-    let module = build_module(
-        &context,
-        functions,
-        type_pool,
-        strings,
-        bytes,
-        interner,
-        interface_defs,
-        interface_vtables,
-    )?;
+    let module = build_module(&context, inputs)?;
 
     if opt_level != OptLevel::O0 {
         // generate_ir needs a TargetMachine to run passes. We do a lightweight
@@ -535,23 +510,7 @@ struct FnCodegen<'ctx, 'a> {
 }
 
 impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        cfg: &'a Cfg,
-        fn_value: FunctionValue<'ctx>,
-        ctx: &'ctx Context,
-        builder: &'a Builder<'ctx>,
-        module: &'a Module<'ctx>,
-        type_pool: &'a TypeInternPool,
-        strings: &'a [String],
-        string_globals: &'a [GlobalValue<'ctx>],
-        bytes_globals: &'a [GlobalValue<'ctx>],
-        bytes_lens: &'a [u64],
-        interner: &'a ThreadedRodeo,
-        fn_map: &'a HashMap<&'a str, FunctionValue<'ctx>>,
-        vtable_map: &'a HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
-        interface_defs: &'a [gruel_air::InterfaceDef],
-    ) -> Self {
+    fn new(cfg: &'a Cfg, fn_value: FunctionValue<'ctx>, mod_ctx: &ModuleCtx<'ctx, 'a>) -> Self {
         let value_count = cfg.value_count();
         let num_locals = cfg.num_locals() as usize;
 
@@ -559,24 +518,28 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         let llvm_blocks: Vec<LlvmBlock<'ctx>> = cfg
             .blocks()
             .iter()
-            .map(|bb| ctx.append_basic_block(fn_value, &format!("bb{}", bb.id.as_u32())))
+            .map(|bb| {
+                mod_ctx
+                    .ctx
+                    .append_basic_block(fn_value, &format!("bb{}", bb.id.as_u32()))
+            })
             .collect();
 
         let num_params = cfg.num_params() as usize;
-        let slot_to_llvm_param = build_slot_to_llvm_param(cfg, type_pool);
+        let slot_to_llvm_param = build_slot_to_llvm_param(cfg, mod_ctx.type_pool);
         Self {
             cfg,
             fn_value,
-            ctx,
-            builder,
-            module,
-            type_pool,
-            interner,
-            fn_map,
-            strings,
-            string_globals,
-            bytes_globals,
-            bytes_lens,
+            ctx: mod_ctx.ctx,
+            builder: mod_ctx.builder,
+            module: mod_ctx.module,
+            type_pool: mod_ctx.type_pool,
+            interner: mod_ctx.interner,
+            fn_map: mod_ctx.fn_map,
+            strings: mod_ctx.strings,
+            string_globals: mod_ctx.string_globals,
+            bytes_globals: mod_ctx.bytes_globals,
+            bytes_lens: mod_ctx.bytes_lens,
             llvm_blocks,
             values: vec![None; value_count],
             locals: vec![None; num_locals],
@@ -584,8 +547,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             phi_nodes: vec![None; value_count],
             param_allocas: vec![None; num_params],
             slot_to_llvm_param,
-            vtable_map,
-            interface_defs,
+            vtable_map: mod_ctx.vtable_map,
+            interface_defs: mod_ctx.interface_defs,
         }
     }
 
@@ -3990,39 +3953,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 }
 
 /// Generate the body of a declared LLVM function from its CFG.
-#[allow(clippy::too_many_arguments)]
 fn define_function<'ctx>(
     cfg: &Cfg,
     fn_value: &FunctionValue<'ctx>,
-    ctx: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &Module<'ctx>,
-    type_pool: &TypeInternPool,
-    strings: &[String],
-    string_globals: &[GlobalValue<'ctx>],
-    bytes_globals: &[GlobalValue<'ctx>],
-    bytes_lens: &[u64],
-    interner: &ThreadedRodeo,
-    fn_map: &HashMap<&str, FunctionValue<'ctx>>,
-    vtable_map: &HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
-    interface_defs: &[gruel_air::InterfaceDef],
+    mod_ctx: &ModuleCtx<'ctx, '_>,
 ) -> CompileResult<()> {
-    let mut fn_gen = FnCodegen::new(
-        cfg,
-        *fn_value,
-        ctx,
-        builder,
-        module,
-        type_pool,
-        strings,
-        string_globals,
-        bytes_globals,
-        bytes_lens,
-        interner,
-        fn_map,
-        vtable_map,
-        interface_defs,
-    );
+    let mut fn_gen = FnCodegen::new(cfg, *fn_value, mod_ctx);
     fn_gen.translate()
 }
 

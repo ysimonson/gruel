@@ -53,6 +53,59 @@ enum ReceiverSource {
     Param(u32),
 }
 
+/// Header info shared by every `for` loop analyzer (range / array / slice).
+///
+/// The four fields here are decided by the parser before the analyzer can
+/// know which iterable shape it's dealing with, so they pass through every
+/// downstream variant.
+struct ForLoopHead {
+    binding: Spur,
+    is_mut: bool,
+    body: InstRef,
+    span: Span,
+}
+
+/// Per-iteration metadata for an array `for` loop.
+struct ArraySource {
+    air_ref: AirRef,
+    ty: Type,
+    elem_ty: Type,
+    len: u64,
+    is_copy: bool,
+}
+
+/// Output sink for pattern binding emission. Both vectors are appended to
+/// in order as the recursive pattern walker introduces local slots.
+pub(crate) struct BindingEmission<'a> {
+    pub(crate) storage_lives: &'a mut Vec<AirRef>,
+    pub(crate) allocs: &'a mut Vec<AirRef>,
+}
+
+/// Resolved receiver for an ADR-0055 call-sugar dispatch.
+struct CallSugarReceiver {
+    name: Spur,
+    ty: Type,
+    source: ReceiverSource,
+    struct_id: crate::types::StructId,
+}
+
+/// Reference to an enum variant in source code: an optional module qualifier
+/// (e.g. `crate::Mod::Enum::Variant`), the enum's type name, and the
+/// variant's name.
+struct VariantRef {
+    module: Option<InstRef>,
+    type_name: Spur,
+    variant: Spur,
+}
+
+/// Field value extracted from a destructuring pattern: the AIR value of the
+/// field, its type, and the source span of the binding for diagnostics.
+struct BoundField {
+    val: AirRef,
+    ty: Type,
+    span: Span,
+}
+
 // ============================================================================
 // Place Building (ADR-0030 Phase 8)
 // ============================================================================
@@ -897,7 +950,15 @@ impl<'a> Sema<'a> {
                 is_mut,
                 iterable,
                 body,
-            } => self.analyze_for_loop(air, *binding, *is_mut, *iterable, *body, inst.span, ctx),
+            } => {
+                let head = ForLoopHead {
+                    binding: *binding,
+                    is_mut: *is_mut,
+                    body: *body,
+                    span: inst.span,
+                };
+                self.analyze_for_loop(air, head, *iterable, ctx)
+            }
 
             InstData::InfiniteLoop { body } => {
                 self.analyze_infinite_loop(air, *body, inst.span, ctx)
@@ -1147,15 +1208,11 @@ impl<'a> Sema<'a> {
     ///     }
     /// }
     /// ```
-    #[allow(clippy::too_many_arguments)]
     fn analyze_for_loop(
         &mut self,
         air: &mut Air,
-        binding: Spur,
-        is_mut: bool,
+        head: ForLoopHead,
         iterable: InstRef,
-        body: InstRef,
-        span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
         // Check if the iterable is a @range(...) intrinsic
@@ -1167,16 +1224,7 @@ impl<'a> Sema<'a> {
                 args_len,
             } if *name == self.known.range => {
                 let args = self.rir.get_inst_refs(*args_start, *args_len);
-                self.analyze_range_for_loop(
-                    air,
-                    binding,
-                    is_mut,
-                    &args,
-                    body,
-                    span,
-                    iterable_inst.span,
-                    ctx,
-                )
+                self.analyze_range_for_loop(air, &head, &args, iterable_inst.span, ctx)
             }
             _ => {
                 // Not @range — analyze the iterable expression and check if it's an array
@@ -1188,19 +1236,14 @@ impl<'a> Sema<'a> {
                     let (elem_type, array_len) = self.type_pool.array_def(array_type_id);
                     let is_copy = self.is_type_copy(elem_type);
 
-                    self.analyze_array_for_loop(
-                        air,
-                        binding,
-                        is_mut,
-                        iterable_result.air_ref,
-                        iterable_type,
-                        elem_type,
-                        array_len,
+                    let source = ArraySource {
+                        air_ref: iterable_result.air_ref,
+                        ty: iterable_type,
+                        elem_ty: elem_type,
+                        len: array_len,
                         is_copy,
-                        body,
-                        span,
-                        ctx,
-                    )
+                    };
+                    self.analyze_array_for_loop(air, &head, &source, ctx)
                 } else if matches!(
                     iterable_type.kind(),
                     TypeKind::Slice(_) | TypeKind::MutSlice(_)
@@ -1210,7 +1253,7 @@ impl<'a> Sema<'a> {
                     // deref-assignment operator from ADR-0062 phase 8 and
                     // is deferred — for now we only support immutable
                     // iteration that copies each element by value.
-                    if is_mut {
+                    if head.is_mut {
                         return Err(CompileError::new(
                             ErrorKind::TypeMismatch {
                                 expected: "for-each over a slice (immutable form only)".to_string(),
@@ -1221,11 +1264,9 @@ impl<'a> Sema<'a> {
                     }
                     self.analyze_slice_for_loop(
                         air,
-                        binding,
+                        &head,
                         iterable_result.air_ref,
                         iterable_type,
-                        body,
-                        span,
                         ctx,
                     )
                 } else {
@@ -1242,18 +1283,20 @@ impl<'a> Sema<'a> {
     }
 
     /// Desugar `for x in @range(...) { body }` into a while loop in AIR.
-    #[allow(clippy::too_many_arguments)]
     fn analyze_range_for_loop(
         &mut self,
         air: &mut Air,
-        binding: Spur,
-        is_mut: bool,
+        head: &ForLoopHead,
         range_args: &[InstRef],
-        body: InstRef,
-        span: Span,
         range_span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        let ForLoopHead {
+            binding,
+            is_mut,
+            body,
+            span,
+        } = *head;
         // Parse @range arguments: @range(end), @range(start, end), @range(start, end, stride)
         let (start_ref, end_ref, stride_ref) = match range_args.len() {
             1 => (None, range_args[0], None),
@@ -1487,21 +1530,26 @@ impl<'a> Sema<'a> {
     /// For Copy element types, elements are copied out and the array remains valid.
     /// For non-Copy element types, elements are moved out and the array is consumed;
     /// `break` is forbidden because it would leave un-dropped elements.
-    #[allow(clippy::too_many_arguments)]
     fn analyze_array_for_loop(
         &mut self,
         air: &mut Air,
-        binding: Spur,
-        is_mut: bool,
-        arr_air: AirRef,
-        arr_type: Type,
-        elem_type: Type,
-        array_len: u64,
-        is_copy: bool,
-        body: InstRef,
-        span: Span,
+        head: &ForLoopHead,
+        source: &ArraySource,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        let ForLoopHead {
+            binding,
+            is_mut,
+            body,
+            span,
+        } = *head;
+        let ArraySource {
+            air_ref: arr_air,
+            ty: arr_type,
+            elem_ty: elem_type,
+            len: array_len,
+            is_copy,
+        } = *source;
         // Open outer scope for temp variables
         ctx.push_scope();
 
@@ -1710,17 +1758,20 @@ impl<'a> Sema<'a> {
     /// ADR-0064 phase 8: desugar `for x in s { body }` over a slice into
     /// a counter-driven loop that reads each element via the slice
     /// indexing intrinsic.
-    #[allow(clippy::too_many_arguments)]
     fn analyze_slice_for_loop(
         &mut self,
         air: &mut Air,
-        binding: Spur,
+        head: &ForLoopHead,
         slice_air: AirRef,
         slice_type: Type,
-        body: InstRef,
-        span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        let ForLoopHead {
+            binding,
+            body,
+            span,
+            ..
+        } = *head;
         let elem_ty = match slice_type.kind() {
             TypeKind::Slice(id) => self.type_pool.slice_def(id),
             TypeKind::MutSlice(id) => self.type_pool.mut_slice_def(id),
@@ -2546,14 +2597,12 @@ impl<'a> Sema<'a> {
                     // directly using the extracted field value as scrutinee,
                     // rather than materialising a slot for the whole field.
                     if let Some(sub) = &binding.sub_pattern {
+                        let mut out = BindingEmission {
+                            storage_lives: &mut storage_lives,
+                            allocs: &mut allocs,
+                        };
                         self.emit_recursive_pattern_bindings(
-                            air,
-                            field_val,
-                            field_ty,
-                            sub,
-                            ctx,
-                            &mut storage_lives,
-                            &mut allocs,
+                            air, field_val, field_ty, sub, ctx, &mut out,
                         );
                         continue;
                     }
@@ -2667,14 +2716,17 @@ impl<'a> Sema<'a> {
                 let expanded = expanded_tuple_pattern(pattern, &self.type_pool, scrutinee_type);
                 let mut storage_lives = Vec::new();
                 let mut allocs = Vec::new();
+                let mut out = BindingEmission {
+                    storage_lives: &mut storage_lives,
+                    allocs: &mut allocs,
+                };
                 self.emit_recursive_pattern_bindings(
                     air,
                     scrutinee_result.air_ref,
                     scrutinee_type,
                     &expanded,
                     ctx,
-                    &mut storage_lives,
-                    &mut allocs,
+                    &mut out,
                 );
 
                 let inner_result = self.analyze_inst(air, *body, ctx)?;
@@ -2846,7 +2898,6 @@ impl<'a> Sema<'a> {
     /// `scr_air_ref` is the AIR value of the (possibly projected) current
     /// focus; `scr_ty` is its type. Unknown struct lookups are treated as
     /// no-ops — the outer type-checking already surfaced those errors.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_recursive_pattern_bindings(
         &self,
         air: &mut Air,
@@ -2854,19 +2905,18 @@ impl<'a> Sema<'a> {
         scr_ty: Type,
         pattern: &RirPattern,
         ctx: &mut AnalysisContext,
-        storage_lives: &mut Vec<AirRef>,
-        allocs: &mut Vec<AirRef>,
+        out: &mut BindingEmission<'_>,
     ) {
         match pattern {
             RirPattern::Ident { name, is_mut, span } => {
                 let slot = ctx.next_slot;
                 ctx.next_slot += 1;
-                storage_lives.push(air.add_inst(AirInst {
+                out.storage_lives.push(air.add_inst(AirInst {
                     data: AirInstData::StorageLive { slot },
                     ty: scr_ty,
                     span: *span,
                 }));
-                allocs.push(air.add_inst(AirInst {
+                out.allocs.push(air.add_inst(AirInst {
                     data: AirInstData::Alloc {
                         slot,
                         init: scr_air_ref,
@@ -2903,15 +2953,7 @@ impl<'a> Sema<'a> {
                         ty: field_ty,
                         span: elem.span(),
                     });
-                    self.emit_recursive_pattern_bindings(
-                        air,
-                        field_val,
-                        field_ty,
-                        elem,
-                        ctx,
-                        storage_lives,
-                        allocs,
-                    );
+                    self.emit_recursive_pattern_bindings(air, field_val, field_ty, elem, ctx, out);
                 }
             }
             RirPattern::Struct { fields, .. } => {
@@ -2944,8 +2986,7 @@ impl<'a> Sema<'a> {
                         field_ty,
                         &rf.pattern,
                         ctx,
-                        storage_lives,
-                        allocs,
+                        out,
                     );
                 }
             }
@@ -2975,13 +3016,14 @@ impl<'a> Sema<'a> {
                     });
                     self.emit_binding_setup(
                         air,
-                        field_val,
-                        field_ty,
+                        BoundField {
+                            val: field_val,
+                            ty: field_ty,
+                            span: pattern.span(),
+                        },
                         binding,
-                        pattern.span(),
                         ctx,
-                        storage_lives,
-                        allocs,
+                        out,
                     );
                 }
             }
@@ -3012,13 +3054,14 @@ impl<'a> Sema<'a> {
                     });
                     self.emit_binding_setup(
                         air,
-                        field_val,
-                        field_ty,
+                        BoundField {
+                            val: field_val,
+                            ty: field_ty,
+                            span: pattern.span(),
+                        },
                         &fb.binding,
-                        pattern.span(),
                         ctx,
-                        storage_lives,
-                        allocs,
+                        out,
                     );
                 }
             }
@@ -3031,28 +3074,21 @@ impl<'a> Sema<'a> {
     /// field value already extracted. Handles wildcard, named leaf, and
     /// nested `sub_pattern` cases uniformly with
     /// `emit_recursive_pattern_bindings`.
-    #[allow(clippy::too_many_arguments)]
     fn emit_binding_setup(
         &self,
         air: &mut Air,
-        field_val: AirRef,
-        field_ty: Type,
+        field: BoundField,
         binding: &RirPatternBinding,
-        pattern_span: Span,
         ctx: &mut AnalysisContext,
-        storage_lives: &mut Vec<AirRef>,
-        allocs: &mut Vec<AirRef>,
+        out: &mut BindingEmission<'_>,
     ) {
+        let BoundField {
+            val: field_val,
+            ty: field_ty,
+            span: pattern_span,
+        } = field;
         if let Some(sub) = &binding.sub_pattern {
-            self.emit_recursive_pattern_bindings(
-                air,
-                field_val,
-                field_ty,
-                sub,
-                ctx,
-                storage_lives,
-                allocs,
-            );
+            self.emit_recursive_pattern_bindings(air, field_val, field_ty, sub, ctx, out);
             return;
         }
         if binding.is_wildcard {
@@ -3063,12 +3099,12 @@ impl<'a> Sema<'a> {
         };
         let slot = ctx.next_slot;
         ctx.next_slot += 1;
-        storage_lives.push(air.add_inst(AirInst {
+        out.storage_lives.push(air.add_inst(AirInst {
             data: AirInstData::StorageLive { slot },
             ty: field_ty,
             span: pattern_span,
         }));
-        allocs.push(air.add_inst(AirInst {
+        out.allocs.push(air.add_inst(AirInst {
             data: AirInstData::Alloc {
                 slot,
                 init: field_val,
@@ -4703,13 +4739,14 @@ impl<'a> Sema<'a> {
 
         Some(self.emit_call_sugar(
             air,
-            name,
-            receiver_ty,
-            source,
-            struct_id,
+            CallSugarReceiver {
+                name,
+                ty: receiver_ty,
+                source,
+                struct_id,
+            },
             call_sym,
-            args_start,
-            args_len,
+            (args_start, args_len),
             span,
             ctx,
         ))
@@ -4717,20 +4754,21 @@ impl<'a> Sema<'a> {
 
     /// Emit the AIR for a successful call-sugar rewrite. Factored out of
     /// `try_analyze_call_sugar` so that function can stay a simple predicate.
-    #[allow(clippy::too_many_arguments)]
     fn emit_call_sugar(
         &mut self,
         air: &mut Air,
-        receiver_name: Spur,
-        receiver_ty: Type,
-        source: ReceiverSource,
-        struct_id: crate::types::StructId,
+        receiver: CallSugarReceiver,
         call_sym: Spur,
-        args_start: u32,
-        args_len: u32,
+        (args_start, args_len): (u32, u32),
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        let CallSugarReceiver {
+            name: receiver_name,
+            ty: receiver_ty,
+            source,
+            struct_id,
+        } = receiver;
         // Emit the receiver load, tracking move/use state the same way
         // `analyze_var_ref` does for ordinary VarRef expressions.
         let receiver_name_str = self.interner.resolve(&receiver_name).to_string();
@@ -5790,11 +5828,12 @@ impl<'a> Sema<'a> {
                 fields_len,
             } => self.analyze_enum_struct_variant(
                 air,
-                *module,
-                *type_name,
-                *variant,
-                *fields_start,
-                *fields_len,
+                VariantRef {
+                    module: *module,
+                    type_name: *type_name,
+                    variant: *variant,
+                },
+                (*fields_start, *fields_len),
                 inst.span,
                 ctx,
             ),
@@ -5810,18 +5849,19 @@ impl<'a> Sema<'a> {
     }
 
     /// Analyze an enum struct variant construction: `Enum::Variant { field: value, ... }`
-    #[allow(clippy::too_many_arguments)]
     fn analyze_enum_struct_variant(
         &mut self,
         air: &mut Air,
-        module: Option<InstRef>,
-        type_name: Spur,
-        variant_spur: Spur,
-        fields_start: u32,
-        fields_len: u32,
+        variant_ref: VariantRef,
+        (fields_start, fields_len): (u32, u32),
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        let VariantRef {
+            module,
+            type_name,
+            variant: variant_spur,
+        } = variant_ref;
         // Look up the enum type, including comptime type variable resolution
         let enum_id = if let Some(module_ref) = module {
             self.resolve_enum_through_module(module_ref, type_name, span)?

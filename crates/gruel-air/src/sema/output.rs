@@ -11,6 +11,11 @@ use gruel_error::CompileWarning;
 use lasso::Spur;
 use std::collections::HashMap;
 
+/// Vtable witnesses keyed by `(struct_id, interface_id)`. The value is the
+/// conforming type's method-key list in interface declaration order; codegen
+/// looks each one up in the function map to build the vtable global.
+pub type InterfaceVtables = HashMap<(StructId, InterfaceId), Vec<(StructId, Spur)>>;
+
 /// Result of analyzing a function.
 #[derive(Debug)]
 pub struct AnalyzedFunction {
@@ -63,5 +68,5 @@ pub struct SemaOutput {
     /// the conforming type's method-key list in interface declaration order;
     /// codegen looks each one up in the function map to build the vtable
     /// global.
-    pub interface_vtables: HashMap<(StructId, InterfaceId), Vec<(StructId, Spur)>>,
+    pub interface_vtables: InterfaceVtables,
 }
