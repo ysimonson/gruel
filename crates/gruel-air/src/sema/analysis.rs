@@ -674,7 +674,12 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
             if method_info.has_self {
                 // Add self parameter (Normal mode - passed by value)
                 let self_sym = sema.interner.get_or_intern("self");
-                param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+                let self_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                };
+                param_info.push((self_sym, method_info.struct_type, self_mode));
             }
 
             // Add regular parameters (convert from arena slices)
@@ -752,7 +757,12 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
 
             if method_info.has_self {
                 let self_sym = sema.interner.get_or_intern("self");
-                param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+                let self_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                };
+                param_info.push((self_sym, method_info.struct_type, self_mode));
             }
 
             for i in 0..param_names.len() {
@@ -1048,7 +1058,12 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 if method_info.has_self {
                     // Add self parameter (Normal mode - passed by value)
                     let self_sym = sema.interner.get_or_intern("self");
-                    param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+                    let self_mode = match method_info.receiver {
+                        crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                        crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                        crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                    };
+                    param_info.push((self_sym, method_info.struct_type, self_mode));
                 }
 
                 // Add regular parameters (convert from arena slices)
@@ -1246,7 +1261,12 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
 
             if method_info.has_self {
                 let self_sym = sema.interner.get_or_intern("self");
-                param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+                let self_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                };
+                param_info.push((self_sym, method_info.struct_type, self_mode));
             }
 
             for i in 0..param_names.len() {

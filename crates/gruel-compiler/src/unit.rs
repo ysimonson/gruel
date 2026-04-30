@@ -49,14 +49,14 @@ fn Option(comptime T: type) -> type {
         Some(T),
         None,
 
-        fn is_some(self) -> bool {
+        fn is_some(borrow self) -> bool {
             match self {
                 Self::Some(_) => true,
                 Self::None => false,
             }
         }
 
-        fn is_none(self) -> bool {
+        fn is_none(borrow self) -> bool {
             match self {
                 Self::Some(_) => false,
                 Self::None => true,

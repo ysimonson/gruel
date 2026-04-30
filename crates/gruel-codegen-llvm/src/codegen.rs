@@ -1991,8 +1991,25 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                     Some(inkwell::values::BasicMetadataValueEnum::from(ptr))
                                 }
                                 _ => {
-                                    // Fallback: pass the value as-is.
-                                    Some(self.get_value(arg.value).into())
+                                    // Source has no stable storage address
+                                    // (by-value param, computed value, etc.).
+                                    // For most types, materialize into a
+                                    // temporary alloca so we have something
+                                    // to point at. Interface fat-pointers
+                                    // (ADR-0056) are passed by value at the
+                                    // ABI level even when the source-level
+                                    // mode is borrow/inout — see
+                                    // `is_param_by_ref`'s comment.
+                                    let arg_ty = self.cfg.get_inst(arg.value).ty;
+                                    if matches!(arg_ty.kind(), TypeKind::Interface(_)) {
+                                        Some(self.get_value(arg.value).into())
+                                    } else {
+                                        let val = self.get_value(arg.value);
+                                        let val_ty = val.get_type();
+                                        let tmp = self.build_entry_alloca(val_ty, "borrow_tmp");
+                                        self.builder.build_store(tmp, val).unwrap();
+                                        Some(inkwell::values::BasicMetadataValueEnum::from(tmp))
+                                    }
                                 }
                             };
                         }
@@ -3058,6 +3075,40 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     .unwrap()
                     .try_as_basic_value()
                     .basic()
+            }
+
+            // ---- User-triggered panic ----
+            IntrinsicId::Panic => {
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let i64_ty = self.ctx.i64_type();
+                if args.is_empty() {
+                    // @panic() — no message. Calls __gruel_panic_no_msg().
+                    let fn_ty = self.ctx.void_type().fn_type(&[], false);
+                    let f = self
+                        .module
+                        .get_function("__gruel_panic_no_msg")
+                        .unwrap_or_else(|| {
+                            self.module
+                                .add_function("__gruel_panic_no_msg", fn_ty, None)
+                        });
+                    self.builder.build_call(f, &[], "").unwrap();
+                } else {
+                    // @panic(msg: String) — extract (ptr, len) and call __gruel_panic.
+                    let msg_val = self.get_value(args[0]);
+                    let (ptr, len) = self.extract_str_ptr_len(msg_val);
+                    let fn_ty = self
+                        .ctx
+                        .void_type()
+                        .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+                    let f = self
+                        .module
+                        .get_function("__gruel_panic")
+                        .unwrap_or_else(|| self.module.add_function("__gruel_panic", fn_ty, None));
+                    self.builder
+                        .build_call(f, &[ptr.into(), len.into()], "")
+                        .unwrap();
+                }
+                None
             }
 
             // ---- Debug print ----

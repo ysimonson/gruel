@@ -74,6 +74,21 @@ fn main() -> i32 {
 """
 exit_code = 42
 
+# unwrap on None panics with the standard message
+[[case]]
+name = "option_unwrap_on_none_panics"
+spec = ["3.8:82"]
+description = "Option::unwrap panics with the standard message for None"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::None;
+    x.unwrap()
+}
+"""
+exit_code = 101
+stderr_contains = "called unwrap on a None value"
+
 # unwrap_or on Some returns the contained value
 [[case]]
 name = "option_unwrap_or_on_some"

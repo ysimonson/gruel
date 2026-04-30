@@ -176,3 +176,29 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# Clone constraint dispatches to the user's clone method through a generic.
+[[case]]
+name = "clone_interface_user_struct_generic_dispatch"
+spec = ["3.8:70", "3.8:71", "3.8:73"]
+description = "Clone-bound generic dispatches to a user-struct clone"
+source = """
+struct Wrap {
+    n: i32,
+
+    fn clone(borrow self) -> Wrap {
+        Wrap { n: self.n }
+    }
+}
+
+fn dup(comptime T: Clone, x: T) -> T {
+    x.clone()
+}
+
+fn main() -> i32 {
+    let w = Wrap { n: 42 };
+    let w2 = dup(Wrap, w);
+    w2.n
+}
+"""
+exit_code = 42
