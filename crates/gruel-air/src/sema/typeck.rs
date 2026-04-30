@@ -6,8 +6,8 @@
 //! - ABI slot calculations
 //! - Type conversions between AIR types and inference types
 
-use gruel_error::{CompileError, CompileResult, ErrorKind};
-use gruel_span::Span;
+use gruel_util::Span;
+use gruel_util::{CompileError, CompileResult, ErrorKind};
 use lasso::Spur;
 
 use super::Sema;

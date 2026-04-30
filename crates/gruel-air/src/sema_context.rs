@@ -31,8 +31,8 @@
 use rustc_hash::FxHashMap as HashMap;
 use std::sync::{PoisonError, RwLock};
 
-use gruel_error::PreviewFeatures;
 use gruel_rir::Rir;
+use gruel_util::PreviewFeatures;
 use lasso::{Spur, ThreadedRodeo};
 
 use crate::inference::{FunctionSig, InferType, MethodSig};
@@ -234,7 +234,7 @@ pub struct SemaContext<'a> {
     pub source_file_path: Option<String>,
     /// Maps FileId to source file paths (multi-file mode).
     /// Used for resolving relative imports when multiple files are compiled.
-    pub file_paths: HashMap<gruel_span::FileId, String>,
+    pub file_paths: HashMap<gruel_util::FileId, String>,
     /// Reference to the parameter arena for accessing function/method parameter data.
     /// Use `param_arena.types(fn_info.params)` to get parameter types, etc.
     pub param_arena: &'a ParamArena,
@@ -350,7 +350,7 @@ impl<'a> SemaContext<'a> {
     ///
     /// Looks up the file path using the span's file_id. Falls back to
     /// `source_file_path` for single-file compilation mode.
-    pub fn get_source_path(&self, span: gruel_span::Span) -> Option<&str> {
+    pub fn get_source_path(&self, span: gruel_util::Span) -> Option<&str> {
         // First, try the file_paths map (multi-file mode)
         if let Some(path) = self.file_paths.get(&span.file_id) {
             return Some(path.as_str());
@@ -360,7 +360,7 @@ impl<'a> SemaContext<'a> {
     }
 
     /// Get the file path for a given FileId.
-    pub fn get_file_path(&self, file_id: gruel_span::FileId) -> Option<&str> {
+    pub fn get_file_path(&self, file_id: gruel_util::FileId) -> Option<&str> {
         self.file_paths.get(&file_id).map(|s| s.as_str())
     }
 
@@ -377,8 +377,8 @@ impl<'a> SemaContext<'a> {
     /// Returns true if the item is accessible.
     pub fn is_accessible(
         &self,
-        accessing_file_id: gruel_span::FileId,
-        target_file_id: gruel_span::FileId,
+        accessing_file_id: gruel_util::FileId,
+        target_file_id: gruel_util::FileId,
         is_pub: bool,
     ) -> bool {
         // Public items are always accessible
@@ -577,15 +577,15 @@ impl<'a> SemaContext<'a> {
     /// Returns an error with a helpful message if the feature is not enabled.
     pub fn require_preview(
         &self,
-        feature: gruel_error::PreviewFeature,
+        feature: gruel_util::PreviewFeature,
         what: &str,
-        span: gruel_span::Span,
-    ) -> gruel_error::CompileResult<()> {
+        span: gruel_util::Span,
+    ) -> gruel_util::CompileResult<()> {
         if self.preview_features.contains(&feature) {
             Ok(())
         } else {
-            Err(gruel_error::CompileError::new(
-                gruel_error::ErrorKind::PreviewFeatureRequired {
+            Err(gruel_util::CompileError::new(
+                gruel_util::ErrorKind::PreviewFeatureRequired {
                     feature,
                     what: what.to_string(),
                 },
@@ -612,9 +612,9 @@ impl<'a> SemaContext<'a> {
         &self,
         _module_ref: gruel_rir::InstRef,
         type_name: lasso::Spur,
-        span: gruel_span::Span,
-    ) -> gruel_error::CompileResult<StructId> {
-        use gruel_error::{CompileError, ErrorKind};
+        span: gruel_util::Span,
+    ) -> gruel_util::CompileResult<StructId> {
+        use gruel_util::{CompileError, ErrorKind};
 
         // Get the module type from the inst - we need to look up the AIR result
         // For now, use a simplified approach: look up the type name in the global scope
@@ -659,9 +659,9 @@ impl<'a> SemaContext<'a> {
         &self,
         _module_ref: gruel_rir::InstRef,
         type_name: lasso::Spur,
-        span: gruel_span::Span,
-    ) -> gruel_error::CompileResult<EnumId> {
-        use gruel_error::{CompileError, ErrorKind};
+        span: gruel_util::Span,
+    ) -> gruel_util::CompileResult<EnumId> {
+        use gruel_util::{CompileError, ErrorKind};
 
         let type_name_str = self.interner.resolve(&type_name);
 

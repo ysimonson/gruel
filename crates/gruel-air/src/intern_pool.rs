@@ -412,7 +412,7 @@ impl TypeInternPool {
                 destructor: None,
                 is_builtin: false,
                 is_pub: false,
-                file_id: gruel_span::FileId::DEFAULT,
+                file_id: gruel_util::FileId::DEFAULT,
             },
         }));
 
@@ -1555,7 +1555,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
 
         let (struct_id, is_new) = pool.register_struct(name, def.clone());
@@ -1584,7 +1584,7 @@ mod tests {
                 EnumVariantDef::unit("Blue"),
             ],
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
 
@@ -1641,7 +1641,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
 
         let (struct_id, _) = pool.register_struct(name, def);
@@ -1665,7 +1665,7 @@ mod tests {
                 EnumVariantDef::unit("Inactive"),
             ],
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
 
@@ -1705,7 +1705,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
         let (struct_id, _) = pool.register_struct(struct_name, struct_def);
         let struct_ty = pool.struct_id_to_interned(struct_id);
@@ -1741,7 +1741,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
         let (struct_id, _) = pool.register_struct(struct_name, struct_def);
         let struct_ty = pool.struct_id_to_interned(struct_id);
@@ -1751,7 +1751,7 @@ mod tests {
             name: "Color".to_string(),
             variants: vec![EnumVariantDef::unit("Red")],
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
         let (enum_id, _) = pool.register_enum(enum_name, enum_def);
@@ -1793,7 +1793,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
         let (struct_id, _) = pool.register_struct(name, def.clone());
 
@@ -1825,7 +1825,7 @@ mod tests {
             name: "Status".to_string(),
             variants: vec![EnumVariantDef::unit("A"), EnumVariantDef::unit("B")],
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
         let (enum_id, _) = pool.register_enum(name, def.clone());
@@ -1869,7 +1869,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
         let (struct_id, _) = pool.register_struct(name, def);
         let struct_ty = pool.struct_id_to_interned(struct_id);
@@ -1902,7 +1902,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
         pool.register_struct(s1, def.clone());
         pool.register_struct(
@@ -1919,7 +1919,7 @@ mod tests {
                 name: "E1".to_string(),
                 variants: vec![],
                 is_pub: false,
-                file_id: gruel_span::FileId::DEFAULT,
+                file_id: gruel_util::FileId::DEFAULT,
                 destructor: None,
             },
         );
@@ -2060,7 +2060,7 @@ mod tests {
                             destructor: None,
                             is_builtin: false,
                             is_pub: false,
-                            file_id: gruel_span::FileId::DEFAULT,
+                            file_id: gruel_util::FileId::DEFAULT,
                         };
                         pool.register_struct(name, def);
                     }
@@ -2138,7 +2138,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
 
         // Complete registration
@@ -2181,7 +2181,7 @@ mod tests {
                 destructor: None,
                 is_builtin: false,
                 is_pub: false,
-                file_id: gruel_span::FileId::DEFAULT,
+                file_id: gruel_util::FileId::DEFAULT,
             };
             pool.complete_struct_registration(id, name, def);
         }

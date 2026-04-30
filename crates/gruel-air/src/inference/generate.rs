@@ -19,7 +19,8 @@ use crate::types::{
 use gruel_builtins::BuiltinTypeConstructorKind;
 use gruel_intrinsics::{IntrinsicId, lookup_by_name};
 use gruel_rir::{InstData, InstRef, Rir};
-use gruel_span::Span;
+use gruel_util::Span;
+use gruel_util::{BinOp, UnaryOp};
 use lasso::{Spur, ThreadedRodeo};
 use rustc_hash::FxHashMap as HashMap;
 
@@ -328,80 +329,59 @@ impl<'a> ConstraintGenerator<'a> {
 
             InstData::UnitConst => InferType::Concrete(Type::UNIT),
 
-            // Binary arithmetic: both operands must have the same numeric type
-            InstData::Add { lhs, rhs }
-            | InstData::Sub { lhs, rhs }
-            | InstData::Mul { lhs, rhs }
-            | InstData::Div { lhs, rhs }
-            | InstData::Mod { lhs, rhs } => self.generate_binary_arith(*lhs, *rhs, ctx),
+            InstData::Bin { op, lhs, rhs } => match op {
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                    self.generate_binary_arith(*lhs, *rhs, ctx)
+                }
+                BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+                    self.generate_binary_bitwise(*lhs, *rhs, ctx)
+                }
+                BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                    let lhs_info = self.generate(*lhs, ctx);
+                    let rhs_info = self.generate(*rhs, ctx);
+                    self.add_constraint(Constraint::equal(lhs_info.ty, rhs_info.ty, span));
+                    InferType::Concrete(Type::BOOL)
+                }
+                BinOp::And | BinOp::Or => {
+                    let lhs_info = self.generate(*lhs, ctx);
+                    let rhs_info = self.generate(*rhs, ctx);
+                    self.add_constraint(Constraint::equal(
+                        lhs_info.ty,
+                        InferType::Concrete(Type::BOOL),
+                        lhs_info.span,
+                    ));
+                    self.add_constraint(Constraint::equal(
+                        rhs_info.ty,
+                        InferType::Concrete(Type::BOOL),
+                        rhs_info.span,
+                    ));
+                    InferType::Concrete(Type::BOOL)
+                }
+            },
 
-            // Bitwise operations: operands must be integers (no floats)
-            InstData::BitAnd { lhs, rhs }
-            | InstData::BitOr { lhs, rhs }
-            | InstData::BitXor { lhs, rhs }
-            | InstData::Shl { lhs, rhs }
-            | InstData::Shr { lhs, rhs } => self.generate_binary_bitwise(*lhs, *rhs, ctx),
-
-            // Comparison operators: operands must match, result is bool
-            InstData::Eq { lhs, rhs }
-            | InstData::Ne { lhs, rhs }
-            | InstData::Lt { lhs, rhs }
-            | InstData::Gt { lhs, rhs }
-            | InstData::Le { lhs, rhs }
-            | InstData::Ge { lhs, rhs } => {
-                let lhs_info = self.generate(*lhs, ctx);
-                let rhs_info = self.generate(*rhs, ctx);
-                // Operands must have the same type
-                self.add_constraint(Constraint::equal(lhs_info.ty, rhs_info.ty, span));
-                InferType::Concrete(Type::BOOL)
-            }
-
-            // Logical operators: operands must be bool, result is bool
-            InstData::And { lhs, rhs } | InstData::Or { lhs, rhs } => {
-                let lhs_info = self.generate(*lhs, ctx);
-                let rhs_info = self.generate(*rhs, ctx);
-                self.add_constraint(Constraint::equal(
-                    lhs_info.ty,
-                    InferType::Concrete(Type::BOOL),
-                    lhs_info.span,
-                ));
-                self.add_constraint(Constraint::equal(
-                    rhs_info.ty,
-                    InferType::Concrete(Type::BOOL),
-                    rhs_info.span,
-                ));
-                InferType::Concrete(Type::BOOL)
-            }
-
-            // Unary negation: operand must be signed integer
-            InstData::Neg { operand } => {
-                let operand_info = self.generate(*operand, ctx);
-                // Result type is the same as operand type
-                let result_ty = operand_info.ty.clone();
-                // Must be a signed integer
-                self.add_constraint(Constraint::is_signed(result_ty.clone(), span));
-                result_ty
-            }
-
-            // Logical NOT: operand must be bool
-            InstData::Not { operand } => {
-                let operand_info = self.generate(*operand, ctx);
-                self.add_constraint(Constraint::equal(
-                    operand_info.ty,
-                    InferType::Concrete(Type::BOOL),
-                    operand_info.span,
-                ));
-                InferType::Concrete(Type::BOOL)
-            }
-
-            // Bitwise NOT: operand must be integer
-            InstData::BitNot { operand } => {
-                let operand_info = self.generate(*operand, ctx);
-                let result_ty = operand_info.ty.clone();
-                // Must be an integer type (signed or unsigned)
-                self.add_constraint(Constraint::is_integer(result_ty.clone(), span));
-                result_ty
-            }
+            InstData::Unary { op, operand } => match op {
+                UnaryOp::Neg => {
+                    let operand_info = self.generate(*operand, ctx);
+                    let result_ty = operand_info.ty.clone();
+                    self.add_constraint(Constraint::is_signed(result_ty.clone(), span));
+                    result_ty
+                }
+                UnaryOp::Not => {
+                    let operand_info = self.generate(*operand, ctx);
+                    self.add_constraint(Constraint::equal(
+                        operand_info.ty,
+                        InferType::Concrete(Type::BOOL),
+                        operand_info.span,
+                    ));
+                    InferType::Concrete(Type::BOOL)
+                }
+                UnaryOp::BitNot => {
+                    let operand_info = self.generate(*operand, ctx);
+                    let result_ty = operand_info.ty.clone();
+                    self.add_constraint(Constraint::is_integer(result_ty.clone(), span));
+                    result_ty
+                }
+            },
 
             // ADR-0062: `&x` / `&mut x` produces `Ref(T)` / `MutRef(T)`.
             // The result type depends on the operand's resolved type, which
@@ -1754,7 +1734,7 @@ impl<'a> ConstraintGenerator<'a> {
         &mut self,
         binding: &gruel_rir::RirPatternBinding,
         field_ty: InferType,
-        pattern_span: gruel_span::Span,
+        pattern_span: gruel_util::Span,
         ctx: &mut ConstraintContext,
         added_bindings: &mut Vec<(lasso::Spur, Option<LocalVarInfo>)>,
     ) {
@@ -2191,7 +2171,11 @@ mod tests {
             span: Span::new(4, 5),
         });
         let add = rir.add_inst(gruel_rir::Inst {
-            data: InstData::Add { lhs, rhs },
+            data: InstData::Bin {
+                op: BinOp::Add,
+                lhs,
+                rhs,
+            },
             span: Span::new(0, 5),
         });
 
@@ -2238,7 +2222,11 @@ mod tests {
             span: Span::new(4, 5),
         });
         let lt = rir.add_inst(gruel_rir::Inst {
-            data: InstData::Lt { lhs, rhs },
+            data: InstData::Bin {
+                op: BinOp::Lt,
+                lhs,
+                rhs,
+            },
             span: Span::new(0, 5),
         });
 
@@ -2280,7 +2268,11 @@ mod tests {
             span: Span::new(8, 13),
         });
         let and = rir.add_inst(gruel_rir::Inst {
-            data: InstData::And { lhs, rhs },
+            data: InstData::Bin {
+                op: BinOp::And,
+                lhs,
+                rhs,
+            },
             span: Span::new(0, 13),
         });
 
@@ -2318,7 +2310,10 @@ mod tests {
             span: Span::new(1, 3),
         });
         let neg = rir.add_inst(gruel_rir::Inst {
-            data: InstData::Neg { operand },
+            data: InstData::Unary {
+                op: UnaryOp::Neg,
+                operand,
+            },
             span: Span::new(0, 3),
         });
 
@@ -2773,7 +2768,10 @@ mod tests {
             span: Span::new(1, 3),
         });
         let bitnot = rir.add_inst(gruel_rir::Inst {
-            data: InstData::BitNot { operand },
+            data: InstData::Unary {
+                op: UnaryOp::BitNot,
+                operand,
+            },
             span: Span::new(0, 3),
         });
 

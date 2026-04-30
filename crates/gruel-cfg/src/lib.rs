@@ -21,7 +21,7 @@ pub mod drop_names;
 mod inst;
 pub mod opt;
 
-use gruel_error::CompileWarning;
+use gruel_util::CompileWarning;
 
 pub use build::CfgBuilder;
 pub use inst::{

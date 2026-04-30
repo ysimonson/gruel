@@ -26,7 +26,7 @@ use gruel_air::{
     StructDef, Type, TypeInternPool, TypeKind,
 };
 use gruel_cfg::drop_names;
-use gruel_span::Span;
+use gruel_util::Span;
 use lasso::ThreadedRodeo;
 
 /// Check if a type needs drop.

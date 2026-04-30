@@ -6,8 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use gruel_error::{CompileError, CompileResult, ErrorKind};
-use gruel_span::FileId;
+use gruel_util::FileId;
+use gruel_util::{CompileError, CompileResult, ErrorKind};
 
 use crate::types::EnumId;
 
@@ -64,7 +64,7 @@ impl Sema<'_> {
         &self,
         _module_ref: gruel_rir::InstRef,
         type_name: lasso::Spur,
-        span: gruel_span::Span,
+        span: gruel_util::Span,
     ) -> CompileResult<EnumId> {
         let type_name_str = self.interner.resolve(&type_name);
 

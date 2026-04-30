@@ -26,7 +26,7 @@
 
 use std::fmt;
 
-use gruel_span::Span;
+use gruel_util::Span;
 use lasso::{Key, Spur};
 use smallvec::SmallVec;
 

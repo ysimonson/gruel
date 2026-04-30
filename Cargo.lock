@@ -335,13 +335,12 @@ name = "gruel-air"
 version = "0.1.0"
 dependencies = [
  "gruel-builtins",
- "gruel-error",
  "gruel-intrinsics",
  "gruel-lexer",
  "gruel-parser",
  "gruel-rir",
- "gruel-span",
  "gruel-target",
+ "gruel-util",
  "lasso",
  "rayon",
  "rustc-hash",
@@ -357,11 +356,10 @@ name = "gruel-cfg"
 version = "0.1.0"
 dependencies = [
  "gruel-air",
- "gruel-error",
  "gruel-lexer",
  "gruel-parser",
  "gruel-rir",
- "gruel-span",
+ "gruel-util",
  "lasso",
  "strum",
 ]
@@ -372,8 +370,8 @@ version = "0.1.0"
 dependencies = [
  "gruel-air",
  "gruel-cfg",
- "gruel-error",
  "gruel-intrinsics",
+ "gruel-util",
  "inkwell",
  "lasso",
  "rustc-hash",
@@ -387,12 +385,11 @@ dependencies = [
  "gruel-air",
  "gruel-cfg",
  "gruel-codegen-llvm",
- "gruel-error",
  "gruel-lexer",
  "gruel-parser",
  "gruel-rir",
- "gruel-span",
  "gruel-target",
+ "gruel-util",
  "lasso",
  "rayon",
  "rustc-hash",
@@ -401,20 +398,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "gruel-error"
-version = "0.1.0"
-dependencies = [
- "gruel-span",
- "rustc-hash",
- "strum",
- "thiserror",
-]
-
-[[package]]
 name = "gruel-intrinsics"
 version = "0.1.0"
 dependencies = [
- "gruel-error",
+ "gruel-util",
  "rustc-hash",
 ]
 
@@ -422,8 +409,7 @@ dependencies = [
 name = "gruel-lexer"
 version = "0.1.0"
 dependencies = [
- "gruel-error",
- "gruel-span",
+ "gruel-util",
  "lasso",
  "logos",
 ]
@@ -433,9 +419,8 @@ name = "gruel-parser"
 version = "0.1.0"
 dependencies = [
  "chumsky",
- "gruel-error",
  "gruel-lexer",
- "gruel-span",
+ "gruel-util",
  "lasso",
  "smallvec",
 ]
@@ -447,16 +432,12 @@ dependencies = [
  "gruel-intrinsics",
  "gruel-lexer",
  "gruel-parser",
- "gruel-span",
+ "gruel-util",
  "lasso",
 ]
 
 [[package]]
 name = "gruel-runtime"
-version = "0.1.0"
-
-[[package]]
-name = "gruel-span"
 version = "0.1.0"
 
 [[package]]
@@ -480,7 +461,8 @@ dependencies = [
 name = "gruel-test-runner"
 version = "0.1.0"
 dependencies = [
- "gruel-error",
+ "gruel-util",
+ "libtest2-mimic",
  "rustc-hash",
  "serde",
  "tempfile",
@@ -489,11 +471,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "gruel-ui-tests"
+name = "gruel-util"
 version = "0.1.0"
 dependencies = [
- "gruel-test-runner",
- "libtest2-mimic",
+ "rustc-hash",
+ "strum",
+ "thiserror",
 ]
 
 [[package]]

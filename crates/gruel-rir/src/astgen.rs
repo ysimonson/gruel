@@ -11,16 +11,40 @@ use gruel_parser::ast::{
     TupleElemPattern,
 };
 use gruel_parser::{
-    ArgMode, AssignTarget, Ast, BinaryOp, CallArg, Directive, DirectiveArg, EnumDecl, Expr,
-    Function, IntrinsicArg, Item, Method, ParamMode, Pattern, Statement, StructDecl, TypeExpr,
-    UnaryOp, ast::Visibility,
+    ArgMode, AssignTarget, Ast, BinaryOp as AstBinOp, CallArg, Directive, DirectiveArg, EnumDecl,
+    Expr, Function, IntrinsicArg, Item, Method, ParamMode, Pattern, Statement, StructDecl,
+    TypeExpr, UnaryOp as AstUnaryOp, ast::Visibility,
 };
+use gruel_util::{BinOp, UnaryOp};
 
 use crate::inst::{
     FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDestructureField,
     RirDirective, RirParam, RirParamMode, RirPattern, RirPatternBinding, RirStructField,
     RirStructPatternBinding,
 };
+
+fn ast_binop_to_ir(op: AstBinOp) -> BinOp {
+    match op {
+        AstBinOp::Add => BinOp::Add,
+        AstBinOp::Sub => BinOp::Sub,
+        AstBinOp::Mul => BinOp::Mul,
+        AstBinOp::Div => BinOp::Div,
+        AstBinOp::Mod => BinOp::Mod,
+        AstBinOp::Eq => BinOp::Eq,
+        AstBinOp::Ne => BinOp::Ne,
+        AstBinOp::Lt => BinOp::Lt,
+        AstBinOp::Gt => BinOp::Gt,
+        AstBinOp::Le => BinOp::Le,
+        AstBinOp::Ge => BinOp::Ge,
+        AstBinOp::And => BinOp::And,
+        AstBinOp::Or => BinOp::Or,
+        AstBinOp::BitAnd => BinOp::BitAnd,
+        AstBinOp::BitOr => BinOp::BitOr,
+        AstBinOp::BitXor => BinOp::BitXor,
+        AstBinOp::Shl => BinOp::Shl,
+        AstBinOp::Shr => BinOp::Shr,
+    }
+}
 
 /// Generates RIR from an AST.
 pub struct AstGen<'a> {
@@ -655,28 +679,9 @@ impl<'a> AstGen<'a> {
             Expr::Binary(bin) => {
                 let lhs = self.gen_expr(&bin.left);
                 let rhs = self.gen_expr(&bin.right);
-                let data = match bin.op {
-                    BinaryOp::Add => InstData::Add { lhs, rhs },
-                    BinaryOp::Sub => InstData::Sub { lhs, rhs },
-                    BinaryOp::Mul => InstData::Mul { lhs, rhs },
-                    BinaryOp::Div => InstData::Div { lhs, rhs },
-                    BinaryOp::Mod => InstData::Mod { lhs, rhs },
-                    BinaryOp::Eq => InstData::Eq { lhs, rhs },
-                    BinaryOp::Ne => InstData::Ne { lhs, rhs },
-                    BinaryOp::Lt => InstData::Lt { lhs, rhs },
-                    BinaryOp::Gt => InstData::Gt { lhs, rhs },
-                    BinaryOp::Le => InstData::Le { lhs, rhs },
-                    BinaryOp::Ge => InstData::Ge { lhs, rhs },
-                    BinaryOp::And => InstData::And { lhs, rhs },
-                    BinaryOp::Or => InstData::Or { lhs, rhs },
-                    BinaryOp::BitAnd => InstData::BitAnd { lhs, rhs },
-                    BinaryOp::BitOr => InstData::BitOr { lhs, rhs },
-                    BinaryOp::BitXor => InstData::BitXor { lhs, rhs },
-                    BinaryOp::Shl => InstData::Shl { lhs, rhs },
-                    BinaryOp::Shr => InstData::Shr { lhs, rhs },
-                };
+                let op = ast_binop_to_ir(bin.op);
                 self.rir.add_inst(Inst {
-                    data,
+                    data: InstData::Bin { op, lhs, rhs },
                     span: bin.span,
                 })
             }
@@ -686,7 +691,7 @@ impl<'a> AstGen<'a> {
                 // any instructions for the operand so that the range
                 // sub-expressions don't escape into a stand-alone `Range` IR
                 // node (there is none).
-                if matches!(un.op, UnaryOp::Ref | UnaryOp::MutRef)
+                if matches!(un.op, AstUnaryOp::Ref | AstUnaryOp::MutRef)
                     && let Expr::Index(index_expr) = &*un.operand
                     && let Expr::Range(range_expr) = &*index_expr.index
                 {
@@ -694,7 +699,7 @@ impl<'a> AstGen<'a> {
                     let lo = range_expr.lo.as_ref().map(|e| self.gen_expr(e));
                     let hi = range_expr.hi.as_ref().map(|e| self.gen_expr(e));
                     let sentinel = range_expr.sentinel.as_ref().map(|e| self.gen_expr(e));
-                    let is_mut = matches!(un.op, UnaryOp::MutRef);
+                    let is_mut = matches!(un.op, AstUnaryOp::MutRef);
                     return self.rir.add_inst(Inst {
                         data: InstData::MakeSlice {
                             base,
@@ -708,14 +713,23 @@ impl<'a> AstGen<'a> {
                 }
                 let operand = self.gen_expr(&un.operand);
                 let data = match un.op {
-                    UnaryOp::Neg => InstData::Neg { operand },
-                    UnaryOp::Not => InstData::Not { operand },
-                    UnaryOp::BitNot => InstData::BitNot { operand },
-                    UnaryOp::Ref => InstData::MakeRef {
+                    AstUnaryOp::Neg => InstData::Unary {
+                        op: UnaryOp::Neg,
+                        operand,
+                    },
+                    AstUnaryOp::Not => InstData::Unary {
+                        op: UnaryOp::Not,
+                        operand,
+                    },
+                    AstUnaryOp::BitNot => InstData::Unary {
+                        op: UnaryOp::BitNot,
+                        operand,
+                    },
+                    AstUnaryOp::Ref => InstData::MakeRef {
                         operand,
                         is_mut: false,
                     },
-                    UnaryOp::MutRef => InstData::MakeRef {
+                    AstUnaryOp::MutRef => InstData::MakeRef {
                         operand,
                         is_mut: true,
                     },
@@ -1769,7 +1783,7 @@ impl<'a> AstGen<'a> {
         &mut self,
         pattern: &Pattern,
         init: InstRef,
-        span: gruel_span::Span,
+        span: gruel_util::Span,
         out: &mut Vec<InstRef>,
     ) {
         // Build the flat destructure fields plus a side-list of child sub-patterns
@@ -2094,7 +2108,7 @@ fn is_irrefutable_destructure(pat: &Pattern) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inst::RirPrinter;
+    use crate::print::RirPrinter;
     use gruel_lexer::Lexer;
     use gruel_parser::Parser;
 
@@ -2151,7 +2165,11 @@ mod tests {
         // Check add instruction
         let add_inst = rir.get(InstRef::from_raw(2));
         match &add_inst.data {
-            InstData::Add { lhs, rhs } => {
+            InstData::Bin {
+                op: BinOp::Add,
+                lhs,
+                rhs,
+            } => {
                 assert!(matches!(rir.get(*lhs).data, InstData::IntConst(1)));
                 assert!(matches!(rir.get(*rhs).data, InstData::IntConst(2)));
             }
@@ -2172,11 +2190,18 @@ mod tests {
             InstData::FnDecl { body, .. } => {
                 let body_inst = rir.get(*body);
                 match &body_inst.data {
-                    InstData::Add { lhs, rhs } => {
+                    InstData::Bin {
+                        op: BinOp::Add,
+                        lhs,
+                        rhs,
+                    } => {
                         // lhs should be IntConst(1)
                         assert!(matches!(rir.get(*lhs).data, InstData::IntConst(1)));
                         // rhs should be Mul
-                        assert!(matches!(rir.get(*rhs).data, InstData::Mul { .. }));
+                        assert!(matches!(
+                            rir.get(*rhs).data,
+                            InstData::Bin { op: BinOp::Mul, .. }
+                        ));
                     }
                     _ => panic!("expected Add"),
                 }
@@ -2195,7 +2220,10 @@ mod tests {
         // Check neg instruction
         let neg_inst = rir.get(InstRef::from_raw(1));
         match &neg_inst.data {
-            InstData::Neg { operand } => {
+            InstData::Unary {
+                op: UnaryOp::Neg,
+                operand,
+            } => {
                 assert!(matches!(rir.get(*operand).data, InstData::IntConst(42)));
             }
             _ => panic!("expected Neg"),
@@ -2216,9 +2244,16 @@ mod tests {
             InstData::FnDecl { body, .. } => {
                 let body_inst = rir.get(*body);
                 match &body_inst.data {
-                    InstData::Mul { lhs, rhs } => {
+                    InstData::Bin {
+                        op: BinOp::Mul,
+                        lhs,
+                        rhs,
+                    } => {
                         // lhs should be Add
-                        assert!(matches!(rir.get(*lhs).data, InstData::Add { .. }));
+                        assert!(matches!(
+                            rir.get(*lhs).data,
+                            InstData::Bin { op: BinOp::Add, .. }
+                        ));
                         // rhs should be IntConst(3)
                         assert!(matches!(rir.get(*rhs).data, InstData::IntConst(3)));
                     }
@@ -2231,36 +2266,19 @@ mod tests {
 
     #[test]
     fn test_gen_all_binary_ops() {
-        // Test all binary operators generate correct instructions
-        let (rir, _) = gen_rir("fn main() -> i32 { 1 + 2 }");
-        assert!(matches!(
-            rir.get(InstRef::from_raw(2)).data,
-            InstData::Add { .. }
-        ));
-
-        let (rir, _) = gen_rir("fn main() -> i32 { 1 - 2 }");
-        assert!(matches!(
-            rir.get(InstRef::from_raw(2)).data,
-            InstData::Sub { .. }
-        ));
-
-        let (rir, _) = gen_rir("fn main() -> i32 { 1 * 2 }");
-        assert!(matches!(
-            rir.get(InstRef::from_raw(2)).data,
-            InstData::Mul { .. }
-        ));
-
-        let (rir, _) = gen_rir("fn main() -> i32 { 1 / 2 }");
-        assert!(matches!(
-            rir.get(InstRef::from_raw(2)).data,
-            InstData::Div { .. }
-        ));
-
-        let (rir, _) = gen_rir("fn main() -> i32 { 1 % 2 }");
-        assert!(matches!(
-            rir.get(InstRef::from_raw(2)).data,
-            InstData::Mod { .. }
-        ));
+        for (src, expected) in [
+            ("fn main() -> i32 { 1 + 2 }", BinOp::Add),
+            ("fn main() -> i32 { 1 - 2 }", BinOp::Sub),
+            ("fn main() -> i32 { 1 * 2 }", BinOp::Mul),
+            ("fn main() -> i32 { 1 / 2 }", BinOp::Div),
+            ("fn main() -> i32 { 1 % 2 }", BinOp::Mod),
+        ] {
+            let (rir, _) = gen_rir(src);
+            match rir.get(InstRef::from_raw(2)).data {
+                InstData::Bin { op, .. } => assert_eq!(op, expected),
+                _ => panic!("expected Bin for {}", src),
+            }
+        }
     }
 
     #[test]
@@ -2383,7 +2401,10 @@ mod tests {
                         let inst_refs = rir.get_extra(*extra_start, *len);
                         // Last instruction in block is the Add
                         let add_inst = rir.get(InstRef::from_raw(inst_refs[2]));
-                        assert!(matches!(add_inst.data, InstData::Add { .. }));
+                        assert!(matches!(
+                            add_inst.data,
+                            InstData::Bin { op: BinOp::Add, .. }
+                        ));
                     }
                     _ => panic!("expected Block"),
                 }

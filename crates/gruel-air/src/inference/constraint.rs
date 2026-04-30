@@ -5,7 +5,7 @@
 //! - [`Substitution`] - Mapping from type variables to resolved types
 
 use super::types::{InferType, TypeVarId};
-use gruel_span::Span;
+use gruel_util::Span;
 use std::cell::RefCell;
 
 /// A type constraint generated during analysis.

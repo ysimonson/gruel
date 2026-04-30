@@ -12,11 +12,11 @@
 //! - **Runtime dispatch (Phase 4)**: drives vtable generation for the
 //!   `(concrete type, interface)` pair.
 
-use gruel_error::{
+use gruel_util::Span;
+use gruel_util::{
     CompileError, CompileResult, ErrorKind, InterfaceMethodMissingData,
     InterfaceMethodSignatureMismatchData,
 };
-use gruel_span::Span;
 use lasso::Spur;
 
 use super::Sema;
@@ -340,11 +340,11 @@ impl<'a> Sema<'a> {
 mod tests {
     use super::*;
     use crate::sema::Sema;
-    use gruel_error::PreviewFeatures;
     use gruel_lexer::Lexer;
     use gruel_parser::Parser;
     use gruel_rir::AstGen;
-    use gruel_span::Span;
+    use gruel_util::PreviewFeatures;
+    use gruel_util::Span;
 
     /// Like `gather_declarations_for_testing` in `sema::tests`, but with
     /// the `interfaces` preview feature enabled and `validate_interface_decls`

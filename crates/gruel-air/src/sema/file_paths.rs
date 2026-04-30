@@ -5,7 +5,7 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
-use gruel_span::FileId;
+use gruel_util::FileId;
 
 use super::Sema;
 
@@ -21,7 +21,7 @@ impl<'a> Sema<'a> {
     /// Get the source file path for a span.
     ///
     /// Looks up the file path using the span's file_id.
-    pub(crate) fn get_source_path(&self, span: gruel_span::Span) -> Option<&str> {
+    pub(crate) fn get_source_path(&self, span: gruel_util::Span) -> Option<&str> {
         self.file_paths.get(&span.file_id).map(|s| s.as_str())
     }
 

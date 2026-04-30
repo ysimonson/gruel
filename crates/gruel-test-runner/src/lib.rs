@@ -3,7 +3,7 @@
 //! This crate provides common functionality for running compiler tests,
 //! including test case parsing, execution, and output comparison.
 
-use gruel_error::PreviewFeature;
+use gruel_util::PreviewFeature;
 use serde::{Deserialize, Deserializer};
 
 /// Default timeout for test execution in milliseconds (10 seconds).

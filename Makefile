@@ -37,7 +37,7 @@ test: quick-test doctest
 	cargo run -p gruel-spec -- --traceability
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_UI_CASES=crates/gruel-ui-tests/cases \
-	cargo run -p gruel-ui-tests -- --quiet $(ARGS)
+	cargo run -p gruel-test-runner --bin gruel-ui-tests -- --quiet $(ARGS)
 
 # Format all Rust files.
 fmt:
@@ -134,7 +134,6 @@ crate-docs:
 	    --exclude gruel \
 	    --exclude gruel-runtime \
 	    --exclude gruel-spec \
-	    --exclude gruel-ui-tests \
 	    --exclude gruel-test-runner
 	rm -rf website/static/crate-docs
 	mkdir -p website/static/crate-docs

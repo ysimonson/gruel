@@ -17,8 +17,8 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
-use gruel_error::{CompileError, CompileResult, CompileWarning, ErrorKind, PreviewFeature};
-use gruel_span::Span;
+use gruel_util::Span;
+use gruel_util::{CompileError, CompileResult, CompileWarning, ErrorKind, PreviewFeature};
 use lasso::Spur;
 
 use crate::inference::InferType;

@@ -8,7 +8,7 @@
 //!
 //! ```ignore
 //! use gruel_compiler::{CompilationUnit, SourceFile, CompileOptions};
-//! use gruel_span::FileId;
+//! use gruel_util::FileId;
 //!
 //! // Create source files
 //! let sources = vec![
@@ -33,7 +33,7 @@ use crate::{
     CompileOutput, CompileWarning, ErrorKind, FunctionWithCfg, Lexer, MultiErrorResult, Parser,
     Rir, Sema, SourceFile, Type, TypeInternPool, compile_backend,
 };
-use gruel_span::FileId;
+use gruel_util::FileId;
 
 /// Result of parsing a single file within a compilation unit.
 #[derive(Debug)]

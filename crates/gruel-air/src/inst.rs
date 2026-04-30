@@ -24,7 +24,7 @@ const _: () = assert!(std::mem::size_of::<AirInst>() <= 48);
 const _: () = assert!(std::mem::size_of::<AirInstData>() <= 32);
 
 use crate::types::{StructId, Type};
-use gruel_span::Span;
+use gruel_util::{BinOp, Span, UnaryOp};
 use lasso::{Key, Spur};
 
 // ============================================================================
@@ -134,13 +134,10 @@ impl AirPlace {
 }
 
 /// The base of a place - where the memory location starts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AirPlaceBase {
-    /// Local variable slot
-    Local(u32),
-    /// Parameter slot (for parameters, including inout)
-    Param(u32),
-}
+///
+/// Re-export of [`gruel_util::PlaceBase`] under the AIR-flavoured name to
+/// avoid a needless rename at every call site.
+pub use gruel_util::PlaceBase as AirPlaceBase;
 
 /// A projection applied to a place to reach a nested location.
 ///
@@ -998,57 +995,13 @@ pub enum AirInstData {
     /// This instruction has type `Type::COMPTIME_TYPE` and is erased during specialization.
     TypeConst(crate::Type),
 
-    // Binary arithmetic operations
-    /// Addition
-    Add(AirRef, AirRef),
-    /// Subtraction
-    Sub(AirRef, AirRef),
-    /// Multiplication
-    Mul(AirRef, AirRef),
-    /// Division
-    Div(AirRef, AirRef),
-    /// Modulo
-    Mod(AirRef, AirRef),
+    /// Binary operation: arithmetic, comparison, logical, or bitwise.
+    /// Logical `And`/`Or` are short-circuiting; they are lowered to
+    /// control flow during CFG construction.
+    Bin(BinOp, AirRef, AirRef),
 
-    // Comparison operations (return bool)
-    /// Equality
-    Eq(AirRef, AirRef),
-    /// Inequality
-    Ne(AirRef, AirRef),
-    /// Less than
-    Lt(AirRef, AirRef),
-    /// Greater than
-    Gt(AirRef, AirRef),
-    /// Less than or equal
-    Le(AirRef, AirRef),
-    /// Greater than or equal
-    Ge(AirRef, AirRef),
-
-    // Logical operations (return bool)
-    /// Logical AND
-    And(AirRef, AirRef),
-    /// Logical OR
-    Or(AirRef, AirRef),
-
-    // Bitwise operations
-    /// Bitwise AND
-    BitAnd(AirRef, AirRef),
-    /// Bitwise OR
-    BitOr(AirRef, AirRef),
-    /// Bitwise XOR
-    BitXor(AirRef, AirRef),
-    /// Left shift
-    Shl(AirRef, AirRef),
-    /// Right shift (arithmetic for signed, logical for unsigned)
-    Shr(AirRef, AirRef),
-
-    // Unary operations
-    /// Negation
-    Neg(AirRef),
-    /// Logical NOT
-    Not(AirRef),
-    /// Bitwise NOT
-    BitNot(AirRef),
+    /// Unary operation: `-`, `!`, or `~`.
+    Unary(UnaryOp, AirRef),
 
     /// Reference construction (ADR-0062): `&x` (`is_mut = false`) or
     /// `&mut x` (`is_mut = true`). Operand must be an lvalue. Lowers to
@@ -1479,27 +1432,8 @@ impl fmt::Display for Air {
                 AirInstData::BytesConst(idx) => writeln!(f, "bytes_const @{}", idx)?,
                 AirInstData::UnitConst => writeln!(f, "const ()")?,
                 AirInstData::TypeConst(ty) => writeln!(f, "type_const {}", ty.name())?,
-                AirInstData::Add(lhs, rhs) => writeln!(f, "add {}, {}", lhs, rhs)?,
-                AirInstData::Sub(lhs, rhs) => writeln!(f, "sub {}, {}", lhs, rhs)?,
-                AirInstData::Mul(lhs, rhs) => writeln!(f, "mul {}, {}", lhs, rhs)?,
-                AirInstData::Div(lhs, rhs) => writeln!(f, "div {}, {}", lhs, rhs)?,
-                AirInstData::Mod(lhs, rhs) => writeln!(f, "mod {}, {}", lhs, rhs)?,
-                AirInstData::Eq(lhs, rhs) => writeln!(f, "eq {}, {}", lhs, rhs)?,
-                AirInstData::Ne(lhs, rhs) => writeln!(f, "ne {}, {}", lhs, rhs)?,
-                AirInstData::Lt(lhs, rhs) => writeln!(f, "lt {}, {}", lhs, rhs)?,
-                AirInstData::Gt(lhs, rhs) => writeln!(f, "gt {}, {}", lhs, rhs)?,
-                AirInstData::Le(lhs, rhs) => writeln!(f, "le {}, {}", lhs, rhs)?,
-                AirInstData::Ge(lhs, rhs) => writeln!(f, "ge {}, {}", lhs, rhs)?,
-                AirInstData::And(lhs, rhs) => writeln!(f, "and {}, {}", lhs, rhs)?,
-                AirInstData::Or(lhs, rhs) => writeln!(f, "or {}, {}", lhs, rhs)?,
-                AirInstData::BitAnd(lhs, rhs) => writeln!(f, "bit_and {}, {}", lhs, rhs)?,
-                AirInstData::BitOr(lhs, rhs) => writeln!(f, "bit_or {}, {}", lhs, rhs)?,
-                AirInstData::BitXor(lhs, rhs) => writeln!(f, "bit_xor {}, {}", lhs, rhs)?,
-                AirInstData::Shl(lhs, rhs) => writeln!(f, "shl {}, {}", lhs, rhs)?,
-                AirInstData::Shr(lhs, rhs) => writeln!(f, "shr {}, {}", lhs, rhs)?,
-                AirInstData::Neg(operand) => writeln!(f, "neg {}", operand)?,
-                AirInstData::Not(operand) => writeln!(f, "not {}", operand)?,
-                AirInstData::BitNot(operand) => writeln!(f, "bit_not {}", operand)?,
+                AirInstData::Bin(op, lhs, rhs) => writeln!(f, "{} {}, {}", op, lhs, rhs)?,
+                AirInstData::Unary(op, operand) => writeln!(f, "{} {}", op, operand)?,
                 AirInstData::MakeRef { operand, is_mut } => writeln!(
                     f,
                     "make_ref{} {}",

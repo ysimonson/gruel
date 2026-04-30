@@ -8,7 +8,7 @@
 use super::constraint::{Constraint, Substitution};
 use super::types::{InferType, TypeVarId};
 use crate::Type;
-use gruel_span::Span;
+use gruel_util::Span;
 
 /// Result of unifying two types.
 #[derive(Debug, Clone, PartialEq, Eq)]

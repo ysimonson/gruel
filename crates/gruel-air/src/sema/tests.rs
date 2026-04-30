@@ -4,10 +4,10 @@ mod tests {
     use crate::inst::{AirInstData, AirRef};
     use crate::sema::{Sema, SemaOutput};
     use crate::types::Type;
-    use gruel_error::{CompileErrors, ErrorKind, MultiErrorResult, PreviewFeatures};
     use gruel_lexer::Lexer;
     use gruel_parser::Parser;
     use gruel_rir::AstGen;
+    use gruel_util::{BinOp, CompileErrors, ErrorKind, MultiErrorResult, PreviewFeatures, UnaryOp};
 
     fn compile_to_air(source: &str) -> MultiErrorResult<SemaOutput> {
         let lexer = Lexer::new(source);
@@ -46,7 +46,7 @@ mod tests {
 
         // Check that add instruction exists with correct type
         let add_inst = air.get(AirRef::from_raw(2));
-        assert!(matches!(add_inst.data, AirInstData::Add(_, _)));
+        assert!(matches!(add_inst.data, AirInstData::Bin(BinOp::Add, _, _)));
         assert_eq!(add_inst.ty, Type::I32);
     }
 
@@ -69,7 +69,7 @@ mod tests {
         assert_eq!(air.len(), 3);
 
         let neg_inst = air.get(AirRef::from_raw(1));
-        assert!(matches!(neg_inst.data, AirInstData::Neg(_)));
+        assert!(matches!(neg_inst.data, AirInstData::Unary(UnaryOp::Neg, _)));
         assert_eq!(neg_inst.ty, Type::I32);
     }
 
@@ -83,7 +83,7 @@ mod tests {
 
         // Check that result is multiplication
         let mul_inst = air.get(AirRef::from_raw(4));
-        assert!(matches!(mul_inst.data, AirInstData::Mul(_, _)));
+        assert!(matches!(mul_inst.data, AirInstData::Bin(BinOp::Mul, _, _)));
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! phase of semantic analysis. They are used to resolve function calls,
 //! method calls, and constant references during function body analysis.
 
-use gruel_span::{FileId, Span};
+use gruel_util::{FileId, Span};
 use lasso::Spur;
 
 use crate::param_arena::ParamRange;

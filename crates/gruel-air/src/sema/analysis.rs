@@ -17,18 +17,18 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_builtins::BuiltinTypeDef;
-use gruel_error::{
-    CompileError, CompileErrors, CompileResult, CompileWarning, ErrorKind,
-    IntrinsicTypeMismatchError, MultiErrorResult, OptionExt, PreviewFeature, WarningKind,
-};
 use gruel_intrinsics::{
     IntrinsicId, PointerKind, PointerOpForm, lookup_by_id, lookup_pointer_method,
 };
 use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirDirective, RirParamMode, RirPattern,
 };
-use gruel_span::Span;
 use gruel_target::{Arch, Os};
+use gruel_util::{BinOp, Span, UnaryOp};
+use gruel_util::{
+    CompileError, CompileErrors, CompileResult, CompileWarning, ErrorKind,
+    IntrinsicTypeMismatchError, MultiErrorResult, OptionExt, PreviewFeature, WarningKind,
+};
 use lasso::Spur;
 use tracing::info_span;
 
@@ -2353,69 +2353,27 @@ impl<'a> Sema<'a> {
             | InstData::StringConst(_)
             | InstData::UnitConst => self.analyze_literal(air, inst_ref, ctx),
 
-            // Binary arithmetic operations
-            InstData::Add { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::Add, inst.span, ctx)
-            }
-            InstData::Sub { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::Sub, inst.span, ctx)
-            }
-            InstData::Mul { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::Mul, inst.span, ctx)
-            }
-            InstData::Div { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::Div, inst.span, ctx)
-            }
-            InstData::Mod { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::Mod, inst.span, ctx)
-            }
+            InstData::Bin { op, lhs, rhs } => match op {
+                BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Mod
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr => self.analyze_binary_arith(air, *lhs, *rhs, *op, inst.span, ctx),
+                BinOp::Eq | BinOp::Ne => {
+                    self.analyze_comparison(air, (*lhs, *rhs), true, *op, inst.span, ctx)
+                }
+                BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                    self.analyze_comparison(air, (*lhs, *rhs), false, *op, inst.span, ctx)
+                }
+                BinOp::And | BinOp::Or => self.analyze_logical_op(air, inst_ref, ctx),
+            },
 
-            // Bitwise binary operations
-            InstData::BitAnd { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::BitAnd, inst.span, ctx)
-            }
-            InstData::BitOr { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::BitOr, inst.span, ctx)
-            }
-            InstData::BitXor { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::BitXor, inst.span, ctx)
-            }
-            InstData::Shl { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::Shl, inst.span, ctx)
-            }
-            InstData::Shr { lhs, rhs } => {
-                self.analyze_binary_arith(air, *lhs, *rhs, AirInstData::Shr, inst.span, ctx)
-            }
-
-            // Comparison operations
-            InstData::Eq { lhs, rhs } => {
-                self.analyze_comparison(air, (*lhs, *rhs), true, AirInstData::Eq, inst.span, ctx)
-            }
-            InstData::Ne { lhs, rhs } => {
-                self.analyze_comparison(air, (*lhs, *rhs), true, AirInstData::Ne, inst.span, ctx)
-            }
-            InstData::Lt { lhs, rhs } => {
-                self.analyze_comparison(air, (*lhs, *rhs), false, AirInstData::Lt, inst.span, ctx)
-            }
-            InstData::Gt { lhs, rhs } => {
-                self.analyze_comparison(air, (*lhs, *rhs), false, AirInstData::Gt, inst.span, ctx)
-            }
-            InstData::Le { lhs, rhs } => {
-                self.analyze_comparison(air, (*lhs, *rhs), false, AirInstData::Le, inst.span, ctx)
-            }
-            InstData::Ge { lhs, rhs } => {
-                self.analyze_comparison(air, (*lhs, *rhs), false, AirInstData::Ge, inst.span, ctx)
-            }
-
-            // Logical operations
-            InstData::And { .. } | InstData::Or { .. } => {
-                self.analyze_logical_op(air, inst_ref, ctx)
-            }
-
-            // Unary operations
-            InstData::Neg { .. } | InstData::Not { .. } | InstData::BitNot { .. } => {
-                self.analyze_unary_op(air, inst_ref, ctx)
-            }
+            InstData::Unary { .. } => self.analyze_unary_op(air, inst_ref, ctx),
 
             // Reference construction (ADR-0062): `&x` / `&mut x`.
             InstData::MakeRef { .. } => self.analyze_make_ref(air, inst_ref, ctx),
@@ -5227,18 +5185,15 @@ impl<'a> Sema<'a> {
     ///
     /// Follows Rust's type inference rules:
     /// Types are determined by HM inference. Both operands must have the same type.
-    fn analyze_binary_arith<F>(
+    fn analyze_binary_arith(
         &mut self,
         air: &mut Air,
         lhs: InstRef,
         rhs: InstRef,
-        make_data: F,
+        op: BinOp,
         span: Span,
         ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult>
-    where
-        F: FnOnce(AirRef, AirRef) -> AirInstData,
-    {
+    ) -> CompileResult<AnalysisResult> {
         let lhs_result = self.analyze_inst(air, lhs, ctx)?;
         let rhs_result = self.analyze_inst(air, rhs, ctx)?;
 
@@ -5254,7 +5209,7 @@ impl<'a> Sema<'a> {
         }
 
         let air_ref = air.add_inst(AirInst {
-            data: make_data(lhs_result.air_ref, rhs_result.air_ref),
+            data: AirInstData::Bin(op, lhs_result.air_ref, rhs_result.air_ref),
             ty: lhs_result.ty,
             span,
         });
@@ -5267,18 +5222,15 @@ impl<'a> Sema<'a> {
     ///
     /// For equality operators (`==`, `!=`), both integers and booleans are allowed.
     /// For ordering operators (`<`, `>`, `<=`, `>=`), only integers are allowed.
-    fn analyze_comparison<F>(
+    fn analyze_comparison(
         &mut self,
         air: &mut Air,
         (lhs, rhs): (InstRef, InstRef),
         allow_bool: bool,
-        make_data: F,
+        op: BinOp,
         span: Span,
         ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult>
-    where
-        F: FnOnce(AirRef, AirRef) -> AirInstData,
-    {
+    ) -> CompileResult<AnalysisResult> {
         // Check for chained comparisons (e.g., `a < b < c`)
         // Since the parser is left-associative, `a < b < c` parses as `(a < b) < c`,
         // so we only need to check if the LHS is a comparison.
@@ -5296,7 +5248,7 @@ impl<'a> Sema<'a> {
         // Propagate Never/Error without additional type errors
         if lhs_type.is_never() || lhs_type.is_error() {
             let air_ref = air.add_inst(AirInst {
-                data: make_data(lhs_result.air_ref, rhs_result.air_ref),
+                data: AirInstData::Bin(op, lhs_result.air_ref, rhs_result.air_ref),
                 ty: Type::BOOL,
                 span,
             });
@@ -5332,7 +5284,7 @@ impl<'a> Sema<'a> {
         }
 
         let air_ref = air.add_inst(AirInst {
-            data: make_data(lhs_result.air_ref, rhs_result.air_ref),
+            data: AirInstData::Bin(op, lhs_result.air_ref, rhs_result.air_ref),
             ty: Type::BOOL,
             span,
         });
@@ -5356,149 +5308,94 @@ impl<'a> Sema<'a> {
             // Boolean literals
             InstData::BoolConst(value) => Some(ConstValue::Bool(*value)),
 
-            // Unary negation: -expr
-            InstData::Neg { operand } => match self.try_evaluate_const(*operand)? {
-                ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
-                _ => None,
-            },
-
-            // Logical NOT: !expr
-            InstData::Not { operand } => match self.try_evaluate_const(*operand)? {
-                ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
-                _ => None,
-            },
-
-            // Binary arithmetic operations
-            InstData::Add { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                l.checked_add(r).map(ConstValue::Integer)
-            }
-            InstData::Sub { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                l.checked_sub(r).map(ConstValue::Integer)
-            }
-            InstData::Mul { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                l.checked_mul(r).map(ConstValue::Integer)
-            }
-            InstData::Div { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                if r == 0 {
-                    None // Division by zero - defer to runtime
-                } else {
-                    l.checked_div(r).map(ConstValue::Integer)
-                }
-            }
-            InstData::Mod { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                if r == 0 {
-                    None // Modulo by zero - defer to runtime
-                } else {
-                    l.checked_rem(r).map(ConstValue::Integer)
-                }
-            }
-
-            // Comparison operations
-            InstData::Eq { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?;
-                let r = self.try_evaluate_const(*rhs)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
-                        Some(ConstValue::Bool(a == b))
+            InstData::Unary { op, operand } => {
+                let v = self.try_evaluate_const(*operand)?;
+                match (op, v) {
+                    (UnaryOp::Neg, ConstValue::Integer(n)) => {
+                        n.checked_neg().map(ConstValue::Integer)
                     }
-                    (ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(a == b)),
-                    _ => None, // Mixed types
-                }
-            }
-            InstData::Ne { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?;
-                let r = self.try_evaluate_const(*rhs)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
-                        Some(ConstValue::Bool(a != b))
-                    }
-                    (ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(a != b)),
+                    (UnaryOp::Not, ConstValue::Bool(b)) => Some(ConstValue::Bool(!b)),
+                    (UnaryOp::BitNot, ConstValue::Integer(n)) => Some(ConstValue::Integer(!n)),
                     _ => None,
                 }
             }
-            InstData::Lt { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                Some(ConstValue::Bool(l < r))
-            }
-            InstData::Gt { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                Some(ConstValue::Bool(l > r))
-            }
-            InstData::Le { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                Some(ConstValue::Bool(l <= r))
-            }
-            InstData::Ge { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                Some(ConstValue::Bool(l >= r))
-            }
 
-            // Logical operations
-            InstData::And { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_bool()?;
-                let r = self.try_evaluate_const(*rhs)?.as_bool()?;
-                Some(ConstValue::Bool(l && r))
-            }
-            InstData::Or { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_bool()?;
-                let r = self.try_evaluate_const(*rhs)?.as_bool()?;
-                Some(ConstValue::Bool(l || r))
-            }
-
-            // Bitwise operations
-            InstData::BitAnd { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                Some(ConstValue::Integer(l & r))
-            }
-            InstData::BitOr { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                Some(ConstValue::Integer(l | r))
-            }
-            InstData::BitXor { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                Some(ConstValue::Integer(l ^ r))
-            }
-            InstData::Shl { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                // Only constant-fold small shift amounts to avoid type-width issues.
-                // For shifts >= 8, defer to runtime where hardware handles masking correctly.
-                // This is conservative but safe - we don't know the operand type here.
-                if !(0..8).contains(&r) {
-                    return None;
+            InstData::Bin { op, lhs, rhs } => {
+                let l = self.try_evaluate_const(*lhs)?;
+                let r = self.try_evaluate_const(*rhs)?;
+                match op {
+                    BinOp::Add => l
+                        .as_integer()?
+                        .checked_add(r.as_integer()?)
+                        .map(ConstValue::Integer),
+                    BinOp::Sub => l
+                        .as_integer()?
+                        .checked_sub(r.as_integer()?)
+                        .map(ConstValue::Integer),
+                    BinOp::Mul => l
+                        .as_integer()?
+                        .checked_mul(r.as_integer()?)
+                        .map(ConstValue::Integer),
+                    BinOp::Div => {
+                        let r = r.as_integer()?;
+                        if r == 0 {
+                            None
+                        } else {
+                            l.as_integer()?.checked_div(r).map(ConstValue::Integer)
+                        }
+                    }
+                    BinOp::Mod => {
+                        let r = r.as_integer()?;
+                        if r == 0 {
+                            None
+                        } else {
+                            l.as_integer()?.checked_rem(r).map(ConstValue::Integer)
+                        }
+                    }
+                    BinOp::Eq => match (l, r) {
+                        (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                            Some(ConstValue::Bool(a == b))
+                        }
+                        (ConstValue::Bool(a), ConstValue::Bool(b)) => {
+                            Some(ConstValue::Bool(a == b))
+                        }
+                        _ => None,
+                    },
+                    BinOp::Ne => match (l, r) {
+                        (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                            Some(ConstValue::Bool(a != b))
+                        }
+                        (ConstValue::Bool(a), ConstValue::Bool(b)) => {
+                            Some(ConstValue::Bool(a != b))
+                        }
+                        _ => None,
+                    },
+                    BinOp::Lt => Some(ConstValue::Bool(l.as_integer()? < r.as_integer()?)),
+                    BinOp::Gt => Some(ConstValue::Bool(l.as_integer()? > r.as_integer()?)),
+                    BinOp::Le => Some(ConstValue::Bool(l.as_integer()? <= r.as_integer()?)),
+                    BinOp::Ge => Some(ConstValue::Bool(l.as_integer()? >= r.as_integer()?)),
+                    BinOp::And => Some(ConstValue::Bool(l.as_bool()? && r.as_bool()?)),
+                    BinOp::Or => Some(ConstValue::Bool(l.as_bool()? || r.as_bool()?)),
+                    BinOp::BitAnd => Some(ConstValue::Integer(l.as_integer()? & r.as_integer()?)),
+                    BinOp::BitOr => Some(ConstValue::Integer(l.as_integer()? | r.as_integer()?)),
+                    BinOp::BitXor => Some(ConstValue::Integer(l.as_integer()? ^ r.as_integer()?)),
+                    // Only constant-fold small shift amounts to avoid type-width issues.
+                    // For larger shifts, defer to runtime where hardware handles masking.
+                    BinOp::Shl => {
+                        let r = r.as_integer()?;
+                        if !(0..8).contains(&r) {
+                            return None;
+                        }
+                        Some(ConstValue::Integer(l.as_integer()? << r))
+                    }
+                    BinOp::Shr => {
+                        let r = r.as_integer()?;
+                        if !(0..8).contains(&r) {
+                            return None;
+                        }
+                        Some(ConstValue::Integer(l.as_integer()? >> r))
+                    }
                 }
-                Some(ConstValue::Integer(l << r))
-            }
-            InstData::Shr { lhs, rhs } => {
-                let l = self.try_evaluate_const(*lhs)?.as_integer()?;
-                let r = self.try_evaluate_const(*rhs)?.as_integer()?;
-                // Only constant-fold small shift amounts to avoid type-width issues.
-                // For shifts >= 8, defer to runtime where hardware handles masking correctly.
-                if !(0..8).contains(&r) {
-                    return None;
-                }
-                Some(ConstValue::Integer(l >> r))
-            }
-            InstData::BitNot { operand } => {
-                let n = self.try_evaluate_const(*operand)?.as_integer()?;
-                Some(ConstValue::Integer(!n))
             }
 
             // Comptime block: comptime { expr } is compile-time evaluable if its inner expr is
@@ -5772,214 +5669,92 @@ impl<'a> Sema<'a> {
             // Boolean literals
             InstData::BoolConst(value) => Some(ConstValue::Bool(*value)),
 
-            // Unary negation: -expr
-            InstData::Neg { operand } => {
-                match self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)? {
-                    ConstValue::Integer(n) => n.checked_neg().map(ConstValue::Integer),
+            InstData::Unary { op, operand } => {
+                let v = self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)?;
+                match (op, v) {
+                    (UnaryOp::Neg, ConstValue::Integer(n)) => {
+                        n.checked_neg().map(ConstValue::Integer)
+                    }
+                    (UnaryOp::Not, ConstValue::Bool(b)) => Some(ConstValue::Bool(!b)),
+                    (UnaryOp::BitNot, ConstValue::Integer(n)) => Some(ConstValue::Integer(!n)),
                     _ => None,
                 }
             }
 
-            // Logical NOT: !expr
-            InstData::Not { operand } => {
-                match self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)? {
-                    ConstValue::Bool(b) => Some(ConstValue::Bool(!b)),
-                    _ => None,
-                }
-            }
-
-            // Binary arithmetic operations
-            InstData::Add { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                l.checked_add(r).map(ConstValue::Integer)
-            }
-            InstData::Sub { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                l.checked_sub(r).map(ConstValue::Integer)
-            }
-            InstData::Mul { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                l.checked_mul(r).map(ConstValue::Integer)
-            }
-            InstData::Div { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                if r == 0 {
-                    None
-                } else {
-                    l.checked_div(r).map(ConstValue::Integer)
-                }
-            }
-            InstData::Mod { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                if r == 0 {
-                    None
-                } else {
-                    l.checked_rem(r).map(ConstValue::Integer)
-                }
-            }
-
-            // Comparison operations
-            InstData::Eq { lhs, rhs } => {
+            InstData::Bin { op, lhs, rhs } => {
                 let l = self.try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?;
                 let r = self.try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
-                        Some(ConstValue::Bool(a == b))
+                match op {
+                    BinOp::Add => l
+                        .as_integer()?
+                        .checked_add(r.as_integer()?)
+                        .map(ConstValue::Integer),
+                    BinOp::Sub => l
+                        .as_integer()?
+                        .checked_sub(r.as_integer()?)
+                        .map(ConstValue::Integer),
+                    BinOp::Mul => l
+                        .as_integer()?
+                        .checked_mul(r.as_integer()?)
+                        .map(ConstValue::Integer),
+                    BinOp::Div => {
+                        let r = r.as_integer()?;
+                        if r == 0 {
+                            None
+                        } else {
+                            l.as_integer()?.checked_div(r).map(ConstValue::Integer)
+                        }
                     }
-                    (ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(a == b)),
-                    _ => None,
-                }
-            }
-            InstData::Ne { lhs, rhs } => {
-                let l = self.try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?;
-                let r = self.try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
-                        Some(ConstValue::Bool(a != b))
+                    BinOp::Mod => {
+                        let r = r.as_integer()?;
+                        if r == 0 {
+                            None
+                        } else {
+                            l.as_integer()?.checked_rem(r).map(ConstValue::Integer)
+                        }
                     }
-                    (ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(a != b)),
-                    _ => None,
+                    BinOp::Eq => match (l, r) {
+                        (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                            Some(ConstValue::Bool(a == b))
+                        }
+                        (ConstValue::Bool(a), ConstValue::Bool(b)) => {
+                            Some(ConstValue::Bool(a == b))
+                        }
+                        _ => None,
+                    },
+                    BinOp::Ne => match (l, r) {
+                        (ConstValue::Integer(a), ConstValue::Integer(b)) => {
+                            Some(ConstValue::Bool(a != b))
+                        }
+                        (ConstValue::Bool(a), ConstValue::Bool(b)) => {
+                            Some(ConstValue::Bool(a != b))
+                        }
+                        _ => None,
+                    },
+                    BinOp::Lt => Some(ConstValue::Bool(l.as_integer()? < r.as_integer()?)),
+                    BinOp::Gt => Some(ConstValue::Bool(l.as_integer()? > r.as_integer()?)),
+                    BinOp::Le => Some(ConstValue::Bool(l.as_integer()? <= r.as_integer()?)),
+                    BinOp::Ge => Some(ConstValue::Bool(l.as_integer()? >= r.as_integer()?)),
+                    BinOp::And => Some(ConstValue::Bool(l.as_bool()? && r.as_bool()?)),
+                    BinOp::Or => Some(ConstValue::Bool(l.as_bool()? || r.as_bool()?)),
+                    BinOp::BitAnd => Some(ConstValue::Integer(l.as_integer()? & r.as_integer()?)),
+                    BinOp::BitOr => Some(ConstValue::Integer(l.as_integer()? | r.as_integer()?)),
+                    BinOp::BitXor => Some(ConstValue::Integer(l.as_integer()? ^ r.as_integer()?)),
+                    BinOp::Shl => {
+                        let r = r.as_integer()?;
+                        if !(0..8).contains(&r) {
+                            return None;
+                        }
+                        Some(ConstValue::Integer(l.as_integer()? << r))
+                    }
+                    BinOp::Shr => {
+                        let r = r.as_integer()?;
+                        if !(0..8).contains(&r) {
+                            return None;
+                        }
+                        Some(ConstValue::Integer(l.as_integer()? >> r))
+                    }
                 }
-            }
-            InstData::Lt { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                Some(ConstValue::Bool(l < r))
-            }
-            InstData::Gt { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                Some(ConstValue::Bool(l > r))
-            }
-            InstData::Le { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                Some(ConstValue::Bool(l <= r))
-            }
-            InstData::Ge { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                Some(ConstValue::Bool(l >= r))
-            }
-
-            // Logical operations
-            InstData::And { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_bool()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_bool()?;
-                Some(ConstValue::Bool(l && r))
-            }
-            InstData::Or { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_bool()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_bool()?;
-                Some(ConstValue::Bool(l || r))
-            }
-
-            // Bitwise operations
-            InstData::BitAnd { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                Some(ConstValue::Integer(l & r))
-            }
-            InstData::BitOr { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                Some(ConstValue::Integer(l | r))
-            }
-            InstData::BitXor { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                Some(ConstValue::Integer(l ^ r))
-            }
-            InstData::Shl { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                if !(0..8).contains(&r) {
-                    return None;
-                }
-                Some(ConstValue::Integer(l << r))
-            }
-            InstData::Shr { lhs, rhs } => {
-                let l = self
-                    .try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?
-                    .as_integer()?;
-                let r = self
-                    .try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?
-                    .as_integer()?;
-                if !(0..8).contains(&r) {
-                    return None;
-                }
-                Some(ConstValue::Integer(l >> r))
-            }
-            InstData::BitNot { operand } => {
-                let n = self
-                    .try_evaluate_const_with_subst(*operand, type_subst, value_subst)?
-                    .as_integer()?;
-                Some(ConstValue::Integer(!n))
             }
 
             // Comptime block: comptime { expr } is compile-time evaluable if its inner expr is
@@ -7167,321 +6942,149 @@ impl<'a> Sema<'a> {
                 Ok(ConstValue::ComptimeStr(idx))
             }
 
-            // ── Unary operations ─────────────────────────────────────────────
-            InstData::Neg { operand } => {
-                let n = int(
-                    self.evaluate_comptime_inst(operand, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                n.checked_neg()
-                    .map(ConstValue::Integer)
-                    .ok_or_else(|| overflow(inst_span))
+            InstData::Unary { op, operand } => {
+                let v = self.evaluate_comptime_inst(operand, locals, ctx, outer_span)?;
+                match op {
+                    UnaryOp::Neg => {
+                        let n = int(v, inst_span)?;
+                        n.checked_neg()
+                            .map(ConstValue::Integer)
+                            .ok_or_else(|| overflow(inst_span))
+                    }
+                    UnaryOp::Not => Ok(ConstValue::Bool(!bool_val(v, inst_span)?)),
+                    UnaryOp::BitNot => Ok(ConstValue::Integer(!int(v, inst_span)?)),
+                }
             }
 
-            InstData::Not { operand } => {
-                let b = bool_val(
-                    self.evaluate_comptime_inst(operand, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(!b))
-            }
-
-            InstData::BitNot { operand } => {
-                let n = int(
-                    self.evaluate_comptime_inst(operand, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Integer(!n))
-            }
-
-            // ── Binary arithmetic ─────────────────────────────────────────────
-            InstData::Add { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                l.checked_add(r)
-                    .map(ConstValue::Integer)
-                    .ok_or_else(|| overflow(inst_span))
-            }
-            InstData::Sub { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                l.checked_sub(r)
-                    .map(ConstValue::Integer)
-                    .ok_or_else(|| overflow(inst_span))
-            }
-            InstData::Mul { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                l.checked_mul(r)
-                    .map(ConstValue::Integer)
-                    .ok_or_else(|| overflow(inst_span))
-            }
-            InstData::Div { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                if r == 0 {
-                    return Err(CompileError::new(
+            InstData::Bin { op, lhs, rhs } => {
+                let lv = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
+                let rv = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
+                let div_zero = |what: &str| {
+                    CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
-                            reason: "division by zero in comptime evaluation".into(),
+                            reason: format!("{} by zero in comptime evaluation", what),
                         },
                         inst_span,
-                    ));
-                }
-                l.checked_div(r)
-                    .map(ConstValue::Integer)
-                    .ok_or_else(|| overflow(inst_span))
-            }
-            InstData::Mod { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                if r == 0 {
-                    return Err(CompileError::new(
-                        ErrorKind::ComptimeEvaluationFailed {
-                            reason: "modulo by zero in comptime evaluation".into(),
-                        },
-                        inst_span,
-                    ));
-                }
-                l.checked_rem(r)
-                    .map(ConstValue::Integer)
-                    .ok_or_else(|| overflow(inst_span))
-            }
-
-            // ── Comparisons ───────────────────────────────────────────────────
-            InstData::Eq { lhs, rhs } => {
-                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
-                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
-                        Ok(ConstValue::Bool(a == b))
-                    }
-                    (ConstValue::Bool(a), ConstValue::Bool(b)) => Ok(ConstValue::Bool(a == b)),
-                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
-                        let sa = self.resolve_comptime_str(a, inst_span)?;
-                        let sb = self.resolve_comptime_str(b, inst_span)?;
-                        Ok(ConstValue::Bool(sa == sb))
-                    }
-                    (
-                        ConstValue::EnumVariant {
-                            enum_id: ae,
-                            variant_idx: av,
-                        },
-                        ConstValue::EnumVariant {
-                            enum_id: be,
-                            variant_idx: bv,
-                        },
-                    ) => Ok(ConstValue::Bool(ae == be && av == bv)),
-                    _ => Err(not_const(inst_span)),
-                }
-            }
-            InstData::Ne { lhs, rhs } => {
-                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
-                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
-                        Ok(ConstValue::Bool(a != b))
-                    }
-                    (ConstValue::Bool(a), ConstValue::Bool(b)) => Ok(ConstValue::Bool(a != b)),
-                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
-                        let sa = self.resolve_comptime_str(a, inst_span)?;
-                        let sb = self.resolve_comptime_str(b, inst_span)?;
-                        Ok(ConstValue::Bool(sa != sb))
-                    }
-                    (
-                        ConstValue::EnumVariant {
-                            enum_id: ae,
-                            variant_idx: av,
-                        },
-                        ConstValue::EnumVariant {
-                            enum_id: be,
-                            variant_idx: bv,
-                        },
-                    ) => Ok(ConstValue::Bool(!(ae == be && av == bv))),
-                    _ => Err(not_const(inst_span)),
-                }
-            }
-            InstData::Lt { lhs, rhs } => {
-                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
-                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => Ok(ConstValue::Bool(a < b)),
-                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
-                        let sa = self.resolve_comptime_str(a, inst_span)?;
-                        let sb = self.resolve_comptime_str(b, inst_span)?;
-                        Ok(ConstValue::Bool(sa < sb))
-                    }
-                    _ => Err(not_const(inst_span)),
-                }
-            }
-            InstData::Gt { lhs, rhs } => {
-                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
-                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => Ok(ConstValue::Bool(a > b)),
-                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
-                        let sa = self.resolve_comptime_str(a, inst_span)?;
-                        let sb = self.resolve_comptime_str(b, inst_span)?;
-                        Ok(ConstValue::Bool(sa > sb))
-                    }
-                    _ => Err(not_const(inst_span)),
-                }
-            }
-            InstData::Le { lhs, rhs } => {
-                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
-                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
-                        Ok(ConstValue::Bool(a <= b))
-                    }
-                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
-                        let sa = self.resolve_comptime_str(a, inst_span)?;
-                        let sb = self.resolve_comptime_str(b, inst_span)?;
-                        Ok(ConstValue::Bool(sa <= sb))
-                    }
-                    _ => Err(not_const(inst_span)),
-                }
-            }
-            InstData::Ge { lhs, rhs } => {
-                let l = self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?;
-                let r = self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?;
-                match (l, r) {
-                    (ConstValue::Integer(a), ConstValue::Integer(b)) => {
-                        Ok(ConstValue::Bool(a >= b))
-                    }
-                    (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
-                        let sa = self.resolve_comptime_str(a, inst_span)?;
-                        let sb = self.resolve_comptime_str(b, inst_span)?;
-                        Ok(ConstValue::Bool(sa >= sb))
-                    }
-                    _ => Err(not_const(inst_span)),
-                }
-            }
-
-            // ── Logical ───────────────────────────────────────────────────────
-            InstData::And { lhs, rhs } => {
-                let l = bool_val(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = bool_val(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l && r))
-            }
-            InstData::Or { lhs, rhs } => {
-                let l = bool_val(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = bool_val(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Bool(l || r))
-            }
-
-            // ── Bitwise ───────────────────────────────────────────────────────
-            InstData::BitAnd { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Integer(l & r))
-            }
-            InstData::BitOr { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Integer(l | r))
-            }
-            InstData::BitXor { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                Ok(ConstValue::Integer(l ^ r))
-            }
-            InstData::Shl { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                if !(0..64).contains(&r) {
-                    return Err(CompileError::new(
+                    )
+                };
+                let shift_oob = || {
+                    CompileError::new(
                         ErrorKind::ComptimeEvaluationFailed {
                             reason: "shift amount out of range in comptime evaluation".into(),
                         },
                         inst_span,
-                    ));
+                    )
+                };
+                match op {
+                    BinOp::Add => int(lv, inst_span)?
+                        .checked_add(int(rv, inst_span)?)
+                        .map(ConstValue::Integer)
+                        .ok_or_else(|| overflow(inst_span)),
+                    BinOp::Sub => int(lv, inst_span)?
+                        .checked_sub(int(rv, inst_span)?)
+                        .map(ConstValue::Integer)
+                        .ok_or_else(|| overflow(inst_span)),
+                    BinOp::Mul => int(lv, inst_span)?
+                        .checked_mul(int(rv, inst_span)?)
+                        .map(ConstValue::Integer)
+                        .ok_or_else(|| overflow(inst_span)),
+                    BinOp::Div => {
+                        let r = int(rv, inst_span)?;
+                        if r == 0 {
+                            return Err(div_zero("division"));
+                        }
+                        int(lv, inst_span)?
+                            .checked_div(r)
+                            .map(ConstValue::Integer)
+                            .ok_or_else(|| overflow(inst_span))
+                    }
+                    BinOp::Mod => {
+                        let r = int(rv, inst_span)?;
+                        if r == 0 {
+                            return Err(div_zero("modulo"));
+                        }
+                        int(lv, inst_span)?
+                            .checked_rem(r)
+                            .map(ConstValue::Integer)
+                            .ok_or_else(|| overflow(inst_span))
+                    }
+                    BinOp::Eq | BinOp::Ne => {
+                        let eq = match (lv, rv) {
+                            (ConstValue::Integer(a), ConstValue::Integer(b)) => a == b,
+                            (ConstValue::Bool(a), ConstValue::Bool(b)) => a == b,
+                            (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                                let sa = self.resolve_comptime_str(a, inst_span)?;
+                                let sb = self.resolve_comptime_str(b, inst_span)?;
+                                sa == sb
+                            }
+                            (
+                                ConstValue::EnumVariant {
+                                    enum_id: ae,
+                                    variant_idx: av,
+                                },
+                                ConstValue::EnumVariant {
+                                    enum_id: be,
+                                    variant_idx: bv,
+                                },
+                            ) => ae == be && av == bv,
+                            _ => return Err(not_const(inst_span)),
+                        };
+                        Ok(ConstValue::Bool(if matches!(op, BinOp::Eq) {
+                            eq
+                        } else {
+                            !eq
+                        }))
+                    }
+                    BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                        let ord = match (lv, rv) {
+                            (ConstValue::Integer(a), ConstValue::Integer(b)) => a.cmp(&b),
+                            (ConstValue::ComptimeStr(a), ConstValue::ComptimeStr(b)) => {
+                                let sa = self.resolve_comptime_str(a, inst_span)?;
+                                let sb = self.resolve_comptime_str(b, inst_span)?;
+                                sa.cmp(sb)
+                            }
+                            _ => return Err(not_const(inst_span)),
+                        };
+                        use std::cmp::Ordering::*;
+                        let result = matches!(
+                            (op, ord),
+                            (BinOp::Lt, Less)
+                                | (BinOp::Gt, Greater)
+                                | (BinOp::Le, Less | Equal)
+                                | (BinOp::Ge, Greater | Equal)
+                        );
+                        Ok(ConstValue::Bool(result))
+                    }
+                    BinOp::And => Ok(ConstValue::Bool(
+                        bool_val(lv, inst_span)? && bool_val(rv, inst_span)?,
+                    )),
+                    BinOp::Or => Ok(ConstValue::Bool(
+                        bool_val(lv, inst_span)? || bool_val(rv, inst_span)?,
+                    )),
+                    BinOp::BitAnd => Ok(ConstValue::Integer(
+                        int(lv, inst_span)? & int(rv, inst_span)?,
+                    )),
+                    BinOp::BitOr => Ok(ConstValue::Integer(
+                        int(lv, inst_span)? | int(rv, inst_span)?,
+                    )),
+                    BinOp::BitXor => Ok(ConstValue::Integer(
+                        int(lv, inst_span)? ^ int(rv, inst_span)?,
+                    )),
+                    BinOp::Shl => {
+                        let r = int(rv, inst_span)?;
+                        if !(0..64).contains(&r) {
+                            return Err(shift_oob());
+                        }
+                        Ok(ConstValue::Integer(int(lv, inst_span)? << r))
+                    }
+                    BinOp::Shr => {
+                        let r = int(rv, inst_span)?;
+                        if !(0..64).contains(&r) {
+                            return Err(shift_oob());
+                        }
+                        Ok(ConstValue::Integer(int(lv, inst_span)? >> r))
+                    }
                 }
-                Ok(ConstValue::Integer(l << r))
-            }
-            InstData::Shr { lhs, rhs } => {
-                let l = int(
-                    self.evaluate_comptime_inst(lhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                let r = int(
-                    self.evaluate_comptime_inst(rhs, locals, ctx, outer_span)?,
-                    inst_span,
-                )?;
-                if !(0..64).contains(&r) {
-                    return Err(CompileError::new(
-                        ErrorKind::ComptimeEvaluationFailed {
-                            reason: "shift amount out of range in comptime evaluation".into(),
-                        },
-                        inst_span,
-                    ));
-                }
-                Ok(ConstValue::Integer(l >> r))
             }
 
             // ── Block: iterate instructions, return last value ─────────────────
@@ -8841,12 +8444,10 @@ impl<'a> Sema<'a> {
     fn is_comparison(&self, inst_ref: InstRef) -> bool {
         matches!(
             self.rir.get(inst_ref).data,
-            InstData::Lt { .. }
-                | InstData::Gt { .. }
-                | InstData::Le { .. }
-                | InstData::Ge { .. }
-                | InstData::Eq { .. }
-                | InstData::Ne { .. }
+            InstData::Bin {
+                op: BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::Eq | BinOp::Ne,
+                ..
+            }
         )
     }
 

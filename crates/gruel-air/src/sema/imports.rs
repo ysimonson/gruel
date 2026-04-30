@@ -8,9 +8,9 @@
 //! testable resolution logic with explicit priority order. See the module_path
 //! module for details on how different import forms are resolved.
 
-use gruel_error::{CompileError, CompileResult, ErrorKind};
 use gruel_rir::InstRef;
-use gruel_span::Span;
+use gruel_util::Span;
+use gruel_util::{CompileError, CompileResult, ErrorKind};
 
 use crate::types::Type;
 

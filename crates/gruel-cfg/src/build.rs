@@ -7,7 +7,7 @@ use gruel_air::{
     Air, AirArgMode, AirInstData, AirPattern, AirPlaceBase, AirPlaceRef, AirProjection, AirRef,
     AnalyzedFunction, Type, TypeInternPool,
 };
-use gruel_error::{CompileWarning, WarningKind};
+use gruel_util::{BinOp, CompileWarning, WarningKind};
 
 use crate::CfgOutput;
 use crate::inst::{
@@ -90,7 +90,7 @@ struct LiveSlot {
     /// The type of value stored in the slot
     ty: Type,
     /// The span where the slot became live (for error reporting)
-    span: gruel_span::Span,
+    span: gruel_util::Span,
 }
 
 /// A live parameter that needs dropping at function exit.
@@ -306,14 +306,36 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
-            AirInstData::Add(lhs, rhs) => {
+            // Eager binary ops (arithmetic / comparison / bitwise). The
+            // short-circuit `&&` / `||` are handled as separate Bin arms
+            // below because they need to introduce control flow.
+            AirInstData::Bin(
+                op @ (BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Mod
+                | BinOp::Eq
+                | BinOp::Ne
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::Le
+                | BinOp::Ge
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr),
+                lhs,
+                rhs,
+            ) => {
                 let Some(lhs_val) = self.lower_value(*lhs) else {
                     return Self::diverged();
                 };
                 let Some(rhs_val) = self.lower_value(*rhs) else {
                     return Self::diverged();
                 };
-                let value = self.emit(CfgInstData::Add(lhs_val, rhs_val), ty, span);
+                let value = self.emit(CfgInstData::Bin(*op, lhs_val, rhs_val), ty, span);
                 self.cache(air_ref, value);
                 ExprResult {
                     value: Some(value),
@@ -321,157 +343,7 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
-            AirInstData::Sub(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Sub(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Mul(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Mul(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Div(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Div(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Mod(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Mod(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Eq(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Eq(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Ne(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Ne(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Lt(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Lt(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Gt(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Gt(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Le(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Le(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Ge(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Ge(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::And(lhs, rhs) => {
+            AirInstData::Bin(BinOp::And, lhs, rhs) => {
                 // Short-circuit: if lhs is false, result is false
                 // We need to create blocks for this
                 let Some(lhs_val) = self.lower_value(*lhs) else {
@@ -526,7 +398,7 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
-            AirInstData::Or(lhs, rhs) => {
+            AirInstData::Bin(BinOp::Or, lhs, rhs) => {
                 // Short-circuit: if lhs is true, result is true
                 let Some(lhs_val) = self.lower_value(*lhs) else {
                     return Self::diverged();
@@ -580,35 +452,11 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
-            AirInstData::Neg(operand) => {
+            AirInstData::Unary(op, operand) => {
                 let Some(op_val) = self.lower_value(*operand) else {
                     return Self::diverged();
                 };
-                let value = self.emit(CfgInstData::Neg(op_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Not(operand) => {
-                let Some(op_val) = self.lower_value(*operand) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Not(op_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::BitNot(operand) => {
-                let Some(op_val) = self.lower_value(*operand) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::BitNot(op_val), ty, span);
+                let value = self.emit(CfgInstData::Unary(*op, op_val), ty, span);
                 self.cache(air_ref, value);
                 ExprResult {
                     value: Some(value),
@@ -695,81 +543,6 @@ impl<'a> CfgBuilder<'a> {
                     ty,
                     span,
                 );
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::BitAnd(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::BitAnd(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::BitOr(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::BitOr(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::BitXor(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::BitXor(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Shl(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Shl(lhs_val, rhs_val), ty, span);
-                self.cache(air_ref, value);
-                ExprResult {
-                    value: Some(value),
-                    continuation: Continuation::Continues,
-                }
-            }
-
-            AirInstData::Shr(lhs, rhs) => {
-                let Some(lhs_val) = self.lower_value(*lhs) else {
-                    return Self::diverged();
-                };
-                let Some(rhs_val) = self.lower_value(*rhs) else {
-                    return Self::diverged();
-                };
-                let value = self.emit(CfgInstData::Shr(lhs_val, rhs_val), ty, span);
                 self.cache(air_ref, value);
                 ExprResult {
                     value: Some(value),
@@ -2362,7 +2135,7 @@ impl<'a> CfgBuilder<'a> {
     }
 
     /// Emit an instruction in the current block.
-    fn emit(&mut self, data: CfgInstData, ty: Type, span: gruel_span::Span) -> CfgValue {
+    fn emit(&mut self, data: CfgInstData, ty: Type, span: gruel_util::Span) -> CfgValue {
         self.cfg
             .add_inst_to_block(self.current_block, CfgInst { data, ty, span })
     }
@@ -2404,7 +2177,7 @@ impl<'a> CfgBuilder<'a> {
         scrut: Scrutinee<'_>,
         pattern: &AirPattern,
         targets: BranchTargets,
-        span: gruel_span::Span,
+        span: gruel_util::Span,
     ) {
         let Scrutinee {
             slot: scr_slot,
@@ -2428,13 +2201,13 @@ impl<'a> CfgBuilder<'a> {
             AirPattern::Int(n) => {
                 let val = self.read_projected(scr_slot, scr_ty, projection, span);
                 let lit = self.emit(CfgInstData::Const(*n as u64), scr_ty, span);
-                let cond = self.emit(CfgInstData::Eq(val, lit), Type::BOOL, span);
+                let cond = self.emit(CfgInstData::Bin(BinOp::Eq, val, lit), Type::BOOL, span);
                 self.branch_to(cond, matched, unmatched, span);
             }
             AirPattern::Bool(b) => {
                 let val = self.read_projected(scr_slot, scr_ty, projection, span);
                 let lit = self.emit(CfgInstData::BoolConst(*b), Type::BOOL, span);
-                let cond = self.emit(CfgInstData::Eq(val, lit), Type::BOOL, span);
+                let cond = self.emit(CfgInstData::Bin(BinOp::Eq, val, lit), Type::BOOL, span);
                 self.branch_to(cond, matched, unmatched, span);
             }
             AirPattern::EnumVariant { variant_index, .. }
@@ -2444,7 +2217,7 @@ impl<'a> CfgBuilder<'a> {
                 let val = self.read_projected(scr_slot, scr_ty, projection, span);
                 let disc = self.emit(CfgInstData::GetDiscriminant { base: val }, disc_ty, span);
                 let lit = self.emit(CfgInstData::Const(*variant_index as u64), disc_ty, span);
-                let cond = self.emit(CfgInstData::Eq(disc, lit), Type::BOOL, span);
+                let cond = self.emit(CfgInstData::Bin(BinOp::Eq, disc, lit), Type::BOOL, span);
                 self.branch_to(cond, matched, unmatched, span);
             }
             AirPattern::EnumDataVariant {
@@ -2463,7 +2236,7 @@ impl<'a> CfgBuilder<'a> {
                 let val = self.read_projected(scr_slot, scr_ty, projection, span);
                 let disc = self.emit(CfgInstData::GetDiscriminant { base: val }, disc_ty, span);
                 let lit = self.emit(CfgInstData::Const(*variant_index as u64), disc_ty, span);
-                let cond = self.emit(CfgInstData::Eq(disc, lit), Type::BOOL, span);
+                let cond = self.emit(CfgInstData::Bin(BinOp::Eq, disc, lit), Type::BOOL, span);
                 if all_trivial {
                     self.branch_to(cond, matched, unmatched, span);
                 } else {
@@ -2489,7 +2262,7 @@ impl<'a> CfgBuilder<'a> {
                 let val = self.read_projected(scr_slot, scr_ty, projection, span);
                 let disc = self.emit(CfgInstData::GetDiscriminant { base: val }, disc_ty, span);
                 let lit = self.emit(CfgInstData::Const(*variant_index as u64), disc_ty, span);
-                let cond = self.emit(CfgInstData::Eq(disc, lit), Type::BOOL, span);
+                let cond = self.emit(CfgInstData::Bin(BinOp::Eq, disc, lit), Type::BOOL, span);
                 if all_trivial {
                     self.branch_to(cond, matched, unmatched, span);
                 } else {
@@ -2619,7 +2392,7 @@ impl<'a> CfgBuilder<'a> {
         scr_slot: u32,
         ty: Type,
         projection: &[Projection],
-        span: gruel_span::Span,
+        span: gruel_util::Span,
     ) -> CfgValue {
         let place = self
             .cfg
@@ -2639,7 +2412,7 @@ impl<'a> CfgBuilder<'a> {
         variant_index: u32,
         fields: I,
         targets: BranchTargets,
-        span: gruel_span::Span,
+        span: gruel_util::Span,
     ) where
         I: IntoIterator<Item = (u32, &'p AirPattern)>,
     {
@@ -2748,7 +2521,7 @@ impl<'a> CfgBuilder<'a> {
         cond: CfgValue,
         then_block: BlockId,
         else_block: BlockId,
-        _span: gruel_span::Span,
+        _span: gruel_util::Span,
     ) {
         let (then_args_start, then_args_len) = self.cfg.push_extra(std::iter::empty::<CfgValue>());
         let (else_args_start, else_args_len) = self.cfg.push_extra(std::iter::empty::<CfgValue>());
@@ -2776,7 +2549,7 @@ impl<'a> CfgBuilder<'a> {
         join_block: BlockId,
         result_type: Type,
         air_ref: AirRef,
-        _span: gruel_span::Span,
+        _span: gruel_util::Span,
     ) -> ExprResult {
         let mut all_diverged = true;
         let mut arm_results = Vec::new();
@@ -2854,7 +2627,7 @@ impl<'a> CfgBuilder<'a> {
     /// Re-add a local slot to the current scope after it was previously forgotten.
     /// This handles the case where a variable is moved (forget_local_slot), then
     /// reassigned — the new value needs to be tracked for drop at scope exit.
-    fn re_add_local_slot(&mut self, slot: u32, ty: Type, span: gruel_span::Span) {
+    fn re_add_local_slot(&mut self, slot: u32, ty: Type, span: gruel_util::Span) {
         // Only add if not already tracked (avoid double-tracking)
         let already_tracked = self
             .scope_stack
@@ -2901,7 +2674,7 @@ impl<'a> CfgBuilder<'a> {
 
     /// Emit drops for all live slots in all scopes, plus live params (for return).
     /// Drops are emitted in reverse order (LIFO) across all scopes, then params in reverse order.
-    fn emit_drops_for_all_scopes(&mut self, span: gruel_span::Span) {
+    fn emit_drops_for_all_scopes(&mut self, span: gruel_util::Span) {
         // Collect all live slots in reverse order across all scopes
         let all_slots: Vec<LiveSlot> = self
             .scope_stack
@@ -2924,7 +2697,7 @@ impl<'a> CfgBuilder<'a> {
     /// Emit drops for slots in scopes created inside the current loop (for break/continue).
     /// Only drops slots from the current scope depth down to (but not including) `target_depth`.
     /// This ensures that slots declared outside the loop are NOT dropped.
-    fn emit_drops_for_loop_exit(&mut self, target_depth: usize, span: gruel_span::Span) {
+    fn emit_drops_for_loop_exit(&mut self, target_depth: usize, span: gruel_util::Span) {
         // Collect slots from scopes created inside the loop (depth >= target_depth)
         // in reverse order (LIFO)
         let loop_slots: Vec<LiveSlot> = self
@@ -2941,7 +2714,7 @@ impl<'a> CfgBuilder<'a> {
     }
 
     /// Emit Drop and StorageDead for a single local slot.
-    fn emit_drop_for_slot(&mut self, live_slot: &LiveSlot, span: gruel_span::Span) {
+    fn emit_drop_for_slot(&mut self, live_slot: &LiveSlot, span: gruel_util::Span) {
         // Emit Drop if the type needs it
         if self.type_needs_drop(live_slot.ty) {
             let slot_val = self.emit(
@@ -2965,7 +2738,7 @@ impl<'a> CfgBuilder<'a> {
     /// Emit Drop for a function parameter.
     /// Unlike locals, params don't use StorageLive/StorageDead — they are live for the
     /// entire function. We just need to load and drop the value.
-    fn emit_drop_for_param(&mut self, live_param: &LiveParam, span: gruel_span::Span) {
+    fn emit_drop_for_param(&mut self, live_param: &LiveParam, span: gruel_util::Span) {
         let param_val = self.emit(
             CfgInstData::Param {
                 index: live_param.param_slot,
@@ -3060,7 +2833,7 @@ impl<'a> CfgBuilder<'a> {
         &mut self,
         air_ref: AirRef,
         ty: Type,
-        span: gruel_span::Span,
+        span: gruel_util::Span,
     ) -> Option<CfgValue> {
         // Try to trace the expression to a place
         let (base, projections) = self.try_trace_place(air_ref)?;
@@ -3142,10 +2915,10 @@ impl<'a> CfgBuilder<'a> {
 mod tests {
     use super::*;
     use gruel_air::Sema;
-    use gruel_error::PreviewFeatures;
     use gruel_lexer::Lexer;
     use gruel_parser::Parser;
     use gruel_rir::AstGen;
+    use gruel_util::PreviewFeatures;
 
     fn build_cfg(source: &str) -> Cfg {
         let lexer = Lexer::new(source);

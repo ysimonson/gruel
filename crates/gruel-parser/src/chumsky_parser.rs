@@ -20,9 +20,9 @@ use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
 use chumsky::recovery::via_parser;
 use chumsky::recursive::Direct;
-use gruel_error::{CompileError, CompileErrors, ErrorKind, MultiErrorResult, PreviewFeatures};
 use gruel_lexer::TokenKind;
-use gruel_span::{FileId, Span};
+use gruel_util::{CompileError, CompileErrors, ErrorKind, MultiErrorResult, PreviewFeatures};
+use gruel_util::{FileId, Span};
 use lasso::{Spur, ThreadedRodeo};
 use std::borrow::Cow;
 
@@ -126,19 +126,19 @@ fn offset_to_u32(offset: usize) -> u32 {
     offset as u32
 }
 
-/// Convert chumsky SimpleSpan to gruel_span::Span with a specific file ID.
+/// Convert chumsky SimpleSpan to gruel_util::Span with a specific file ID.
 ///
 /// # Panics
 ///
 /// In debug builds, panics if `span.start` or `span.end` exceeds `u32::MAX`.
 /// This would only happen for source files larger than 4GB.
-fn to_gruel_span_with_file(span: SimpleSpan, file_id: FileId) -> Span {
+fn to_gruel_util_with_file(span: SimpleSpan, file_id: FileId) -> Span {
     Span::with_file(file_id, offset_to_u32(span.start), offset_to_u32(span.end))
 }
 
-/// Convert chumsky SimpleSpan to gruel_span::Span using the default file ID.
+/// Convert chumsky SimpleSpan to gruel_util::Span using the default file ID.
 /// Only used for error conversion where we don't have access to the parser state.
-fn to_gruel_span(span: SimpleSpan) -> Span {
+fn to_gruel_util(span: SimpleSpan) -> Span {
     Span::new(offset_to_u32(span.start), offset_to_u32(span.end))
 }
 
@@ -150,7 +150,7 @@ where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
     let file_id = e.state().0.file_id;
-    to_gruel_span_with_file(e.span(), file_id)
+    to_gruel_util_with_file(e.span(), file_id)
 }
 
 /// Parser that produces Ident from identifier tokens
@@ -3321,7 +3321,7 @@ where
         )
         .map(|(start_span, _): (SimpleSpan, Vec<TokenKind>)| {
             // Convert SimpleSpan to Span
-            Item::Error(to_gruel_span(start_span))
+            Item::Error(to_gruel_util(start_span))
         })
         .boxed()
 }
@@ -3366,7 +3366,7 @@ fn format_pattern(pattern: &chumsky::error::RichPattern<'_, TokenKind>) -> Strin
 
 /// Convert chumsky Rich error to CompileError, preserving rich context.
 fn convert_error(err: Rich<'_, TokenKind>) -> CompileError {
-    let span = to_gruel_span(*err.span());
+    let span = to_gruel_util(*err.span());
 
     // Build the base error from the reason
     let mut error = match err.reason() {
@@ -3406,7 +3406,7 @@ fn convert_error(err: Rich<'_, TokenKind>) -> CompileError {
     // Add labelled contexts as secondary labels
     for (pattern, ctx_span) in err.contexts() {
         let label_msg = format!("while parsing {}", format_pattern(pattern));
-        let label_span = to_gruel_span(*ctx_span);
+        let label_span = to_gruel_util(*ctx_span);
         error = error.with_label(label_msg, label_span);
     }
 
@@ -4659,7 +4659,7 @@ mod tests {
         // Directly test that ParseError displays correctly
         let error = CompileError::new(
             ErrorKind::ParseError("expected semicolon after expression".to_string()),
-            gruel_span::Span::new(0, 10),
+            gruel_util::Span::new(0, 10),
         );
         assert_eq!(error.to_string(), "expected semicolon after expression");
     }
@@ -4682,10 +4682,10 @@ mod tests {
     }
 
     #[test]
-    fn test_to_gruel_span_normal() {
+    fn test_to_gruel_util_normal() {
         // Normal spans should convert without issue
         let simple = SimpleSpan::new(10, 20);
-        let gruel = to_gruel_span(simple);
+        let gruel = to_gruel_util(simple);
         assert_eq!(gruel.start, 10);
         assert_eq!(gruel.end, 20);
     }
@@ -5493,7 +5493,7 @@ mod tests {
     // ==================== ADR-0049 Phase 3: refutability ====================
 
     fn assert_refutable_in_let_err(result: &MultiErrorResult<ParseResult>) {
-        use gruel_error::ErrorKind;
+        use gruel_util::ErrorKind;
         let errors = result.as_ref().expect_err("expected errors");
         let found = errors
             .iter()

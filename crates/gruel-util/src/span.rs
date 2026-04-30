@@ -1,7 +1,7 @@
-//! Source span and location types for the Gruel compiler.
+//! Source span and location types.
 //!
-//! This crate provides the fundamental types for tracking source locations
-//! throughout the compilation pipeline.
+//! Provides the fundamental types for tracking source locations throughout
+//! the compilation pipeline.
 
 /// A file identifier used to track which source file a span belongs to.
 ///
@@ -138,7 +138,7 @@ impl Span {
     /// # Example
     ///
     /// ```
-    /// use gruel_span::Span;
+    /// use gruel_util::span::Span;
     ///
     /// let outer = Span::new(5, 20);
     /// let inner = Span::new(10, 15);
@@ -161,7 +161,7 @@ impl Span {
     /// # Example
     ///
     /// ```
-    /// use gruel_span::Span;
+    /// use gruel_util::span::Span;
     ///
     /// let span = Span::new(5, 10);
     /// assert!(!span.contains_pos(4));  // before span
@@ -271,7 +271,7 @@ pub fn byte_offset_to_line_col(source: &str, offset: usize) -> (usize, usize) {
 /// # Example
 ///
 /// ```
-/// use gruel_span::LineIndex;
+/// use gruel_util::span::LineIndex;
 ///
 /// let source = "line1\nline2\nline3";
 /// let index = LineIndex::new(source);

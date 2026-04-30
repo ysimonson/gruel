@@ -12,10 +12,11 @@
 
 mod astgen;
 mod inst;
+mod print;
 
 pub use astgen::AstGen;
 pub use inst::{
     FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDestructureField,
     RirDirective, RirFunctionView, RirParam, RirParamMode, RirPattern, RirPatternBinding,
-    RirPrinter,
 };
+pub use print::RirPrinter;

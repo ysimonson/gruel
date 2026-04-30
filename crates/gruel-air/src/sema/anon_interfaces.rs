@@ -10,9 +10,9 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
-use gruel_error::{CompileError, CompileResult, ErrorKind};
 use gruel_rir::InstData;
-use gruel_span::Span;
+use gruel_util::Span;
+use gruel_util::{CompileError, CompileResult, ErrorKind};
 use lasso::Spur;
 
 use super::Sema;
@@ -185,7 +185,7 @@ impl<'a> Sema<'a> {
             name,
             methods,
             is_pub: false,
-            file_id: gruel_span::FileId::new(0),
+            file_id: gruel_util::FileId::new(0),
         });
         id
     }

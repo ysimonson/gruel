@@ -22,7 +22,7 @@ mod types;
 
 use gruel_air::TypeInternPool;
 use gruel_cfg::{Cfg, OptLevel};
-use gruel_error::CompileResult;
+use gruel_util::CompileResult;
 use lasso::ThreadedRodeo;
 
 /// Inputs to LLVM codegen, bundled to keep function signatures readable.

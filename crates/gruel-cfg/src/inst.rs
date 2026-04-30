@@ -25,7 +25,7 @@ const _: () = assert!(std::mem::size_of::<CfgInst>() <= 48);
 const _: () = assert!(std::mem::size_of::<CfgInstData>() <= 32);
 
 use gruel_air::{AirParamMode, EnumId, StructId, Type};
-use gruel_span::Span;
+use gruel_util::{BinOp, Span, UnaryOp};
 use lasso::{Key, Spur};
 
 /// Boxed payload for [`CfgInstData::MakeSlice`] (ADR-0064).
@@ -138,13 +138,9 @@ impl fmt::Display for Place {
 }
 
 /// The base of a place - where the memory location starts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlaceBase {
-    /// Local variable slot
-    Local(u32),
-    /// Parameter slot (for parameters, including inout)
-    Param(u32),
-}
+///
+/// Re-export of [`gruel_util::PlaceBase`].
+pub use gruel_util::PlaceBase;
 
 /// A projection applied to a place to reach a nested location.
 ///
@@ -294,52 +290,26 @@ pub enum CfgInstData {
     BytesConst(u32),
 
     /// Reference to a function parameter
-    Param {
-        index: u32,
-    },
+    Param { index: u32 },
 
     /// Block parameter (like phi, but explicit)
     /// Only valid at the start of a block
-    BlockParam {
-        index: u32,
-    },
+    BlockParam { index: u32 },
 
-    // Binary arithmetic operations
-    Add(CfgValue, CfgValue),
-    Sub(CfgValue, CfgValue),
-    Mul(CfgValue, CfgValue),
-    Div(CfgValue, CfgValue),
-    Mod(CfgValue, CfgValue),
+    /// Binary operation: arithmetic, comparison, or bitwise. Short-circuit
+    /// `And`/`Or` (from RIR/AIR) are lowered to control flow during CFG
+    /// construction and never appear here.
+    Bin(BinOp, CfgValue, CfgValue),
 
-    // Comparison operations (return bool)
-    Eq(CfgValue, CfgValue),
-    Ne(CfgValue, CfgValue),
-    Lt(CfgValue, CfgValue),
-    Gt(CfgValue, CfgValue),
-    Le(CfgValue, CfgValue),
-    Ge(CfgValue, CfgValue),
-
-    // Bitwise operations
-    BitAnd(CfgValue, CfgValue),
-    BitOr(CfgValue, CfgValue),
-    BitXor(CfgValue, CfgValue),
-    Shl(CfgValue, CfgValue),
-    Shr(CfgValue, CfgValue),
-
-    // Unary operations
-    Neg(CfgValue),
-    Not(CfgValue),
-    BitNot(CfgValue),
+    /// Unary operation: `-`, `!`, or `~`.
+    Unary(UnaryOp, CfgValue),
 
     /// Reference construction (ADR-0062): produce the address of a place.
     /// `is_mut` is informational; codegen produces the same alloca pointer
     /// (or GEP for projected places) for both immutable and mutable
     /// references — the borrow checker has already enforced exclusivity at
     /// sema time.
-    MakeRef {
-        place: Place,
-        is_mut: bool,
-    },
+    MakeRef { place: Place, is_mut: bool },
 
     /// Slice construction (ADR-0064): produce a fat pointer `{ptr, len}`
     /// over a sub-range of an array place. The payload is boxed to keep
@@ -348,42 +318,26 @@ pub enum CfgInstData {
 
     // Variable operations
     /// Allocate local variable with initial value
-    Alloc {
-        slot: u32,
-        init: CfgValue,
-    },
+    Alloc { slot: u32, init: CfgValue },
     /// Load value from local variable
-    Load {
-        slot: u32,
-    },
+    Load { slot: u32 },
     /// Store value to local variable
-    Store {
-        slot: u32,
-        value: CfgValue,
-    },
+    Store { slot: u32, value: CfgValue },
     /// Store value to a parameter (for inout params)
-    ParamStore {
-        param_slot: u32,
-        value: CfgValue,
-    },
+    ParamStore { param_slot: u32, value: CfgValue },
 
     // Place operations (ADR-0030)
     /// Read a value from a memory location.
     ///
     /// This unifies Load, IndexGet, and FieldGet into a single instruction
     /// that can handle arbitrarily nested access patterns like `arr[i].field`.
-    PlaceRead {
-        place: Place,
-    },
+    PlaceRead { place: Place },
 
     /// Write a value to a memory location.
     ///
     /// This unifies Store, IndexSet, ParamIndexSet, FieldSet, and ParamFieldSet
     /// into a single instruction that can handle nested writes.
-    PlaceWrite {
-        place: Place,
-        value: CfgValue,
-    },
+    PlaceWrite { place: Place, value: CfgValue },
 
     // Function calls
     /// Function call. Arguments are stored in the Cfg's call_args array.
@@ -467,10 +421,7 @@ pub enum CfgInstData {
 
     // Enum operations
     /// Create an enum variant (discriminant value) for unit-only enums.
-    EnumVariant {
-        enum_id: EnumId,
-        variant_index: u32,
-    },
+    EnumVariant { enum_id: EnumId, variant_index: u32 },
 
     /// Create a data enum variant with associated field values.
     /// Used when the enum has at least one data variant.
@@ -549,23 +500,17 @@ pub enum CfgInstData {
     // Drop/destructor operations
     /// Drop a value, running its destructor if the type has one.
     /// For trivially droppable types, this is a no-op that will be elided.
-    Drop {
-        value: CfgValue,
-    },
+    Drop { value: CfgValue },
 
     // Storage liveness operations (for drop elaboration and stack allocation)
     /// Marks that a local slot becomes live (storage allocated).
     /// The slot is now valid to write to.
-    StorageLive {
-        slot: u32,
-    },
+    StorageLive { slot: u32 },
 
     /// Marks that a local slot becomes dead (storage can be deallocated).
     /// The slot is now invalid to read from.
     /// Drop elaboration inserts Drop before this if the type needs drop.
-    StorageDead {
-        slot: u32,
-    },
+    StorageDead { slot: u32 },
 
     /// Coerce a concrete value to an interface fat pointer (ADR-0056).
     ///
@@ -1265,25 +1210,8 @@ impl Cfg {
             CfgInstData::BytesConst(idx) => write!(f, "bytes_const @{}", idx),
             CfgInstData::Param { index } => write!(f, "param {}", index),
             CfgInstData::BlockParam { index } => write!(f, "block_param {}", index),
-            CfgInstData::Add(lhs, rhs) => write!(f, "add {}, {}", lhs, rhs),
-            CfgInstData::Sub(lhs, rhs) => write!(f, "sub {}, {}", lhs, rhs),
-            CfgInstData::Mul(lhs, rhs) => write!(f, "mul {}, {}", lhs, rhs),
-            CfgInstData::Div(lhs, rhs) => write!(f, "div {}, {}", lhs, rhs),
-            CfgInstData::Mod(lhs, rhs) => write!(f, "mod {}, {}", lhs, rhs),
-            CfgInstData::Eq(lhs, rhs) => write!(f, "eq {}, {}", lhs, rhs),
-            CfgInstData::Ne(lhs, rhs) => write!(f, "ne {}, {}", lhs, rhs),
-            CfgInstData::Lt(lhs, rhs) => write!(f, "lt {}, {}", lhs, rhs),
-            CfgInstData::Gt(lhs, rhs) => write!(f, "gt {}, {}", lhs, rhs),
-            CfgInstData::Le(lhs, rhs) => write!(f, "le {}, {}", lhs, rhs),
-            CfgInstData::Ge(lhs, rhs) => write!(f, "ge {}, {}", lhs, rhs),
-            CfgInstData::BitAnd(lhs, rhs) => write!(f, "bit_and {}, {}", lhs, rhs),
-            CfgInstData::BitOr(lhs, rhs) => write!(f, "bit_or {}, {}", lhs, rhs),
-            CfgInstData::BitXor(lhs, rhs) => write!(f, "bit_xor {}, {}", lhs, rhs),
-            CfgInstData::Shl(lhs, rhs) => write!(f, "shl {}, {}", lhs, rhs),
-            CfgInstData::Shr(lhs, rhs) => write!(f, "shr {}, {}", lhs, rhs),
-            CfgInstData::Neg(v) => write!(f, "neg {}", v),
-            CfgInstData::Not(v) => write!(f, "not {}", v),
-            CfgInstData::BitNot(v) => write!(f, "bit_not {}", v),
+            CfgInstData::Bin(op, lhs, rhs) => write!(f, "{} {}, {}", op, lhs, rhs),
+            CfgInstData::Unary(op, v) => write!(f, "{} {}", op, v),
             CfgInstData::MakeRef { place, is_mut } => {
                 write!(f, "make_ref{} {}", if *is_mut { "_mut" } else { "" }, place)
             }

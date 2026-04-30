@@ -1,7 +1,7 @@
-//! Error types for the Gruel compiler.
+//! Error types and compiler diagnostics.
 //!
-//! This crate provides the error infrastructure used throughout the compilation
-//! pipeline. Errors carry source location information for diagnostic rendering.
+//! Provides the error infrastructure used throughout the compilation pipeline.
+//! Errors carry source location information for diagnostic rendering.
 //!
 //! # Diagnostic System
 //!
@@ -9,17 +9,8 @@
 //! - **Labels**: Secondary spans pointing to related code locations
 //! - **Notes**: Informational context about the error/warning
 //! - **Helps**: Actionable suggestions for fixing the issue
-//!
-//! Example:
-//! ```ignore
-//! CompileError::new(ErrorKind::TypeMismatch { ... }, span)
-//!     .with_label("expected because of this", other_span)
-//!     .with_help("consider using a type conversion")
-//! ```
 
-pub mod ice;
-
-use gruel_span::Span;
+use crate::span::Span;
 use rustc_hash::FxHashSet as HashSet;
 use std::borrow::Cow;
 use std::fmt;
@@ -1505,7 +1496,7 @@ pub type MultiErrorResult<T> = Result<T, CompileErrors>;
 ///
 /// # Example
 /// ```ignore
-/// use gruel_error::{OptionExt, ErrorKind};
+/// use gruel_util::{OptionExt, ErrorKind};
 ///
 /// let result = ctx.locals.get(name)
 ///     .ok_or_compile_error(ErrorKind::UndefinedVariable(name_str.to_string()), span)?;

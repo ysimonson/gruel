@@ -5,8 +5,8 @@
 
 mod logos_lexer;
 
-pub use gruel_span::FileId;
-use gruel_span::Span;
+pub use gruel_util::FileId;
+use gruel_util::Span;
 pub use lasso::{Key, Spur, ThreadedRodeo};
 pub use logos_lexer::LogosLexer as Lexer;
 

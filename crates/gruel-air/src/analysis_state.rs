@@ -13,7 +13,7 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
-use gruel_error::CompileWarning;
+use gruel_util::CompileWarning;
 
 /// Per-function mutable state during semantic analysis.
 ///

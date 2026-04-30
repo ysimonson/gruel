@@ -574,7 +574,7 @@ pub struct InterfaceDef {
     /// Whether this interface is public (module-system future work).
     pub is_pub: bool,
     /// File ID this interface was declared in.
-    pub file_id: gruel_span::FileId,
+    pub file_id: gruel_util::FileId,
 }
 
 /// A type slot inside an interface method signature (ADR-0060).
@@ -684,7 +684,7 @@ pub struct StructDef {
     /// Whether this struct is public (visible outside its directory)
     pub is_pub: bool,
     /// File ID this struct was declared in (for visibility checking)
-    pub file_id: gruel_span::FileId,
+    pub file_id: gruel_util::FileId,
 }
 
 /// A field in a struct definition.
@@ -757,7 +757,7 @@ pub struct EnumDef {
     /// Whether this enum is public (visible outside its directory)
     pub is_pub: bool,
     /// File ID this enum was declared in (for visibility checking)
-    pub file_id: gruel_span::FileId,
+    pub file_id: gruel_util::FileId,
     /// User-defined destructor function name, if any (e.g., "Resource.__drop").
     /// ADR-0053 phase 3b. Mirrors `StructDef.destructor`.
     pub destructor: Option<String>,
@@ -2083,7 +2083,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
 
         let (idx, field) = def.find_field("x").unwrap();
@@ -2109,7 +2109,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
         assert_eq!(empty.field_count(), 0);
 
@@ -2135,7 +2135,7 @@ mod tests {
             destructor: None,
             is_builtin: false,
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
         };
         assert_eq!(with_fields.field_count(), 3);
     }
@@ -2148,7 +2148,7 @@ mod tests {
             name: "Empty".to_string(),
             variants: vec![],
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
         assert_eq!(empty.variant_count(), 0);
@@ -2161,7 +2161,7 @@ mod tests {
                 EnumVariantDef::unit("Blue"),
             ],
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
         assert_eq!(color.variant_count(), 3);
@@ -2177,7 +2177,7 @@ mod tests {
                 EnumVariantDef::unit("Blue"),
             ],
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
 
@@ -2193,7 +2193,7 @@ mod tests {
             name: "Empty".to_string(),
             variants: vec![],
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
         assert_eq!(empty.discriminant_type(), Type::NEVER);
@@ -2206,7 +2206,7 @@ mod tests {
             name: "Small".to_string(),
             variants: vec![EnumVariantDef::unit("A")],
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
         assert_eq!(small.discriminant_type(), Type::U8);
@@ -2217,7 +2217,7 @@ mod tests {
                 .map(|i| EnumVariantDef::unit(format!("V{}", i)))
                 .collect(),
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
         assert_eq!(max_u8.discriminant_type(), Type::U8);
@@ -2232,7 +2232,7 @@ mod tests {
                 .map(|i| EnumVariantDef::unit(format!("V{}", i)))
                 .collect(),
             is_pub: false,
-            file_id: gruel_span::FileId::DEFAULT,
+            file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
         };
         assert_eq!(medium.discriminant_type(), Type::U16);

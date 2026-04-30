@@ -8,8 +8,8 @@ use gruel_air::{StructId, Type, TypeInternPool, TypeKind};
 use gruel_cfg::{
     BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator, drop_names,
 };
-use gruel_error::{CompileError, CompileResult, ErrorKind};
 use gruel_intrinsics::{IntrinsicId, lookup_by_name};
+use gruel_util::{BinOp, CompileError, CompileResult, ErrorKind, UnaryOp};
 use inkwell::FloatPredicate;
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
@@ -1408,6 +1408,207 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         Ok(())
     }
 
+    /// Lower a `CfgInstData::Bin` into an LLVM value. Internal cases mirror
+    /// the prior per-variant codegen (float vs. int paths, signed vs.
+    /// unsigned, string compare, overflow-checked arithmetic).
+    fn translate_bin(&mut self, op: BinOp, lhs: CfgValue, rhs: CfgValue) -> BasicValueEnum<'ctx> {
+        let lhs_ty = self.cfg.get_inst(lhs).ty;
+        match op {
+            BinOp::Add | BinOp::Sub | BinOp::Mul => {
+                if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    match op {
+                        BinOp::Add => self.builder.build_float_add(l, r, "fadd").unwrap().into(),
+                        BinOp::Sub => self.builder.build_float_sub(l, r, "fsub").unwrap().into(),
+                        BinOp::Mul => self.builder.build_float_mul(l, r, "fmul").unwrap().into(),
+                        _ => unreachable!(),
+                    }
+                } else {
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    let signed = is_signed_type(lhs_ty);
+                    let intrinsic = match (op, signed) {
+                        (BinOp::Add, true) => "llvm.sadd.with.overflow",
+                        (BinOp::Add, false) => "llvm.uadd.with.overflow",
+                        (BinOp::Sub, true) => "llvm.ssub.with.overflow",
+                        (BinOp::Sub, false) => "llvm.usub.with.overflow",
+                        (BinOp::Mul, true) => "llvm.smul.with.overflow",
+                        (BinOp::Mul, false) => "llvm.umul.with.overflow",
+                        _ => unreachable!(),
+                    };
+                    self.build_checked_int_op(l, r, intrinsic).into()
+                }
+            }
+            BinOp::Div | BinOp::Mod => {
+                if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    if matches!(op, BinOp::Div) {
+                        self.builder.build_float_div(l, r, "fdiv").unwrap().into()
+                    } else {
+                        self.builder.build_float_rem(l, r, "frem").unwrap().into()
+                    }
+                } else {
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    self.build_div_zero_check(r);
+                    let signed = is_signed_type(lhs_ty);
+                    let v = match (op, signed) {
+                        (BinOp::Div, true) => {
+                            self.builder.build_int_signed_div(l, r, "div").unwrap()
+                        }
+                        (BinOp::Div, false) => {
+                            self.builder.build_int_unsigned_div(l, r, "div").unwrap()
+                        }
+                        (BinOp::Mod, true) => {
+                            self.builder.build_int_signed_rem(l, r, "rem").unwrap()
+                        }
+                        (BinOp::Mod, false) => {
+                            self.builder.build_int_unsigned_rem(l, r, "rem").unwrap()
+                        }
+                        _ => unreachable!(),
+                    };
+                    v.into()
+                }
+            }
+            BinOp::Eq => {
+                if gruel_type_to_llvm(lhs_ty, self.ctx, self.type_pool).is_none() {
+                    // Unit == Unit is always true.
+                    self.ctx.bool_type().const_int(1, false).into()
+                } else {
+                    let l = self.get_value(lhs);
+                    let r = self.get_value(rhs);
+                    self.build_value_eq(lhs_ty, l, r).into()
+                }
+            }
+            BinOp::Ne => {
+                if gruel_type_to_llvm(lhs_ty, self.ctx, self.type_pool).is_none() {
+                    self.ctx.bool_type().const_int(0, false).into()
+                } else {
+                    let l = self.get_value(lhs);
+                    let r = self.get_value(rhs);
+                    let eq = self.build_value_eq(lhs_ty, l, r);
+                    self.builder.build_not(eq, "ne").unwrap().into()
+                }
+            }
+            BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                let (sint, uint, fpred, name) = match op {
+                    BinOp::Lt => (
+                        IntPredicate::SLT,
+                        IntPredicate::ULT,
+                        FloatPredicate::OLT,
+                        "lt",
+                    ),
+                    BinOp::Gt => (
+                        IntPredicate::SGT,
+                        IntPredicate::UGT,
+                        FloatPredicate::OGT,
+                        "gt",
+                    ),
+                    BinOp::Le => (
+                        IntPredicate::SLE,
+                        IntPredicate::ULE,
+                        FloatPredicate::OLE,
+                        "le",
+                    ),
+                    BinOp::Ge => (
+                        IntPredicate::SGE,
+                        IntPredicate::UGE,
+                        FloatPredicate::OGE,
+                        "ge",
+                    ),
+                    _ => unreachable!(),
+                };
+                if self.is_builtin_string(lhs_ty) {
+                    let l = self.get_value(lhs);
+                    let r = self.get_value(rhs);
+                    self.build_str_cmp(l, r, sint, &format!("str{}", name))
+                        .into()
+                } else if lhs_ty.is_float() {
+                    let l = self.get_value(lhs).into_float_value();
+                    let r = self.get_value(rhs).into_float_value();
+                    self.builder
+                        .build_float_compare(fpred, l, r, &format!("f{}", name))
+                        .unwrap()
+                        .into()
+                } else {
+                    let l = self.get_value(lhs).into_int_value();
+                    let r = self.get_value(rhs).into_int_value();
+                    let p = if is_signed_type(lhs_ty) { sint } else { uint };
+                    self.builder
+                        .build_int_compare(p, l, r, name)
+                        .unwrap()
+                        .into()
+                }
+            }
+            BinOp::BitAnd => {
+                let l = self.get_value(lhs).into_int_value();
+                let r = self.get_value(rhs).into_int_value();
+                self.builder.build_and(l, r, "and").unwrap().into()
+            }
+            BinOp::BitOr => {
+                let l = self.get_value(lhs).into_int_value();
+                let r = self.get_value(rhs).into_int_value();
+                self.builder.build_or(l, r, "or").unwrap().into()
+            }
+            BinOp::BitXor => {
+                let l = self.get_value(lhs).into_int_value();
+                let r = self.get_value(rhs).into_int_value();
+                self.builder.build_xor(l, r, "xor").unwrap().into()
+            }
+            BinOp::Shl => {
+                let l = self.get_value(lhs).into_int_value();
+                let r = self.get_value(rhs).into_int_value();
+                self.builder.build_left_shift(l, r, "shl").unwrap().into()
+            }
+            BinOp::Shr => {
+                let l = self.get_value(lhs).into_int_value();
+                let r = self.get_value(rhs).into_int_value();
+                let signed = is_signed_type(lhs_ty);
+                self.builder
+                    .build_right_shift(l, r, signed, "shr")
+                    .unwrap()
+                    .into()
+            }
+            BinOp::And | BinOp::Or => {
+                // Short-circuit ops are lowered to control flow during CFG
+                // construction; they should never reach codegen.
+                unreachable!("logical {:?} should have been lowered to control flow", op)
+            }
+        }
+    }
+
+    /// Lower a `CfgInstData::Unary` into an LLVM value.
+    fn translate_unary(&mut self, op: UnaryOp, operand: CfgValue) -> BasicValueEnum<'ctx> {
+        match op {
+            UnaryOp::Neg => {
+                let op_ty = self.cfg.get_inst(operand).ty;
+                if op_ty.is_float() {
+                    let v = self.get_value(operand).into_float_value();
+                    self.builder.build_float_neg(v, "fneg").unwrap().into()
+                } else {
+                    let v = self.get_value(operand).into_int_value();
+                    let zero = v.get_type().const_zero();
+                    self.build_checked_int_op(zero, v, "llvm.ssub.with.overflow")
+                        .into()
+                }
+            }
+            UnaryOp::Not => {
+                let v = self.get_value(operand).into_int_value();
+                let zero = v.get_type().const_zero();
+                self.builder
+                    .build_int_compare(IntPredicate::EQ, v, zero, "not")
+                    .unwrap()
+                    .into()
+            }
+            UnaryOp::BitNot => {
+                let v = self.get_value(operand).into_int_value();
+                self.builder.build_not(v, "bitnot").unwrap().into()
+            }
+        }
+    }
+
     /// Translate a single CFG instruction.
     fn translate_inst(&mut self, val: CfgValue) -> CompileResult<()> {
         let inst = self.cfg.get_inst(val).clone();
@@ -1527,299 +1728,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 return Ok(());
             }
 
-            // ---- Binary arithmetic ----
-            CfgInstData::Add(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if lhs_ty.is_float() {
-                    let l = self.get_value(lhs).into_float_value();
-                    let r = self.get_value(rhs).into_float_value();
-                    Some(self.builder.build_float_add(l, r, "fadd").unwrap().into())
-                } else {
-                    let l = self.get_value(lhs).into_int_value();
-                    let r = self.get_value(rhs).into_int_value();
-                    let intrinsic = if is_signed_type(lhs_ty) {
-                        "llvm.sadd.with.overflow"
-                    } else {
-                        "llvm.uadd.with.overflow"
-                    };
-                    Some(self.build_checked_int_op(l, r, intrinsic).into())
-                }
-            }
-            CfgInstData::Sub(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if lhs_ty.is_float() {
-                    let l = self.get_value(lhs).into_float_value();
-                    let r = self.get_value(rhs).into_float_value();
-                    Some(self.builder.build_float_sub(l, r, "fsub").unwrap().into())
-                } else {
-                    let l = self.get_value(lhs).into_int_value();
-                    let r = self.get_value(rhs).into_int_value();
-                    let intrinsic = if is_signed_type(lhs_ty) {
-                        "llvm.ssub.with.overflow"
-                    } else {
-                        "llvm.usub.with.overflow"
-                    };
-                    Some(self.build_checked_int_op(l, r, intrinsic).into())
-                }
-            }
-            CfgInstData::Mul(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if lhs_ty.is_float() {
-                    let l = self.get_value(lhs).into_float_value();
-                    let r = self.get_value(rhs).into_float_value();
-                    Some(self.builder.build_float_mul(l, r, "fmul").unwrap().into())
-                } else {
-                    let l = self.get_value(lhs).into_int_value();
-                    let r = self.get_value(rhs).into_int_value();
-                    let intrinsic = if is_signed_type(lhs_ty) {
-                        "llvm.smul.with.overflow"
-                    } else {
-                        "llvm.umul.with.overflow"
-                    };
-                    Some(self.build_checked_int_op(l, r, intrinsic).into())
-                }
-            }
-            CfgInstData::Div(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if lhs_ty.is_float() {
-                    let l = self.get_value(lhs).into_float_value();
-                    let r = self.get_value(rhs).into_float_value();
-                    Some(self.builder.build_float_div(l, r, "fdiv").unwrap().into())
-                } else {
-                    let l = self.get_value(lhs).into_int_value();
-                    let r = self.get_value(rhs).into_int_value();
-                    self.build_div_zero_check(r);
-                    let v = if is_signed_type(lhs_ty) {
-                        self.builder.build_int_signed_div(l, r, "div").unwrap()
-                    } else {
-                        self.builder.build_int_unsigned_div(l, r, "div").unwrap()
-                    };
-                    Some(v.into())
-                }
-            }
-            CfgInstData::Mod(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if lhs_ty.is_float() {
-                    let l = self.get_value(lhs).into_float_value();
-                    let r = self.get_value(rhs).into_float_value();
-                    Some(self.builder.build_float_rem(l, r, "frem").unwrap().into())
-                } else {
-                    let l = self.get_value(lhs).into_int_value();
-                    let r = self.get_value(rhs).into_int_value();
-                    self.build_div_zero_check(r);
-                    let v = if is_signed_type(lhs_ty) {
-                        self.builder.build_int_signed_rem(l, r, "rem").unwrap()
-                    } else {
-                        self.builder.build_int_unsigned_rem(l, r, "rem").unwrap()
-                    };
-                    Some(v.into())
-                }
-            }
-
-            // ---- Comparisons (produce i1) ----
-            CfgInstData::Eq(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if gruel_type_to_llvm(lhs_ty, self.ctx, self.type_pool).is_none() {
-                    // Unit == Unit is always true.
-                    Some(self.ctx.bool_type().const_int(1, false).into())
-                } else {
-                    let l = self.get_value(lhs);
-                    let r = self.get_value(rhs);
-                    Some(self.build_value_eq(lhs_ty, l, r).into())
-                }
-            }
-            CfgInstData::Ne(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if gruel_type_to_llvm(lhs_ty, self.ctx, self.type_pool).is_none() {
-                    // Unit != Unit is always false.
-                    Some(self.ctx.bool_type().const_int(0, false).into())
-                } else {
-                    let l = self.get_value(lhs);
-                    let r = self.get_value(rhs);
-                    let eq = self.build_value_eq(lhs_ty, l, r);
-                    // Ne = not(Eq)
-                    Some(self.builder.build_not(eq, "ne").unwrap().into())
-                }
-            }
-            CfgInstData::Lt(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if self.is_builtin_string(lhs_ty) {
-                    let l = self.get_value(lhs);
-                    let r = self.get_value(rhs);
-                    Some(self.build_str_cmp(l, r, IntPredicate::SLT, "strlt").into())
-                } else if lhs_ty.is_float() {
-                    let l = self.get_value(lhs).into_float_value();
-                    let r = self.get_value(rhs).into_float_value();
-                    Some(
-                        self.builder
-                            .build_float_compare(FloatPredicate::OLT, l, r, "flt")
-                            .unwrap()
-                            .into(),
-                    )
-                } else {
-                    let (pred, upred) = (IntPredicate::SLT, IntPredicate::ULT);
-                    let l = self.get_value(lhs).into_int_value();
-                    let r = self.get_value(rhs).into_int_value();
-                    let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                    Some(
-                        self.builder
-                            .build_int_compare(p, l, r, "lt")
-                            .unwrap()
-                            .into(),
-                    )
-                }
-            }
-            CfgInstData::Gt(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if self.is_builtin_string(lhs_ty) {
-                    let l = self.get_value(lhs);
-                    let r = self.get_value(rhs);
-                    Some(self.build_str_cmp(l, r, IntPredicate::SGT, "strgt").into())
-                } else if lhs_ty.is_float() {
-                    let l = self.get_value(lhs).into_float_value();
-                    let r = self.get_value(rhs).into_float_value();
-                    Some(
-                        self.builder
-                            .build_float_compare(FloatPredicate::OGT, l, r, "fgt")
-                            .unwrap()
-                            .into(),
-                    )
-                } else {
-                    let (pred, upred) = (IntPredicate::SGT, IntPredicate::UGT);
-                    let l = self.get_value(lhs).into_int_value();
-                    let r = self.get_value(rhs).into_int_value();
-                    let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                    Some(
-                        self.builder
-                            .build_int_compare(p, l, r, "gt")
-                            .unwrap()
-                            .into(),
-                    )
-                }
-            }
-            CfgInstData::Le(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if self.is_builtin_string(lhs_ty) {
-                    let l = self.get_value(lhs);
-                    let r = self.get_value(rhs);
-                    Some(self.build_str_cmp(l, r, IntPredicate::SLE, "strle").into())
-                } else if lhs_ty.is_float() {
-                    let l = self.get_value(lhs).into_float_value();
-                    let r = self.get_value(rhs).into_float_value();
-                    Some(
-                        self.builder
-                            .build_float_compare(FloatPredicate::OLE, l, r, "fle")
-                            .unwrap()
-                            .into(),
-                    )
-                } else {
-                    let (pred, upred) = (IntPredicate::SLE, IntPredicate::ULE);
-                    let l = self.get_value(lhs).into_int_value();
-                    let r = self.get_value(rhs).into_int_value();
-                    let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                    Some(
-                        self.builder
-                            .build_int_compare(p, l, r, "le")
-                            .unwrap()
-                            .into(),
-                    )
-                }
-            }
-            CfgInstData::Ge(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                if self.is_builtin_string(lhs_ty) {
-                    let l = self.get_value(lhs);
-                    let r = self.get_value(rhs);
-                    Some(self.build_str_cmp(l, r, IntPredicate::SGE, "strge").into())
-                } else if lhs_ty.is_float() {
-                    let l = self.get_value(lhs).into_float_value();
-                    let r = self.get_value(rhs).into_float_value();
-                    Some(
-                        self.builder
-                            .build_float_compare(FloatPredicate::OGE, l, r, "fge")
-                            .unwrap()
-                            .into(),
-                    )
-                } else {
-                    let (pred, upred) = (IntPredicate::SGE, IntPredicate::UGE);
-                    let l = self.get_value(lhs).into_int_value();
-                    let r = self.get_value(rhs).into_int_value();
-                    let p = if is_signed_type(lhs_ty) { pred } else { upred };
-                    Some(
-                        self.builder
-                            .build_int_compare(p, l, r, "ge")
-                            .unwrap()
-                            .into(),
-                    )
-                }
-            }
-
-            // ---- Bitwise ----
-            CfgInstData::BitAnd(lhs, rhs) => {
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                Some(self.builder.build_and(l, r, "and").unwrap().into())
-            }
-            CfgInstData::BitOr(lhs, rhs) => {
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                Some(self.builder.build_or(l, r, "or").unwrap().into())
-            }
-            CfgInstData::BitXor(lhs, rhs) => {
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                Some(self.builder.build_xor(l, r, "xor").unwrap().into())
-            }
-            CfgInstData::Shl(lhs, rhs) => {
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                Some(self.builder.build_left_shift(l, r, "shl").unwrap().into())
-            }
-            CfgInstData::Shr(lhs, rhs) => {
-                let lhs_ty = self.cfg.get_inst(lhs).ty;
-                let l = self.get_value(lhs).into_int_value();
-                let r = self.get_value(rhs).into_int_value();
-                // Arithmetic right shift for signed types; logical for unsigned.
-                let signed = is_signed_type(lhs_ty);
-                Some(
-                    self.builder
-                        .build_right_shift(l, r, signed, "shr")
-                        .unwrap()
-                        .into(),
-                )
-            }
-
-            // ---- Unary ----
-            CfgInstData::Neg(operand) => {
-                let op_ty = self.cfg.get_inst(operand).ty;
-                if op_ty.is_float() {
-                    let v = self.get_value(operand).into_float_value();
-                    Some(self.builder.build_float_neg(v, "fneg").unwrap().into())
-                } else {
-                    let v = self.get_value(operand).into_int_value();
-                    // Negation on signed types: 0 - v, with overflow check.
-                    let zero = v.get_type().const_zero();
-                    Some(
-                        self.build_checked_int_op(zero, v, "llvm.ssub.with.overflow")
-                            .into(),
-                    )
-                }
-            }
-            CfgInstData::Not(operand) => {
-                // Boolean not: compare == 0.
-                let v = self.get_value(operand).into_int_value();
-                let zero = v.get_type().const_zero();
-                Some(
-                    self.builder
-                        .build_int_compare(IntPredicate::EQ, v, zero, "not")
-                        .unwrap()
-                        .into(),
-                )
-            }
-            CfgInstData::BitNot(operand) => {
-                let v = self.get_value(operand).into_int_value();
-                Some(self.builder.build_not(v, "bitnot").unwrap().into())
-            }
+            CfgInstData::Bin(op, lhs, rhs) => Some(self.translate_bin(op, lhs, rhs)),
+            CfgInstData::Unary(op, operand) => Some(self.translate_unary(op, operand)),
 
             // ---- Local variable operations ----
             CfgInstData::Alloc { slot, init } => {

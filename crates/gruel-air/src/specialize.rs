@@ -14,9 +14,9 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
-use gruel_error::{CompileError, CompileResult, ErrorKind};
 use gruel_rir::RirParamMode;
-use gruel_span::Span;
+use gruel_util::Span;
+use gruel_util::{CompileError, CompileResult, ErrorKind};
 use lasso::{Spur, ThreadedRodeo};
 
 use crate::inst::{Air, AirInstData};

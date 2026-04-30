@@ -13,7 +13,7 @@
 //!
 //! See [ADR-0050](../../docs/designs/0050-intrinsics-crate.md).
 
-use gruel_error::PreviewFeature;
+use gruel_util::PreviewFeature;
 
 // ============================================================================
 // Enums

@@ -7,9 +7,9 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_builtins::BuiltinTypeDef;
-use gruel_error::CompileWarning;
 use gruel_rir::RirParamMode;
-use gruel_span::Span;
+use gruel_util::CompileWarning;
+use gruel_util::Span;
 use lasso::Spur;
 
 use crate::scope::ScopedContext;

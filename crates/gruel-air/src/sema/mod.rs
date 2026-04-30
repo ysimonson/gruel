@@ -62,9 +62,9 @@ pub use output::{AnalyzedFunction, InterfaceVtables, SemaOutput};
 
 use rustc_hash::FxHashMap as HashMap;
 
-use gruel_error::{CompileErrors, MultiErrorResult, PreviewFeatures};
 use gruel_rir::Rir;
-use gruel_span::FileId;
+use gruel_util::FileId;
+use gruel_util::{CompileErrors, MultiErrorResult, PreviewFeatures};
 use lasso::{Spur, ThreadedRodeo};
 
 use crate::intern_pool::TypeInternPool;
@@ -117,7 +117,7 @@ pub struct Sema<'a> {
     /// propagate these via `?`; we buffer them here and surface after
     /// analysis so users still see actionable diagnostics for an
     /// `@derive(...)` error on an anonymous struct/enum.
-    pub(crate) pending_anon_derive_errors: Vec<gruel_error::CompileError>,
+    pub(crate) pending_anon_derive_errors: Vec<gruel_util::CompileError>,
     /// Constant table: maps const name symbol to const info
     pub(crate) constants: HashMap<Spur, ConstInfo>,
     /// Enabled preview features
@@ -147,10 +147,10 @@ pub struct Sema<'a> {
     /// Populated when a struct body contains `fn drop(self)`. The analysis pass
     /// looks these up to run `analyze_destructor_function` against the method
     /// body.
-    pub(crate) inline_struct_drops: HashMap<StructId, (gruel_rir::InstRef, gruel_span::Span)>,
+    pub(crate) inline_struct_drops: HashMap<StructId, (gruel_rir::InstRef, gruel_util::Span)>,
     /// Inline destructor bodies keyed by enum id (ADR-0053 phase 3b).
     /// Same contract as `inline_struct_drops` but for enums.
-    pub(crate) inline_enum_drops: HashMap<EnumId, (gruel_rir::InstRef, gruel_span::Span)>,
+    pub(crate) inline_enum_drops: HashMap<EnumId, (gruel_rir::InstRef, gruel_util::Span)>,
     /// Method signatures for anonymous structs, used for structural equality comparison.
     pub(crate) anon_struct_method_sigs: HashMap<StructId, Vec<AnonMethodSig>>,
     /// Captured comptime values for anonymous structs.
@@ -189,7 +189,7 @@ pub struct Sema<'a> {
     /// the format of the runtime `__gruel_dbg_*` functions.
     pub(crate) comptime_dbg_output: Vec<String>,
     /// Pending warnings for comptime `@dbg` calls. Each entry is (message, span).
-    pub(crate) comptime_log_output: Vec<(String, gruel_span::Span)>,
+    pub(crate) comptime_log_output: Vec<(String, gruel_util::Span)>,
     /// When true, comptime `@dbg` does not print to stderr on-the-fly. The output
     /// is still appended to `comptime_dbg_output` and a warning is still emitted.
     /// Set by the `--capture-comptime-dbg` CLI flag (used by the fuzzer).

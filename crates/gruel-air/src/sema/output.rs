@@ -7,7 +7,7 @@
 use crate::inst::{Air, AirParamMode};
 use crate::intern_pool::TypeInternPool;
 use crate::types::{InterfaceDef, InterfaceId, StructId, Type};
-use gruel_error::CompileWarning;
+use gruel_util::CompileWarning;
 use lasso::Spur;
 use rustc_hash::FxHashMap as HashMap;
 

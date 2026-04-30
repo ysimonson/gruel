@@ -8,7 +8,7 @@
 //! Use the [`ice!`] macro for easy ICE creation:
 //!
 //! ```ignore
-//! use gruel_error::ice;
+//! use gruel_util::ice;
 //!
 //! // Simple ICE with just a message
 //! let ctx = ice!("unexpected type in codegen");

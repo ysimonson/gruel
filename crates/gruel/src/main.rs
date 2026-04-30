@@ -173,8 +173,7 @@ struct Options {
     capture_comptime_dbg: bool,
 }
 
-/// Result of parsing command-line arguments (used only by tests).
-#[cfg(test)]
+/// Result of parsing command-line arguments.
 enum ParseResult {
     /// Successfully parsed options.
     Options(Options),
@@ -250,10 +249,15 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
     })
 }
 
-/// Parse arguments from a slice of strings (for testing).
-#[cfg(test)]
-fn parse_args_from(args: &[&str]) -> ParseResult {
-    let argv = std::iter::once("gruel").chain(args.iter().copied());
+/// Parse CLI arguments into [`Options`].
+///
+/// `argv` accepts anything iterable into [`OsString`] — `std::env::args_os()`
+/// at runtime, or a hand-rolled iterator in tests.
+fn parse_args<I, T>(argv: I) -> ParseResult
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
     let cli = match Cli::try_parse_from(argv) {
         Ok(c) => c,
         Err(e) => {
@@ -274,27 +278,6 @@ fn parse_args_from(args: &[&str]) -> ParseResult {
     }
 }
 
-fn parse_args() -> Option<Options> {
-    let cli = match Cli::try_parse() {
-        Ok(c) => c,
-        Err(e) => {
-            use clap::error::ErrorKind;
-            let _ = e.print();
-            match e.kind() {
-                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => std::process::exit(0),
-                _ => return None,
-            }
-        }
-    };
-    match cli_to_options(cli) {
-        Ok(opts) => Some(opts),
-        Err(msg) => {
-            eprintln!("{}", msg);
-            None
-        }
-    }
-}
-
 /// Initialize the tracing subscriber based on CLI options and RUST_LOG.
 ///
 /// Priority: RUST_LOG environment variable takes precedence over --log-level flag.
@@ -309,131 +292,57 @@ fn init_tracing(
     time_passes: bool,
     benchmark_json: bool,
 ) -> Option<timing::TimingData> {
+    use tracing_subscriber::Layer;
     use tracing_subscriber::layer::SubscriberExt;
 
-    // Check if RUST_LOG is set - it takes priority
+    // RUST_LOG takes priority over --log-level.
     let rust_log = std::env::var("RUST_LOG").ok();
-
-    // Determine if we should enable logging
-    let effective_level = if rust_log.is_some() {
-        // RUST_LOG is set, we'll use it for filtering
-        Some(Level::TRACE) // Allow all, let EnvFilter handle it
-    } else {
-        log_level.to_tracing_level()
-    };
-
-    let logging_enabled = effective_level.is_some();
-
-    // Need timing data if either --time-passes or --benchmark-json is specified
+    let logging_enabled = rust_log.is_some() || log_level.to_tracing_level().is_some();
     let needs_timing = time_passes || benchmark_json;
 
-    // If neither logging nor timing is enabled, don't install a subscriber
+    // No subscriber needed when neither feature is on.
     if !logging_enabled && !needs_timing {
         return None;
     }
 
-    // Create timing data if timing is needed
-    let timing_data = if needs_timing {
-        Some(timing::TimingData::new())
-    } else {
-        None
-    };
+    let timing_data = needs_timing.then(timing::TimingData::new);
 
-    // Build the filter (only used if logging is enabled)
-    let filter = if logging_enabled {
-        let f = if let Some(rust_log) = rust_log {
-            // Use RUST_LOG value
-            EnvFilter::try_new(rust_log).unwrap_or_else(|e| {
-                eprintln!("Warning: invalid RUST_LOG value, using default: {}", e);
-                EnvFilter::new(format!(
-                    "{}",
-                    log_level.to_tracing_level().unwrap_or(Level::INFO)
-                ))
-            })
-        } else {
-            // Use --log-level value
-            EnvFilter::new(format!(
-                "{}",
-                log_level.to_tracing_level().unwrap_or(Level::INFO)
-            ))
-        };
-        Some(f)
-    } else {
-        None
-    };
+    let filter = logging_enabled.then(|| match rust_log {
+        Some(value) => EnvFilter::try_new(&value).unwrap_or_else(|e| {
+            eprintln!("Warning: invalid RUST_LOG value, using default: {}", e);
+            EnvFilter::new(
+                log_level
+                    .to_tracing_level()
+                    .unwrap_or(Level::INFO)
+                    .to_string(),
+            )
+        }),
+        None => EnvFilter::new(
+            log_level
+                .to_tracing_level()
+                .unwrap_or(Level::INFO)
+                .to_string(),
+        ),
+    });
 
-    // Build and install the subscriber
-    // We need to handle all combinations of timing + logging
-    match (needs_timing, logging_enabled, log_format) {
-        // Timing only (no logging)
-        (true, false, _) => {
-            let timing_layer = timing::TimingLayer::new(timing_data.clone().unwrap());
-            let subscriber = tracing_subscriber::registry().with(timing_layer);
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("failed to set tracing subscriber");
+    let fmt_layer = logging_enabled.then(|| {
+        let layer = fmt::layer()
+            .with_target(true)
+            .with_span_events(FmtSpan::CLOSE)
+            .with_writer(std::io::stderr);
+        match log_format {
+            LogFormat::Text => layer.boxed(),
+            LogFormat::Json => layer.json().boxed(),
         }
+    });
 
-        // Timing + text logging
-        (true, true, LogFormat::Text) => {
-            let timing_layer = timing::TimingLayer::new(timing_data.clone().unwrap());
-            let subscriber = tracing_subscriber::registry()
-                .with(filter.unwrap())
-                .with(timing_layer)
-                .with(
-                    fmt::layer()
-                        .with_target(true)
-                        .with_span_events(FmtSpan::CLOSE)
-                        .with_writer(std::io::stderr),
-                );
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("failed to set tracing subscriber");
-        }
+    let timing_layer = timing_data.clone().map(timing::TimingLayer::new);
 
-        // Timing + JSON logging
-        (true, true, LogFormat::Json) => {
-            let timing_layer = timing::TimingLayer::new(timing_data.clone().unwrap());
-            let subscriber = tracing_subscriber::registry()
-                .with(filter.unwrap())
-                .with(timing_layer)
-                .with(
-                    fmt::layer()
-                        .json()
-                        .with_target(true)
-                        .with_span_events(FmtSpan::CLOSE)
-                        .with_writer(std::io::stderr),
-                );
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("failed to set tracing subscriber");
-        }
-
-        // Text logging only (no timing)
-        (false, true, LogFormat::Text) => {
-            let subscriber = tracing_subscriber::registry().with(filter.unwrap()).with(
-                fmt::layer()
-                    .with_target(true)
-                    .with_span_events(FmtSpan::CLOSE)
-                    .with_writer(std::io::stderr),
-            );
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("failed to set tracing subscriber");
-        }
-
-        // JSON logging only (no timing)
-        (false, true, LogFormat::Json) => {
-            let subscriber = tracing_subscriber::registry().with(filter.unwrap()).with(
-                fmt::layer()
-                    .json()
-                    .with_target(true)
-                    .with_span_events(FmtSpan::CLOSE)
-                    .with_writer(std::io::stderr),
-            );
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("failed to set tracing subscriber");
-        }
-
-        // Neither timing nor logging - already handled above
-        (false, false, _) => unreachable!(),
-    }
+    let subscriber = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .with(timing_layer);
+    tracing::subscriber::set_global_default(subscriber).expect("failed to set tracing subscriber");
 
     timing_data
 }
@@ -514,9 +423,10 @@ fn get_peak_memory_bytes() -> Option<u64> {
 }
 
 fn main() {
-    let options = match parse_args() {
-        Some(opts) => opts,
-        None => std::process::exit(1),
+    let options = match parse_args(std::env::args_os()) {
+        ParseResult::Options(opts) => opts,
+        ParseResult::Exit => std::process::exit(0),
+        ParseResult::Error => std::process::exit(1),
     };
 
     // Initialize tracing based on CLI options
@@ -880,6 +790,15 @@ fn handle_emit_multi_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drive `parse_args` from a slice of `&str`, prepending the program name
+    /// the same way `std::env::args_os()` would.
+    fn parse_args_from(args: &[&str]) -> ParseResult {
+        let argv: Vec<String> = std::iter::once("gruel".to_string())
+            .chain(args.iter().map(|s| s.to_string()))
+            .collect();
+        parse_args(argv)
+    }
 
     /// Helper to extract Options from ParseResult, panicking if not Options.
     fn unwrap_options(result: ParseResult) -> Options {

@@ -12,9 +12,9 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_builtins::{is_reserved_type_constructor_name, is_reserved_type_name};
-use gruel_error::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
-use gruel_span::Span;
+use gruel_util::Span;
+use gruel_util::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
 use lasso::Spur;
 
 use super::anon_interfaces::decode_receiver_mode;
@@ -226,7 +226,7 @@ impl<'a> Sema<'a> {
         struct RawIface {
             name: Spur,
             is_pub: bool,
-            file_id: gruel_span::FileId,
+            file_id: gruel_util::FileId,
             decl_span: Span,
             methods: Vec<RawIfaceMethod>,
         }

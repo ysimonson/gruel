@@ -5,8 +5,8 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
-use gruel_error::PreviewFeatures;
 use gruel_rir::Rir;
+use gruel_util::PreviewFeatures;
 use lasso::{Spur, ThreadedRodeo};
 
 use crate::intern_pool::TypeInternPool;

@@ -23,32 +23,11 @@ mod tests {
         "BoolConst",
         "StringConst",
         "UnitConst",
-        // Binary arithmetic
-        "Add",
-        "Sub",
-        "Mul",
-        "Div",
-        "Mod",
-        // Comparisons
-        "Eq",
-        "Ne",
-        "Lt",
-        "Gt",
-        "Le",
-        "Ge",
-        // Logical
-        "And",
-        "Or",
-        // Bitwise
-        "BitAnd",
-        "BitOr",
-        "BitXor",
-        "Shl",
-        "Shr",
-        // Unary
-        "Neg",
-        "Not",
-        "BitNot",
+        // Binary ops (the BinOp dispatch covers arithmetic, comparison,
+        // logical, bitwise — the per-op match lives inside Bin).
+        "Bin",
+        // Unary ops (Neg / Not / BitNot are dispatched inside Unary).
+        "Unary",
         // Control flow
         "Branch",
         "Loop",
@@ -237,16 +216,15 @@ mod tests {
         let source = r#"
             match inst.data {
                 InstData::IntConst(_) => {},
-                InstData::Add { lhs, rhs } | InstData::Sub { lhs, rhs } => {},
+                InstData::Bin { op, lhs, rhs } => {},
                 InstData::Call { name, .. } => {},
             }
         "#;
 
         let variants = extract_instdata_variants(source);
         assert!(variants.contains("IntConst"));
-        assert!(variants.contains("Add"));
-        assert!(variants.contains("Sub"));
+        assert!(variants.contains("Bin"));
         assert!(variants.contains("Call"));
-        assert_eq!(variants.len(), 4);
+        assert_eq!(variants.len(), 3);
     }
 }

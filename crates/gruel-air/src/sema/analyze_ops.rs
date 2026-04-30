@@ -22,19 +22,19 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
-use gruel_error::{
-    CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
-    WarningKind,
-};
 use gruel_intrinsics::IntrinsicId;
 use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirDestructureField, RirParamMode, RirPattern,
     RirPatternBinding,
 };
+use gruel_util::{
+    CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
+    WarningKind,
+};
 use lasso::Spur;
 
 use crate::sema::context::ConstValue;
-use gruel_span::Span;
+use gruel_util::{BinOp, Span, UnaryOp};
 
 use super::Sema;
 use super::context::{AnalysisContext, AnalysisResult, LocalVar};
@@ -535,12 +535,23 @@ impl<'a> Sema<'a> {
     ) -> CompileResult<AnalysisResult> {
         let inst = self.rir.get(inst_ref);
 
-        match &inst.data {
-            InstData::Neg { operand } => {
-                // Get the resolved type from HM inference
+        let (op, operand) = match &inst.data {
+            InstData::Unary { op, operand } => (*op, *operand),
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::InternalError(format!(
+                        "analyze_unary_op called with non-unary instruction: {:?}",
+                        inst.data
+                    )),
+                    inst.span,
+                ));
+            }
+        };
+
+        match op {
+            UnaryOp::Neg => {
                 let ty = Self::get_resolved_type(ctx, inst_ref, inst.span, "negation operator")?;
 
-                // Check if trying to negate an unsigned type.
                 if ty.is_unsigned() {
                     return Err(CompileError::new(
                         ErrorKind::CannotNegateUnsigned(ty.name().to_string()),
@@ -550,53 +561,48 @@ impl<'a> Sema<'a> {
                 }
 
                 // Special case: negating a literal that equals |MIN| for signed types.
-                let operand_inst = self.rir.get(*operand);
-                if let InstData::IntConst(value) = &operand_inst.data {
-                    // Check if this value, when negated, fits in the target signed type
-                    if ty.negated_literal_fits(*value) && !ty.literal_fits(*value) {
-                        // This is the MIN value case - store the MIN value directly.
-                        let neg_value = match ty.kind() {
-                            TypeKind::I8 => (i8::MIN as i64) as u64,
-                            TypeKind::I16 => (i16::MIN as i64) as u64,
-                            TypeKind::I32 => (i32::MIN as i64) as u64,
-                            TypeKind::I64 => i64::MIN as u64,
-                            _ => unreachable!(),
-                        };
-                        let air_ref = air.add_inst(AirInst {
-                            data: AirInstData::Const(neg_value),
-                            ty,
-                            span: inst.span,
-                        });
-                        return Ok(AnalysisResult::new(air_ref, ty));
-                    }
+                let operand_inst = self.rir.get(operand);
+                if let InstData::IntConst(value) = &operand_inst.data
+                    && ty.negated_literal_fits(*value)
+                    && !ty.literal_fits(*value)
+                {
+                    let neg_value = match ty.kind() {
+                        TypeKind::I8 => (i8::MIN as i64) as u64,
+                        TypeKind::I16 => (i16::MIN as i64) as u64,
+                        TypeKind::I32 => (i32::MIN as i64) as u64,
+                        TypeKind::I64 => i64::MIN as u64,
+                        _ => unreachable!(),
+                    };
+                    let air_ref = air.add_inst(AirInst {
+                        data: AirInstData::Const(neg_value),
+                        ty,
+                        span: inst.span,
+                    });
+                    return Ok(AnalysisResult::new(air_ref, ty));
                 }
 
-                let operand_result = self.analyze_inst(air, *operand, ctx)?;
-
+                let operand_result = self.analyze_inst(air, operand, ctx)?;
                 let air_ref = air.add_inst(AirInst {
-                    data: AirInstData::Neg(operand_result.air_ref),
+                    data: AirInstData::Unary(UnaryOp::Neg, operand_result.air_ref),
                     ty,
                     span: inst.span,
                 });
                 Ok(AnalysisResult::new(air_ref, ty))
             }
 
-            InstData::Not { operand } => {
-                let operand_result = self.analyze_inst(air, *operand, ctx)?;
-
+            UnaryOp::Not => {
+                let operand_result = self.analyze_inst(air, operand, ctx)?;
                 let air_ref = air.add_inst(AirInst {
-                    data: AirInstData::Not(operand_result.air_ref),
+                    data: AirInstData::Unary(UnaryOp::Not, operand_result.air_ref),
                     ty: Type::BOOL,
                     span: inst.span,
                 });
                 Ok(AnalysisResult::new(air_ref, Type::BOOL))
             }
 
-            InstData::BitNot { operand } => {
-                // Get the resolved type from HM inference
+            UnaryOp::BitNot => {
                 let ty = Self::get_resolved_type(ctx, inst_ref, inst.span, "bitwise NOT operator")?;
 
-                // Bitwise NOT operates on integer types only
                 if !ty.is_integer() && !ty.is_error() && !ty.is_never() {
                     return Err(CompileError::new(
                         ErrorKind::TypeMismatch {
@@ -607,23 +613,14 @@ impl<'a> Sema<'a> {
                     ));
                 }
 
-                let operand_result = self.analyze_inst(air, *operand, ctx)?;
-
+                let operand_result = self.analyze_inst(air, operand, ctx)?;
                 let air_ref = air.add_inst(AirInst {
-                    data: AirInstData::BitNot(operand_result.air_ref),
+                    data: AirInstData::Unary(UnaryOp::BitNot, operand_result.air_ref),
                     ty,
                     span: inst.span,
                 });
                 Ok(AnalysisResult::new(air_ref, ty))
             }
-
-            _ => Err(CompileError::new(
-                ErrorKind::InternalError(format!(
-                    "analyze_unary_op called with non-unary instruction: {:?}",
-                    inst.data
-                )),
-                inst.span,
-            )),
         }
     }
 
@@ -864,7 +861,10 @@ impl<'a> Sema<'a> {
     fn const_int_value(&self, inst_ref: InstRef) -> Option<i128> {
         match &self.rir.get(inst_ref).data {
             InstData::IntConst(v) => Some(*v as i128),
-            InstData::Neg { operand } => self.const_int_value(*operand).map(|v| -v),
+            InstData::Unary {
+                op: UnaryOp::Neg,
+                operand,
+            } => self.const_int_value(*operand).map(|v| -v),
             _ => None,
         }
     }
@@ -884,39 +884,31 @@ impl<'a> Sema<'a> {
     ) -> CompileResult<AnalysisResult> {
         let inst = self.rir.get(inst_ref);
 
-        match &inst.data {
-            InstData::And { lhs, rhs } => {
-                let lhs_result = self.analyze_inst(air, *lhs, ctx)?;
-                let rhs_result = self.analyze_inst(air, *rhs, ctx)?;
-
-                let air_ref = air.add_inst(AirInst {
-                    data: AirInstData::And(lhs_result.air_ref, rhs_result.air_ref),
-                    ty: Type::BOOL,
-                    span: inst.span,
-                });
-                Ok(AnalysisResult::new(air_ref, Type::BOOL))
+        let (op, lhs, rhs) = match &inst.data {
+            InstData::Bin {
+                op: op @ (BinOp::And | BinOp::Or),
+                lhs,
+                rhs,
+            } => (*op, *lhs, *rhs),
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::InternalError(format!(
+                        "analyze_logical_op called with non-logical instruction: {:?}",
+                        inst.data
+                    )),
+                    inst.span,
+                ));
             }
+        };
 
-            InstData::Or { lhs, rhs } => {
-                let lhs_result = self.analyze_inst(air, *lhs, ctx)?;
-                let rhs_result = self.analyze_inst(air, *rhs, ctx)?;
-
-                let air_ref = air.add_inst(AirInst {
-                    data: AirInstData::Or(lhs_result.air_ref, rhs_result.air_ref),
-                    ty: Type::BOOL,
-                    span: inst.span,
-                });
-                Ok(AnalysisResult::new(air_ref, Type::BOOL))
-            }
-
-            _ => Err(CompileError::new(
-                ErrorKind::InternalError(format!(
-                    "analyze_logical_op called with non-logical instruction: {:?}",
-                    inst.data
-                )),
-                inst.span,
-            )),
-        }
+        let lhs_result = self.analyze_inst(air, lhs, ctx)?;
+        let rhs_result = self.analyze_inst(air, rhs, ctx)?;
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Bin(op, lhs_result.air_ref, rhs_result.air_ref),
+            ty: Type::BOOL,
+            span: inst.span,
+        });
+        Ok(AnalysisResult::new(air_ref, Type::BOOL))
     }
 
     // ========================================================================
@@ -1401,7 +1393,7 @@ impl<'a> Sema<'a> {
             span,
         });
         let cond_ref = air.add_inst(AirInst {
-            data: AirInstData::Lt(counter_load_for_cond, end_result.air_ref),
+            data: AirInstData::Bin(BinOp::Lt, counter_load_for_cond, end_result.air_ref),
             ty: Type::BOOL,
             span,
         });
@@ -1459,7 +1451,7 @@ impl<'a> Sema<'a> {
             span,
         });
         let incremented = air.add_inst(AirInst {
-            data: AirInstData::Add(counter_load_for_inc, stride_air),
+            data: AirInstData::Bin(BinOp::Add, counter_load_for_inc, stride_air),
             ty: iter_type,
             span,
         });
@@ -1607,7 +1599,7 @@ impl<'a> Sema<'a> {
             span,
         });
         let cond_ref = air.add_inst(AirInst {
-            data: AirInstData::Lt(counter_load_for_cond, len_const),
+            data: AirInstData::Bin(BinOp::Lt, counter_load_for_cond, len_const),
             ty: Type::BOOL,
             span,
         });
@@ -1685,7 +1677,7 @@ impl<'a> Sema<'a> {
             span,
         });
         let incremented = air.add_inst(AirInst {
-            data: AirInstData::Add(counter_load_for_inc, one_const),
+            data: AirInstData::Bin(BinOp::Add, counter_load_for_inc, one_const),
             ty: Type::I32,
             span,
         });
@@ -1851,7 +1843,7 @@ impl<'a> Sema<'a> {
             span,
         });
         let cond_ref = air.add_inst(AirInst {
-            data: AirInstData::Lt(counter_load_for_cond, len_call),
+            data: AirInstData::Bin(BinOp::Lt, counter_load_for_cond, len_call),
             ty: Type::BOOL,
             span,
         });
@@ -1922,7 +1914,7 @@ impl<'a> Sema<'a> {
             span,
         });
         let inc = air.add_inst(AirInst {
-            data: AirInstData::Add(counter_load_for_inc, one),
+            data: AirInstData::Bin(BinOp::Add, counter_load_for_inc, one),
             ty: Type::USIZE,
             span,
         });

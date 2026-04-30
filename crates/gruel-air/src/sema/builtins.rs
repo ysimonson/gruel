@@ -52,7 +52,7 @@ impl<'a> Sema<'a> {
                 destructor: builtin.drop_fn.map(|s| s.to_string()),
                 is_builtin: true,
                 is_pub: true,                        // Built-in types are always public
-                file_id: gruel_span::FileId::new(0), // Synthetic, no source file
+                file_id: gruel_util::FileId::new(0), // Synthetic, no source file
             };
 
             // Register in type pool and get pool-based StructId
@@ -86,7 +86,7 @@ impl<'a> Sema<'a> {
                 name: builtin_enum.name.to_string(),
                 variants,
                 is_pub: true,                        // Built-in enums are always public
-                file_id: gruel_span::FileId::new(0), // Synthetic, no source file
+                file_id: gruel_util::FileId::new(0), // Synthetic, no source file
                 destructor: None,
             };
 
@@ -132,7 +132,7 @@ impl<'a> Sema<'a> {
                     return_type: IfaceTy::Concrete(Type::UNIT),
                 }],
                 is_pub: true,
-                file_id: gruel_span::FileId::new(0),
+                file_id: gruel_util::FileId::new(0),
             });
             self.interfaces.insert(drop_name, id);
         }
@@ -149,7 +149,7 @@ impl<'a> Sema<'a> {
                     return_type: IfaceTy::SelfType,
                 }],
                 is_pub: true,
-                file_id: gruel_span::FileId::new(0),
+                file_id: gruel_util::FileId::new(0),
             });
             self.interfaces.insert(copy_name, id);
         }

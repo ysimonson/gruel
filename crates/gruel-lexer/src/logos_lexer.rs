@@ -3,8 +3,8 @@
 //! This module provides a lexer implementation using the logos derive macro
 //! for efficient tokenization.
 
-use gruel_error::{CompileError, CompileResult, ErrorKind};
-use gruel_span::{FileId, Span};
+use gruel_util::{CompileError, CompileResult, ErrorKind};
+use gruel_util::{FileId, Span};
 use lasso::{Spur, ThreadedRodeo};
 use logos::Logos;
 
@@ -492,7 +492,7 @@ impl<'a> LogosLexer<'a> {
                     });
                 }
                 Err(lex_error) => {
-                    let gruel_span =
+                    let gruel_util =
                         Span::with_file(self.file_id, span.start as u32, span.end as u32);
                     let slice = lexer.slice();
                     let error_char = slice.chars().next().unwrap_or('?');
@@ -510,7 +510,7 @@ impl<'a> LogosLexer<'a> {
                         }
                         LexError::UnterminatedString => ErrorKind::UnterminatedString,
                     };
-                    return Err(CompileError::new(kind, gruel_span));
+                    return Err(CompileError::new(kind, gruel_util));
                 }
             }
         }

@@ -27,6 +27,7 @@
 
 mod diagnostic;
 mod drop_glue;
+mod link;
 mod unit;
 
 pub use unit::CompilationUnit;
@@ -38,124 +39,22 @@ pub use diagnostic::{
     ColorChoice, JsonDiagnostic, JsonSpan, JsonSuggestion, MultiFileFormatter,
     MultiFileJsonFormatter, SourceInfo,
 };
-
-use std::io::Write;
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-// ============================================================================
-// Error Helper Functions
-// ============================================================================
-
-/// Convert an I/O result into a `CompileResult` with a contextual message.
-///
-/// This helper wraps `std::io::Error` with a descriptive message explaining
-/// what operation failed.
-///
-/// # Example
-/// ```ignore
-/// std::fs::create_dir_all(&path).map_err(|e| io_link_error("failed to create temp directory", e))?;
-/// ```
-fn io_link_error(context: &str, err: std::io::Error) -> CompileError {
-    CompileError::without_span(ErrorKind::LinkError(format!("{}: {}", context, err)))
-}
-
-/// Counter for generating unique temp directory names.
-static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// A temporary directory for linking that automatically cleans up on drop.
-///
-/// This struct manages the creation of a unique temporary directory for the
-/// linking process and automatically removes it when dropped (whether via
-/// normal completion or early error return).
-struct TempLinkDir {
-    /// Path to the temporary directory.
-    path: PathBuf,
-    /// Paths to the object files written to the directory.
-    obj_paths: Vec<PathBuf>,
-    /// Path to the runtime archive in the directory.
-    runtime_path: PathBuf,
-    /// Path where the linked executable will be written.
-    output_path: PathBuf,
-}
-
-impl TempLinkDir {
-    /// Create a new temporary directory for linking.
-    ///
-    /// Creates a unique directory in the system temp directory with the
-    /// format `gruel-<pid>-<counter>` to ensure uniqueness even in parallel
-    /// test execution.
-    fn new() -> CompileResult<Self> {
-        let unique_id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("gruel-{}-{}", std::process::id(), unique_id));
-        std::fs::create_dir_all(&path)
-            .map_err(|e| io_link_error("failed to create temp directory", e))?;
-
-        let runtime_path = path.join("libgruel_runtime.a");
-        let output_path = path.join("output");
-
-        Ok(Self {
-            path,
-            obj_paths: Vec::new(),
-            runtime_path,
-            output_path,
-        })
-    }
-
-    /// Write object files to the temporary directory.
-    ///
-    /// Each object file is written to a file named `obj{N}.o` where N is
-    /// the index. The paths are stored in `self.obj_paths`.
-    fn write_object_files(&mut self, object_files: &[Vec<u8>]) -> CompileResult<()> {
-        for (i, obj_bytes) in object_files.iter().enumerate() {
-            let obj_path = self.path.join(format!("obj{}.o", i));
-            let mut file = std::fs::File::create(&obj_path)
-                .map_err(|e| io_link_error("failed to create temp object file", e))?;
-            file.write_all(obj_bytes)
-                .map_err(|e| io_link_error("failed to write temp object file", e))?;
-            self.obj_paths.push(obj_path);
-        }
-        Ok(())
-    }
-
-    /// Write the runtime archive to the temporary directory.
-    fn write_runtime(&self, runtime_bytes: &[u8]) -> CompileResult<()> {
-        std::fs::write(&self.runtime_path, runtime_bytes)
-            .map_err(|e| io_link_error("failed to write runtime archive", e))
-    }
-
-    /// Read the linked executable from the output path.
-    fn read_output(&self) -> CompileResult<Vec<u8>> {
-        std::fs::read(&self.output_path)
-            .map_err(|e| io_link_error("failed to read linked executable", e))
-    }
-}
-
-impl Drop for TempLinkDir {
-    fn drop(&mut self) {
-        // Best-effort cleanup; ignore errors
-        let _ = std::fs::remove_dir_all(&self.path);
-    }
-}
-
-/// The gruel-runtime staticlib archive bytes, embedded at compile time.
-/// This is linked into every Gruel executable.
-static RUNTIME_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libgruel_runtime.a"));
+pub use link::LinkerMode;
+use link::link_system_with_warnings;
 
 // Re-export commonly used types
 pub use gruel_air::{Air, AnalyzedFunction, Sema, SemaOutput, StructDef, Type, TypeInternPool};
 pub use gruel_cfg::{Cfg, CfgBuilder, CfgOutput, OptLevel};
-pub use gruel_error::{
+pub use gruel_lexer::{Lexer, Token, TokenKind};
+pub use gruel_parser::{Ast, Expr, Function, Item, Parser};
+pub use gruel_rir::{AstGen, Rir, RirPrinter};
+pub use gruel_target::{Arch, Target};
+pub use gruel_util::{
     Applicability, CompileError, CompileErrors, CompileResult, CompileWarning, Diagnostic,
     ErrorCode, ErrorKind, MultiErrorResult, PreviewFeature, PreviewFeatures, Suggestion,
     WarningKind,
 };
-pub use gruel_lexer::{Lexer, Token, TokenKind};
-pub use gruel_parser::{Ast, Expr, Function, Item, Parser};
-pub use gruel_rir::{AstGen, Rir, RirPrinter};
-pub use gruel_span::{FileId, Span};
-pub use gruel_target::{Arch, Target};
+pub use gruel_util::{FileId, Span};
 pub use lasso::{Spur, ThreadedRodeo};
 
 // ============================================================================
@@ -236,7 +135,7 @@ pub struct ParsedProgram {
 ///
 /// ```ignore
 /// use gruel_compiler::{SourceFile, parse_all_files};
-/// use gruel_span::FileId;
+/// use gruel_util::FileId;
 ///
 /// let sources = vec![
 ///     SourceFile::new("main.gruel", "fn main() -> i32 { 0 }", FileId::new(1)),
@@ -340,7 +239,7 @@ struct SymbolDef {
 ///
 /// ```ignore
 /// use gruel_compiler::{parse_all_files, merge_symbols, SourceFile};
-/// use gruel_span::FileId;
+/// use gruel_util::FileId;
 ///
 /// let sources = vec![
 ///     SourceFile::new("main.gruel", "fn main() -> i32 { helper() }", FileId::new(1)),
@@ -696,19 +595,6 @@ pub fn validate_and_generate_rir_parallel(
         interner,
         file_paths,
     })
-}
-
-/// Which linker to use for the final linking phase.
-///
-/// The Gruel compiler can either use its built-in ELF linker or delegate to
-/// an external system linker like `clang`, `gcc`, or `ld`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum LinkerMode {
-    /// Use the internal linker (default).
-    #[default]
-    Internal,
-    /// Use an external system linker (e.g., "clang", "ld", "gcc").
-    System(String),
 }
 
 /// Configuration options for compilation.
@@ -1226,7 +1112,7 @@ pub fn compile_with_options(
 ///
 /// ```ignore
 /// use gruel_compiler::{SourceFile, CompileOptions, compile_multi_file_with_options};
-/// use gruel_span::FileId;
+/// use gruel_util::FileId;
 ///
 /// let sources = vec![
 ///     SourceFile::new("main.gruel", "fn main() -> i32 { helper() }", FileId::new(1)),
@@ -1262,90 +1148,6 @@ pub fn compile_multi_file_with_options(
     // Use CompilationUnit for the entire pipeline
     let mut unit = CompilationUnit::new(sources.to_vec(), options.clone());
     unit.run_all()
-}
-
-/// Link using an external system linker.
-fn link_system_with_warnings(
-    options: &CompileOptions,
-    object_files: &[Vec<u8>],
-    linker_cmd: &str,
-    warnings: &[CompileWarning],
-) -> MultiErrorResult<CompileOutput> {
-    let _span = info_span!("linker", mode = "system", command = linker_cmd).entered();
-
-    // Set up temporary directory with object files and runtime
-    let mut temp_dir = TempLinkDir::new().map_err(CompileErrors::from)?;
-    temp_dir
-        .write_object_files(object_files)
-        .map_err(CompileErrors::from)?;
-    temp_dir
-        .write_runtime(RUNTIME_BYTES)
-        .map_err(CompileErrors::from)?;
-
-    // Build the linker command
-    let mut cmd = Command::new(linker_cmd);
-
-    // Add target-specific linker flags.
-    // We use -nostartfiles (not -nostdlib) because the runtime provides its own
-    // _start/_main entry points but relies on libc for syscalls.
-    if options.target.is_macho() {
-        // macOS-specific flags
-        cmd.arg("-nostartfiles");
-        cmd.arg("-arch").arg("arm64");
-        cmd.arg("-e").arg("__main");
-    } else {
-        // Linux/ELF-specific flags
-        // Dynamic linking lets ld.so initialize libc (TLS, malloc, stdio)
-        // before jumping to our _start. We only skip the C startup files
-        // since the runtime provides its own _start entry point.
-        cmd.arg("-nostartfiles");
-    }
-
-    cmd.arg("-o");
-    cmd.arg(&temp_dir.output_path);
-
-    // Add object files
-    for path in &temp_dir.obj_paths {
-        cmd.arg(path);
-    }
-
-    // Add the runtime library
-    cmd.arg(&temp_dir.runtime_path);
-
-    // macOS requires libSystem for syscalls
-    if options.target.is_macho() {
-        cmd.arg("-lSystem");
-    }
-
-    // Run the linker
-    let output = cmd.output().map_err(|e| {
-        CompileErrors::from(CompileError::without_span(ErrorKind::LinkError(format!(
-            "failed to execute linker '{}': {}",
-            linker_cmd, e
-        ))))
-    })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // temp_dir is dropped here, cleaning up automatically
-        return Err(CompileErrors::from(CompileError::without_span(
-            ErrorKind::LinkError(format!("linker '{}' failed: {}", linker_cmd, stderr)),
-        )));
-    }
-
-    // Read the resulting executable
-    let elf = temp_dir.read_output().map_err(CompileErrors::from)?;
-    info!(
-        object_count = object_files.len(),
-        output_bytes = elf.len(),
-        "linking complete"
-    );
-
-    // temp_dir is dropped here, cleaning up automatically
-    Ok(CompileOutput {
-        elf,
-        warnings: warnings.to_vec(),
-    })
 }
 
 // ============================================================================
