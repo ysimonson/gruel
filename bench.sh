@@ -104,25 +104,37 @@ fi
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m)
 
-# Build the compiler
+# Create temp directory for outputs (also used for the build log so we can
+# surface full cargo output on failure without leaving stray files behind).
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# Build the compiler.
+# A naked `cargo build ... | tail -3` hides the rustc diagnostic and leaves
+# only the trailing "could not compile X" summary lines, which is useless
+# for diagnosis (especially in CI). Capture the full log and dump it on
+# failure; on success, keep the original short tail for cleanliness.
 log_info "Building gruel compiler ($BUILD_MODE mode)..."
+BUILD_LOG="$TEMP_DIR/build.log"
 if [[ "$BUILD_MODE" == "release" ]]; then
-    cargo build -p gruel --release 2>&1 | tail -3
+    build_cmd=(cargo build -p gruel --release)
     GRUEL_BIN="$SCRIPT_DIR/target/release/gruel"
 else
-    cargo build -p gruel 2>&1 | tail -3
+    build_cmd=(cargo build -p gruel)
     GRUEL_BIN="$SCRIPT_DIR/target/debug/gruel"
 fi
+if ! "${build_cmd[@]}" >"$BUILD_LOG" 2>&1; then
+    log_error "Build failed. Full cargo output:"
+    cat "$BUILD_LOG" >&2
+    exit 1
+fi
+tail -3 "$BUILD_LOG"
 if [[ ! -x "$GRUEL_BIN" ]]; then
     log_error "Failed to find gruel binary at: $GRUEL_BIN"
     exit 1
 fi
 
 log_info "Using compiler: $GRUEL_BIN"
-
-# Create temp directory for outputs
-TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
 
 # Parse manifest and run benchmarks
 log_info "Running benchmarks ($ITERATIONS iterations each)..."
