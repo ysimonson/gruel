@@ -501,6 +501,7 @@ impl<'a> Sema<'a> {
                         name: struct_name,
                         fields: Vec::new(), // Filled in during resolve_declarations
                         is_copy,
+                        is_clone: false, // Filled in during resolve_declarations after fields known
                         is_handle,
                         is_linear: *is_linear,
                         destructor: None,  // Filled in during resolve_declarations

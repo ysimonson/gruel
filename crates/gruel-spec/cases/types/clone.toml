@@ -135,3 +135,44 @@ fn main() -> i32 {
 }
 """
 exit_code = 3
+
+# A function bounded on Clone can be instantiated with multiple types.
+[[case]]
+name = "clone_interface_multiple_instantiations"
+spec = ["3.8:70", "3.8:71", "3.8:73"]
+description = "Clone-bound generic accepts both String and primitives"
+source = """
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_clone(String, "abc");
+    use_clone(i32, 7);
+    use_clone(bool, true);
+    0
+}
+"""
+exit_code = 0
+
+# A user struct with a clone method directly calls it.
+[[case]]
+name = "clone_interface_user_struct_direct_call"
+spec = ["3.8:70", "3.8:71"]
+description = "User struct with hand-written clone is callable directly"
+source = """
+struct Wrap {
+    n: i32,
+
+    fn clone(borrow self) -> Wrap {
+        Wrap { n: self.n }
+    }
+}
+
+fn main() -> i32 {
+    let w = Wrap { n: 42 };
+    let w2 = w.clone();
+    w2.n
+}
+"""
+exit_code = 42

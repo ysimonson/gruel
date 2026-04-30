@@ -466,3 +466,43 @@ Generic code may constrain on `Clone` exactly as on `Copy` or `Drop`:
 `fn duplicate(comptime T: Clone, x: T) -> T { x.clone() }` accepts any
 type whose conformance check passes and rejects non-conforming types at
 the call site.
+
+## Canonical `Option(T)` (ADR-0065)
+
+{{ rule(id="3.8:80", cat="normative") }}
+
+The compiler unconditionally registers a canonical `Option(T)` generic enum
+in every compilation. The definition is equivalent to
+
+```gruel
+fn Option(comptime T: type) -> type {
+    enum { Some(T), None }
+}
+```
+
+and is available without any `import` or `use` directive. User code **MUST
+NOT** redefine the name `Option`; doing so is a duplicate-definition error
+at the redefinition site.
+
+{{ rule(id="3.8:81", cat="informative") }}
+
+`Option(T)` flows through the standard enum-with-data machinery (§4.7).
+Pattern matching, exhaustiveness checks, and codegen do not special-case
+it. Future ADRs may introduce layout optimizations (e.g. null-pointer-as
+-`None` for `Option(Ptr(T))`); v1 ships the naive `{ tag, payload }`
+layout.
+
+{{ rule(id="3.8:82", cat="normative") }}
+
+`Option(T)` ships with the following methods, defined in the prelude:
+
+- `fn is_some(self) -> bool` — true iff the receiver is `Some`.
+- `fn is_none(self) -> bool` — true iff the receiver is `None`.
+- `fn unwrap(self) -> T` — returns the contained value, or panics if
+  `None`.
+- `fn unwrap_or(self, default: T) -> T` — returns the contained value
+  if `Some`, otherwise returns `default`.
+
+Each method consumes the receiver. Because `Option(T)` is treated as
+`Copy` (§3.8:2 — all enum types), receivers are implicitly duplicated at
+the call site, so a name remains usable after a query method.

@@ -1,0 +1,70 @@
+[section]
+id = "types.option"
+spec_chapter = "3.8"
+name = "Canonical Option(T) (ADR-0065)"
+description = "Tests for the prelude-registered Option(T) generic enum."
+
+# `Option(T)` is available without any user declaration.
+[[case]]
+name = "option_prelude_some"
+spec = ["3.8:80"]
+description = "Option(i32)::Some constructed from the prelude"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::Some(42);
+    match x {
+        O::Some(n) => n,
+        O::None => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "option_prelude_none"
+spec = ["3.8:80"]
+description = "Option(i32)::None evaluates to the alternative branch"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::None;
+    match x {
+        O::Some(n) => n,
+        O::None => 7,
+    }
+}
+"""
+exit_code = 7
+
+[[case]]
+name = "option_prelude_string_payload"
+spec = ["3.8:80"]
+description = "Option(String) carries a heap-owning payload"
+source = """
+fn main() -> i32 {
+    let O = Option(String);
+    let x: O = O::Some("hi");
+    match x {
+        O::Some(s) => @cast(s.len()),
+        O::None => 0,
+    }
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "option_prelude_shadow_rejected"
+spec = ["3.8:80"]
+description = "User cannot redefine Option since the prelude registers it"
+source = """
+fn Option(comptime T: type) -> type {
+    enum { Some(T), None }
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "duplicate"

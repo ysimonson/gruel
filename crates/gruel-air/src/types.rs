@@ -670,6 +670,11 @@ pub struct StructDef {
     pub fields: Vec<StructField>,
     /// Whether this struct is marked with @copy (can be implicitly duplicated)
     pub is_copy: bool,
+    /// Whether this struct is marked with @derive(Clone) (compiler-synthesized
+    /// recursive clone). ADR-0065. Mutually compatible with `is_copy` because
+    /// every Copy type is automatically Clone, but `@derive(Clone)` can also
+    /// be applied to affine types whose fields are all `Clone`.
+    pub is_clone: bool,
     /// Whether this struct is marked with @handle (can be explicitly duplicated via .handle())
     pub is_handle: bool,
     /// Whether this struct is a linear type (must be consumed, cannot be dropped)
@@ -2078,6 +2083,7 @@ mod tests {
                 },
             ],
             is_copy: false,
+            is_clone: false,
             is_handle: false,
             is_linear: false,
             destructor: None,
@@ -2104,6 +2110,7 @@ mod tests {
             name: "Empty".to_string(),
             fields: vec![],
             is_copy: false,
+            is_clone: false,
             is_handle: false,
             is_linear: false,
             destructor: None,
@@ -2130,6 +2137,7 @@ mod tests {
                 },
             ],
             is_copy: false,
+            is_clone: false,
             is_handle: false,
             is_linear: false,
             destructor: None,
