@@ -13,6 +13,10 @@
 #   ./bench.sh --help             # Show usage
 
 set -e
+# Without pipefail, `cargo build | tail -3` would mask a build failure
+# behind tail's success. Pipefail makes the pipeline exit non-zero if
+# any command in it fails.
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCHMARKS_DIR="$SCRIPT_DIR/benchmarks"
@@ -225,6 +229,9 @@ for i in "${!benchmark_names[@]}"; do
             # macOS: -l gives max resident set size in bytes
             if ! timing_json=$(/usr/bin/time -l "$GRUEL_BIN" --benchmark-json "$opt_flag" "$full_path" "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
+                log_warn "  --- gruel stderr ---"
+                sed 's/^/  /' "$time_output" >&2 || true
+                log_warn "  --- end stderr ---"
                 rm -f "$time_output"
                 continue
             fi
@@ -234,6 +241,9 @@ for i in "${!benchmark_names[@]}"; do
             # Linux: -v gives max resident set size in KB
             if ! timing_json=$(/usr/bin/time -v "$GRUEL_BIN" --benchmark-json "$opt_flag" "$full_path" "$output_binary" 2>"$time_output"); then
                 log_warn "  Iteration $iter failed, skipping"
+                log_warn "  --- gruel stderr ---"
+                sed 's/^/  /' "$time_output" >&2 || true
+                log_warn "  --- end stderr ---"
                 rm -f "$time_output"
                 continue
             fi
