@@ -153,6 +153,26 @@ impl<'a> Sema<'a> {
             });
             self.interfaces.insert(copy_name, id);
         }
+
+        // ADR-0065: Clone is the third compiler-recognized interface.
+        // `fn clone(borrow self) -> Self`. Conformance is determined by
+        // `check_clone_conformance` in conformance.rs.
+        let clone_name = self.interner.get_or_intern_static("Clone");
+        if !self.interfaces.contains_key(&clone_name) {
+            let id = InterfaceId(self.interface_defs.len() as u32);
+            self.interface_defs.push(InterfaceDef {
+                name: "Clone".to_string(),
+                methods: vec![InterfaceMethodReq {
+                    name: "clone".to_string(),
+                    receiver: ReceiverMode::Borrow,
+                    param_types: Vec::new(),
+                    return_type: IfaceTy::SelfType,
+                }],
+                is_pub: true,
+                file_id: gruel_util::FileId::new(0),
+            });
+            self.interfaces.insert(clone_name, id);
+        }
     }
 
     // ========================================================================

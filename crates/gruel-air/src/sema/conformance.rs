@@ -69,6 +69,11 @@ impl<'a> Sema<'a> {
         if iface_def.name == "Drop" {
             return self.check_drop_conformance(candidate, interface_id, use_span);
         }
+        if iface_def.name == "Clone"
+            && let Some(witness) = self.check_clone_short_circuit(candidate, interface_id, use_span)
+        {
+            return witness;
+        }
 
         let candidate_struct_id = match candidate.kind() {
             TypeKind::Struct(id) => id,
@@ -216,6 +221,47 @@ impl<'a> Sema<'a> {
             });
         }
         Err(self.iface_method_missing(candidate, interface_id, "copy", use_span))
+    }
+
+    /// Built-in short-circuit for the `Clone` interface (ADR-0065).
+    ///
+    /// Returns `Some(...)` to short-circuit the regular method-table check:
+    /// - Linear types never conform.
+    /// - Copy types automatically conform (bitwise-copy synthesis).
+    /// - Built-in types with a `clone` method (e.g. `String`) conform via
+    ///   the built-in method registry.
+    ///
+    /// Returns `None` to fall through to the regular method-table check
+    /// (used for affine user types that have written `fn clone(borrow self)
+    /// -> Self` themselves or via `@derive(Clone)`).
+    fn check_clone_short_circuit(
+        &self,
+        candidate: Type,
+        interface_id: InterfaceId,
+        use_span: Span,
+    ) -> Option<CompileResult<ConformanceWitness>> {
+        if self.is_type_linear(candidate) {
+            return Some(Err(self.iface_method_missing(
+                candidate,
+                interface_id,
+                "clone",
+                use_span,
+            )));
+        }
+        if self.is_type_copy(candidate) {
+            return Some(Ok(ConformanceWitness {
+                slot_methods: Vec::new(),
+            }));
+        }
+        if let TypeKind::Struct(struct_id) = candidate.kind()
+            && let Some(builtin) = self.get_builtin_type_def(struct_id)
+            && builtin.find_method("clone").is_some()
+        {
+            return Some(Ok(ConformanceWitness {
+                slot_methods: Vec::new(),
+            }));
+        }
+        None
     }
 
     /// Built-in conformance for the `Drop` interface (ADR-0059).

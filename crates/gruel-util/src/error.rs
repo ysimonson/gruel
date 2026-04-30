@@ -320,6 +320,8 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// Clone interface and canonical Option(T) (ADR-0065).
+    CloneAndOption,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -351,6 +353,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::CloneAndOption => "ADR-0065",
         }
     }
 
@@ -1963,7 +1966,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, clone_and_option");
     }
 
     // ========================================================================

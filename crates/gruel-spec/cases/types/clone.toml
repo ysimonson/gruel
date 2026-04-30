@@ -1,0 +1,137 @@
+[section]
+id = "types.clone"
+spec_chapter = "3.8"
+name = "Clone Interface (ADR-0065)"
+description = "Tests for the compiler-recognized Clone structural interface."
+
+# A `comptime T: Clone` bound accepts a Copy primitive (auto-conformance).
+[[case]]
+name = "clone_interface_accepts_copy_primitive"
+spec = ["3.8:70", "3.8:71"]
+description = "comptime T: Clone accepts i32 via Copy auto-conformance"
+source = """
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_clone(i32, 7)
+}
+"""
+exit_code = 0
+
+# A `comptime T: Clone` bound accepts a `@derive(Copy)` struct (Copy → Clone).
+[[case]]
+name = "clone_interface_accepts_derive_copy_struct"
+spec = ["3.8:70", "3.8:71"]
+description = "comptime T: Clone accepts a @derive(Copy) struct"
+source = """
+@derive(Copy)
+struct Pair { x: i32, y: i32 }
+
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_clone(Pair, Pair { x: 1, y: 2 })
+}
+"""
+exit_code = 0
+
+# A `comptime T: Clone` bound accepts the built-in `String` type.
+[[case]]
+name = "clone_interface_accepts_string"
+spec = ["3.8:70", "3.8:71"]
+description = "comptime T: Clone accepts String via built-in clone method"
+source = """
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_clone(String, "hello");
+    0
+}
+"""
+exit_code = 0
+
+# A user affine struct with `fn clone(borrow self) -> Self` conforms.
+[[case]]
+name = "clone_interface_accepts_user_struct_with_clone_method"
+spec = ["3.8:70", "3.8:71"]
+description = "comptime T: Clone accepts a user struct with a clone method"
+source = """
+struct Foo {
+    fn clone(borrow self) -> Foo { Foo {} }
+}
+
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_clone(Foo, Foo {});
+    0
+}
+"""
+exit_code = 0
+
+# A user affine struct WITHOUT a clone method does NOT conform.
+[[case]]
+name = "clone_interface_rejects_struct_without_clone_method"
+spec = ["3.8:71"]
+description = "comptime T: Clone rejects affine struct without clone method"
+source = """
+struct Foo {}
+
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_clone(Foo, Foo {});
+    0
+}
+"""
+compile_fail = true
+error_contains = "does not conform to interface `Clone`"
+
+# A `linear` type does NOT conform to Clone.
+[[case]]
+name = "clone_interface_rejects_linear"
+spec = ["3.8:72"]
+description = "comptime T: Clone rejects linear types"
+source = """
+linear struct MustUse { value: i32 }
+
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_clone(MustUse, MustUse { value: 1 });
+    0
+}
+"""
+compile_fail = true
+error_contains = "does not conform to interface `Clone`"
+
+# Calling .clone() on a String through a Clone-bounded generic works.
+[[case]]
+name = "clone_interface_dispatch_on_string"
+spec = ["3.8:70", "3.8:71"]
+description = "Calling clone() on a Clone-bound generic resolves to the built-in String clone"
+source = """
+fn duplicate(comptime T: Clone, x: T) -> T {
+    x.clone()
+}
+
+fn main() -> i32 {
+    let s: String = "abc";
+    let s2 = duplicate(String, s);
+    let len: usize = s2.len();
+    @cast(len)
+}
+"""
+exit_code = 3

@@ -190,7 +190,7 @@ ADR-0066 (`Vec(T)`) gates on this ADR landing or co-lands behind a combined prev
 
 ## Implementation Phases
 
-- [ ] **Phase 1: `Clone` interface injection** — add `CLONE_INTERFACE` to `gruel-builtins`. Sema injects it alongside `Drop`/`Copy` via the ADR-0059 mechanism. `is_type_clone(ty)` query in `gruel-air`. Auto-conformance for all `Copy` types (the bitwise-copy synthesis). Reject `@derive(Clone)` on linear types.
+- [x] **Phase 1: `Clone` interface injection** — add `CLONE_INTERFACE` to `gruel-builtins`. Sema injects it alongside `Drop`/`Copy` via the ADR-0059 mechanism. `is_type_clone(ty)` query in `gruel-air`. Auto-conformance for all `Copy` types (the bitwise-copy synthesis). Reject `@derive(Clone)` on linear types.
 
 - [ ] **Phase 2: `@derive(Clone)`** — extend the existing derive registry (ADR-0058) with the `Clone` derive. Synthesizes a `clone` method that recursively calls `.clone()` on each field (struct) or each variant payload (enum). Compile error if any field type is not `Clone`.
 

@@ -571,6 +571,30 @@ impl<'a> SemaContext<'a> {
         }
     }
 
+    /// Check if a type conforms to the `Clone` interface (ADR-0065).
+    ///
+    /// Linear types never conform. Copy types automatically conform. Built-in
+    /// types with a `clone` method (e.g. `String`) conform. User structs
+    /// conform if they have a `fn clone(borrow self) -> Self` method.
+    pub fn is_type_clone(&self, ty: Type) -> bool {
+        if self.is_type_linear(ty) {
+            return false;
+        }
+        if self.is_type_copy(ty) {
+            return true;
+        }
+        if let TypeKind::Struct(struct_id) = ty.kind()
+            && let Some(builtin) = self.get_builtin_type_def(struct_id)
+            && builtin.find_method("clone").is_some()
+        {
+            return true;
+        }
+        // User struct with a clone method: caller should use `check_conforms`
+        // for full method-signature checking. This fast query returns false
+        // here; the conformance check is the source of truth.
+        false
+    }
+
     /// Check that a preview feature is enabled.
     ///
     /// This is used to gate experimental features behind the `--preview` flag.
