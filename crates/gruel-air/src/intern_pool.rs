@@ -1099,6 +1099,36 @@ impl TypeInternPool {
         }
     }
 
+    /// Check if a type is linear (must be explicitly consumed, can't be
+    /// implicitly dropped — ADR-0008).
+    ///
+    /// Linearity propagates through compound types (ADR-0067):
+    /// - `Struct(S)` is linear iff `S` was declared `linear struct`.
+    /// - `[T; N]` is linear iff `N > 0` and `T` is linear.
+    /// - `Vec(T)` is linear iff `T` is linear.
+    /// - `Enum(E)` is linear iff any variant payload is linear.
+    /// - All other types are non-linear.
+    pub fn is_type_linear(&self, ty: Type) -> bool {
+        match ty.kind() {
+            TypeKind::Struct(struct_id) => self.struct_def(struct_id).is_linear,
+            TypeKind::Array(array_id) => {
+                let (element_type, length) = self.array_def(array_id);
+                length > 0 && self.is_type_linear(element_type)
+            }
+            TypeKind::Vec(vec_id) => {
+                let element_type = self.vec_def(vec_id);
+                self.is_type_linear(element_type)
+            }
+            TypeKind::Enum(enum_id) => {
+                let def = self.enum_def(enum_id);
+                def.variants
+                    .iter()
+                    .any(|v| v.fields.iter().any(|f| self.is_type_linear(*f)))
+            }
+            _ => false,
+        }
+    }
+
     /// Get all `Vec(T)` type IDs registered in the pool (ADR-0066).
     pub fn all_vec_ids(&self) -> Vec<VecTypeId> {
         let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);

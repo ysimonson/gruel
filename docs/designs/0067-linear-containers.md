@@ -195,7 +195,7 @@ For `Vec(T:Linear)` — the codegen-emitted Vec drop function would *also* need 
 - **Vec(T:Linear).clone is rejected.** Cloning a linear value isn't well-defined (would create a second linear obligation), so `Clone` doesn't conform — but generic code that bounds `T: Clone` won't accept `Vec(T:Linear)`. Same trade as for individual linear values.
 - **`unwrap` rejection for linear T may surprise users.** `let x = opt.unwrap()` is the idiomatic way to extract a value; rejecting it for linear T forces the user into `match`. The error message must be clear.
 - **Runtime cost on dispose.** A branch on `len != 0` per dispose call. Negligible but not zero.
-- **Two `is_type_linear` definitions to keep in sync.** The duplication between `sema/builtins.rs` and `sema_context.rs` is pre-existing; this ADR adds the same recursion logic to both. A future cleanup could DRY these up.
+- ~~**Two `is_type_linear` definitions to keep in sync.**~~ Resolved in this ADR's implementation: the recursion logic now lives once on `TypeInternPool::is_type_linear`; both `Sema::is_type_linear` and `SemaContext::is_type_linear` delegate to it.
 
 ### Neutral
 
