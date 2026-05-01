@@ -724,12 +724,17 @@ pub struct StructDef {
 }
 
 /// A field in a struct definition.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StructField {
     /// Field name
     pub name: String,
     /// Field type
     pub ty: Type,
+    /// ADR-0072: whether this field is private. Currently only set on
+    /// synthetic builtins (e.g. `String::bytes`); user-defined struct
+    /// fields are always public until the visibility / module system
+    /// lands.
+    pub is_private: bool,
 }
 
 impl StructDef {
@@ -2127,10 +2132,12 @@ mod tests {
                 StructField {
                     name: "x".to_string(),
                     ty: Type::I32,
+                    is_private: false,
                 },
                 StructField {
                     name: "y".to_string(),
                     ty: Type::I32,
+                    is_private: false,
                 },
             ],
             is_copy: false,
@@ -2177,14 +2184,17 @@ mod tests {
                 StructField {
                     name: "a".to_string(),
                     ty: Type::I32,
+                    is_private: false,
                 },
                 StructField {
                     name: "b".to_string(),
                     ty: Type::BOOL,
+                    is_private: false,
                 },
                 StructField {
                     name: "c".to_string(),
                     ty: Type::I64,
+                    is_private: false,
                 },
             ],
             is_copy: false,

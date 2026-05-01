@@ -998,8 +998,9 @@ mod tests {
         assert_eq!(stats.enum_count, 5);
         // No arrays in Phase 1
         assert_eq!(stats.array_count, 0);
-        // Total: 8 composite types
-        assert_eq!(stats.total, 8);
+        // Total: 9 composite types — adds Vec(u8) interned by String's
+        // synthetic `bytes` field per ADR-0072.
+        assert_eq!(stats.total, 9);
     }
 
     #[test]

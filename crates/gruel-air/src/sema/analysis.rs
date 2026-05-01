@@ -2691,6 +2691,7 @@ impl<'a> Sema<'a> {
                     struct_fields.push(StructField {
                         name: name_str,
                         ty: field_ty,
+                        is_private: false,
                     });
                 }
 
@@ -2954,6 +2955,17 @@ impl<'a> Sema<'a> {
                     },
                     span,
                 )?;
+
+            // ADR-0072: reject writes to private fields.
+            if struct_field.is_private {
+                return Err(CompileError::new(
+                    ErrorKind::PrivateField {
+                        struct_name: struct_def.name.clone(),
+                        field_name: field_name_str.clone(),
+                    },
+                    span,
+                ));
+            }
 
             let field_type = struct_field.ty;
 
@@ -5557,6 +5569,7 @@ impl<'a> Sema<'a> {
                     struct_fields.push(StructField {
                         name: name_str,
                         ty: field_ty,
+                        is_private: false,
                     });
                 }
 
@@ -5913,6 +5926,7 @@ impl<'a> Sema<'a> {
                     struct_fields.push(StructField {
                         name: name_str,
                         ty: field_ty,
+                        is_private: false,
                     });
                 }
 
@@ -6544,10 +6558,12 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "kind".to_string(),
                 ty: typekind_type,
+                is_private: false,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
+                is_private: false,
             },
         ];
         let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::default());
@@ -6578,18 +6594,22 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "kind".to_string(),
                 ty: typekind_type,
+                is_private: false,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
+                is_private: false,
             },
             StructField {
                 name: "bits".to_string(),
                 ty: Type::I32,
+                is_private: false,
             },
             StructField {
                 name: "is_signed".to_string(),
                 ty: Type::BOOL,
+                is_private: false,
             },
         ];
         let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::default());
@@ -6638,10 +6658,12 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
+                is_private: false,
             },
             StructField {
                 name: "field_type".to_string(),
                 ty: Type::COMPTIME_TYPE,
+                is_private: false,
             },
         ];
         let (field_info_type, _) =
@@ -6673,18 +6695,22 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "kind".to_string(),
                 ty: typekind_type,
+                is_private: false,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
+                is_private: false,
             },
             StructField {
                 name: "field_count".to_string(),
                 ty: Type::I32,
+                is_private: false,
             },
             StructField {
                 name: "fields".to_string(),
                 ty: fields_array_type,
+                is_private: false,
             },
         ];
         let (info_type, _) =
@@ -6751,10 +6777,12 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
+                is_private: false,
             },
             StructField {
                 name: "field_type".to_string(),
                 ty: Type::COMPTIME_TYPE,
+                is_private: false,
             },
         ];
         let (field_info_type, _) =
@@ -6789,14 +6817,17 @@ impl<'a> Sema<'a> {
                 StructField {
                     name: "name".to_string(),
                     ty: Type::COMPTIME_STR,
+                    is_private: false,
                 },
                 StructField {
                     name: "field_count".to_string(),
                     ty: Type::I32,
+                    is_private: false,
                 },
                 StructField {
                     name: "fields".to_string(),
                     ty: vfields_array_type,
+                    is_private: false,
                 },
             ];
             let (variant_info_type, _) =
@@ -6827,14 +6858,17 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
+                is_private: false,
             },
             StructField {
                 name: "field_count".to_string(),
                 ty: Type::I32,
+                is_private: false,
             },
             StructField {
                 name: "fields".to_string(),
                 ty: empty_fields_array_type,
+                is_private: false,
             },
         ];
         let (variant_info_type, _) =
@@ -6847,18 +6881,22 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "kind".to_string(),
                 ty: typekind_type,
+                is_private: false,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
+                is_private: false,
             },
             StructField {
                 name: "variant_count".to_string(),
                 ty: Type::I32,
+                is_private: false,
             },
             StructField {
                 name: "variants".to_string(),
                 ty: variants_array_type,
+                is_private: false,
             },
         ];
         let (info_type, _) =

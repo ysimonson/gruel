@@ -32,9 +32,9 @@
 //! pub static VEC_TYPE: BuiltinTypeDef = BuiltinTypeDef {
 //!     name: "Vec",  // How users refer to it in source code
 //!     fields: &[
-//!         BuiltinField { name: "ptr", ty: BuiltinFieldType::U64 },
-//!         BuiltinField { name: "len", ty: BuiltinFieldType::U64 },
-//!         BuiltinField { name: "cap", ty: BuiltinFieldType::U64 },
+//!         BuiltinField { name: "ptr", ty: BuiltinFieldType::U64, private: false },
+//!         BuiltinField { name: "len", ty: BuiltinFieldType::U64, private: false },
+//!         BuiltinField { name: "cap", ty: BuiltinFieldType::U64, private: false },
 //!     ],
 //!     is_copy: false,  // Vec owns heap memory, so it's a move type
 //!     drop_fn: Some("__gruel_drop_Vec"),  // Runtime destructor
@@ -163,6 +163,11 @@ pub enum BuiltinFieldType {
     U8,
     /// Boolean
     Bool,
+    /// Reference to another built-in parameterized type, given by source-form
+    /// name (e.g. `"Vec(u8)"`). Sema is responsible for parsing and resolving
+    /// this string to the corresponding `Type`. Used by ADR-0072 to define
+    /// `String` as a synthetic struct with a single `bytes: Vec(u8)` field.
+    BuiltinType(&'static str),
 }
 
 /// A field in a built-in struct.
@@ -172,6 +177,11 @@ pub struct BuiltinField {
     pub name: &'static str,
     /// Field type
     pub ty: BuiltinFieldType,
+    /// Whether this field is private (rejected by sema when accessed outside
+    /// the built-in's own methods). Defaults to false. Per ADR-0072 this is
+    /// used to hide synthetic-struct internals (currently `String::bytes`)
+    /// without committing to a full visibility / module system.
+    pub private: bool,
 }
 
 /// How the receiver is passed to a method.
@@ -295,31 +305,22 @@ pub struct BuiltinTypeDef {
 
 /// The built-in String type.
 ///
-/// Layout: `{ ptr: u64, len: u64, cap: u64 }` (24 bytes)
-///
-/// - `ptr`: Pointer to heap-allocated byte buffer (or .rodata for literals)
-/// - `len`: Current length in bytes
-/// - `cap`: Capacity of allocated buffer (0 for .rodata literals)
+/// ADR-0072: `String` is a synthetic struct containing a single private
+/// `bytes: Vec(u8)` field. The runtime in-memory layout — `{ ptr, len,
+/// cap }`, 24 bytes on 64-bit — is identical to `Vec(u8)`, so conversions
+/// between the two are zero-cost. The single `bytes` field is private:
+/// sema rejects user code that attempts to read or write it. Method
+/// bodies on `String` are the only sites with access to the inner buffer.
 ///
 /// String is a move type (not Copy) because it owns heap-allocated memory.
-/// The drop function checks `cap > 0` before freeing, allowing .rodata
-/// literals (with `cap = 0`) to be safely dropped without freeing.
+/// The drop function delegates to `Vec(u8)`'s drop logic.
 pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
     name: "String",
-    fields: &[
-        BuiltinField {
-            name: "ptr",
-            ty: BuiltinFieldType::U64,
-        },
-        BuiltinField {
-            name: "len",
-            ty: BuiltinFieldType::U64,
-        },
-        BuiltinField {
-            name: "cap",
-            ty: BuiltinFieldType::U64,
-        },
-    ],
+    fields: &[BuiltinField {
+        name: "bytes",
+        ty: BuiltinFieldType::BuiltinType("Vec(u8)"),
+        private: true,
+    }],
     is_copy: false,
     drop_fn: Some("__gruel_drop_String"),
     operators: &[
@@ -801,6 +802,7 @@ impl BuiltinFieldType {
             BuiltinFieldType::U64 => "u64",
             BuiltinFieldType::U8 => "u8",
             BuiltinFieldType::Bool => "bool",
+            BuiltinFieldType::BuiltinType(name) => name,
         }
     }
 }
@@ -1075,14 +1077,18 @@ mod tests {
     #[test]
     fn test_string_type_exists() {
         assert_eq!(STRING_TYPE.name, "String");
-        assert_eq!(STRING_TYPE.fields.len(), 3);
+        // ADR-0072: single private `bytes: Vec(u8)` field.
+        assert_eq!(STRING_TYPE.fields.len(), 1);
+        assert_eq!(STRING_TYPE.fields[0].name, "bytes");
+        assert!(STRING_TYPE.fields[0].private);
         assert!(!STRING_TYPE.is_copy);
         assert_eq!(STRING_TYPE.drop_fn, Some("__gruel_drop_String"));
     }
 
     #[test]
     fn test_string_slot_count() {
-        assert_eq!(STRING_TYPE.slot_count(), 3);
+        // One ABI slot — the inner Vec(u8) — per ADR-0072.
+        assert_eq!(STRING_TYPE.slot_count(), 1);
     }
 
     #[test]

@@ -99,6 +99,7 @@ impl ErrorCode {
     pub const DERIVE_NOT_A_DERIVE: Self = Self(441);
     pub const DEPRECATED_DIRECTIVE: Self = Self(442);
     pub const UNDEFINED_METHOD: Self = Self(411);
+    pub const PRIVATE_FIELD: Self = Self(443);
     pub const UNDEFINED_ASSOC_FN: Self = Self(412);
     pub const METHOD_CALL_ON_NON_STRUCT: Self = Self(413);
     pub const METHOD_CALLED_AS_ASSOC_FN: Self = Self(414);
@@ -886,6 +887,13 @@ pub enum ErrorKind {
         struct_name: String,
         field_name: String,
     },
+    /// ADR-0072: access to a private field of a synthetic builtin struct
+    /// from outside that builtin's own methods.
+    #[error("field '{field_name}' of '{struct_name}' is private")]
+    PrivateField {
+        struct_name: String,
+        field_name: String,
+    },
     #[error("duplicate field '{field_name}' in struct '{struct_name}'")]
     DuplicateField {
         struct_name: String,
@@ -1238,6 +1246,7 @@ impl ErrorKind {
             ErrorKind::MissingFields(_) => ErrorCode::MISSING_FIELDS,
             ErrorKind::MissingFieldInDestructure { .. } => ErrorCode::MISSING_FIELDS,
             ErrorKind::UnknownField { .. } => ErrorCode::UNKNOWN_FIELD,
+            ErrorKind::PrivateField { .. } => ErrorCode::PRIVATE_FIELD,
             ErrorKind::DuplicateField { .. } => ErrorCode::DUPLICATE_FIELD,
             ErrorKind::EmptyStruct => ErrorCode::EMPTY_STRUCT,
             ErrorKind::EmptyAnonEnum => ErrorCode::EMPTY_STRUCT, // reuse code

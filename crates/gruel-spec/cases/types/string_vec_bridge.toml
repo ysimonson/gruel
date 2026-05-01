@@ -15,6 +15,7 @@ description = "Tests for ADR-0072: String as a newtype wrapper over Vec(u8)."
 name = "private_bytes_field_rejected"
 spec = ["7.4:1", "7.4:10"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = String::new();
@@ -31,6 +32,7 @@ error_contains = "private"
 name = "empty_string_is_valid_utf8"
 spec = ["7.4:2"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = String::new();

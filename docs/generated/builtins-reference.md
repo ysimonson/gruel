@@ -43,9 +43,7 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 
 | Field | Type |
 |---|---|
-| `ptr` | `u64` |
-| `len` | `u64` |
-| `cap` | `u64` |
+| `bytes` | `Vec(u8)` |
 
 **Operators:**
 

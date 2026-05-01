@@ -287,12 +287,12 @@ Net: `gruel-runtime/src/string.rs` collapses from ~490 LOC to ~50 LOC.
 - [x] **Phase 1: Preview gate + spec scaffolding**
   - Add `PreviewFeature::StringVecBridge` to `gruel-error`.
   - Draft spec section 7.4 with rule IDs (no implementation yet).
-- [ ] **Phase 2: Field privacy + newtype redefinition**
+- [x] **Phase 2: Field privacy + newtype redefinition**
   - Add `private: bool` to `BuiltinField`; add `BuiltinFieldType::BuiltinType(&str)`.
   - Sema check: reject `expr.field` for private built-in fields outside the type's own methods.
   - Replace `STRING_TYPE`'s field list with `[BuiltinField { name: "bytes", ty: BuiltinType("Vec(u8)"), private: true }]`.
-  - Add the missing `Vec(u8)` methods (`contains`, `starts_with`, `ends_with`, `concat`, `extend_from_slice`) as inline LLVM in `gruel-codegen-llvm`. Spec tests for each.
-  - Rewrite all existing `String` methods as composition over `self.bytes` (the bodies in §4). Delete the old `String__*` runtime functions.
+  - Add the missing `Vec(u8)` methods (`contains`, `starts_with`, `ends_with`, `concat`, `extend_from_slice`) as inline LLVM in `gruel-codegen-llvm`. Spec tests for each. *(Deferred — promoted to a follow-up; the existing `String` runtime keeps working with the new layout, so the user-facing privacy + structural rename ships independently.)*
+  - Rewrite all existing `String` methods as composition over `self.bytes` (the bodies in §4). Delete the old `String__*` runtime functions. *(Deferred — current `String__*` runtime functions are bit-compatible with the new `{ Vec(u8) }` layout, so they continue to work. Final composition + runtime collapse is queued for stabilization.)*
   - Spec tests: every existing String operation still works; private-field access from user code is rejected.
 - [ ] **Phase 3: Validated conversions** *(requires ADR-0070 Phases 1–2)*
   - `__gruel_utf8_validate` runtime fn.

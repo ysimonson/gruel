@@ -33,11 +33,8 @@ impl<'a> Sema<'a> {
                 .iter()
                 .map(|f| StructField {
                     name: f.name.to_string(),
-                    ty: match f.ty {
-                        BuiltinFieldType::U64 => Type::U64,
-                        BuiltinFieldType::U8 => Type::U8,
-                        BuiltinFieldType::Bool => Type::BOOL,
-                    },
+                    ty: self.resolve_builtin_field_type(f.ty),
+                    is_private: f.private,
                 })
                 .collect();
 
@@ -261,6 +258,31 @@ impl<'a> Sema<'a> {
             0
         } else {
             1
+        }
+    }
+
+    /// Resolve a `BuiltinFieldType` to a concrete `Type` (ADR-0072).
+    ///
+    /// Scalar variants (`U64`, `U8`, `Bool`) map directly. The
+    /// `BuiltinType("Vec(u8)")` form is the structural newtype reference
+    /// introduced for `String::bytes`; the v1 implementation only resolves
+    /// the exact spellings it knows about.
+    fn resolve_builtin_field_type(&mut self, ty: BuiltinFieldType) -> Type {
+        match ty {
+            BuiltinFieldType::U64 => Type::U64,
+            BuiltinFieldType::U8 => Type::U8,
+            BuiltinFieldType::Bool => Type::BOOL,
+            BuiltinFieldType::BuiltinType(name) => match name {
+                "Vec(u8)" => {
+                    let vec_id = self.type_pool.intern_vec_from_type(Type::U8);
+                    Type::new_vec(vec_id)
+                }
+                other => panic!(
+                    "BuiltinFieldType::BuiltinType({:?}): unsupported builtin type reference; \
+                     extend `Sema::resolve_builtin_field_type` to support it",
+                    other
+                ),
+            },
         }
     }
 }

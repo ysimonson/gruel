@@ -724,10 +724,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
     /// Extract the `(ptr, len)` fields from a String struct value.
     ///
-    /// String layout is `{ u64: ptr_as_int, u64: len, u64: cap }`.
-    /// The `ptr` field is stored as `u64` (integer) in the Gruel type system.
-    /// This helper extracts it as an LLVM `ptr` (via `inttoptr`) for use in
-    /// runtime function calls that expect `*const u8 / *mut u8`.
+    /// ADR-0072: String layout is `{ bytes: Vec(u8) }` with the inner
+    /// Vec(u8) being `{ ptr, i64 len, i64 cap }`. The pointer is stored
+    /// as a typed `ptr` (no inttoptr needed).
     fn extract_str_ptr_len(
         &mut self,
         str_val: BasicValueEnum<'ctx>,
@@ -736,24 +735,23 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         inkwell::values::IntValue<'ctx>,
     ) {
         let sv = str_val.into_struct_value();
-        // Field 0: ptr stored as i64 — convert to opaque ptr for runtime calls.
-        let agg: AggregateValueEnum<'ctx> = sv.into();
-        let ptr_as_int = self
+        let outer: AggregateValueEnum<'ctx> = sv.into();
+        let inner = self
             .builder
-            .build_extract_value(agg, 0, "str_ptr_i")
-            .expect("extract ptr field")
-            .into_int_value();
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            .build_extract_value(outer, 0, "str_bytes")
+            .expect("extract String.bytes")
+            .into_struct_value();
+        let inner_agg: AggregateValueEnum<'ctx> = inner.into();
         let ptr = self
             .builder
-            .build_int_to_ptr(ptr_as_int, ptr_ty, "str_ptr")
-            .unwrap();
-        // Field 1: len as i64.
-        let agg: AggregateValueEnum<'ctx> = sv.into();
+            .build_extract_value(inner_agg, 0, "str_ptr")
+            .expect("extract bytes.ptr")
+            .into_pointer_value();
+        let inner_agg: AggregateValueEnum<'ctx> = inner.into();
         let len = self
             .builder
-            .build_extract_value(agg, 1, "str_len")
-            .expect("extract len field")
+            .build_extract_value(inner_agg, 1, "str_len")
+            .expect("extract bytes.len")
             .into_int_value();
         (ptr, len)
     }
@@ -770,28 +768,29 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         inkwell::values::IntValue<'ctx>,
     ) {
         let sv = str_val.into_struct_value();
-        let agg: AggregateValueEnum<'ctx> = sv.into();
-        let ptr_as_int = self
+        let outer: AggregateValueEnum<'ctx> = sv.into();
+        let inner = self
             .builder
-            .build_extract_value(agg, 0, "str_ptr_i")
-            .unwrap()
-            .into_int_value();
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            .build_extract_value(outer, 0, "str_bytes")
+            .expect("extract String.bytes")
+            .into_struct_value();
+        let inner_agg: AggregateValueEnum<'ctx> = inner.into();
         let ptr = self
             .builder
-            .build_int_to_ptr(ptr_as_int, ptr_ty, "str_ptr")
-            .unwrap();
-        let agg: AggregateValueEnum<'ctx> = sv.into();
+            .build_extract_value(inner_agg, 0, "str_ptr")
+            .expect("extract bytes.ptr")
+            .into_pointer_value();
+        let inner_agg: AggregateValueEnum<'ctx> = inner.into();
         let len = self
             .builder
-            .build_extract_value(agg, 1, "str_len")
-            .unwrap()
+            .build_extract_value(inner_agg, 1, "str_len")
+            .expect("extract bytes.len")
             .into_int_value();
-        let agg: AggregateValueEnum<'ctx> = sv.into();
+        let inner_agg: AggregateValueEnum<'ctx> = inner.into();
         let cap = self
             .builder
-            .build_extract_value(agg, 2, "str_cap")
-            .unwrap()
+            .build_extract_value(inner_agg, 2, "str_cap")
+            .expect("extract bytes.cap")
             .into_int_value();
         (ptr, len, cap)
     }
@@ -1729,44 +1728,45 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             CfgInstData::StringConst(idx) => {
-                // Build a String struct value `{ ptr, len, 0 }` pointing at the
-                // LLVM global that holds the string's raw bytes.
+                // ADR-0072: String is a newtype `{ bytes: Vec(u8) }`. Its
+                // LLVM type is `{ {ptr, i64, i64} }` — an outer struct
+                // wrapping the Vec(u8) aggregate. Build the inner Vec(u8)
+                // first, then wrap it.
                 let idx = idx as usize;
                 let str_len = self.strings.get(idx).map(|s| s.len()).unwrap_or(0) as u64;
                 let global = self.string_globals.get(idx);
                 let i64_ty = self.ctx.i64_type();
-                // String.ptr is stored as u64 (integer), not as ptr type.
-                // Convert the global address to i64 via ptrtoint so it fits in
-                // the String struct's first field.
-                let data_ptr_as_int: inkwell::values::BasicValueEnum<'ctx> = if let Some(g) = global
-                {
-                    let raw_ptr = g.as_pointer_value();
-                    self.builder
-                        .build_ptr_to_int(raw_ptr, i64_ty, "str_data_i")
-                        .unwrap()
-                        .into()
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let data_ptr: inkwell::values::PointerValue<'ctx> = if let Some(g) = global {
+                    g.as_pointer_value()
                 } else {
-                    i64_ty.const_zero().into()
+                    ptr_ty.const_null()
                 };
-                let len_val: inkwell::values::BasicValueEnum<'ctx> =
-                    i64_ty.const_int(str_len, false).into();
-                let cap_val: inkwell::values::BasicValueEnum<'ctx> = i64_ty.const_zero().into();
-                // Build String struct { ptr, i64, i64 }
+                let len_val = i64_ty.const_int(str_len, false);
+                let cap_val = i64_ty.const_zero();
+                // Build the Vec(u8) aggregate { ptr, len, cap }.
+                let vec_agg = self.vec_agg_type();
+                let undef_vec: AggregateValueEnum<'ctx> = vec_agg.get_undef().into();
+                let with_p = self
+                    .builder
+                    .build_insert_value(undef_vec, data_ptr, 0, "sc_vec_p")
+                    .unwrap();
+                let with_l = self
+                    .builder
+                    .build_insert_value(with_p, len_val, 1, "sc_vec_l")
+                    .unwrap();
+                let inner_vec = self
+                    .builder
+                    .build_insert_value(with_l, cap_val, 2, "sc_vec_c")
+                    .unwrap();
+                // Wrap in the String outer struct { Vec(u8) }.
                 let str_llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
                     .expect("String type must have LLVM representation")
                     .into_struct_type();
-                let undef: AggregateValueEnum<'ctx> = str_llvm_ty.get_undef().into();
+                let undef_str: AggregateValueEnum<'ctx> = str_llvm_ty.get_undef().into();
                 let agg = self
                     .builder
-                    .build_insert_value(undef, data_ptr_as_int, 0, "sc_ptr")
-                    .unwrap();
-                let agg = self
-                    .builder
-                    .build_insert_value(agg, len_val, 1, "sc_len")
-                    .unwrap();
-                let agg = self
-                    .builder
-                    .build_insert_value(agg, cap_val, 2, "sc_cap")
+                    .build_insert_value(undef_str, inner_vec, 0, "sc_string")
                     .unwrap();
                 Some(agg.as_basic_value_enum())
             }

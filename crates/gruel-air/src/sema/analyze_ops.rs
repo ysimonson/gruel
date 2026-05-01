@@ -353,6 +353,19 @@ impl<'a> Sema<'a> {
                                 None => return Ok(None), // Unknown field
                             };
 
+                        // ADR-0072: reject access to private fields. v1
+                        // applies to synthetic builtins (e.g. `String::bytes`)
+                        // only — user-defined struct fields are public.
+                        if struct_field.is_private {
+                            return Err(CompileError::new(
+                                ErrorKind::PrivateField {
+                                    struct_name: struct_def.name.clone(),
+                                    field_name: resolved_name_str.clone(),
+                                },
+                                self.rir.get(inst_ref).span,
+                            ));
+                        }
+
                         let field_type = struct_field.ty;
 
                         // Add this projection with field name for move checking
@@ -4532,6 +4545,7 @@ impl<'a> Sema<'a> {
             .map(|(i, r)| StructField {
                 name: i.to_string(),
                 ty: r.ty,
+                is_private: false,
             })
             .collect();
 
@@ -5005,7 +5019,19 @@ impl<'a> Sema<'a> {
                 .unwrap_or_else(|| struct_def.name.clone())
         };
         let (field_index, struct_field) = match struct_def.find_field(&field_name_str) {
-            Some(f) => f,
+            Some(f) => {
+                // ADR-0072: privacy check.
+                if f.1.is_private {
+                    return Err(CompileError::new(
+                        ErrorKind::PrivateField {
+                            struct_name: struct_def.name.clone(),
+                            field_name: field_name_str.clone(),
+                        },
+                        span,
+                    ));
+                }
+                f
+            }
             None => {
                 let mut err = CompileError::new(
                     ErrorKind::UnknownField {

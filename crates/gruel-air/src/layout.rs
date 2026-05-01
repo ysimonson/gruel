@@ -475,14 +475,17 @@ mod tests {
                 StructField {
                     name: "a".into(),
                     ty: Type::U8,
+                    is_private: false,
                 },
                 StructField {
                     name: "b".into(),
                     ty: Type::U32,
+                    is_private: false,
                 },
                 StructField {
                     name: "c".into(),
                     ty: Type::U8,
+                    is_private: false,
                 },
             ],
             is_copy: false,
@@ -603,10 +606,12 @@ mod tests {
                 StructField {
                     name: "pad".into(),
                     ty: Type::U8,
+                    is_private: false,
                 },
                 StructField {
                     name: "b".into(),
                     ty: Type::BOOL,
+                    is_private: false,
                 },
             ],
             is_copy: false,

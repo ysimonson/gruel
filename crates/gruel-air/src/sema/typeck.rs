@@ -387,6 +387,7 @@ impl<'a> Sema<'a> {
                     struct_fields.push(crate::types::StructField {
                         name: i.to_string(),
                         ty: elem_ty,
+                        is_private: false,
                     });
                 }
                 let (ty, _is_new) = self.find_or_create_anon_struct(
