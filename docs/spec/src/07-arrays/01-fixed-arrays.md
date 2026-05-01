@@ -80,7 +80,7 @@ Out-of-bounds access **MUST** cause a runtime panic.
 In addition to single-element indexing `arr[i]`, an array place can be
 subscripted by a *range* (`arr[lo..hi]`, `arr[..hi]`, etc.) when used as
 the operand of `&` or `&mut`. The result is a `Slice(T)` or
-`MutSlice(T)`; see [chapter 7.2](@/spec/src/07-arrays/02-slices.md).
+`MutSlice(T)`; see [chapter 7.2](@/07-arrays/02-slices.md).
 
 ## Mutable Arrays
 
