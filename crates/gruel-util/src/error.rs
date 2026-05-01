@@ -328,6 +328,12 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// Niche-encoded enum layouts (ADR-0069).
+    ///
+    /// When enabled, two-variant Option-shaped enums whose payload exposes a
+    /// usable niche are laid out without a separate discriminant byte
+    /// (`Option(bool)` collapses to 1 byte, etc.).
+    EnumNiches,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -359,6 +365,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::EnumNiches => "ADR-0069",
         }
     }
 
@@ -1979,7 +1986,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, enum_niches");
     }
 
     // ========================================================================

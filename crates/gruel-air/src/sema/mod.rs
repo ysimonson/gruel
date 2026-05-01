@@ -204,6 +204,11 @@ impl<'a> Sema<'a> {
         interner: &'a ThreadedRodeo,
         preview_features: PreviewFeatures,
     ) -> Self {
+        let type_pool = TypeInternPool::new();
+        // Wire the enum-niches preview into the layout cache (ADR-0069).
+        type_pool.set_enum_niches_preview(
+            preview_features.contains(&gruel_util::PreviewFeature::EnumNiches),
+        );
         Self {
             rir,
             interner,
@@ -227,7 +232,7 @@ impl<'a> Sema<'a> {
             builtin_typekind_id: None,
             builtin_ownership_id: None,
             known: KnownSymbols::new(interner),
-            type_pool: TypeInternPool::new(),
+            type_pool,
             module_registry: crate::sema_context::ModuleRegistry::new(),
             file_paths: HashMap::default(),
             param_arena: ParamArena::new(),

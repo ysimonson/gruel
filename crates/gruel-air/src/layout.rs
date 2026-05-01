@@ -203,6 +203,11 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
 
         TypeKind::Enum(id) => {
             let def = pool.enum_def(id);
+            if pool.enum_niches_preview_enabled() {
+                if let Some(niche_layout) = try_niche_encoded_enum_layout(pool, &def) {
+                    return niche_layout;
+                }
+            }
             enum_layout_separate(pool, &def)
         }
 
@@ -280,6 +285,58 @@ fn enum_layout_separate(pool: &TypeInternPool, def: &EnumDef) -> Layout {
         niches: Vec::new(),
         discriminant: Some(strategy),
     }
+}
+
+/// Try to compute a niche-encoded layout for an enum (ADR-0069 phase 5).
+///
+/// Returns `Some(layout)` when the enum is "Option-shaped":
+///   - Exactly one unit variant.
+///   - Exactly one data variant whose payload type exposes a usable niche.
+///
+/// Otherwise returns `None` and the caller falls back to
+/// [`enum_layout_separate`].
+fn try_niche_encoded_enum_layout(pool: &TypeInternPool, def: &EnumDef) -> Option<Layout> {
+    if def.variants.len() != 2 {
+        return None;
+    }
+    let (unit_idx, data_idx) = match (def.variants[0].has_data(), def.variants[1].has_data()) {
+        (false, true) => (0u32, 1u32),
+        (true, false) => (1u32, 0u32),
+        _ => return None,
+    };
+    let data_variant = &def.variants[data_idx as usize];
+    if data_variant.fields.len() != 1 {
+        // V1 only handles a single-field data variant (e.g. `Some(T)`).
+        return None;
+    }
+    let payload_ty = data_variant.fields[0];
+    let payload_layout = layout_of(pool, payload_ty);
+    let niche = payload_layout.niches.first()?;
+    // Reserve niche.start for the unit variant; expose the rest to enclosing
+    // types so the optimization composes (Phase 7).
+    let niche_value = niche.start;
+    let remaining_start = niche.start + 1;
+    let mut composed_niches = Vec::new();
+    if remaining_start <= niche.end {
+        composed_niches.push(NicheRange {
+            offset: niche.offset,
+            width: niche.width,
+            start: remaining_start,
+            end: niche.end,
+        });
+    }
+    Some(Layout {
+        size: payload_layout.size,
+        align: payload_layout.align,
+        niches: composed_niches,
+        discriminant: Some(DiscriminantStrategy::Niche {
+            unit_variant: unit_idx,
+            data_variant: data_idx,
+            niche_offset: niche.offset,
+            niche_width: niche.width,
+            niche_value,
+        }),
+    })
 }
 
 #[inline]
@@ -412,6 +469,83 @@ mod tests {
         assert_eq!(layout.size, 12);
         assert_eq!(layout.align, 4);
         assert!(layout.niches.is_empty());
+    }
+
+    fn make_option_bool(p: &TypeInternPool, name: &str) -> Type {
+        let mut rodeo = Rodeo::default();
+        let s = rodeo.get_or_intern(name);
+        let mut some = EnumVariantDef::unit("Some");
+        some.fields = vec![Type::BOOL];
+        let def = crate::EnumDef {
+            name: name.to_string(),
+            variants: vec![EnumVariantDef::unit("None"), some],
+            is_pub: false,
+            file_id: FileId::DEFAULT,
+            destructor: None,
+        };
+        let (eid, _) = p.register_enum(s, def);
+        Type::new_enum(eid)
+    }
+
+    #[test]
+    fn option_bool_separate_layout_when_niches_disabled() {
+        let p = fresh_pool();
+        let ty = make_option_bool(&p, "OptB1");
+        let layout = layout_of(&p, ty);
+        // Without the preview, layout is the standard tagged union: { u8 disc, [1 x i8] payload }.
+        assert_eq!(layout.size, 2);
+        assert_eq!(layout.align, 1);
+        match layout.discriminant_strategy().unwrap() {
+            DiscriminantStrategy::Separate { .. } => {}
+            other => panic!("expected Separate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn option_bool_collapses_to_one_byte_with_niches_preview() {
+        let p = fresh_pool();
+        p.set_enum_niches_preview(true);
+        let ty = make_option_bool(&p, "OptB2");
+        let layout = layout_of(&p, ty);
+        assert_eq!(layout.size, 1, "Option(bool) should collapse to 1 byte");
+        assert_eq!(layout.align, 1);
+        match layout.discriminant_strategy().unwrap() {
+            DiscriminantStrategy::Niche {
+                niche_offset,
+                niche_width,
+                niche_value,
+                unit_variant,
+                data_variant,
+            } => {
+                assert_eq!(niche_offset, 0);
+                assert_eq!(niche_width, 1);
+                assert_eq!(niche_value, 2, "first reserved niche value");
+                assert_eq!(unit_variant, 0);
+                assert_eq!(data_variant, 1);
+            }
+            other => panic!("expected Niche, got {other:?}"),
+        }
+        // Remaining niche values [3..=255] are exposed for further nesting.
+        assert_eq!(
+            layout.niches,
+            vec![NicheRange {
+                offset: 0,
+                width: 1,
+                start: 3,
+                end: 255,
+            }]
+        );
+    }
+
+    #[test]
+    fn toggling_preview_clears_layout_cache() {
+        let p = fresh_pool();
+        let ty = make_option_bool(&p, "OptB3");
+        assert_eq!(layout_of(&p, ty).size, 2);
+        p.set_enum_niches_preview(true);
+        assert_eq!(layout_of(&p, ty).size, 1);
+        p.set_enum_niches_preview(false);
+        assert_eq!(layout_of(&p, ty).size, 2);
     }
 
     #[test]
