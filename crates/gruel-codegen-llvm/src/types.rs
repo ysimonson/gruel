@@ -4,7 +4,7 @@
 //! `gruel_air::layout::layout_of`. This module is a thin LLVM-type adapter on
 //! top of that layout query.
 
-use gruel_air::layout::layout_of;
+use gruel_air::layout::{DiscriminantStrategy, layout_of};
 use gruel_air::{Type, TypeInternPool, TypeKind};
 use inkwell::AddressSpace;
 use inkwell::context::Context;
@@ -116,36 +116,45 @@ pub fn gruel_type_to_llvm<'ctx>(
 
         // Enums:
         // - Unit-only enums: represented as their discriminant integer type (backward compat).
-        // - Data enums: tagged union `{ discriminant_type, [max_payload_bytes x i8] }`.
+        // - Data enums (separate strategy): tagged union `{ discriminant_type, [max_payload_bytes x i8] }`.
+        // - Data enums (niche strategy): `[size x i8]` byte array — no separate discriminant (ADR-0069).
         TypeKind::Enum(id) => {
             let def = type_pool.enum_def(id);
             if def.is_unit_only() {
                 // C-style enum: just the discriminant integer.
-                gruel_type_to_llvm(def.discriminant_type(), ctx, type_pool)
-            } else {
-                // Data enum: tagged union struct.
-                let discrim_llvm = gruel_type_to_llvm(def.discriminant_type(), ctx, type_pool)?;
-                let max_payload: u64 = def
-                    .variants
-                    .iter()
-                    .map(|v| {
-                        v.fields
-                            .iter()
-                            .map(|f| layout_of(type_pool, *f).size)
-                            .sum::<u64>()
-                    })
-                    .max()
-                    .unwrap_or(0);
-                if max_payload == 0 {
-                    // All variants happen to have empty payloads (shouldn't happen for
-                    // has_data_variants() == true, but handle gracefully).
-                    Some(discrim_llvm)
-                } else {
-                    let byte_arr = ctx.i8_type().array_type(max_payload as u32);
-                    Some(
-                        ctx.struct_type(&[discrim_llvm, byte_arr.into()], false)
-                            .into(),
-                    )
+                return gruel_type_to_llvm(def.discriminant_type(), ctx, type_pool);
+            }
+            let layout = layout_of(type_pool, ty);
+            match layout.discriminant_strategy() {
+                Some(DiscriminantStrategy::Niche { .. }) => {
+                    // Niche-encoded: storage is exactly the payload's bytes.
+                    Some(ctx.i8_type().array_type(layout.size as u32).into())
+                }
+                Some(DiscriminantStrategy::Separate { .. }) | None => {
+                    // Data enum: tagged union struct.
+                    let discrim_llvm = gruel_type_to_llvm(def.discriminant_type(), ctx, type_pool)?;
+                    let max_payload: u64 = def
+                        .variants
+                        .iter()
+                        .map(|v| {
+                            v.fields
+                                .iter()
+                                .map(|f| layout_of(type_pool, *f).size)
+                                .sum::<u64>()
+                        })
+                        .max()
+                        .unwrap_or(0);
+                    if max_payload == 0 {
+                        // All variants happen to have empty payloads (shouldn't happen for
+                        // has_data_variants() == true, but handle gracefully).
+                        Some(discrim_llvm)
+                    } else {
+                        let byte_arr = ctx.i8_type().array_type(max_payload as u32);
+                        Some(
+                            ctx.struct_type(&[discrim_llvm, byte_arr.into()], false)
+                                .into(),
+                        )
+                    }
                 }
             }
         }

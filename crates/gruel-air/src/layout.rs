@@ -203,10 +203,10 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
 
         TypeKind::Enum(id) => {
             let def = pool.enum_def(id);
-            if pool.enum_niches_preview_enabled() {
-                if let Some(niche_layout) = try_niche_encoded_enum_layout(pool, &def) {
-                    return niche_layout;
-                }
+            if pool.enum_niches_preview_enabled()
+                && let Some(niche_layout) = try_niche_encoded_enum_layout(pool, &def)
+            {
+                return niche_layout;
             }
             enum_layout_separate(pool, &def)
         }

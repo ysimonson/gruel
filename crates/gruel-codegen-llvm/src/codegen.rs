@@ -944,6 +944,101 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         ptr
     }
 
+    /// Write `value` (interpreted as a little-endian unsigned integer of
+    /// `width` bytes) into `slot[offset..offset+width]` (ADR-0069).
+    ///
+    /// Used by niche-encoded enums to encode the unit variant and to read the
+    /// niche bytes during match dispatch.
+    fn write_niche_bytes(
+        &mut self,
+        slot: inkwell::values::PointerValue<'ctx>,
+        storage_ty: inkwell::types::ArrayType<'ctx>,
+        offset: u32,
+        width: u8,
+        value: u128,
+    ) {
+        let zero = self.ctx.i64_type().const_zero();
+        let off = self.ctx.i64_type().const_int(offset as u64, false);
+        let ptr = unsafe {
+            self.builder
+                .build_gep(storage_ty, slot, &[zero, off], "niche_ptr")
+                .expect("build_gep failed")
+        };
+        // Use an integer of the appropriate bit width and store little-endian
+        // (LLVM's default storage on the supported targets).
+        let int_ty = niche_int_type(self.ctx, width);
+        let int_val = int_ty.const_int(value as u64, false);
+        let store = self.builder.build_store(ptr, int_val).unwrap();
+        store.set_alignment(1).unwrap();
+    }
+
+    /// Load `width` bytes at `slot[offset..offset+width]` as an unsigned
+    /// integer (ADR-0069).
+    fn load_niche_bytes(
+        &mut self,
+        slot: inkwell::values::PointerValue<'ctx>,
+        storage_ty: inkwell::types::ArrayType<'ctx>,
+        offset: u32,
+        width: u8,
+    ) -> inkwell::values::IntValue<'ctx> {
+        let zero = self.ctx.i64_type().const_zero();
+        let off = self.ctx.i64_type().const_int(offset as u64, false);
+        let ptr = unsafe {
+            self.builder
+                .build_gep(storage_ty, slot, &[zero, off], "niche_ptr")
+                .expect("build_gep failed")
+        };
+        let int_ty = niche_int_type(self.ctx, width);
+        let load = self.builder.build_load(int_ty, ptr, "niche_val").unwrap();
+        load.as_instruction_value()
+            .unwrap()
+            .set_alignment(1)
+            .unwrap();
+        load.into_int_value()
+    }
+
+    /// Spill a niche-encoded enum value to a stack slot, load the niche bytes,
+    /// and synthesize an integer discriminant of `discrim_ty`'s width:
+    /// `niche_value` → `unit_variant`, anything else → `data_variant`
+    /// (ADR-0069).
+    #[allow(clippy::too_many_arguments)]
+    fn synthesize_niche_discriminant(
+        &mut self,
+        raw_val: BasicValueEnum<'ctx>,
+        storage_size: u64,
+        niche_offset: u32,
+        niche_width: u8,
+        niche_value: u128,
+        unit_variant: u32,
+        data_variant: u32,
+        discrim_ty: Type,
+    ) -> inkwell::values::IntValue<'ctx> {
+        let storage_ty = self.ctx.i8_type().array_type(storage_size as u32);
+        let slot = self.build_entry_alloca(storage_ty.into(), "niche_enum_slot");
+        self.builder.build_store(slot, raw_val).unwrap();
+        let niche_bytes = self.load_niche_bytes(slot, storage_ty, niche_offset, niche_width);
+        let niche_const =
+            niche_int_type(self.ctx, niche_width).const_int(niche_value as u64, false);
+        let is_unit = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                niche_bytes,
+                niche_const,
+                "is_unit",
+            )
+            .unwrap();
+        let discrim_llvm_ty = gruel_type_to_llvm(discrim_ty, self.ctx, self.type_pool)
+            .expect("enum discriminant type must have an LLVM type")
+            .into_int_type();
+        let unit_const = discrim_llvm_ty.const_int(unit_variant as u64, false);
+        let data_const = discrim_llvm_ty.const_int(data_variant as u64, false);
+        self.builder
+            .build_select(is_unit, unit_const, data_const, "niche_disc")
+            .unwrap()
+            .into_int_value()
+    }
+
     /// Emit a runtime array bounds check.
     ///
     /// If `index >= length`, calls `__gruel_bounds_check()` (which never returns).
@@ -2408,37 +2503,71 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let enum_def = self.type_pool.enum_def(enum_id);
                 if enum_def.is_unit_only() {
                     // Unit-only enum: represented as its discriminant integer.
-                    gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| {
-                        t.into_int_type()
+                    if let Some(t) = gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
+                        let v = t
+                            .into_int_type()
                             .const_int(variant_index as u64, false)
-                            .into()
-                    })
-                } else {
-                    // Data enum: unit variant produces a tagged union value
-                    // with the discriminant set and the payload zeroed.
-                    let struct_ty = match gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
-                        Some(t) => t.into_struct_type(),
-                        None => return Ok(()),
-                    };
-                    let discrim_ty =
-                        gruel_type_to_llvm(enum_def.discriminant_type(), self.ctx, self.type_pool)
-                            .unwrap()
-                            .into_int_type();
-                    let discrim_val = discrim_ty.const_int(variant_index as u64, false);
-                    let mut agg: AggregateValueEnum = struct_ty.get_undef().into();
-                    agg = self
-                        .builder
-                        .build_insert_value(agg, discrim_val, 0, "ev_d")
-                        .expect("build_insert_value failed");
-                    // Payload (field 1) is zeroed for unit variants.
-                    let payload_ty = struct_ty.get_field_type_at_index(1).unwrap();
-                    let payload_zero = payload_ty.const_zero();
-                    agg = self
-                        .builder
-                        .build_insert_value(agg, payload_zero, 1, "ev_p")
-                        .expect("build_insert_value failed");
-                    Some(agg.as_basic_value_enum())
+                            .into();
+                        self.set_value(val, v);
+                    }
+                    return Ok(());
                 }
+                let layout = layout_of(self.type_pool, ty);
+                let strategy = layout
+                    .discriminant_strategy()
+                    .expect("data enum must have a discriminant strategy");
+                if let DiscriminantStrategy::Niche {
+                    unit_variant,
+                    niche_offset,
+                    niche_width,
+                    niche_value,
+                    ..
+                } = strategy
+                {
+                    // Niche-encoded layout: storage is `[size x i8]`.
+                    debug_assert_eq!(variant_index, unit_variant);
+                    let storage_ty = self.ctx.i8_type().array_type(layout.size as u32);
+                    let slot = self.build_entry_alloca(storage_ty.into(), "niche_unit_slot");
+                    let zero_init = storage_ty.const_zero();
+                    self.builder.build_store(slot, zero_init).unwrap();
+                    self.write_niche_bytes(
+                        slot,
+                        storage_ty,
+                        niche_offset,
+                        niche_width,
+                        niche_value,
+                    );
+                    let result = self
+                        .builder
+                        .build_load(storage_ty, slot, "niche_unit_val")
+                        .unwrap();
+                    self.set_value(val, result);
+                    return Ok(());
+                }
+                // Data enum (Separate strategy): unit variant produces a tagged
+                // union value with the discriminant set and the payload zeroed.
+                let struct_ty = match gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
+                    Some(t) => t.into_struct_type(),
+                    None => return Ok(()),
+                };
+                let discrim_ty =
+                    gruel_type_to_llvm(enum_def.discriminant_type(), self.ctx, self.type_pool)
+                        .unwrap()
+                        .into_int_type();
+                let discrim_val = discrim_ty.const_int(variant_index as u64, false);
+                let mut agg: AggregateValueEnum = struct_ty.get_undef().into();
+                agg = self
+                    .builder
+                    .build_insert_value(agg, discrim_val, 0, "ev_d")
+                    .expect("build_insert_value failed");
+                // Payload (field 1) is zeroed for unit variants.
+                let payload_ty = struct_ty.get_field_type_at_index(1).unwrap();
+                let payload_zero = payload_ty.const_zero();
+                agg = self
+                    .builder
+                    .build_insert_value(agg, payload_zero, 1, "ev_p")
+                    .expect("build_insert_value failed");
+                Some(agg.as_basic_value_enum())
             }
 
             CfgInstData::EnumCreate {
@@ -2451,14 +2580,73 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let variant_def = &enum_def.variants[variant_index as usize];
                 let field_types: Vec<Type> = variant_def.fields.clone();
 
-                let strategy = layout_of(self.type_pool, ty)
+                let layout = layout_of(self.type_pool, ty);
+                let strategy = layout
                     .discriminant_strategy()
                     .expect("enum type must have a discriminant strategy");
+
                 match strategy {
-                    DiscriminantStrategy::Separate { .. } => {}
-                    DiscriminantStrategy::Niche { .. } => {
-                        unreachable!("niche-encoded enum codegen is not implemented yet")
+                    DiscriminantStrategy::Niche {
+                        unit_variant,
+                        niche_offset,
+                        niche_width,
+                        niche_value,
+                        ..
+                    } => {
+                        // ADR-0069: niche-encoded layout is `[size x i8]`. The
+                        // unit variant writes `niche_value` at `niche_offset`;
+                        // the data variant stores its single payload field
+                        // starting at offset 0.
+                        let storage_ty = self.ctx.i8_type().array_type(layout.size as u32);
+                        let slot = self.build_entry_alloca(storage_ty.into(), "enum_slot");
+                        // Zero the storage so unused bytes are deterministic.
+                        let zero_init = storage_ty.const_zero();
+                        self.builder.build_store(slot, zero_init).unwrap();
+
+                        let fields = self.cfg.get_extra(fields_start, fields_len).to_vec();
+                        if variant_index == unit_variant {
+                            // Unit variant: write niche_value at niche_offset.
+                            self.write_niche_bytes(
+                                slot,
+                                storage_ty,
+                                niche_offset,
+                                niche_width,
+                                niche_value,
+                            );
+                        } else {
+                            // Data variant: store the (single) payload field at offset 0.
+                            debug_assert_eq!(fields.len(), 1);
+                            debug_assert_eq!(field_types.len(), 1);
+                            let field_ty = field_types[0];
+                            if gruel_type_to_llvm(field_ty, self.ctx, self.type_pool).is_some() {
+                                let field_llvm_val = self.get_value(fields[0]);
+                                let zero = self.ctx.i64_type().const_zero();
+                                let payload_ptr = unsafe {
+                                    self.builder
+                                        .build_gep(
+                                            storage_ty,
+                                            slot,
+                                            &[zero, zero],
+                                            "niche_payload_ptr",
+                                        )
+                                        .expect("build_gep failed")
+                                };
+                                let store = self
+                                    .builder
+                                    .build_store(payload_ptr, field_llvm_val)
+                                    .unwrap();
+                                store.set_alignment(1).unwrap();
+                            }
+                        }
+
+                        let result = self
+                            .builder
+                            .build_load(storage_ty, slot, "enum_val")
+                            .unwrap();
+                        self.set_value(val, result);
+                        return Ok(());
                     }
+                    DiscriminantStrategy::Separate { .. } => {}
                 }
 
                 let struct_ty = match gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
@@ -2550,14 +2738,40 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let variant_def = &enum_def.variants[variant_index as usize];
                 let field_types = &variant_def.fields;
 
-                let strategy = layout_of(self.type_pool, enum_ty)
+                let layout = layout_of(self.type_pool, enum_ty);
+                let strategy = layout
                     .discriminant_strategy()
                     .expect("enum type must have a discriminant strategy");
-                match strategy {
-                    DiscriminantStrategy::Separate { .. } => {}
-                    DiscriminantStrategy::Niche { .. } => {
-                        unreachable!("niche-encoded enum codegen is not implemented yet")
-                    }
+                if let DiscriminantStrategy::Niche { .. } = strategy {
+                    // Niche-encoded enum: storage is `[size x i8]`, payload
+                    // occupies offset 0, and there is exactly one field.
+                    debug_assert_eq!(field_index, 0);
+                    debug_assert_eq!(field_types.len(), 1);
+                    let field_ty_gruel = field_types[0];
+                    let Some(field_llvm_ty) =
+                        gruel_type_to_llvm(field_ty_gruel, self.ctx, self.type_pool)
+                    else {
+                        return Ok(());
+                    };
+                    let storage_ty = self.ctx.i8_type().array_type(layout.size as u32);
+                    let slot = self.build_entry_alloca(storage_ty.into(), "niche_payload_slot");
+                    self.builder.build_store(slot, base_val).unwrap();
+                    let zero = self.ctx.i64_type().const_zero();
+                    let field_ptr = unsafe {
+                        self.builder
+                            .build_gep(storage_ty, slot, &[zero, zero], "niche_payload_ptr")
+                            .expect("build_gep failed")
+                    };
+                    let load = self
+                        .builder
+                        .build_load(field_llvm_ty, field_ptr, "niche_payload_val")
+                        .unwrap();
+                    load.as_instruction_value()
+                        .unwrap()
+                        .set_alignment(1)
+                        .unwrap();
+                    self.set_value(val, load);
+                    return Ok(());
                 }
 
                 // Compute byte offset of the target field within the payload.
@@ -2633,7 +2847,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let scrutinee_ty = self.cfg.get_inst(base).ty;
                 let disc = if let TypeKind::Enum(id) = scrutinee_ty.kind() {
                     let enum_def = self.type_pool.enum_def(id);
-                    let strategy = layout_of(self.type_pool, scrutinee_ty)
+                    let layout = layout_of(self.type_pool, scrutinee_ty);
+                    let strategy = layout
                         .discriminant_strategy()
                         .expect("enum type must have a discriminant strategy");
                     match strategy {
@@ -2647,9 +2862,24 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 raw
                             }
                         }
-                        DiscriminantStrategy::Niche { .. } => {
-                            unreachable!("niche-encoded enum codegen is not implemented yet")
-                        }
+                        DiscriminantStrategy::Niche {
+                            unit_variant,
+                            data_variant,
+                            niche_offset,
+                            niche_width,
+                            niche_value,
+                        } => self
+                            .synthesize_niche_discriminant(
+                                raw,
+                                layout.size,
+                                niche_offset,
+                                niche_width,
+                                niche_value,
+                                unit_variant,
+                                data_variant,
+                                enum_def.discriminant_type(),
+                            )
+                            .into(),
                     }
                 } else {
                     raw
@@ -5105,7 +5335,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let scrutinee_ty = self.cfg.get_inst(scrutinee).ty;
                     if let TypeKind::Enum(id) = scrutinee_ty.kind() {
                         let enum_def = self.type_pool.enum_def(id);
-                        let strategy = layout_of(self.type_pool, scrutinee_ty)
+                        let layout = layout_of(self.type_pool, scrutinee_ty);
+                        let strategy = layout
                             .discriminant_strategy()
                             .expect("enum type must have a discriminant strategy");
                         match strategy {
@@ -5120,9 +5351,22 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                     raw_val.into_int_value()
                                 }
                             }
-                            DiscriminantStrategy::Niche { .. } => {
-                                unreachable!("niche-encoded enum codegen is not implemented yet")
-                            }
+                            DiscriminantStrategy::Niche {
+                                unit_variant,
+                                data_variant,
+                                niche_offset,
+                                niche_width,
+                                niche_value,
+                            } => self.synthesize_niche_discriminant(
+                                raw_val,
+                                layout.size,
+                                niche_offset,
+                                niche_width,
+                                niche_value,
+                                unit_variant,
+                                data_variant,
+                                enum_def.discriminant_type(),
+                            ),
                         }
                     } else {
                         raw_val.into_int_value()
@@ -5161,6 +5405,21 @@ fn define_function<'ctx>(
 ) -> CompileResult<()> {
     let mut fn_gen = FnCodegen::new(cfg, *fn_value, mod_ctx);
     fn_gen.translate()
+}
+
+/// LLVM integer type for a niche of `width` bytes (ADR-0069).
+fn niche_int_type<'ctx>(
+    ctx: &'ctx inkwell::context::Context,
+    width: u8,
+) -> inkwell::types::IntType<'ctx> {
+    match width {
+        1 => ctx.i8_type(),
+        2 => ctx.i16_type(),
+        4 => ctx.i32_type(),
+        8 => ctx.i64_type(),
+        16 => ctx.i128_type(),
+        other => panic!("unsupported niche width: {other}"),
+    }
 }
 
 /// Returns true for signed integer types.

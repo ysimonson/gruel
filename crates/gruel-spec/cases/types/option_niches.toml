@@ -1,0 +1,85 @@
+[section]
+id = "types.option_niches"
+spec_chapter = "3.8"
+name = "Option niche-encoded layout (ADR-0069)"
+description = """
+Tests for niche-filled Option layouts gated on `--preview enum_niches`.
+Programs that compile and run identically with and without the preview
+flag verify that the optimization preserves observable semantics.
+"""
+
+[[case]]
+name = "option_bool_some_true_round_trip"
+spec = ["3.8:80"]
+preview = "enum_niches"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let O = Option(bool);
+    let x: O = O::Some(true);
+    match x {
+        O::Some(b) => if b { 1 } else { 2 },
+        O::None => 3,
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "option_bool_some_false_round_trip"
+spec = ["3.8:80"]
+preview = "enum_niches"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let O = Option(bool);
+    let x: O = O::Some(false);
+    match x {
+        O::Some(b) => if b { 1 } else { 2 },
+        O::None => 3,
+    }
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "option_bool_none_round_trip"
+spec = ["3.8:80"]
+preview = "enum_niches"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let O = Option(bool);
+    let x: O = O::None;
+    match x {
+        O::Some(b) => if b { 1 } else { 2 },
+        O::None => 3,
+    }
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "option_small_enum_round_trip"
+spec = ["3.8:80"]
+preview = "enum_niches"
+preview_should_pass = true
+description = "Option of a unit-only enum collapses to one byte and round-trips correctly."
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    let O = Option(Color);
+    let r: O = O::Some(Color::Red);
+    let g: O = O::Some(Color::Green);
+    let b: O = O::Some(Color::Blue);
+    let n: O = O::None;
+    let mut acc: i32 = 0;
+    acc = acc + (match r { O::Some(c) => match c { Color::Red => 1, Color::Green => 0, Color::Blue => 0 }, O::None => 0 });
+    acc = acc + (match g { O::Some(c) => match c { Color::Red => 0, Color::Green => 2, Color::Blue => 0 }, O::None => 0 });
+    acc = acc + (match b { O::Some(c) => match c { Color::Red => 0, Color::Green => 0, Color::Blue => 4 }, O::None => 0 });
+    acc = acc + (match n { O::Some(_) => 0, O::None => 8 });
+    acc
+}
+"""
+exit_code = 15

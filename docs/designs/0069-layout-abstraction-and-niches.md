@@ -165,7 +165,7 @@ Each phase is independently committable and testable.
 
 - [x] **Phase 5: Niche-aware layout for two-variant Option-shaped enums.** When laying out an enum with one unit variant and one data variant whose payload has a usable niche, return a `Layout` with the niche-encoded shape (no discriminant byte; size = payload size; remaining niche values exposed). Gate behind `--preview enum-niches` in `gruel-air` so Phase 5+ work can land incrementally without affecting non-preview compilations.
 
-- [ ] **Phase 6: Codegen for niche-encoded enums.** Constructor stores payload directly + writes `niche.start` for the unit variant. Match-dispatch loads the niche bytes and tests range membership instead of equality on a tag. Pattern binding for the data variant reads the payload from offset 0. End-to-end tests behind the preview gate: `Option(bool)` size and round-trip, nested `Option(Option(bool))`, `Option(SmallEnum)`.
+- [x] **Phase 6: Codegen for niche-encoded enums.** Constructor stores payload directly + writes `niche.start` for the unit variant. Match-dispatch loads the niche bytes and tests range membership instead of equality on a tag. Pattern binding for the data variant reads the payload from offset 0. End-to-end tests behind the preview gate: `Option(bool)` size and round-trip, nested `Option(Option(bool))`, `Option(SmallEnum)`.
 
 - [ ] **Phase 7: Composability and recursive niche inheritance.** Niche-encoded enums expose their *remaining* niche range as their own `Layout::niches`, so they can be re-niched by an enclosing enum. Tests for `Option(Option(Option(bool)))` collapsing to 1 byte; for `Option` of a struct containing a `bool` (niche inherited via struct field offset).
 
