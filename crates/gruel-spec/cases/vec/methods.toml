@@ -10,7 +10,7 @@ description = "Tests for Vec(T) constructors, queries, push/pop, indexing, etc."
 
 [[case]]
 name = "vec_new_empty"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let v: Vec(i32) = Vec(i32)::new();
@@ -22,7 +22,7 @@ exit_code = 0
 
 [[case]]
 name = "vec_with_capacity"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let v: Vec(i32) = Vec(i32)::with_capacity(8);
@@ -34,7 +34,7 @@ exit_code = 1
 
 [[case]]
 name = "vec_push_pop"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -49,7 +49,7 @@ exit_code = 36
 
 [[case]]
 name = "vec_indexing"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -64,7 +64,7 @@ exit_code = 139
 
 [[case]]
 name = "vec_is_empty_initially"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let v: Vec(i32) = Vec(i32)::new();
@@ -75,7 +75,7 @@ exit_code = 1
 
 [[case]]
 name = "vec_clear"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -89,7 +89,7 @@ exit_code = 7
 
 [[case]]
 name = "vec_reserve"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -102,7 +102,7 @@ exit_code = 1
 
 [[case]]
 name = "vec_literal"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let v = @vec(1, 2, 3, 4, 5);
@@ -114,7 +114,7 @@ exit_code = 11
 
 [[case]]
 name = "vec_repeat"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let v = @vec_repeat(7, 4);
@@ -126,7 +126,7 @@ exit_code = 18
 
 [[case]]
 name = "vec_pop_empty_panics"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -137,7 +137,7 @@ exit_code = 101
 
 [[case]]
 name = "vec_index_oob_panics"
-spec = ["7.3:1"]
+spec = ["7.3:2"]
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -209,3 +209,20 @@ fn main() -> i32 {
 }
 """
 exit_code = 7
+
+[[case]]
+name = "vec_terminated_ptr_checked"
+spec = ["7.3:6"]
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(72);
+    v.push(105);
+    checked {
+        let _p = v.terminated_ptr(0);
+    };
+    let len_val: usize = v.len();
+    @cast(len_val)
+}
+"""
+exit_code = 2

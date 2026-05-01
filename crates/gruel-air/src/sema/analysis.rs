@@ -3364,13 +3364,11 @@ impl<'a> Sema<'a> {
         }
 
         // ADR-0066: methods on `Vec(T)` values dispatch through the
-        // vec_methods module which emits the appropriate intrinsic.
+        // vec_methods module which emits the appropriate intrinsic. All
+        // Vec methods take borrow/inout self — undo the move that
+        // analyze_inst recorded for the root variable.
         if matches!(receiver_type.kind(), TypeKind::Vec(_)) {
-            if !matches!(
-                method_name_str.as_str(),
-                "ptr" | "ptr_mut" | "terminated_ptr"
-            ) && let Some(var) = receiver_var
-            {
+            if let Some(var) = receiver_var {
                 ctx.moved_vars.remove(&var);
             }
             return self.dispatch_vec_method_call(
