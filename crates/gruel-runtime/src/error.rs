@@ -70,6 +70,17 @@ pub extern "C" fn __gruel_panic_no_msg() -> ! {
     platform::exit(101)
 }
 
+/// `Vec::dispose()` called on a non-empty Vec (ADR-0067).
+///
+/// Disposing of a Vec with `len != 0` would orphan the contained elements
+/// (especially fatal for linear payloads). The codegen emits a runtime
+/// branch that calls this function when the precondition fails.
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_vec_dispose_panic() -> ! {
+    platform::write_stderr(b"panic: Vec::dispose called on a non-empty Vec\n");
+    platform::exit(101)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

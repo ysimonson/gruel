@@ -8,6 +8,7 @@ use gruel_air::{
     AnalyzedFunction, Type, TypeInternPool,
 };
 use gruel_util::{BinOp, CompileWarning, WarningKind};
+use lasso::ThreadedRodeo;
 
 use crate::CfgOutput;
 use crate::inst::{
@@ -108,6 +109,8 @@ pub struct CfgBuilder<'a> {
     cfg: Cfg,
     /// Type intern pool for struct/enum/array lookups (Phase 2B ADR-0024)
     type_pool: &'a TypeInternPool,
+    /// Interner for resolving Spur-encoded names (e.g. intrinsic names).
+    interner: &'a ThreadedRodeo,
     /// Current block we're building
     current_block: BlockId,
     /// Stack of loop contexts for nested loops
@@ -132,7 +135,11 @@ impl<'a> CfgBuilder<'a> {
     ///
     /// The `type_pool` provides struct/enum/array definitions needed for queries like
     /// `type_needs_drop`.
-    pub fn build(func: &'a AnalyzedFunction, type_pool: &'a TypeInternPool) -> CfgOutput {
+    pub fn build(
+        func: &'a AnalyzedFunction,
+        type_pool: &'a TypeInternPool,
+        interner: &'a ThreadedRodeo,
+    ) -> CfgOutput {
         // Determine which by-value parameters need dropping at function exit.
         // Inout/borrow parameters are not owned by the callee and must not be dropped.
         // Destructors must NOT auto-drop their self parameter — the destructor IS the
@@ -170,6 +177,7 @@ impl<'a> CfgBuilder<'a> {
                 func.param_slot_types.clone(),
             ),
             type_pool,
+            interner,
             current_block: BlockId(0),
             loop_stack: Vec::new(),
             value_cache: vec![None; func.air.len()],
@@ -690,11 +698,21 @@ impl<'a> CfgBuilder<'a> {
                 args_len,
             } => {
                 let mut arg_vals = Vec::new();
-                for arg in self.air.get_air_refs(*args_start, *args_len) {
-                    let Some(val) = self.lower_value(arg) else {
+                let arg_refs: Vec<AirRef> = self.air.get_air_refs(*args_start, *args_len).collect();
+                for arg in &arg_refs {
+                    let Some(val) = self.lower_value(*arg) else {
                         return Self::diverged();
                     };
                     arg_vals.push(val);
+                }
+                // ADR-0067: `vec_dispose(self)` consumes its receiver
+                // by-value. Forget the slot so the scope-exit elaboration
+                // doesn't emit a duplicate drop.
+                let intrinsic_name = self.interner.resolve(name);
+                if intrinsic_name == "vec_dispose"
+                    && let Some(first) = arg_refs.first()
+                {
+                    self.forget_consumed_value(*first);
                 }
                 // Store args in extra array
                 let (args_start, args_len) = self.cfg.push_extra(arg_vals);
@@ -2936,7 +2954,7 @@ mod tests {
         let output = sema.analyze_all().unwrap();
 
         let func = &output.functions[0];
-        CfgBuilder::build(func, &output.type_pool).cfg
+        CfgBuilder::build(func, &output.type_pool, &interner).cfg
     }
 
     #[test]

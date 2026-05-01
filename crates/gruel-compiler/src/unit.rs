@@ -501,7 +501,9 @@ impl<'src> CompilationUnit<'src> {
             .collect();
 
         // Build CFGs in parallel
-        let (functions, cfg_warnings) = self.build_cfgs(all_functions, &sema_output.type_pool);
+        let interner_ref = self.interner.as_ref().expect("interner not initialized");
+        let (functions, cfg_warnings) =
+            self.build_cfgs(all_functions, &sema_output.type_pool, interner_ref);
 
         self.functions = Some(functions);
         self.type_pool = Some(sema_output.type_pool);
@@ -520,13 +522,14 @@ impl<'src> CompilationUnit<'src> {
         &self,
         functions: Vec<AnalyzedFunction>,
         type_pool: &TypeInternPool,
+        interner: &ThreadedRodeo,
     ) -> (Vec<FunctionWithCfg>, Vec<CompileWarning>) {
         let _span = info_span!("cfg_construction").entered();
 
         let results: Vec<(FunctionWithCfg, Vec<CompileWarning>)> = functions
             .into_par_iter()
             .map(|func| {
-                let cfg_output = CfgBuilder::build(&func, type_pool);
+                let cfg_output = CfgBuilder::build(&func, type_pool, interner);
 
                 (
                     FunctionWithCfg {

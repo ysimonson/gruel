@@ -105,6 +105,7 @@ pub enum IntrinsicId {
     VecClone,
     VecLiteral,
     VecRepeat,
+    VecDispose,
     PartsToVec,
 
     // ---- Preview / test infra ----
@@ -944,6 +945,18 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &["@vec_repeat(0, 100)"],
     },
     IntrinsicDef {
+        id: IntrinsicId::VecDispose,
+        name: "vec_dispose",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: Some("__gruel_vec_dispose_panic"),
+        summary: "Free a Vec's heap buffer; panic if `len != 0`.",
+        description: "`@vec_dispose(v)` is the explicit-release form for `Vec(T)`. It panics if `v.len != 0` (so any contained linear elements are still live), then frees the heap buffer. Surface form: `v.dispose()`. For `Vec(T:Linear)` this is the only legal release path; for non-linear `T` it's an explicit alternative to implicit drop.",
+        examples: &[],
+    },
+    IntrinsicDef {
         id: IntrinsicId::PartsToVec,
         name: "parts_to_vec",
         kind: IntrinsicKind::Expr,
@@ -1503,6 +1516,7 @@ mod tests {
                 | IntrinsicId::VecClone
                 | IntrinsicId::VecLiteral
                 | IntrinsicId::VecRepeat
+                | IntrinsicId::VecDispose
                 | IntrinsicId::PartsToVec
                 | IntrinsicId::TestPreviewGate => {}
             }

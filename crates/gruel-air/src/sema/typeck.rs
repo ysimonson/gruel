@@ -44,8 +44,14 @@ impl<'a> Sema<'a> {
             | TypeKind::F64
             | TypeKind::Bool
             | TypeKind::Unit => true,
-            // Enum types are Copy (they're small discriminant values)
-            TypeKind::Enum(_) => true,
+            // Enum types are Copy (they're small discriminant values), unless
+            // any payload is linear (ADR-0067).
+            TypeKind::Enum(enum_id) => {
+                let def = self.type_pool.enum_def(enum_id);
+                !def.variants
+                    .iter()
+                    .any(|v| v.fields.iter().any(|f| self.is_type_linear(*f)))
+            }
             // ComptimeInt is Copy (like ComptimeStr)
             TypeKind::ComptimeInt => true,
             // Never and Error are Copy for convenience
@@ -276,17 +282,9 @@ impl<'a> Sema<'a> {
                         Ok(Type::new_mut_slice(slice_id))
                     }
                     BuiltinTypeConstructorKind::Vec => {
-                        // ADR-0066: reject linear element types.
-                        if self.is_type_linear(arg_types[0]) {
-                            return Err(gruel_util::CompileError::new(
-                                gruel_util::ErrorKind::InternalError(format!(
-                                    "Vec(T) does not support linear element types in v1 \
-                                     (T = {}); see ADR-0066",
-                                    self.format_type_name(arg_types[0])
-                                )),
-                                span,
-                            ));
-                        }
+                        // ADR-0067: linear element types are accepted; the
+                        // resulting Vec is itself linear (via is_type_linear
+                        // recursion) and must be drained + disposed.
                         let vec_id = self.type_pool.intern_vec_from_type(arg_types[0]);
                         Ok(Type::new_vec(vec_id))
                     }

@@ -3364,11 +3364,14 @@ impl<'a> Sema<'a> {
         }
 
         // ADR-0066: methods on `Vec(T)` values dispatch through the
-        // vec_methods module which emits the appropriate intrinsic. All
+        // vec_methods module which emits the appropriate intrinsic. Most
         // Vec methods take borrow/inout self — undo the move that
-        // analyze_inst recorded for the root variable.
+        // analyze_inst recorded. ADR-0067's `dispose(self)` consumes
+        // self by-value, so the move recorded by `analyze_inst` is correct
+        // and should be preserved.
         if matches!(receiver_type.kind(), TypeKind::Vec(_)) {
-            if let Some(var) = receiver_var {
+            let consumes_self = matches!(method_name_str.as_str(), "dispose");
+            if !consumes_self && let Some(var) = receiver_var {
                 ctx.moved_vars.remove(&var);
             }
             return self.dispatch_vec_method_call(
@@ -4442,7 +4445,8 @@ impl<'a> Sema<'a> {
             | IntrinsicId::VecPtr
             | IntrinsicId::VecPtrMut
             | IntrinsicId::VecTerminatedPtr
-            | IntrinsicId::VecClone => Err(CompileError::new(
+            | IntrinsicId::VecClone
+            | IntrinsicId::VecDispose => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),

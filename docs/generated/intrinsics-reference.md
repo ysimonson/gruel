@@ -68,6 +68,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@vec_clone` | expr | Vectors | — | — | Clone a Vec. |
 | `@vec` | expr | Vectors | — | — | Construct a Vec from individual elements. |
 | `@vec_repeat` | expr | Vectors | — | — | Construct a Vec with N copies of a value. |
+| `@vec_dispose` | expr | Vectors | — | — | Free a Vec's heap buffer; panic if `len != 0`. |
 | `@parts_to_vec` | expr | Vectors | — | yes | Build a Vec from raw parts. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
 

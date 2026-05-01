@@ -38,20 +38,3 @@ fn main() -> i32 {
 """
 exit_code = 7
 
-[[case]]
-name = "vec_rejects_linear_element_type"
-spec = ["7.3:1"]
-description = "Vec(T) where T:Linear is rejected"
-source = """
-linear struct MustUse { value: i32 }
-
-fn take(_v: Vec(MustUse)) -> i32 {
-    7
-}
-
-fn main() -> i32 {
-    7
-}
-"""
-compile_fail = true
-error_contains = "does not support linear element"

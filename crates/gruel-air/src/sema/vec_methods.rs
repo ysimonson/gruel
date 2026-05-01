@@ -269,6 +269,25 @@ impl<'a> Sema<'a> {
                 )
             }
             "clone" => self.emit_vec_query(air, "vec_clone", receiver, args, span, receiver.ty),
+            "dispose" => {
+                if !args.is_empty() {
+                    return Err(CompileError::new(
+                        ErrorKind::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                        },
+                        span,
+                    ));
+                }
+                // dispose consumes self by-value (Normal arg mode).
+                self.emit_vec_intrinsic(
+                    air,
+                    "vec_dispose",
+                    &[(receiver.air_ref, AirArgMode::Normal)],
+                    Type::UNIT,
+                    span,
+                )
+            }
             _ => Err(CompileError::new(
                 ErrorKind::UndefinedMethod {
                     type_name: self.format_type_name(receiver.ty),

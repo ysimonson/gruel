@@ -243,14 +243,29 @@ impl<'a> Sema<'a> {
     }
 
     /// Check if a type is a linear type.
-    /// Only struct types can be linear - primitives and other types are not linear.
+    ///
+    /// Linearity propagates through compound types (ADR-0067): an array, vec,
+    /// or enum whose element/payload type is linear is itself linear.
     pub(crate) fn is_type_linear(&self, ty: Type) -> bool {
         match ty.kind() {
             TypeKind::Struct(struct_id) => {
                 let struct_def = self.type_pool.struct_def(struct_id);
                 struct_def.is_linear
             }
-            // Only struct types can be linear
+            TypeKind::Array(array_id) => {
+                let (element_type, _) = self.type_pool.array_def(array_id);
+                self.is_type_linear(element_type)
+            }
+            TypeKind::Vec(vec_id) => {
+                let element_type = self.type_pool.vec_def(vec_id);
+                self.is_type_linear(element_type)
+            }
+            TypeKind::Enum(enum_id) => {
+                let def = self.type_pool.enum_def(enum_id);
+                def.variants
+                    .iter()
+                    .any(|v| v.fields.iter().any(|f| self.is_type_linear(*f)))
+            }
             _ => false,
         }
     }

@@ -881,7 +881,7 @@ pub fn compile_frontend_from_ast_with_options_full(
         let results: Vec<(FunctionWithCfg, Vec<CompileWarning>)> = all_functions
             .into_par_iter()
             .map(|func| {
-                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool);
+                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool, &interner);
 
                 (
                     FunctionWithCfg {
@@ -999,7 +999,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
         let results: Vec<(FunctionWithCfg, Vec<CompileWarning>)> = all_functions
             .into_par_iter()
             .map(|func| {
-                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool);
+                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool, &interner);
 
                 (
                     FunctionWithCfg {
@@ -3197,7 +3197,7 @@ mod integration_tests {
                 if func.air.return_type() == Type::COMPTIME_TYPE {
                     continue;
                 }
-                let _cfg_output = CfgBuilder::build(&func, &sema_output.type_pool);
+                let _cfg_output = CfgBuilder::build(&func, &sema_output.type_pool, &interner);
                 count += 1;
             }
             count

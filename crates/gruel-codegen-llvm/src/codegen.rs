@@ -3856,6 +3856,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             IntrinsicId::VecClone => Some(self.translate_vec_clone(args, ty)),
             IntrinsicId::VecLiteral => Some(self.translate_vec_literal(args, ty)),
             IntrinsicId::VecRepeat => Some(self.translate_vec_repeat(args, ty)),
+            IntrinsicId::VecDispose => {
+                self.translate_vec_dispose(args);
+                None
+            }
             IntrinsicId::PartsToVec => Some(self.translate_parts_to_vec(args, ty)),
 
             // ---- Fallback: return zero value for unimplemented intrinsics ----
@@ -4832,6 +4836,91 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         let bytes = self
             .builder
             .build_int_mul(cap, elem_size, "drop_bytes")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let free_fn = self.vec_free_fn();
+        self.builder
+            .build_call(free_fn, &[buf.into(), bytes.into(), align.into()], "")
+            .unwrap();
+        self.builder.build_unconditional_branch(after_bb).unwrap();
+        self.builder.position_at_end(after_bb);
+    }
+
+    /// `v.dispose()` — ADR-0067: panic if `len != 0`, otherwise free the buffer.
+    ///
+    /// Receiver is passed by-value (consumed). The buffer is freed even when
+    /// `cap == 0` is harmless because `__gruel_free` is a no-op on
+    /// zero-byte allocations / null pointers.
+    fn translate_vec_dispose(&mut self, args: &[CfgValue]) {
+        let recv_val = self.get_value(args[0]);
+        let recv = recv_val.into_struct_value();
+        let buf = self
+            .builder
+            .build_extract_value(recv, 0, "dispose_buf")
+            .unwrap()
+            .into_pointer_value();
+        let len = self
+            .builder
+            .build_extract_value(recv, 1, "dispose_len")
+            .unwrap()
+            .into_int_value();
+        let cap = self
+            .builder
+            .build_extract_value(recv, 2, "dispose_cap")
+            .unwrap()
+            .into_int_value();
+        let i64_ty = self.ctx.i64_type();
+        let zero = i64_ty.const_zero();
+
+        // panic if len != 0
+        let nonempty = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::NE, len, zero, "dispose_nonempty")
+            .unwrap();
+        let panic_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_dispose_panic");
+        let cont_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_dispose_cont");
+        self.builder
+            .build_conditional_branch(nonempty, panic_bb, cont_bb)
+            .unwrap();
+
+        self.builder.position_at_end(panic_bb);
+        let panic_fn_ty = self.ctx.void_type().fn_type(&[], false);
+        let panic_fn = self
+            .module
+            .get_function("__gruel_vec_dispose_panic")
+            .unwrap_or_else(|| {
+                self.module
+                    .add_function("__gruel_vec_dispose_panic", panic_fn_ty, None)
+            });
+        self.builder.build_call(panic_fn, &[], "").unwrap();
+        self.builder.build_unreachable().unwrap();
+
+        self.builder.position_at_end(cont_bb);
+        // Free the buffer (only if cap > 0).
+        let alive = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::UGT, cap, zero, "dispose_alive")
+            .unwrap();
+        let free_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_dispose_free");
+        let after_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_dispose_after");
+        self.builder
+            .build_conditional_branch(alive, free_bb, after_bb)
+            .unwrap();
+        self.builder.position_at_end(free_bb);
+
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let bytes = self
+            .builder
+            .build_int_mul(cap, elem_size, "dispose_bytes")
             .unwrap();
         let align = i64_ty.const_int(8, false);
         let free_fn = self.vec_free_fn();

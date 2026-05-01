@@ -20,9 +20,10 @@ storage that the compiler-generated drop releases when the value goes
 out of scope.
 
 `Vec(T)` is gated behind the `vec` preview feature; using the name in
-type position without `--preview vec` is rejected. Element types **MUST
-NOT** be `linear`; the compiler rejects `Vec(T:Linear)` at type-resolution
-time.
+type position without `--preview vec` is rejected. When the element type
+`T` is `linear`, the resulting `Vec(T)` is itself linear (per ADR-0067):
+implicit drops are rejected and the user must drain the vector and call
+`dispose` to release the heap buffer.
 
 ## Construction
 
@@ -37,7 +38,8 @@ Two associated functions construct a `Vec(T)`:
 The variadic `@vec(a, b, c, ...)` intrinsic builds a `Vec(T)` from its
 arguments: `cap = len = arg_count`, each argument moved into a slot.
 At least one argument is required; element types unify to a single
-`T`. The element type **MUST NOT** be `linear`.
+`T`. The element type **MUST NOT** be `linear` (linearity is propagated
+to the literal's elements which would be left un-consumed).
 
 The `@vec_repeat(v: T, n: usize) -> Vec(T)` intrinsic builds a vector
 with `n` copies of `v`. v1 requires `T: Copy`; non-Copy `T: Clone`
@@ -107,3 +109,32 @@ Dropping a `Vec(T)` runs the per-element drop loop (when `T` needs
 drop) over `[0..len]`, then frees the buffer if `cap > 0`. The element
 drop dispatches via the same `__gruel_drop_*` machinery used for
 ordinary affine struct fields.
+
+## Dispose
+
+{{ rule(id="7.3:8", cat="dynamic-semantics") }}
+
+`v.dispose()` is the explicit-release form (ADR-0067). It consumes
+`self` by-value, panics if `len != 0` (with code 101 and message
+`"panic: Vec::dispose called on a non-empty Vec"`), then frees the
+heap buffer. After `dispose` the value is moved-out; no implicit drop
+runs at end-of-scope. For `Vec(T)` with non-linear `T`, dispose is an
+explicit alternative to implicit drop. For `Vec(T:Linear)` (see below),
+dispose is the only legal release path because implicit drops are
+rejected at compile time.
+
+## Linear elements
+
+{{ rule(id="7.3:9", cat="legality-rule") }}
+
+When the element type `T` is `linear`, `Vec(T)` is itself linear: the
+must-consume discipline propagates through the container. An implicit
+drop of `Vec(T:Linear)` is a compile error (the same diagnostic that
+governs ordinary linear values applies). Users must drain the vector
+(via `pop` or destructuring helpers) and then call `dispose` to release
+the buffer.
+
+`Vec(T:Linear)::clone` is rejected because linear values do not conform
+to the `Clone` interface (cloning would create a second linear
+obligation). `@vec(...)` and `@vec_repeat(...)` likewise reject linear
+element types.
