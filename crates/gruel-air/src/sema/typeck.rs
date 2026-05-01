@@ -276,9 +276,19 @@ impl<'a> Sema<'a> {
                         Ok(Type::new_mut_slice(slice_id))
                     }
                     BuiltinTypeConstructorKind::Vec => {
-                        // ADR-0066 Phase 1: lower `Vec(T)` in type position.
-                        // The preview gate / linear-rejection / copy-validation
-                        // land in Phase 2 alongside the construction methods.
+                        // ADR-0066: gate Vec(T) behind --preview vec, reject
+                        // linear element types.
+                        self.require_preview(gruel_util::PreviewFeature::Vec, "Vec(T)", span)?;
+                        if self.is_type_linear(arg_types[0]) {
+                            return Err(gruel_util::CompileError::new(
+                                gruel_util::ErrorKind::InternalError(format!(
+                                    "Vec(T) does not support linear element types in v1 \
+                                     (T = {}); see ADR-0066",
+                                    self.format_type_name(arg_types[0])
+                                )),
+                                span,
+                            ));
+                        }
                         let vec_id = self.type_pool.intern_vec_from_type(arg_types[0]);
                         Ok(Type::new_vec(vec_id))
                     }
