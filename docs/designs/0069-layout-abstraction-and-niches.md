@@ -157,7 +157,7 @@ Each phase is independently committable and testable.
 
 - [x] **Phase 1: `Layout` struct, computation, cache (no behavior change).** Add `crates/gruel-air/src/layout.rs` with the `Layout` and `NicheRange` types and `layout_of(pool, ty)`. Compute size/align using the same rules `type_byte_size` / `type_alignment` use today; leave `niches` empty for every type. Cache on `TypeInternPool`. No callers yet; verify with unit tests that `layout_of` agrees with the existing functions across every type kind.
 
-- [ ] **Phase 2: Migrate codegen size/align queries to `Layout`.** `type_byte_size` and `type_alignment` in `gruel-codegen-llvm/src/types.rs` become thin wrappers over `layout_of`. All other in-tree callers go through `Layout`. Existing test suite (full `make test`) must pass unchanged — no observable behavior should differ.
+- [x] **Phase 2: Migrate codegen size/align queries to `Layout`.** `type_byte_size` and `type_alignment` in `gruel-codegen-llvm/src/types.rs` become thin wrappers over `layout_of`. All other in-tree callers go through `Layout`. Existing test suite (full `make test`) must pass unchanged — no observable behavior should differ.
 
 - [ ] **Phase 3: Migrate enum constructor and match-extract through `Layout`.** Add `Layout::discriminant_strategy()` returning either `Separate { offset, width }` (current behavior) or `Niche { ... }` (Phase 5+). Constructor and match-switch lowering in `codegen.rs` consult this instead of hardcoding field 0. Phase 3 still produces only `Separate`, so wire format and tests remain identical.
 

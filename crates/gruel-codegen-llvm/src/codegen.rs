@@ -4,6 +4,7 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
+use gruel_air::layout::layout_of;
 use gruel_air::{StructId, Type, TypeInternPool, TypeKind};
 use gruel_cfg::{
     BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator, drop_names,
@@ -2475,7 +2476,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 if !fields.is_empty() {
                     let variant_payload_size: u64 = field_types
                         .iter()
-                        .map(|f| crate::types::type_byte_size(*f, self.type_pool))
+                        .map(|f| layout_of(self.type_pool, *f).size)
                         .sum();
                     let byte_arr_ty = self.ctx.i8_type().array_type(variant_payload_size as u32);
                     let payload_ptr = self
@@ -2509,7 +2510,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                         let store = self.builder.build_store(field_ptr, field_llvm_val).unwrap();
                         store.set_alignment(1).unwrap();
 
-                        byte_offset += crate::types::type_byte_size(field_ty, self.type_pool);
+                        byte_offset += layout_of(self.type_pool, field_ty).size;
                     }
                 }
 
@@ -2542,7 +2543,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 // Compute byte offset of the target field within the payload.
                 let byte_offset: u64 = field_types[..field_index as usize]
                     .iter()
-                    .map(|f| crate::types::type_byte_size(*f, self.type_pool))
+                    .map(|f| layout_of(self.type_pool, *f).size)
                     .sum();
 
                 let field_ty_gruel = field_types[field_index as usize];
@@ -2574,7 +2575,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     .map(|v| {
                         v.fields
                             .iter()
-                            .map(|f| crate::types::type_byte_size(*f, self.type_pool))
+                            .map(|f| layout_of(self.type_pool, *f).size)
                             .sum::<u64>()
                     })
                     .max()
