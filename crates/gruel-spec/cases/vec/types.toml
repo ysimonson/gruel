@@ -1,0 +1,40 @@
+# Vec(T) Type System (ADR-0066)
+#
+# Tests for the `Vec(T)` type-position form. Construction methods
+# (`Vec::new`, `Vec::with_capacity`) and the rest of the surface land in
+# subsequent phases of the ADR.
+
+[section]
+id = "vec.types"
+spec_chapter = "7.3"
+name = "Vec Types"
+description = "Tests for ADR-0066 Vec(T) names in type position."
+
+[[case]]
+name = "vec_type_in_param"
+spec = ["7.3:1"]
+source = """
+fn take(_v: Vec(i32)) -> i32 {
+    7
+}
+
+fn main() -> i32 {
+    7
+}
+"""
+exit_code = 7
+
+[[case]]
+name = "vec_type_in_return"
+spec = ["7.3:1"]
+source = """
+fn make() -> Vec(i32) {
+    @panic("not yet implemented")
+}
+
+fn main() -> i32 {
+    7
+}
+"""
+exit_code = 7
+

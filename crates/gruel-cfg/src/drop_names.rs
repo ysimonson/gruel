@@ -39,6 +39,8 @@ pub fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
                 .iter()
                 .any(|v| v.fields.iter().any(|f| type_needs_drop(*f, type_pool)))
         }
+        // Vec(T) (ADR-0066) always needs drop — owns heap memory.
+        TypeKind::Vec(_) => true,
         _ => false,
     }
 }
@@ -142,6 +144,10 @@ pub fn type_name_component(ty: Type, type_pool: &TypeInternPool) -> String {
         TypeKind::MutSlice(id) => {
             let elem = type_pool.mut_slice_def(id);
             format!("mut_slice_{}", type_name_component(elem, type_pool))
+        }
+        TypeKind::Vec(id) => {
+            let elem = type_pool.vec_def(id);
+            format!("vec_{}", type_name_component(elem, type_pool))
         }
         TypeKind::Interface(id) => format!("interface{}", id.0),
     }

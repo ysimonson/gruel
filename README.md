@@ -14,6 +14,8 @@ Theme: Build upon Rue's bones, keeping a lot of the broad ideas but making break
 - Use of `usize` for indexing (ADR-0054)
 - Tuples (ADR-0048)
 - Slices (ADR-0064)
+- Canonical `Option(T)` and `Clone` interface (ADR-0065)
+- Vecs (ADR-0066)
 - Anonymous functions (ADR-0055)
 - Go-like structurally typed interfaces (ADR-0056, ADR-0057, ADR-0060)
 - Rust-like `@derive` for structs and enums (ADR-0058)

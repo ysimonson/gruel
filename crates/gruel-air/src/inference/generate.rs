@@ -2008,6 +2008,10 @@ impl<'a> ConstraintGenerator<'a> {
                     let id = self.type_pool.intern_mut_slice_from_type(arg_ty);
                     Type::new_mut_slice(id)
                 }
+                BuiltinTypeConstructorKind::Vec => {
+                    let id = self.type_pool.intern_vec_from_type(arg_ty);
+                    Type::new_vec(id)
+                }
             };
             return Some(InferType::Concrete(ptr_ty));
         }

@@ -1,0 +1,108 @@
+# Vec(T) dispose method (ADR-0067)
+#
+# Tests for Vec::dispose, which frees the heap buffer after panicking if
+# `len != 0`. For `Vec(T:Linear)` this is the only legal release path; for
+# non-linear T it's an explicit alternative to implicit drop.
+
+[section]
+id = "vec.dispose"
+spec_chapter = "7.3"
+name = "Vec Dispose"
+description = "Tests for ADR-0067 Vec::dispose semantics."
+
+[[case]]
+name = "vec_dispose_empty"
+spec = ["7.3:8"]
+description = "dispose on an empty (never-pushed) Vec is a no-op"
+source = """
+fn main() -> i32 {
+    let v: Vec(i32) = Vec(i32)::new();
+    v.dispose();
+    7
+}
+"""
+exit_code = 7
+
+[[case]]
+name = "vec_dispose_drained"
+spec = ["7.3:8"]
+description = "dispose on a Vec that was push-then-pop-drained succeeds"
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(1);
+    v.push(2);
+    v.pop();
+    v.pop();
+    v.dispose();
+    11
+}
+"""
+exit_code = 11
+
+[[case]]
+name = "vec_dispose_nonempty_panics"
+spec = ["7.3:8"]
+description = "dispose panics if any elements remain"
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(1);
+    v.dispose();
+    7
+}
+"""
+exit_code = 101
+
+[[case]]
+name = "vec_dispose_after_clear"
+spec = ["7.3:8"]
+description = "clear + dispose is a valid release sequence"
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(10);
+    v.push(20);
+    v.clear();
+    v.dispose();
+    33
+}
+"""
+exit_code = 33
+
+[[case]]
+name = "vec_linear_drained_dispose"
+spec = ["7.3:9"]
+description = "Vec of linear elements: drain via pop then dispose"
+source = """
+linear struct MustUse { value: i32 }
+
+fn consume(m: MustUse) -> i32 {
+    m.value
+}
+
+fn main() -> i32 {
+    let mut v: Vec(MustUse) = Vec(MustUse)::new();
+    v.push(MustUse { value: 7 });
+    let m = v.pop();
+    let result = consume(m);
+    v.dispose();
+    result
+}
+"""
+exit_code = 7
+
+[[case]]
+name = "vec_linear_implicit_drop_rejected"
+spec = ["7.3:9"]
+description = "Vec(T:Linear) cannot be implicitly dropped at end of scope"
+source = """
+linear struct MustUse { value: i32 }
+
+fn main() -> i32 {
+    let _v: Vec(MustUse) = Vec(MustUse)::new();
+    7
+}
+"""
+compile_fail = true
+error_contains = "must be consumed"

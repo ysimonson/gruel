@@ -1206,3 +1206,50 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "does not conform to interface `Copy`"
+
+# ADR-0067: linearity propagates through compound types.
+[[case]]
+name = "linear_array_implicit_drop_rejected"
+spec = ["3.8:32"]
+description = "Array of linear elements cannot be implicitly dropped (ADR-0067)"
+source = """
+linear struct MustUse { value: i32 }
+
+fn main() -> i32 {
+    let _arr: [MustUse; 1] = [MustUse { value: 7 }];
+    0
+}
+"""
+compile_fail = true
+error_contains = "linear value"
+
+[[case]]
+name = "linear_array_index_partial_move_rejected"
+spec = ["3.8:32"]
+description = "Indexing into an array of linear elements is rejected (partial moves are banned, ADR-0036)"
+source = """
+linear struct MustUse { value: i32 }
+
+fn consume(m: MustUse) -> i32 { m.value }
+
+fn main() -> i32 {
+    let arr: [MustUse; 1] = [MustUse { value: 7 }];
+    consume(arr[0])
+}
+"""
+compile_fail = true
+error_contains = "cannot move out of indexed position"
+
+[[case]]
+name = "linear_zero_array_drop_ok"
+spec = ["3.8:32"]
+description = "Empty array of linear elements has no payload — implicit drop OK"
+source = """
+linear struct MustUse { value: i32 }
+
+fn main() -> i32 {
+    let _arr: [MustUse; 0] = [];
+    7
+}
+"""
+exit_code = 7

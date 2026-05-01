@@ -44,8 +44,14 @@ impl<'a> Sema<'a> {
             | TypeKind::F64
             | TypeKind::Bool
             | TypeKind::Unit => true,
-            // Enum types are Copy (they're small discriminant values)
-            TypeKind::Enum(_) => true,
+            // Enum types are Copy (they're small discriminant values), unless
+            // any payload is linear (ADR-0067).
+            TypeKind::Enum(enum_id) => {
+                let def = self.type_pool.enum_def(enum_id);
+                !def.variants
+                    .iter()
+                    .any(|v| v.fields.iter().any(|f| self.is_type_linear(*f)))
+            }
             // ComptimeInt is Copy (like ComptimeStr)
             TypeKind::ComptimeInt => true,
             // Never and Error are Copy for convenience
@@ -82,6 +88,8 @@ impl<'a> Sema<'a> {
             // (ptr + len). Bitwise-copying is safe; borrow-checking enforces
             // exclusivity.
             TypeKind::Slice(_) | TypeKind::MutSlice(_) => true,
+            // Vec(T) (ADR-0066) is affine — owns heap memory.
+            TypeKind::Vec(_) => false,
         }
     }
 
@@ -272,6 +280,13 @@ impl<'a> Sema<'a> {
                     BuiltinTypeConstructorKind::MutSlice => {
                         let slice_id = self.type_pool.intern_mut_slice_from_type(arg_types[0]);
                         Ok(Type::new_mut_slice(slice_id))
+                    }
+                    BuiltinTypeConstructorKind::Vec => {
+                        // ADR-0067: linear element types are accepted; the
+                        // resulting Vec is itself linear (via is_type_linear
+                        // recursion) and must be drained + disposed.
+                        let vec_id = self.type_pool.intern_vec_from_type(arg_types[0]);
+                        Ok(Type::new_vec(vec_id))
                     }
                 };
             }
@@ -584,6 +599,8 @@ impl<'a> Sema<'a> {
             TypeKind::Interface(_) => 2,
             // Slices (ADR-0064): fat pointer `{ptr, len}` occupies 2 slots.
             TypeKind::Slice(_) | TypeKind::MutSlice(_) => 2,
+            // Vec(T) (ADR-0066): `{ptr, len, cap}` — 3 slots.
+            TypeKind::Vec(_) => 3,
         }
     }
 }

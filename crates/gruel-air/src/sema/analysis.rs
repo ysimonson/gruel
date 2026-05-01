@@ -674,7 +674,12 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
             if method_info.has_self {
                 // Add self parameter (Normal mode - passed by value)
                 let self_sym = sema.interner.get_or_intern("self");
-                param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+                let self_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                };
+                param_info.push((self_sym, method_info.struct_type, self_mode));
             }
 
             // Add regular parameters (convert from arena slices)
@@ -752,7 +757,12 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
 
             if method_info.has_self {
                 let self_sym = sema.interner.get_or_intern("self");
-                param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+                let self_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                };
+                param_info.push((self_sym, method_info.struct_type, self_mode));
             }
 
             for i in 0..param_names.len() {
@@ -1048,7 +1058,12 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 if method_info.has_self {
                     // Add self parameter (Normal mode - passed by value)
                     let self_sym = sema.interner.get_or_intern("self");
-                    param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+                    let self_mode = match method_info.receiver {
+                        crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                        crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                        crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                    };
+                    param_info.push((self_sym, method_info.struct_type, self_mode));
                 }
 
                 // Add regular parameters (convert from arena slices)
@@ -1246,7 +1261,12 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
 
             if method_info.has_self {
                 let self_sym = sema.interner.get_or_intern("self");
-                param_info.push((self_sym, method_info.struct_type, RirParamMode::Normal));
+                let self_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                };
+                param_info.push((self_sym, method_info.struct_type, self_mode));
             }
 
             for i in 0..param_names.len() {
@@ -1439,7 +1459,7 @@ impl<'a> Sema<'a> {
 
     /// Check that we are inside a `checked` block.
     /// Returns an error if `checked_depth` is zero.
-    fn require_checked_for_intrinsic(
+    pub(crate) fn require_checked_for_intrinsic(
         ctx: &AnalysisContext,
         intrinsic_name: &str,
         span: Span,
@@ -3343,6 +3363,27 @@ impl<'a> Sema<'a> {
             );
         }
 
+        // ADR-0066: methods on `Vec(T)` values dispatch through the
+        // vec_methods module which emits the appropriate intrinsic. Most
+        // Vec methods take borrow/inout self — undo the move that
+        // analyze_inst recorded. ADR-0067's `dispose(self)` consumes
+        // self by-value, so the move recorded by `analyze_inst` is correct
+        // and should be preserved.
+        if matches!(receiver_type.kind(), TypeKind::Vec(_)) {
+            let consumes_self = matches!(method_name_str.as_str(), "dispose");
+            if !consumes_self && let Some(var) = receiver_var {
+                ctx.moved_vars.remove(&var);
+            }
+            return self.dispatch_vec_method_call(
+                air,
+                receiver_result,
+                &method_name_str,
+                &args,
+                span,
+                ctx,
+            );
+        }
+
         let struct_id = match receiver_type.kind() {
             TypeKind::Struct(id) => id,
             _ => {
@@ -3375,6 +3416,43 @@ impl<'a> Sema<'a> {
         // Look up the struct name by its ID (for error messages)
         let struct_def = self.type_pool.struct_def(struct_id);
         let struct_name_str = struct_def.name.clone();
+
+        // ADR-0065 Phase 2: `@derive(Clone)` structs have a synthesized
+        // `<TypeName>.clone(borrow self) -> Self` emitted by `clone_glue`.
+        // The synthesized function isn't registered in `self.methods`; emit
+        // the Call directly when dispatching `.clone()` on such a struct,
+        // and *only* if the user hasn't also written their own clone method
+        // (which takes precedence via the regular methods.get path below).
+        if struct_def.is_clone
+            && method_name_str == "clone"
+            && !self.methods.contains_key(&(struct_id, method))
+            && args.is_empty()
+        {
+            // Receiver is `borrow self`; the AIR Call carries the receiver
+            // as a Borrow-mode arg.
+            if let Some(var) = receiver_var {
+                ctx.moved_vars.remove(&var);
+            }
+            let extra = [
+                receiver_result.air_ref.as_u32(),
+                AirArgMode::Borrow.as_u32(),
+            ];
+            let args_start = air.add_extra(&extra);
+            let fn_name = self
+                .interner
+                .get_or_intern(format!("{}.clone", struct_name_str));
+            let return_type = Type::new_struct(struct_id);
+            let air_ref = air.add_inst(AirInst {
+                data: AirInstData::Call {
+                    name: fn_name,
+                    args_start,
+                    args_len: 1,
+                },
+                ty: return_type,
+                span,
+            });
+            return Ok(AnalysisResult::new(air_ref, return_type));
+        }
 
         // Look up the method using StructId directly. Copy out so the
         // borrow on `self.methods` doesn't conflict with later mutable
@@ -3804,8 +3882,26 @@ impl<'a> Sema<'a> {
         // resolve_type already handles type-call syntax via the
         // BuiltinTypeConstructor registry, so dispatch through there.
         if let Some((callee_name, _)) = crate::types::parse_type_call_syntax(&type_name_str)
-            && gruel_builtins::get_builtin_type_constructor(&callee_name).is_some()
+            && let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name)
         {
+            // ADR-0066: route Vec(T)::new()/with_capacity(n) through the
+            // Vec dispatcher.
+            if matches!(
+                constructor.kind,
+                gruel_builtins::BuiltinTypeConstructorKind::Vec
+            ) {
+                let vec_ty = self.resolve_type(type_name, span)?;
+                if let Some(result) = self.try_dispatch_vec_static_call(
+                    air,
+                    ctx,
+                    vec_ty,
+                    &function_name_str,
+                    &args,
+                    span,
+                ) {
+                    return result;
+                }
+            }
             return self.dispatch_pointer_assoc_fn_call(
                 air,
                 type_name,
@@ -3950,6 +4046,16 @@ impl<'a> Sema<'a> {
                 });
                 return Ok(AnalysisResult::new(air_ref, method_info.return_type));
             }
+        }
+
+        // ADR-0066: Vec(T) static method calls via comptime type variable
+        // (e.g., `let V = Vec(i32); V::new()`).
+        if let Some(&ty) = ctx.comptime_type_vars.get(&type_name)
+            && matches!(ty.kind(), TypeKind::Vec(_))
+            && let Some(result) =
+                self.try_dispatch_vec_static_call(air, ctx, ty, &function_name_str, &args, span)
+        {
+            return result;
         }
 
         // Check if this is an enum data variant construction via a comptime type variable
@@ -4322,7 +4428,25 @@ impl<'a> Sema<'a> {
             | IntrinsicId::SliceIndexRead
             | IntrinsicId::SliceIndexWrite
             | IntrinsicId::SlicePtr
-            | IntrinsicId::SlicePtrMut => Err(CompileError::new(
+            | IntrinsicId::SlicePtrMut
+            // ADR-0066: Vec methods are dispatched via VEC_METHODS / static
+            // path-call paths, not direct @vec_* expressions.
+            | IntrinsicId::VecNew
+            | IntrinsicId::VecWithCapacity
+            | IntrinsicId::VecLen
+            | IntrinsicId::VecCapacity
+            | IntrinsicId::VecIsEmpty
+            | IntrinsicId::VecPush
+            | IntrinsicId::VecPop
+            | IntrinsicId::VecClear
+            | IntrinsicId::VecReserve
+            | IntrinsicId::VecIndexRead
+            | IntrinsicId::VecIndexWrite
+            | IntrinsicId::VecPtr
+            | IntrinsicId::VecPtrMut
+            | IntrinsicId::VecTerminatedPtr
+            | IntrinsicId::VecClone
+            | IntrinsicId::VecDispose => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),
@@ -4334,6 +4458,10 @@ impl<'a> Sema<'a> {
             IntrinsicId::PartsToMutSlice => {
                 self.analyze_parts_to_slice_intrinsic(air, &args, span, ctx, true)
             }
+            // ADR-0066: @vec(...), @vec_repeat(v, n), @parts_to_vec(p, l, c).
+            IntrinsicId::VecLiteral => self.analyze_vec_literal_intrinsic(air, &args, span, ctx),
+            IntrinsicId::VecRepeat => self.analyze_vec_repeat_intrinsic(air, &args, span, ctx),
+            IntrinsicId::PartsToVec => self.analyze_parts_to_vec_intrinsic(air, &args, span, ctx),
         }
     }
 

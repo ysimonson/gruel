@@ -1425,7 +1425,7 @@ exit_code = 42
 name = "anon_enum_basic"
 spec = ["4.14:30"]
 source = """
-fn Option(comptime T: type) -> type {
+fn Maybe(comptime T: type) -> type {
     enum {
         Some(T),
         None,
@@ -1433,7 +1433,7 @@ fn Option(comptime T: type) -> type {
 }
 
 fn main() -> i32 {
-    let Opt = Option(i32);
+    let Opt = Maybe(i32);
     let x = Opt::Some(42);
     match x {
         Opt::Some(v) => v,
@@ -1447,7 +1447,7 @@ exit_code = 42
 name = "anon_enum_unit_variant"
 spec = ["4.14:30"]
 source = """
-fn Option(comptime T: type) -> type {
+fn Maybe(comptime T: type) -> type {
     enum {
         Some(T),
         None,
@@ -1455,7 +1455,7 @@ fn Option(comptime T: type) -> type {
 }
 
 fn main() -> i32 {
-    let Opt = Option(i32);
+    let Opt = Maybe(i32);
     let x = Opt::None;
     match x {
         Opt::Some(v) => v,
@@ -1538,7 +1538,7 @@ error_contains = "must have at least one variant"
 name = "anon_enum_method_self_match"
 spec = ["4.14:33"]
 source = """
-fn Option(comptime T: type) -> type {
+fn Maybe(comptime T: type) -> type {
     enum {
         Some(T),
         None,
@@ -1553,7 +1553,7 @@ fn Option(comptime T: type) -> type {
 }
 
 fn main() -> i32 {
-    let Opt = Option(i32);
+    let Opt = Maybe(i32);
     let a = Opt::Some(42);
     let b = Opt::None;
     a.unwrap_or(0) + b.unwrap_or(10)
@@ -1565,7 +1565,7 @@ exit_code = 52
 name = "anon_enum_static_method"
 spec = ["4.14:33"]
 source = """
-fn Option(comptime T: type) -> type {
+fn Maybe(comptime T: type) -> type {
     enum {
         Some(T),
         None,
@@ -1581,7 +1581,7 @@ fn Option(comptime T: type) -> type {
 }
 
 fn main() -> i32 {
-    let Opt = Option(i32);
+    let Opt = Maybe(i32);
     let a = Opt::some(42);
     let b = Opt::none();
     match a {
@@ -1634,7 +1634,7 @@ exit_code = 42
 name = "anon_enum_is_some_method"
 spec = ["4.14:33"]
 source = """
-fn Option(comptime T: type) -> type {
+fn Maybe(comptime T: type) -> type {
     enum {
         Some(T),
         None,
@@ -1649,7 +1649,7 @@ fn Option(comptime T: type) -> type {
 }
 
 fn main() -> i32 {
-    let Opt = Option(i32);
+    let Opt = Maybe(i32);
     let a = Opt::Some(42);
     let b = Opt::None;
     let x: i32 = if a.is_some() { 30 } else { 0 };
@@ -1886,14 +1886,14 @@ exit_code = 42
 name = "comptime_enum_tuple_variant"
 spec = ["4.14:39"]
 source = """
-enum IntOption { Some(i32), None }
+enum IntMaybe { Some(i32), None }
 
 fn main() -> i32 {
     comptime {
-        let x = IntOption::Some(42);
+        let x = IntMaybe::Some(42);
         match x {
-            IntOption::Some(v) => v,
-            IntOption::None => 0,
+            IntMaybe::Some(v) => v,
+            IntMaybe::None => 0,
         }
     }
 }
@@ -1904,14 +1904,14 @@ exit_code = 42
 name = "comptime_enum_tuple_variant_none"
 spec = ["4.14:39"]
 source = """
-enum IntOption { Some(i32), None }
+enum IntMaybe { Some(i32), None }
 
 fn main() -> i32 {
     comptime {
-        let x = IntOption::None;
+        let x = IntMaybe::None;
         match x {
-            IntOption::Some(v) => v,
-            IntOption::None => 42,
+            IntMaybe::Some(v) => v,
+            IntMaybe::None => 42,
         }
     }
 }
@@ -2017,12 +2017,12 @@ exit_code = 42
 name = "comptime_match_in_loop"
 spec = ["4.14:41"]
 source = """
-enum IntOption { Some(i32), None }
+enum IntMaybe { Some(i32), None }
 
-fn unwrap_or(opt: IntOption, default: i32) -> i32 {
+fn unwrap_or(opt: IntMaybe, default: i32) -> i32 {
     match opt {
-        IntOption::Some(v) => v,
-        IntOption::None => default,
+        IntMaybe::Some(v) => v,
+        IntMaybe::None => default,
     }
 }
 
@@ -2032,13 +2032,13 @@ fn main() -> i32 {
         let mut i = 0;
         while i < 5 {
             let opt = if i < 3 {
-                IntOption::Some(10)
+                IntMaybe::Some(10)
             } else {
-                IntOption::None
+                IntMaybe::None
             };
             total = total + match opt {
-                IntOption::Some(n) => n,
-                IntOption::None => 1,
+                IntMaybe::Some(n) => n,
+                IntMaybe::None => 1,
             };
             i = i + 1;
         }

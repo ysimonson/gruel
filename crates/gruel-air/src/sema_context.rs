@@ -453,8 +453,14 @@ impl<'a> SemaContext<'a> {
             | TypeKind::F64
             | TypeKind::Bool
             | TypeKind::Unit => true,
-            // Enum types are Copy (they're small discriminant values)
-            TypeKind::Enum(_) => true,
+            // Enum types are Copy (they're small discriminant values), unless
+            // any payload is linear (ADR-0067).
+            TypeKind::Enum(enum_id) => {
+                let def = self.type_pool.enum_def(enum_id);
+                !def.variants
+                    .iter()
+                    .any(|v| v.fields.iter().any(|f| self.is_type_linear(*f)))
+            }
             // Never, Error, ComptimeType, ComptimeStr, and ComptimeInt are Copy for convenience
             TypeKind::Never
             | TypeKind::Error
@@ -482,6 +488,8 @@ impl<'a> SemaContext<'a> {
             TypeKind::Interface(_) => true,
             // Slices (ADR-0064) are Copy — scope-bound fat pointers.
             TypeKind::Slice(_) | TypeKind::MutSlice(_) => true,
+            // Vec(T) (ADR-0066) is affine — owns heap memory.
+            TypeKind::Vec(_) => false,
         }
     }
 
@@ -561,14 +569,40 @@ impl<'a> SemaContext<'a> {
     }
 
     /// Check if a type is a linear type.
+    ///
+    /// Delegates to `TypeInternPool::is_type_linear`, which is the single
+    /// source of truth for linearity semantics (ADR-0067).
     pub fn is_type_linear(&self, ty: Type) -> bool {
-        match ty.kind() {
-            TypeKind::Struct(struct_id) => {
-                let struct_def = self.type_pool.struct_def(struct_id);
-                struct_def.is_linear
-            }
-            _ => false,
+        self.type_pool.is_type_linear(ty)
+    }
+
+    /// Check if a type conforms to the `Clone` interface (ADR-0065).
+    ///
+    /// Linear types never conform. Copy types automatically conform. Built-in
+    /// types with a `clone` method (e.g. `String`) conform. `@derive(Clone)`
+    /// structs (with `is_clone == true`) conform via the synthesized
+    /// `<TypeName>.clone`. User structs with hand-written `fn clone(borrow
+    /// self) -> Self` need full conformance check via `check_conforms`; this
+    /// fast query returns false for them.
+    pub fn is_type_clone(&self, ty: Type) -> bool {
+        if self.is_type_linear(ty) {
+            return false;
         }
+        if self.is_type_copy(ty) {
+            return true;
+        }
+        if let TypeKind::Struct(struct_id) = ty.kind() {
+            if let Some(builtin) = self.get_builtin_type_def(struct_id)
+                && builtin.find_method("clone").is_some()
+            {
+                return true;
+            }
+            let struct_def = self.type_pool.struct_def(struct_id);
+            if struct_def.is_clone {
+                return true;
+            }
+        }
+        false
     }
 
     /// Check that a preview feature is enabled.

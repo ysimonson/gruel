@@ -25,6 +25,7 @@
 //! This crate is instrumented with `tracing` spans for performance analysis.
 //! Use `--log-level info` or `--time-passes` to see timing information.
 
+mod clone_glue;
 mod diagnostic;
 mod drop_glue;
 mod link;
@@ -859,6 +860,8 @@ pub fn compile_frontend_from_ast_with_options_full(
 
     // Synthesize drop glue functions for structs that need them
     let drop_glue_functions = drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
+    // ADR-0065: synthesize clone glue for `@derive(Clone)` structs.
+    let clone_glue_functions = clone_glue::synthesize_clone_glue(&sema_output.type_pool);
 
     // Combine user functions with synthesized drop glue functions
     // Filter out comptime-only functions (those returning `type`) as they don't generate runtime code
@@ -867,6 +870,7 @@ pub fn compile_frontend_from_ast_with_options_full(
         .into_iter()
         .filter(|f| f.air.return_type() != Type::COMPTIME_TYPE)
         .chain(drop_glue_functions)
+        .chain(clone_glue_functions)
         .collect();
 
     // Build CFGs from AIR (one per function) in parallel, collecting warnings
@@ -877,7 +881,7 @@ pub fn compile_frontend_from_ast_with_options_full(
         let results: Vec<(FunctionWithCfg, Vec<CompileWarning>)> = all_functions
             .into_par_iter()
             .map(|func| {
-                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool);
+                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool, &interner);
 
                 (
                     FunctionWithCfg {
@@ -974,6 +978,8 @@ pub fn compile_frontend_from_rir_with_file_paths(
 
     // Synthesize drop glue functions for structs that need them
     let drop_glue_functions = drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
+    // ADR-0065: synthesize clone glue for `@derive(Clone)` structs.
+    let clone_glue_functions = clone_glue::synthesize_clone_glue(&sema_output.type_pool);
 
     // Combine user functions with synthesized drop glue functions
     // Filter out comptime-only functions (those returning `type`) as they don't generate runtime code
@@ -982,6 +988,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
         .into_iter()
         .filter(|f| f.air.return_type() != Type::COMPTIME_TYPE)
         .chain(drop_glue_functions)
+        .chain(clone_glue_functions)
         .collect();
 
     // Build CFGs from AIR (one per function) in parallel, collecting warnings
@@ -992,7 +999,7 @@ pub fn compile_frontend_from_rir_with_file_paths(
         let results: Vec<(FunctionWithCfg, Vec<CompileWarning>)> = all_functions
             .into_par_iter()
             .map(|func| {
-                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool);
+                let cfg_output = CfgBuilder::build(&func, &sema_output.type_pool, &interner);
 
                 (
                     FunctionWithCfg {
@@ -3190,7 +3197,7 @@ mod integration_tests {
                 if func.air.return_type() == Type::COMPTIME_TYPE {
                     continue;
                 }
-                let _cfg_output = CfgBuilder::build(&func, &sema_output.type_pool);
+                let _cfg_output = CfgBuilder::build(&func, &sema_output.type_pool, &interner);
                 count += 1;
             }
             count

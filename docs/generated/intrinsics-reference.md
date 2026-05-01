@@ -51,6 +51,25 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@parts_to_slice` | expr | Slices | — | yes | Build a slice from a raw pointer and a length. |
 | `@parts_to_mut_slice` | expr | Slices | — | yes | Build a mutable slice from a raw mutable pointer and a length. |
 | `@slice_index_write` | expr | Slices | — | — | Write an element to a mutable slice with bounds checking. |
+| `@vec_new` | expr | Vectors | — | — | Create an empty Vec(T). |
+| `@vec_with_capacity` | expr | Vectors | — | — | Create a Vec(T) with a preallocated buffer. |
+| `@vec_len` | expr | Vectors | — | — | Length of a vec. |
+| `@vec_capacity` | expr | Vectors | — | — | Capacity of a vec. |
+| `@vec_is_empty` | expr | Vectors | — | — | Whether a vec has length zero. |
+| `@vec_push` | expr | Vectors | — | — | Append an element to a Vec. |
+| `@vec_pop` | expr | Vectors | — | — | Remove and return the last element of a Vec. |
+| `@vec_clear` | expr | Vectors | — | — | Drop all elements of a Vec without freeing the buffer. |
+| `@vec_reserve` | expr | Vectors | — | — | Ensure a Vec has capacity for additional elements. |
+| `@vec_index_read` | expr | Vectors | — | — | Read an element from a vec with bounds checking. |
+| `@vec_index_write` | expr | Vectors | — | — | Write an element to a vec with bounds checking. |
+| `@vec_ptr` | expr | Vectors | — | yes | Extract the data pointer from a Vec. |
+| `@vec_ptr_mut` | expr | Vectors | — | yes | Extract the mutable data pointer from a Vec. |
+| `@vec_terminated_ptr` | expr | Vectors | — | yes | Write a sentinel and return the data pointer. |
+| `@vec_clone` | expr | Vectors | — | — | Clone a Vec. |
+| `@vec` | expr | Vectors | — | — | Construct a Vec from individual elements. |
+| `@vec_repeat` | expr | Vectors | — | — | Construct a Vec with N copies of a value. |
+| `@vec_dispose` | expr | Vectors | — | — | Free a Vec's heap buffer; panic if `len != 0`. |
+| `@parts_to_vec` | expr | Vectors | — | yes | Build a Vec from raw parts. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
 
 ## Debug & Diagnostics

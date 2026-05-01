@@ -430,3 +430,79 @@ Generic code may constrain on these interfaces directly:
 `fn process(comptime T: Copy, t: T)` accepts any `Copy` type and rejects
 non-conforming types at the call site. This is the same conformance
 machinery as user-defined interfaces (§6.5).
+
+## `Clone` Interface (ADR-0065)
+
+{{ rule(id="3.8:70", cat="normative") }}
+
+Gruel exposes a third compiler-recognized structural interface, `Clone`
+(`fn clone(borrow self) -> Self`). `Clone` formalizes "explicit deep
+duplication" for affine types and is the single conformance every
+collection method, generic constraint, and built-in clone helper resolves
+against.
+
+{{ rule(id="3.8:71", cat="normative") }}
+
+For every type `T`:
+
+- `T` conforms to `Clone` iff `T` is not `linear` and any of the
+  following holds:
+  - `T` conforms to `Copy` (the synthesized `clone` is the bitwise copy);
+  - `T` is a built-in type whose registered method set contains a
+    `clone` method (e.g. `String`); or
+  - `T` is a struct or enum that defines a method with the signature
+    `fn clone(borrow self) -> Self` (written inline, spliced via
+    `@derive(Clone)`, or hand-written in an extension block).
+
+{{ rule(id="3.8:72", cat="legality-rule") }}
+
+Linear types **MUST NOT** conform to `Clone`. The conformance check
+unconditionally rejects them; `@derive(Clone)` on a `linear` declaration
+is also rejected at the declaration site.
+
+{{ rule(id="3.8:73", cat="informative") }}
+
+Generic code may constrain on `Clone` exactly as on `Copy` or `Drop`:
+`fn duplicate(comptime T: Clone, x: T) -> T { x.clone() }` accepts any
+type whose conformance check passes and rejects non-conforming types at
+the call site.
+
+## Canonical `Option(T)` (ADR-0065)
+
+{{ rule(id="3.8:80", cat="normative") }}
+
+The compiler unconditionally registers a canonical `Option(T)` generic enum
+in every compilation. The definition is equivalent to
+
+```gruel
+fn Option(comptime T: type) -> type {
+    enum { Some(T), None }
+}
+```
+
+and is available without any `import` or `use` directive. User code **MUST
+NOT** redefine the name `Option`; doing so is a duplicate-definition error
+at the redefinition site.
+
+{{ rule(id="3.8:81", cat="informative") }}
+
+`Option(T)` flows through the standard enum-with-data machinery (§4.7).
+Pattern matching, exhaustiveness checks, and codegen do not special-case
+it. Future ADRs may introduce layout optimizations (e.g. null-pointer-as
+-`None` for `Option(Ptr(T))`); v1 ships the naive `{ tag, payload }`
+layout.
+
+{{ rule(id="3.8:82", cat="normative") }}
+
+`Option(T)` ships with the following methods, defined in the prelude:
+
+- `fn is_some(self) -> bool` — true iff the receiver is `Some`.
+- `fn is_none(self) -> bool` — true iff the receiver is `None`.
+- `fn unwrap(self) -> T` — returns the contained value, or panics if
+  `None`.
+- `fn unwrap_or(self, default: T) -> T` — returns the contained value
+  if `Some`, otherwise returns `default`.
+
+Each method consumes the receiver. Because `Option(T)` is treated as
+`Copy` (§3.8:2 — all enum types), receivers are implicitly duplicated at
+the call site, so a name remains usable after a query method.

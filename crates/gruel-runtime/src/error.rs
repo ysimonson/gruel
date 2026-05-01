@@ -45,6 +45,42 @@ pub extern "C" fn __gruel_float_to_int_overflow() -> ! {
     platform::exit(101)
 }
 
+/// User-triggered panic with a message.
+///
+/// Called by `@panic("message")` after the message string has been
+/// extracted to a (ptr, len) pair. Writes "panic: <message>\n" to stderr
+/// and exits with code 101.
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_panic(msg_ptr: *const u8, msg_len: u64) -> ! {
+    platform::write_stderr(b"panic: ");
+    if !msg_ptr.is_null() && msg_len > 0 {
+        let slice = unsafe { core::slice::from_raw_parts(msg_ptr, msg_len as usize) };
+        platform::write_stderr(slice);
+    }
+    platform::write_stderr(b"\n");
+    platform::exit(101)
+}
+
+/// User-triggered panic with no message.
+///
+/// Called by `@panic()`. Writes "panic\n" to stderr and exits with code 101.
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_panic_no_msg() -> ! {
+    platform::write_stderr(b"panic\n");
+    platform::exit(101)
+}
+
+/// `Vec::dispose()` called on a non-empty Vec (ADR-0067).
+///
+/// Disposing of a Vec with `len != 0` would orphan the contained elements
+/// (especially fatal for linear payloads). The codegen emits a runtime
+/// branch that calls this function when the precondition fails.
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_vec_dispose_panic() -> ! {
+    platform::write_stderr(b"panic: Vec::dispose called on a non-empty Vec\n");
+    platform::exit(101)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

@@ -15,6 +15,11 @@ impl FileId {
     /// the file is unknown.
     pub const DEFAULT: FileId = FileId(0);
 
+    /// File ID reserved for the synthetic compiler prelude (ADR-0065).
+    /// Always parsed first; used so the prelude has a stable FileId distinct
+    /// from any user file.
+    pub const PRELUDE: FileId = FileId(0xFFFF_FFFE);
+
     /// Create a new file ID from an index.
     #[inline]
     pub const fn new(id: u32) -> Self {

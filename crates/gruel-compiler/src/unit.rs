@@ -35,6 +35,51 @@ use crate::{
 };
 use gruel_util::FileId;
 
+/// ADR-0065: the synthetic compiler prelude.
+///
+/// Contains canonical type definitions injected into every compilation:
+/// - `Option(T)`: the canonical optional type, used by collection methods.
+///
+/// This is parsed as a regular Gruel source file with `FileId::PRELUDE` and
+/// runs through the standard pipeline. Adding more types here is just adding
+/// more declarations to the string.
+const PRELUDE_SOURCE: &str = r#"
+fn Option(comptime T: type) -> type {
+    enum {
+        Some(T),
+        None,
+
+        fn is_some(borrow self) -> bool {
+            match self {
+                Self::Some(_) => true,
+                Self::None => false,
+            }
+        }
+
+        fn is_none(borrow self) -> bool {
+            match self {
+                Self::Some(_) => false,
+                Self::None => true,
+            }
+        }
+
+        fn unwrap(self) -> T {
+            match self {
+                Self::Some(x) => x,
+                Self::None => @panic("called unwrap on a None value"),
+            }
+        }
+
+        fn unwrap_or(self, default: T) -> T {
+            match self {
+                Self::Some(x) => x,
+                Self::None => default,
+            }
+        }
+    }
+}
+"#;
+
 /// Result of parsing a single file within a compilation unit.
 #[derive(Debug)]
 struct ParsedFileData {
@@ -156,8 +201,26 @@ impl<'src> CompilationUnit<'src> {
         let _span = info_span!("parse", file_count = self.sources.len()).entered();
 
         // Parse all files with a shared interner
-        let mut parsed_files = Vec::with_capacity(self.sources.len());
+        let mut parsed_files = Vec::with_capacity(self.sources.len() + 1);
         let mut interner = ThreadedRodeo::new();
+
+        // ADR-0065: prepend the synthetic prelude (canonical Option(T), etc.).
+        // The prelude is always parsed first under FileId::PRELUDE so user
+        // files retain their original FileIds for diagnostics.
+        let prelude = SourceFile::new("<prelude>", PRELUDE_SOURCE, FileId::PRELUDE);
+        let prelude_lexer =
+            Lexer::with_interner_and_file_id(prelude.source, interner, prelude.file_id);
+        let (prelude_tokens, returned_interner) =
+            prelude_lexer.tokenize().map_err(CompileErrors::from)?;
+        interner = returned_interner;
+        let prelude_parser = Parser::new(prelude_tokens, interner)
+            .with_preview_features(self.options.preview_features.clone());
+        let (prelude_ast, returned_interner) = prelude_parser.parse()?;
+        interner = returned_interner;
+        parsed_files.push(ParsedFileData {
+            path: prelude.path.to_string(),
+            ast: prelude_ast,
+        });
 
         for source in &self.sources {
             let _file_span = info_span!("parse_file", path = %source.path).entered();
@@ -425,6 +488,8 @@ impl<'src> CompilationUnit<'src> {
         // Synthesize drop glue functions
         let drop_glue_functions =
             crate::drop_glue::synthesize_drop_glue(&sema_output.type_pool, interner);
+        // ADR-0065: synthesize clone glue for `@derive(Clone)` structs.
+        let clone_glue_functions = crate::clone_glue::synthesize_clone_glue(&sema_output.type_pool);
 
         // Combine user functions with drop glue, filtering out comptime-only functions
         let all_functions: Vec<_> = sema_output
@@ -432,10 +497,13 @@ impl<'src> CompilationUnit<'src> {
             .into_iter()
             .filter(|f| f.air.return_type() != Type::COMPTIME_TYPE)
             .chain(drop_glue_functions)
+            .chain(clone_glue_functions)
             .collect();
 
         // Build CFGs in parallel
-        let (functions, cfg_warnings) = self.build_cfgs(all_functions, &sema_output.type_pool);
+        let interner_ref = self.interner.as_ref().expect("interner not initialized");
+        let (functions, cfg_warnings) =
+            self.build_cfgs(all_functions, &sema_output.type_pool, interner_ref);
 
         self.functions = Some(functions);
         self.type_pool = Some(sema_output.type_pool);
@@ -454,13 +522,14 @@ impl<'src> CompilationUnit<'src> {
         &self,
         functions: Vec<AnalyzedFunction>,
         type_pool: &TypeInternPool,
+        interner: &ThreadedRodeo,
     ) -> (Vec<FunctionWithCfg>, Vec<CompileWarning>) {
         let _span = info_span!("cfg_construction").entered();
 
         let results: Vec<(FunctionWithCfg, Vec<CompileWarning>)> = functions
             .into_par_iter()
             .map(|func| {
-                let cfg_output = CfgBuilder::build(&func, type_pool);
+                let cfg_output = CfgBuilder::build(&func, type_pool, interner);
 
                 (
                     FunctionWithCfg {

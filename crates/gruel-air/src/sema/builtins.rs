@@ -47,6 +47,7 @@ impl<'a> Sema<'a> {
                 name: builtin.name.to_string(),
                 fields,
                 is_copy: builtin.is_copy,
+                is_clone: false,
                 is_handle: false, // Built-in types don't use @handle yet
                 is_linear: false, // Built-in types are not linear
                 destructor: builtin.drop_fn.map(|s| s.to_string()),
@@ -153,6 +154,26 @@ impl<'a> Sema<'a> {
             });
             self.interfaces.insert(copy_name, id);
         }
+
+        // ADR-0065: Clone is the third compiler-recognized interface.
+        // `fn clone(borrow self) -> Self`. Conformance is determined by
+        // `check_clone_conformance` in conformance.rs.
+        let clone_name = self.interner.get_or_intern_static("Clone");
+        if !self.interfaces.contains_key(&clone_name) {
+            let id = InterfaceId(self.interface_defs.len() as u32);
+            self.interface_defs.push(InterfaceDef {
+                name: "Clone".to_string(),
+                methods: vec![InterfaceMethodReq {
+                    name: "clone".to_string(),
+                    receiver: ReceiverMode::Borrow,
+                    param_types: Vec::new(),
+                    return_type: IfaceTy::SelfType,
+                }],
+                is_pub: true,
+                file_id: gruel_util::FileId::new(0),
+            });
+            self.interfaces.insert(clone_name, id);
+        }
     }
 
     // ========================================================================
@@ -222,16 +243,11 @@ impl<'a> Sema<'a> {
     }
 
     /// Check if a type is a linear type.
-    /// Only struct types can be linear - primitives and other types are not linear.
+    ///
+    /// Delegates to `TypeInternPool::is_type_linear`, which is the single
+    /// source of truth for linearity semantics (ADR-0067).
     pub(crate) fn is_type_linear(&self, ty: Type) -> bool {
-        match ty.kind() {
-            TypeKind::Struct(struct_id) => {
-                let struct_def = self.type_pool.struct_def(struct_id);
-                struct_def.is_linear
-            }
-            // Only struct types can be linear
-            _ => false,
-        }
+        self.type_pool.is_type_linear(ty)
     }
 
     /// Variant index of the `Ownership` builtin enum classifying `ty`.

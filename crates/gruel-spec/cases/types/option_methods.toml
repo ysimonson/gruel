@@ -1,0 +1,137 @@
+[section]
+id = "types.option_methods"
+spec_chapter = "3.8"
+name = "Option(T) Methods (ADR-0065)"
+description = "Tests for the prelude-registered Option(T) method surface."
+
+# is_some on Some returns true
+[[case]]
+name = "option_is_some_on_some"
+spec = ["3.8:82"]
+description = "Option::is_some returns true for Some variants"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::Some(42);
+    if x.is_some() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# is_some on None returns false
+[[case]]
+name = "option_is_some_on_none"
+spec = ["3.8:82"]
+description = "Option::is_some returns false for None"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::None;
+    if x.is_some() { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+# is_none on Some returns false
+[[case]]
+name = "option_is_none_on_some"
+spec = ["3.8:82"]
+description = "Option::is_none returns false for Some"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::Some(42);
+    if x.is_none() { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+# is_none on None returns true
+[[case]]
+name = "option_is_none_on_none"
+spec = ["3.8:82"]
+description = "Option::is_none returns true for None"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::None;
+    if x.is_none() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# unwrap on Some returns the contained value
+[[case]]
+name = "option_unwrap_on_some"
+spec = ["3.8:82"]
+description = "Option::unwrap returns the contained value for Some"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::Some(42);
+    x.unwrap()
+}
+"""
+exit_code = 42
+
+# unwrap on None panics with the standard message
+[[case]]
+name = "option_unwrap_on_none_panics"
+spec = ["3.8:82"]
+description = "Option::unwrap panics with the standard message for None"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::None;
+    x.unwrap()
+}
+"""
+exit_code = 101
+stderr_contains = "called unwrap on a None value"
+
+# unwrap_or on Some returns the contained value
+[[case]]
+name = "option_unwrap_or_on_some"
+spec = ["3.8:82"]
+description = "Option::unwrap_or returns the contained value for Some"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::Some(42);
+    x.unwrap_or(99)
+}
+"""
+exit_code = 42
+
+# unwrap_or on None returns the default
+[[case]]
+name = "option_unwrap_or_on_none"
+spec = ["3.8:82"]
+description = "Option::unwrap_or returns the default for None"
+source = """
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::None;
+    x.unwrap_or(99)
+}
+"""
+exit_code = 99
+
+# Option(T) conforms to Clone (via auto-Copy → Clone for enums)
+[[case]]
+name = "option_conforms_to_clone"
+spec = ["3.8:71", "3.8:80"]
+description = "Option(T) conforms to Clone via auto-Copy enum rule"
+source = """
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    let O = Option(i32);
+    let x: O = O::Some(42);
+    use_clone(O, x);
+    0
+}
+"""
+exit_code = 0

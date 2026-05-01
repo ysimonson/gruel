@@ -22,7 +22,7 @@ use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target as LlvmTarget, TargetMachine,
 };
-use inkwell::types::BasicType;
+use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::BasicMetadataValueEnum;
 use inkwell::values::{
     AggregateValueEnum, BasicValue, BasicValueEnum, FunctionValue, GlobalValue, PhiValue,
@@ -1776,6 +1776,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let lo = data.lo;
                 let hi = data.hi;
                 let sentinel = data.sentinel;
+                let vec_base = data.vec_base;
                 use inkwell::IntPredicate;
 
                 let elem_ty = match ty.kind() {
@@ -1784,7 +1785,25 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     _ => unreachable!("MakeSlice produces a slice type"),
                 };
                 let i64_ty = self.ctx.i64_type();
-                let array_len_val = i64_ty.const_int(array_len, false);
+                // For Vec bases, the "array length" is the runtime `len`
+                // field. Read it now so the bounds check below works.
+                let array_len_val = if vec_base {
+                    let agg_ty = self.vec_agg_type();
+                    let vec_ptr = match self.build_place_gep_chain(&place, ty) {
+                        Some(p) => p,
+                        None => return Ok(()),
+                    };
+                    let len_ptr = self
+                        .builder
+                        .build_struct_gep(agg_ty, vec_ptr, 1, "vec_slice_len")
+                        .unwrap();
+                    self.builder
+                        .build_load(i64_ty, len_ptr, "vec_slice_len_val")
+                        .unwrap()
+                        .into_int_value()
+                } else {
+                    i64_ty.const_int(array_len, false)
+                };
 
                 let coerce_to_i64 = |this: &Self,
                                      v: inkwell::values::IntValue<'ctx>|
@@ -1852,9 +1871,30 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 self.builder.position_at_end(ok_bb);
 
                 // ptr = GEP &arr[lo]; offset by `lo` elements.
-                let arr_ptr = match self.build_place_gep_chain(&place, elem_ty) {
-                    Some(p) => p,
-                    None => return Ok(()),
+                // For Vec bases, the buffer is at field 0 of the aggregate.
+                let arr_ptr = if vec_base {
+                    let agg_ty = self.vec_agg_type();
+                    let vec_ptr = match self.build_place_gep_chain(&place, ty) {
+                        Some(p) => p,
+                        None => return Ok(()),
+                    };
+                    let buf_ptr = self
+                        .builder
+                        .build_struct_gep(agg_ty, vec_ptr, 0, "vec_slc_buf_ptr")
+                        .unwrap();
+                    self.builder
+                        .build_load(
+                            self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                            buf_ptr,
+                            "vec_slc_buf",
+                        )
+                        .unwrap()
+                        .into_pointer_value()
+                } else {
+                    match self.build_place_gep_chain(&place, elem_ty) {
+                        Some(p) => p,
+                        None => return Ok(()),
+                    }
                 };
                 let elem_llvm_ty = gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool);
                 let data_ptr = match elem_llvm_ty {
@@ -1991,8 +2031,25 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                     Some(inkwell::values::BasicMetadataValueEnum::from(ptr))
                                 }
                                 _ => {
-                                    // Fallback: pass the value as-is.
-                                    Some(self.get_value(arg.value).into())
+                                    // Source has no stable storage address
+                                    // (by-value param, computed value, etc.).
+                                    // For most types, materialize into a
+                                    // temporary alloca so we have something
+                                    // to point at. Interface fat-pointers
+                                    // (ADR-0056) are passed by value at the
+                                    // ABI level even when the source-level
+                                    // mode is borrow/inout — see
+                                    // `is_param_by_ref`'s comment.
+                                    let arg_ty = self.cfg.get_inst(arg.value).ty;
+                                    if matches!(arg_ty.kind(), TypeKind::Interface(_)) {
+                                        Some(self.get_value(arg.value).into())
+                                    } else {
+                                        let val = self.get_value(arg.value);
+                                        let val_ty = val.get_type();
+                                        let tmp = self.build_entry_alloca(val_ty, "borrow_tmp");
+                                        self.builder.build_store(tmp, val).unwrap();
+                                        Some(inkwell::values::BasicMetadataValueEnum::from(tmp))
+                                    }
                                 }
                             };
                         }
@@ -2354,6 +2411,15 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 value: dropped_value,
             } => {
                 let dropped_ty = self.cfg.get_inst(dropped_value).ty;
+                // ADR-0066: Vec(T) drop. For T:Copy v1, just free the buffer
+                // if cap > 0. (Per-element drops for non-Copy T land in
+                // Phase 6.)
+                if matches!(dropped_ty.kind(), TypeKind::Vec(_))
+                    && let Some(val) = self.values[dropped_value.as_u32() as usize]
+                {
+                    self.translate_vec_drop(val, dropped_ty);
+                    return Ok(());
+                }
                 if self.is_builtin_string(dropped_ty) {
                     // String: call __gruel_drop_String(ptr, len, cap) from the runtime.
                     // Literals have cap == 0 and are safely treated as no-ops.
@@ -3060,6 +3126,40 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     .basic()
             }
 
+            // ---- User-triggered panic ----
+            IntrinsicId::Panic => {
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let i64_ty = self.ctx.i64_type();
+                if args.is_empty() {
+                    // @panic() — no message. Calls __gruel_panic_no_msg().
+                    let fn_ty = self.ctx.void_type().fn_type(&[], false);
+                    let f = self
+                        .module
+                        .get_function("__gruel_panic_no_msg")
+                        .unwrap_or_else(|| {
+                            self.module
+                                .add_function("__gruel_panic_no_msg", fn_ty, None)
+                        });
+                    self.builder.build_call(f, &[], "").unwrap();
+                } else {
+                    // @panic(msg: String) — extract (ptr, len) and call __gruel_panic.
+                    let msg_val = self.get_value(args[0]);
+                    let (ptr, len) = self.extract_str_ptr_len(msg_val);
+                    let fn_ty = self
+                        .ctx
+                        .void_type()
+                        .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+                    let f = self
+                        .module
+                        .get_function("__gruel_panic")
+                        .unwrap_or_else(|| self.module.add_function("__gruel_panic", fn_ty, None));
+                    self.builder
+                        .build_call(f, &[ptr.into(), len.into()], "")
+                        .unwrap();
+                }
+                None
+            }
+
             // ---- Debug print ----
             IntrinsicId::Dbg => {
                 let i64_ty = self.ctx.i64_type();
@@ -3709,9 +3809,1216 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 Some(is_empty.into())
             }
 
+            // ============================================================
+            // ADR-0066: Vec(T) operations.
+            //
+            // Vec(T) lowers to `{ T*, i64, i64 }`. Receivers passed as
+            // borrow/inout are LLVM `ptr` to the aggregate; we load fields
+            // from those pointers. By-value receivers are aggregate values.
+            // ============================================================
+            IntrinsicId::VecNew => self.translate_vec_new(ty),
+            IntrinsicId::VecWithCapacity => self.translate_vec_with_capacity(ty, args),
+            IntrinsicId::VecLen => Some(self.translate_vec_field_load(args[0], 1, "vec_len")),
+            IntrinsicId::VecCapacity => Some(self.translate_vec_field_load(args[0], 2, "vec_cap")),
+            IntrinsicId::VecIsEmpty => {
+                let len = self
+                    .translate_vec_field_load(args[0], 1, "vec_len")
+                    .into_int_value();
+                let zero = self.ctx.i64_type().const_zero();
+                let is_empty = self
+                    .builder
+                    .build_int_compare(inkwell::IntPredicate::EQ, len, zero, "vec_is_empty")
+                    .unwrap();
+                Some(is_empty.into())
+            }
+            IntrinsicId::VecPush => {
+                self.translate_vec_push(args);
+                None
+            }
+            IntrinsicId::VecPop => Some(self.translate_vec_pop(args, ty)),
+            IntrinsicId::VecClear => {
+                self.translate_vec_clear(args);
+                None
+            }
+            IntrinsicId::VecReserve => {
+                self.translate_vec_reserve(args);
+                None
+            }
+            IntrinsicId::VecIndexRead => Some(self.translate_vec_index_read(args, ty)),
+            IntrinsicId::VecIndexWrite => {
+                self.translate_vec_index_write(args);
+                None
+            }
+            IntrinsicId::VecPtr | IntrinsicId::VecPtrMut => {
+                Some(self.translate_vec_field_load(args[0], 0, "vec_ptr"))
+            }
+            IntrinsicId::VecTerminatedPtr => Some(self.translate_vec_terminated_ptr(args)),
+            IntrinsicId::VecClone => Some(self.translate_vec_clone(args, ty)),
+            IntrinsicId::VecLiteral => Some(self.translate_vec_literal(args, ty)),
+            IntrinsicId::VecRepeat => Some(self.translate_vec_repeat(args, ty)),
+            IntrinsicId::VecDispose => {
+                self.translate_vec_dispose(args);
+                None
+            }
+            IntrinsicId::PartsToVec => Some(self.translate_parts_to_vec(args, ty)),
+
             // ---- Fallback: return zero value for unimplemented intrinsics ----
             _ => gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero()),
         }
+    }
+
+    /// Element type from a `Vec(T)` value.
+    fn vec_element_type(&self, vec_ty: Type) -> Type {
+        match vec_ty.kind() {
+            TypeKind::Vec(id) => self.type_pool.vec_def(id),
+            _ => unreachable!("vec_element_type called with non-Vec"),
+        }
+    }
+
+    /// Get a pointer to the Vec aggregate. Inout/Borrow CFG args are passed
+    /// pre-load (the codegen call path materializes a pointer in `call_args`),
+    /// but `Intrinsic` args don't go through that path — the Vec value is
+    /// available as either a pointer (when the source has a stable storage
+    /// slot) or an aggregate value (when materialized inline). This helper
+    /// covers both: prefer the source's existing storage; fall back to a
+    /// temporary alloca + store + return its pointer.
+    fn vec_recv_ptr(&mut self, recv: CfgValue) -> inkwell::values::PointerValue<'ctx> {
+        let inst = self.cfg.get_inst(recv).clone();
+        match inst.data {
+            CfgInstData::Load { slot } => {
+                self.locals[slot as usize].expect("vec receiver: slot not yet allocated")
+            }
+            CfgInstData::Param { index } if self.cfg.is_param_by_ref(index) => {
+                let llvm_idx = self.slot_to_llvm_param[index as usize];
+                self.fn_value
+                    .get_nth_param(llvm_idx)
+                    .expect("param slot out of range")
+                    .into_pointer_value()
+            }
+            _ => {
+                let v = self.get_value(recv);
+                let agg_ty = self.vec_agg_type();
+                let tmp = self.build_entry_alloca(agg_ty.into(), "vec_recv_tmp");
+                self.builder.build_store(tmp, v).unwrap();
+                tmp
+            }
+        }
+    }
+
+    /// Load a single field of a Vec aggregate via its pointer.
+    fn translate_vec_field_load(
+        &mut self,
+        recv: CfgValue,
+        field: u32,
+        name: &str,
+    ) -> BasicValueEnum<'ctx> {
+        let recv_ptr = self.vec_recv_ptr(recv);
+        let agg_ty = self.vec_agg_type();
+        let field_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, field, name)
+            .unwrap();
+        let field_llvm_ty: BasicTypeEnum<'ctx> = match field {
+            0 => self.ctx.ptr_type(inkwell::AddressSpace::default()).into(),
+            _ => self.ctx.i64_type().into(),
+        };
+        self.builder
+            .build_load(field_llvm_ty, field_ptr, name)
+            .unwrap()
+    }
+
+    /// LLVM type of a Vec aggregate (independent of element type).
+    fn vec_agg_type(&self) -> inkwell::types::StructType<'ctx> {
+        let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default()).into();
+        let i64_ty = self.ctx.i64_type().into();
+        self.ctx.struct_type(&[ptr, i64_ty, i64_ty], false)
+    }
+
+    /// Build a `Vec(T)` value with given fields.
+    fn vec_pack(
+        &mut self,
+        ptr: inkwell::values::PointerValue<'ctx>,
+        len: inkwell::values::IntValue<'ctx>,
+        cap: inkwell::values::IntValue<'ctx>,
+    ) -> BasicValueEnum<'ctx> {
+        let agg = self.vec_agg_type().get_undef();
+        let with_ptr = self
+            .builder
+            .build_insert_value(agg, ptr, 0, "vec_p")
+            .unwrap();
+        let with_len = self
+            .builder
+            .build_insert_value(with_ptr, len, 1, "vec_l")
+            .unwrap();
+        let full = self
+            .builder
+            .build_insert_value(with_len, cap, 2, "vec_c")
+            .unwrap();
+        full.into_struct_value().into()
+    }
+
+    /// Get the byte size of `T` for `Vec(T)`-typed `vec_ty`.
+    fn vec_elem_size(&self, vec_ty: Type) -> inkwell::values::IntValue<'ctx> {
+        let elem_ty = self.vec_element_type(vec_ty);
+        let i64_ty = self.ctx.i64_type();
+        match gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool) {
+            Some(llvm_ty) => llvm_ty.size_of().unwrap_or_else(|| i64_ty.const_zero()),
+            None => i64_ty.const_zero(),
+        }
+    }
+
+    /// `__gruel_alloc(size, align) -> *u8`.
+    fn vec_alloc_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
+        let i64_ty = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let fn_ty = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
+        self.module
+            .get_function("__gruel_alloc")
+            .unwrap_or_else(|| self.module.add_function("__gruel_alloc", fn_ty, None))
+    }
+
+    fn vec_realloc_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
+        let i64_ty = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let fn_ty = ptr_ty.fn_type(
+            &[ptr_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()],
+            false,
+        );
+        self.module
+            .get_function("__gruel_realloc")
+            .unwrap_or_else(|| self.module.add_function("__gruel_realloc", fn_ty, None))
+    }
+
+    fn vec_free_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
+        let i64_ty = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let fn_ty = self
+            .ctx
+            .void_type()
+            .fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false);
+        self.module
+            .get_function("__gruel_free")
+            .unwrap_or_else(|| self.module.add_function("__gruel_free", fn_ty, None))
+    }
+
+    /// `Vec::new()` — empty Vec, ptr=null, len=0, cap=0.
+    fn translate_vec_new(&mut self, _ty: Type) -> Option<BasicValueEnum<'ctx>> {
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let i64_ty = self.ctx.i64_type();
+        let null_ptr = ptr_ty.const_null();
+        let zero = i64_ty.const_zero();
+        Some(self.vec_pack(null_ptr, zero, zero))
+    }
+
+    /// `Vec::with_capacity(n)` — alloc n*sizeof(T), ptr=alloc, len=0, cap=n.
+    fn translate_vec_with_capacity(
+        &mut self,
+        vec_ty: Type,
+        args: &[CfgValue],
+    ) -> Option<BasicValueEnum<'ctx>> {
+        let n_raw = self.get_value(args[0]).into_int_value();
+        let i64_ty = self.ctx.i64_type();
+        let n = self.zext_to_i64(n_raw);
+        let elem_size = self.vec_elem_size(vec_ty);
+        let bytes = self
+            .builder
+            .build_int_mul(n, elem_size, "vec_alloc_bytes")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let alloc_fn = self.vec_alloc_fn();
+        let raw_ptr = self
+            .builder
+            .build_call(alloc_fn, &[bytes.into(), align.into()], "vec_alloc")
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        // If n == 0, alloc may return null; that's fine for an empty Vec.
+        Some(self.vec_pack(raw_ptr, i64_ty.const_zero(), n))
+    }
+
+    fn zext_to_i64(&self, v: inkwell::values::IntValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+        let i64_ty = self.ctx.i64_type();
+        let bits = v.get_type().get_bit_width();
+        if bits < 64 {
+            self.builder.build_int_z_extend(v, i64_ty, "z").unwrap()
+        } else if bits > 64 {
+            self.builder.build_int_truncate(v, i64_ty, "tr").unwrap()
+        } else {
+            v
+        }
+    }
+
+    /// `v.push(x)` — grow if cap==len, store x at ptr[len], len+=1.
+    fn translate_vec_push(&mut self, args: &[CfgValue]) {
+        let recv_ptr = self.vec_recv_ptr(args[0]);
+        let val = self.get_value(args[1]);
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let one = i64_ty.const_int(1, false);
+
+        // Determine element type from arg's CFG type. The pushed value's
+        // type is T.
+        let val_gruel_ty = self.cfg.get_inst(args[1]).ty;
+        let elem_size = match gruel_type_to_llvm(val_gruel_ty, self.ctx, self.type_pool) {
+            Some(t) => t.size_of().unwrap_or_else(|| i64_ty.const_zero()),
+            None => i64_ty.const_zero(),
+        };
+
+        // Load current ptr/len/cap.
+        let len_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "len_ptr")
+            .unwrap();
+        let cap_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 2, "cap_ptr")
+            .unwrap();
+        let buf_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 0, "buf_ptr")
+            .unwrap();
+        let len = self
+            .builder
+            .build_load(i64_ty, len_ptr, "len")
+            .unwrap()
+            .into_int_value();
+        let cap = self
+            .builder
+            .build_load(i64_ty, cap_ptr, "cap")
+            .unwrap()
+            .into_int_value();
+
+        // If cap == len, grow.
+        let needs_grow = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, len, cap, "needs_grow")
+            .unwrap();
+        let grow_bb = self.ctx.append_basic_block(self.fn_value, "vec_push_grow");
+        let after_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_push_after_grow");
+        self.builder
+            .build_conditional_branch(needs_grow, grow_bb, after_bb)
+            .unwrap();
+
+        // Grow: new_cap = max(cap*2, 4); realloc.
+        self.builder.position_at_end(grow_bb);
+        let two = i64_ty.const_int(2, false);
+        let four = i64_ty.const_int(4, false);
+        let cap_x2 = self.builder.build_int_mul(cap, two, "cap_x2").unwrap();
+        let cap_ge_4 = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::UGE, cap_x2, four, "cap_ge_4")
+            .unwrap();
+        let new_cap = self
+            .builder
+            .build_select(cap_ge_4, cap_x2, four, "new_cap")
+            .unwrap()
+            .into_int_value();
+        let old_bytes = self
+            .builder
+            .build_int_mul(cap, elem_size, "old_bytes")
+            .unwrap();
+        let new_bytes = self
+            .builder
+            .build_int_mul(new_cap, elem_size, "new_bytes")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let realloc_fn = self.vec_realloc_fn();
+        let old_ptr = self
+            .builder
+            .build_load(
+                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                buf_ptr,
+                "old_ptr",
+            )
+            .unwrap()
+            .into_pointer_value();
+        let new_ptr = self
+            .builder
+            .build_call(
+                realloc_fn,
+                &[
+                    old_ptr.into(),
+                    old_bytes.into(),
+                    new_bytes.into(),
+                    align.into(),
+                ],
+                "vec_realloc",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        self.builder.build_store(buf_ptr, new_ptr).unwrap();
+        self.builder.build_store(cap_ptr, new_cap).unwrap();
+        self.builder.build_unconditional_branch(after_bb).unwrap();
+
+        // After-grow: store value at ptr[len], len+=1.
+        self.builder.position_at_end(after_bb);
+        let cur_buf = self
+            .builder
+            .build_load(
+                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                buf_ptr,
+                "cur_buf",
+            )
+            .unwrap()
+            .into_pointer_value();
+        let elem_llvm = match gruel_type_to_llvm(val_gruel_ty, self.ctx, self.type_pool) {
+            Some(t) => t,
+            None => return,
+        };
+        let slot = unsafe {
+            self.builder
+                .build_in_bounds_gep(elem_llvm, cur_buf, &[len], "push_slot")
+                .unwrap()
+        };
+        self.builder.build_store(slot, val).unwrap();
+        let new_len = self.builder.build_int_add(len, one, "new_len").unwrap();
+        self.builder.build_store(len_ptr, new_len).unwrap();
+    }
+
+    /// `v.pop()` — len-=1, load from ptr[new_len].
+    fn translate_vec_pop(&mut self, args: &[CfgValue], elem_ty: Type) -> BasicValueEnum<'ctx> {
+        let recv_ptr = self.vec_recv_ptr(args[0]);
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let one = i64_ty.const_int(1, false);
+        let len_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "len_ptr")
+            .unwrap();
+        let buf_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 0, "buf_ptr")
+            .unwrap();
+        let len = self
+            .builder
+            .build_load(i64_ty, len_ptr, "len")
+            .unwrap()
+            .into_int_value();
+        // For v1: panic if empty (no Option wrapping). The pop intrinsic
+        // returns the bare element; an empty pop traps via __gruel_panic.
+        let zero = i64_ty.const_zero();
+        let is_empty = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, len, zero, "pop_empty")
+            .unwrap();
+        let panic_bb = self.ctx.append_basic_block(self.fn_value, "pop_panic");
+        let ok_bb = self.ctx.append_basic_block(self.fn_value, "pop_ok");
+        self.builder
+            .build_conditional_branch(is_empty, panic_bb, ok_bb)
+            .unwrap();
+        self.builder.position_at_end(panic_bb);
+        let panic_fn = self
+            .module
+            .get_function("__gruel_panic_no_msg")
+            .unwrap_or_else(|| {
+                self.module.add_function(
+                    "__gruel_panic_no_msg",
+                    self.ctx.void_type().fn_type(&[], false),
+                    None,
+                )
+            });
+        self.builder.build_call(panic_fn, &[], "").unwrap();
+        self.builder.build_unreachable().unwrap();
+        self.builder.position_at_end(ok_bb);
+        let new_len = self.builder.build_int_sub(len, one, "new_len").unwrap();
+        self.builder.build_store(len_ptr, new_len).unwrap();
+        let buf = self
+            .builder
+            .build_load(
+                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                buf_ptr,
+                "buf",
+            )
+            .unwrap()
+            .into_pointer_value();
+        let elem_llvm = match gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool) {
+            Some(t) => t,
+            None => return self.ctx.i64_type().const_zero().into(),
+        };
+        let slot = unsafe {
+            self.builder
+                .build_in_bounds_gep(elem_llvm, buf, &[new_len], "pop_slot")
+                .unwrap()
+        };
+        self.builder.build_load(elem_llvm, slot, "popped").unwrap()
+    }
+
+    /// `v.clear()` — drop each live element, then set len = 0.
+    fn translate_vec_clear(&mut self, args: &[CfgValue]) {
+        let recv_ptr = self.vec_recv_ptr(args[0]);
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_ty = self.vec_element_type(recv_vec_ty);
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let len_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "len_ptr")
+            .unwrap();
+        // Per-element drop loop if T needs drop.
+        if drop_names::type_needs_drop(elem_ty, self.type_pool) {
+            let buf_ptr = self
+                .builder
+                .build_struct_gep(agg_ty, recv_ptr, 0, "buf_ptr")
+                .unwrap();
+            let len = self
+                .builder
+                .build_load(i64_ty, len_ptr, "clear_len")
+                .unwrap()
+                .into_int_value();
+            let buf = self
+                .builder
+                .build_load(
+                    self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                    buf_ptr,
+                    "clear_buf",
+                )
+                .unwrap()
+                .into_pointer_value();
+            self.emit_vec_drop_loop(buf, len, elem_ty);
+        }
+        self.builder
+            .build_store(len_ptr, i64_ty.const_zero())
+            .unwrap();
+    }
+
+    /// `v.reserve(n)` — ensure cap >= len + n via realloc.
+    fn translate_vec_reserve(&mut self, args: &[CfgValue]) {
+        let recv_ptr = self.vec_recv_ptr(args[0]);
+        let n_raw = self.get_value(args[1]).into_int_value();
+        let n = self.zext_to_i64(n_raw);
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let len_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "len_ptr")
+            .unwrap();
+        let cap_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 2, "cap_ptr")
+            .unwrap();
+        let buf_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 0, "buf_ptr")
+            .unwrap();
+        let len = self
+            .builder
+            .build_load(i64_ty, len_ptr, "len")
+            .unwrap()
+            .into_int_value();
+        let cap = self
+            .builder
+            .build_load(i64_ty, cap_ptr, "cap")
+            .unwrap()
+            .into_int_value();
+        let needed = self.builder.build_int_add(len, n, "needed").unwrap();
+        let needs_grow = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::UGT, needed, cap, "needs_grow")
+            .unwrap();
+        let grow_bb = self.ctx.append_basic_block(self.fn_value, "reserve_grow");
+        let after_bb = self.ctx.append_basic_block(self.fn_value, "reserve_after");
+        self.builder
+            .build_conditional_branch(needs_grow, grow_bb, after_bb)
+            .unwrap();
+        self.builder.position_at_end(grow_bb);
+        // Element size: the receiver's vec type isn't readily available
+        // from here (it's at the receiver's CFG inst's type). Read it.
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let old_bytes = self.builder.build_int_mul(cap, elem_size, "ob").unwrap();
+        let new_bytes = self.builder.build_int_mul(needed, elem_size, "nb").unwrap();
+        let align = i64_ty.const_int(8, false);
+        let realloc_fn = self.vec_realloc_fn();
+        let old = self
+            .builder
+            .build_load(
+                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                buf_ptr,
+                "old",
+            )
+            .unwrap()
+            .into_pointer_value();
+        let new_buf = self
+            .builder
+            .build_call(
+                realloc_fn,
+                &[old.into(), old_bytes.into(), new_bytes.into(), align.into()],
+                "rb",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        self.builder.build_store(buf_ptr, new_buf).unwrap();
+        self.builder.build_store(cap_ptr, needed).unwrap();
+        self.builder.build_unconditional_branch(after_bb).unwrap();
+        self.builder.position_at_end(after_bb);
+    }
+
+    /// `v[i]` — bounds-check, GEP, load.
+    fn translate_vec_index_read(
+        &mut self,
+        args: &[CfgValue],
+        elem_ty: Type,
+    ) -> BasicValueEnum<'ctx> {
+        let recv_ptr = self.vec_recv_ptr(args[0]);
+        let i_raw = self.get_value(args[1]).into_int_value();
+        let i = self.zext_to_i64(i_raw);
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let len_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "len_ptr")
+            .unwrap();
+        let buf_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 0, "buf_ptr")
+            .unwrap();
+        let len = self
+            .builder
+            .build_load(i64_ty, len_ptr, "len")
+            .unwrap()
+            .into_int_value();
+        let oob = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::UGE, i, len, "oob")
+            .unwrap();
+        let panic_bb = self.ctx.append_basic_block(self.fn_value, "idx_panic");
+        let ok_bb = self.ctx.append_basic_block(self.fn_value, "idx_ok");
+        self.builder
+            .build_conditional_branch(oob, panic_bb, ok_bb)
+            .unwrap();
+        self.builder.position_at_end(panic_bb);
+        let bc_fn = self
+            .module
+            .get_function("__gruel_bounds_check")
+            .unwrap_or_else(|| {
+                self.module.add_function(
+                    "__gruel_bounds_check",
+                    self.ctx.void_type().fn_type(&[], false),
+                    None,
+                )
+            });
+        self.builder.build_call(bc_fn, &[], "").unwrap();
+        self.builder.build_unreachable().unwrap();
+        self.builder.position_at_end(ok_bb);
+        let buf = self
+            .builder
+            .build_load(
+                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                buf_ptr,
+                "buf",
+            )
+            .unwrap()
+            .into_pointer_value();
+        let elem_llvm = match gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool) {
+            Some(t) => t,
+            None => return self.ctx.i64_type().const_zero().into(),
+        };
+        let slot = unsafe {
+            self.builder
+                .build_in_bounds_gep(elem_llvm, buf, &[i], "slot")
+                .unwrap()
+        };
+        self.builder.build_load(elem_llvm, slot, "elem").unwrap()
+    }
+
+    /// `v[i] = x`.
+    fn translate_vec_index_write(&mut self, args: &[CfgValue]) {
+        let recv_ptr = self.vec_recv_ptr(args[0]);
+        let i_raw = self.get_value(args[1]).into_int_value();
+        let i = self.zext_to_i64(i_raw);
+        let val = self.get_value(args[2]);
+        let val_ty = self.cfg.get_inst(args[2]).ty;
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let len_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "len_ptr")
+            .unwrap();
+        let buf_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 0, "buf_ptr")
+            .unwrap();
+        let len = self
+            .builder
+            .build_load(i64_ty, len_ptr, "len")
+            .unwrap()
+            .into_int_value();
+        let oob = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::UGE, i, len, "oob")
+            .unwrap();
+        let panic_bb = self.ctx.append_basic_block(self.fn_value, "iw_panic");
+        let ok_bb = self.ctx.append_basic_block(self.fn_value, "iw_ok");
+        self.builder
+            .build_conditional_branch(oob, panic_bb, ok_bb)
+            .unwrap();
+        self.builder.position_at_end(panic_bb);
+        let bc_fn = self
+            .module
+            .get_function("__gruel_bounds_check")
+            .unwrap_or_else(|| {
+                self.module.add_function(
+                    "__gruel_bounds_check",
+                    self.ctx.void_type().fn_type(&[], false),
+                    None,
+                )
+            });
+        self.builder.build_call(bc_fn, &[], "").unwrap();
+        self.builder.build_unreachable().unwrap();
+        self.builder.position_at_end(ok_bb);
+        let buf = self
+            .builder
+            .build_load(
+                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                buf_ptr,
+                "buf",
+            )
+            .unwrap()
+            .into_pointer_value();
+        let elem_llvm = match gruel_type_to_llvm(val_ty, self.ctx, self.type_pool) {
+            Some(t) => t,
+            None => return,
+        };
+        let slot = unsafe {
+            self.builder
+                .build_in_bounds_gep(elem_llvm, buf, &[i], "slot")
+                .unwrap()
+        };
+        self.builder.build_store(slot, val).unwrap();
+    }
+
+    /// `v.terminated_ptr(s)` — ensure cap > len, write s at ptr[len], return ptr.
+    fn translate_vec_terminated_ptr(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
+        let recv_ptr = self.vec_recv_ptr(args[0]);
+        let s = self.get_value(args[1]);
+        let s_ty = self.cfg.get_inst(args[1]).ty;
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let one = i64_ty.const_int(1, false);
+        let len_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "len_ptr")
+            .unwrap();
+        let cap_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 2, "cap_ptr")
+            .unwrap();
+        let buf_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 0, "buf_ptr")
+            .unwrap();
+        let len = self
+            .builder
+            .build_load(i64_ty, len_ptr, "len")
+            .unwrap()
+            .into_int_value();
+        let cap = self
+            .builder
+            .build_load(i64_ty, cap_ptr, "cap")
+            .unwrap()
+            .into_int_value();
+        // Need cap > len. If cap <= len, grow to len+1.
+        let needs_grow = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::ULE, cap, len, "needs_grow")
+            .unwrap();
+        let grow_bb = self.ctx.append_basic_block(self.fn_value, "tp_grow");
+        let after_bb = self.ctx.append_basic_block(self.fn_value, "tp_after");
+        self.builder
+            .build_conditional_branch(needs_grow, grow_bb, after_bb)
+            .unwrap();
+        self.builder.position_at_end(grow_bb);
+        let new_cap = self.builder.build_int_add(len, one, "new_cap").unwrap();
+        let elem_size = match gruel_type_to_llvm(s_ty, self.ctx, self.type_pool) {
+            Some(t) => t.size_of().unwrap_or_else(|| i64_ty.const_zero()),
+            None => i64_ty.const_zero(),
+        };
+        let old_bytes = self.builder.build_int_mul(cap, elem_size, "ob").unwrap();
+        let new_bytes = self
+            .builder
+            .build_int_mul(new_cap, elem_size, "nb")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let realloc_fn = self.vec_realloc_fn();
+        let old = self
+            .builder
+            .build_load(
+                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                buf_ptr,
+                "old",
+            )
+            .unwrap()
+            .into_pointer_value();
+        let new_buf = self
+            .builder
+            .build_call(
+                realloc_fn,
+                &[old.into(), old_bytes.into(), new_bytes.into(), align.into()],
+                "rb",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        self.builder.build_store(buf_ptr, new_buf).unwrap();
+        self.builder.build_store(cap_ptr, new_cap).unwrap();
+        self.builder.build_unconditional_branch(after_bb).unwrap();
+        self.builder.position_at_end(after_bb);
+        let buf = self
+            .builder
+            .build_load(
+                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                buf_ptr,
+                "buf",
+            )
+            .unwrap()
+            .into_pointer_value();
+        let elem_llvm = match gruel_type_to_llvm(s_ty, self.ctx, self.type_pool) {
+            Some(t) => t,
+            None => {
+                let null = self
+                    .ctx
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .const_null();
+                return null.into();
+            }
+        };
+        let slot = unsafe {
+            self.builder
+                .build_in_bounds_gep(elem_llvm, buf, &[len], "slot")
+                .unwrap()
+        };
+        self.builder.build_store(slot, s).unwrap();
+        buf.into()
+    }
+
+    /// `v.clone()` — alloc cap, memcpy len*sizeof(T) bytes.
+    fn translate_vec_clone(&mut self, args: &[CfgValue], vec_ty: Type) -> BasicValueEnum<'ctx> {
+        let recv_ptr = self.vec_recv_ptr(args[0]);
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let len_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "len_ptr")
+            .unwrap();
+        let cap_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 2, "cap_ptr")
+            .unwrap();
+        let buf_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 0, "buf_ptr")
+            .unwrap();
+        let len = self
+            .builder
+            .build_load(i64_ty, len_ptr, "len")
+            .unwrap()
+            .into_int_value();
+        let cap = self
+            .builder
+            .build_load(i64_ty, cap_ptr, "cap")
+            .unwrap()
+            .into_int_value();
+        let buf = self
+            .builder
+            .build_load(
+                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                buf_ptr,
+                "buf",
+            )
+            .unwrap()
+            .into_pointer_value();
+        let elem_size = self.vec_elem_size(vec_ty);
+        let alloc_bytes = self
+            .builder
+            .build_int_mul(cap, elem_size, "alloc_bytes")
+            .unwrap();
+        let copy_bytes = self
+            .builder
+            .build_int_mul(len, elem_size, "copy_bytes")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let alloc_fn = self.vec_alloc_fn();
+        let new_buf = self
+            .builder
+            .build_call(
+                alloc_fn,
+                &[alloc_bytes.into(), align.into()],
+                "vec_clone_alloc",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        // memcpy
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let memcpy_ty = self.ctx.void_type().fn_type(
+            &[
+                ptr_ty.into(),
+                ptr_ty.into(),
+                i64_ty.into(),
+                self.ctx.bool_type().into(),
+            ],
+            false,
+        );
+        let memcpy_fn = self
+            .module
+            .get_function("llvm.memcpy.p0.p0.i64")
+            .unwrap_or_else(|| {
+                self.module
+                    .add_function("llvm.memcpy.p0.p0.i64", memcpy_ty, None)
+            });
+        self.builder
+            .build_call(
+                memcpy_fn,
+                &[
+                    new_buf.into(),
+                    buf.into(),
+                    copy_bytes.into(),
+                    self.ctx.bool_type().const_zero().into(),
+                ],
+                "",
+            )
+            .unwrap();
+        self.vec_pack(new_buf, len, cap)
+    }
+
+    /// `@vec(a, b, c)` — alloc n, store each, len=cap=n.
+    fn translate_vec_literal(&mut self, args: &[CfgValue], vec_ty: Type) -> BasicValueEnum<'ctx> {
+        let n = args.len() as u64;
+        let i64_ty = self.ctx.i64_type();
+        let n_val = i64_ty.const_int(n, false);
+        let elem_size = self.vec_elem_size(vec_ty);
+        let bytes = self
+            .builder
+            .build_int_mul(n_val, elem_size, "lit_bytes")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let alloc_fn = self.vec_alloc_fn();
+        let buf = self
+            .builder
+            .build_call(alloc_fn, &[bytes.into(), align.into()], "vec_lit_alloc")
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        let elem_ty = self.vec_element_type(vec_ty);
+        let elem_llvm = match gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool) {
+            Some(t) => t,
+            None => return self.vec_pack(buf, n_val, n_val),
+        };
+        for (i, &arg) in args.iter().enumerate() {
+            let v = self.get_value(arg);
+            let idx = i64_ty.const_int(i as u64, false);
+            let slot = unsafe {
+                self.builder
+                    .build_in_bounds_gep(elem_llvm, buf, &[idx], "lit_slot")
+                    .unwrap()
+            };
+            self.builder.build_store(slot, v).unwrap();
+        }
+        self.vec_pack(buf, n_val, n_val)
+    }
+
+    /// `@vec_repeat(v, n)` — alloc n, store v in each slot.
+    fn translate_vec_repeat(&mut self, args: &[CfgValue], vec_ty: Type) -> BasicValueEnum<'ctx> {
+        let v = self.get_value(args[0]);
+        let n_raw = self.get_value(args[1]).into_int_value();
+        let n = self.zext_to_i64(n_raw);
+        let i64_ty = self.ctx.i64_type();
+        let elem_size = self.vec_elem_size(vec_ty);
+        let bytes = self
+            .builder
+            .build_int_mul(n, elem_size, "rep_bytes")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let alloc_fn = self.vec_alloc_fn();
+        let buf = self
+            .builder
+            .build_call(alloc_fn, &[bytes.into(), align.into()], "vec_rep_alloc")
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        let elem_ty = self.vec_element_type(vec_ty);
+        let elem_llvm = match gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool) {
+            Some(t) => t,
+            None => return self.vec_pack(buf, n, n),
+        };
+        // Loop: for i in 0..n { buf[i] = v; }
+        let zero = i64_ty.const_zero();
+        let one = i64_ty.const_int(1, false);
+        let header_bb = self.ctx.append_basic_block(self.fn_value, "rep_header");
+        let body_bb = self.ctx.append_basic_block(self.fn_value, "rep_body");
+        let after_bb = self.ctx.append_basic_block(self.fn_value, "rep_after");
+        let entry_bb = self.builder.get_insert_block().unwrap();
+        self.builder.build_unconditional_branch(header_bb).unwrap();
+        self.builder.position_at_end(header_bb);
+        let i_phi = self.builder.build_phi(i64_ty, "i").unwrap();
+        i_phi.add_incoming(&[(&zero, entry_bb)]);
+        let i = i_phi.as_basic_value().into_int_value();
+        let cond = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::ULT, i, n, "cond")
+            .unwrap();
+        self.builder
+            .build_conditional_branch(cond, body_bb, after_bb)
+            .unwrap();
+        self.builder.position_at_end(body_bb);
+        let slot = unsafe {
+            self.builder
+                .build_in_bounds_gep(elem_llvm, buf, &[i], "rep_slot")
+                .unwrap()
+        };
+        self.builder.build_store(slot, v).unwrap();
+        let next = self.builder.build_int_add(i, one, "i_next").unwrap();
+        let body_end = self.builder.get_insert_block().unwrap();
+        i_phi.add_incoming(&[(&next, body_end)]);
+        self.builder.build_unconditional_branch(header_bb).unwrap();
+        self.builder.position_at_end(after_bb);
+        self.vec_pack(buf, n, n)
+    }
+
+    /// Drop a Vec(T) value: drop each live element if T needs drop, then
+    /// free the buffer if cap > 0.
+    fn translate_vec_drop(&mut self, val: BasicValueEnum<'ctx>, vec_ty: Type) {
+        let recv = val.into_struct_value();
+        let buf = self
+            .builder
+            .build_extract_value(recv, 0, "drop_buf")
+            .unwrap()
+            .into_pointer_value();
+        let len = self
+            .builder
+            .build_extract_value(recv, 1, "drop_len")
+            .unwrap()
+            .into_int_value();
+        let cap = self
+            .builder
+            .build_extract_value(recv, 2, "drop_cap")
+            .unwrap()
+            .into_int_value();
+        let i64_ty = self.ctx.i64_type();
+        let zero = i64_ty.const_zero();
+        let alive = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::UGT, cap, zero, "drop_alive")
+            .unwrap();
+        let alive_bb = self.ctx.append_basic_block(self.fn_value, "vec_drop_alive");
+        let after_bb = self.ctx.append_basic_block(self.fn_value, "vec_drop_after");
+        self.builder
+            .build_conditional_branch(alive, alive_bb, after_bb)
+            .unwrap();
+        self.builder.position_at_end(alive_bb);
+
+        // Per-element drop loop if T needs drop.
+        let elem_ty = self.vec_element_type(vec_ty);
+        if drop_names::type_needs_drop(elem_ty, self.type_pool) {
+            self.emit_vec_drop_loop(buf, len, elem_ty);
+        }
+
+        // Free the buffer.
+        let elem_size = self.vec_elem_size(vec_ty);
+        let bytes = self
+            .builder
+            .build_int_mul(cap, elem_size, "drop_bytes")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let free_fn = self.vec_free_fn();
+        self.builder
+            .build_call(free_fn, &[buf.into(), bytes.into(), align.into()], "")
+            .unwrap();
+        self.builder.build_unconditional_branch(after_bb).unwrap();
+        self.builder.position_at_end(after_bb);
+    }
+
+    /// `v.dispose()` — ADR-0067: panic if `len != 0`, otherwise free the buffer.
+    ///
+    /// Receiver is passed by-value (consumed). The buffer is freed even when
+    /// `cap == 0` is harmless because `__gruel_free` is a no-op on
+    /// zero-byte allocations / null pointers.
+    fn translate_vec_dispose(&mut self, args: &[CfgValue]) {
+        let recv_val = self.get_value(args[0]);
+        let recv = recv_val.into_struct_value();
+        let buf = self
+            .builder
+            .build_extract_value(recv, 0, "dispose_buf")
+            .unwrap()
+            .into_pointer_value();
+        let len = self
+            .builder
+            .build_extract_value(recv, 1, "dispose_len")
+            .unwrap()
+            .into_int_value();
+        let cap = self
+            .builder
+            .build_extract_value(recv, 2, "dispose_cap")
+            .unwrap()
+            .into_int_value();
+        let i64_ty = self.ctx.i64_type();
+        let zero = i64_ty.const_zero();
+
+        // panic if len != 0
+        let nonempty = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::NE, len, zero, "dispose_nonempty")
+            .unwrap();
+        let panic_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_dispose_panic");
+        let cont_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_dispose_cont");
+        self.builder
+            .build_conditional_branch(nonempty, panic_bb, cont_bb)
+            .unwrap();
+
+        self.builder.position_at_end(panic_bb);
+        let panic_fn_ty = self.ctx.void_type().fn_type(&[], false);
+        let panic_fn = self
+            .module
+            .get_function("__gruel_vec_dispose_panic")
+            .unwrap_or_else(|| {
+                self.module
+                    .add_function("__gruel_vec_dispose_panic", panic_fn_ty, None)
+            });
+        self.builder.build_call(panic_fn, &[], "").unwrap();
+        self.builder.build_unreachable().unwrap();
+
+        self.builder.position_at_end(cont_bb);
+        // Free the buffer (only if cap > 0).
+        let alive = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::UGT, cap, zero, "dispose_alive")
+            .unwrap();
+        let free_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_dispose_free");
+        let after_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_dispose_after");
+        self.builder
+            .build_conditional_branch(alive, free_bb, after_bb)
+            .unwrap();
+        self.builder.position_at_end(free_bb);
+
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let bytes = self
+            .builder
+            .build_int_mul(cap, elem_size, "dispose_bytes")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let free_fn = self.vec_free_fn();
+        self.builder
+            .build_call(free_fn, &[buf.into(), bytes.into(), align.into()], "")
+            .unwrap();
+        self.builder.build_unconditional_branch(after_bb).unwrap();
+        self.builder.position_at_end(after_bb);
+    }
+
+    /// Emit a loop that drops each element `buf[i]` for `i in 0..len`.
+    fn emit_vec_drop_loop(
+        &mut self,
+        buf: inkwell::values::PointerValue<'ctx>,
+        len: inkwell::values::IntValue<'ctx>,
+        elem_ty: Type,
+    ) {
+        let i64_ty = self.ctx.i64_type();
+        let zero = i64_ty.const_zero();
+        let one = i64_ty.const_int(1, false);
+        let header_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_drop_header");
+        let body_bb = self.ctx.append_basic_block(self.fn_value, "vec_drop_body");
+        let exit_bb = self.ctx.append_basic_block(self.fn_value, "vec_drop_exit");
+        let entry_bb = self.builder.get_insert_block().unwrap();
+        self.builder.build_unconditional_branch(header_bb).unwrap();
+        self.builder.position_at_end(header_bb);
+        let i_phi = self.builder.build_phi(i64_ty, "i").unwrap();
+        i_phi.add_incoming(&[(&zero, entry_bb)]);
+        let i = i_phi.as_basic_value().into_int_value();
+        let cond = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::ULT, i, len, "cond")
+            .unwrap();
+        self.builder
+            .build_conditional_branch(cond, body_bb, exit_bb)
+            .unwrap();
+        self.builder.position_at_end(body_bb);
+        if let Some(elem_llvm) = gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool) {
+            let slot = unsafe {
+                self.builder
+                    .build_in_bounds_gep(elem_llvm, buf, &[i], "drop_slot")
+                    .unwrap()
+            };
+            let elem_val = self
+                .builder
+                .build_load(elem_llvm, slot, "drop_elem")
+                .unwrap();
+            self.emit_element_drop(elem_val, elem_ty);
+        }
+        let next = self.builder.build_int_add(i, one, "i_next").unwrap();
+        let body_end = self.builder.get_insert_block().unwrap();
+        i_phi.add_incoming(&[(&next, body_end)]);
+        self.builder.build_unconditional_branch(header_bb).unwrap();
+        self.builder.position_at_end(exit_bb);
+    }
+
+    /// Emit a drop call for a single element value.
+    fn emit_element_drop(&mut self, val: BasicValueEnum<'ctx>, elem_ty: Type) {
+        if self.is_builtin_string(elem_ty) {
+            let (ptr, len, cap) = self.extract_str_ptr_len_cap(val);
+            let drop_fn = self.get_or_declare_drop_string();
+            self.builder
+                .build_call(drop_fn, &[ptr.into(), len.into(), cap.into()], "")
+                .unwrap();
+            return;
+        }
+        if matches!(elem_ty.kind(), TypeKind::Vec(_)) {
+            self.translate_vec_drop(val, elem_ty);
+            return;
+        }
+        if let Some(fn_name) = drop_names::drop_fn_name(elem_ty, self.type_pool) {
+            let args: Vec<BasicValueEnum<'ctx>> = match elem_ty.kind() {
+                TypeKind::Array(_) => self.extract_fields_for_drop(val, elem_ty),
+                _ => vec![val],
+            };
+            let param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                args.iter().map(|v| v.get_type().into()).collect();
+            let meta_args: Vec<BasicMetadataValueEnum<'ctx>> =
+                args.iter().map(|v| (*v).into()).collect();
+            let fn_in_module = self.module.get_function(&fn_name);
+            let callee = fn_in_module.unwrap_or_else(|| {
+                let fn_ty = self.ctx.void_type().fn_type(&param_types, false);
+                self.module.add_function(&fn_name, fn_ty, None)
+            });
+            self.builder.build_call(callee, &meta_args, "").unwrap();
+        }
+    }
+
+    /// `@parts_to_vec(p, len, cap)` — pack into a Vec aggregate.
+    fn translate_parts_to_vec(&mut self, args: &[CfgValue], _vec_ty: Type) -> BasicValueEnum<'ctx> {
+        let p = self.get_value(args[0]).into_pointer_value();
+        let len_raw = self.get_value(args[1]).into_int_value();
+        let cap_raw = self.get_value(args[2]).into_int_value();
+        let len = self.zext_to_i64(len_raw);
+        let cap = self.zext_to_i64(cap_raw);
+        self.vec_pack(p, len, cap)
     }
 
     /// Translate a CFG terminator into LLVM control flow.

@@ -620,6 +620,8 @@ pub enum BuiltinTypeConstructorKind {
     Slice,
     /// Mutable slice (ADR-0064): `MutSlice(T)` lowers to `TypeKind::MutSlice`.
     MutSlice,
+    /// Owned vector (ADR-0066): `Vec(T)` lowers to `TypeKind::Vec`.
+    Vec,
 }
 
 /// Definition of a built-in parameterized type constructor.
@@ -684,6 +686,13 @@ pub static MUT_SLICE_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructo
     kind: BuiltinTypeConstructorKind::MutSlice,
 };
 
+/// `Vec(T)` — owned, growable vector (ADR-0066).
+pub static VEC_CONSTRUCTOR: BuiltinTypeConstructor = BuiltinTypeConstructor {
+    name: "Vec",
+    arity: 1,
+    kind: BuiltinTypeConstructorKind::Vec,
+};
+
 /// All built-in type constructors.
 ///
 /// The compiler iterates over this slice when resolving type-call expressions
@@ -695,6 +704,7 @@ pub static BUILTIN_TYPE_CONSTRUCTORS: &[&BuiltinTypeConstructor] = &[
     &MUT_REF_CONSTRUCTOR,
     &SLICE_CONSTRUCTOR,
     &MUT_SLICE_CONSTRUCTOR,
+    &VEC_CONSTRUCTOR,
 ];
 
 /// Look up a built-in type constructor by name.
@@ -815,6 +825,7 @@ impl BuiltinTypeConstructorKind {
             BuiltinTypeConstructorKind::MutRef => "mutable reference (ADR-0062)",
             BuiltinTypeConstructorKind::Slice => "immutable slice (ADR-0064)",
             BuiltinTypeConstructorKind::MutSlice => "mutable slice (ADR-0064)",
+            BuiltinTypeConstructorKind::Vec => "owned, growable vector (ADR-0066)",
         }
     }
 }
@@ -1172,8 +1183,9 @@ mod tests {
 
     #[test]
     fn test_builtin_type_constructors_registry() {
-        // ADR-0061: Ptr / MutPtr. ADR-0062: Ref / MutRef. ADR-0064: Slice / MutSlice.
-        assert_eq!(BUILTIN_TYPE_CONSTRUCTORS.len(), 6);
+        // ADR-0061: Ptr / MutPtr. ADR-0062: Ref / MutRef. ADR-0064: Slice /
+        // MutSlice. ADR-0066: Vec.
+        assert_eq!(BUILTIN_TYPE_CONSTRUCTORS.len(), 7);
     }
 
     #[test]
