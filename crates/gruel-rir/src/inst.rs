@@ -1599,6 +1599,7 @@ impl Rir {
             InstData::IntConst(v) => InstData::IntConst(*v),
             InstData::FloatConst(bits) => InstData::FloatConst(*bits),
             InstData::BoolConst(v) => InstData::BoolConst(*v),
+            InstData::CharConst(v) => InstData::CharConst(*v),
             InstData::StringConst(s) => InstData::StringConst(*s),
             InstData::UnitConst => InstData::UnitConst,
             InstData::Break => InstData::Break,
@@ -2236,6 +2237,7 @@ impl Rir {
                 InstData::IntConst(_)
                 | InstData::FloatConst(_)
                 | InstData::BoolConst(_)
+                | InstData::CharConst(_)
                 | InstData::StringConst(_)
                 | InstData::UnitConst
                 | InstData::Bin { .. }
@@ -2296,6 +2298,9 @@ pub enum InstData {
 
     /// Boolean constant
     BoolConst(bool),
+
+    /// Char constant — Unicode scalar value (ADR-0071).
+    CharConst(u32),
 
     /// String constant (interned string content)
     StringConst(Spur),

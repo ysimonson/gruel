@@ -45,6 +45,9 @@ pub fn gruel_type_to_llvm<'ctx>(
         // Booleans are i1 in LLVM IR.
         TypeKind::Bool => Some(ctx.bool_type().into()),
 
+        // ADR-0071: char lowers to i32 (storage holds the Unicode scalar value).
+        TypeKind::Char => Some(ctx.i32_type().into()),
+
         // Unit and Never both map to LLVM void (no value).
         TypeKind::Unit | TypeKind::Never => None,
 

@@ -186,6 +186,70 @@ pub extern "C" fn String__with_capacity(out: *mut StringResult, requested_cap: u
     }
 }
 
+/// ADR-0071: encode `codepoint` as UTF-8 (1–4 bytes) into `out_bytes` and
+/// return the byte count.  `codepoint` must be a valid Unicode scalar value
+/// (caller's responsibility — char values from sema satisfy this).
+///
+/// Uses raw pointer writes to avoid the bounds-check panics that the array
+/// `[u8; 4]` indexing would emit (this crate is `no_std` with no unwinder).
+fn encode_utf8(codepoint: u32, out_bytes: *mut u8) -> usize {
+    unsafe {
+        if codepoint < 0x80 {
+            *out_bytes.add(0) = codepoint as u8;
+            1
+        } else if codepoint < 0x800 {
+            *out_bytes.add(0) = 0xC0 | (codepoint >> 6) as u8;
+            *out_bytes.add(1) = 0x80 | (codepoint & 0x3F) as u8;
+            2
+        } else if codepoint < 0x10000 {
+            *out_bytes.add(0) = 0xE0 | (codepoint >> 12) as u8;
+            *out_bytes.add(1) = 0x80 | ((codepoint >> 6) & 0x3F) as u8;
+            *out_bytes.add(2) = 0x80 | (codepoint & 0x3F) as u8;
+            3
+        } else {
+            *out_bytes.add(0) = 0xF0 | (codepoint >> 18) as u8;
+            *out_bytes.add(1) = 0x80 | ((codepoint >> 12) & 0x3F) as u8;
+            *out_bytes.add(2) = 0x80 | ((codepoint >> 6) & 0x3F) as u8;
+            *out_bytes.add(3) = 0x80 | (codepoint & 0x3F) as u8;
+            4
+        }
+    }
+}
+
+/// ADR-0071: build a String containing the UTF-8 encoding of `codepoint`.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__from_char(out: *mut StringResult, codepoint: u32) {
+    let cap = STRING_MIN_CAPACITY;
+    let ptr = heap::alloc(cap, 1);
+    let n = encode_utf8(codepoint, ptr);
+    unsafe {
+        (*out).ptr = ptr;
+        (*out).len = n as u64;
+        (*out).cap = cap;
+    }
+}
+
+/// ADR-0071: append the UTF-8 encoding of `codepoint` (1–4 bytes) to the string.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__push_char(
+    out: *mut StringResult,
+    ptr: *mut u8,
+    len: u64,
+    cap: u64,
+    codepoint: u32,
+) {
+    // 4-byte upper bound for any UTF-8 encoding.
+    let (new_ptr, new_cap) = string_ensure_capacity(ptr, len, cap, 4);
+    let n = unsafe { encode_utf8(codepoint, new_ptr.add(len as usize)) };
+    unsafe {
+        (*out).ptr = new_ptr;
+        (*out).len = len + n as u64;
+        (*out).cap = new_cap;
+    }
+}
+
 // =============================================================================
 // String Query Methods
 // =============================================================================

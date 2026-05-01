@@ -452,6 +452,7 @@ impl<'a> SemaContext<'a> {
             | TypeKind::F32
             | TypeKind::F64
             | TypeKind::Bool
+            | TypeKind::Char
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values), unless
             // any payload is linear (ADR-0067).

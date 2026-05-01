@@ -660,6 +660,10 @@ impl<'a> AstGen<'a> {
                 data: InstData::BoolConst(lit.value),
                 span: lit.span,
             }),
+            Expr::Char(lit) => self.rir.add_inst(Inst {
+                data: InstData::CharConst(lit.value),
+                span: lit.span,
+            }),
             Expr::String(lit) => {
                 self.rir.add_inst(Inst {
                     data: InstData::StringConst(lit.value), // Already a Spur

@@ -1,0 +1,164 @@
+[section]
+id = "types.char_utf8"
+spec_chapter = "3.14"
+name = "char UTF-8 encoding (ADR-0071)"
+description = "Tests for char.is_ascii, char.len_utf8, and char.encode_utf8."
+
+# is_ascii true
+[[case]]
+name = "is_ascii_true"
+spec = ["3.14:7"]
+source = """
+fn main() -> i32 {
+    let c: char = 'A';
+    if c.is_ascii() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# is_ascii false (multibyte)
+[[case]]
+name = "is_ascii_false_emoji"
+spec = ["3.14:7"]
+source = """
+fn main() -> i32 {
+    let c: char = '\\u{1F600}';
+    if c.is_ascii() { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "is_ascii_boundary_127"
+spec = ["3.14:7"]
+description = "U+007F (DEL) is ASCII"
+source = """
+fn main() -> i32 {
+    let c: char = '\\u{7F}';
+    if c.is_ascii() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "is_ascii_boundary_128"
+spec = ["3.14:7"]
+description = "U+0080 is the first non-ASCII codepoint"
+source = """
+fn main() -> i32 {
+    let c: char = '\\u{80}';
+    if c.is_ascii() { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+# len_utf8 — 1 byte
+[[case]]
+name = "len_utf8_1"
+spec = ["3.14:7", "3.14:10"]
+source = """
+fn main() -> i32 {
+    let c: char = 'A';
+    @cast(c.len_utf8())
+}
+"""
+exit_code = 1
+
+# len_utf8 — 2 bytes
+[[case]]
+name = "len_utf8_2"
+spec = ["3.14:7", "3.14:10"]
+description = "U+00E9 (é) is 2 UTF-8 bytes"
+source = """
+fn main() -> i32 {
+    let c: char = '\\u{E9}';
+    @cast(c.len_utf8())
+}
+"""
+exit_code = 2
+
+# len_utf8 — 3 bytes
+[[case]]
+name = "len_utf8_3"
+spec = ["3.14:7", "3.14:10"]
+description = "U+4E2D (中) is 3 UTF-8 bytes"
+source = """
+fn main() -> i32 {
+    let c: char = '\\u{4E2D}';
+    @cast(c.len_utf8())
+}
+"""
+exit_code = 3
+
+# len_utf8 — 4 bytes
+[[case]]
+name = "len_utf8_4"
+spec = ["3.14:7", "3.14:10"]
+description = "U+1F600 (😀) is 4 UTF-8 bytes"
+source = """
+fn main() -> i32 {
+    let c: char = '\\u{1F600}';
+    @cast(c.len_utf8())
+}
+"""
+exit_code = 4
+
+# encode_utf8 — 1 byte (ASCII)
+[[case]]
+name = "encode_utf8_1byte"
+spec = ["3.14:7", "3.14:10"]
+description = "encode_utf8 of 'A' writes 0x41 to buf[0] and returns 1"
+source = """
+fn main() -> i32 {
+    let c: char = 'A';
+    let mut buf: [u8; 4] = [0, 0, 0, 0];
+    let n: usize = c.encode_utf8(&mut buf);
+    if n == 1 && buf[0] == 65 { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# encode_utf8 — 2 bytes
+[[case]]
+name = "encode_utf8_2byte"
+spec = ["3.14:7", "3.14:10"]
+description = "encode_utf8 of U+00E9 (é) writes [0xC3, 0xA9] to buf and returns 2"
+source = """
+fn main() -> i32 {
+    let c: char = '\\u{E9}';
+    let mut buf: [u8; 4] = [0, 0, 0, 0];
+    let n: usize = c.encode_utf8(&mut buf);
+    if n == 2 && buf[0] == 195 && buf[1] == 169 { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# encode_utf8 — 3 bytes
+[[case]]
+name = "encode_utf8_3byte"
+spec = ["3.14:7", "3.14:10"]
+description = "encode_utf8 of U+4E2D (中) writes [0xE4, 0xB8, 0xAD] to buf and returns 3"
+source = """
+fn main() -> i32 {
+    let c: char = '\\u{4E2D}';
+    let mut buf: [u8; 4] = [0, 0, 0, 0];
+    let n: usize = c.encode_utf8(&mut buf);
+    if n == 3 && buf[0] == 228 && buf[1] == 184 && buf[2] == 173 { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# encode_utf8 — 4 bytes
+[[case]]
+name = "encode_utf8_4byte"
+spec = ["3.14:7", "3.14:10"]
+description = "encode_utf8 of U+1F600 (😀) writes [0xF0, 0x9F, 0x98, 0x80] to buf and returns 4"
+source = """
+fn main() -> i32 {
+    let c: char = '\\u{1F600}';
+    let mut buf: [u8; 4] = [0, 0, 0, 0];
+    let n: usize = c.encode_utf8(&mut buf);
+    if n == 4 && buf[0] == 240 && buf[1] == 159 && buf[2] == 152 && buf[3] == 128 { 1 } else { 0 }
+}
+"""
+exit_code = 1

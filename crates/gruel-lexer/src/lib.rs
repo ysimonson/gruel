@@ -66,6 +66,7 @@ pub enum TokenKind {
     F32,
     F64,
     Bool,
+    Char,
 
     // Patterns
     Underscore, // _ (wildcard pattern)
@@ -76,6 +77,8 @@ pub enum TokenKind {
     /// Use `f64::from_bits()` to recover the value.
     Float(u64),
     String(Spur),
+    /// Char literal — the resolved Unicode scalar value (ADR-0071).
+    CharLit(u32),
 
     // Identifiers
     Ident(Spur),
@@ -175,10 +178,12 @@ impl TokenKind {
             TokenKind::F32 => "type 'f32'",
             TokenKind::F64 => "type 'f64'",
             TokenKind::Bool => "type 'bool'",
+            TokenKind::Char => "type 'char'",
             TokenKind::Underscore => "'_'",
             TokenKind::Int(_) => "integer",
             TokenKind::Float(_) => "float",
             TokenKind::String(_) => "string",
+            TokenKind::CharLit(_) => "char literal",
             TokenKind::Ident(_) => "identifier",
             TokenKind::Plus => "'+'",
             TokenKind::Minus => "'-'",
@@ -286,10 +291,12 @@ impl std::fmt::Display for TokenKind {
             TokenKind::F32 => write!(f, "TYPE(f32)"),
             TokenKind::F64 => write!(f, "TYPE(f64)"),
             TokenKind::Bool => write!(f, "TYPE(bool)"),
+            TokenKind::Char => write!(f, "TYPE(char)"),
             TokenKind::Underscore => write!(f, "UNDERSCORE"),
             TokenKind::Int(v) => write!(f, "INT({})", v),
             TokenKind::Float(bits) => write!(f, "FLOAT({})", f64::from_bits(*bits)),
             TokenKind::String(s) => write!(f, "STRING(sym:{})", s.into_usize()),
+            TokenKind::CharLit(c) => write!(f, "CHAR(U+{:04X})", c),
             TokenKind::Ident(s) => write!(f, "IDENT(sym:{})", s.into_usize()),
             TokenKind::Plus => write!(f, "PLUS"),
             TokenKind::Minus => write!(f, "MINUS"),

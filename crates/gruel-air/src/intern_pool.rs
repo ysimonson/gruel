@@ -94,8 +94,10 @@ impl InternedType {
     pub const UNIT: InternedType = InternedType(14);
     pub const NEVER: InternedType = InternedType(15);
     pub const ERROR: InternedType = InternedType(16);
+    /// ADR-0071: Unicode scalar value (`char`).
+    pub const CHAR: InternedType = InternedType(20);
 
-    const PRIMITIVE_COUNT: u32 = 19;
+    const PRIMITIVE_COUNT: u32 = 21;
 
     /// Check if this is a primitive type (no pool lookup needed).
     #[inline]
@@ -1228,6 +1230,7 @@ impl TypeInternPool {
             TypeKind::F32 => InternedType::F32,
             TypeKind::F64 => InternedType::F64,
             TypeKind::Bool => InternedType::BOOL,
+            TypeKind::Char => InternedType::CHAR,
             TypeKind::Unit => InternedType::UNIT,
             TypeKind::Never => InternedType::NEVER,
             TypeKind::Error => InternedType::ERROR,
@@ -1379,6 +1382,7 @@ impl TypeInternPool {
             TypeKind::F32 => Some(InternedType::F32),
             TypeKind::F64 => Some(InternedType::F64),
             TypeKind::Bool => Some(InternedType::BOOL),
+            TypeKind::Char => Some(InternedType::CHAR),
             TypeKind::Unit => Some(InternedType::UNIT),
             TypeKind::Never => Some(InternedType::NEVER),
             TypeKind::Error => Some(InternedType::ERROR),
@@ -1429,6 +1433,7 @@ impl TypeInternPool {
             14 => Type::UNIT,
             15 => Type::NEVER,
             16 => Type::ERROR,
+            20 => Type::CHAR,
             _ => return None,
         })
     }
@@ -1486,6 +1491,7 @@ impl TypeInternPool {
             TypeKind::F32 => "f32".to_string(),
             TypeKind::F64 => "f64".to_string(),
             TypeKind::Bool => "bool".to_string(),
+            TypeKind::Char => "char".to_string(),
             TypeKind::Unit => "()".to_string(),
             TypeKind::Never => "!".to_string(),
             TypeKind::Error => "<error>".to_string(),

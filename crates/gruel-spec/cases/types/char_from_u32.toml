@@ -1,0 +1,134 @@
+[section]
+id = "types.char_from_u32"
+spec_chapter = "3.14"
+name = "char::from_u32 / from_u32_unchecked (ADR-0071)"
+description = "Tests for u32 → char conversion via from_u32 (Result-returning) and from_u32_unchecked."
+
+# Valid ASCII codepoint
+[[case]]
+name = "from_u32_ascii"
+spec = ["3.14:7", "3.14:9"]
+description = "char::from_u32(65) returns Ok('A')"
+source = """
+fn main() -> i32 {
+    let n: u32 = @cast(65);
+    let r = char::from_u32(n);
+    if r.is_ok() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# Highest valid scalar
+[[case]]
+name = "from_u32_max_valid"
+spec = ["3.14:7", "3.14:9"]
+description = "char::from_u32(0x10FFFF) — highest valid Unicode scalar"
+source = """
+fn main() -> i32 {
+    let n: u32 = @cast(1114111);
+    let r = char::from_u32(n);
+    if r.is_ok() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# Just-after-BMP-low-surrogate (0xD7FF) — last codepoint before surrogate range
+[[case]]
+name = "from_u32_just_below_surrogate"
+spec = ["3.14:7", "3.14:9"]
+source = """
+fn main() -> i32 {
+    let n: u32 = @cast(55295);
+    let r = char::from_u32(n);
+    if r.is_ok() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# Surrogate low boundary
+[[case]]
+name = "from_u32_surrogate_low_rejected"
+spec = ["3.14:7", "3.14:9"]
+description = "char::from_u32(0xD800) returns Err — surrogate"
+source = """
+fn main() -> i32 {
+    let n: u32 = @cast(55296);
+    let r = char::from_u32(n);
+    if r.is_err() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# Surrogate high boundary
+[[case]]
+name = "from_u32_surrogate_high_rejected"
+spec = ["3.14:7", "3.14:9"]
+description = "char::from_u32(0xDFFF) returns Err — surrogate"
+source = """
+fn main() -> i32 {
+    let n: u32 = @cast(57343);
+    let r = char::from_u32(n);
+    if r.is_err() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# Just-after-Unicode-max (0x110000) — first invalid codepoint
+[[case]]
+name = "from_u32_above_max_rejected"
+spec = ["3.14:7", "3.14:9"]
+description = "char::from_u32(0x110000) returns Err — out of Unicode range"
+source = """
+fn main() -> i32 {
+    let n: u32 = @cast(1114112);
+    let r = char::from_u32(n);
+    if r.is_err() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# Round-trip: from_u32(c.to_u32()) returns Ok with the same codepoint
+[[case]]
+name = "from_u32_round_trip"
+spec = ["3.14:7", "3.14:9"]
+description = "from_u32 ∘ to_u32 round-trips"
+source = """
+fn main() -> i32 {
+    let a: char = 'A';
+    let r = char::from_u32(a.to_u32());
+    let c: char = r.unwrap();
+    if c == a { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# from_u32 outside checked block — passes (Result-returning, safe path)
+[[case]]
+name = "from_u32_unchecked_requires_checked"
+spec = ["3.14:7"]
+description = "char::from_u32_unchecked outside checked block is rejected"
+source = """
+fn main() -> i32 {
+    let n: u32 = @cast(65);
+    let _c: char = char::from_u32_unchecked(n);
+    0
+}
+"""
+compile_fail = true
+error_contains = "checked"
+
+# from_u32_unchecked inside checked block works
+[[case]]
+name = "from_u32_unchecked_in_checked"
+spec = ["3.14:7"]
+description = "char::from_u32_unchecked inside checked block returns char"
+source = """
+fn main() -> i32 {
+    let n: u32 = @cast(65);
+    checked {
+        let c: char = char::from_u32_unchecked(n);
+        @cast(c.to_u32())
+    }
+}
+"""
+exit_code = 65

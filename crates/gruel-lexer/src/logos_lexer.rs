@@ -17,6 +17,12 @@ pub enum LexError {
     InvalidFloat,
     InvalidStringEscape,
     UnterminatedString,
+    /// ADR-0071: char literal violations.
+    EmptyCharLit,
+    UnterminatedCharLit,
+    MultiCharLit,
+    InvalidCharEscape,
+    InvalidUnicodeEscape,
 }
 
 /// Process a string literal starting from an opening quote.
@@ -100,6 +106,172 @@ fn process_string_from_quote(lex: &mut logos::Lexer<'_, LogosTokenKind>) -> Resu
     // Intern the string
     let spur = lex.extras.get_or_intern(&result);
     Ok(spur)
+}
+
+/// Process a char literal starting from an opening single-quote.
+/// ADR-0071: emits a u32 Unicode scalar value, with thorough error
+/// reporting for empty/multi-char/unterminated/invalid escapes.
+fn process_char_from_quote(lex: &mut logos::Lexer<'_, LogosTokenKind>) -> Result<u32, LexError> {
+    // At entry we've matched just the opening '
+    let remainder = lex.remainder();
+    let mut chars = remainder.chars();
+    let mut consumed: usize = 0;
+
+    // Read the body (one Unicode scalar OR an escape sequence).
+    let scalar: u32 = match chars.next() {
+        None => {
+            return Err(LexError::UnterminatedCharLit);
+        }
+        Some('\'') => {
+            // Empty literal ''
+            lex.bump(1);
+            return Err(LexError::EmptyCharLit);
+        }
+        Some('\n') | Some('\r') => {
+            // Newline/CR before close — unterminated. Don't consume
+            // so the error span is meaningful.
+            return Err(LexError::UnterminatedCharLit);
+        }
+        Some('\\') => {
+            consumed += 1;
+            match chars.next() {
+                None => {
+                    lex.bump(consumed);
+                    return Err(LexError::UnterminatedCharLit);
+                }
+                Some('n') => {
+                    consumed += 1;
+                    '\n' as u32
+                }
+                Some('r') => {
+                    consumed += 1;
+                    '\r' as u32
+                }
+                Some('t') => {
+                    consumed += 1;
+                    '\t' as u32
+                }
+                Some('\\') => {
+                    consumed += 1;
+                    '\\' as u32
+                }
+                Some('\'') => {
+                    consumed += 1;
+                    '\'' as u32
+                }
+                Some('"') => {
+                    consumed += 1;
+                    '"' as u32
+                }
+                Some('0') => {
+                    consumed += 1;
+                    0u32
+                }
+                Some('u') => {
+                    consumed += 1;
+                    // Expect '{' next
+                    match chars.next() {
+                        Some('{') => {
+                            consumed += 1;
+                        }
+                        _ => {
+                            lex.bump(consumed);
+                            return Err(LexError::InvalidUnicodeEscape);
+                        }
+                    }
+                    // Read up to 6 hex digits, then expect '}'
+                    let mut hex = String::new();
+                    let mut closed = false;
+                    while let Some(c) = chars.next() {
+                        consumed += c.len_utf8();
+                        if c == '}' {
+                            closed = true;
+                            break;
+                        }
+                        if hex.len() >= 6 {
+                            lex.bump(consumed);
+                            return Err(LexError::InvalidUnicodeEscape);
+                        }
+                        if c.is_ascii_hexdigit() {
+                            hex.push(c);
+                        } else {
+                            lex.bump(consumed);
+                            return Err(LexError::InvalidUnicodeEscape);
+                        }
+                    }
+                    if !closed || hex.is_empty() {
+                        lex.bump(consumed);
+                        return Err(LexError::InvalidUnicodeEscape);
+                    }
+                    let n = u32::from_str_radix(&hex, 16)
+                        .map_err(|_| LexError::InvalidUnicodeEscape)?;
+                    // Validate scalar value range.
+                    if (0xD800..=0xDFFF).contains(&n) || n > 0x10FFFF {
+                        lex.bump(consumed);
+                        return Err(LexError::InvalidUnicodeEscape);
+                    }
+                    n
+                }
+                Some(_) => {
+                    lex.bump(consumed);
+                    return Err(LexError::InvalidCharEscape);
+                }
+            }
+        }
+        Some(c) => {
+            consumed += c.len_utf8();
+            c as u32
+        }
+    };
+
+    // Now expect the closing '.
+    match chars.next() {
+        Some('\'') => {
+            consumed += 1;
+            lex.bump(consumed);
+            Ok(scalar)
+        }
+        Some('\n') | Some('\r') | None => {
+            lex.bump(consumed);
+            Err(LexError::UnterminatedCharLit)
+        }
+        Some(_) => {
+            // Multi-character literal: consume until closing ' or newline.
+            // We already have at least one extra char.
+            // Don't bother counting precisely — bump past to end of literal.
+            // This produces a sharper error if the user has 'ab' or 'abc'.
+            // We must still advance past the rest of the literal so subsequent
+            // tokens scan correctly.
+            //
+            // For 'ab', the second char's len was already consumed via chars.next();
+            // we only added the first char's len. Recover: we need to count what
+            // we just read plus walk forward until ' or newline.
+            // Simplest: bump what we have, then keep eating chars until a closing '.
+            // Track that consumed chars.
+            // Re-advance: the second char ate chars.next() above; capture its len.
+            // (We discarded the value but not the bytes.)
+            // Restart from scratch with a fresh remainder slice:
+            let new_remainder = &lex.remainder()[consumed..];
+            let mut extra = 0;
+            let mut found_close = false;
+            for c in new_remainder.chars() {
+                if c == '\n' || c == '\r' {
+                    break;
+                }
+                extra += c.len_utf8();
+                if c == '\'' {
+                    found_close = true;
+                    break;
+                }
+            }
+            lex.bump(consumed + extra);
+            if found_close {
+                Err(LexError::MultiCharLit)
+            } else {
+                Err(LexError::UnterminatedCharLit)
+            }
+        }
+    }
 }
 
 /// Token kinds in the Gruel language, using logos derive macro.
@@ -202,6 +374,8 @@ pub enum LogosTokenKind {
     F64,
     #[token("bool")]
     Bool,
+    #[token("char")]
+    Char,
 
     // Patterns
     #[token("_")]
@@ -225,6 +399,10 @@ pub enum LogosTokenKind {
     // This allows detection of unterminated strings
     #[token("\"", process_string_from_quote)]
     String(Spur),
+
+    // Char literals (ADR-0071) - opening single-quote triggers the scanner.
+    #[token("'", process_char_from_quote)]
+    CharLit(u32),
 
     // Identifiers (lower priority than keywords)
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.extras.get_or_intern(lex.slice()), priority = 1)]
@@ -371,10 +549,12 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::F32 => TokenKind::F32,
             LogosTokenKind::F64 => TokenKind::F64,
             LogosTokenKind::Bool => TokenKind::Bool,
+            LogosTokenKind::Char => TokenKind::Char,
             LogosTokenKind::Float(bits) => TokenKind::Float(bits),
             LogosTokenKind::Underscore => TokenKind::Underscore,
             LogosTokenKind::Int(n) => TokenKind::Int(n),
             LogosTokenKind::String(s) => TokenKind::String(s),
+            LogosTokenKind::CharLit(c) => TokenKind::CharLit(c),
             LogosTokenKind::Ident(s) => TokenKind::Ident(s),
             LogosTokenKind::EqEq => TokenKind::EqEq,
             LogosTokenKind::BangEq => TokenKind::BangEq,
@@ -509,6 +689,11 @@ impl<'a> LogosLexer<'a> {
                             ErrorKind::InvalidStringEscape(escape_char)
                         }
                         LexError::UnterminatedString => ErrorKind::UnterminatedString,
+                        LexError::EmptyCharLit => ErrorKind::EmptyCharLit,
+                        LexError::UnterminatedCharLit => ErrorKind::UnterminatedCharLit,
+                        LexError::MultiCharLit => ErrorKind::MultiCharLit,
+                        LexError::InvalidCharEscape => ErrorKind::InvalidCharEscape,
+                        LexError::InvalidUnicodeEscape => ErrorKind::InvalidUnicodeEscape,
                     };
                     return Err(CompileError::new(kind, gruel_util));
                 }

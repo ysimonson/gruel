@@ -135,6 +135,100 @@ fn Result(comptime T: type, comptime E: type) -> type {
         }
     }
 }
+
+// ADR-0071: validated u32 → char conversion.
+fn char__from_u32(n: u32) -> Result(char, u32) {
+    let surrogate_lo: u32 = 55296;
+    let surrogate_hi: u32 = 57343;
+    let max_scalar: u32 = 1114111;
+    if (n >= surrogate_lo && n <= surrogate_hi) || n > max_scalar {
+        let R = Result(char, u32);
+        R::Err(n)
+    } else {
+        checked {
+            let c: char = char::from_u32_unchecked(n);
+            let R = Result(char, u32);
+            R::Ok(c)
+        }
+    }
+}
+
+// ADR-0071: char.is_ascii() — true iff the codepoint is < 128.
+fn char__is_ascii(c: char) -> bool {
+    let n: u32 = c.to_u32();
+    let limit: u32 = 128;
+    n < limit
+}
+
+// ADR-0071: char.len_utf8() — number of UTF-8 bytes (1, 2, 3, or 4)
+// needed to encode the codepoint.
+fn char__len_utf8(c: char) -> usize {
+    let n: u32 = c.to_u32();
+    let one_byte: u32 = 128;
+    let two_bytes: u32 = 2048;
+    let three_bytes: u32 = 65536;
+    if n < one_byte {
+        1
+    } else if n < two_bytes {
+        2
+    } else if n < three_bytes {
+        3
+    } else {
+        4
+    }
+}
+
+// ADR-0071: char.encode_utf8(buf) — write the canonical UTF-8 encoding of `c`
+// to `buf` and return the byte count (1, 2, 3, or 4).
+fn char__encode_utf8(c: char, buf: MutRef([u8; 4])) -> usize {
+    let n: u32 = c.to_u32();
+    let one_byte: u32 = 128;
+    let two_bytes: u32 = 2048;
+    let three_bytes: u32 = 65536;
+    let cont_mask: u32 = 63;
+    let cont_high: u32 = 128;
+    let lead2: u32 = 192;
+    let lead3: u32 = 224;
+    let lead4: u32 = 240;
+    if n < one_byte {
+        let b0: u8 = @cast(n);
+        buf[0] = b0;
+        1
+    } else if n < two_bytes {
+        let b0u: u32 = (n >> 6) | lead2;
+        let b1u: u32 = (n & cont_mask) | cont_high;
+        let b0: u8 = @cast(b0u);
+        let b1: u8 = @cast(b1u);
+        buf[0] = b0;
+        buf[1] = b1;
+        2
+    } else if n < three_bytes {
+        let b0u: u32 = (n >> 12) | lead3;
+        let b1u: u32 = ((n >> 6) & cont_mask) | cont_high;
+        let b2u: u32 = (n & cont_mask) | cont_high;
+        let b0: u8 = @cast(b0u);
+        let b1: u8 = @cast(b1u);
+        let b2: u8 = @cast(b2u);
+        buf[0] = b0;
+        buf[1] = b1;
+        buf[2] = b2;
+        3
+    } else {
+        let b0u: u32 = (n >> 18) | lead4;
+        let b1u: u32 = ((n >> 12) & cont_mask) | cont_high;
+        let b2u: u32 = ((n >> 6) & cont_mask) | cont_high;
+        let b3u: u32 = (n & cont_mask) | cont_high;
+        let b0: u8 = @cast(b0u);
+        let b1: u8 = @cast(b1u);
+        let b2: u8 = @cast(b2u);
+        let b3: u8 = @cast(b3u);
+        buf[0] = b0;
+        buf[1] = b1;
+        buf[2] = b2;
+        buf[3] = b3;
+        4
+    }
+}
 "#;
 
 /// Result of parsing a single file within a compilation unit.
@@ -856,7 +950,10 @@ mod tests {
         assert!(unit.is_parsed());
         assert!(unit.is_lowered());
         assert!(unit.is_analyzed());
-        assert_eq!(unit.functions().len(), 1);
+        // ADR-0071 added char__from_u32 / char__is_ascii / char__len_utf8 /
+        // char__encode_utf8 plus Option/Result methods to the prelude; the
+        // analysed function count includes those plus user-defined `main`.
+        assert!(unit.functions().len() >= 1);
     }
 
     #[test]
@@ -933,7 +1030,9 @@ mod tests {
         let mut unit = CompilationUnit::new(sources, options);
         unit.run_frontend().unwrap();
         // The frontend should succeed; backend (LLVM codegen) is tested separately
-        // via spec tests that run the resulting binary.
-        assert_eq!(unit.functions().len(), 1);
+        // via spec tests that run the resulting binary. The prelude contributes
+        // additional functions (char__*, etc.) so we only assert that user
+        // code analysed at all.
+        assert!(unit.functions().len() >= 1);
     }
 }

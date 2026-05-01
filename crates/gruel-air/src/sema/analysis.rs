@@ -2364,6 +2364,7 @@ impl<'a> Sema<'a> {
             InstData::IntConst(_)
             | InstData::FloatConst(_)
             | InstData::BoolConst(_)
+            | InstData::CharConst(_)
             | InstData::StringConst(_)
             | InstData::UnitConst => self.analyze_literal(air, inst_ref, ctx),
 
@@ -3345,6 +3346,20 @@ impl<'a> Sema<'a> {
             );
         }
 
+        // ADR-0071: methods on `char` values. `to_u32` lowers to a no-op
+        // bitcast (the i32 storage already holds the codepoint). `len_utf8`,
+        // `is_ascii`, `encode_utf8` are added in later phases.
+        if receiver_type == Type::CHAR {
+            return self.dispatch_char_method_call(
+                air,
+                receiver_result,
+                &method_name_str,
+                &args,
+                span,
+                ctx,
+            );
+        }
+
         // ADR-0066: methods on `Vec(T)` values dispatch through the
         // vec_methods module which emits the appropriate intrinsic. Most
         // Vec methods take borrow/inout self — undo the move that
@@ -3858,6 +3873,13 @@ impl<'a> Sema<'a> {
     ) -> CompileResult<AnalysisResult> {
         let type_name_str = self.interner.resolve(&type_name).to_string();
         let function_name_str = self.interner.resolve(&function).to_string();
+
+        // ADR-0071: associated functions on the `char` primitive type.
+        // `char::from_u32(n) -> Result(char, u32)` and (in `checked` blocks)
+        // `char::from_u32_unchecked(n) -> char`.
+        if type_name_str == "char" {
+            return self.dispatch_char_assoc_fn_call(air, &function_name_str, &args, span, ctx);
+        }
 
         // ADR-0063: `Ptr(T)::name(args)` / `MutPtr(T)::name(args)`. The RIR
         // path stores the LHS as the synthesized symbol `Ptr(T)`; sema's
@@ -5351,23 +5373,29 @@ impl<'a> Sema<'a> {
 
         // Validate the type is appropriate for this comparison
         if allow_bool {
-            // Equality operators (==, !=) work on integers, floats, booleans, strings, unit, and structs
+            // Equality operators (==, !=) work on integers, floats, booleans, chars,
+            // strings, unit, and structs. (ADR-0071: char comparison is by codepoint
+            // value.)
             // Note: String is now a struct, so is_struct() covers it
             if !lhs_type.is_numeric()
                 && lhs_type != Type::BOOL
+                && lhs_type != Type::CHAR
                 && lhs_type != Type::UNIT
                 && !lhs_type.is_struct()
                 && !self.is_builtin_string(lhs_type)
             {
                 return Err(CompileError::type_mismatch(
-                    "numeric, bool, string, unit, or struct".to_string(),
+                    "numeric, bool, char, string, unit, or struct".to_string(),
                     lhs_type.name().to_string(),
                     self.rir.get(lhs).span,
                 ));
             }
-        } else if !lhs_type.is_numeric() && !self.is_builtin_string(lhs_type) {
+        } else if !lhs_type.is_numeric()
+            && lhs_type != Type::CHAR
+            && !self.is_builtin_string(lhs_type)
+        {
             return Err(CompileError::type_mismatch(
-                "numeric or string".to_string(),
+                "numeric, char, or string".to_string(),
                 lhs_type.name().to_string(),
                 self.rir.get(lhs).span,
             ));
@@ -5679,6 +5707,7 @@ impl<'a> Sema<'a> {
                     "u32" => Type::U32,
                     "u64" => Type::U64,
                     "bool" => Type::BOOL,
+                    "char" => Type::CHAR,
                     "()" => Type::UNIT,
                     "!" => Type::NEVER,
                     _ => {
@@ -5709,6 +5738,7 @@ impl<'a> Sema<'a> {
                     "u32" => Type::U32,
                     "u64" => Type::U64,
                     "bool" => Type::BOOL,
+                    "char" => Type::CHAR,
                     "()" => Type::UNIT,
                     "!" => Type::NEVER,
                     _ => {
@@ -6045,6 +6075,7 @@ impl<'a> Sema<'a> {
                     "u32" => Type::U32,
                     "u64" => Type::U64,
                     "bool" => Type::BOOL,
+                    "char" => Type::CHAR,
                     "()" => Type::UNIT,
                     "!" => Type::NEVER,
                     _ => {
@@ -6084,6 +6115,7 @@ impl<'a> Sema<'a> {
                     "u32" => Type::U32,
                     "u64" => Type::U64,
                     "bool" => Type::BOOL,
+                    "char" => Type::CHAR,
                     "()" => Type::UNIT,
                     "!" => Type::NEVER,
                     _ => {
@@ -7240,6 +7272,7 @@ impl<'a> Sema<'a> {
                     "u32" => Some(Type::U32),
                     "u64" => Some(Type::U64),
                     "bool" => Some(Type::BOOL),
+                    "char" => Some(Type::CHAR),
                     "()" => Some(Type::UNIT),
                     "!" => Some(Type::NEVER),
                     _ => None,
@@ -8590,6 +8623,7 @@ impl<'a> Sema<'a> {
                 BuiltinParamType::Usize => Type::USIZE,
                 BuiltinParamType::U8 => Type::U8,
                 BuiltinParamType::Bool => Type::BOOL,
+                BuiltinParamType::Char => Type::CHAR,
                 BuiltinParamType::SelfType => Type::new_struct(struct_id),
             };
 
@@ -8715,6 +8749,7 @@ impl<'a> Sema<'a> {
                 BuiltinParamType::Usize => Type::USIZE,
                 BuiltinParamType::U8 => Type::U8,
                 BuiltinParamType::Bool => Type::BOOL,
+                BuiltinParamType::Char => Type::CHAR,
                 BuiltinParamType::SelfType => Type::new_struct(method_ctx.struct_id),
             };
 
@@ -10262,6 +10297,216 @@ impl<'a> Sema<'a> {
             span,
             ctx,
         )
+    }
+
+    /// ADR-0071: dispatch an associated-function call `char::name(args)`.
+    ///
+    /// v1:
+    /// - `char::from_u32_unchecked(n: u32) -> char` — `checked` block only;
+    ///   lowers to `IntCast` from u32 to char (no-op at LLVM level since both
+    ///   are `i32`).
+    /// - `char::from_u32(n: u32) -> Result(char, u32)` — calls into the
+    ///   prelude function `char__from_u32`, which performs the range check
+    ///   and constructs the Result.
+    pub(crate) fn dispatch_char_assoc_fn_call(
+        &mut self,
+        air: &mut Air,
+        function_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        match function_name {
+            "from_u32_unchecked" => {
+                // Must be inside a `checked` block.
+                if ctx.checked_depth == 0 {
+                    return Err(CompileError::new(
+                        ErrorKind::UncheckedCallRequiresChecked(
+                            "char::from_u32_unchecked".to_string(),
+                        ),
+                        span,
+                    ));
+                }
+                if args.len() != 1 {
+                    return Err(CompileError::new(
+                        ErrorKind::WrongArgumentCount {
+                            expected: 1,
+                            found: args.len(),
+                        },
+                        span,
+                    ));
+                }
+                let arg_result = self.analyze_inst(air, args[0].value, ctx)?;
+                if arg_result.ty != Type::U32 {
+                    return Err(CompileError::type_mismatch(
+                        "u32".to_string(),
+                        arg_result.ty.name().to_string(),
+                        span,
+                    ));
+                }
+                // u32 and char share the i32 LLVM lowering; emit IntCast
+                // for type bookkeeping (codegen is a no-op).
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::IntCast {
+                        value: arg_result.air_ref,
+                        from_ty: Type::U32,
+                    },
+                    ty: Type::CHAR,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, Type::CHAR))
+            }
+            "from_u32" => {
+                // Delegate to the prelude function `char__from_u32` which
+                // performs the range check and constructs `Result(char, u32)`.
+                if args.len() != 1 {
+                    return Err(CompileError::new(
+                        ErrorKind::WrongArgumentCount {
+                            expected: 1,
+                            found: args.len(),
+                        },
+                        span,
+                    ));
+                }
+                let arg_result = self.analyze_inst(air, args[0].value, ctx)?;
+                if arg_result.ty != Type::U32 {
+                    return Err(CompileError::type_mismatch(
+                        "u32".to_string(),
+                        arg_result.ty.name().to_string(),
+                        span,
+                    ));
+                }
+                let fn_name = self.interner.get_or_intern("char__from_u32");
+                let fn_info = self.functions.get(&fn_name).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::InternalError(
+                            "prelude function `char__from_u32` not found".to_string(),
+                        ),
+                        span,
+                    )
+                })?;
+                let return_ty = fn_info.return_type;
+                ctx.referenced_functions.insert(fn_name);
+                let extra = vec![arg_result.air_ref.as_u32(), AirArgMode::Normal.as_u32()];
+                let args_start = air.add_extra(&extra);
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Call {
+                        name: fn_name,
+                        args_start,
+                        args_len: 1,
+                    },
+                    ty: return_ty,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, return_ty))
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::UndefinedFunction(format!("char::{}", function_name)),
+                span,
+            )),
+        }
+    }
+
+    /// ADR-0071: dispatch a method call `c.name(args)` on a `char` value.
+    ///
+    /// v1 surface (Phases 3 + 5):
+    /// - `c.to_u32() -> u32` — no-op cast (char and u32 share i32 lowering).
+    /// - `c.len_utf8() -> usize` — branchless arithmetic on the codepoint.
+    /// - `c.is_ascii() -> bool` — `c.to_u32() < 128`.
+    /// - `c.encode_utf8(buf: &mut [u8; 4]) -> usize` — Phase 5 inline lowering.
+    pub(crate) fn dispatch_char_method_call(
+        &mut self,
+        air: &mut Air,
+        receiver_result: AnalysisResult,
+        method_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        match method_name {
+            "to_u32" => {
+                if !args.is_empty() {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: "char.to_u32".to_string(),
+                            expected: 0,
+                            found: args.len(),
+                        },
+                        span,
+                    ));
+                }
+                // char and u32 share the i32 LLVM lowering; emit an IntCast
+                // for type-tag bookkeeping (codegen treats char→u32 as a no-op).
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::IntCast {
+                        value: receiver_result.air_ref,
+                        from_ty: Type::CHAR,
+                    },
+                    ty: Type::U32,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, Type::U32))
+            }
+            "is_ascii" | "len_utf8" | "encode_utf8" => {
+                let expected_args = if method_name == "encode_utf8" { 1 } else { 0 };
+                if args.len() != expected_args {
+                    return Err(CompileError::new(
+                        ErrorKind::IntrinsicWrongArgCount {
+                            name: format!("char.{}", method_name),
+                            expected: expected_args,
+                            found: args.len(),
+                        },
+                        span,
+                    ));
+                }
+                // Dispatch to the prelude helper function with the receiver
+                // as the first argument, plus any user args.
+                let fn_name_str = format!("char__{}", method_name);
+                let fn_name = self.interner.get_or_intern(&fn_name_str);
+                let fn_info = self.functions.get(&fn_name).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::InternalError(format!(
+                            "prelude function `{}` not found",
+                            fn_name_str
+                        )),
+                        span,
+                    )
+                })?;
+                let return_ty = fn_info.return_type;
+                let param_modes: Vec<_> = self.param_arena.modes(fn_info.params).to_vec();
+                ctx.referenced_functions.insert(fn_name);
+
+                let _ = param_modes;
+                let mut extra = vec![
+                    receiver_result.air_ref.as_u32(),
+                    AirArgMode::Normal.as_u32(),
+                ];
+                for arg in args {
+                    let arg_result = self.analyze_inst(air, arg.value, ctx)?;
+                    extra.push(arg_result.air_ref.as_u32());
+                    extra.push(AirArgMode::Normal.as_u32());
+                }
+                let args_len = (args.len() + 1) as u32;
+                let args_start = air.add_extra(&extra);
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Call {
+                        name: fn_name,
+                        args_start,
+                        args_len,
+                    },
+                    ty: return_ty,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, return_ty))
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::UndefinedMethod {
+                    type_name: "char".to_string(),
+                    method_name: method_name.to_string(),
+                },
+                span,
+            )),
+        }
     }
 
     /// ADR-0063: dispatch a method call `p.name(args)` on a `Ptr(T)` /

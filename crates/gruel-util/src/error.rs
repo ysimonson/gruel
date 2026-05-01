@@ -56,6 +56,11 @@ impl ErrorCode {
     pub const INVALID_STRING_ESCAPE: Self = Self(3);
     pub const UNTERMINATED_STRING: Self = Self(4);
     pub const INVALID_FLOAT: Self = Self(5);
+    pub const EMPTY_CHAR_LIT: Self = Self(6);
+    pub const UNTERMINATED_CHAR_LIT: Self = Self(7);
+    pub const MULTI_CHAR_LIT: Self = Self(8);
+    pub const INVALID_CHAR_ESCAPE: Self = Self(9);
+    pub const INVALID_UNICODE_ESCAPE: Self = Self(10);
 
     // ========================================================================
     // Parser errors (E0100-E0199)
@@ -815,6 +820,21 @@ pub enum ErrorKind {
     InvalidStringEscape(char),
     #[error("unterminated string literal")]
     UnterminatedString,
+    /// ADR-0071: empty char literal (`''`).
+    #[error("empty char literal")]
+    EmptyCharLit,
+    /// ADR-0071: char literal not closed before end of line or end of file.
+    #[error("unterminated char literal")]
+    UnterminatedCharLit,
+    /// ADR-0071: char literal contains more than one Unicode scalar.
+    #[error("char literal must contain exactly one Unicode scalar value")]
+    MultiCharLit,
+    /// ADR-0071: invalid escape sequence inside a char literal.
+    #[error("invalid char escape sequence")]
+    InvalidCharEscape,
+    /// ADR-0071: `\u{...}` malformed or value not a valid Unicode scalar.
+    #[error("invalid unicode escape: not a valid Unicode scalar value")]
+    InvalidUnicodeEscape,
 
     // Parser errors
     #[error("expected {expected}, found {found}")]
@@ -1186,6 +1206,11 @@ impl ErrorKind {
             ErrorKind::InvalidFloat => ErrorCode::INVALID_FLOAT,
             ErrorKind::InvalidStringEscape(_) => ErrorCode::INVALID_STRING_ESCAPE,
             ErrorKind::UnterminatedString => ErrorCode::UNTERMINATED_STRING,
+            ErrorKind::EmptyCharLit => ErrorCode::EMPTY_CHAR_LIT,
+            ErrorKind::UnterminatedCharLit => ErrorCode::UNTERMINATED_CHAR_LIT,
+            ErrorKind::MultiCharLit => ErrorCode::MULTI_CHAR_LIT,
+            ErrorKind::InvalidCharEscape => ErrorCode::INVALID_CHAR_ESCAPE,
+            ErrorKind::InvalidUnicodeEscape => ErrorCode::INVALID_UNICODE_ESCAPE,
 
             // Parser errors (E0100-E0199)
             ErrorKind::UnexpectedToken { .. } => ErrorCode::UNEXPECTED_TOKEN,

@@ -485,6 +485,18 @@ impl<'a> Sema<'a> {
                 Ok(AnalysisResult::new(air_ref, ty))
             }
 
+            // ADR-0071: char literal — lowers to a 32-bit integer constant
+            // holding the Unicode scalar value.
+            InstData::CharConst(value) => {
+                let ty = Type::CHAR;
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Const(*value as u64),
+                    ty,
+                    span: inst.span,
+                });
+                Ok(AnalysisResult::new(air_ref, ty))
+            }
+
             InstData::StringConst(symbol) => {
                 // String literals use the builtin String struct type.
                 let ty = self.builtin_string_type();

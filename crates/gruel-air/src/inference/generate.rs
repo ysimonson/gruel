@@ -312,6 +312,9 @@ impl<'a> ConstraintGenerator<'a> {
 
             InstData::BoolConst(_) => InferType::Concrete(Type::BOOL),
 
+            // ADR-0071: char literal — Unicode scalar value, type is char.
+            InstData::CharConst(_) => InferType::Concrete(Type::CHAR),
+
             // String constants use the builtin String struct type.
             InstData::StringConst(_) => {
                 // Look up the String type from the structs map

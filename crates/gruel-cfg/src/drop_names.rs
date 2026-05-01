@@ -108,6 +108,7 @@ pub fn type_name_component(ty: Type, type_pool: &TypeInternPool) -> String {
         TypeKind::F32 => "f32".to_owned(),
         TypeKind::F64 => "f64".to_owned(),
         TypeKind::Bool => "bool".to_owned(),
+        TypeKind::Char => "char".to_owned(),
         TypeKind::Unit => "unit".to_owned(),
         TypeKind::Never => "never".to_owned(),
         TypeKind::Error => "error".to_owned(),

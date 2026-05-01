@@ -155,6 +155,29 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
         TypeKind::I16 | TypeKind::U16 | TypeKind::F16 => Layout::scalar(2, 2),
         TypeKind::I32 | TypeKind::U32 | TypeKind::F32 => Layout::scalar(4, 4),
         TypeKind::I64 | TypeKind::U64 | TypeKind::F64 => Layout::scalar(8, 8),
+        // ADR-0071: char is a 32-bit Unicode scalar with two niche ranges:
+        //   - surrogates U+D800..=U+DFFF
+        //   - codepoints > U+10FFFF (i.e., 0x110000..=0xFFFFFFFF)
+        // Niche-filling enums consume these to elide their discriminant.
+        TypeKind::Char => Layout {
+            size: 4,
+            align: 4,
+            niches: vec![
+                NicheRange {
+                    offset: 0,
+                    width: 4,
+                    start: 0xD800,
+                    end: 0xDFFF,
+                },
+                NicheRange {
+                    offset: 0,
+                    width: 4,
+                    start: 0x110000,
+                    end: 0xFFFFFFFF,
+                },
+            ],
+            discriminant: None,
+        },
         // Pointer-sized: 64-bit target.
         TypeKind::Isize | TypeKind::Usize => Layout::scalar(8, 8),
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => Layout::scalar(8, 8),

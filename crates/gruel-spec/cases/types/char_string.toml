@@ -1,0 +1,99 @@
+[section]
+id = "types.char_string"
+spec_chapter = "3.14"
+name = "String integration with char (ADR-0071)"
+description = "Tests for String::from_char and String::push_char (the safe codepoint-level push)."
+
+# from_char with ASCII
+[[case]]
+name = "from_char_ascii_len"
+spec = ["3.14:7"]
+description = "String::from_char('A') has length 1"
+source = """
+fn main() -> i32 {
+    let s: String = String::from_char('A');
+    @cast(s.len())
+}
+"""
+exit_code = 1
+
+# from_char with 2-byte char
+[[case]]
+name = "from_char_2byte_len"
+spec = ["3.14:7"]
+description = "String::from_char('é') has length 2 (UTF-8 bytes)"
+source = """
+fn main() -> i32 {
+    let s: String = String::from_char('\\u{E9}');
+    @cast(s.len())
+}
+"""
+exit_code = 2
+
+# from_char with 4-byte char
+[[case]]
+name = "from_char_4byte_len"
+spec = ["3.14:7"]
+description = "String::from_char('😀') has length 4 (UTF-8 bytes)"
+source = """
+fn main() -> i32 {
+    let s: String = String::from_char('\\u{1F600}');
+    @cast(s.len())
+}
+"""
+exit_code = 4
+
+# from_char round-trip equality with literal
+[[case]]
+name = "from_char_eq_literal"
+spec = ["3.14:7"]
+description = "String::from_char('A') equals \"A\""
+source = """
+fn main() -> i32 {
+    let s: String = String::from_char('A');
+    if s == "A" { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# push_char extends a String by one codepoint
+[[case]]
+name = "push_char_ascii"
+spec = ["3.14:7"]
+description = "push_char('B') extends 'A' to 'AB'"
+source = """
+fn main() -> i32 {
+    let mut s: String = String::from_char('A');
+    s.push_char('B');
+    @cast(s.len())
+}
+"""
+exit_code = 2
+
+# push_char with multibyte
+[[case]]
+name = "push_char_multibyte"
+spec = ["3.14:7"]
+description = "push_char('😀') extends a String by 4 UTF-8 bytes"
+source = """
+fn main() -> i32 {
+    let mut s: String = String::from_char('A');
+    s.push_char('\\u{1F600}');
+    @cast(s.len())
+}
+"""
+exit_code = 5
+
+# Round-trip: build "AB" with push_char
+[[case]]
+name = "push_char_eq_literal"
+spec = ["3.14:7"]
+description = "Building 'AB' via from_char + push_char equals the literal \"AB\""
+source = """
+fn main() -> i32 {
+    let mut s: String = String::from_char('A');
+    s.push_char('B');
+    if s == "AB" { 1 } else { 0 }
+}
+"""
+exit_code = 1

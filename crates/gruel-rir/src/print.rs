@@ -202,6 +202,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     writeln!(out, "const {}", f64::from_bits(*bits)).unwrap()
                 }
                 InstData::BoolConst(v) => writeln!(out, "const {}", v).unwrap(),
+                InstData::CharConst(v) => writeln!(out, "const 'U+{:04X}'", v).unwrap(),
                 InstData::StringConst(s) => {
                     writeln!(out, "const {:?}", self.interner.resolve(s)).unwrap()
                 }

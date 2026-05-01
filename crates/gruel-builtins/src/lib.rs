@@ -205,6 +205,8 @@ pub enum BuiltinParamType {
     U8,
     /// Boolean
     Bool,
+    /// Unicode scalar value (ADR-0071).
+    Char,
     /// The built-in type itself (e.g., String for String methods)
     SelfType,
 }
@@ -368,6 +370,17 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__with_capacity",
         },
+        // ADR-0071: build a String containing the UTF-8 encoding of a single
+        // char.  Implemented in the runtime via UTF-8 encode + heap alloc.
+        BuiltinAssociatedFn {
+            name: "from_char",
+            params: &[BuiltinParam {
+                name: "c",
+                ty: BuiltinParamType::Char,
+            }],
+            return_ty: BuiltinReturnType::SelfType,
+            runtime_fn: "String__from_char",
+        },
     ],
     methods: &[
         // Query methods (take &self)
@@ -459,6 +472,17 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__push",
+        },
+        // ADR-0071: append the UTF-8 encoding of `c` (1-4 bytes) to `self`.
+        BuiltinMethod {
+            name: "push_char",
+            receiver_mode: ReceiverMode::ByMutRef,
+            params: &[BuiltinParam {
+                name: "c",
+                ty: BuiltinParamType::Char,
+            }],
+            return_ty: BuiltinReturnType::SelfType,
+            runtime_fn: "String__push_char",
         },
         BuiltinMethod {
             name: "clear",
@@ -788,6 +812,7 @@ impl BuiltinParamType {
             BuiltinParamType::Usize => "usize".to_string(),
             BuiltinParamType::U8 => "u8".to_string(),
             BuiltinParamType::Bool => "bool".to_string(),
+            BuiltinParamType::Char => "char".to_string(),
             BuiltinParamType::SelfType => self_ty.to_string(),
         }
     }

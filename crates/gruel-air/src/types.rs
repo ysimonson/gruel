@@ -280,6 +280,8 @@ pub enum TypeKind {
     F64,
     /// Boolean
     Bool,
+    /// Unicode scalar value (ADR-0071)
+    Char,
     /// The unit type (for functions that don't return a value)
     Unit,
     /// User-defined struct type
@@ -381,6 +383,7 @@ impl std::fmt::Debug for Type {
             TypeKind::F32 => write!(f, "Type::F32"),
             TypeKind::F64 => write!(f, "Type::F64"),
             TypeKind::Bool => write!(f, "Type::BOOL"),
+            TypeKind::Char => write!(f, "Type::CHAR"),
             TypeKind::Unit => write!(f, "Type::UNIT"),
             TypeKind::Error => write!(f, "Type::ERROR"),
             TypeKind::Never => write!(f, "Type::NEVER"),
@@ -461,6 +464,8 @@ impl Type {
     pub const COMPTIME_STR: Type = Type(18);
     /// The comptime integer type - compile-time only integer values
     pub const COMPTIME_INT: Type = Type(19);
+    /// Unicode scalar value (ADR-0071)
+    pub const CHAR: Type = Type(20);
 }
 
 // Composite type constructors
@@ -948,6 +953,7 @@ impl Type {
             17 => Some(TypeKind::ComptimeType),
             18 => Some(TypeKind::ComptimeStr),
             19 => Some(TypeKind::ComptimeInt),
+            20 => Some(TypeKind::Char),
             TAG_STRUCT => Some(TypeKind::Struct(StructId(self.0 >> 8))),
             TAG_ENUM => Some(TypeKind::Enum(EnumId(self.0 >> 8))),
             TAG_ARRAY => Some(TypeKind::Array(ArrayTypeId(self.0 >> 8))),
@@ -983,6 +989,7 @@ impl Type {
             TypeKind::F32 => "f32",
             TypeKind::F64 => "f64",
             TypeKind::Bool => "bool",
+            TypeKind::Char => "char",
             TypeKind::Unit => "()",
             TypeKind::Struct(_) => "<struct>",
             TypeKind::Enum(_) => "<enum>",

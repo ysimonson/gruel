@@ -1,0 +1,262 @@
+[section]
+id = "types.char"
+spec_chapter = "3.14"
+name = "Canonical char type (ADR-0071)"
+description = "Tests for the char primitive type — Unicode scalar value, declarations, comparisons, and to_u32."
+
+# Basic char literal
+[[case]]
+name = "char_lit_basic"
+spec = ["3.14:3"]
+description = "char literal binding"
+source = """
+fn main() -> i32 {
+    let a: char = 'A';
+    @cast(a.to_u32())
+}
+"""
+exit_code = 65
+
+# Newline escape
+[[case]]
+name = "char_lit_newline"
+spec = ["3.14:3"]
+description = "char literal with \\n escape"
+source = """
+fn main() -> i32 {
+    let nl: char = '\\n';
+    @cast(nl.to_u32())
+}
+"""
+exit_code = 10
+
+# Tab escape
+[[case]]
+name = "char_lit_tab"
+spec = ["3.14:3"]
+source = """
+fn main() -> i32 {
+    let t: char = '\\t';
+    @cast(t.to_u32())
+}
+"""
+exit_code = 9
+
+# Quote escape
+[[case]]
+name = "char_lit_quote"
+spec = ["3.14:3"]
+source = """
+fn main() -> i32 {
+    let q: char = '\\'';
+    @cast(q.to_u32())
+}
+"""
+exit_code = 39
+
+# Backslash escape
+[[case]]
+name = "char_lit_backslash"
+spec = ["3.14:3"]
+source = """
+fn main() -> i32 {
+    let b: char = '\\\\';
+    @cast(b.to_u32())
+}
+"""
+exit_code = 92
+
+# Null escape
+[[case]]
+name = "char_lit_null"
+spec = ["3.14:3"]
+source = """
+fn main() -> i32 {
+    let z: char = '\\0';
+    @cast(z.to_u32())
+}
+"""
+exit_code = 0
+
+# Unicode escape — single hex digit
+[[case]]
+name = "char_lit_unicode_short"
+spec = ["3.14:3"]
+source = """
+fn main() -> i32 {
+    let z: char = '\\u{a}';
+    @cast(z.to_u32())
+}
+"""
+exit_code = 10
+
+# Unicode escape — emoji (4-byte UTF-8 codepoint, but stored as scalar)
+[[case]]
+name = "char_lit_unicode_emoji_below_max_i32_exit"
+spec = ["3.14:3"]
+description = "Unicode escape \\u{1F600} produces codepoint 0x1F600 = 128512"
+source = """
+fn main() -> i32 {
+    let smile: char = '\\u{1F600}';
+    let n: u32 = smile.to_u32();
+    let expected: u32 = @cast(128512);
+    if n == expected { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# Multi-byte source character
+[[case]]
+name = "char_lit_multibyte_source"
+spec = ["3.14:3"]
+description = "Multi-byte source character 'é' decodes to single scalar U+00E9"
+source = """
+fn main() -> i32 {
+    let e: char = 'é';
+    let n: u32 = e.to_u32();
+    let expected: u32 = @cast(233);
+    if n == expected { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# Equality
+[[case]]
+name = "char_eq_true"
+spec = ["3.14:6"]
+description = "char equality: 'A' == 'A'"
+source = """
+fn main() -> i32 {
+    let a: char = 'A';
+    let b: char = 'A';
+    if a == b { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "char_eq_false"
+spec = ["3.14:6"]
+source = """
+fn main() -> i32 {
+    let a: char = 'A';
+    let b: char = 'B';
+    if a == b { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "char_lt"
+spec = ["3.14:6"]
+description = "char ordering by codepoint magnitude"
+source = """
+fn main() -> i32 {
+    let a: char = 'A';
+    let z: char = 'Z';
+    if a < z { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# char is Copy: a previously used char remains usable
+[[case]]
+name = "char_is_copy"
+spec = ["3.14:1", "3.14:2", "3.14:5"]
+description = "char is Copy — using it in a comparison doesn't move it"
+source = """
+fn use_char(c: char) -> bool {
+    let a: char = 'A';
+    c == a
+}
+
+fn main() -> i32 {
+    let a: char = 'A';
+    if use_char(a) && use_char(a) { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# to_u32 round-trip
+[[case]]
+name = "char_to_u32_basic"
+spec = ["3.14:7"]
+description = "char.to_u32() returns the Unicode scalar value"
+source = """
+fn main() -> i32 {
+    let a: char = 'A';
+    @cast(a.to_u32())
+}
+"""
+exit_code = 65
+
+# Arithmetic on char rejected
+[[case]]
+name = "char_arith_rejected"
+spec = ["3.14:6"]
+description = "Arithmetic on char is rejected"
+source = """
+fn main() -> i32 {
+    let a: char = 'A';
+    let b: char = 'B';
+    @cast((a + b).to_u32())
+}
+"""
+compile_fail = true
+error_contains = "char"
+
+# Empty char literal
+[[case]]
+name = "char_lit_empty_rejected"
+spec = ["3.14:4"]
+description = "Empty char literal '' is rejected"
+source = """
+fn main() -> i32 {
+    let _: char = '';
+    0
+}
+"""
+compile_fail = true
+error_contains = "empty char literal"
+
+# Multi-character literal
+[[case]]
+name = "char_lit_multi_rejected"
+spec = ["3.14:4"]
+description = "Multi-character literal 'ab' is rejected"
+source = """
+fn main() -> i32 {
+    let _: char = 'ab';
+    0
+}
+"""
+compile_fail = true
+error_contains = "exactly one"
+
+# Invalid Unicode escape (surrogate)
+[[case]]
+name = "char_lit_surrogate_rejected"
+spec = ["3.14:4"]
+description = "Surrogate codepoint \\u{D800} is rejected"
+source = """
+fn main() -> i32 {
+    let _: char = '\\u{D800}';
+    0
+}
+"""
+compile_fail = true
+error_contains = "valid Unicode scalar"
+
+# Invalid Unicode escape (out of range)
+[[case]]
+name = "char_lit_out_of_range_rejected"
+spec = ["3.14:4"]
+description = "Out-of-range codepoint \\u{110000} is rejected"
+source = """
+fn main() -> i32 {
+    let _: char = '\\u{110000}';
+    0
+}
+"""
+compile_fail = true
+error_contains = "valid Unicode scalar"

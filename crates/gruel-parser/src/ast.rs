@@ -600,6 +600,8 @@ pub enum Expr {
     Float(FloatLit),
     /// String literal
     String(StringLit),
+    /// Character literal — Unicode scalar value (ADR-0071)
+    Char(CharLit),
     /// Boolean literal
     Bool(BoolLit),
     /// Unit literal (explicit `()` or implicit unit for blocks without final expression)
@@ -694,6 +696,13 @@ pub struct FloatLit {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StringLit {
     pub value: Spur,
+    pub span: Span,
+}
+
+/// A character literal — Unicode scalar value (ADR-0071).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharLit {
+    pub value: u32,
     pub span: Span,
 }
 
@@ -1330,6 +1339,7 @@ impl Expr {
             Expr::Int(lit) => lit.span,
             Expr::Float(lit) => lit.span,
             Expr::String(lit) => lit.span,
+            Expr::Char(lit) => lit.span,
             Expr::Bool(lit) => lit.span,
             Expr::Unit(lit) => lit.span,
             Expr::Ident(ident) => ident.span,
@@ -1573,6 +1583,7 @@ fn fmt_expr(f: &mut fmt::Formatter<'_>, expr: &Expr, level: usize) -> fmt::Resul
         Expr::Int(lit) => writeln!(f, "Int({})", lit.value),
         Expr::Float(lit) => writeln!(f, "Float({})", f64::from_bits(lit.bits)),
         Expr::String(lit) => writeln!(f, "String(sym:{})", lit.value.into_usize()),
+        Expr::Char(lit) => writeln!(f, "Char(U+{:04X})", lit.value),
         Expr::Bool(lit) => writeln!(f, "Bool({})", lit.value),
         Expr::Unit(_) => writeln!(f, "Unit"),
         Expr::Ident(ident) => writeln!(f, "Ident(sym:{})", ident.name.into_usize()),

@@ -1,0 +1,94 @@
+[section]
+id = "types.char_niches"
+spec_chapter = "3.14"
+name = "char niche-encoded layout (ADR-0071)"
+description = """
+Tests for niche-filled enum layouts that consume char's invalid bit
+patterns (surrogate range U+D800..=U+DFFF, beyond-Unicode 0x110000+)
+to elide the discriminant byte. ADR-0069 niche-filling drives this
+automatically once char's Layout registers the niches.
+"""
+
+# Option(char) round-trips through Some
+[[case]]
+name = "option_char_some_round_trip"
+spec = ["3.14:8"]
+description = "Option(char)::Some('A') matches and yields the correct codepoint"
+source = """
+fn main() -> i32 {
+    let O = Option(char);
+    let x: O = O::Some('A');
+    match x {
+        O::Some(c) => @cast(c.to_u32()),
+        O::None => 0,
+    }
+}
+"""
+exit_code = 65
+
+# Option(char) round-trips through None
+[[case]]
+name = "option_char_none_round_trip"
+spec = ["3.14:8"]
+description = "Option(char)::None matches the None arm"
+source = """
+fn main() -> i32 {
+    let O = Option(char);
+    let x: O = O::None;
+    match x {
+        O::Some(_) => 0,
+        O::None => 7,
+    }
+}
+"""
+exit_code = 7
+
+# Result(char, char): both arms round-trip
+[[case]]
+name = "result_char_char_ok"
+spec = ["3.14:8"]
+description = "Result(char, char)::Ok round-trips"
+source = """
+fn main() -> i32 {
+    let R = Result(char, char);
+    let r: R = R::Ok('A');
+    match r {
+        R::Ok(c) => @cast(c.to_u32()),
+        R::Err(_) => 0,
+    }
+}
+"""
+exit_code = 65
+
+[[case]]
+name = "result_char_char_err"
+spec = ["3.14:8"]
+source = """
+fn main() -> i32 {
+    let R = Result(char, char);
+    let r: R = R::Err('Z');
+    match r {
+        R::Ok(_) => 0,
+        R::Err(c) => @cast(c.to_u32()),
+    }
+}
+"""
+exit_code = 90
+
+# Multibyte char round-trip through Option
+[[case]]
+name = "option_char_emoji_round_trip"
+spec = ["3.14:8"]
+description = "Option(char)::Some(😀) round-trips the 4-byte codepoint"
+source = """
+fn main() -> i32 {
+    let O = Option(char);
+    let x: O = O::Some('\\u{1F600}');
+    let expected: u32 = @cast(128512);
+    match x {
+        O::Some(c) => if c.to_u32() == expected { 1 } else { 0 },
+        O::None => 2,
+    }
+}
+"""
+exit_code = 1

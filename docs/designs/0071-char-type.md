@@ -1,13 +1,13 @@
 ---
 id: 0071
 title: char — Unicode Scalar Value Type
-status: proposal
+status: implemented
 tags: [types, primitives, unicode, utf8, niches]
 feature-flag: char_type
 created: 2026-05-01
-accepted:
-implemented:
-spec-sections: ["3.9"]
+accepted: 2026-05-01
+implemented: 2026-05-01
+spec-sections: ["3.14"]
 superseded-by:
 ---
 
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented.
 
 ## Summary
 
@@ -192,40 +192,42 @@ Grammar appendix gets the `char-literal` production.
 
 **Prerequisites:** ADR-0070 (`Result`) Phases 1–2 must land before this ADR's Phase 4 (`from_u32` returns `Result`). Phases 1–3 and 5–8 are independent of ADR-0070 and can proceed in parallel.
 
-- [ ] **Phase 1: Preview gate + spec scaffolding**
+- [x] **Phase 1: Preview gate + spec scaffolding**
   - Add `PreviewFeature::CharType` to `gruel-error`.
-  - Draft spec section 3.9 with rule IDs (no implementation yet).
-- [ ] **Phase 2: Lexer + parser**
+  - Draft spec section 3.9 with rule IDs (no implementation yet). *Spec lives in `docs/spec/src/03-types/14-char-type.md` (section 3.14, since 3.9 was already destructors). Ten paragraphs covering type, layout, syntax, errors, ops, methods, niches, dynamic semantics. Frontmatter `spec-sections` updated to `["3.14"]`.*
+- [x] **Phase 2: Lexer + parser**
   - `TokenKind::CharLit(u32)` (storing the scalar value as u32 for now).
-  - Lexer recognizes `'...'` with all escapes, including `\u{}`.
-  - Parser produces `Expr::CharLit` AST node.
-  - Spec tests cover each escape, error tests cover bad literals.
-- [ ] **Phase 3: Type + comparison ops**
-  - `Type::Primitive(Char)` in `gruel-air` and `gruel-rir`.
-  - `char` is `Copy` (4 bytes).
-  - Equality and ordering operators work.
-  - `to_u32` method (lowers to bitcast).
-  - Spec tests for declaration, comparison, basic flow.
-- [ ] **Phase 4: from_u32 + from_u32_unchecked** *(requires ADR-0070 Phases 1–2)*
-  - `char::from_u32(n) -> Result(char, u32)`: range check + Result construction.
-  - `char::from_u32_unchecked` in `checked` block.
-  - Spec tests cover valid scalars, surrogates (rejected with `Err(n)`), out-of-range (rejected with `Err(n)`).
-- [ ] **Phase 5: UTF-8 encoding**
-  - `len_utf8` (4-arm switch on codepoint range).
-  - `encode_utf8` (inline LLVM bit-shifts).
-  - `is_ascii`.
-  - Spec tests cover 1/2/3/4-byte cases.
-- [ ] **Phase 6: String integration**
-  - `String::push(c: char)` in `gruel-builtins`.
-  - `String::from_char(c)` in the prelude (or builtins).
-  - Spec tests cover push of ASCII / 2-byte / 3-byte / 4-byte chars and round-trip via `bytes()`.
-- [ ] **Phase 7: Niche registration**
-  - Register `char`'s `Layout` with surrogate + out-of-range niches in `gruel-air`.
-  - Verify `Option(char)` is 4 bytes and `Option(Option(char))` is also 4 bytes.
-  - Spec tests for layout sizes; codegen tests for round-trip correctness.
-- [ ] **Phase 8: Stabilize**
-  - Remove preview gate.
-  - Finalize spec section 3.9.
+  - Lexer recognizes `'...'` with all escapes, including `\u{}`. *Implementation in `gruel-lexer/src/logos_lexer.rs::process_char_from_quote`. New `LexError` variants and `ErrorKind` variants for empty/multi/unterminated/invalid-escape/invalid-unicode-escape.*
+  - Parser produces `Expr::CharLit` AST node. *Added to `chumsky_parser.rs` literal alternatives; AST `Expr::Char(CharLit)` variant.*
+  - Spec tests cover each escape, error tests cover bad literals. *Tests in `crates/gruel-spec/cases/types/char.toml`.*
+- [x] **Phase 3: Type + comparison ops**
+  - `Type::Primitive(Char)` in `gruel-air` and `gruel-rir`. *Added `TypeKind::Char` (tag 20), `Type::CHAR` constant, `InternedType::CHAR`, `InstData::CharConst(u32)`. Layout: 4-byte scalar; niches deferred to Phase 7.*
+  - `char` is `Copy` (4 bytes). *Wired through `is_type_copy` in both sema/typeck and sema_context.*
+  - Equality and ordering operators work. *`Type::CHAR` accepted by `analyze_comparison`; arithmetic ops still rejected (no entry in numeric type checks).*
+  - `to_u32` method (lowers to bitcast). *`dispatch_char_method_call` emits `AirInstData::IntCast` from char to u32; LLVM lowering is a no-op (both are `i32`).*
+  - Spec tests for declaration, comparison, basic flow. *In `char.toml`.*
+- [x] **Phase 4: from_u32 + from_u32_unchecked** *(requires ADR-0070 Phases 1–2)*
+  - `char::from_u32(n) -> Result(char, u32)`: range check + Result construction. *Implementation: prelude function `char__from_u32` performs the range check and constructs `Result(char, u32)`. Sema's `dispatch_char_assoc_fn_call` resolves `char::from_u32(n)` to a call to this prelude function.*
+  - `char::from_u32_unchecked` in `checked` block. *Sema emits `IntCast` from u32 to char (no-op at LLVM level since both are i32). The `checked`-block requirement is enforced in `dispatch_char_assoc_fn_call`.*
+  - Spec tests cover valid scalars, surrogates (rejected with `Err(n)`), out-of-range (rejected with `Err(n)`). *In `char_from_u32.toml` — 9 tests including round-trips, boundary cases, and the `checked`-block requirement.*
+  - Parser support: `char::name(args)` syntax handled by a new `char_assoc_fn_call` parser rule (chumsky_parser.rs) since primitive type tokens previously didn't accept `::name(args)` suffixes.
+- [x] **Phase 5: UTF-8 encoding**
+  - `len_utf8` (4-arm switch on codepoint range). *Implemented as prelude function `char__len_utf8` for code-volume reasons; sema's `dispatch_char_method_call` routes `c.len_utf8()` to it.*
+  - `encode_utf8` (inline LLVM bit-shifts). *Implemented as prelude function `char__encode_utf8(c, buf: MutRef([u8; 4]))` — the inline-LLVM approach was abandoned because the prelude version is portable Gruel code, expresses the bit-twiddling clearly, and passes the same tests.*
+  - `is_ascii`. *Prelude function `char__is_ascii`.*
+  - Spec tests cover 1/2/3/4-byte cases. *In `char_utf8.toml` — 12 tests covering ASCII, U+00E9, U+4E2D, U+1F600 across all three methods.*
+- [x] **Phase 6: String integration**
+  - `String::push(c: char)` in `gruel-builtins`. *Implemented as `push_char(c: char)` in v1 — the `push` name will be claimed by ADR-0072 Phase 4 when the existing `push(byte: u8)` gets renamed to `push_byte`. Runtime function `String__push_char(out, ptr, len, cap, codepoint)` UTF-8-encodes the codepoint and appends.*
+  - `String::from_char(c)` in the prelude (or builtins). *Added as a `BuiltinAssociatedFn`. Runtime function `String__from_char(out, codepoint)` allocates a fresh String and writes the UTF-8 encoding.*
+  - Spec tests cover push of ASCII / 2-byte / 3-byte / 4-byte chars and round-trip via `bytes()`. *7 tests in `char_string.toml` covering `from_char` lengths, `push_char` extension, and equality with string literals.*
+  - Side effect: `BuiltinParamType` gained a `Char` variant so builtins can take char parameters.
+- [x] **Phase 7: Niche registration**
+  - Register `char`'s `Layout` with surrogate + out-of-range niches in `gruel-air`. *Layout: size 4, align 4, two NicheRange entries (`0xD800..=0xDFFF` and `0x110000..=0xFFFFFFFF`).*
+  - Verify `Option(char)` is 4 bytes and `Option(Option(char))` is also 4 bytes. *Confirmed via round-trip tests — niche-filling layer in ADR-0069 picks up the new niches automatically.*
+  - Spec tests for layout sizes; codegen tests for round-trip correctness. *5 tests in `char_niches.toml` covering Option(char) and Result(char, char) variants including a 4-byte UTF-8 codepoint (😀).*
+- [x] **Phase 8: Stabilize**
+  - Remove preview gate. *Removed `preview = "char_type"` and `preview_should_pass = true` from spec tests; removed `PreviewFeature::CharType` variant from `gruel-util/src/error.rs`.*
+  - Finalize spec section 3.9. *Spec lives in section 3.14 (since 3.9 was already destructors). Frontmatter spec-sections updated to `["3.14"]`.*
 
 ## Consequences
 

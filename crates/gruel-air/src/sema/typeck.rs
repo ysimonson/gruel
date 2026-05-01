@@ -43,6 +43,7 @@ impl<'a> Sema<'a> {
             | TypeKind::F32
             | TypeKind::F64
             | TypeKind::Bool
+            | TypeKind::Char
             | TypeKind::Unit => true,
             // Enum types are Copy (they're small discriminant values), unless
             // any payload is linear (ADR-0067).
@@ -209,6 +210,7 @@ impl<'a> Sema<'a> {
             "f32" => return Ok(Type::F32),
             "f64" => return Ok(Type::F64),
             "bool" => return Ok(Type::BOOL),
+            "char" => return Ok(Type::CHAR),
             "()" => return Ok(Type::UNIT),
             "!" => return Ok(Type::NEVER),
             // The type of types - used for comptime type parameters
@@ -443,6 +445,7 @@ impl<'a> Sema<'a> {
             "f32" => return Some(Type::F32),
             "f64" => return Some(Type::F64),
             "bool" => return Some(Type::BOOL),
+            "char" => return Some(Type::CHAR),
             "()" => return Some(Type::UNIT),
             "!" => return Some(Type::NEVER),
             "type" => return Some(Type::COMPTIME_TYPE),
@@ -559,6 +562,7 @@ impl<'a> Sema<'a> {
             | TypeKind::F32
             | TypeKind::F64
             | TypeKind::Bool
+            | TypeKind::Char
             | TypeKind::Error => 1,
             // Zero-sized types use 0 slots
             // ComptimeType/ComptimeStr/ComptimeInt are comptime-only and use 0 runtime slots

@@ -6,7 +6,7 @@
 use crate::ast::{
     AnonFnExpr, AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget,
     AssocFnCallExpr, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr,
-    CheckedBlockExpr, ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr,
+    CharLit, CheckedBlockExpr, ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr,
     DeriveDecl, Directive, DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr,
     EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function,
     Ident, IfExpr, IndexExpr, IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item,
@@ -46,6 +46,8 @@ pub struct PrimitiveTypeSpurs {
     pub f32: Spur,
     pub f64: Spur,
     pub bool: Spur,
+    /// Unicode scalar value type (ADR-0071)
+    pub char: Spur,
     /// Self type keyword - used in methods to refer to the containing struct type
     pub self_type: Spur,
     /// The identifier "drop" — recognized as a method name to define a destructor
@@ -75,6 +77,7 @@ impl PrimitiveTypeSpurs {
             f32: interner.get_or_intern("f32"),
             f64: interner.get_or_intern("f64"),
             bool: interner.get_or_intern("bool"),
+            char: interner.get_or_intern("char"),
             self_type: interner.get_or_intern("Self"),
             drop_name: interner.get_or_intern("drop"),
             derive_name: interner.get_or_intern("derive"),
@@ -314,6 +317,14 @@ where
                 span: span_from_extra(e),
             })
         });
+    let char_parser =
+        just(TokenKind::Char).map_with(|_, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
+            let syms = e.state().0.syms;
+            TypeExpr::Named(Ident {
+                name: syms.char,
+                span: span_from_extra(e),
+            })
+        });
 
     choice((
         i8_parser.boxed(),
@@ -330,6 +341,7 @@ where
         f32_parser.boxed(),
         f64_parser.boxed(),
         bool_parser.boxed(),
+        char_parser.boxed(),
     ))
     .boxed()
 }
@@ -1243,6 +1255,14 @@ where
         }),
     };
 
+    // Char literal (ADR-0071)
+    let char_lit = select! {
+        TokenKind::CharLit(c) = e => Expr::Char(CharLit {
+            value: c,
+            span: span_from_extra(e),
+        }),
+    };
+
     // Boolean literals
     let bool_true = select! {
         TokenKind::True = e => Expr::Bool(BoolLit {
@@ -1271,6 +1291,7 @@ where
         int_lit.boxed(),
         float_lit.boxed(),
         string_lit.boxed(),
+        char_lit.boxed(),
         bool_true.boxed(),
         bool_false.boxed(),
         unit_lit.boxed(),
@@ -2062,6 +2083,35 @@ where
             })
         });
 
+    // ADR-0071: associated-function call on the `char` primitive:
+    //   `char::name(args)` — produces an `AssocFnCall` with type_name = "char".
+    // This must be tried before `type_lit_expr` because `type_lit_expr`
+    // consumes a bare `char` token and the `::name(...)` tail wouldn't fit.
+    let char_assoc_fn_call = just(TokenKind::Char)
+        .ignore_then(just(TokenKind::ColonColon))
+        .ignore_then(ident_parser())
+        .then(
+            call_args_parser(expr.clone())
+                .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)),
+        )
+        .map_with(
+            |(function, args), e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
+                let syms = e.state().0.syms;
+                let span = span_from_extra(e);
+                Expr::AssocFnCall(AssocFnCallExpr {
+                    base: None,
+                    type_name: Ident {
+                        name: syms.char,
+                        span,
+                    },
+                    type_args: Vec::new(),
+                    function,
+                    args,
+                    span,
+                })
+            },
+        );
+
     // Type literal expression: i32, bool, etc. used as values
     // This enables generic function calls like identity(i32, 42)
     let type_lit_expr = primitive_type_parser().map_with(|type_expr, e| {
@@ -2300,6 +2350,8 @@ where
         anon_enum_type_expr.boxed(),
         anon_interface_type_expr.boxed(),
         anon_fn_expr,
+        // ADR-0071: must come before type_lit_expr (which consumes the `char` token alone).
+        char_assoc_fn_call.boxed(),
         type_lit_expr.boxed(),
         call_and_access_parser(expr.clone()),
         paren_expr.boxed(),
@@ -3680,6 +3732,7 @@ fn validate_expr(expr: &Expr, errors: &mut Vec<CompileError>, v: &AstValidator) 
         | Expr::Int(_)
         | Expr::Float(_)
         | Expr::String(_)
+        | Expr::Char(_)
         | Expr::Bool(_)
         | Expr::Unit(_)
         | Expr::Ident(_)
