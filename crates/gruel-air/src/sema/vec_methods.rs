@@ -268,7 +268,26 @@ impl<'a> Sema<'a> {
                     span,
                 )
             }
-            "clone" => self.emit_vec_query(air, "vec_clone", receiver, args, span, receiver.ty),
+            "clone" => {
+                // ADR-0066 Phase 11: per-element clone for non-Copy `T`
+                // requires emitting per-element clone calls (e.g.
+                // `String__clone`) which depends on field-of-borrow access
+                // that the language doesn't yet support cleanly. Until that
+                // lands, `Vec(T).clone()` is restricted to `T: Copy` and the
+                // shallow-memcpy path. Reject non-Copy elements with a clear
+                // error rather than silently aliasing the heap buffer.
+                if !self.is_type_copy(elem_ty) {
+                    return Err(CompileError::new(
+                        ErrorKind::InternalError(format!(
+                            "Vec(T).clone() requires T: Copy in v1 (T = {}); \
+                             per-element clone is deferred — see ADR-0066 Phase 11",
+                            self.format_type_name(elem_ty)
+                        )),
+                        span,
+                    ));
+                }
+                self.emit_vec_query(air, "vec_clone", receiver, args, span, receiver.ty)
+            }
             "dispose" => {
                 if !args.is_empty() {
                     return Err(CompileError::new(

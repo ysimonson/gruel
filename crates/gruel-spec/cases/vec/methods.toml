@@ -195,6 +195,21 @@ fn main() -> i32 {
 exit_code = 36
 
 [[case]]
+name = "vec_clone_non_copy_rejected"
+spec = ["7.3:3"]
+description = "Vec(T).clone() requires T: Copy in v1; non-Copy T is rejected"
+source = """
+fn main() -> i32 {
+    let mut v: Vec(String) = Vec(String)::new();
+    v.push("hi");
+    let _v2 = v.clone();
+    7
+}
+"""
+compile_fail = true
+error_contains = "Vec(T).clone() requires T: Copy"
+
+[[case]]
 name = "vec_string_drop"
 spec = ["7.3:7"]
 source = """
