@@ -187,11 +187,18 @@ unit variants and variants with trivially-droppable fields are no-ops.
 
 {{ rule(id="6.3:20", cat="normative") }}
 
-A data enum is represented in memory as a tagged union: a discriminant integer
-followed by a byte array large enough to hold the payload of the largest variant.
-Fields within a variant are stored sequentially at consecutive byte offsets
-(packed layout, no inter-field padding). Field accesses use unaligned loads and
-stores, which are correct on all supported targets.
+A data enum has a defined size and alignment, but its in-memory representation
+is an implementation choice. The default representation is a tagged union: a
+discriminant integer followed by a byte array large enough to hold the payload
+of the largest variant. Fields within a variant are stored sequentially at
+consecutive byte offsets (packed layout, no inter-field padding) and accessed
+with unaligned loads and stores, which are correct on all supported targets.
+Implementations are permitted to choose alternative representations — for
+example, eliding the discriminant entirely when an Option-shaped enum's payload
+exposes a niche (a forbidden bit pattern) that the unit variant can claim
+(ADR-0069). The only stable observables of an enum value are pattern matching,
+equality, and the field projections produced by patterns; programs that observe
+the raw bytes of an enum value are not portable across compiler versions.
 
 ## Struct Variants
 
