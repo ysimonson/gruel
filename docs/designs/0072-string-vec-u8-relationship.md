@@ -1,12 +1,12 @@
 ---
 id: 0072
 title: String as a Newtype Wrapper over Vec(u8)
-status: proposal
+status: implemented
 tags: [types, strings, ffi, utf8, collections, builtins]
 feature-flag: string_vec_bridge
 created: 2026-05-01
-accepted:
-implemented:
+accepted: 2026-05-01
+implemented: 2026-05-01
 spec-sections: ["7.4"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented (with three sub-items deferred — see Open Questions on Phases 3–5). The `string_vec_bridge` preview gate remains in place; final stabilization (Phase 6) is queued for a follow-up once the deferred items land.
 
 ## Summary
 
