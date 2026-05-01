@@ -1,0 +1,16 @@
+[section]
+id = "diagnostics.sentinel-removed"
+name = "Slice Sentinel Syntax Removed (ADR-0068)"
+description = "The `&arr[lo..hi :s]` slice sentinel form was removed in ADR-0068. The parser now rejects the trailing `:` with a standard expected-token error."
+
+[[case]]
+name = "sentinel_subscript_parse_error"
+source = """
+fn main() -> i32 {
+    let arr: [u8; 3] = [1, 2, 0];
+    let s = &arr[0..2 :0];
+    0
+}
+"""
+compile_fail = true
+error_contains = "':'"

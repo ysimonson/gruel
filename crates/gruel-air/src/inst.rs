@@ -1012,13 +1012,11 @@ pub enum AirInstData {
     ///
     /// Lowered from `&arr[range]` / `&mut arr[range]`. `base` must
     /// designate an array place. `lo` defaults to `0`, `hi` defaults to
-    /// `arr.len()` when absent. `sentinel` carries the optional `:s`
-    /// (Phase 7) — `None` for non-sentinel ranges.
+    /// `arr.len()` when absent.
     MakeSlice {
         base: AirRef,
         lo: Option<AirRef>,
         hi: Option<AirRef>,
-        sentinel: Option<AirRef>,
         is_mut: bool,
     },
 
@@ -1444,7 +1442,6 @@ impl fmt::Display for Air {
                     base,
                     lo,
                     hi,
-                    sentinel,
                     is_mut,
                 } => {
                     write!(
@@ -1458,9 +1455,6 @@ impl fmt::Display for Air {
                     }
                     if let Some(hi) = hi {
                         write!(f, ", hi={}", hi)?;
-                    }
-                    if let Some(s) = sentinel {
-                        write!(f, ", sentinel={}", s)?;
                     }
                     writeln!(f)?;
                 }

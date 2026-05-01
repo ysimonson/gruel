@@ -502,7 +502,6 @@ impl<'a> CfgBuilder<'a> {
                 base,
                 lo,
                 hi,
-                sentinel,
                 is_mut,
             } => {
                 let place = match self.lower_air_lvalue_place(*base) {
@@ -534,20 +533,12 @@ impl<'a> CfgBuilder<'a> {
                     }),
                     None => None,
                 };
-                let sentinel_val = match sentinel {
-                    Some(s) => Some(match self.lower_value(*s) {
-                        Some(v) => v,
-                        None => return Self::diverged(),
-                    }),
-                    None => None,
-                };
                 let value = self.emit(
                     CfgInstData::MakeSlice(Box::new(crate::MakeSliceData {
                         place,
                         array_len,
                         lo: lo_val,
                         hi: hi_val,
-                        sentinel: sentinel_val,
                         is_mut: *is_mut,
                         vec_base,
                     })),

@@ -1,12 +1,12 @@
 ---
 id: 0068
 title: Remove Slice Sentinel Support
-status: proposal
+status: implemented
 tags: [slices, ffi, simplification, removal]
 feature-flag:
 created: 2026-05-01
-accepted:
-implemented:
+accepted: 2026-05-01
+implemented: 2026-05-01
 spec-sections: ["7.2"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -112,19 +112,19 @@ This is pure deletion. Preview-gating the *removal* of a stabilized feature woul
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Parser** — remove `sentinel_suffix` from `chumsky_parser.rs`'s range-subscript productions; remove `RangeExpr::sentinel` field from `gruel-parser/src/ast.rs`; remove the AST printer's sentinel rendering. The parse error for an attempted `:s` form should be the natural "expected `]`, found `:`" — clear enough without bespoke text. Update parser unit tests that specifically constructed sentinel `RangeExpr`s.
+- [x] **Phase 1: Parser** — remove `sentinel_suffix` from `chumsky_parser.rs`'s range-subscript productions; remove `RangeExpr::sentinel` field from `gruel-parser/src/ast.rs`; remove the AST printer's sentinel rendering. The parse error for an attempted `:s` form should be the natural "expected `]`, found `:`" — clear enough without bespoke text. Update parser unit tests that specifically constructed sentinel `RangeExpr`s.
 
-- [ ] **Phase 2: RIR** — remove the `sentinel: Option<InstRef>` field from the range-subscript variant in `gruel-rir/src/inst.rs`; remove `renumber_opt(*sentinel)` from the renumber impl; remove the printer's `, sentinel=…` rendering; remove sentinel emission from `gruel-rir/src/astgen.rs`'s range-subscript handler.
+- [x] **Phase 2: RIR** — remove the `sentinel: Option<InstRef>` field from the range-subscript variant in `gruel-rir/src/inst.rs`; remove `renumber_opt(*sentinel)` from the renumber impl; remove the printer's `, sentinel=…` rendering; remove sentinel emission from `gruel-rir/src/astgen.rs`'s range-subscript handler.
 
-- [ ] **Phase 3: AIR** — remove the `sentinel: Option<AirRef>` field from the range-subscript variant in `gruel-air/src/inst.rs`; remove the printer rendering; remove sentinel handling from `gruel-air/src/sema/analyze_ops.rs` (the `sentinel_opt` branch, the `strict` bounds tightening, and the result write-back). Remove any other `sentinel: None` constructors that exist purely to satisfy the field. Remove sentinel branch from `gruel-air/src/inference/generate.rs`.
+- [x] **Phase 3: AIR** — remove the `sentinel: Option<AirRef>` field from the range-subscript variant in `gruel-air/src/inst.rs`; remove the printer rendering; remove sentinel handling from `gruel-air/src/sema/analyze_ops.rs` (the `sentinel_opt` branch, the `strict` bounds tightening, and the result write-back). Remove any other `sentinel: None` constructors that exist purely to satisfy the field. Remove sentinel branch from `gruel-air/src/inference/generate.rs`.
 
-- [ ] **Phase 4: CFG / codegen** — remove `sentinel: Option<CfgValue>` from `gruel-cfg/src/inst.rs`'s range-subscript instruction; remove the construction in `gruel-cfg/src/build.rs`; remove the printer rendering. In `gruel-codegen-llvm/src/codegen.rs`, remove the sentinel runtime check block (load `arr[hi]`, compare, panic-on-mismatch). Remove any `gruel-runtime` panic helper that exists exclusively for sentinel mismatch (verify it's not shared with bounds-check panics first).
+- [x] **Phase 4: CFG / codegen** — remove `sentinel: Option<CfgValue>` from `gruel-cfg/src/inst.rs`'s range-subscript instruction; remove the construction in `gruel-cfg/src/build.rs`; remove the printer rendering. In `gruel-codegen-llvm/src/codegen.rs`, remove the sentinel runtime check block (load `arr[hi]`, compare, panic-on-mismatch). Remove any `gruel-runtime` panic helper that exists exclusively for sentinel mismatch (verify it's not shared with bounds-check panics first).
 
-- [ ] **Phase 5: Intrinsics registry** — remove the two `SliceMethod` entries named `"terminated_ptr"` from `SLICE_METHODS` in `gruel-intrinsics/src/lib.rs`. Verify no `IntrinsicId` variant becomes orphaned (`SlicePtr` is still used by `ptr` / `ptr_mut`). Run `make gen-intrinsic-docs` and commit the regenerated `docs/generated/intrinsics-reference.md`.
+- [x] **Phase 5: Intrinsics registry** — remove the two `SliceMethod` entries named `"terminated_ptr"` from `SLICE_METHODS` in `gruel-intrinsics/src/lib.rs`. Verify no `IntrinsicId` variant becomes orphaned (`SlicePtr` is still used by `ptr` / `ptr_mut`). Run `make gen-intrinsic-docs` and commit the regenerated `docs/generated/intrinsics-reference.md`.
 
-- [ ] **Phase 6: Spec** — edit `docs/spec/src/07-arrays/02-slices.md` to remove the "Sentinel form" construction subsection, the `terminated_ptr()` row from the methods table, and the "Sentinel discipline" prose section. Renumber affected paragraphs. Update grammar appendix to drop `range_with_sentinel`. Migrate any traceability `spec = [...]` references in surviving tests if paragraph numbers shifted.
+- [x] **Phase 6: Spec** — edit `docs/spec/src/07-arrays/02-slices.md` to remove the "Sentinel form" construction subsection, the `terminated_ptr()` row from the methods table, and the "Sentinel discipline" prose section. Renumber affected paragraphs. Update grammar appendix to drop `range_with_sentinel`. Migrate any traceability `spec = [...]` references in surviving tests if paragraph numbers shifted.
 
-- [ ] **Phase 7: Tests + cleanup** — delete `crates/gruel-spec/cases/slices/sentinel.toml`. Run `make test` to confirm no other tests reference removed paragraph IDs or use `:s` syntax. Add a regression test in `crates/gruel-ui-tests/cases/diagnostics/` (or wherever fits) verifying the parse-error wording for `&arr[0..2 :0]` is reasonable. Final search: `grep -rn ':[0-9]\|terminated_ptr' crates/ docs/` to confirm nothing leaks.
+- [x] **Phase 7: Tests + cleanup** — delete `crates/gruel-spec/cases/slices/sentinel.toml`. Run `make test` to confirm no other tests reference removed paragraph IDs or use `:s` syntax. Add a regression test in `crates/gruel-ui-tests/cases/diagnostics/` (or wherever fits) verifying the parse-error wording for `&arr[0..2 :0]` is reasonable. Final search: `grep -rn ':[0-9]\|terminated_ptr' crates/ docs/` to confirm nothing leaks.
 
 ## Consequences
 

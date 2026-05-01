@@ -1114,13 +1114,11 @@ pub struct IndexExpr {
 /// A range expression used as a slice subscript (ADR-0064).
 ///
 /// Ranges are recognized only inside `[ … ]`. `lo` and `hi` are optional
-/// (defaulting to 0 and `arr.len()` respectively). `sentinel` carries the
-/// `lo..hi :s` form.
+/// (defaulting to 0 and `arr.len()` respectively).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RangeExpr {
     pub lo: Option<Box<Expr>>,
     pub hi: Option<Box<Expr>>,
-    pub sentinel: Option<Box<Expr>>,
     pub span: Span,
 }
 
@@ -1810,11 +1808,6 @@ fn fmt_expr(f: &mut fmt::Formatter<'_>, expr: &Expr, level: usize) -> fmt::Resul
                 indent(f, level + 1)?;
                 writeln!(f, "Hi:")?;
                 fmt_expr(f, hi, level + 2)?;
-            }
-            if let Some(s) = &range_expr.sentinel {
-                indent(f, level + 1)?;
-                writeln!(f, "Sentinel:")?;
-                fmt_expr(f, s, level + 2)?;
             }
             Ok(())
         }

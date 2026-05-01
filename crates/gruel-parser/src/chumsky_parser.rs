@@ -1750,36 +1750,25 @@ where
     // (same convention as the rest-pattern parser).
     let dot_dot = just(TokenKind::Dot).then(just(TokenKind::Dot));
 
-    // ADR-0064 phase 7: optional `: sentinel` after the range body.
-    let sentinel_suffix = just(TokenKind::Colon).ignore_then(expr.clone()).or_not();
-
     let range_or_expr = choice((
         // `..` or `..hi` — leading `..` makes this unambiguous.
         dot_dot
             .ignore_then(expr.clone().or_not())
-            .then(sentinel_suffix.clone())
-            .map_with(|(hi, sentinel), e| {
+            .map_with(|hi, e| {
                 Expr::Range(RangeExpr {
                     lo: None,
                     hi: hi.map(Box::new),
-                    sentinel: sentinel.map(Box::new),
                     span: span_from_extra(e),
                 })
             }),
         // `expr` optionally followed by `..` and optionally another expr.
         // No `..` => plain index expression.
         expr.clone()
-            .then(
-                dot_dot
-                    .ignore_then(expr.clone().or_not())
-                    .then(sentinel_suffix)
-                    .or_not(),
-            )
+            .then(dot_dot.ignore_then(expr.clone().or_not()).or_not())
             .map_with(|(lhs, suffix), e| match suffix {
-                Some((hi, sentinel)) => Expr::Range(RangeExpr {
+                Some(hi) => Expr::Range(RangeExpr {
                     lo: Some(Box::new(lhs)),
                     hi: hi.map(Box::new),
-                    sentinel: sentinel.map(Box::new),
                     span: span_from_extra(e),
                 }),
                 None => lhs,
@@ -3684,9 +3673,6 @@ fn validate_expr(expr: &Expr, errors: &mut Vec<CompileError>, v: &AstValidator) 
             }
             if let Some(hi) = &r.hi {
                 validate_expr(hi, errors, v);
-            }
-            if let Some(s) = &r.sentinel {
-                validate_expr(s, errors, v);
             }
         }
         Expr::ComptimeUnrollFor(_) | Expr::Checked(_) => {}

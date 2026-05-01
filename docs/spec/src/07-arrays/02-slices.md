@@ -115,48 +115,9 @@ inside a `checked` block. `@parts_to_slice` accepts `Ptr(T)` and
 produces `Slice(T)`; `@parts_to_mut_slice` accepts `MutPtr(T)` and
 produces `MutSlice(T)`.
 
-## Sentinel Subscripts
-
-{{ rule(id="7.2:16", cat="syntax") }}
-
-`&arr[lo..hi :s]` and `&mut arr[lo..hi :s]` produce slices whose
-follow-on element is guaranteed to equal `s`. The sentinel form **MUST**
-be used inside `&` / `&mut`; range-with-sentinel is not valid as an
-rvalue.
-
-{{ rule(id="7.2:17", cat="legality-rule") }}
-
-A sentinel range borrow checks at construction that:
-
-1. `lo < hi` — the view is non-empty.
-2. `hi < N` — `arr[hi]` is in-bounds of the source array of length `N`.
-3. `arr[hi] == s`.
-
-When endpoints are constant the constraints are checked at compile
-time; otherwise they are checked at runtime.
-
-{{ rule(id="7.2:18", cat="dynamic-semantics") }}
-
-If any of the construction-time checks 7.2:17(1)–(3) fails at runtime,
-the program panics.
-
-{{ rule(id="7.2:19", cat="informative") }}
-
-The sentinel guarantee is a construction-time invariant; it is not
-tracked by the type system. The runtime representation of a
-sentinel-checked slice is identical to a non-sentinel slice — `{ptr,
-len}` only.
-
-{{ rule(id="7.2:20", cat="normative") }}
-
-For a slice `s` whose construction has been sentinel-checked, the method
-`s.terminated_ptr()` returns a `Ptr(T)` to the data and is permitted to
-read up to and including the sentinel byte at position `s.len()`. The
-method **MUST** appear inside a `checked` block.
-
 ## Iteration
 
-{{ rule(id="7.2:21", cat="normative") }}
+{{ rule(id="7.2:16", cat="normative") }}
 
 `for x in s` over a slice `s: Slice(T)` (`T: Copy`) yields each element
 by value. The loop body sees `x: T`. The mutable form (over `MutSlice(T)`)

@@ -703,14 +703,13 @@ impl<'a> Sema<'a> {
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
         let inst = self.rir.get(inst_ref);
-        let (base, lo_opt, hi_opt, sentinel_opt, is_mut) = match &inst.data {
+        let (base, lo_opt, hi_opt, is_mut) = match &inst.data {
             InstData::MakeSlice {
                 base,
                 lo,
                 hi,
-                sentinel,
                 is_mut,
-            } => (*base, *lo, *hi, *sentinel, *is_mut),
+            } => (*base, *lo, *hi, *is_mut),
             _ => unreachable!("analyze_make_slice called with non-MakeSlice instruction"),
         };
         let span = inst.span;
@@ -788,10 +787,6 @@ impl<'a> Sema<'a> {
 
         let lo_result = analyze_endpoint(self, air, ctx, lo_opt)?;
         let hi_result = analyze_endpoint(self, air, ctx, hi_opt)?;
-        let sentinel_result = match sentinel_opt {
-            Some(r) => Some(self.analyze_inst(air, r, ctx)?),
-            None => None,
-        };
 
         // Compile-time bounds check when both endpoints are integer
         // constants and the array length is statically known.
@@ -807,17 +802,7 @@ impl<'a> Sema<'a> {
             && !base_is_vec
             && let Some(hi_v) = hi_default
         {
-            // ADR-0064 phase 7: sentinel ranges have stricter bounds.
-            //   lo < hi   (non-empty: at least one element before the
-            //              sentinel byte)
-            //   hi < N    (sentinel byte must be in-bounds)
-            let strict = sentinel_opt.is_some();
-            let lo_hi_bad = if strict {
-                lo_default < 0 || hi_v < 0 || lo_default >= hi_v
-            } else {
-                lo_default < 0 || hi_v < 0 || lo_default > hi_v
-            };
-            if lo_hi_bad {
+            if lo_default < 0 || hi_v < 0 || lo_default > hi_v {
                 return Err(CompileError::new(
                     ErrorKind::IndexOutOfBounds {
                         index: lo_default as i64,
@@ -826,12 +811,7 @@ impl<'a> Sema<'a> {
                     span,
                 ));
             }
-            let hi_bad = if strict {
-                (hi_v as u64) >= array_len
-            } else {
-                (hi_v as u64) > array_len
-            };
-            if hi_bad {
+            if (hi_v as u64) > array_len {
                 return Err(CompileError::new(
                     ErrorKind::IndexOutOfBounds {
                         index: hi_v as i64,
@@ -857,7 +837,6 @@ impl<'a> Sema<'a> {
                 base: base_result.air_ref,
                 lo: lo_result.as_ref().map(|r| r.air_ref),
                 hi: hi_result.as_ref().map(|r| r.air_ref),
-                sentinel: sentinel_result.as_ref().map(|r| r.air_ref),
                 is_mut,
             },
             ty: result_ty,
@@ -1263,7 +1242,6 @@ impl<'a> Sema<'a> {
                             base: iter_res.air_ref,
                             lo: None,
                             hi: None,
-                            sentinel: None,
                             is_mut: false,
                         },
                         ty: slice_ty,

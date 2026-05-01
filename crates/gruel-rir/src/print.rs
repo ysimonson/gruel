@@ -221,7 +221,6 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     base,
                     lo,
                     hi,
-                    sentinel,
                     is_mut,
                 } => {
                     write!(
@@ -236,9 +235,6 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     }
                     if let Some(hi) = hi {
                         write!(out, ", hi={}", hi).unwrap();
-                    }
-                    if let Some(s) = sentinel {
-                        write!(out, ", sentinel={}", s).unwrap();
                     }
                     writeln!(out).unwrap();
                 }

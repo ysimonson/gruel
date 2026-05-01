@@ -1239,13 +1239,6 @@ pub const SLICE_METHODS: &[SliceMethod] = &[
         intrinsic_name: "slice_ptr",
         requires_checked: true,
     },
-    SliceMethod {
-        kind: SliceKind::Slice,
-        name: "terminated_ptr",
-        intrinsic: IntrinsicId::SlicePtr,
-        intrinsic_name: "slice_ptr",
-        requires_checked: true,
-    },
     // ---- Methods on MutSlice(T) ----
     SliceMethod {
         kind: SliceKind::MutSlice,
@@ -1273,13 +1266,6 @@ pub const SLICE_METHODS: &[SliceMethod] = &[
         name: "ptr_mut",
         intrinsic: IntrinsicId::SlicePtrMut,
         intrinsic_name: "slice_ptr_mut",
-        requires_checked: true,
-    },
-    SliceMethod {
-        kind: SliceKind::MutSlice,
-        name: "terminated_ptr",
-        intrinsic: IntrinsicId::SlicePtr,
-        intrinsic_name: "slice_ptr",
         requires_checked: true,
     },
 ];

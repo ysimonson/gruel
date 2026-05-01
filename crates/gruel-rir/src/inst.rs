@@ -1662,13 +1662,11 @@ impl Rir {
                 base,
                 lo,
                 hi,
-                sentinel,
                 is_mut,
             } => InstData::MakeSlice {
                 base: renumber(*base),
                 lo: renumber_opt(*lo),
                 hi: renumber_opt(*hi),
-                sentinel: renumber_opt(*sentinel),
                 is_mut: *is_mut,
             },
 
@@ -2334,13 +2332,10 @@ pub enum InstData {
     /// `&mut arr[range]` (`is_mut = true`). The `base` must be an lvalue
     /// of array type. `lo` and `hi` are the range endpoints; `None` means
     /// the implicit default (`0` for `lo`, `arr.len()` for `hi`).
-    /// `sentinel` carries the optional `:s` form (Phase 7) — `None` for
-    /// non-sentinel ranges.
     MakeSlice {
         base: InstRef,
         lo: Option<InstRef>,
         hi: Option<InstRef>,
-        sentinel: Option<InstRef>,
         is_mut: bool,
     },
 

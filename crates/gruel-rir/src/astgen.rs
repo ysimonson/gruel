@@ -698,14 +698,12 @@ impl<'a> AstGen<'a> {
                     let base = self.gen_expr(&index_expr.base);
                     let lo = range_expr.lo.as_ref().map(|e| self.gen_expr(e));
                     let hi = range_expr.hi.as_ref().map(|e| self.gen_expr(e));
-                    let sentinel = range_expr.sentinel.as_ref().map(|e| self.gen_expr(e));
                     let is_mut = matches!(un.op, AstUnaryOp::MutRef);
                     return self.rir.add_inst(Inst {
                         data: InstData::MakeSlice {
                             base,
                             lo,
                             hi,
-                            sentinel,
                             is_mut,
                         },
                         span: un.span,

@@ -1775,7 +1775,6 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let array_len = data.array_len;
                 let lo = data.lo;
                 let hi = data.hi;
-                let sentinel = data.sentinel;
                 let vec_base = data.vec_base;
                 use inkwell::IntPredicate;
 
@@ -1834,22 +1833,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 };
 
                 // Runtime check: lo <= hi && hi <= array_len.
-                // Sentinel ranges (ADR-0064 phase 7) require strict
-                // versions: lo < hi and hi < array_len, since the byte at
-                // arr[hi] must exist as a real follow-on element.
-                let strict = sentinel.is_some();
-                let (lo_pred, hi_pred) = if strict {
-                    (IntPredicate::ULT, IntPredicate::ULT)
-                } else {
-                    (IntPredicate::ULE, IntPredicate::ULE)
-                };
                 let lo_ok = self
                     .builder
-                    .build_int_compare(lo_pred, lo_val, hi_val, "slc_lo_hi")
+                    .build_int_compare(IntPredicate::ULE, lo_val, hi_val, "slc_lo_hi")
                     .unwrap();
                 let hi_ok = self
                     .builder
-                    .build_int_compare(hi_pred, hi_val, array_len_val, "slc_hi_n")
+                    .build_int_compare(IntPredicate::ULE, hi_val, array_len_val, "slc_hi_n")
                     .unwrap();
                 let in_bounds = self.builder.build_and(lo_ok, hi_ok, "slc_ok").unwrap();
                 let in_bounds = self.build_expect_i1(in_bounds, true);
@@ -1905,57 +1895,6 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     },
                     None => arr_ptr, // zero-sized element — pointer arithmetic is a no-op
                 };
-
-                // ADR-0064 phase 7: sentinel runtime check.
-                // We've already validated lo < hi and hi < N strictly.
-                // Now load arr[hi] and compare to the expected sentinel.
-                if let (Some(s), Some(ety)) = (sentinel, elem_llvm_ty) {
-                    let sentinel_ptr = unsafe {
-                        self.builder
-                            .build_gep(ety, arr_ptr, &[hi_val], "slc_sptr")
-                            .unwrap()
-                    };
-                    let actual = self
-                        .builder
-                        .build_load(ety, sentinel_ptr, "slc_sval")
-                        .unwrap();
-                    let expected = self.get_value(s);
-                    let eq = match (actual.get_type(), expected.get_type()) {
-                        (
-                            inkwell::types::BasicTypeEnum::IntType(at),
-                            inkwell::types::BasicTypeEnum::IntType(et),
-                        ) => {
-                            let a = actual.into_int_value();
-                            let e = expected.into_int_value();
-                            // Coerce the constant sentinel to the element
-                            // bit-width.
-                            let e = if at.get_bit_width() < et.get_bit_width() {
-                                self.builder
-                                    .build_int_truncate(e, at, "slc_strunc")
-                                    .unwrap()
-                            } else if at.get_bit_width() > et.get_bit_width() {
-                                self.builder.build_int_z_extend(e, at, "slc_szext").unwrap()
-                            } else {
-                                e
-                            };
-                            self.builder
-                                .build_int_compare(IntPredicate::EQ, a, e, "slc_seq")
-                                .unwrap()
-                        }
-                        _ => self.ctx.bool_type().const_int(1, false),
-                    };
-                    let eq = self.build_expect_i1(eq, true);
-                    let sok_bb = self.ctx.append_basic_block(current_fn, "slc_sok");
-                    let sbad_bb = self.ctx.append_basic_block(current_fn, "slc_sbad");
-                    self.builder
-                        .build_conditional_branch(eq, sok_bb, sbad_bb)
-                        .unwrap();
-                    self.builder.position_at_end(sbad_bb);
-                    let check_fn = self.get_or_declare_noreturn_fn("__gruel_bounds_check");
-                    self.builder.build_call(check_fn, &[], "").unwrap();
-                    self.builder.build_unreachable().unwrap();
-                    self.builder.position_at_end(sok_bb);
-                }
 
                 let len_val = self
                     .builder

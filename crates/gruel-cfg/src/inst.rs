@@ -35,7 +35,6 @@ pub struct MakeSliceData {
     pub array_len: u64,
     pub lo: Option<CfgValue>,
     pub hi: Option<CfgValue>,
-    pub sentinel: Option<CfgValue>,
     pub is_mut: bool,
     /// ADR-0066: when set, indicates that the base is a `Vec(T)`. The
     /// `place` references the Vec aggregate; codegen reads `ptr` and `len`
@@ -1232,9 +1231,6 @@ impl Cfg {
                 }
                 if let Some(hi) = data.hi {
                     write!(f, ", hi={}", hi)?;
-                }
-                if let Some(s) = data.sentinel {
-                    write!(f, ", sentinel={}", s)?;
                 }
                 Ok(())
             }
