@@ -161,7 +161,7 @@ Each phase is independently committable and testable.
 
 - [x] **Phase 3: Migrate enum constructor and match-extract through `Layout`.** Add `Layout::discriminant_strategy()` returning either `Separate { offset, width }` (current behavior) or `Niche { ... }` (Phase 5+). Constructor and match-switch lowering in `codegen.rs` consult this instead of hardcoding field 0. Phase 3 still produces only `Separate`, so wire format and tests remain identical.
 
-- [ ] **Phase 4: Populate niches for `bool` and unit-only enums.** Extend `layout_of` to fill in `niches` for `bool` (`{2..=255}` at offset 0) and unit-only enums (unused tag values). Pure data; no codegen change. Add unit tests asserting niche presence.
+- [x] **Phase 4: Populate niches for `bool` and unit-only enums.** Extend `layout_of` to fill in `niches` for `bool` (`{2..=255}` at offset 0) and unit-only enums (unused tag values). Pure data; no codegen change. Add unit tests asserting niche presence.
 
 - [ ] **Phase 5: Niche-aware layout for two-variant Option-shaped enums.** When laying out an enum with one unit variant and one data variant whose payload has a usable niche, return a `Layout` with the niche-encoded shape (no discriminant byte; size = payload size; remaining niche values exposed). Gate behind `--preview enum-niches` in `gruel-air` so Phase 5+ work can land incrementally without affecting non-preview compilations.
 

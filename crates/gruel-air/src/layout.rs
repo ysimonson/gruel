@@ -138,7 +138,20 @@ pub fn layout_of(pool: &TypeInternPool, ty: Type) -> Layout {
 
 fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
     match ty.kind() {
-        TypeKind::I8 | TypeKind::U8 | TypeKind::Bool => Layout::scalar(1, 1),
+        TypeKind::Bool => Layout {
+            size: 1,
+            align: 1,
+            // `bool` storage byte holds either 0 or 1; values 2..=255 are
+            // forbidden bit patterns. (ADR-0069 phase 4.)
+            niches: vec![NicheRange {
+                offset: 0,
+                width: 1,
+                start: 2,
+                end: 255,
+            }],
+            discriminant: None,
+        },
+        TypeKind::I8 | TypeKind::U8 => Layout::scalar(1, 1),
         TypeKind::I16 | TypeKind::U16 | TypeKind::F16 => Layout::scalar(2, 2),
         TypeKind::I32 | TypeKind::U32 | TypeKind::F32 => Layout::scalar(4, 4),
         TypeKind::I64 | TypeKind::U64 | TypeKind::F64 => Layout::scalar(8, 8),
@@ -217,10 +230,25 @@ fn enum_layout_separate(pool: &TypeInternPool, def: &EnumDef) -> Layout {
         payload_offset: discrim_layout.size as u32,
     };
     if def.is_unit_only() {
+        // Unit-only enum: the storage holds the discriminant directly.
+        // Discriminant values >= variant_count are forbidden bit patterns,
+        // exposed as a niche so an enclosing enum (Phase 5+) can re-niche us.
+        let variant_count = def.variants.len() as u128;
+        let max = NicheRange::max_for_width(tag_width);
+        let niches = if variant_count > 0 && variant_count <= max {
+            vec![NicheRange {
+                offset: 0,
+                width: tag_width,
+                start: variant_count,
+                end: max,
+            }]
+        } else {
+            Vec::new()
+        };
         return Layout {
             size: discrim_layout.size,
             align: discrim_layout.align,
-            niches: Vec::new(),
+            niches,
             discriminant: Some(strategy),
         };
     }
@@ -272,6 +300,53 @@ mod tests {
     }
 
     #[test]
+    fn bool_has_niche_2_through_255() {
+        let p = fresh_pool();
+        let layout = layout_of(&p, Type::BOOL);
+        assert_eq!(layout.size, 1);
+        assert_eq!(layout.align, 1);
+        assert_eq!(
+            layout.niches,
+            vec![NicheRange {
+                offset: 0,
+                width: 1,
+                start: 2,
+                end: 255,
+            }]
+        );
+    }
+
+    #[test]
+    fn unit_enum_exposes_unused_discriminant_as_niche() {
+        let p = fresh_pool();
+        let mut rodeo = Rodeo::default();
+        let name = rodeo.get_or_intern("E3");
+        let def = crate::EnumDef {
+            name: "E3".into(),
+            variants: vec![
+                EnumVariantDef::unit("A"),
+                EnumVariantDef::unit("B"),
+                EnumVariantDef::unit("C"),
+            ],
+            is_pub: false,
+            file_id: FileId::DEFAULT,
+            destructor: None,
+        };
+        let (eid, _) = p.register_enum(name, def);
+        let layout = layout_of(&p, Type::new_enum(eid));
+        assert_eq!(layout.size, 1);
+        assert_eq!(
+            layout.niches,
+            vec![NicheRange {
+                offset: 0,
+                width: 1,
+                start: 3,
+                end: 255,
+            }]
+        );
+    }
+
+    #[test]
     fn primitive_sizes() {
         let p = fresh_pool();
         assert_eq!(layout_of(&p, Type::I8), Layout::scalar(1, 1));
@@ -287,7 +362,10 @@ mod tests {
         assert_eq!(layout_of(&p, Type::F16), Layout::scalar(2, 2));
         assert_eq!(layout_of(&p, Type::F32), Layout::scalar(4, 4));
         assert_eq!(layout_of(&p, Type::F64), Layout::scalar(8, 8));
-        assert_eq!(layout_of(&p, Type::BOOL), Layout::scalar(1, 1));
+        // bool is size/align 1 but carries a niche — covered by `bool_has_niche_2_through_255`.
+        let bool_layout = layout_of(&p, Type::BOOL);
+        assert_eq!(bool_layout.size, 1);
+        assert_eq!(bool_layout.align, 1);
     }
 
     #[test]
