@@ -1,0 +1,170 @@
+# Vec(T) Methods (ADR-0066)
+#
+# Tests for Vec(T) construction, queries, mutation, indexing, and FFI.
+
+[section]
+id = "vec.methods"
+spec_chapter = "7.3"
+name = "Vec Methods"
+description = "Tests for Vec(T) constructors, queries, push/pop, indexing, etc."
+
+[[case]]
+name = "vec_new_empty"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let v: Vec(i32) = Vec(i32)::new();
+    let len: usize = v.len();
+    @cast(len)
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_with_capacity"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let v: Vec(i32) = Vec(i32)::with_capacity(8);
+    let cap: usize = v.capacity();
+    if cap >= 8 { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "vec_push_pop"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(7);
+    v.push(35);
+    let popped: i32 = v.pop();
+    let remaining: usize = v.len();
+    popped + @cast(remaining)
+}
+"""
+exit_code = 36
+
+[[case]]
+name = "vec_indexing"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(10);
+    v.push(20);
+    v.push(30);
+    v[1] = 99;
+    v[0] + v[1] + v[2]
+}
+"""
+exit_code = 139
+
+[[case]]
+name = "vec_is_empty_initially"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let v: Vec(i32) = Vec(i32)::new();
+    if v.is_empty() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "vec_clear"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(1);
+    v.push(2);
+    v.clear();
+    if v.is_empty() { 7 } else { 0 }
+}
+"""
+exit_code = 7
+
+[[case]]
+name = "vec_reserve"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.reserve(100);
+    let cap: usize = v.capacity();
+    if cap >= 100 { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "vec_literal"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let v = @vec(1, 2, 3, 4, 5);
+    let len: i32 = @cast(v.len());
+    len + v[0] + v[4]
+}
+"""
+exit_code = 11
+
+[[case]]
+name = "vec_repeat"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let v = @vec_repeat(7, 4);
+    let len: i32 = @cast(v.len());
+    len + v[0] + v[3]
+}
+"""
+exit_code = 18
+
+[[case]]
+name = "vec_pop_empty_panics"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.pop()
+}
+"""
+exit_code = 101
+
+[[case]]
+name = "vec_index_oob_panics"
+spec = ["7.3:1"]
+preview = "vec"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(7);
+    v[10]
+}
+"""
+exit_code = 101

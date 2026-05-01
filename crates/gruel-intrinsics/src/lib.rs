@@ -87,6 +87,26 @@ pub enum IntrinsicId {
     PartsToSlice,
     PartsToMutSlice,
 
+    // ---- Vec operations (ADR-0066) ----
+    VecNew,
+    VecWithCapacity,
+    VecLen,
+    VecCapacity,
+    VecIsEmpty,
+    VecPush,
+    VecPop,
+    VecClear,
+    VecReserve,
+    VecIndexRead,
+    VecIndexWrite,
+    VecPtr,
+    VecPtrMut,
+    VecTerminatedPtr,
+    VecClone,
+    VecLiteral,
+    VecRepeat,
+    PartsToVec,
+
     // ---- Preview / test infra ----
     TestPreviewGate,
 }
@@ -119,6 +139,7 @@ pub enum Category {
     Syscall,
     Iteration,
     Slice,
+    Vec,
     Meta,
 }
 
@@ -137,6 +158,7 @@ impl Category {
             Category::Syscall => "System Calls",
             Category::Iteration => "Iteration",
             Category::Slice => "Slices",
+            Category::Vec => "Vectors",
             Category::Meta => "Preview / Meta",
         }
     }
@@ -716,6 +738,223 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         description: "`@slice_index_write(m, i, v)` performs `m[i] = v`. Requires `MutSlice(T)`. Bounds-checks at runtime. Surface form: `m[i] = v`.",
         examples: &[],
     },
+    // ---- Vec operations (ADR-0066) ----
+    IntrinsicDef {
+        id: IntrinsicId::VecNew,
+        name: "vec_new",
+        kind: IntrinsicKind::Type,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Create an empty Vec(T).",
+        description: "`@vec_new(T)` returns an empty `Vec(T)` (cap=0, ptr=null). Surface form: `Vec(T)::new()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecWithCapacity,
+        name: "vec_with_capacity",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Create a Vec(T) with a preallocated buffer.",
+        description: "`@vec_with_capacity(T, n)` returns an empty `Vec(T)` whose `cap >= n`. Surface form: `Vec(T)::with_capacity(n)`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecLen,
+        name: "vec_len",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Length of a vec.",
+        description: "`@vec_len(v)` returns the live element count. Surface form: `v.len()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecCapacity,
+        name: "vec_capacity",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Capacity of a vec.",
+        description: "`@vec_capacity(v)` returns the allocated slot count. Surface form: `v.capacity()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecIsEmpty,
+        name: "vec_is_empty",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Whether a vec has length zero.",
+        description: "`@vec_is_empty(v)` returns `v.len() == 0`. Surface form: `v.is_empty()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecPush,
+        name: "vec_push",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Append an element to a Vec.",
+        description: "`@vec_push(v, x)` appends `x` to `v`, growing the buffer if needed. Surface form: `v.push(x)`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecPop,
+        name: "vec_pop",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Remove and return the last element of a Vec.",
+        description: "`@vec_pop(v)` returns `Option(T)` — `None` on empty, `Some(t)` otherwise. Surface form: `v.pop()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecClear,
+        name: "vec_clear",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Drop all elements of a Vec without freeing the buffer.",
+        description: "`@vec_clear(v)` runs the per-element drop loop and sets `len = 0`. Surface form: `v.clear()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecReserve,
+        name: "vec_reserve",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Ensure a Vec has capacity for additional elements.",
+        description: "`@vec_reserve(v, n)` grows the buffer so that `cap >= len + n`. Surface form: `v.reserve(n)`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecIndexRead,
+        name: "vec_index_read",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Read an element from a vec with bounds checking.",
+        description: "`@vec_index_read(v, i)` returns `v[i]`. Bounds-checked at runtime. Requires `T: Copy`. Surface form: `v[i]`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecIndexWrite,
+        name: "vec_index_write",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Write an element to a vec with bounds checking.",
+        description: "`@vec_index_write(v, i, x)` performs `v[i] = x`. Bounds-checked at runtime. Surface form: `v[i] = x`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecPtr,
+        name: "vec_ptr",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Extract the data pointer from a Vec.",
+        description: "`@vec_ptr(v)` returns a `Ptr(T)` to the first element. Requires a `checked` block. Surface form: `v.ptr()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecPtrMut,
+        name: "vec_ptr_mut",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Extract the mutable data pointer from a Vec.",
+        description: "`@vec_ptr_mut(v)` returns a `MutPtr(T)`. Requires a `checked` block. Surface form: `v.ptr_mut()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecTerminatedPtr,
+        name: "vec_terminated_ptr",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Write a sentinel and return the data pointer.",
+        description: "`@vec_terminated_ptr(v, s)` writes `s` at `ptr[len]` (growing if needed), returns `Ptr(T)`. Requires a `checked` block. Surface form: `v.terminated_ptr(s)`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecClone,
+        name: "vec_clone",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Clone a Vec.",
+        description: "`@vec_clone(v)` returns a deep copy of `v`. Requires `T: Clone`. Surface form: `v.clone()`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecLiteral,
+        name: "vec",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Construct a Vec from individual elements.",
+        description: "`@vec(a, b, c)` returns a `Vec(T)` of length 3 with the given elements. Mirrors Rust's `vec![…]`. Requires at least one argument; element types unify to a single `T`.",
+        examples: &["@vec(1, 2, 3)"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecRepeat,
+        name: "vec_repeat",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Construct a Vec with N copies of a value.",
+        description: "`@vec_repeat(v, n)` returns a `Vec(T)` of length `n` where every slot holds a clone of `v`. Requires `T: Clone`.",
+        examples: &["@vec_repeat(0, 100)"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::PartsToVec,
+        name: "parts_to_vec",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::Vec),
+        runtime_fn: None,
+        summary: "Build a Vec from raw parts.",
+        description: "`@parts_to_vec(p: MutPtr(T), len: usize, cap: usize) -> Vec(T)` takes ownership of `p`. Requires a `checked` block.",
+        examples: &[],
+    },
     IntrinsicDef {
         id: IntrinsicId::TestPreviewGate,
         name: "test_preview_gate",
@@ -1247,6 +1486,24 @@ mod tests {
                 | IntrinsicId::SlicePtrMut
                 | IntrinsicId::PartsToSlice
                 | IntrinsicId::PartsToMutSlice
+                | IntrinsicId::VecNew
+                | IntrinsicId::VecWithCapacity
+                | IntrinsicId::VecLen
+                | IntrinsicId::VecCapacity
+                | IntrinsicId::VecIsEmpty
+                | IntrinsicId::VecPush
+                | IntrinsicId::VecPop
+                | IntrinsicId::VecClear
+                | IntrinsicId::VecReserve
+                | IntrinsicId::VecIndexRead
+                | IntrinsicId::VecIndexWrite
+                | IntrinsicId::VecPtr
+                | IntrinsicId::VecPtrMut
+                | IntrinsicId::VecTerminatedPtr
+                | IntrinsicId::VecClone
+                | IntrinsicId::VecLiteral
+                | IntrinsicId::VecRepeat
+                | IntrinsicId::PartsToVec
                 | IntrinsicId::TestPreviewGate => {}
             }
         }

@@ -5379,6 +5379,11 @@ impl<'a> Sema<'a> {
         if let Some(result) = self.try_analyze_slice_index_read(air, base, index, span, ctx)? {
             return Ok(result);
         }
+        // ADR-0066: indexing on a Vec(T) value emits a vec_index_read
+        // intrinsic.
+        if let Some(result) = self.try_analyze_vec_index_read(air, base, index, span, ctx)? {
+            return Ok(result);
+        }
         // Check for constant out-of-bounds index early (before tracing)
         // We need the array type for bounds checking, so peek at the base first
         let _base_inst = self.rir.get(base);
@@ -5563,6 +5568,12 @@ impl<'a> Sema<'a> {
         {
             return Ok(result);
         }
+        // ADR-0066: indexing-write on Vec(T).
+        if let Some(result) =
+            self.try_analyze_vec_index_write(air, base, index, value, span, ctx)?
+        {
+            return Ok(result);
+        }
         // Delegate to the main implementation in analysis.rs
         self.analyze_index_set_impl(air, base, index, value, span, ctx)
     }
@@ -5573,7 +5584,7 @@ impl<'a> Sema<'a> {
     /// AIR for a base whose array path will re-analyse it. Only handles
     /// the cases that can produce a slice value today: a local / parameter
     /// holding a slice, or a slice-typed function-call result.
-    fn peek_inst_type(&self, inst_ref: InstRef, ctx: &AnalysisContext) -> Option<Type> {
+    pub(crate) fn peek_inst_type(&self, inst_ref: InstRef, ctx: &AnalysisContext) -> Option<Type> {
         match &self.rir.get(inst_ref).data {
             InstData::VarRef { name } => ctx.locals.get(name).map(|l| l.ty),
             InstData::ParamRef { name, .. } => {

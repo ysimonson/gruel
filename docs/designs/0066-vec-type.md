@@ -316,27 +316,27 @@ Same pattern as ADR-0061 / 0062 / 0063 / 0064:
 
 - [x] **Phase 1: Type system foundation** — add `TypeKind::Vec(TypeId)` with intern-pool support. LLVM lowering as `{ T*, i64, i64 }` aggregate. No surface form yet. Add `BuiltinTypeConstructorKind::Vec` and `VEC_CONSTRUCTOR` to `gruel-builtins`. Add `PreviewFeature::Vec` to `gruel-error`.
 
-- [~] **Phase 2: Construction** *(partial — preview gate + linear-rejection shipped; constructors deferred)* — sema accepts `Vec(T)` in type position behind `--preview vec`. Reject `Vec(T)` when `T: Linear` with a clear error pointing at this ADR. Implement `Vec::new()` and `Vec::with_capacity(n)`. Codegen emits the constructor inline (zero-init the aggregate; for `with_capacity` with `n > 0`, call `__gruel_alloc`). Drop function emission for `T: Copy` (just free). *Status: the preview gate, linear-rejection, and Vec(T) usability in parameter / return / let-binding type positions are shipped. The constructors `Vec::new()` / `Vec::with_capacity(n)` are deferred — they require new associated-function dispatch infrastructure for parameterized type constructors (e.g. `Vec(i32)::new()` paths), which the existing path-expression resolution doesn't recognize. That dispatch path is shared with method-call work for Phase 3 (`len` / `capacity` / `is_empty`) and would be cleanest to land alongside it.*
+- [x] **Phase 2: Construction** — sema accepts `Vec(T)` in type position behind `--preview vec`. Reject `Vec(T)` when `T: Linear` with a clear error pointing at this ADR. Implement `Vec::new()` and `Vec::with_capacity(n)`. Codegen emits the constructor inline (zero-init the aggregate; for `with_capacity` with `n > 0`, call `__gruel_alloc`). Drop function emission for `T: Copy` (just free).
 
-- [ ] **Phase 3: Length / capacity / is_empty queries** — add `VEC_METHODS` registry skeleton; implement the three field-extraction methods. Codegen emits direct field GEPs.
+- [x] **Phase 3: Length / capacity / is_empty queries** — add `VEC_METHODS` registry skeleton; implement the three field-extraction methods. Codegen emits direct field GEPs.
 
-- [ ] **Phase 4: Push / pop / clear / reserve** — codegen emits inline grow-or-write for `push`; bounds-checked move-out for `pop`; len-reset (with element drop) for `clear`; grow-to-additional for `reserve`. The grow path uses `__gruel_realloc` with a doubling-capacity policy, optionally encapsulated in `__gruel_vec_grow`.
+- [x] **Phase 4: Push / pop / clear / reserve** — codegen emits inline grow-or-write for `push`; bounds-checked move-out for `pop`; len-reset (with element drop) for `clear`; grow-to-additional for `reserve`. The grow path uses `__gruel_realloc` with a doubling-capacity policy, optionally encapsulated in `__gruel_vec_grow`.
 
-- [ ] **Phase 5: `@vec` literal intrinsic** — add `IntrinsicId::Vec` to `gruel-intrinsics` with `--preview vec` gating. Sema unifies argument types to a single `T`, rejects empty calls and `T: Linear`. Codegen allocates `cap = n` slots, stores each argument by move, sets `len = n`. Reuses the alloc/grow path from Phase 4.
+- [x] **Phase 5: `@vec` literal intrinsic** — add `IntrinsicId::Vec` to `gruel-intrinsics` with `--preview vec` gating. Sema unifies argument types to a single `T`, rejects empty calls and `T: Linear`. Codegen allocates `cap = n` slots, stores each argument by move, sets `len = n`. Reuses the alloc/grow path from Phase 4.
 
 - [ ] **Phase 6: Drop for non-Copy `T`** — codegen emits a per-`T` drop function that loops over `[0..len]` calling the element drop, then frees. Tested on `Vec(String)`, `Vec(Vec(i32))`. `clear` reuses the same drop loop.
 
-- [ ] **Phase 7: Indexing** — `v[i]` read for `T: Copy`, `v[i] = val` write. Bounds checks per spec 7.1:9–11. Move-out-of-non-Copy rejected per 7.1:28.
+- [x] **Phase 7: Indexing** — `v[i]` read for `T: Copy`, `v[i] = val` write. Bounds checks per spec 7.1:9–11. Move-out-of-non-Copy rejected per 7.1:28.
 
 - [ ] **Phase 8: Slice borrowing** — extend ADR-0064 phase 4's range-subscript place form to accept Vec receivers. `&v[..]` and `&mut v[a..b]` produce `Slice(T)` / `MutSlice(T)` of length `len`. Borrow-checker treats Vec mutation as conflicting with live slice borrows.
 
 - [ ] **Phase 9: Iteration** — for-each over `Vec(T)` lowers to for-each over `&v[..]`. Inherits Copy / non-Copy / mut-iter rules from ADR-0064 phase 8. Mut form deferred if deref-assignment hasn't landed.
 
-- [ ] **Phase 10: Checked-block extras** — `v.ptr()`, `v.ptr_mut()`, `v.terminated_ptr(s)`, `@parts_to_vec(p, len, cap)`. Each gated to `checked` blocks. `terminated_ptr` codegen: ensure `cap > len` (grow if needed via the same path as `push`'s grow); store `s` at `ptr[len]`; return the pointer.
+- [x] **Phase 10: Checked-block extras** — `v.ptr()`, `v.ptr_mut()`, `v.terminated_ptr(s)`, `@parts_to_vec(p, len, cap)`. Each gated to `checked` blocks. `terminated_ptr` codegen: ensure `cap > len` (grow if needed via the same path as `push`'s grow); store `s` at `ptr[len]`; return the pointer.
 
 - [ ] **Phase 11: Clone** — `v.clone() -> Vec(T)` for `T: Clone` (per ADR-0065). Codegen allocates `cap` slots; for `T: Copy`, single `memcpy(len * sizeof(T))`; for non-Copy `T: Clone`, per-element clone loop calling `T::clone` via interface dispatch. Register `Vec(T): Clone where T: Clone` conformance.
 
-- [ ] **Phase 12: `@vec_repeat` intrinsic** — add `IntrinsicId::VecRepeat` to `gruel-intrinsics` with `--preview vec` gating. Sema requires `T: Clone` (per Phase 11), `n: usize`, rejects `T: Linear`. Codegen allocates `cap = n` slots; for `n >= 1`, clones `v` into `ptr[0..n-1]` and moves `v` into `ptr[n-1]`; for `n == 0`, returns empty Vec and drops `v`. `T: Copy` collapses the clone path to a store loop / `memcpy`.
+- [x] **Phase 12: `@vec_repeat` intrinsic** — add `IntrinsicId::VecRepeat` to `gruel-intrinsics` with `--preview vec` gating. Sema requires `T: Clone` (per Phase 11), `n: usize`, rejects `T: Linear`. Codegen allocates `cap = n` slots; for `n >= 1`, clones `v` into `ptr[0..n-1]` and moves `v` into `ptr[n-1]`; for `n == 0`, returns empty Vec and drops `v`. `T: Copy` collapses the clone path to a store loop / `memcpy`. *v1 limitation: requires `T: Copy` (no recursive Clone-call synthesis); non-Copy element clone in `@vec_repeat` is a follow-up alongside the Phase 6 / 11 Clone synthesis work.*
 
 - [ ] **Phase 13: Spec** — author `docs/spec/src/07-arrays/03-vectors.md` covering type, layout, ownership, construction (including `@vec` and `@vec_repeat`), methods, on-demand termination, slice integration, iteration, drop, and the FFI / `checked` surface.
 

@@ -1459,7 +1459,7 @@ impl<'a> Sema<'a> {
 
     /// Check that we are inside a `checked` block.
     /// Returns an error if `checked_depth` is zero.
-    fn require_checked_for_intrinsic(
+    pub(crate) fn require_checked_for_intrinsic(
         ctx: &AnalysisContext,
         intrinsic_name: &str,
         span: Span,
@@ -3363,6 +3363,26 @@ impl<'a> Sema<'a> {
             );
         }
 
+        // ADR-0066: methods on `Vec(T)` values dispatch through the
+        // vec_methods module which emits the appropriate intrinsic.
+        if matches!(receiver_type.kind(), TypeKind::Vec(_)) {
+            if !matches!(
+                method_name_str.as_str(),
+                "ptr" | "ptr_mut" | "terminated_ptr"
+            ) && let Some(var) = receiver_var
+            {
+                ctx.moved_vars.remove(&var);
+            }
+            return self.dispatch_vec_method_call(
+                air,
+                receiver_result,
+                &method_name_str,
+                &args,
+                span,
+                ctx,
+            );
+        }
+
         let struct_id = match receiver_type.kind() {
             TypeKind::Struct(id) => id,
             _ => {
@@ -3861,8 +3881,26 @@ impl<'a> Sema<'a> {
         // resolve_type already handles type-call syntax via the
         // BuiltinTypeConstructor registry, so dispatch through there.
         if let Some((callee_name, _)) = crate::types::parse_type_call_syntax(&type_name_str)
-            && gruel_builtins::get_builtin_type_constructor(&callee_name).is_some()
+            && let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name)
         {
+            // ADR-0066: route Vec(T)::new()/with_capacity(n) through the
+            // Vec dispatcher.
+            if matches!(
+                constructor.kind,
+                gruel_builtins::BuiltinTypeConstructorKind::Vec
+            ) {
+                let vec_ty = self.resolve_type(type_name, span)?;
+                if let Some(result) = self.try_dispatch_vec_static_call(
+                    air,
+                    ctx,
+                    vec_ty,
+                    &function_name_str,
+                    &args,
+                    span,
+                ) {
+                    return result;
+                }
+            }
             return self.dispatch_pointer_assoc_fn_call(
                 air,
                 type_name,
@@ -4007,6 +4045,16 @@ impl<'a> Sema<'a> {
                 });
                 return Ok(AnalysisResult::new(air_ref, method_info.return_type));
             }
+        }
+
+        // ADR-0066: Vec(T) static method calls via comptime type variable
+        // (e.g., `let V = Vec(i32); V::new()`).
+        if let Some(&ty) = ctx.comptime_type_vars.get(&type_name)
+            && matches!(ty.kind(), TypeKind::Vec(_))
+            && let Some(result) =
+                self.try_dispatch_vec_static_call(air, ctx, ty, &function_name_str, &args, span)
+        {
+            return result;
         }
 
         // Check if this is an enum data variant construction via a comptime type variable
@@ -4379,7 +4427,24 @@ impl<'a> Sema<'a> {
             | IntrinsicId::SliceIndexRead
             | IntrinsicId::SliceIndexWrite
             | IntrinsicId::SlicePtr
-            | IntrinsicId::SlicePtrMut => Err(CompileError::new(
+            | IntrinsicId::SlicePtrMut
+            // ADR-0066: Vec methods are dispatched via VEC_METHODS / static
+            // path-call paths, not direct @vec_* expressions.
+            | IntrinsicId::VecNew
+            | IntrinsicId::VecWithCapacity
+            | IntrinsicId::VecLen
+            | IntrinsicId::VecCapacity
+            | IntrinsicId::VecIsEmpty
+            | IntrinsicId::VecPush
+            | IntrinsicId::VecPop
+            | IntrinsicId::VecClear
+            | IntrinsicId::VecReserve
+            | IntrinsicId::VecIndexRead
+            | IntrinsicId::VecIndexWrite
+            | IntrinsicId::VecPtr
+            | IntrinsicId::VecPtrMut
+            | IntrinsicId::VecTerminatedPtr
+            | IntrinsicId::VecClone => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),
@@ -4391,6 +4456,10 @@ impl<'a> Sema<'a> {
             IntrinsicId::PartsToMutSlice => {
                 self.analyze_parts_to_slice_intrinsic(air, &args, span, ctx, true)
             }
+            // ADR-0066: @vec(...), @vec_repeat(v, n), @parts_to_vec(p, l, c).
+            IntrinsicId::VecLiteral => self.analyze_vec_literal_intrinsic(air, &args, span, ctx),
+            IntrinsicId::VecRepeat => self.analyze_vec_repeat_intrinsic(air, &args, span, ctx),
+            IntrinsicId::PartsToVec => self.analyze_parts_to_vec_intrinsic(air, &args, span, ctx),
         }
     }
 

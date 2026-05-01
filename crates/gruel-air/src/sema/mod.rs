@@ -50,6 +50,7 @@ mod output;
 mod sema_ctx_builder;
 mod typeck;
 mod usefulness;
+mod vec_methods;
 mod visibility;
 
 // Public re-exports
