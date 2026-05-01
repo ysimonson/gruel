@@ -4,7 +4,7 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
-use gruel_air::layout::layout_of;
+use gruel_air::layout::{DiscriminantStrategy, layout_of};
 use gruel_air::{StructId, Type, TypeInternPool, TypeKind};
 use gruel_cfg::{
     BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator, drop_names,
@@ -2451,6 +2451,16 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let variant_def = &enum_def.variants[variant_index as usize];
                 let field_types: Vec<Type> = variant_def.fields.clone();
 
+                let strategy = layout_of(self.type_pool, ty)
+                    .discriminant_strategy()
+                    .expect("enum type must have a discriminant strategy");
+                match strategy {
+                    DiscriminantStrategy::Separate { .. } => {}
+                    DiscriminantStrategy::Niche { .. } => {
+                        unreachable!("niche-encoded enum codegen is not implemented yet")
+                    }
+                }
+
                 let struct_ty = match gruel_type_to_llvm(ty, self.ctx, self.type_pool) {
                     Some(t) => t.into_struct_type(),
                     None => return Ok(()),
@@ -2459,7 +2469,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 // Alloca the tagged union on the stack (in entry block for mem2reg).
                 let slot = self.build_entry_alloca(struct_ty.into(), "enum_slot");
 
-                // Store discriminant at struct field 0.
+                // Store discriminant at struct field 0 (Separate strategy: tag_offset = 0).
                 let discrim_ty =
                     gruel_type_to_llvm(enum_def.discriminant_type(), self.ctx, self.type_pool)
                         .unwrap()
@@ -2540,6 +2550,16 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let variant_def = &enum_def.variants[variant_index as usize];
                 let field_types = &variant_def.fields;
 
+                let strategy = layout_of(self.type_pool, enum_ty)
+                    .discriminant_strategy()
+                    .expect("enum type must have a discriminant strategy");
+                match strategy {
+                    DiscriminantStrategy::Separate { .. } => {}
+                    DiscriminantStrategy::Niche { .. } => {
+                        unreachable!("niche-encoded enum codegen is not implemented yet")
+                    }
+                }
+
                 // Compute byte offset of the target field within the payload.
                 let byte_offset: u64 = field_types[..field_index as usize]
                     .iter()
@@ -2602,22 +2622,34 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             CfgInstData::GetDiscriminant { base } => {
-                // For data enums the LLVM layout is `{ disc, payload }`,
-                // so extract element 0; for unit-only enums the value
-                // itself is the discriminant and we just propagate it.
+                // Read the discriminant according to the type's
+                // `DiscriminantStrategy` (ADR-0069). For the current
+                // `Separate` strategy with data variants the LLVM layout is
+                // `{ disc, payload }`, so we extract element 0; for unit-only
+                // enums the value itself is the discriminant.
                 // Mirrors the discriminant-read logic in
                 // `Terminator::Switch` below.
                 let raw = self.get_value(base);
                 let scrutinee_ty = self.cfg.get_inst(base).ty;
                 let disc = if let TypeKind::Enum(id) = scrutinee_ty.kind() {
                     let enum_def = self.type_pool.enum_def(id);
-                    if enum_def.has_data_variants() {
-                        let struct_val = raw.into_struct_value();
-                        self.builder
-                            .build_extract_value(struct_val, 0, "discrim")
-                            .expect("extract_value failed")
-                    } else {
-                        raw
+                    let strategy = layout_of(self.type_pool, scrutinee_ty)
+                        .discriminant_strategy()
+                        .expect("enum type must have a discriminant strategy");
+                    match strategy {
+                        DiscriminantStrategy::Separate { .. } => {
+                            if enum_def.has_data_variants() {
+                                let struct_val = raw.into_struct_value();
+                                self.builder
+                                    .build_extract_value(struct_val, 0, "discrim")
+                                    .expect("extract_value failed")
+                            } else {
+                                raw
+                            }
+                        }
+                        DiscriminantStrategy::Niche { .. } => {
+                            unreachable!("niche-encoded enum codegen is not implemented yet")
+                        }
                     }
                 } else {
                     raw
@@ -5065,20 +5097,32 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 default,
             } => {
                 let raw_val = self.get_value(scrutinee);
-                // For data enums (tagged union structs), extract the discriminant from field 0.
-                // Unit-only enums are already plain integers and don't need extraction.
+                // Consult the type's DiscriminantStrategy (ADR-0069). For the
+                // current `Separate` strategy on data enums, the discriminant
+                // lives in struct field 0; for unit-only enums the value
+                // itself is the discriminant.
                 let val = {
                     let scrutinee_ty = self.cfg.get_inst(scrutinee).ty;
                     if let TypeKind::Enum(id) = scrutinee_ty.kind() {
                         let enum_def = self.type_pool.enum_def(id);
-                        if enum_def.has_data_variants() {
-                            let struct_val = raw_val.into_struct_value();
-                            self.builder
-                                .build_extract_value(struct_val, 0, "discrim")
-                                .expect("extract_value failed")
-                                .into_int_value()
-                        } else {
-                            raw_val.into_int_value()
+                        let strategy = layout_of(self.type_pool, scrutinee_ty)
+                            .discriminant_strategy()
+                            .expect("enum type must have a discriminant strategy");
+                        match strategy {
+                            DiscriminantStrategy::Separate { .. } => {
+                                if enum_def.has_data_variants() {
+                                    let struct_val = raw_val.into_struct_value();
+                                    self.builder
+                                        .build_extract_value(struct_val, 0, "discrim")
+                                        .expect("extract_value failed")
+                                        .into_int_value()
+                                } else {
+                                    raw_val.into_int_value()
+                                }
+                            }
+                            DiscriminantStrategy::Niche { .. } => {
+                                unreachable!("niche-encoded enum codegen is not implemented yet")
+                            }
                         }
                     } else {
                         raw_val.into_int_value()

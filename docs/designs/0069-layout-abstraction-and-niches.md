@@ -159,7 +159,7 @@ Each phase is independently committable and testable.
 
 - [x] **Phase 2: Migrate codegen size/align queries to `Layout`.** `type_byte_size` and `type_alignment` in `gruel-codegen-llvm/src/types.rs` become thin wrappers over `layout_of`. All other in-tree callers go through `Layout`. Existing test suite (full `make test`) must pass unchanged — no observable behavior should differ.
 
-- [ ] **Phase 3: Migrate enum constructor and match-extract through `Layout`.** Add `Layout::discriminant_strategy()` returning either `Separate { offset, width }` (current behavior) or `Niche { ... }` (Phase 5+). Constructor and match-switch lowering in `codegen.rs` consult this instead of hardcoding field 0. Phase 3 still produces only `Separate`, so wire format and tests remain identical.
+- [x] **Phase 3: Migrate enum constructor and match-extract through `Layout`.** Add `Layout::discriminant_strategy()` returning either `Separate { offset, width }` (current behavior) or `Niche { ... }` (Phase 5+). Constructor and match-switch lowering in `codegen.rs` consult this instead of hardcoding field 0. Phase 3 still produces only `Separate`, so wire format and tests remain identical.
 
 - [ ] **Phase 4: Populate niches for `bool` and unit-only enums.** Extend `layout_of` to fill in `niches` for `bool` (`{2..=255}` at offset 0) and unit-only enums (unused tag values). Pure data; no codegen change. Add unit tests asserting niche presence.
 

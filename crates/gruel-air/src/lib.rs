@@ -39,7 +39,7 @@ pub use inst::{
 pub use intern_pool::{
     EnumData, InternedType, StructData, TypeData, TypeInternPool, TypeInternPoolStats,
 };
-pub use layout::{Layout, NicheRange, layout_of};
+pub use layout::{DiscriminantStrategy, Layout, NicheRange, layout_of};
 pub use param_arena::{ParamArena, ParamRange};
 pub use sema::{
     AnalyzedFunction, ConstValue, FunctionInfo, GatherOutput, InterfaceVtables, MethodInfo, Sema,

@@ -43,7 +43,47 @@ impl NicheRange {
     }
 }
 
-/// The layout of a Gruel type: size, alignment, and any niches.
+/// How an enum encodes its discriminant within its storage.
+///
+/// Returned by [`Layout::discriminant_strategy`] for enum types. The constructor
+/// and match-dispatch in codegen consult this to decide where to read/write the
+/// tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscriminantStrategy {
+    /// Standard tagged union: discriminant lives in its own slot at
+    /// `tag_offset`, with payload following at `payload_offset`.
+    ///
+    /// In LLVM this is the `{ discrim, [N x i8] }` struct shape used today
+    /// (`tag_offset = 0`, `payload_offset = tag_width`).
+    Separate {
+        /// Byte offset of the discriminant tag within the enum's storage.
+        tag_offset: u32,
+        /// Width of the discriminant tag in bytes.
+        tag_width: u8,
+        /// Byte offset where variant payload bytes start.
+        payload_offset: u32,
+    },
+    /// Niche-encoded: no separate discriminant slot. The unit variant is
+    /// identified by reading `niche_width` bytes at `niche_offset` and seeing
+    /// `niche_value`; any other bit pattern means the data variant.
+    ///
+    /// Reserved for Phase 5+ of ADR-0069.
+    Niche {
+        /// Index of the (single) unit variant.
+        unit_variant: u32,
+        /// Index of the (single) data variant.
+        data_variant: u32,
+        /// Byte offset of the niche bytes within the enum's storage.
+        niche_offset: u32,
+        /// Niche width in bytes.
+        niche_width: u8,
+        /// Bit pattern (little-endian) that encodes the unit variant.
+        niche_value: u128,
+    },
+}
+
+/// The layout of a Gruel type: size, alignment, niches, and (for enums) its
+/// discriminant strategy.
 ///
 /// `Layout` is a pure function of the type. Because types are interned, the
 /// pool caches the result of [`layout_of`] keyed by [`Type`].
@@ -55,15 +95,18 @@ pub struct Layout {
     pub align: u64,
     /// Forbidden bit-pattern ranges within a value of this type.
     pub niches: Vec<NicheRange>,
+    /// For enum types: how the discriminant is encoded. `None` for non-enums.
+    pub discriminant: Option<DiscriminantStrategy>,
 }
 
 impl Layout {
-    /// A layout with the given size and alignment and no niches.
+    /// A layout with the given size and alignment, no niches, no enum repr.
     pub fn scalar(size: u64, align: u64) -> Self {
         Self {
             size,
             align,
             niches: Vec::new(),
+            discriminant: None,
         }
     }
 
@@ -73,7 +116,13 @@ impl Layout {
             size: 0,
             align: 1,
             niches: Vec::new(),
+            discriminant: None,
         }
+    }
+
+    /// Discriminant strategy for enum types; `None` for non-enum types.
+    pub fn discriminant_strategy(&self) -> Option<DiscriminantStrategy> {
+        self.discriminant
     }
 }
 
@@ -124,6 +173,7 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
                 size: offset,
                 align: max_align,
                 niches: Vec::new(),
+                discriminant: None,
             }
         }
 
@@ -134,6 +184,7 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
                 size: elem.size * len,
                 align: elem.align,
                 niches: Vec::new(),
+                discriminant: None,
             }
         }
 
@@ -159,11 +210,18 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
 /// this in Phase 5+.
 fn enum_layout_separate(pool: &TypeInternPool, def: &EnumDef) -> Layout {
     let discrim_layout = layout_of(pool, def.discriminant_type());
+    let tag_width = discrim_layout.size as u8;
+    let strategy = DiscriminantStrategy::Separate {
+        tag_offset: 0,
+        tag_width,
+        payload_offset: discrim_layout.size as u32,
+    };
     if def.is_unit_only() {
         return Layout {
             size: discrim_layout.size,
             align: discrim_layout.align,
             niches: Vec::new(),
+            discriminant: Some(strategy),
         };
     }
     // Tagged union { discrim, [max_payload x i8] }
@@ -183,6 +241,7 @@ fn enum_layout_separate(pool: &TypeInternPool, def: &EnumDef) -> Layout {
             size: discrim_layout.size,
             align: discrim_layout.align,
             niches: Vec::new(),
+            discriminant: Some(strategy),
         };
     }
     let total = discrim_layout.size + max_payload;
@@ -191,6 +250,7 @@ fn enum_layout_separate(pool: &TypeInternPool, def: &EnumDef) -> Layout {
         size,
         align: discrim_layout.align,
         niches: Vec::new(),
+        discriminant: Some(strategy),
     }
 }
 
