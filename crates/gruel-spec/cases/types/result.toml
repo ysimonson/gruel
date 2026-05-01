@@ -1,0 +1,97 @@
+[section]
+id = "types.result"
+spec_chapter = "3.13"
+name = "Canonical Result(T, E) (ADR-0070)"
+description = "Tests for the prelude-registered Result(T, E) generic enum."
+
+# `Result(T, E)` is available without any user declaration.
+[[case]]
+name = "result_prelude_ok"
+spec = ["3.13:1"]
+description = "Result(i32, String)::Ok constructed from the prelude"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    match r {
+        R::Ok(n) => n,
+        R::Err(_) => 0,
+    }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "result_prelude_err"
+spec = ["3.13:1"]
+description = "Result(i32, i32)::Err evaluates the err arm"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Err(7);
+    match r {
+        R::Ok(_) => 0,
+        R::Err(e) => e,
+    }
+}
+"""
+exit_code = 7
+
+[[case]]
+name = "result_prelude_string_payload"
+spec = ["3.13:1"]
+description = "Result(String, i32) carries a heap-owning ok payload"
+source = """
+fn main() -> i32 {
+    let R = Result(String, i32);
+    let r: R = R::Ok("hi");
+    match r {
+        R::Ok(s) => @cast(s.len()),
+        R::Err(_) => 0,
+    }
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "result_prelude_shadow_rejected"
+spec = ["3.13:1"]
+description = "User cannot redefine Result since the prelude registers it"
+source = """
+fn Result(comptime T: type, comptime E: type) -> type {
+    enum { Ok(T), Err(E) }
+}
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "duplicate"
+
+# Phase 1 stub method
+[[case]]
+name = "result_is_ok_on_ok"
+spec = ["3.13:2"]
+description = "Result::is_ok returns true for Ok variants"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    if r.is_ok() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "result_is_ok_on_err"
+spec = ["3.13:2"]
+description = "Result::is_ok returns false for Err variants"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Err(7);
+    if r.is_ok() { 1 } else { 0 }
+}
+"""
+exit_code = 0

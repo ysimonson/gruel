@@ -1,0 +1,224 @@
+[section]
+id = "types.result_methods"
+spec_chapter = "3.13"
+name = "Result(T, E) Methods (ADR-0070)"
+description = "Tests for the prelude-registered Result(T, E) method surface."
+
+# is_ok on Ok returns true
+[[case]]
+name = "result_is_ok_true"
+spec = ["3.13:3"]
+description = "Result::is_ok returns true for Ok variants"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    if r.is_ok() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# is_ok on Err returns false
+[[case]]
+name = "result_is_ok_false"
+spec = ["3.13:3"]
+description = "Result::is_ok returns false for Err"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Err(7);
+    if r.is_ok() { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+# is_err on Ok returns false
+[[case]]
+name = "result_is_err_false"
+spec = ["3.13:3"]
+description = "Result::is_err returns false for Ok"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    if r.is_err() { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+# is_err on Err returns true
+[[case]]
+name = "result_is_err_true"
+spec = ["3.13:3"]
+description = "Result::is_err returns true for Err"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Err(7);
+    if r.is_err() { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+# unwrap on Ok returns the contained value
+[[case]]
+name = "result_unwrap_on_ok"
+spec = ["3.13:3"]
+description = "Result::unwrap returns the contained value for Ok"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    r.unwrap()
+}
+"""
+exit_code = 42
+
+# unwrap on Err panics with the standard message
+[[case]]
+name = "result_unwrap_on_err_panics"
+spec = ["3.13:3"]
+description = "Result::unwrap panics with the standard message for Err"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Err(7);
+    r.unwrap()
+}
+"""
+exit_code = 101
+stderr_contains = "called unwrap on an Err value"
+
+# unwrap_err on Err returns the contained error
+[[case]]
+name = "result_unwrap_err_on_err"
+spec = ["3.13:3"]
+description = "Result::unwrap_err returns the contained value for Err"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Err(7);
+    r.unwrap_err()
+}
+"""
+exit_code = 7
+
+# unwrap_err on Ok panics with the standard message
+[[case]]
+name = "result_unwrap_err_on_ok_panics"
+spec = ["3.13:3"]
+description = "Result::unwrap_err panics with the standard message for Ok"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    r.unwrap_err()
+}
+"""
+exit_code = 101
+stderr_contains = "called unwrap_err on an Ok value"
+
+# unwrap_or on Ok returns the contained value
+[[case]]
+name = "result_unwrap_or_on_ok"
+spec = ["3.13:3"]
+description = "Result::unwrap_or returns the contained value for Ok"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    r.unwrap_or(99)
+}
+"""
+exit_code = 42
+
+# unwrap_or on Err returns the default
+[[case]]
+name = "result_unwrap_or_on_err"
+spec = ["3.13:3"]
+description = "Result::unwrap_or returns the default for Err"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Err(7);
+    r.unwrap_or(99)
+}
+"""
+exit_code = 99
+
+# expect on Ok returns the contained value
+[[case]]
+name = "result_expect_on_ok"
+spec = ["3.13:3"]
+description = "Result::expect returns the contained value for Ok"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    r.expect("should be ok")
+}
+"""
+exit_code = 42
+
+# expect on Err panics with the user-provided message
+[[case]]
+name = "result_expect_on_err_panics"
+spec = ["3.13:3"]
+description = "Result::expect panics with the user-provided message for Err"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Err(7);
+    r.expect("expected ok but got err")
+}
+"""
+exit_code = 101
+stderr_contains = "expected ok but got err"
+
+# expect_err on Err returns the contained error
+[[case]]
+name = "result_expect_err_on_err"
+spec = ["3.13:3"]
+description = "Result::expect_err returns the contained value for Err"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Err(7);
+    r.expect_err("should be err")
+}
+"""
+exit_code = 7
+
+# expect_err on Ok panics with the user-provided message
+[[case]]
+name = "result_expect_err_on_ok_panics"
+spec = ["3.13:3"]
+description = "Result::expect_err panics with the user-provided message for Ok"
+source = """
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    r.expect_err("expected err but got ok")
+}
+"""
+exit_code = 101
+stderr_contains = "expected err but got ok"
+
+# Result(T, E) conforms to Clone when both T and E are Copy (via auto-Copy → Clone for enums)
+[[case]]
+name = "result_conforms_to_clone"
+spec = ["3.13:6"]
+description = "Result(T, E) conforms to Clone via auto-Copy enum rule when payloads are Copy"
+source = """
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    let R = Result(i32, i32);
+    let r: R = R::Ok(42);
+    use_clone(R, r);
+    0
+}
+"""
+exit_code = 0

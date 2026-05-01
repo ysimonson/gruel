@@ -506,3 +506,5 @@ layout.
 Each method consumes the receiver. Because `Option(T)` is treated as
 `Copy` (§3.8:2 — all enum types), receivers are implicitly duplicated at
 the call site, so a name remains usable after a query method.
+
+The companion canonical type `Result(T, E)` is documented in §3.13.

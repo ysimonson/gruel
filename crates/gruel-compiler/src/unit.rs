@@ -35,10 +35,11 @@ use crate::{
 };
 use gruel_util::FileId;
 
-/// ADR-0065: the synthetic compiler prelude.
+/// ADR-0065 / ADR-0070: the synthetic compiler prelude.
 ///
 /// Contains canonical type definitions injected into every compilation:
-/// - `Option(T)`: the canonical optional type, used by collection methods.
+/// - `Option(T)` (ADR-0065): the canonical optional type.
+/// - `Result(T, E)` (ADR-0070): the canonical fallible-with-context type.
 ///
 /// This is parsed as a regular Gruel source file with `FileId::PRELUDE` and
 /// runs through the standard pipeline. Adding more types here is just adding
@@ -74,6 +75,62 @@ fn Option(comptime T: type) -> type {
             match self {
                 Self::Some(x) => x,
                 Self::None => default,
+            }
+        }
+    }
+}
+
+fn Result(comptime T: type, comptime E: type) -> type {
+    enum {
+        Ok(T),
+        Err(E),
+
+        fn is_ok(borrow self) -> bool {
+            match self {
+                Self::Ok(_) => true,
+                Self::Err(_) => false,
+            }
+        }
+
+        fn is_err(borrow self) -> bool {
+            match self {
+                Self::Ok(_) => false,
+                Self::Err(_) => true,
+            }
+        }
+
+        fn unwrap(self) -> T {
+            match self {
+                Self::Ok(x) => x,
+                Self::Err(_) => @panic("called unwrap on an Err value"),
+            }
+        }
+
+        fn unwrap_err(self) -> E {
+            match self {
+                Self::Ok(_) => @panic("called unwrap_err on an Ok value"),
+                Self::Err(e) => e,
+            }
+        }
+
+        fn unwrap_or(self, default: T) -> T {
+            match self {
+                Self::Ok(x) => x,
+                Self::Err(_) => default,
+            }
+        }
+
+        fn expect(self, msg: String) -> T {
+            match self {
+                Self::Ok(x) => x,
+                Self::Err(_) => @panic(msg),
+            }
+        }
+
+        fn expect_err(self, msg: String) -> E {
+            match self {
+                Self::Ok(_) => @panic(msg),
+                Self::Err(e) => e,
             }
         }
     }

@@ -1,13 +1,13 @@
 ---
 id: 0070
 title: Canonical Result(T, E)
-status: proposal
+status: implemented
 tags: [types, generics, prelude, error-handling]
 feature-flag: result_type
 created: 2026-05-01
-accepted:
-implemented:
-spec-sections: ["3.10"]
+accepted: 2026-05-01
+implemented: 2026-05-01
+spec-sections: ["3.13"]
 superseded-by:
 ---
 
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented (with two phases deferred — see "Deferred from v1" below).
 
 ## Summary
 
@@ -145,38 +145,40 @@ Open detail: should `Ok` and `Err` be importable as bare names (`Ok(42)` instead
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Preview gate + prelude scaffolding**
+- [x] **Phase 1: Preview gate + prelude scaffolding**
   - Add `PreviewFeature::ResultType` to `gruel-error`.
   - Append `Result(T, E)` definition and a stub method body (`is_ok` only) to the prelude source string.
-  - Register `Ok` and `Err` as bare-importable names.
-  - Confirm name resolution and basic match work.
-- [ ] **Phase 2: Core method surface**
+  - Register `Ok` and `Err` as bare-importable names. *Implementation note: matching ADR-0065 / Option's pattern, this isn't bare-imported; users write `R::Ok` / `R::Err` after `let R = Result(T, E)`. Same posture as `O::Some` / `O::None`.*
+  - Confirm name resolution and basic match work. *Spec tests in `crates/gruel-spec/cases/types/result.toml`.*
+- [x] **Phase 2: Core method surface**
   - Implement `is_ok`, `is_err`, `unwrap`, `unwrap_err`, `unwrap_or` in the prelude.
-  - `unwrap` / `unwrap_err` linearity gates (mirrors `Option::unwrap`).
-  - Spec tests for each method, including panic behavior.
-- [ ] **Phase 3: Conversions to Option**
-  - `ok(self) -> Option(T)` and `err(self) -> Option(E)`.
-  - Linearity gates on the dropped arm.
-  - Spec tests cover round-trips and linear-rejection cases.
-- [ ] **Phase 4: `expect` / `expect_err`**
-  - Implement using the existing panic-with-message infrastructure.
-  - Spec tests.
-- [ ] **Phase 5: Linearity propagation tests**
-  - Verify `Result(MustUse, i32)`, `Result(i32, MustUse)`, `Result(MustUse, MustUse)` all report as linear.
-  - Verify the rejection diagnostics for `unwrap` / `ok` / `err` on linear arms.
+  - `unwrap` / `unwrap_err` linearity gates (mirrors `Option::unwrap`). *Implementation note: matching ADR-0067's posture for `Option(T:Linear)`, no explicit gate is added — the prelude method's body fails to typecheck under linear T or E (the discard pattern `Self::Err(_)` against a linear payload). v1 leaves users to `match` exhaustively at the use site for linear payloads. Phase 5 documents this.*
+  - Spec tests for each method, including panic behavior. *Spec tests in `crates/gruel-spec/cases/types/result_methods.toml`.*
+- [x] **Phase 3: Conversions to Option — deferred.** *Blocked on the same infrastructure gap that deferred `Option::map` in ADR-0065 Phase 5: expressing `Option(T)` inside a generic method body requires either (a) parser support for `Option(T)::Variant(...)` in expression position (today's parser treats `Option(T)` as a call statement and rejects the trailing `::Variant`), or (b) sema treating the receiver's bound `T` as comptime when used in `let O = Option(T)`. Both are real follow-up work. ADR-0065 cleared the same hurdle for `map`; once that lands, `ok`/`err` ship simultaneously. Until then, users convert via `match r { R::Ok(x) => O::Some(x), R::Err(_) => O::None }` at the use site.*
+- [x] **Phase 4: `expect` / `expect_err`**
+  - Implement using the existing panic-with-message infrastructure. *`@panic(msg)` already accepts a `String` parameter (codegen extracts ptr/len and calls `__gruel_panic`).*
+  - Spec tests. *Added to `result_methods.toml`.*
+- [x] **Phase 5: Linearity propagation tests**
+  - Verify `Result(MustUse, i32)`, `Result(i32, MustUse)`, `Result(MustUse, MustUse)` all report as linear. *Confirmed: the existing `is_type_linear` recursion through enum payloads handles this transparently.*
+  - Verify the rejection diagnostics for `unwrap` / `ok` / `err` on linear arms. *In v1, instantiation itself fails — the borrow-`self` methods (`is_ok`, `is_err`) discard-pattern against linear payloads, which the borrow checker rejects. Same deferred limitation as `Option(T:Linear)` per ADR-0067 Phase 3. Tests in `result_linearity.toml` document the current behavior; spec paragraph `3.13:5` records the deferral.*
   - No new code expected — existing recursion should cover it; phase exists to confirm and document.
-- [ ] **Phase 6: Clone conformance**
-  - Verify `Result(i32, i32)` is `Copy` (hence `Clone`) under the v1 enum-Copy simplification.
-  - Add a deferred-synthesis note for when ADR-0065's simplification is refined.
-- [ ] **Phase 7: Niche optimization tests**
-  - `Result(bool, bool)` is 1 byte; `Result(char, ())` is 4 bytes (after ADR-0071 lands).
-  - No new code; verify ADR-0069's niche-filling consumes Result's discriminant correctly.
-- [ ] **Phase 8: Spec**
-  - Write spec section 3.10 (or place under existing prelude appendix).
-  - Cross-link from `Option(T)`'s section.
-- [ ] **Phase 9: Stabilize**
-  - Remove preview gate.
-  - Update consumer ADRs (ADR-0072's `from_utf8` return type; ADR-0071's `char::from_u32`).
+- [x] **Phase 6: Clone conformance**
+  - Verify `Result(i32, i32)` is `Copy` (hence `Clone`) under the v1 enum-Copy simplification. *Spec test `result_conforms_to_clone` in `result_methods.toml`.*
+  - Add a deferred-synthesis note for when ADR-0065's simplification is refined. *Spec paragraph `3.13:6`.*
+- [x] **Phase 7: Niche optimization tests**
+  - `Result(bool, bool)` is 1 byte; `Result(char, ())` is 4 bytes (after ADR-0071 lands). *`Result(bool, bool)` and `Result(i32, Color)` round-trip tests in `result_niches.toml`. The `Result(char, ())` case is gated on ADR-0071 and lives there.*
+  - No new code; verify ADR-0069's niche-filling consumes Result's discriminant correctly. *Confirmed — `Result(bool, bool)` round-trips four discriminant×payload combinations through both arms.*
+- [x] **Phase 8: Spec**
+  - Write spec section 3.10 (or place under existing prelude appendix). *Created `docs/spec/src/03-types/13-result-type.md` (section 3.13, since 3.10 was already mutable-strings). Six paragraphs covering registration, layout, methods, linearity propagation, the v1 linear-payload limitation, and Clone conformance. ADR frontmatter `spec-sections` updated to `["3.13"]`.*
+  - Cross-link from `Option(T)`'s section. *Added pointer in §3.8 after the Option methods list.*
+- [x] **Phase 9: Stabilize**
+  - Remove preview gate. *Removed `preview = "result_type"` and `preview_should_pass = true` from spec tests; removed `PreviewFeature::ResultType` variant from `gruel-util/src/error.rs`.*
+  - Update consumer ADRs (ADR-0072's `from_utf8` return type; ADR-0071's `char::from_u32`). *Both ADRs were authored with the Result-returning shape from the start; no edits needed.*
+
+### Deferred from v1
+
+- **Phase 3 (`ok` / `err` conversions to `Option`).** Blocked on the same infrastructure gap that deferred `Option::map` in ADR-0065 Phase 5: the prelude method body cannot construct `Option(T)` when `T` is the receiver's bound generic parameter, because (a) the parser doesn't accept `Option(T)::Variant(...)` in expression position and treats `Option(T)` as a call statement requiring a semicolon, and (b) sema treats `T` as runtime in the method body, so `let O = Option(T)` errors with "comptime parameter requires a compile-time known value." When ADR-0065's follow-up resolves this for `map`, `ok`/`err` ship simultaneously. Until then, users convert via inline `match`.
+- **Phase 5 (linear-payload prelude support).** Linearity propagates correctly through `Result(T, E)` (the `is_type_linear` recursion handles enum payloads), but the prelude methods `is_ok` / `is_err` use `borrow self` with discard patterns (`Self::Ok(_)`, `Self::Err(_)`). The borrow checker rejects the discard pattern against a linear payload — even though `_` consumes nothing — so `Result(MustUse, _)` cannot be instantiated through the prelude. Same deferred limitation as `Option(T:Linear)` per ADR-0067 Phase 3. Spec paragraph 3.13:5 records the gap; tests in `result_linearity.toml` document the current behavior. A future ADR (smarter discard-pattern handling on borrowed enums, or per-`T` method gating) lifts this for both `Option` and `Result` together.
 
 ## Consequences
 

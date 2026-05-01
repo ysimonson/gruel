@@ -1,0 +1,56 @@
+[section]
+id = "types.result_linearity"
+spec_chapter = "3.13"
+name = "Result(T, E) Linearity (ADR-0070)"
+description = "Tests for linearity propagation through Result(T, E) and the prelude-method limitation for linear payloads."
+
+# Result(MustUse, i32) cannot be instantiated through the prelude today
+# because the borrow-self methods (is_ok/is_err) reject discard patterns
+# against linear payloads.  Mirrors ADR-0067 Phase 3 deferral for Option.
+[[case]]
+name = "result_linear_ok_payload_blocked"
+spec = ["3.13:4", "3.13:5"]
+description = "Result(MustUse, i32) is rejected by the prelude is_ok method"
+source = """
+linear struct MustUse { value: i32 }
+
+fn main() -> i32 {
+    let R = Result(MustUse, i32);
+    let _r: R = R::Err(7);
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot move out of borrowed value"
+
+[[case]]
+name = "result_linear_err_payload_blocked"
+spec = ["3.13:4", "3.13:5"]
+description = "Result(i32, MustUse) is rejected by the prelude is_err method"
+source = """
+linear struct MustUse { value: i32 }
+
+fn main() -> i32 {
+    let R = Result(i32, MustUse);
+    let _r: R = R::Ok(42);
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot move out of borrowed value"
+
+[[case]]
+name = "result_linear_both_payloads_blocked"
+spec = ["3.13:4", "3.13:5"]
+description = "Result(MustUse, MustUse) is rejected by the prelude methods"
+source = """
+linear struct MustUse { value: i32 }
+
+fn main() -> i32 {
+    let R = Result(MustUse, MustUse);
+    let _r: R = R::Ok(MustUse { value: 1 });
+    0
+}
+"""
+compile_fail = true
+error_contains = "cannot move out of borrowed value"

@@ -1,0 +1,96 @@
+[section]
+id = "types.result_niches"
+spec_chapter = "3.13"
+name = "Result niche-encoded layout (ADR-0069)"
+description = """
+Tests for niche-filled Result layouts (ADR-0069). The optimization
+preserves observable semantics — pattern matching round-trips for
+Result(bool, bool) and Result with niche-bearing payloads should
+all return the expected discriminants and payload values.
+"""
+
+[[case]]
+name = "result_bool_bool_ok_true"
+spec = ["3.13:2"]
+description = "Result(bool, bool) packs into a single byte using bool niches."
+source = """
+fn main() -> i32 {
+    let R = Result(bool, bool);
+    let r: R = R::Ok(true);
+    match r {
+        R::Ok(b) => if b { 1 } else { 2 },
+        R::Err(b) => if b { 3 } else { 4 },
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "result_bool_bool_ok_false"
+spec = ["3.13:2"]
+source = """
+fn main() -> i32 {
+    let R = Result(bool, bool);
+    let r: R = R::Ok(false);
+    match r {
+        R::Ok(b) => if b { 1 } else { 2 },
+        R::Err(b) => if b { 3 } else { 4 },
+    }
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "result_bool_bool_err_true"
+spec = ["3.13:2"]
+source = """
+fn main() -> i32 {
+    let R = Result(bool, bool);
+    let r: R = R::Err(true);
+    match r {
+        R::Ok(b) => if b { 1 } else { 2 },
+        R::Err(b) => if b { 3 } else { 4 },
+    }
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "result_bool_bool_err_false"
+spec = ["3.13:2"]
+source = """
+fn main() -> i32 {
+    let R = Result(bool, bool);
+    let r: R = R::Err(false);
+    match r {
+        R::Ok(b) => if b { 1 } else { 2 },
+        R::Err(b) => if b { 3 } else { 4 },
+    }
+}
+"""
+exit_code = 4
+
+# Result of a unit-only enum on the Err side: niches in the Err payload should
+# be available to the Result discriminant.
+[[case]]
+name = "result_small_enum_round_trip"
+spec = ["3.13:2"]
+description = "Result(i32, Color) for a 3-variant unit enum round-trips correctly."
+source = """
+enum Color { Red, Green, Blue }
+
+fn main() -> i32 {
+    let R = Result(i32, Color);
+    let ok: R = R::Ok(42);
+    let r: R = R::Err(Color::Red);
+    let g: R = R::Err(Color::Green);
+    let b: R = R::Err(Color::Blue);
+    let mut acc: i32 = 0;
+    acc = acc + (match ok { R::Ok(n) => n, R::Err(_) => 0 });
+    acc = acc + (match r { R::Err(c) => match c { Color::Red => 1, Color::Green => 0, Color::Blue => 0 }, R::Ok(_) => 0 });
+    acc = acc + (match g { R::Err(c) => match c { Color::Red => 0, Color::Green => 2, Color::Blue => 0 }, R::Ok(_) => 0 });
+    acc = acc + (match b { R::Err(c) => match c { Color::Red => 0, Color::Green => 0, Color::Blue => 4 }, R::Ok(_) => 0 });
+    acc
+}
+"""
+exit_code = 49
