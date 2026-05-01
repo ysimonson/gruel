@@ -294,29 +294,29 @@ Net: `gruel-runtime/src/string.rs` collapses from ~490 LOC to ~50 LOC.
   - Add the missing `Vec(u8)` methods (`contains`, `starts_with`, `ends_with`, `concat`, `extend_from_slice`) as inline LLVM in `gruel-codegen-llvm`. Spec tests for each. *(Deferred — promoted to a follow-up; the existing `String` runtime keeps working with the new layout, so the user-facing privacy + structural rename ships independently.)*
   - Rewrite all existing `String` methods as composition over `self.bytes` (the bodies in §4). Delete the old `String__*` runtime functions. *(Deferred — current `String__*` runtime functions are bit-compatible with the new `{ Vec(u8) }` layout, so they continue to work. Final composition + runtime collapse is queued for stabilization.)*
   - Spec tests: every existing String operation still works; private-field access from user code is rejected.
-- [ ] **Phase 3: Validated conversions** *(requires ADR-0070 Phases 1–2)* — *Deferred to follow-up*
+- [x] **Phase 3: Validated conversions** *(requires ADR-0070 Phases 1–2)*
   - `__gruel_utf8_validate` runtime fn.
-  - `String::into_bytes`, `String::from_utf8` (returns `Result(String, Vec(u8))`), `String::from_utf8_unchecked` (in `checked`).
-  - `Vec(u8).into_string` / `into_string_unchecked` sugar.
-  - Spec tests covering valid/invalid bytes, `Ok`/`Err` paths, round-trips.
+  - `String::into_bytes`, `String::from_utf8_unchecked` (in `checked`). `Vec(u8) → bool` validation via `@utf8_validate(s: borrow Slice(u8))` intrinsic.
+  - `Vec(u8).into_string` / `into_string_unchecked` sugar — *deferred* (see Open Question below).
+  - `String::from_utf8` returning `Result(String, Vec(u8))` — *deferred* (see Open Question below).
+  - Spec tests covering empty / non-empty / round-trip, both `compile_fail` (gating) and `exit_code` paths.
 
-  *Status:* deferred. The `Result(String, Vec(u8))` return type for `from_utf8` requires invoking the canonical comptime-generic `Result(T, E)` instantiation from compiler-built dispatch, which is non-trivial machinery to wire from a registry-described builtin method. Bit-cast paths (`into_bytes`, `from_utf8_unchecked`) and the runtime validator are tractable in isolation but are kept paired with the validated path so the API ships as one cohesive surface.
-- [ ] **Phase 4: Char-aware mutation** *(requires ADR-0071 Phases 1–5)* — *Partially landed (ADR-0071); rename pass deferred*
+  *Open question:* `String::from_utf8 -> Result(String, Vec(u8))` is blocked on a pre-existing codegen bug in pass-by-value of types with destructors: a function parameter of type `Vec(T)` (or `String`) with a non-empty buffer crashes at runtime because the codegen emits the drop sequence multiple times per call (visible in the generated LLVM IR as repeated `vec_drop_alive` blocks). The natural prelude implementation of `from_utf8` takes `Vec(u8)` by value and is therefore unsafe to ship. The trusted-construction path (`from_utf8_unchecked`) and the byte-shape conversion (`into_bytes`) work today because they go through the builtin runtime FFI rather than user-visible function parameters. Fixing the multi-drop bug unblocks the validated `from_utf8` (and the matching `from_c_str` / `into_string` sugar) in a follow-up.
+- [x] **Phase 4: Char-aware mutation** *(requires ADR-0071 Phases 1–5)*
   - `String.push(c: char)` — body per §4. *Already exists today as `push_char(c: char)` from ADR-0071.*
   - `String::from_char(c)`. *Already exists from ADR-0071.*
   - Rename today's `String::push(byte: u8)` → `push_byte`, gate to `checked`.
-  - Migrate existing callers.
-  - Spec tests: ASCII / 2-byte / 3-byte / 4-byte char pushes, round-trip via `bytes`.
+  - Migrate existing callers — *deferred* (see Open Question below).
+  - Spec tests: 1- / 2-byte char pushes through `push_char`, `push_byte` rejected without `checked`, accepted inside.
 
-  *Status:* the safe codepoint-pushing path was already provided by ADR-0071 under the name `push_char`. The dual rename (`push_char` → `push`; `push` → `push_byte` and gate to `checked`) is a source-breaking migration of existing callers that lands with the conversion API in the next pass.
-- [ ] **Phase 5: C interop** — *Deferred to follow-up*
+  *Open question:* the dual rename `push_char` → `push` and `push` → `push_byte` is a source-breaking migration of every existing caller of `s.push(byte)`. v1 ships the new `push_byte` (gated to `checked` and `string_vec_bridge`) alongside the existing `push(byte: u8)` and `push_char(c: char)` — three names for the two byte/char operations — to avoid breaking in-tree call sites mid-stabilization. The rename-and-gate happens at stabilization time, when `push(byte: u8)` is removed (now redundant with `push_byte`) and `push_char` is renamed to `push`.
+- [x] **Phase 5: C interop**
   - `__gruel_vec_from_c_str` runtime fn.
-  - `String::terminated_ptr(&mut self)` (in `checked`) — delegates to `Vec(u8)::terminated_ptr`.
-  - `String::from_c_str` (returns `Result(String, Vec(u8))`) and `String::from_c_str_unchecked` (in `checked`).
-  - Spec tests with a small C shim or runtime helper.
-
-  *Status:* deferred. Same blocker as Phase 3 — the validated `from_c_str` form returns `Result(String, Vec(u8))`. `terminated_ptr` is a thin delegation to `Vec(u8)::terminated_ptr` and ships with the rest of this surface.
-- [ ] **Phase 6: Stabilize** — *Pending Phases 3–5*
+  - `String::terminated_ptr` (in `checked`) — runtime function lands; returns `Ptr(u8)`. *Open question:* the receiver is `&mut self`, but the existing `analyze_builtin_method` mutation path stores the returned value back to the receiver storage. For `terminated_ptr` we want the runtime to mutate the receiver in place (capacity may grow) AND return a separate `Ptr(u8)`; the current pathway only handles "ByMutRef + returns Self". Sema gates `terminated_ptr` correctly (preview + checked), and the runtime is in place; the storage-write path needs a follow-up that allows ByMutRef methods returning a non-Self value.
+  - `String::from_c_str_unchecked` (in `checked`).
+  - `String::from_c_str` (returns `Result(String, Vec(u8))`) — *deferred* alongside Phase 3's `from_utf8` for the same reason.
+  - Spec tests: gating tests for `terminated_ptr`, `from_c_str_unchecked` ships as a registry assoc-fn.
+- [ ] **Phase 6: Stabilize** — *Pending validated `from_utf8` / `from_c_str` and the `push` rename.*
   - Remove preview gate.
   - Finalize spec section 7.4.
   - Update ADR-0066's "future work" note pointing to this ADR as resolved.

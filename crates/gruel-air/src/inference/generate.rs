@@ -842,6 +842,11 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::NEVER)
                     }
+                    Some(IntrinsicId::Utf8Validate) => {
+                        // ADR-0072: returns bool.
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::BOOL)
+                    }
                     // Other intrinsics (@dbg, @assert, @test_preview_gate, @import)
                     // and any unknown name return Unit. Sema handles the unknown case
                     // with a proper diagnostic; we just pick a coherent type here.

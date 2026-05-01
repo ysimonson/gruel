@@ -515,6 +515,204 @@ pub extern "C" fn String__reserve(
 }
 
 // =============================================================================
+// ADR-0072: String / Vec(u8) bridge — validated and unchecked conversions
+// =============================================================================
+
+/// `Vec(u8)` sret payload, bit-identical to [`StringResult`] (same fields,
+/// same offsets). Both types share a 24-byte `{ptr, len, cap}` shape; the
+/// distinction at this layer is purely nominal.
+#[repr(C)]
+pub struct VecU8Result {
+    pub ptr: *mut u8,
+    pub len: u64,
+    pub cap: u64,
+}
+
+const _: () = {
+    assert!(core::mem::size_of::<VecU8Result>() == 24);
+    assert!(core::mem::align_of::<VecU8Result>() == 8);
+};
+
+/// ADR-0072: `String::into_bytes` — consume a `String` and yield the
+/// underlying `Vec(u8)`. The two share a layout, so this is a pass-through.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__into_bytes(out: *mut VecU8Result, ptr: *mut u8, len: u64, cap: u64) {
+    unsafe {
+        (*out).ptr = ptr;
+        (*out).len = len;
+        (*out).cap = cap;
+    }
+}
+
+/// ADR-0072: `String::from_utf8_unchecked` — wrap a `Vec(u8)` into a
+/// `String` without validation. Caller asserts the UTF-8 invariant.
+/// Identical-layout pass-through.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__from_utf8_unchecked(
+    out: *mut StringResult,
+    ptr: *mut u8,
+    len: u64,
+    cap: u64,
+) {
+    unsafe {
+        (*out).ptr = ptr;
+        (*out).len = len;
+        (*out).cap = cap;
+    }
+}
+
+/// ADR-0072: validate that `[ptr..ptr+len]` is a well-formed UTF-8 byte
+/// sequence. Returns `1` if valid, `0` otherwise. Uses raw pointer reads
+/// to avoid the bounds-check panics that slice indexing would emit
+/// (this crate is `no_std` with no unwinder).
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_utf8_validate(ptr: *const u8, len: u64) -> u8 {
+    if len == 0 {
+        return 1;
+    }
+    let len_us = len as usize;
+    let mut i = 0usize;
+    while i < len_us {
+        let b = unsafe { *ptr.add(i) };
+        let n = if b < 0x80 {
+            1usize
+        } else if b & 0xE0 == 0xC0 {
+            if b < 0xC2 {
+                return 0; // overlong 2-byte
+            }
+            2usize
+        } else if b & 0xF0 == 0xE0 {
+            3usize
+        } else if b & 0xF8 == 0xF0 {
+            if b > 0xF4 {
+                return 0; // codepoint > 0x10FFFF
+            }
+            4usize
+        } else {
+            return 0;
+        };
+        if i + n > len_us {
+            return 0;
+        }
+        // Continuation bytes must be 10xxxxxx.
+        let mut k = 1usize;
+        while k < n {
+            let c = unsafe { *ptr.add(i + k) };
+            if c & 0xC0 != 0x80 {
+                return 0;
+            }
+            k += 1;
+        }
+        if n == 3 {
+            let b1 = unsafe { *ptr.add(i + 1) };
+            let b2 = unsafe { *ptr.add(i + 2) };
+            let cp = ((b as u32 & 0x0F) << 12) | ((b1 as u32 & 0x3F) << 6) | (b2 as u32 & 0x3F);
+            if cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF) {
+                return 0;
+            }
+        } else if n == 4 {
+            let b1 = unsafe { *ptr.add(i + 1) };
+            let b2 = unsafe { *ptr.add(i + 2) };
+            let b3 = unsafe { *ptr.add(i + 3) };
+            let cp = ((b as u32 & 0x07) << 18)
+                | ((b1 as u32 & 0x3F) << 12)
+                | ((b2 as u32 & 0x3F) << 6)
+                | (b3 as u32 & 0x3F);
+            if cp < 0x10000 || cp > 0x10FFFF {
+                return 0;
+            }
+        }
+        i += n;
+    }
+    1
+}
+
+/// ADR-0072: ingest a NUL-terminated C string into a fresh `Vec(u8)` with
+/// strlen + alloc + memcpy. Used by `String::from_c_str(_unchecked)`.
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_vec_from_c_str(out: *mut VecU8Result, p: *const u8) {
+    if p.is_null() {
+        unsafe {
+            (*out).ptr = core::ptr::null_mut();
+            (*out).len = 0;
+            (*out).cap = 0;
+        }
+        return;
+    }
+    // strlen
+    let mut len: u64 = 0;
+    unsafe {
+        while *p.add(len as usize) != 0 {
+            len += 1;
+        }
+    }
+    let cap = len.max(STRING_MIN_CAPACITY);
+    let new_ptr = if cap == 0 {
+        core::ptr::null_mut()
+    } else {
+        heap::alloc(cap, 1)
+    };
+    if !new_ptr.is_null() && len > 0 {
+        unsafe {
+            core::ptr::copy_nonoverlapping(p, new_ptr, len as usize);
+        }
+    }
+    unsafe {
+        (*out).ptr = new_ptr;
+        (*out).len = len;
+        (*out).cap = cap;
+    }
+}
+
+/// ADR-0072: `String::from_c_str_unchecked` — copy `strlen(p)` bytes
+/// into a heap buffer and reinterpret as `String`. Caller asserts UTF-8.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__from_c_str_unchecked(out: *mut StringResult, p: *const u8) {
+    let mut v = VecU8Result {
+        ptr: core::ptr::null_mut(),
+        len: 0,
+        cap: 0,
+    };
+    __gruel_vec_from_c_str(&mut v as *mut VecU8Result, p);
+    unsafe {
+        (*out).ptr = v.ptr;
+        (*out).len = v.len;
+        (*out).cap = v.cap;
+    }
+}
+
+/// ADR-0072: `String::terminated_ptr` — ensure `cap > len`, write a NUL
+/// byte at `ptr[len]`, and return the buffer pointer.  Modifies `*out`
+/// (the new String fields) and returns the buffer pointer suitable for
+/// passing to a C function expecting `const char *`.
+///
+/// Mirrors `Vec(u8)::terminated_ptr(0u8)` semantics. The sentinel sits
+/// outside the live `[0..len]` range and is overwritten by the next
+/// mutating call.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "C" fn String__terminated_ptr(
+    out: *mut StringResult,
+    ptr: *mut u8,
+    len: u64,
+    cap: u64,
+) -> *mut u8 {
+    let (new_ptr, new_cap) = string_ensure_capacity(ptr, len, cap, 1);
+    unsafe {
+        if !new_ptr.is_null() {
+            *new_ptr.add(len as usize) = 0;
+        }
+        (*out).ptr = new_ptr;
+        (*out).len = len;
+        (*out).cap = new_cap;
+    }
+    new_ptr
+}
+
+// =============================================================================
 // Internal Helper
 // =============================================================================
 

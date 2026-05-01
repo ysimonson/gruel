@@ -108,6 +108,9 @@ pub enum IntrinsicId {
     VecDispose,
     PartsToVec,
 
+    // ---- ADR-0072 String / Vec(u8) bridge ----
+    Utf8Validate,
+
     // ---- Preview / test infra ----
     TestPreviewGate,
 }
@@ -980,6 +983,22 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         description: "`@test_preview_gate()` exists solely to verify that the preview-feature gating mechanism works. Always gated behind `--preview test_infra`.",
         examples: &[],
     },
+    IntrinsicDef {
+        id: IntrinsicId::Utf8Validate,
+        name: "utf8_validate",
+        kind: IntrinsicKind::Expr,
+        category: Category::Meta,
+        requires_unchecked: false,
+        // Implementation-detail intrinsic invoked by the prelude
+        // `String__from_utf8` body. The user-visible gate is on
+        // `String::from_utf8` itself (ADR-0072), so this stays ungated to
+        // allow eager prelude analysis without `--preview string_vec_bridge`.
+        preview: None,
+        runtime_fn: Some("__gruel_utf8_validate"),
+        summary: "Check whether a byte slice is well-formed UTF-8.",
+        description: "`@utf8_validate(s: borrow Slice(u8)) -> bool` returns `true` iff the bytes in `s` form a valid UTF-8 sequence. Used by `String::from_utf8` (ADR-0072).",
+        examples: &["@utf8_validate(&v[..])"],
+    },
 ];
 
 // ============================================================================
@@ -1504,7 +1523,8 @@ mod tests {
                 | IntrinsicId::VecRepeat
                 | IntrinsicId::VecDispose
                 | IntrinsicId::PartsToVec
-                | IntrinsicId::TestPreviewGate => {}
+                | IntrinsicId::TestPreviewGate
+                | IntrinsicId::Utf8Validate => {}
             }
         }
     }

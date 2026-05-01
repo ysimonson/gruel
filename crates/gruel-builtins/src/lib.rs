@@ -219,6 +219,10 @@ pub enum BuiltinParamType {
     Char,
     /// The built-in type itself (e.g., String for String methods)
     SelfType,
+    /// Reference to another built-in parameterized type by source-form
+    /// name (e.g. `"Vec(u8)"`, `"Ptr(u8)"`). Sema resolves the string
+    /// to the corresponding `Type`. Per ADR-0072.
+    BuiltinType(&'static str),
 }
 
 /// Return type of a built-in method.
@@ -236,6 +240,9 @@ pub enum BuiltinReturnType {
     Bool,
     /// Returns the built-in type itself
     SelfType,
+    /// Reference to another built-in parameterized type by source-form
+    /// name (e.g. `"Vec(u8)"`, `"Ptr(u8)"`). Per ADR-0072.
+    BuiltinType(&'static str),
 }
 
 /// An operator overload for a built-in type.
@@ -382,6 +389,30 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__from_char",
         },
+        // ADR-0072: zero-cost trusted construction from a Vec(u8). The
+        // memory layout matches String exactly, so the runtime is a memcpy.
+        // The `checked` requirement is enforced at the sema layer because
+        // it's preview-gated and the registry has no per-call gate.
+        BuiltinAssociatedFn {
+            name: "from_utf8_unchecked",
+            params: &[BuiltinParam {
+                name: "v",
+                ty: BuiltinParamType::BuiltinType("Vec(u8)"),
+            }],
+            return_ty: BuiltinReturnType::SelfType,
+            runtime_fn: "String__from_utf8_unchecked",
+        },
+        // ADR-0072: ingest a NUL-terminated C string and return a String,
+        // skipping UTF-8 validation. Caller-asserted invariant.
+        BuiltinAssociatedFn {
+            name: "from_c_str_unchecked",
+            params: &[BuiltinParam {
+                name: "p",
+                ty: BuiltinParamType::BuiltinType("Ptr(u8)"),
+            }],
+            return_ty: BuiltinReturnType::SelfType,
+            runtime_fn: "String__from_c_str_unchecked",
+        },
     ],
     methods: &[
         // Query methods (take &self)
@@ -501,6 +532,55 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__reserve",
+        },
+        // ADR-0072: byte-count accessor (synonym for `len`). The split
+        // naming leaves room for future `chars_len()` once codepoint
+        // iteration ships.
+        BuiltinMethod {
+            name: "bytes_len",
+            receiver_mode: ReceiverMode::ByRef,
+            params: &[],
+            return_ty: BuiltinReturnType::Usize,
+            runtime_fn: "String__len",
+        },
+        BuiltinMethod {
+            name: "bytes_capacity",
+            receiver_mode: ReceiverMode::ByRef,
+            params: &[],
+            return_ty: BuiltinReturnType::Usize,
+            runtime_fn: "String__capacity",
+        },
+        // ADR-0072: consume the String, return its underlying Vec(u8).
+        // O(1); runtime is a memcpy because the layouts are identical.
+        BuiltinMethod {
+            name: "into_bytes",
+            receiver_mode: ReceiverMode::ByValue,
+            params: &[],
+            return_ty: BuiltinReturnType::BuiltinType("Vec(u8)"),
+            runtime_fn: "String__into_bytes",
+        },
+        // ADR-0072: niche escape hatch — append a single raw byte. Caller
+        // assumes the UTF-8 invariant burden. Sema gates this method to
+        // `checked` blocks separately (see analyze_builtin_method).
+        BuiltinMethod {
+            name: "push_byte",
+            receiver_mode: ReceiverMode::ByMutRef,
+            params: &[BuiltinParam {
+                name: "byte",
+                ty: BuiltinParamType::U8,
+            }],
+            return_ty: BuiltinReturnType::SelfType,
+            runtime_fn: "String__push",
+        },
+        // ADR-0072: NUL-terminated handoff for C interop. Delegates to
+        // Vec(u8)::terminated_ptr with sentinel 0u8. `checked` block only
+        // (gated by sema; preview-feature flag string_vec_bridge).
+        BuiltinMethod {
+            name: "terminated_ptr",
+            receiver_mode: ReceiverMode::ByMutRef,
+            params: &[],
+            return_ty: BuiltinReturnType::BuiltinType("Ptr(u8)"),
+            runtime_fn: "String__terminated_ptr",
         },
     ],
 };
@@ -816,6 +896,7 @@ impl BuiltinParamType {
             BuiltinParamType::Bool => "bool".to_string(),
             BuiltinParamType::Char => "char".to_string(),
             BuiltinParamType::SelfType => self_ty.to_string(),
+            BuiltinParamType::BuiltinType(name) => name.to_string(),
         }
     }
 }
@@ -829,6 +910,7 @@ impl BuiltinReturnType {
             BuiltinReturnType::U8 => "u8".to_string(),
             BuiltinReturnType::Bool => "bool".to_string(),
             BuiltinReturnType::SelfType => self_ty.to_string(),
+            BuiltinReturnType::BuiltinType(name) => name.to_string(),
         }
     }
 }

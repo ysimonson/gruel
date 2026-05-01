@@ -71,6 +71,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@vec_dispose` | expr | Vectors | — | — | Free a Vec's heap buffer; panic if `len != 0`. |
 | `@parts_to_vec` | expr | Vectors | — | yes | Build a Vec from raw parts. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
+| `@utf8_validate` | expr | Preview / Meta | — | — | Check whether a byte slice is well-formed UTF-8. |
 
 ## Debug & Diagnostics
 
@@ -504,4 +505,16 @@ for i in @range(0, 10) { ... }
 `@test_preview_gate()` exists solely to verify that the preview-feature gating mechanism works. Always gated behind `--preview test_infra`.
 
 - **Preview gate:** `--preview test_infra` (ADR-0005)
+
+### `@utf8_validate`
+
+`@utf8_validate(s: borrow Slice(u8)) -> bool` returns `true` iff the bytes in `s` form a valid UTF-8 sequence. Used by `String::from_utf8` (ADR-0072).
+
+- **Runtime symbol:** `__gruel_utf8_validate`
+
+**Examples:**
+
+```gruel
+@utf8_validate(&v[..])
+```
 

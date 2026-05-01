@@ -4064,9 +4064,56 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
             IntrinsicId::PartsToVec => Some(self.translate_parts_to_vec(args, ty)),
 
+            // ADR-0072: @utf8_validate(s) — call __gruel_utf8_validate(ptr, len) -> u8,
+            // convert to bool.
+            IntrinsicId::Utf8Validate => Some(self.translate_utf8_validate(args)),
+
             // ---- Fallback: return zero value for unimplemented intrinsics ----
             _ => gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero()),
         }
+    }
+
+    /// Codegen for `@utf8_validate(s: borrow Slice(u8)) -> bool` (ADR-0072).
+    /// Extracts (ptr, len) from the slice and calls
+    /// `__gruel_utf8_validate(ptr, len) -> u8`, then truncates to i1.
+    fn translate_utf8_validate(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
+        let slice_val = self.get_value(args[0]).into_struct_value();
+        let ptr = self
+            .builder
+            .build_extract_value(slice_val, 0, "u8v_ptr")
+            .unwrap()
+            .into_pointer_value();
+        let len = self
+            .builder
+            .build_extract_value(slice_val, 1, "u8v_len")
+            .unwrap()
+            .into_int_value();
+        let i64_ty = self.ctx.i64_type();
+        let i8_ty = self.ctx.i8_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let fn_ty = i8_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+        let callee = self
+            .module
+            .get_function("__gruel_utf8_validate")
+            .unwrap_or_else(|| {
+                self.module
+                    .add_function("__gruel_utf8_validate", fn_ty, None)
+            });
+        let result = self
+            .builder
+            .build_call(callee, &[ptr.into(), len.into()], "utf8_valid")
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+        // u8 → bool (i1): nonzero is true.
+        let zero = i8_ty.const_zero();
+        let cmp = self
+            .builder
+            .build_int_compare(IntPredicate::NE, result, zero, "u8v_b")
+            .unwrap();
+        cmp.into()
     }
 
     /// Element type from a `Vec(T)` value.

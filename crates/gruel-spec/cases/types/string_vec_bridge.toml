@@ -44,14 +44,16 @@ exit_code = 0
 # ---- 7.4:3 method surface: bytes_len / bytes_capacity ----
 
 [[case]]
-name = "bytes_len_after_push"
+name = "bytes_len_after_push_char"
 spec = ["7.4:3"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
-    s.push('A');
-    s.bytes_len() as i32
+    s.push_char('A');
+    let n: i32 = @cast(s.bytes_len());
+    n
 }
 """
 exit_code = 1
@@ -60,10 +62,13 @@ exit_code = 1
 name = "bytes_capacity_at_least_reserved"
 spec = ["7.4:3"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
-    let mut s = String::with_capacity(16);
-    if s.bytes_capacity() >= 16usize { 0 } else { 1 }
+    let n: usize = 16;
+    let s = String::with_capacity(n);
+    let cap = s.bytes_capacity();
+    if cap >= n { 0 } else { 1 }
 }
 """
 exit_code = 0
@@ -77,12 +82,13 @@ preview = "string_vec_bridge"
 source = """
 fn main() -> i32 {
     let mut a: Vec(u8) = Vec(u8)::new();
-    a.push(1u8);
+    a.push(1);
     let mut b: Vec(u8) = Vec(u8)::new();
-    b.push(2u8);
-    b.push(3u8);
+    b.push(2);
+    b.push(3);
     a.extend_from_slice(&b[..]);
-    a.len() as i32
+    let n: i32 = @cast(a.len());
+    n
 }
 """
 exit_code = 3
@@ -93,11 +99,13 @@ exit_code = 3
 name = "into_bytes_round_trip"
 spec = ["7.4:5"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = String::from_char('Z');
     let v: Vec(u8) = s.into_bytes();
-    v.len() as i32
+    let n: i32 = @cast(v.len());
+    n
 }
 """
 exit_code = 1
@@ -112,8 +120,12 @@ source = """
 fn main() -> i32 {
     let s = String::from_char('A');
     let v: Vec(u8) = s.into_bytes();
-    match String::from_utf8(v) {
-        Result::Ok(s2) => s2.bytes_len() as i32,
+    let r = String::from_utf8(v);
+    match r {
+        Result::Ok(s2) => {
+            let n: i32 = @cast(s2.bytes_len());
+            n
+        },
         Result::Err(_) => -1,
     }
 }
@@ -127,11 +139,10 @@ preview = "string_vec_bridge"
 source = """
 fn main() -> i32 {
     let mut v: Vec(u8) = Vec(u8)::with_capacity(2);
-    checked {
-        v.push(0xFFu8);
-        v.push(0xFEu8);
-    }
-    match String::from_utf8(v) {
+    v.push(255);
+    v.push(254);
+    let r = String::from_utf8(v);
+    match r {
         Result::Ok(_) => 1,
         Result::Err(_) => 0,
     }
@@ -145,27 +156,31 @@ exit_code = 0
 name = "from_utf8_unchecked_basic"
 spec = ["7.4:7"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s0 = String::from_char('Q');
     let v: Vec(u8) = s0.into_bytes();
-    let s = checked { String::from_utf8_unchecked(v) };
-    s.bytes_len() as i32
+    let s1 = checked { String::from_utf8_unchecked(v) };
+    let n: i32 = @cast(s1.bytes_len());
+    n
 }
 """
 exit_code = 1
 
-# ---- 7.4:8 push (char) and push_byte ----
+# ---- 7.4:8 push_char and push_byte ----
 
 [[case]]
 name = "push_char_multi_byte"
 spec = ["7.4:8"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
-    s.push('é');
-    s.bytes_len() as i32
+    s.push_char('é');
+    let n: i32 = @cast(s.bytes_len());
+    n
 }
 """
 exit_code = 2
@@ -174,10 +189,12 @@ exit_code = 2
 name = "push_byte_requires_checked"
 spec = ["7.4:8"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
-    s.push_byte(0x41u8);
+    let b: u8 = 65;
+    s.push_byte(b);
     0
 }
 """
@@ -188,13 +205,17 @@ error_contains = "checked"
 name = "push_byte_in_checked_block"
 spec = ["7.4:8"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
-    checked {
-        s.push_byte(0x41u8);
-    }
-    s.bytes_len() as i32
+    let b: u8 = 65;
+    let _ = checked {
+        s.push_byte(b);
+        0
+    };
+    let n: i32 = @cast(s.bytes_len());
+    n
 }
 """
 exit_code = 1
@@ -205,6 +226,7 @@ exit_code = 1
 name = "terminated_ptr_requires_checked"
 spec = ["7.4:9"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
@@ -222,10 +244,12 @@ preview = "string_vec_bridge"
 source = """
 fn main() -> i32 {
     let mut s = String::from_char('A');
-    checked {
+    let _ = checked {
         let _p = s.terminated_ptr();
-    }
-    s.bytes_len() as i32
+        0
+    };
+    let n: i32 = @cast(s.bytes_len());
+    n
 }
 """
 exit_code = 1

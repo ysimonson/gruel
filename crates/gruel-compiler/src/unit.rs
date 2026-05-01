@@ -229,6 +229,7 @@ fn char__encode_utf8(c: char, buf: MutRef([u8; 4])) -> usize {
         4
     }
 }
+
 "#;
 
 /// Result of parsing a single file within a compilation unit.

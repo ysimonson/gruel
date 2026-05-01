@@ -10,7 +10,7 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 
 | Name | Ownership | Methods | Associated fns | Operators |
 |---|---|---|---|---|
-| `String` | affine | 13 | 3 | `==`, `!=`, `<`, `<=`, `>`, `>=` |
+| `String` | affine | 18 | 5 | `==`, `!=`, `<`, `<=`, `>`, `>=` |
 
 ### Type Constructors
 
@@ -61,6 +61,8 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 - `String::new() -> String` — runtime: `String__new`
 - `String::with_capacity(capacity: usize) -> String` — runtime: `String__with_capacity`
 - `String::from_char(c: char) -> String` — runtime: `String__from_char`
+- `String::from_utf8_unchecked(v: Vec(u8)) -> String` — runtime: `String__from_utf8_unchecked`
+- `String::from_c_str_unchecked(p: Ptr(u8)) -> String` — runtime: `String__from_c_str_unchecked`
 
 **Methods:**
 
@@ -77,6 +79,11 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 - `fn push_char(&mut self, c: char) -> String` — runtime: `String__push_char`
 - `fn clear(&mut self) -> String` — runtime: `String__clear`
 - `fn reserve(&mut self, additional: usize) -> String` — runtime: `String__reserve`
+- `fn bytes_len(&self) -> usize` — runtime: `String__len`
+- `fn bytes_capacity(&self) -> usize` — runtime: `String__capacity`
+- `fn into_bytes(self) -> Vec(u8)` — runtime: `String__into_bytes`
+- `fn push_byte(&mut self, byte: u8) -> String` — runtime: `String__push`
+- `fn terminated_ptr(&mut self) -> Ptr(u8)` — runtime: `String__terminated_ptr`
 
 ## Type Constructors
 

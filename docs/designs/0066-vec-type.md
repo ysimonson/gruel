@@ -387,7 +387,7 @@ Same pattern as ADR-0061 / 0062 / 0063 / 0064:
 
 ## Future Work
 
-- **`String` migration.** A separate ADR can redefine `String` as a thin wrapper over `Vec(u8)` with a UTF-8 invariant, removing the `String__*` runtime functions and unifying the byte-string story. The current ADR is deliberately compatible.
+- **`String` migration.** ~~A separate ADR can redefine `String` as a thin wrapper over `Vec(u8)` with a UTF-8 invariant, removing the `String__*` runtime functions and unifying the byte-string story. The current ADR is deliberately compatible.~~ Resolved in [ADR-0072](0072-string-vec-u8-relationship.md): `String` is a synthetic newtype `{ bytes: Vec(u8) }` with a private inner field, structural conversions, char-aware mutation, and C-string interop. The full collapse of the `String__*` runtime functions onto Vec(u8) operations is staged behind that ADR's stabilization phase.
 - **Allocator parameterization.** `Vec(T, A)` once an `Allocator` interface stabilizes.
 - **Rich method surface.** `extend`, `insert`, `remove`, `swap_remove`, `truncate`, `drain`, `dedup`, `sort`, `from_iter`, `to_vec` (slice → Vec), `into_iter` (consuming iteration). Each is a small registry add.
 - **More `Option(T)`-returning accessors.** `get(i) -> Option(T)`, `first() -> Option(T)`, `last() -> Option(T)`, `find(pred) -> Option(T)`. Build on the same `Option(T)` from ADR-0065 that `pop` already uses.

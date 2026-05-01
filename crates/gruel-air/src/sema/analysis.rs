@@ -4464,7 +4464,52 @@ impl<'a> Sema<'a> {
             IntrinsicId::VecLiteral => self.analyze_vec_literal_intrinsic(air, &args, span, ctx),
             IntrinsicId::VecRepeat => self.analyze_vec_repeat_intrinsic(air, &args, span, ctx),
             IntrinsicId::PartsToVec => self.analyze_parts_to_vec_intrinsic(air, &args, span, ctx),
+            // ADR-0072: validate UTF-8 of a borrowed Slice(u8). Returns bool.
+            IntrinsicId::Utf8Validate => {
+                self.analyze_utf8_validate_intrinsic(air, &args, span, ctx)
+            }
         }
+    }
+
+    /// Analyze `@utf8_validate(s: borrow Slice(u8)) -> bool` (ADR-0072).
+    fn analyze_utf8_validate_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: 1,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+        let s = self.analyze_inst(air, args[0].value, ctx)?;
+        // Accept either `Slice(u8)` or `&v[..]` (already a Slice(u8)).
+        let is_slice_u8 = matches!(s.ty.kind(), TypeKind::Slice(_) | TypeKind::MutSlice(_));
+        if !is_slice_u8 && !s.ty.is_error() {
+            return Err(CompileError::type_mismatch(
+                "Slice(u8)".to_string(),
+                self.format_type_name(s.ty),
+                span,
+            ));
+        }
+        let args_start = air.add_extra(&[s.air_ref.as_u32()]);
+        let name = self.interner.get_or_intern_static("utf8_validate");
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name,
+                args_start,
+                args_len: 1,
+            },
+            ty: Type::BOOL,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, Type::BOOL))
     }
 
     // Helper methods for intrinsic analysis (delegated from analyze_intrinsic_impl)
@@ -8639,6 +8684,9 @@ impl<'a> Sema<'a> {
                 )
             })?;
 
+        // ADR-0072: enforce preview-feature and `checked`-block gates.
+        self.check_string_vec_bridge_method_gates(builtin_def.name, function_name, ctx, span)?;
+
         // Check argument count
         if args.len() != assoc_fn.params.len() {
             return Err(CompileError::new(
@@ -8663,6 +8711,7 @@ impl<'a> Sema<'a> {
                 BuiltinParamType::Bool => Type::BOOL,
                 BuiltinParamType::Char => Type::CHAR,
                 BuiltinParamType::SelfType => Type::new_struct(struct_id),
+                BuiltinParamType::BuiltinType(name) => self.resolve_builtin_type_name(name),
             };
 
             // Type check
@@ -8686,6 +8735,7 @@ impl<'a> Sema<'a> {
             BuiltinReturnType::U8 => Type::U8,
             BuiltinReturnType::Bool => Type::BOOL,
             BuiltinReturnType::SelfType => self.builtin_air_type(struct_id),
+            BuiltinReturnType::BuiltinType(name) => self.resolve_builtin_type_name(name),
         };
 
         // Generate runtime function call
@@ -8741,6 +8791,16 @@ impl<'a> Sema<'a> {
                 )
             })?;
 
+        // ADR-0072: enforce preview-feature and `checked`-block gating for the
+        // String <-> Vec(u8) bridge surface. The registry has no per-method
+        // gate today, so this is applied based on the method name.
+        self.check_string_vec_bridge_method_gates(
+            method_ctx.builtin_def.name,
+            method_ctx.method_name,
+            ctx,
+            method_ctx.span,
+        )?;
+
         // Handle receiver mode (borrow vs mutation vs consume)
         match method.receiver_mode {
             ReceiverMode::ByRef => {
@@ -8789,6 +8849,7 @@ impl<'a> Sema<'a> {
                 BuiltinParamType::Bool => Type::BOOL,
                 BuiltinParamType::Char => Type::CHAR,
                 BuiltinParamType::SelfType => Type::new_struct(method_ctx.struct_id),
+                BuiltinParamType::BuiltinType(name) => self.resolve_builtin_type_name(name),
             };
 
             // Type check
@@ -8816,6 +8877,7 @@ impl<'a> Sema<'a> {
             BuiltinReturnType::U8 => Type::U8,
             BuiltinReturnType::Bool => Type::BOOL,
             BuiltinReturnType::SelfType => self.builtin_air_type(method_ctx.struct_id),
+            BuiltinReturnType::BuiltinType(name) => self.resolve_builtin_type_name(name),
         };
 
         // Generate runtime function call

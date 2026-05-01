@@ -272,17 +272,89 @@ impl<'a> Sema<'a> {
             BuiltinFieldType::U64 => Type::U64,
             BuiltinFieldType::U8 => Type::U8,
             BuiltinFieldType::Bool => Type::BOOL,
-            BuiltinFieldType::BuiltinType(name) => match name {
-                "Vec(u8)" => {
-                    let vec_id = self.type_pool.intern_vec_from_type(Type::U8);
-                    Type::new_vec(vec_id)
-                }
-                other => panic!(
-                    "BuiltinFieldType::BuiltinType({:?}): unsupported builtin type reference; \
-                     extend `Sema::resolve_builtin_field_type` to support it",
-                    other
-                ),
-            },
+            BuiltinFieldType::BuiltinType(name) => self.resolve_builtin_type_name(name),
+        }
+    }
+
+    /// ADR-0072: enforce preview-feature and `checked`-block gating for the
+    /// String / Vec(u8) bridge surface. Hardcoded by name because the
+    /// builtin registry has no per-method gate today; if more synthetic
+    /// surfaces want gates the right move is to add fields to
+    /// `BuiltinMethod` / `BuiltinAssociatedFn` rather than extending this
+    /// match.
+    pub(crate) fn check_string_vec_bridge_method_gates(
+        &self,
+        type_name: &str,
+        method_name: &str,
+        ctx: &super::context::AnalysisContext,
+        span: gruel_util::Span,
+    ) -> gruel_util::CompileResult<()> {
+        if type_name != "String" {
+            return Ok(());
+        }
+        // Skip preview gating for the synthetic prelude — its body uses
+        // these methods to implement `String::from_utf8` etc., and is
+        // analyzed eagerly before the user's `--preview` flags can apply.
+        // The user-facing `String::from_utf8` call still goes through
+        // its dispatcher which performs the gate check at the call site.
+        if span.file_id == gruel_util::FileId::PRELUDE {
+            return Ok(());
+        }
+        // Methods/assoc-fns gated on the `string_vec_bridge` preview feature.
+        // Pre-existing String surface (len/capacity/is_empty/clone/contains/
+        // starts_with/ends_with/concat/push_str/push/clear/reserve/new/
+        // with_capacity/from_char/push_char) is unchanged.
+        let preview_gated = matches!(
+            method_name,
+            "into_bytes"
+                | "bytes_len"
+                | "bytes_capacity"
+                | "from_utf8_unchecked"
+                | "from_c_str_unchecked"
+                | "push_byte"
+                | "terminated_ptr"
+        );
+        if preview_gated {
+            self.require_preview(
+                gruel_util::PreviewFeature::StringVecBridge,
+                method_name,
+                span,
+            )?;
+        }
+        // Subset that additionally requires a `checked` block (caller
+        // assumes UTF-8 invariant or raw-pointer responsibility).
+        let checked_gated = matches!(
+            method_name,
+            "from_utf8_unchecked" | "from_c_str_unchecked" | "push_byte" | "terminated_ptr"
+        );
+        if checked_gated {
+            Self::require_checked_for_intrinsic(ctx, method_name, span)?;
+        }
+        Ok(())
+    }
+
+    /// Resolve a source-form built-in type name (e.g. `"Vec(u8)"`) to its
+    /// concrete `Type`. Used by `BuiltinFieldType::BuiltinType`,
+    /// `BuiltinParamType::BuiltinType`, and `BuiltinReturnType::BuiltinType`.
+    pub(crate) fn resolve_builtin_type_name(&mut self, name: &str) -> Type {
+        match name {
+            "Vec(u8)" => {
+                let vec_id = self.type_pool.intern_vec_from_type(Type::U8);
+                Type::new_vec(vec_id)
+            }
+            "Ptr(u8)" => {
+                let id = self.type_pool.intern_ptr_const_from_type(Type::U8);
+                Type::new_ptr_const(id)
+            }
+            "MutPtr(u8)" => {
+                let id = self.type_pool.intern_ptr_mut_from_type(Type::U8);
+                Type::new_ptr_mut(id)
+            }
+            other => panic!(
+                "unsupported builtin type reference {:?}; \
+                 extend `Sema::resolve_builtin_type_name` to support it",
+                other
+            ),
         }
     }
 }
