@@ -331,10 +331,6 @@ struct TypeInternPoolInner {
     /// Keyed by `Type` (a u32 index); since types are interned, the layout is
     /// a pure function of the key.
     layout_cache: HashMap<Type, Layout>,
-
-    /// Whether the `--preview enum-niches` flag is enabled (ADR-0069).
-    /// Affects layout computation for Option-shaped enums.
-    enum_niches_preview: bool,
 }
 
 impl TypeInternPool {
@@ -354,26 +350,7 @@ impl TypeInternPool {
                 struct_by_name: HashMap::default(),
                 enum_by_name: HashMap::default(),
                 layout_cache: HashMap::default(),
-                enum_niches_preview: false,
             }),
-        }
-    }
-
-    /// Whether the `--preview enum-niches` flag is enabled (ADR-0069).
-    pub fn enum_niches_preview_enabled(&self) -> bool {
-        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
-        inner.enum_niches_preview
-    }
-
-    /// Enable or disable the `enum-niches` preview (ADR-0069).
-    ///
-    /// Toggling the flag clears the layout cache, since cached layouts may
-    /// reflect the previous setting.
-    pub fn set_enum_niches_preview(&self, enabled: bool) {
-        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
-        if inner.enum_niches_preview != enabled {
-            inner.enum_niches_preview = enabled;
-            inner.layout_cache.clear();
         }
     }
 
@@ -1586,7 +1563,6 @@ impl Clone for TypeInternPool {
                 struct_by_name: inner.struct_by_name.clone(),
                 enum_by_name: inner.enum_by_name.clone(),
                 layout_cache: inner.layout_cache.clone(),
-                enum_niches_preview: inner.enum_niches_preview,
             }),
         }
     }

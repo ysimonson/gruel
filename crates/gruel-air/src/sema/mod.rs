@@ -205,10 +205,6 @@ impl<'a> Sema<'a> {
         preview_features: PreviewFeatures,
     ) -> Self {
         let type_pool = TypeInternPool::new();
-        // Wire the enum-niches preview into the layout cache (ADR-0069).
-        type_pool.set_enum_niches_preview(
-            preview_features.contains(&gruel_util::PreviewFeature::EnumNiches),
-        );
         Self {
             rir,
             interner,

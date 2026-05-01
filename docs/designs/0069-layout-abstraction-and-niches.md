@@ -1,12 +1,12 @@
 ---
 id: 0069
 title: Layout Abstraction and Niche-Filling for Enums
-status: proposal
+status: implemented
 tags: [layout, types, optimization, codegen, internals]
 feature-flag: enum-niches
 created: 2026-05-01
-accepted:
-implemented:
+accepted: 2026-05-01
+implemented: 2026-05-01
 spec-sections: ["3.8"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -171,7 +171,7 @@ Each phase is independently committable and testable.
 
 - [x] **Phase 8: Spec.** Add a section to `docs/spec/src/03-types/` documenting layout guarantees: types have a defined size/alignment, but specific representations (presence/absence of a discriminant, where it lives) are implementation choices except where explicitly guaranteed (e.g., `repr(C)` if/when it lands). Note that pattern matching, equality, and field access are the only stable observables; raw bit pattern inspection of an enum is not. Update the generated builtins reference if `Option`'s documented size table needs revisions.
 
-- [ ] **Phase 9: Stabilize.** Remove the `enum-niches` preview gate, drop `PreviewFeature::EnumNiches`, update ADR status to `implemented`. Confirm full `make test` passes without `--preview`.
+- [x] **Phase 9: Stabilize.** Remove the `enum-niches` preview gate, drop `PreviewFeature::EnumNiches`, update ADR status to `implemented`. Confirm full `make test` passes without `--preview`.
 
 ### Preview gating
 

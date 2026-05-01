@@ -214,9 +214,7 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
 
         TypeKind::Enum(id) => {
             let def = pool.enum_def(id);
-            if pool.enum_niches_preview_enabled()
-                && let Some(niche_layout) = try_niche_encoded_enum_layout(pool, &def)
-            {
+            if let Some(niche_layout) = try_niche_encoded_enum_layout(pool, &def) {
                 return niche_layout;
             }
             enum_layout_separate(pool, &def)
@@ -499,23 +497,8 @@ mod tests {
     }
 
     #[test]
-    fn option_bool_separate_layout_when_niches_disabled() {
+    fn option_bool_collapses_to_one_byte() {
         let p = fresh_pool();
-        let ty = make_option_bool(&p, "OptB1");
-        let layout = layout_of(&p, ty);
-        // Without the preview, layout is the standard tagged union: { u8 disc, [1 x i8] payload }.
-        assert_eq!(layout.size, 2);
-        assert_eq!(layout.align, 1);
-        match layout.discriminant_strategy().unwrap() {
-            DiscriminantStrategy::Separate { .. } => {}
-            other => panic!("expected Separate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn option_bool_collapses_to_one_byte_with_niches_preview() {
-        let p = fresh_pool();
-        p.set_enum_niches_preview(true);
         let ty = make_option_bool(&p, "OptB2");
         let layout = layout_of(&p, ty);
         assert_eq!(layout.size, 1, "Option(bool) should collapse to 1 byte");
@@ -551,7 +534,6 @@ mod tests {
     #[test]
     fn nested_option_bool_collapses_recursively() {
         let p = fresh_pool();
-        p.set_enum_niches_preview(true);
         // Build Option(Option(Option(bool))) by hand.
         let inner = make_option_bool(&p, "OptB_inner");
         let mut rodeo = Rodeo::default();
@@ -625,17 +607,6 @@ mod tests {
                 end: 255,
             }]
         );
-    }
-
-    #[test]
-    fn toggling_preview_clears_layout_cache() {
-        let p = fresh_pool();
-        let ty = make_option_bool(&p, "OptB3");
-        assert_eq!(layout_of(&p, ty).size, 2);
-        p.set_enum_niches_preview(true);
-        assert_eq!(layout_of(&p, ty).size, 1);
-        p.set_enum_niches_preview(false);
-        assert_eq!(layout_of(&p, ty).size, 2);
     }
 
     #[test]

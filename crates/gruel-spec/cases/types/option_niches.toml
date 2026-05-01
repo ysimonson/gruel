@@ -3,16 +3,15 @@ id = "types.option_niches"
 spec_chapter = "3.8"
 name = "Option niche-encoded layout (ADR-0069)"
 description = """
-Tests for niche-filled Option layouts gated on `--preview enum_niches`.
-Programs that compile and run identically with and without the preview
-flag verify that the optimization preserves observable semantics.
+Tests for niche-filled Option layouts (ADR-0069). The optimization
+preserves observable semantics — pattern matching round-trips for
+Option(bool), nested Option, and Option(unit-only-enum) all return
+the expected discriminants and payload values.
 """
 
 [[case]]
 name = "option_bool_some_true_round_trip"
 spec = ["3.8:80", "3.0:5", "3.0:6", "3.0:7"]
-preview = "enum_niches"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let O = Option(bool);
@@ -28,8 +27,6 @@ exit_code = 1
 [[case]]
 name = "option_bool_some_false_round_trip"
 spec = ["3.8:80", "3.0:5", "3.0:6", "3.0:7"]
-preview = "enum_niches"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let O = Option(bool);
@@ -45,8 +42,6 @@ exit_code = 2
 [[case]]
 name = "option_bool_none_round_trip"
 spec = ["3.8:80", "3.0:5", "3.0:6", "3.0:7"]
-preview = "enum_niches"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let O = Option(bool);
@@ -62,8 +57,6 @@ exit_code = 3
 [[case]]
 name = "nested_option_bool_some_some_true"
 spec = ["3.8:80", "3.0:5", "3.0:6", "3.0:7"]
-preview = "enum_niches"
-preview_should_pass = true
 description = "Option(Option(bool)) collapses to 1 byte; deepest Some(true) round-trips."
 source = """
 fn main() -> i32 {
@@ -84,8 +77,6 @@ exit_code = 2
 [[case]]
 name = "nested_option_bool_some_none"
 spec = ["3.8:80", "3.0:5", "3.0:6", "3.0:7"]
-preview = "enum_niches"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let O = Option(bool);
@@ -105,8 +96,6 @@ exit_code = 1
 [[case]]
 name = "nested_option_bool_outer_none"
 spec = ["3.8:80", "3.0:5", "3.0:6", "3.0:7"]
-preview = "enum_niches"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let O = Option(bool);
@@ -126,8 +115,6 @@ exit_code = 7
 [[case]]
 name = "option_small_enum_round_trip"
 spec = ["3.8:80", "3.0:5", "3.0:6", "3.0:7"]
-preview = "enum_niches"
-preview_should_pass = true
 description = "Option of a unit-only enum collapses to one byte and round-trips correctly."
 source = """
 enum Color { Red, Green, Blue }
