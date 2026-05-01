@@ -574,8 +574,11 @@ impl<'a> SemaContext<'a> {
     /// Check if a type conforms to the `Clone` interface (ADR-0065).
     ///
     /// Linear types never conform. Copy types automatically conform. Built-in
-    /// types with a `clone` method (e.g. `String`) conform. User structs
-    /// conform if they have a `fn clone(borrow self) -> Self` method.
+    /// types with a `clone` method (e.g. `String`) conform. `@derive(Clone)`
+    /// structs (with `is_clone == true`) conform via the synthesized
+    /// `<TypeName>.clone`. User structs with hand-written `fn clone(borrow
+    /// self) -> Self` need full conformance check via `check_conforms`; this
+    /// fast query returns false for them.
     pub fn is_type_clone(&self, ty: Type) -> bool {
         if self.is_type_linear(ty) {
             return false;
@@ -583,15 +586,17 @@ impl<'a> SemaContext<'a> {
         if self.is_type_copy(ty) {
             return true;
         }
-        if let TypeKind::Struct(struct_id) = ty.kind()
-            && let Some(builtin) = self.get_builtin_type_def(struct_id)
-            && builtin.find_method("clone").is_some()
-        {
-            return true;
+        if let TypeKind::Struct(struct_id) = ty.kind() {
+            if let Some(builtin) = self.get_builtin_type_def(struct_id)
+                && builtin.find_method("clone").is_some()
+            {
+                return true;
+            }
+            let struct_def = self.type_pool.struct_def(struct_id);
+            if struct_def.is_clone {
+                return true;
+            }
         }
-        // User struct with a clone method: caller should use `check_conforms`
-        // for full method-signature checking. This fast query returns false
-        // here; the conformance check is the source of truth.
         false
     }
 

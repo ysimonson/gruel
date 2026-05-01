@@ -271,6 +271,14 @@ pub struct CopyStructNonCopyFieldError {
     pub field_type: String,
 }
 
+/// Payload for `ErrorKind::CloneStructNonCopyField` (ADR-0065).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloneStructNonCopyFieldError {
+    pub struct_name: String,
+    pub field_name: String,
+    pub field_type: String,
+}
+
 /// Payload for `ErrorKind::IntrinsicTypeMismatch`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntrinsicTypeMismatchError {
@@ -881,6 +889,12 @@ pub enum ErrorKind {
     /// Linear struct cannot derive Copy
     #[error("linear struct '{0}' cannot be marked `@derive(Copy)`")]
     LinearStructCopy(String),
+    /// Linear struct cannot derive Clone (ADR-0065)
+    #[error("linear struct '{0}' cannot be marked `@derive(Clone)`")]
+    LinearStructClone(String),
+    /// @derive(Clone) v1 limitation: every field must be Copy.
+    #[error("@derive(Clone) on struct '{struct_name}' requires every field to be Copy in v1; field '{field_name}' has type '{field_type}' which is not Copy. Hand-write `fn clone(borrow self) -> Self` instead.", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
+    CloneStructNonCopyField(Box<CloneStructNonCopyFieldError>),
     /// A directive that has been retired (ADR-0059).
     #[error("the `@{name}` directive is no longer supported; use `{replacement}` instead")]
     DeprecatedDirective { name: String, replacement: String },
@@ -1201,6 +1215,8 @@ impl ErrorKind {
             ErrorKind::DuplicateTypeDefinition { .. } => ErrorCode::DUPLICATE_TYPE_DEFINITION,
             ErrorKind::LinearValueNotConsumed(_) => ErrorCode::LINEAR_VALUE_NOT_CONSUMED,
             ErrorKind::LinearStructCopy(_) => ErrorCode::LINEAR_STRUCT_COPY,
+            ErrorKind::LinearStructClone(_) => ErrorCode::LINEAR_STRUCT_COPY,
+            ErrorKind::CloneStructNonCopyField { .. } => ErrorCode::COPY_STRUCT_NON_COPY_FIELD,
             ErrorKind::DeprecatedDirective { .. } => ErrorCode::DEPRECATED_DIRECTIVE,
             ErrorKind::HandleStructMissingMethod { .. } => ErrorCode::HANDLE_STRUCT_MISSING_METHOD,
             ErrorKind::HandleMethodWrongSignature { .. } => {

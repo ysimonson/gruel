@@ -488,6 +488,8 @@ impl<'src> CompilationUnit<'src> {
         // Synthesize drop glue functions
         let drop_glue_functions =
             crate::drop_glue::synthesize_drop_glue(&sema_output.type_pool, interner);
+        // ADR-0065: synthesize clone glue for `@derive(Clone)` structs.
+        let clone_glue_functions = crate::clone_glue::synthesize_clone_glue(&sema_output.type_pool);
 
         // Combine user functions with drop glue, filtering out comptime-only functions
         let all_functions: Vec<_> = sema_output
@@ -495,6 +497,7 @@ impl<'src> CompilationUnit<'src> {
             .into_iter()
             .filter(|f| f.air.return_type() != Type::COMPTIME_TYPE)
             .chain(drop_glue_functions)
+            .chain(clone_glue_functions)
             .collect();
 
         // Build CFGs in parallel

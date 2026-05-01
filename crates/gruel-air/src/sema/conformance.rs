@@ -261,6 +261,19 @@ impl<'a> Sema<'a> {
                 slot_methods: Vec::new(),
             }));
         }
+        // ADR-0065 Phase 2: `@derive(Clone)` structs have an `is_clone` flag
+        // and a synthesized `<TypeName>.clone` function emitted by
+        // `clone_glue`. The conformance witness needs no real method slot —
+        // dispatch is handled by a parallel short-circuit in
+        // `analyze_method_call_impl`.
+        if let TypeKind::Struct(struct_id) = candidate.kind() {
+            let struct_def = self.type_pool.struct_def(struct_id);
+            if struct_def.is_clone {
+                return Some(Ok(ConformanceWitness {
+                    slot_methods: Vec::new(),
+                }));
+            }
+        }
         None
     }
 

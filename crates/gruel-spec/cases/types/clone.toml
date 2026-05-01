@@ -177,6 +177,75 @@ fn main() -> i32 {
 """
 exit_code = 42
 
+# @derive(Clone) on a struct with all-Copy fields synthesizes a clone method.
+[[case]]
+name = "derive_clone_struct_all_copy_fields"
+spec = ["3.8:71"]
+description = "@derive(Clone) on a struct with all-Copy fields synthesizes clone"
+source = """
+@derive(Clone)
+struct Point { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let p = Point { x: 17, y: 25 };
+    let q: Point = p.clone();
+    q.x + q.y
+}
+"""
+exit_code = 42
+
+# @derive(Clone) on a struct with non-Copy fields is rejected (v1 limitation).
+[[case]]
+name = "derive_clone_struct_non_copy_field_rejected"
+spec = ["3.8:71"]
+description = "@derive(Clone) v1 rejects non-Copy fields"
+source = """
+@derive(Clone)
+struct Holder { s: String }
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "every field to be Copy"
+
+# @derive(Clone) on a linear struct is rejected.
+[[case]]
+name = "derive_clone_linear_rejected"
+spec = ["3.8:72"]
+description = "@derive(Clone) on linear struct is rejected"
+source = """
+@derive(Clone)
+linear struct MustUse { value: i32 }
+
+fn main() -> i32 {
+    0
+}
+"""
+compile_fail = true
+error_contains = "linear struct"
+
+# @derive(Clone) makes the struct conform to the Clone interface.
+[[case]]
+name = "derive_clone_struct_conforms_to_clone"
+spec = ["3.8:71", "3.8:73"]
+description = "@derive(Clone) struct conforms to comptime T: Clone"
+source = """
+@derive(Clone)
+struct Pair { a: i32, b: i32 }
+
+fn use_clone(comptime T: Clone, t: T) -> i32 {
+    0
+}
+
+fn main() -> i32 {
+    use_clone(Pair, Pair { a: 1, b: 2 });
+    0
+}
+"""
+exit_code = 0
+
 # Clone constraint dispatches to the user's clone method through a generic.
 [[case]]
 name = "clone_interface_user_struct_generic_dispatch"

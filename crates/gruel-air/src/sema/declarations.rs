@@ -172,6 +172,21 @@ impl<'a> Sema<'a> {
         false
     }
 
+    /// Check if a directive list contains `@derive(Clone)` (ADR-0065).
+    pub(crate) fn has_clone_directive(&self, directives: &[RirDirective]) -> bool {
+        let derive_sym = self.interner.get("derive");
+        let clone_iface_sym = self.interner.get("Clone");
+        for directive in directives {
+            if Some(directive.name) == derive_sym
+                && let Some(clone_iface) = clone_iface_sym
+                && directive.args.contains(&clone_iface)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Reject the legacy `@copy` directive with a migration error. ADR-0059
     /// retired `@copy` in favor of `@derive(Copy)`; the directive parser is
     /// generic so we surface the migration here.
@@ -1025,7 +1040,8 @@ impl<'a> Sema<'a> {
     /// elsewhere and there are no methods to splice.
     fn is_compiler_derive(&self, name: Spur) -> bool {
         let copy_iface_sym = self.interner.get("Copy");
-        Some(name) == copy_iface_sym
+        let clone_iface_sym = self.interner.get("Clone");
+        Some(name) == copy_iface_sym || Some(name) == clone_iface_sym
     }
 
     /// ADR-0058 phases 1 + 2: gate `derive` items behind the
@@ -1371,6 +1387,12 @@ impl<'a> Sema<'a> {
                         *name,
                         inst.span,
                     )?;
+                    self.validate_clone_struct(
+                        *directives_start,
+                        *directives_len,
+                        *name,
+                        inst.span,
+                    )?;
                     // Collect methods defined inline in the struct
                     self.collect_struct_methods(*name, *methods_start, *methods_len, inst.span)?;
                 }
@@ -1504,6 +1526,76 @@ impl<'a> Sema<'a> {
                 ));
             }
         }
+        Ok(())
+    }
+
+    /// Validate `@derive(Clone)` and set the `is_clone` flag (ADR-0065).
+    ///
+    /// Runs after `resolve_struct_fields`, so the struct's field types are
+    /// known. v1 only supports `@derive(Clone)` on structs whose every field
+    /// is `Copy`; non-Copy fields require dispatching to each field's clone
+    /// method, which the v1 synthesis path doesn't do (deferred). For the
+    /// "all-Copy" case the synthesized clone is just per-field reads + a
+    /// struct literal; that's what `clone_glue::synthesize_clone_glue` emits.
+    fn validate_clone_struct(
+        &mut self,
+        directives_start: u32,
+        directives_len: u32,
+        name: Spur,
+        span: Span,
+    ) -> CompileResult<()> {
+        let directives = self.rir.get_directives(directives_start, directives_len);
+        if !self.has_clone_directive(&directives) {
+            return Ok(());
+        }
+
+        let struct_name = self.interner.resolve(&name).to_string();
+        let struct_id = *self.structs.get(&name).ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::InternalError(
+                    ice!(
+                        "struct not found during @derive(Clone) validation",
+                        phase: "sema/declarations",
+                        details: { "struct_name" => struct_name.clone() }
+                    )
+                    .to_string(),
+                ),
+                span,
+            )
+        })?;
+
+        // Linear types cannot be Clone.
+        let struct_def = self.type_pool.struct_def(struct_id);
+        if struct_def.is_linear {
+            return Err(CompileError::new(
+                ErrorKind::LinearStructClone(struct_name.clone()),
+                span,
+            ));
+        }
+
+        // v1 limitation: every field must be Copy. Affine fields require
+        // recursive clone-dispatch in the synthesized body, which is deferred.
+        let fields_snapshot = struct_def.fields.clone();
+        for field in &fields_snapshot {
+            if !self.is_type_copy(field.ty) {
+                let field_type_name = self.format_type_name(field.ty);
+                return Err(CompileError::new(
+                    ErrorKind::CloneStructNonCopyField(Box::new(
+                        gruel_util::CloneStructNonCopyFieldError {
+                            struct_name: struct_name.clone(),
+                            field_name: field.name.clone(),
+                            field_type: field_type_name,
+                        },
+                    )),
+                    span,
+                ));
+            }
+        }
+
+        // Set is_clone on the StructDef.
+        let mut updated = self.type_pool.struct_def(struct_id);
+        updated.is_clone = true;
+        self.type_pool.update_struct_def(struct_id, updated);
         Ok(())
     }
 

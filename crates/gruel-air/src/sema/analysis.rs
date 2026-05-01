@@ -3396,6 +3396,43 @@ impl<'a> Sema<'a> {
         let struct_def = self.type_pool.struct_def(struct_id);
         let struct_name_str = struct_def.name.clone();
 
+        // ADR-0065 Phase 2: `@derive(Clone)` structs have a synthesized
+        // `<TypeName>.clone(borrow self) -> Self` emitted by `clone_glue`.
+        // The synthesized function isn't registered in `self.methods`; emit
+        // the Call directly when dispatching `.clone()` on such a struct,
+        // and *only* if the user hasn't also written their own clone method
+        // (which takes precedence via the regular methods.get path below).
+        if struct_def.is_clone
+            && method_name_str == "clone"
+            && !self.methods.contains_key(&(struct_id, method))
+            && args.is_empty()
+        {
+            // Receiver is `borrow self`; the AIR Call carries the receiver
+            // as a Borrow-mode arg.
+            if let Some(var) = receiver_var {
+                ctx.moved_vars.remove(&var);
+            }
+            let extra = [
+                receiver_result.air_ref.as_u32(),
+                AirArgMode::Borrow.as_u32(),
+            ];
+            let args_start = air.add_extra(&extra);
+            let fn_name = self
+                .interner
+                .get_or_intern(format!("{}.clone", struct_name_str));
+            let return_type = Type::new_struct(struct_id);
+            let air_ref = air.add_inst(AirInst {
+                data: AirInstData::Call {
+                    name: fn_name,
+                    args_start,
+                    args_len: 1,
+                },
+                ty: return_type,
+                span,
+            });
+            return Ok(AnalysisResult::new(air_ref, return_type));
+        }
+
         // Look up the method using StructId directly. Copy out so the
         // borrow on `self.methods` doesn't conflict with later mutable
         // borrows of `self` (e.g. `analyze_call_args`).
