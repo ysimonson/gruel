@@ -15,6 +15,7 @@ mod function_analyzer;
 mod inference;
 mod inst;
 mod intern_pool;
+pub mod layout;
 mod param_arena;
 mod scope;
 mod sema;
@@ -38,6 +39,7 @@ pub use inst::{
 pub use intern_pool::{
     EnumData, InternedType, StructData, TypeData, TypeInternPool, TypeInternPoolStats,
 };
+pub use layout::{Layout, NicheRange, layout_of};
 pub use param_arena::{ParamArena, ParamRange};
 pub use sema::{
     AnalyzedFunction, ConstValue, FunctionInfo, GatherOutput, InterfaceVtables, MethodInfo, Sema,
@@ -49,10 +51,10 @@ pub use sema_context::{
     InferenceContext as SemaContextInferenceContext, ModuleRegistry, SemaContext,
 };
 pub use types::{
-    ArrayTypeId, EnumDef, EnumId, IfaceTy, InterfaceDef, InterfaceId, InterfaceMethodReq,
-    ModuleDef, ModuleId, MutRefTypeId, MutSliceTypeId, PtrConstTypeId, PtrMutTypeId, ReceiverMode,
-    RefTypeId, SliceTypeId, StructDef, StructField, StructId, Type, TypeKind,
-    parse_array_type_syntax,
+    ArrayTypeId, EnumDef, EnumId, EnumVariantDef, IfaceTy, InterfaceDef, InterfaceId,
+    InterfaceMethodReq, ModuleDef, ModuleId, MutRefTypeId, MutSliceTypeId, PtrConstTypeId,
+    PtrMutTypeId, ReceiverMode, RefTypeId, SliceTypeId, StructDef, StructField, StructId, Type,
+    TypeKind, parse_array_type_syntax,
 };
 
 /// Sentinel value used to encode parameter slots in AIR instructions.

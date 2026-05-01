@@ -155,7 +155,7 @@ These are deliberately *not* in v1:
 
 Each phase is independently committable and testable.
 
-- [ ] **Phase 1: `Layout` struct, computation, cache (no behavior change).** Add `crates/gruel-air/src/layout.rs` with the `Layout` and `NicheRange` types and `layout_of(pool, ty)`. Compute size/align using the same rules `type_byte_size` / `type_alignment` use today; leave `niches` empty for every type. Cache on `TypeInternPool`. No callers yet; verify with unit tests that `layout_of` agrees with the existing functions across every type kind.
+- [x] **Phase 1: `Layout` struct, computation, cache (no behavior change).** Add `crates/gruel-air/src/layout.rs` with the `Layout` and `NicheRange` types and `layout_of(pool, ty)`. Compute size/align using the same rules `type_byte_size` / `type_alignment` use today; leave `niches` empty for every type. Cache on `TypeInternPool`. No callers yet; verify with unit tests that `layout_of` agrees with the existing functions across every type kind.
 
 - [ ] **Phase 2: Migrate codegen size/align queries to `Layout`.** `type_byte_size` and `type_alignment` in `gruel-codegen-llvm/src/types.rs` become thin wrappers over `layout_of`. All other in-tree callers go through `Layout`. Existing test suite (full `make test`) must pass unchanged — no observable behavior should differ.
 

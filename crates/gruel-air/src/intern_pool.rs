@@ -40,6 +40,7 @@ use std::sync::{PoisonError, RwLock};
 
 use lasso::Spur;
 
+use crate::layout::Layout;
 use crate::types::{
     ArrayTypeId, EnumDef, EnumId, MutRefTypeId, MutSliceTypeId, PtrConstTypeId, PtrMutTypeId,
     RefTypeId, SliceTypeId, StructDef, StructId, Type, TypeKind, VecTypeId,
@@ -325,6 +326,11 @@ struct TypeInternPoolInner {
 
     /// Nominal type lookup: name -> InternedType for enums.
     enum_by_name: HashMap<Spur, InternedType>,
+
+    /// Cached layouts (ADR-0069). Populated lazily by `layout::layout_of`.
+    /// Keyed by `Type` (a u32 index); since types are interned, the layout is
+    /// a pure function of the key.
+    layout_cache: HashMap<Type, Layout>,
 }
 
 impl TypeInternPool {
@@ -343,8 +349,21 @@ impl TypeInternPool {
                 vec_map: HashMap::default(),
                 struct_by_name: HashMap::default(),
                 enum_by_name: HashMap::default(),
+                layout_cache: HashMap::default(),
             }),
         }
+    }
+
+    /// Look up a cached layout, if any (ADR-0069).
+    pub(crate) fn cached_layout(&self, ty: Type) -> Option<Layout> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner.layout_cache.get(&ty).cloned()
+    }
+
+    /// Insert a layout into the cache (ADR-0069).
+    pub(crate) fn cache_layout(&self, ty: Type, layout: Layout) {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        inner.layout_cache.insert(ty, layout);
     }
 
     /// Register a new struct (nominal - no deduplication).
@@ -1543,6 +1562,7 @@ impl Clone for TypeInternPool {
                 vec_map: inner.vec_map.clone(),
                 struct_by_name: inner.struct_by_name.clone(),
                 enum_by_name: inner.enum_by_name.clone(),
+                layout_cache: inner.layout_cache.clone(),
             }),
         }
     }

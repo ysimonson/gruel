@@ -301,3 +301,136 @@ pub fn gruel_type_to_llvm_param<'ctx>(
 ) -> Option<BasicMetadataTypeEnum<'ctx>> {
     gruel_type_to_llvm(ty, ctx, type_pool).map(Into::into)
 }
+
+#[cfg(test)]
+mod tests {
+    //! Cross-check that the legacy `type_byte_size` / `type_alignment` helpers
+    //! agree with `gruel_air::layout::layout_of` across every type kind.
+    //!
+    //! This is the Phase 1 acceptance criterion of ADR-0069: the new abstraction
+    //! must reproduce today's numbers exactly before Phase 2 routes callers
+    //! through it.
+    use super::*;
+    use gruel_air::layout::layout_of;
+    use gruel_air::{EnumDef, EnumVariantDef, StructDef, StructField};
+    use gruel_util::FileId;
+    use lasso::Rodeo;
+
+    fn assert_agrees(pool: &TypeInternPool, ty: Type) {
+        let layout = layout_of(pool, ty);
+        assert_eq!(
+            layout.size,
+            type_byte_size(ty, pool),
+            "size mismatch for {ty:?}"
+        );
+        assert_eq!(
+            layout.align,
+            type_alignment(ty, pool),
+            "align mismatch for {ty:?}"
+        );
+    }
+
+    #[test]
+    fn layout_agrees_for_primitives() {
+        let pool = TypeInternPool::new();
+        for ty in [
+            Type::I8,
+            Type::I16,
+            Type::I32,
+            Type::I64,
+            Type::U8,
+            Type::U16,
+            Type::U32,
+            Type::U64,
+            Type::ISIZE,
+            Type::USIZE,
+            Type::F16,
+            Type::F32,
+            Type::F64,
+            Type::BOOL,
+            Type::UNIT,
+            Type::NEVER,
+        ] {
+            assert_agrees(&pool, ty);
+        }
+    }
+
+    #[test]
+    fn layout_agrees_for_struct() {
+        let pool = TypeInternPool::new();
+        let mut rodeo = Rodeo::default();
+        let name = rodeo.get_or_intern("S");
+        let def = StructDef {
+            name: "S".into(),
+            fields: vec![
+                StructField {
+                    name: "a".into(),
+                    ty: Type::U8,
+                },
+                StructField {
+                    name: "b".into(),
+                    ty: Type::U64,
+                },
+                StructField {
+                    name: "c".into(),
+                    ty: Type::U16,
+                },
+            ],
+            is_copy: false,
+            is_clone: false,
+            is_handle: false,
+            is_linear: false,
+            destructor: None,
+            is_builtin: false,
+            is_pub: false,
+            file_id: FileId::DEFAULT,
+        };
+        let (sid, _) = pool.register_struct(name, def);
+        assert_agrees(&pool, Type::new_struct(sid));
+    }
+
+    #[test]
+    fn layout_agrees_for_array() {
+        let pool = TypeInternPool::new();
+        let aid = pool.intern_array_from_type(Type::I32, 7);
+        assert_agrees(&pool, Type::new_array(aid));
+    }
+
+    #[test]
+    fn layout_agrees_for_unit_enum() {
+        let pool = TypeInternPool::new();
+        let mut rodeo = Rodeo::default();
+        let name = rodeo.get_or_intern("Color");
+        let def = EnumDef {
+            name: "Color".into(),
+            variants: vec![
+                EnumVariantDef::unit("R"),
+                EnumVariantDef::unit("G"),
+                EnumVariantDef::unit("B"),
+            ],
+            is_pub: false,
+            file_id: FileId::DEFAULT,
+            destructor: None,
+        };
+        let (eid, _) = pool.register_enum(name, def);
+        assert_agrees(&pool, Type::new_enum(eid));
+    }
+
+    #[test]
+    fn layout_agrees_for_data_enum() {
+        let pool = TypeInternPool::new();
+        let mut rodeo = Rodeo::default();
+        let name = rodeo.get_or_intern("Opt");
+        let mut some = EnumVariantDef::unit("Some");
+        some.fields = vec![Type::I64];
+        let def = EnumDef {
+            name: "Opt".into(),
+            variants: vec![EnumVariantDef::unit("None"), some],
+            is_pub: false,
+            file_id: FileId::DEFAULT,
+            destructor: None,
+        };
+        let (eid, _) = pool.register_enum(name, def);
+        assert_agrees(&pool, Type::new_enum(eid));
+    }
+}
