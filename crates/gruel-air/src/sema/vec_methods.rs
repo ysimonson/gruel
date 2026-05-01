@@ -340,7 +340,6 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        self.require_preview(gruel_util::PreviewFeature::Vec, "@vec", span)?;
         if args.is_empty() {
             return Err(CompileError::new(
                 ErrorKind::WrongArgumentCount {
@@ -406,7 +405,6 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        self.require_preview(gruel_util::PreviewFeature::Vec, "@vec_repeat", span)?;
         if args.len() != 2 {
             return Err(CompileError::new(
                 ErrorKind::WrongArgumentCount {

@@ -503,13 +503,15 @@ impl<'a> CfgBuilder<'a> {
                 };
                 // Determine the source array's compile-time length from the
                 // place's root type.
-                let array_len = match self.air.get(*base).ty.kind() {
+                let base_ty = self.air.get(*base).ty;
+                let array_len = match base_ty.kind() {
                     gruel_air::TypeKind::Array(id) => {
                         let (_elem, len) = self.type_pool.array_def(id);
                         len
                     }
                     _ => 0,
                 };
+                let vec_base = matches!(base_ty.kind(), gruel_air::TypeKind::Vec(_));
                 let lo_val = match lo {
                     Some(lo) => Some(match self.lower_value(*lo) {
                         Some(v) => v,
@@ -539,6 +541,7 @@ impl<'a> CfgBuilder<'a> {
                         hi: hi_val,
                         sentinel: sentinel_val,
                         is_mut: *is_mut,
+                        vec_base,
                     })),
                     ty,
                     span,

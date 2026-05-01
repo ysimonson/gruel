@@ -276,9 +276,7 @@ impl<'a> Sema<'a> {
                         Ok(Type::new_mut_slice(slice_id))
                     }
                     BuiltinTypeConstructorKind::Vec => {
-                        // ADR-0066: gate Vec(T) behind --preview vec, reject
-                        // linear element types.
-                        self.require_preview(gruel_util::PreviewFeature::Vec, "Vec(T)", span)?;
+                        // ADR-0066: reject linear element types.
                         if self.is_type_linear(arg_types[0]) {
                             return Err(gruel_util::CompileError::new(
                                 gruel_util::ErrorKind::InternalError(format!(

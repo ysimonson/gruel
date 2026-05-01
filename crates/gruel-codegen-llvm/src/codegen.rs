@@ -1776,6 +1776,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let lo = data.lo;
                 let hi = data.hi;
                 let sentinel = data.sentinel;
+                let vec_base = data.vec_base;
                 use inkwell::IntPredicate;
 
                 let elem_ty = match ty.kind() {
@@ -1784,7 +1785,25 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     _ => unreachable!("MakeSlice produces a slice type"),
                 };
                 let i64_ty = self.ctx.i64_type();
-                let array_len_val = i64_ty.const_int(array_len, false);
+                // For Vec bases, the "array length" is the runtime `len`
+                // field. Read it now so the bounds check below works.
+                let array_len_val = if vec_base {
+                    let agg_ty = self.vec_agg_type();
+                    let vec_ptr = match self.build_place_gep_chain(&place, ty) {
+                        Some(p) => p,
+                        None => return Ok(()),
+                    };
+                    let len_ptr = self
+                        .builder
+                        .build_struct_gep(agg_ty, vec_ptr, 1, "vec_slice_len")
+                        .unwrap();
+                    self.builder
+                        .build_load(i64_ty, len_ptr, "vec_slice_len_val")
+                        .unwrap()
+                        .into_int_value()
+                } else {
+                    i64_ty.const_int(array_len, false)
+                };
 
                 let coerce_to_i64 = |this: &Self,
                                      v: inkwell::values::IntValue<'ctx>|
@@ -1852,9 +1871,30 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 self.builder.position_at_end(ok_bb);
 
                 // ptr = GEP &arr[lo]; offset by `lo` elements.
-                let arr_ptr = match self.build_place_gep_chain(&place, elem_ty) {
-                    Some(p) => p,
-                    None => return Ok(()),
+                // For Vec bases, the buffer is at field 0 of the aggregate.
+                let arr_ptr = if vec_base {
+                    let agg_ty = self.vec_agg_type();
+                    let vec_ptr = match self.build_place_gep_chain(&place, ty) {
+                        Some(p) => p,
+                        None => return Ok(()),
+                    };
+                    let buf_ptr = self
+                        .builder
+                        .build_struct_gep(agg_ty, vec_ptr, 0, "vec_slc_buf_ptr")
+                        .unwrap();
+                    self.builder
+                        .build_load(
+                            self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                            buf_ptr,
+                            "vec_slc_buf",
+                        )
+                        .unwrap()
+                        .into_pointer_value()
+                } else {
+                    match self.build_place_gep_chain(&place, elem_ty) {
+                        Some(p) => p,
+                        None => return Ok(()),
+                    }
                 };
                 let elem_llvm_ty = gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool);
                 let data_ptr = match elem_llvm_ty {
@@ -4206,15 +4246,39 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         self.builder.build_load(elem_llvm, slot, "popped").unwrap()
     }
 
-    /// `v.clear()` — set len = 0. (Per-element drop is in Phase 6.)
+    /// `v.clear()` — drop each live element, then set len = 0.
     fn translate_vec_clear(&mut self, args: &[CfgValue]) {
         let recv_ptr = self.vec_recv_ptr(args[0]);
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_ty = self.vec_element_type(recv_vec_ty);
         let agg_ty = self.vec_agg_type();
         let i64_ty = self.ctx.i64_type();
         let len_ptr = self
             .builder
             .build_struct_gep(agg_ty, recv_ptr, 1, "len_ptr")
             .unwrap();
+        // Per-element drop loop if T needs drop.
+        if drop_names::type_needs_drop(elem_ty, self.type_pool) {
+            let buf_ptr = self
+                .builder
+                .build_struct_gep(agg_ty, recv_ptr, 0, "buf_ptr")
+                .unwrap();
+            let len = self
+                .builder
+                .build_load(i64_ty, len_ptr, "clear_len")
+                .unwrap()
+                .into_int_value();
+            let buf = self
+                .builder
+                .build_load(
+                    self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                    buf_ptr,
+                    "clear_buf",
+                )
+                .unwrap()
+                .into_pointer_value();
+            self.emit_vec_drop_loop(buf, len, elem_ty);
+        }
         self.builder
             .build_store(len_ptr, i64_ty.const_zero())
             .unwrap();
@@ -4725,15 +4789,20 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         self.vec_pack(buf, n, n)
     }
 
-    /// Drop a Vec(T) value: free the buffer if cap > 0. (Per-element drops
-    /// for non-Copy T are Phase 6.)
-    fn translate_vec_drop(&mut self, val: BasicValueEnum<'ctx>, _vec_ty: Type) {
+    /// Drop a Vec(T) value: drop each live element if T needs drop, then
+    /// free the buffer if cap > 0.
+    fn translate_vec_drop(&mut self, val: BasicValueEnum<'ctx>, vec_ty: Type) {
         let recv = val.into_struct_value();
         let buf = self
             .builder
             .build_extract_value(recv, 0, "drop_buf")
             .unwrap()
             .into_pointer_value();
+        let len = self
+            .builder
+            .build_extract_value(recv, 1, "drop_len")
+            .unwrap()
+            .into_int_value();
         let cap = self
             .builder
             .build_extract_value(recv, 2, "drop_cap")
@@ -4745,13 +4814,21 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .builder
             .build_int_compare(inkwell::IntPredicate::UGT, cap, zero, "drop_alive")
             .unwrap();
-        let free_bb = self.ctx.append_basic_block(self.fn_value, "vec_drop_free");
+        let alive_bb = self.ctx.append_basic_block(self.fn_value, "vec_drop_alive");
         let after_bb = self.ctx.append_basic_block(self.fn_value, "vec_drop_after");
         self.builder
-            .build_conditional_branch(alive, free_bb, after_bb)
+            .build_conditional_branch(alive, alive_bb, after_bb)
             .unwrap();
-        self.builder.position_at_end(free_bb);
-        let elem_size = self.vec_elem_size(_vec_ty);
+        self.builder.position_at_end(alive_bb);
+
+        // Per-element drop loop if T needs drop.
+        let elem_ty = self.vec_element_type(vec_ty);
+        if drop_names::type_needs_drop(elem_ty, self.type_pool) {
+            self.emit_vec_drop_loop(buf, len, elem_ty);
+        }
+
+        // Free the buffer.
+        let elem_size = self.vec_elem_size(vec_ty);
         let bytes = self
             .builder
             .build_int_mul(cap, elem_size, "drop_bytes")
@@ -4763,6 +4840,86 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .unwrap();
         self.builder.build_unconditional_branch(after_bb).unwrap();
         self.builder.position_at_end(after_bb);
+    }
+
+    /// Emit a loop that drops each element `buf[i]` for `i in 0..len`.
+    fn emit_vec_drop_loop(
+        &mut self,
+        buf: inkwell::values::PointerValue<'ctx>,
+        len: inkwell::values::IntValue<'ctx>,
+        elem_ty: Type,
+    ) {
+        let i64_ty = self.ctx.i64_type();
+        let zero = i64_ty.const_zero();
+        let one = i64_ty.const_int(1, false);
+        let header_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "vec_drop_header");
+        let body_bb = self.ctx.append_basic_block(self.fn_value, "vec_drop_body");
+        let exit_bb = self.ctx.append_basic_block(self.fn_value, "vec_drop_exit");
+        let entry_bb = self.builder.get_insert_block().unwrap();
+        self.builder.build_unconditional_branch(header_bb).unwrap();
+        self.builder.position_at_end(header_bb);
+        let i_phi = self.builder.build_phi(i64_ty, "i").unwrap();
+        i_phi.add_incoming(&[(&zero, entry_bb)]);
+        let i = i_phi.as_basic_value().into_int_value();
+        let cond = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::ULT, i, len, "cond")
+            .unwrap();
+        self.builder
+            .build_conditional_branch(cond, body_bb, exit_bb)
+            .unwrap();
+        self.builder.position_at_end(body_bb);
+        if let Some(elem_llvm) = gruel_type_to_llvm(elem_ty, self.ctx, self.type_pool) {
+            let slot = unsafe {
+                self.builder
+                    .build_in_bounds_gep(elem_llvm, buf, &[i], "drop_slot")
+                    .unwrap()
+            };
+            let elem_val = self
+                .builder
+                .build_load(elem_llvm, slot, "drop_elem")
+                .unwrap();
+            self.emit_element_drop(elem_val, elem_ty);
+        }
+        let next = self.builder.build_int_add(i, one, "i_next").unwrap();
+        let body_end = self.builder.get_insert_block().unwrap();
+        i_phi.add_incoming(&[(&next, body_end)]);
+        self.builder.build_unconditional_branch(header_bb).unwrap();
+        self.builder.position_at_end(exit_bb);
+    }
+
+    /// Emit a drop call for a single element value.
+    fn emit_element_drop(&mut self, val: BasicValueEnum<'ctx>, elem_ty: Type) {
+        if self.is_builtin_string(elem_ty) {
+            let (ptr, len, cap) = self.extract_str_ptr_len_cap(val);
+            let drop_fn = self.get_or_declare_drop_string();
+            self.builder
+                .build_call(drop_fn, &[ptr.into(), len.into(), cap.into()], "")
+                .unwrap();
+            return;
+        }
+        if matches!(elem_ty.kind(), TypeKind::Vec(_)) {
+            self.translate_vec_drop(val, elem_ty);
+            return;
+        }
+        if let Some(fn_name) = drop_names::drop_fn_name(elem_ty, self.type_pool) {
+            let args: Vec<BasicValueEnum<'ctx>> = match elem_ty.kind() {
+                TypeKind::Array(_) => self.extract_fields_for_drop(val, elem_ty),
+                _ => vec![val],
+            };
+            let param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                args.iter().map(|v| v.get_type().into()).collect();
+            let meta_args: Vec<BasicMetadataValueEnum<'ctx>> =
+                args.iter().map(|v| (*v).into()).collect();
+            let fn_in_module = self.module.get_function(&fn_name);
+            let callee = fn_in_module.unwrap_or_else(|| {
+                let fn_ty = self.ctx.void_type().fn_type(&param_types, false);
+                self.module.add_function(&fn_name, fn_ty, None)
+            });
+            self.builder.build_call(callee, &meta_args, "").unwrap();
+        }
     }
 
     /// `@parts_to_vec(p, len, cap)` — pack into a Vec aggregate.

@@ -11,8 +11,6 @@ description = "Tests for Vec(T) constructors, queries, push/pop, indexing, etc."
 [[case]]
 name = "vec_new_empty"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let v: Vec(i32) = Vec(i32)::new();
@@ -25,8 +23,6 @@ exit_code = 0
 [[case]]
 name = "vec_with_capacity"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let v: Vec(i32) = Vec(i32)::with_capacity(8);
@@ -39,8 +35,6 @@ exit_code = 1
 [[case]]
 name = "vec_push_pop"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -56,8 +50,6 @@ exit_code = 36
 [[case]]
 name = "vec_indexing"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -73,8 +65,6 @@ exit_code = 139
 [[case]]
 name = "vec_is_empty_initially"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let v: Vec(i32) = Vec(i32)::new();
@@ -86,8 +76,6 @@ exit_code = 1
 [[case]]
 name = "vec_clear"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -102,8 +90,6 @@ exit_code = 7
 [[case]]
 name = "vec_reserve"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -117,8 +103,6 @@ exit_code = 1
 [[case]]
 name = "vec_literal"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let v = @vec(1, 2, 3, 4, 5);
@@ -131,8 +115,6 @@ exit_code = 11
 [[case]]
 name = "vec_repeat"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let v = @vec_repeat(7, 4);
@@ -145,8 +127,6 @@ exit_code = 18
 [[case]]
 name = "vec_pop_empty_panics"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -158,8 +138,6 @@ exit_code = 101
 [[case]]
 name = "vec_index_oob_panics"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -168,3 +146,66 @@ fn main() -> i32 {
 }
 """
 exit_code = 101
+
+[[case]]
+name = "vec_slice_borrow"
+spec = ["7.3:4"]
+source = """
+fn main() -> i32 {
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(1);
+    v.push(2);
+    v.push(3);
+    let s: Slice(i32) = &v[..];
+    s[0] + s[1] + s[2]
+}
+"""
+exit_code = 6
+
+[[case]]
+name = "vec_for_each"
+spec = ["7.3:5"]
+source = """
+fn main() -> i32 {
+    let mut v = Vec(i32)::new();
+    v.push(1);
+    v.push(2);
+    v.push(3);
+    let mut total: i32 = 0;
+    for x in v {
+        total = total + x;
+    }
+    total
+}
+"""
+exit_code = 6
+
+[[case]]
+name = "vec_clone_copy"
+spec = ["7.3:3"]
+source = """
+fn main() -> i32 {
+    let mut v = Vec(i32)::new();
+    v.push(7);
+    v.push(11);
+    let v2 = v.clone();
+    v[0] + v[1] + v2[0] + v2[1]
+}
+"""
+exit_code = 36
+
+[[case]]
+name = "vec_string_drop"
+spec = ["7.3:7"]
+source = """
+fn main() -> i32 {
+    let mut v: Vec(String) = Vec(String)::new();
+    v.push("hello");
+    v.push("world");
+    let len: i32 = @cast(v.len());
+    let popped: String = v.pop();
+    let popped_len: i32 = @cast(popped.len());
+    len + popped_len
+}
+"""
+exit_code = 7

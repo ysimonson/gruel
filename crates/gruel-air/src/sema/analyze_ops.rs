@@ -738,12 +738,21 @@ impl<'a> Sema<'a> {
         let base_result = self.analyze_inst(air, base, ctx)?;
         let base_ty = base_result.ty;
 
-        let (elem_ty, array_len) = match base_ty.kind() {
+        let (elem_ty, array_len, base_is_vec) = match base_ty.kind() {
             TypeKind::Array(id) => {
                 let (elem, len) = self.type_pool.array_def(id);
-                (elem, len)
+                (elem, len, false)
             }
-            _ if base_ty.is_error() || base_ty.is_never() => (Type::ERROR, 0u64),
+            // ADR-0066: range subscripts on Vec(T) produce slices over the
+            // live `[0..len]` range. Compile-time bounds checks against a
+            // fixed length don't apply (len is runtime); pass 0 as the
+            // sentinel bound so they're skipped, and rely on the codegen
+            // bounds check when the slice is constructed.
+            TypeKind::Vec(id) => {
+                let elem = self.type_pool.vec_def(id);
+                (elem, 0u64, true)
+            }
+            _ if base_ty.is_error() || base_ty.is_never() => (Type::ERROR, 0u64, false),
             _ => {
                 return Err(CompileError::new(
                     ErrorKind::IndexOnNonArray {
@@ -795,6 +804,7 @@ impl<'a> Sema<'a> {
             None
         });
         if !base_ty.is_error()
+            && !base_is_vec
             && let Some(hi_v) = hi_default
         {
             // ADR-0064 phase 7: sentinel ranges have stricter bounds.
@@ -1219,8 +1229,48 @@ impl<'a> Sema<'a> {
                 self.analyze_range_for_loop(air, &head, &args, iterable_inst.span, ctx)
             }
             _ => {
-                // Not @range — analyze the iterable expression and check if it's an array
+                // Not @range — peek at the iterable's type (without moving)
+                // to dispatch.
                 let iterable_span = iterable_inst.span;
+                let peek_ty = self.peek_inst_type(iterable, ctx);
+                if matches!(peek_ty.map(|t| t.kind()), Some(TypeKind::Vec(_))) {
+                    // ADR-0066 Phase 9: for-each over Vec(T) lowers to
+                    // iteration over a borrowed slice view. The receiver
+                    // must be a place; analyze it for value, then undo the
+                    // move (matches slice borrowing semantics).
+                    if head.is_mut {
+                        return Err(CompileError::new(
+                            ErrorKind::TypeMismatch {
+                                expected: "for-each over a Vec (immutable form only)".to_string(),
+                                found: "mut binding".to_string(),
+                            },
+                            iterable_span,
+                        ));
+                    }
+                    let root_var = self.extract_root_variable(iterable);
+                    let iter_res = self.analyze_inst(air, iterable, ctx)?;
+                    if let Some(var) = root_var {
+                        ctx.moved_vars.remove(&var);
+                    }
+                    let elem_ty = match iter_res.ty.kind() {
+                        TypeKind::Vec(id) => self.type_pool.vec_def(id),
+                        _ => unreachable!(),
+                    };
+                    let slice_id = self.type_pool.intern_slice_from_type(elem_ty);
+                    let slice_ty = Type::new_slice(slice_id);
+                    let slice_air = air.add_inst(AirInst {
+                        data: AirInstData::MakeSlice {
+                            base: iter_res.air_ref,
+                            lo: None,
+                            hi: None,
+                            sentinel: None,
+                            is_mut: false,
+                        },
+                        ty: slice_ty,
+                        span: iterable_span,
+                    });
+                    return self.analyze_slice_for_loop(air, &head, slice_air, slice_ty, ctx);
+                }
                 let iterable_result = self.analyze_inst(air, iterable, ctx)?;
                 let iterable_type = iterable_result.ty;
 

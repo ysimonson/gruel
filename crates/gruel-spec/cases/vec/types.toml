@@ -13,8 +13,6 @@ description = "Tests for ADR-0066 Vec(T) names in type position."
 [[case]]
 name = "vec_type_in_param"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn take(_v: Vec(i32)) -> i32 {
     7
@@ -29,8 +27,6 @@ exit_code = 7
 [[case]]
 name = "vec_type_in_return"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 source = """
 fn make() -> Vec(i32) {
     @panic("not yet implemented")
@@ -43,26 +39,8 @@ fn main() -> i32 {
 exit_code = 7
 
 [[case]]
-name = "vec_requires_preview_feature"
-spec = ["7.3:1"]
-description = "Vec(T) without --preview vec is rejected"
-source = """
-fn take(_v: Vec(i32)) -> i32 {
-    7
-}
-
-fn main() -> i32 {
-    7
-}
-"""
-compile_fail = true
-error_contains = "preview feature"
-
-[[case]]
 name = "vec_rejects_linear_element_type"
 spec = ["7.3:1"]
-preview = "vec"
-preview_should_pass = true
 description = "Vec(T) where T:Linear is rejected"
 source = """
 linear struct MustUse { value: i32 }

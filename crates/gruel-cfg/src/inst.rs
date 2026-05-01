@@ -28,7 +28,7 @@ use gruel_air::{AirParamMode, EnumId, StructId, Type};
 use gruel_util::{BinOp, Span, UnaryOp};
 use lasso::{Key, Spur};
 
-/// Boxed payload for [`CfgInstData::MakeSlice`] (ADR-0064).
+/// Boxed payload for [`CfgInstData::MakeSlice`] (ADR-0064 / ADR-0066).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MakeSliceData {
     pub place: Place,
@@ -37,6 +37,10 @@ pub struct MakeSliceData {
     pub hi: Option<CfgValue>,
     pub sentinel: Option<CfgValue>,
     pub is_mut: bool,
+    /// ADR-0066: when set, indicates that the base is a `Vec(T)`. The
+    /// `place` references the Vec aggregate; codegen reads `ptr` and `len`
+    /// from the live fields at runtime, ignoring `array_len`.
+    pub vec_base: bool,
 }
 
 // ============================================================================
