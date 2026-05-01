@@ -1,0 +1,229 @@
+# String / Vec(u8) bridge tests (ADR-0072)
+#
+# These tests cover spec §7.4 — String as a newtype wrapper over Vec(u8).
+# The whole feature is gated behind the `string_vec_bridge` preview feature.
+
+[section]
+id = "types.string_vec_bridge"
+spec_chapter = "7.4"
+name = "String / Vec(u8) Relationship"
+description = "Tests for ADR-0072: String as a newtype wrapper over Vec(u8)."
+
+# ---- 7.4:1 newtype + privacy ----
+
+[[case]]
+name = "private_bytes_field_rejected"
+spec = ["7.4:1", "7.4:10"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let s = String::new();
+    let _ = s.bytes;
+    0
+}
+"""
+compile_fail = true
+error_contains = "private"
+
+# ---- 7.4:2 UTF-8 invariant: empty / literal trivially valid ----
+
+[[case]]
+name = "empty_string_is_valid_utf8"
+spec = ["7.4:2"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let s = String::new();
+    if s.is_empty() { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+# ---- 7.4:3 method surface: bytes_len / bytes_capacity ----
+
+[[case]]
+name = "bytes_len_after_push"
+spec = ["7.4:3"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let mut s = String::new();
+    s.push('A');
+    s.bytes_len() as i32
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "bytes_capacity_at_least_reserved"
+spec = ["7.4:3"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let mut s = String::with_capacity(16);
+    if s.bytes_capacity() >= 16usize { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+# ---- 7.4:4 Vec(u8) extensions ----
+
+[[case]]
+name = "vec_u8_extend_from_slice"
+spec = ["7.4:4"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let mut a: Vec(u8) = Vec(u8)::new();
+    a.push(1u8);
+    let mut b: Vec(u8) = Vec(u8)::new();
+    b.push(2u8);
+    b.push(3u8);
+    a.extend_from_slice(&b[..]);
+    a.len() as i32
+}
+"""
+exit_code = 3
+
+# ---- 7.4:5 into_bytes ----
+
+[[case]]
+name = "into_bytes_round_trip"
+spec = ["7.4:5"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let s = String::from_char('Z');
+    let v: Vec(u8) = s.into_bytes();
+    v.len() as i32
+}
+"""
+exit_code = 1
+
+# ---- 7.4:6 from_utf8 validated ----
+
+[[case]]
+name = "from_utf8_valid_ok"
+spec = ["7.4:6"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let s = String::from_char('A');
+    let v: Vec(u8) = s.into_bytes();
+    match String::from_utf8(v) {
+        Result::Ok(s2) => s2.bytes_len() as i32,
+        Result::Err(_) => -1,
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "from_utf8_invalid_err"
+spec = ["7.4:6"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let mut v: Vec(u8) = Vec(u8)::with_capacity(2);
+    checked {
+        v.push(0xFFu8);
+        v.push(0xFEu8);
+    }
+    match String::from_utf8(v) {
+        Result::Ok(_) => 1,
+        Result::Err(_) => 0,
+    }
+}
+"""
+exit_code = 0
+
+# ---- 7.4:7 from_utf8_unchecked ----
+
+[[case]]
+name = "from_utf8_unchecked_basic"
+spec = ["7.4:7"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let s0 = String::from_char('Q');
+    let v: Vec(u8) = s0.into_bytes();
+    let s = checked { String::from_utf8_unchecked(v) };
+    s.bytes_len() as i32
+}
+"""
+exit_code = 1
+
+# ---- 7.4:8 push (char) and push_byte ----
+
+[[case]]
+name = "push_char_multi_byte"
+spec = ["7.4:8"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let mut s = String::new();
+    s.push('é');
+    s.bytes_len() as i32
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "push_byte_requires_checked"
+spec = ["7.4:8"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let mut s = String::new();
+    s.push_byte(0x41u8);
+    0
+}
+"""
+compile_fail = true
+error_contains = "checked"
+
+[[case]]
+name = "push_byte_in_checked_block"
+spec = ["7.4:8"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let mut s = String::new();
+    checked {
+        s.push_byte(0x41u8);
+    }
+    s.bytes_len() as i32
+}
+"""
+exit_code = 1
+
+# ---- 7.4:9 C interop ----
+
+[[case]]
+name = "terminated_ptr_requires_checked"
+spec = ["7.4:9"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let mut s = String::new();
+    let _p = s.terminated_ptr();
+    0
+}
+"""
+compile_fail = true
+error_contains = "checked"
+
+[[case]]
+name = "terminated_ptr_in_checked_block"
+spec = ["7.4:9"]
+preview = "string_vec_bridge"
+source = """
+fn main() -> i32 {
+    let mut s = String::from_char('A');
+    checked {
+        let _p = s.terminated_ptr();
+    }
+    s.bytes_len() as i32
+}
+"""
+exit_code = 1

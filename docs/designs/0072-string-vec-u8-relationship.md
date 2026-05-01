@@ -284,7 +284,7 @@ Net: `gruel-runtime/src/string.rs` collapses from ~490 LOC to ~50 LOC.
 
 **Prerequisites:** ADR-0070 (`Result`) Phases 1–2 must land before this ADR's Phase 3. ADR-0071 (`char`) Phases 1–5 must land before this ADR's Phase 4. ADR-0071 itself depends on ADR-0070, so the natural ordering is: Result → char → String.
 
-- [ ] **Phase 1: Preview gate + spec scaffolding**
+- [x] **Phase 1: Preview gate + spec scaffolding**
   - Add `PreviewFeature::StringVecBridge` to `gruel-error`.
   - Draft spec section 7.4 with rule IDs (no implementation yet).
 - [ ] **Phase 2: Field privacy + newtype redefinition**
