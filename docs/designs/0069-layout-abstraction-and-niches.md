@@ -167,7 +167,7 @@ Each phase is independently committable and testable.
 
 - [x] **Phase 6: Codegen for niche-encoded enums.** Constructor stores payload directly + writes `niche.start` for the unit variant. Match-dispatch loads the niche bytes and tests range membership instead of equality on a tag. Pattern binding for the data variant reads the payload from offset 0. End-to-end tests behind the preview gate: `Option(bool)` size and round-trip, nested `Option(Option(bool))`, `Option(SmallEnum)`.
 
-- [ ] **Phase 7: Composability and recursive niche inheritance.** Niche-encoded enums expose their *remaining* niche range as their own `Layout::niches`, so they can be re-niched by an enclosing enum. Tests for `Option(Option(Option(bool)))` collapsing to 1 byte; for `Option` of a struct containing a `bool` (niche inherited via struct field offset).
+- [x] **Phase 7: Composability and recursive niche inheritance.** Niche-encoded enums expose their *remaining* niche range as their own `Layout::niches`, so they can be re-niched by an enclosing enum. Tests for `Option(Option(Option(bool)))` collapsing to 1 byte; for `Option` of a struct containing a `bool` (niche inherited via struct field offset).
 
 - [ ] **Phase 8: Spec.** Add a section to `docs/spec/src/03-types/` documenting layout guarantees: types have a defined size/alignment, but specific representations (presence/absence of a discriminant, where it lives) are implementation choices except where explicitly guaranteed (e.g., `repr(C)` if/when it lands). Note that pattern matching, equality, and field access are the only stable observables; raw bit pattern inspection of an enum is not. Update the generated builtins reference if `Option`'s documented size table needs revisions.
 

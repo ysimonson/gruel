@@ -60,6 +60,70 @@ fn main() -> i32 {
 exit_code = 3
 
 [[case]]
+name = "nested_option_bool_some_some_true"
+spec = ["3.8:80"]
+preview = "enum_niches"
+preview_should_pass = true
+description = "Option(Option(bool)) collapses to 1 byte; deepest Some(true) round-trips."
+source = """
+fn main() -> i32 {
+    let O = Option(bool);
+    let OO = Option(O);
+    let x: OO = OO::Some(O::Some(true));
+    match x {
+        OO::None => 0,
+        OO::Some(inner) => match inner {
+            O::None => 1,
+            O::Some(b) => if b { 2 } else { 3 },
+        },
+    }
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "nested_option_bool_some_none"
+spec = ["3.8:80"]
+preview = "enum_niches"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let O = Option(bool);
+    let OO = Option(O);
+    let x: OO = OO::Some(O::None);
+    match x {
+        OO::None => 0,
+        OO::Some(inner) => match inner {
+            O::None => 1,
+            O::Some(b) => if b { 2 } else { 3 },
+        },
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "nested_option_bool_outer_none"
+spec = ["3.8:80"]
+preview = "enum_niches"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let O = Option(bool);
+    let OO = Option(O);
+    let x: OO = OO::None;
+    match x {
+        OO::None => 7,
+        OO::Some(inner) => match inner {
+            O::None => 1,
+            O::Some(b) => if b { 2 } else { 3 },
+        },
+    }
+}
+"""
+exit_code = 7
+
+[[case]]
 name = "option_small_enum_round_trip"
 spec = ["3.8:80"]
 preview = "enum_niches"

@@ -170,6 +170,7 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
             let def = pool.struct_def(id);
             let mut offset = 0u64;
             let mut max_align = 1u64;
+            let mut niches = Vec::new();
             for f in &def.fields {
                 let field_layout = layout_of(pool, f.ty);
                 if field_layout.size == 0 {
@@ -177,6 +178,16 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
                 }
                 max_align = max_align.max(field_layout.align);
                 offset = align_up(offset, field_layout.align);
+                // Inherit field niches with offset adjusted to the field's
+                // offset within the struct (ADR-0069 phase 7).
+                for n in &field_layout.niches {
+                    niches.push(NicheRange {
+                        offset: n.offset + offset as u32,
+                        width: n.width,
+                        start: n.start,
+                        end: n.end,
+                    });
+                }
                 offset += field_layout.size;
             }
             if max_align > 1 {
@@ -185,7 +196,7 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
             Layout {
                 size: offset,
                 align: max_align,
-                niches: Vec::new(),
+                niches,
                 discriminant: None,
             }
         }
@@ -532,6 +543,85 @@ mod tests {
                 offset: 0,
                 width: 1,
                 start: 3,
+                end: 255,
+            }]
+        );
+    }
+
+    #[test]
+    fn nested_option_bool_collapses_recursively() {
+        let p = fresh_pool();
+        p.set_enum_niches_preview(true);
+        // Build Option(Option(Option(bool))) by hand.
+        let inner = make_option_bool(&p, "OptB_inner");
+        let mut rodeo = Rodeo::default();
+        let mid_name = rodeo.get_or_intern("OptOptB");
+        let mut some_mid = EnumVariantDef::unit("Some");
+        some_mid.fields = vec![inner];
+        let mid_def = crate::EnumDef {
+            name: "OptOptB".into(),
+            variants: vec![EnumVariantDef::unit("None"), some_mid],
+            is_pub: false,
+            file_id: FileId::DEFAULT,
+            destructor: None,
+        };
+        let (mid_eid, _) = p.register_enum(mid_name, mid_def);
+        let mid = Type::new_enum(mid_eid);
+        let outer_name = rodeo.get_or_intern("OptOptOptB");
+        let mut some_outer = EnumVariantDef::unit("Some");
+        some_outer.fields = vec![mid];
+        let outer_def = crate::EnumDef {
+            name: "OptOptOptB".into(),
+            variants: vec![EnumVariantDef::unit("None"), some_outer],
+            is_pub: false,
+            file_id: FileId::DEFAULT,
+            destructor: None,
+        };
+        let (outer_eid, _) = p.register_enum(outer_name, outer_def);
+        let outer = Type::new_enum(outer_eid);
+        let layout = layout_of(&p, outer);
+        assert_eq!(
+            layout.size, 1,
+            "Option(Option(Option(bool))) should collapse to 1 byte"
+        );
+    }
+
+    #[test]
+    fn struct_inherits_field_niches() {
+        let p = fresh_pool();
+        let mut rodeo = Rodeo::default();
+        let name = rodeo.get_or_intern("Wrap");
+        // struct Wrap { _pad: u8, b: bool }
+        let def = StructDef {
+            name: "Wrap".into(),
+            fields: vec![
+                StructField {
+                    name: "pad".into(),
+                    ty: Type::U8,
+                },
+                StructField {
+                    name: "b".into(),
+                    ty: Type::BOOL,
+                },
+            ],
+            is_copy: false,
+            is_clone: false,
+            is_handle: false,
+            is_linear: false,
+            destructor: None,
+            is_builtin: false,
+            is_pub: false,
+            file_id: FileId::DEFAULT,
+        };
+        let (sid, _) = p.register_struct(name, def);
+        let layout = layout_of(&p, Type::new_struct(sid));
+        // The bool's niche should be inherited at offset 1 (the bool field offset).
+        assert_eq!(
+            layout.niches,
+            vec![NicheRange {
+                offset: 1,
+                width: 1,
+                start: 2,
                 end: 255,
             }]
         );
