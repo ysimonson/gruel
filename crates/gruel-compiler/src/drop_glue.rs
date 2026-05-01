@@ -34,6 +34,35 @@ fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
     drop_names::type_needs_drop(ty, type_pool)
 }
 
+/// If `statements` is non-empty, wrap them in a Block whose value is `value` and
+/// return the resulting AirRef. If empty, return `value` unchanged. The block's
+/// type is taken to be Type::UNIT — every call site here produces unit.
+fn block_or_value(air: &mut Air, statements: &[AirRef], value: AirRef, span: Span) -> AirRef {
+    if statements.is_empty() {
+        return value;
+    }
+    let stmt_u32s: Vec<u32> = statements.iter().map(|r| r.as_u32()).collect();
+    let stmts_start = air.add_extra(&stmt_u32s);
+    let stmts_len = statements.len() as u32;
+    air.add_inst(AirInst {
+        data: AirInstData::Block {
+            stmts_start,
+            stmts_len,
+            value,
+        },
+        ty: Type::UNIT,
+        span,
+    })
+}
+
+fn unit_const(air: &mut Air, span: Span) -> AirRef {
+    air.add_inst(AirInst {
+        data: AirInstData::UnitConst,
+        ty: Type::UNIT,
+        span,
+    })
+}
+
 /// Synthesize drop glue functions for all structs and arrays that need them.
 ///
 /// Returns a list of synthesized functions that should be added to the compilation.
@@ -161,32 +190,11 @@ fn create_struct_drop_glue_function(
         }
     }
 
-    // Create the unit value for return
-    let unit_const = air.add_inst(AirInst {
-        data: AirInstData::UnitConst,
-        ty: Type::UNIT,
-        span,
-    });
-
     // Wrap side-effect statements in a Block so they are executed.
     // The CFG builder uses demand-driven lowering, so statements must be
     // explicitly listed as block side-effects.
-    let return_value = if drop_statements.is_empty() {
-        unit_const
-    } else {
-        let stmt_u32s: Vec<u32> = drop_statements.iter().map(|r| r.as_u32()).collect();
-        let stmts_start = air.add_extra(&stmt_u32s);
-        let stmts_len = drop_statements.len() as u32;
-        air.add_inst(AirInst {
-            data: AirInstData::Block {
-                stmts_start,
-                stmts_len,
-                value: unit_const,
-            },
-            ty: Type::UNIT,
-            span,
-        })
-    };
+    let unit = unit_const(&mut air, span);
+    let return_value = block_or_value(&mut air, &drop_statements, unit, span);
 
     air.add_inst(AirInst {
         data: AirInstData::Ret(Some(return_value)),
@@ -279,30 +287,9 @@ fn create_array_drop_glue_function(
         }
     }
 
-    // Create the unit value for return
-    let unit_const = air.add_inst(AirInst {
-        data: AirInstData::UnitConst,
-        ty: Type::UNIT,
-        span,
-    });
-
     // If we have drop statements, wrap them in a Block so they get executed
-    let return_value = if drop_statements.is_empty() {
-        unit_const
-    } else {
-        let stmt_u32s: Vec<u32> = drop_statements.iter().map(|r| r.as_u32()).collect();
-        let stmts_start = air.add_extra(&stmt_u32s);
-        let stmts_len = drop_statements.len() as u32;
-        air.add_inst(AirInst {
-            data: AirInstData::Block {
-                stmts_start,
-                stmts_len,
-                value: unit_const,
-            },
-            ty: Type::UNIT,
-            span,
-        })
-    };
+    let unit = unit_const(&mut air, span);
+    let return_value = block_or_value(&mut air, &drop_statements, unit, span);
 
     // Add return instruction
     air.add_inst(AirInst {
@@ -405,30 +392,9 @@ fn create_enum_drop_glue_function(
             }
         }
 
-        // The unit value returned by this arm.
-        let unit_const = air.add_inst(AirInst {
-            data: AirInstData::UnitConst,
-            ty: Type::UNIT,
-            span,
-        });
-
         // Arm body: block with drop statements, or just unit if nothing to drop.
-        let body: AirRef = if drop_stmts.is_empty() {
-            unit_const
-        } else {
-            let stmt_u32s: Vec<u32> = drop_stmts.iter().map(|r| r.as_u32()).collect();
-            let stmts_start = air.add_extra(&stmt_u32s);
-            let stmts_len = drop_stmts.len() as u32;
-            air.add_inst(AirInst {
-                data: AirInstData::Block {
-                    stmts_start,
-                    stmts_len,
-                    value: unit_const,
-                },
-                ty: Type::UNIT,
-                span,
-            })
-        };
+        let unit = unit_const(&mut air, span);
+        let body: AirRef = block_or_value(&mut air, &drop_stmts, unit, span);
 
         AirPattern::EnumVariant {
             enum_id,
@@ -455,23 +421,8 @@ fn create_enum_drop_glue_function(
         match_result
     } else {
         pre_match_stmts.push(match_result);
-        let stmt_u32s: Vec<u32> = pre_match_stmts.iter().map(|r| r.as_u32()).collect();
-        let stmts_start = air.add_extra(&stmt_u32s);
-        let stmts_len = pre_match_stmts.len() as u32;
-        let unit_const = air.add_inst(AirInst {
-            data: AirInstData::UnitConst,
-            ty: Type::UNIT,
-            span,
-        });
-        air.add_inst(AirInst {
-            data: AirInstData::Block {
-                stmts_start,
-                stmts_len,
-                value: unit_const,
-            },
-            ty: Type::UNIT,
-            span,
-        })
+        let unit = unit_const(&mut air, span);
+        block_or_value(&mut air, &pre_match_stmts, unit, span)
     };
 
     // Return unit.

@@ -2051,11 +2051,9 @@ impl<'a> Sema<'a> {
                     && let Some(moved_span) = move_state.full_move
                 {
                     let name_str = self.interner.resolve(name);
-                    return Err(CompileError::new(
-                        ErrorKind::UseAfterMove(name_str.to_string()),
-                        inst.span,
-                    )
-                    .with_label("value moved here", moved_span));
+                    return Err(CompileError::use_after_move(
+                        name_str, inst.span, moved_span,
+                    ));
                 }
 
                 // NOTE: We do NOT mark as moved here - this is a projection
@@ -2081,11 +2079,9 @@ impl<'a> Sema<'a> {
                     && let Some(moved_span) = move_state.full_move
                 {
                     let name_str = self.interner.resolve(name);
-                    return Err(CompileError::new(
-                        ErrorKind::UseAfterMove(name_str.to_string()),
-                        inst.span,
-                    )
-                    .with_label("value moved here", moved_span));
+                    return Err(CompileError::use_after_move(
+                        name_str, inst.span, moved_span,
+                    ));
                 }
 
                 // NOTE: We do NOT mark as moved here - this is a projection
@@ -2266,11 +2262,9 @@ impl<'a> Sema<'a> {
             // Index must be `usize` (ADR-0054).
             let index_result = self.analyze_inst(air, *index, ctx)?;
             if index_result.ty != Type::USIZE && !index_result.ty.is_error() {
-                return Err(CompileError::new(
-                    ErrorKind::TypeMismatch {
-                        expected: "usize".to_string(),
-                        found: index_result.ty.name().to_string(),
-                    },
+                return Err(CompileError::type_mismatch(
+                    "usize".to_string(),
+                    index_result.ty.name().to_string(),
                     self.rir.get(*index).span,
                 ));
             }
@@ -2894,11 +2888,7 @@ impl<'a> Sema<'a> {
                 && let Some(moved_span) = state.full_move
             {
                 let root_name = self.interner.resolve(&trace.root_var);
-                return Err(CompileError::new(
-                    ErrorKind::UseAfterMove(root_name.to_string()),
-                    span,
-                )
-                .with_label("value moved here", moved_span));
+                return Err(CompileError::use_after_move(root_name, span, moved_span));
             }
 
             // Check mutability
@@ -3016,11 +3006,7 @@ impl<'a> Sema<'a> {
                 && let Some(moved_span) = state.full_move
             {
                 let root_name = self.interner.resolve(&trace.root_var);
-                return Err(CompileError::new(
-                    ErrorKind::UseAfterMove(root_name.to_string()),
-                    span,
-                )
-                .with_label("value moved here", moved_span));
+                return Err(CompileError::use_after_move(root_name, span, moved_span));
             }
 
             // Check mutability
@@ -3079,11 +3065,9 @@ impl<'a> Sema<'a> {
             // Analyze index. Must be `usize` (ADR-0054).
             let index_result = self.analyze_inst(air, index, ctx)?;
             if index_result.ty != Type::USIZE && !index_result.ty.is_error() {
-                return Err(CompileError::new(
-                    ErrorKind::TypeMismatch {
-                        expected: "usize".to_string(),
-                        found: index_result.ty.name().to_string(),
-                    },
+                return Err(CompileError::type_mismatch(
+                    "usize".to_string(),
+                    index_result.ty.name().to_string(),
                     self.rir.get(index).span,
                 ));
             }
@@ -3297,11 +3281,9 @@ impl<'a> Sema<'a> {
                 let actual_ty = air.get(arg_air.value).ty;
                 if actual_ty != expected_ty {
                     let arg_span = self.rir.get(args[i].value).span;
-                    return Err(CompileError::new(
-                        ErrorKind::TypeMismatch {
-                            expected: expected_ty.name().to_string(),
-                            found: actual_ty.name().to_string(),
-                        },
+                    return Err(CompileError::type_mismatch(
+                        expected_ty.name().to_string(),
+                        actual_ty.name().to_string(),
                         arg_span,
                     ));
                 }
@@ -3923,17 +3905,15 @@ impl<'a> Sema<'a> {
                 if !field_types.is_empty() {
                     // If this is a struct variant, error: use { } instead of ( )
                     if variant_def.is_struct_variant() {
-                        return Err(CompileError::new(
-                            ErrorKind::TypeMismatch {
-                                expected: format!(
-                                    "struct-style construction `{}::{} {{ ... }}`",
-                                    type_name_str, function_name_str
-                                ),
-                                found: format!(
-                                    "tuple-style construction `{}::{}(...)`",
-                                    type_name_str, function_name_str
-                                ),
-                            },
+                        return Err(CompileError::type_mismatch(
+                            format!(
+                                "struct-style construction `{}::{} {{ ... }}`",
+                                type_name_str, function_name_str
+                            ),
+                            format!(
+                                "tuple-style construction `{}::{}(...)`",
+                                type_name_str, function_name_str
+                            ),
                             span,
                         ));
                     }
@@ -3954,11 +3934,9 @@ impl<'a> Sema<'a> {
                     for (i, arg) in args.iter().enumerate() {
                         let result = self.analyze_inst(air, arg.value, ctx)?;
                         if result.ty != field_types[i] {
-                            return Err(CompileError::new(
-                                ErrorKind::TypeMismatch {
-                                    expected: field_types[i].name().to_string(),
-                                    found: result.ty.name().to_string(),
-                                },
+                            return Err(CompileError::type_mismatch(
+                                field_types[i].name().to_string(),
+                                result.ty.name().to_string(),
                                 span,
                             ));
                         }
@@ -4017,11 +3995,9 @@ impl<'a> Sema<'a> {
                 for (i, arg) in args.iter().enumerate() {
                     let result = self.analyze_inst(air, arg.value, ctx)?;
                     if result.ty != method_param_types[i] {
-                        return Err(CompileError::new(
-                            ErrorKind::TypeMismatch {
-                                expected: method_param_types[i].name().to_string(),
-                                found: result.ty.name().to_string(),
-                            },
+                        return Err(CompileError::type_mismatch(
+                            method_param_types[i].name().to_string(),
+                            result.ty.name().to_string(),
                             span,
                         ));
                     }
@@ -4069,17 +4045,15 @@ impl<'a> Sema<'a> {
                 let field_types: Vec<Type> = variant_def.fields.clone();
                 if !field_types.is_empty() {
                     if variant_def.is_struct_variant() {
-                        return Err(CompileError::new(
-                            ErrorKind::TypeMismatch {
-                                expected: format!(
-                                    "struct-style construction `{}::{} {{ ... }}`",
-                                    type_name_str, function_name_str
-                                ),
-                                found: format!(
-                                    "tuple-style construction `{}::{}(...)`",
-                                    type_name_str, function_name_str
-                                ),
-                            },
+                        return Err(CompileError::type_mismatch(
+                            format!(
+                                "struct-style construction `{}::{} {{ ... }}`",
+                                type_name_str, function_name_str
+                            ),
+                            format!(
+                                "tuple-style construction `{}::{}(...)`",
+                                type_name_str, function_name_str
+                            ),
                             span,
                         ));
                     }
@@ -4096,11 +4070,9 @@ impl<'a> Sema<'a> {
                     for (i, arg) in args.iter().enumerate() {
                         let result = self.analyze_inst(air, arg.value, ctx)?;
                         if result.ty != field_types[i] {
-                            return Err(CompileError::new(
-                                ErrorKind::TypeMismatch {
-                                    expected: field_types[i].name().to_string(),
-                                    found: result.ty.name().to_string(),
-                                },
+                            return Err(CompileError::type_mismatch(
+                                field_types[i].name().to_string(),
+                                result.ty.name().to_string(),
                                 span,
                             ));
                         }
@@ -4156,11 +4128,9 @@ impl<'a> Sema<'a> {
                 for (i, arg) in args.iter().enumerate() {
                     let result = self.analyze_inst(air, arg.value, ctx)?;
                     if result.ty != method_param_types[i] {
-                        return Err(CompileError::new(
-                            ErrorKind::TypeMismatch {
-                                expected: method_param_types[i].name().to_string(),
-                                found: result.ty.name().to_string(),
-                            },
+                        return Err(CompileError::type_mismatch(
+                            method_param_types[i].name().to_string(),
+                            result.ty.name().to_string(),
                             span,
                         ));
                     }
@@ -4195,11 +4165,9 @@ impl<'a> Sema<'a> {
             match ty.kind() {
                 TypeKind::Struct(id) => id,
                 _ => {
-                    return Err(CompileError::new(
-                        ErrorKind::TypeMismatch {
-                            expected: "struct type".to_string(),
-                            found: ty.name().to_string(),
-                        },
+                    return Err(CompileError::type_mismatch(
+                        "struct type".to_string(),
+                        ty.name().to_string(),
                         span,
                     ));
                 }
@@ -5327,11 +5295,9 @@ impl<'a> Sema<'a> {
 
         // Verify the type is numeric (HM should have enforced this, but check anyway)
         if !lhs_result.ty.is_numeric() && !lhs_result.ty.is_error() && !lhs_result.ty.is_never() {
-            return Err(CompileError::new(
-                ErrorKind::TypeMismatch {
-                    expected: "numeric type".to_string(),
-                    found: lhs_result.ty.name().to_string(),
-                },
+            return Err(CompileError::type_mismatch(
+                "numeric type".to_string(),
+                lhs_result.ty.name().to_string(),
                 span,
             ));
         }
@@ -5393,20 +5359,16 @@ impl<'a> Sema<'a> {
                 && !lhs_type.is_struct()
                 && !self.is_builtin_string(lhs_type)
             {
-                return Err(CompileError::new(
-                    ErrorKind::TypeMismatch {
-                        expected: "numeric, bool, string, unit, or struct".to_string(),
-                        found: lhs_type.name().to_string(),
-                    },
+                return Err(CompileError::type_mismatch(
+                    "numeric, bool, string, unit, or struct".to_string(),
+                    lhs_type.name().to_string(),
                     self.rir.get(lhs).span,
                 ));
             }
         } else if !lhs_type.is_numeric() && !self.is_builtin_string(lhs_type) {
-            return Err(CompileError::new(
-                ErrorKind::TypeMismatch {
-                    expected: "numeric or string".to_string(),
-                    found: lhs_type.name().to_string(),
-                },
+            return Err(CompileError::type_mismatch(
+                "numeric or string".to_string(),
+                lhs_type.name().to_string(),
                 self.rir.get(lhs).span,
             ));
         }
@@ -8633,11 +8595,9 @@ impl<'a> Sema<'a> {
 
             // Type check
             if arg_result.ty != expected_ty && !arg_result.ty.is_error() {
-                return Err(CompileError::new(
-                    ErrorKind::TypeMismatch {
-                        expected: expected_ty.name().to_string(),
-                        found: arg_result.ty.name().to_string(),
-                    },
+                return Err(CompileError::type_mismatch(
+                    expected_ty.name().to_string(),
+                    arg_result.ty.name().to_string(),
                     span,
                 ));
             }
@@ -8764,11 +8724,9 @@ impl<'a> Sema<'a> {
                 && !(self.is_builtin_string(arg_result.ty)
                     && matches!(method.params[i].ty, BuiltinParamType::SelfType))
             {
-                return Err(CompileError::new(
-                    ErrorKind::TypeMismatch {
-                        expected: expected_ty.name().to_string(),
-                        found: arg_result.ty.name().to_string(),
-                    },
+                return Err(CompileError::type_mismatch(
+                    expected_ty.name().to_string(),
+                    arg_result.ty.name().to_string(),
                     method_ctx.span,
                 ));
             }
@@ -9760,11 +9718,9 @@ impl<'a> Sema<'a> {
 
         // Check that value type matches pointee type
         if value_type != pointee_type && !value_type.is_error() && !value_type.is_never() {
-            return Err(CompileError::new(
-                ErrorKind::TypeMismatch {
-                    expected: self.format_type_name(pointee_type),
-                    found: self.format_type_name(value_type),
-                },
+            return Err(CompileError::type_mismatch(
+                self.format_type_name(pointee_type),
+                self.format_type_name(value_type),
                 span,
             ));
         }
@@ -10150,11 +10106,9 @@ impl<'a> Sema<'a> {
             && !dst_pointee.is_never()
             && !src_pointee.is_never()
         {
-            return Err(CompileError::new(
-                ErrorKind::TypeMismatch {
-                    expected: self.format_type_name(dst_pointee),
-                    found: self.format_type_name(src_pointee),
-                },
+            return Err(CompileError::type_mismatch(
+                self.format_type_name(dst_pointee),
+                self.format_type_name(src_pointee),
                 span,
             ));
         }
@@ -10577,11 +10531,9 @@ impl<'a> Sema<'a> {
                 };
                 let v = self.analyze_inst(air, args[0].value, ctx)?;
                 if v.ty != pointee && !v.ty.is_error() && !v.ty.is_never() {
-                    return Err(CompileError::new(
-                        ErrorKind::TypeMismatch {
-                            expected: self.format_type_name(pointee),
-                            found: self.format_type_name(v.ty),
-                        },
+                    return Err(CompileError::type_mismatch(
+                        self.format_type_name(pointee),
+                        self.format_type_name(v.ty),
                         span,
                     ));
                 }
@@ -10644,11 +10596,9 @@ impl<'a> Sema<'a> {
                 let src_pointee = self.pointer_pointee_type(src.ty);
                 if dst_pointee != src_pointee && !dst_pointee.is_error() && !src_pointee.is_error()
                 {
-                    return Err(CompileError::new(
-                        ErrorKind::TypeMismatch {
-                            expected: self.format_type_name(dst_pointee),
-                            found: self.format_type_name(src_pointee),
-                        },
+                    return Err(CompileError::type_mismatch(
+                        self.format_type_name(dst_pointee),
+                        self.format_type_name(src_pointee),
                         span,
                     ));
                 }
@@ -10741,11 +10691,9 @@ impl<'a> Sema<'a> {
                     && !ref_pointee.is_error()
                     && !pointee_from_lhs.is_error()
                 {
-                    return Err(CompileError::new(
-                        ErrorKind::TypeMismatch {
-                            expected: self.format_type_name(pointee_from_lhs),
-                            found: self.format_type_name(ref_pointee),
-                        },
+                    return Err(CompileError::type_mismatch(
+                        self.format_type_name(pointee_from_lhs),
+                        self.format_type_name(ref_pointee),
                         span,
                     ));
                 }

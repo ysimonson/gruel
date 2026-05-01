@@ -1323,6 +1323,28 @@ impl CompileError {
             diagnostic: Box::new(Diagnostic::new()),
         }
     }
+
+    /// Build a `UseAfterMove` error at `use_span` with a "value moved here"
+    /// label pointing at `moved_span`.
+    pub fn use_after_move(name: impl Into<String>, use_span: Span, moved_span: Span) -> Self {
+        Self::new(ErrorKind::UseAfterMove(name.into()), use_span)
+            .with_label("value moved here", moved_span)
+    }
+
+    /// Build a `TypeMismatch` error.
+    pub fn type_mismatch(
+        expected: impl Into<String>,
+        found: impl Into<String>,
+        span: Span,
+    ) -> Self {
+        Self::new(
+            ErrorKind::TypeMismatch {
+                expected: expected.into(),
+                found: found.into(),
+            },
+            span,
+        )
+    }
 }
 
 /// Result type for compilation operations.

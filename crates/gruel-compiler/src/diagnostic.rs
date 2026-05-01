@@ -26,6 +26,8 @@ use rustc_hash::FxHashMap as HashMap;
 use std::io::IsTerminal;
 
 use annotate_snippets::{Level, Renderer, Snippet};
+use gruel_util::span::byte_offset_to_line_col;
+use serde::Serialize;
 
 use crate::{CompileError, CompileErrors, CompileWarning, Diagnostic, ErrorCode, FileId, Span};
 
@@ -63,6 +65,27 @@ pub enum ColorChoice {
     Never,
 }
 
+/// Resolves FileId -> SourceInfo, with a fallback for spans without a known file.
+struct SourceMap<'a> {
+    sources: HashMap<FileId, SourceInfo<'a>>,
+}
+
+impl<'a> SourceMap<'a> {
+    fn new(sources: impl IntoIterator<Item = (FileId, SourceInfo<'a>)>) -> Self {
+        Self {
+            sources: sources.into_iter().collect(),
+        }
+    }
+
+    /// Try the file_id, then FileId::DEFAULT, then any registered source.
+    fn get_or_fallback(&self, file_id: FileId) -> Option<&SourceInfo<'a>> {
+        self.sources
+            .get(&file_id)
+            .or_else(|| self.sources.get(&FileId::DEFAULT))
+            .or_else(|| self.sources.values().next())
+    }
+}
+
 // ============================================================================
 // Text Diagnostic Formatter
 // ============================================================================
@@ -89,9 +112,7 @@ pub enum ColorChoice {
 /// eprintln!("{}", error_output);
 /// ```
 pub struct MultiFileFormatter<'a> {
-    /// Mapping from FileId to source information.
-    sources: HashMap<FileId, SourceInfo<'a>>,
-    /// The renderer for formatting diagnostics.
+    sources: SourceMap<'a>,
     renderer: Renderer,
 }
 
@@ -119,25 +140,9 @@ impl<'a> MultiFileFormatter<'a> {
             Renderer::plain()
         };
         Self {
-            sources: sources.into_iter().collect(),
+            sources: SourceMap::new(sources),
             renderer,
         }
-    }
-
-    /// Get the source info for a file ID, if it exists.
-    fn get_source(&self, file_id: FileId) -> Option<&SourceInfo<'a>> {
-        self.sources.get(&file_id)
-    }
-
-    /// Get a fallback source info (the first one in the map).
-    ///
-    /// This is used when a span has no file ID (FileId::DEFAULT) and we need
-    /// to show something. Returns None if no sources are registered.
-    fn fallback_source(&self) -> Option<&SourceInfo<'a>> {
-        // Try FileId::DEFAULT first, then any source
-        self.sources
-            .get(&FileId::DEFAULT)
-            .or_else(|| self.sources.values().next())
     }
 
     /// Format a compilation error into a string.
@@ -247,10 +252,7 @@ impl<'a> MultiFileFormatter<'a> {
         // Get the message, optionally with line number for disambiguation
         let message = if include_line_number {
             if let Some(span) = warning.span() {
-                if let Some(source_info) = self
-                    .get_source(span.file_id)
-                    .or_else(|| self.fallback_source())
-                {
+                if let Some(source_info) = self.sources.get_or_fallback(span.file_id) {
                     let line = span.line_number(source_info.source);
                     warning.kind.format_with_line(Some(line))
                 } else {
@@ -320,9 +322,7 @@ impl<'a> MultiFileFormatter<'a> {
             let spans = &file_spans[&file_id];
 
             // Get source info for this file
-            let source_info = self.get_source(file_id).or_else(|| self.fallback_source());
-
-            let Some(source_info) = source_info else {
+            let Some(source_info) = self.sources.get_or_fallback(file_id) else {
                 // No source available for this file - skip it
                 continue;
             };
@@ -371,7 +371,7 @@ impl<'a> MultiFileFormatter<'a> {
 /// This structure is designed to be compatible with common editor protocols
 /// (LSP, cargo's JSON format) while containing all information needed for
 /// rich diagnostic display.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct JsonDiagnostic {
     /// Error or warning code (e.g., "E0206").
     pub code: String,
@@ -390,7 +390,7 @@ pub struct JsonDiagnostic {
 }
 
 /// A span in JSON format with file location and labels.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct JsonSpan {
     /// Source file path.
     pub file: String,
@@ -409,7 +409,7 @@ pub struct JsonSpan {
 }
 
 /// A suggested fix in JSON format.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct JsonSuggestion {
     /// Human-readable description.
     pub message: String,
@@ -428,105 +428,7 @@ pub struct JsonSuggestion {
 impl JsonDiagnostic {
     /// Serialize this diagnostic to a JSON string.
     pub fn to_json(&self) -> String {
-        let mut obj = serde_json::Map::new();
-        obj.insert(
-            "code".to_string(),
-            serde_json::Value::String(self.code.clone()),
-        );
-        obj.insert(
-            "message".to_string(),
-            serde_json::Value::String(self.message.clone()),
-        );
-        obj.insert(
-            "severity".to_string(),
-            serde_json::Value::String(self.severity.to_string()),
-        );
-
-        // Spans
-        let spans: Vec<serde_json::Value> = self
-            .spans
-            .iter()
-            .map(|s| {
-                let mut span = serde_json::Map::new();
-                span.insert(
-                    "file".to_string(),
-                    serde_json::Value::String(s.file.clone()),
-                );
-                span.insert(
-                    "start".to_string(),
-                    serde_json::Value::Number(s.start.into()),
-                );
-                span.insert("end".to_string(), serde_json::Value::Number(s.end.into()));
-                span.insert("line".to_string(), serde_json::Value::Number(s.line.into()));
-                span.insert(
-                    "column".to_string(),
-                    serde_json::Value::Number(s.column.into()),
-                );
-                if let Some(label) = &s.label {
-                    span.insert(
-                        "label".to_string(),
-                        serde_json::Value::String(label.clone()),
-                    );
-                } else {
-                    span.insert("label".to_string(), serde_json::Value::Null);
-                }
-                span.insert("primary".to_string(), serde_json::Value::Bool(s.primary));
-                serde_json::Value::Object(span)
-            })
-            .collect();
-        obj.insert("spans".to_string(), serde_json::Value::Array(spans));
-
-        // Suggestions
-        let suggestions: Vec<serde_json::Value> = self
-            .suggestions
-            .iter()
-            .map(|s| {
-                let mut sugg = serde_json::Map::new();
-                sugg.insert(
-                    "message".to_string(),
-                    serde_json::Value::String(s.message.clone()),
-                );
-                sugg.insert(
-                    "file".to_string(),
-                    serde_json::Value::String(s.file.clone()),
-                );
-                sugg.insert(
-                    "start".to_string(),
-                    serde_json::Value::Number(s.start.into()),
-                );
-                sugg.insert("end".to_string(), serde_json::Value::Number(s.end.into()));
-                sugg.insert(
-                    "replacement".to_string(),
-                    serde_json::Value::String(s.replacement.clone()),
-                );
-                sugg.insert(
-                    "applicability".to_string(),
-                    serde_json::Value::String(s.applicability.clone()),
-                );
-                serde_json::Value::Object(sugg)
-            })
-            .collect();
-        obj.insert(
-            "suggestions".to_string(),
-            serde_json::Value::Array(suggestions),
-        );
-
-        // Notes and helps
-        let notes: Vec<serde_json::Value> = self
-            .notes
-            .iter()
-            .map(|n| serde_json::Value::String(n.clone()))
-            .collect();
-        obj.insert("notes".to_string(), serde_json::Value::Array(notes));
-
-        let helps: Vec<serde_json::Value> = self
-            .helps
-            .iter()
-            .map(|h| serde_json::Value::String(h.clone()))
-            .collect();
-        obj.insert("helps".to_string(), serde_json::Value::Array(helps));
-
-        serde_json::to_string(&serde_json::Value::Object(obj)).unwrap_or_else(|_| "{}".to_string())
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
     }
 }
 
@@ -553,190 +455,104 @@ impl JsonDiagnostic {
 /// let json = formatter.format_error(&error).to_json();
 /// ```
 pub struct MultiFileJsonFormatter<'a> {
-    /// Mapping from FileId to source information.
-    sources: HashMap<FileId, SourceInfo<'a>>,
+    sources: SourceMap<'a>,
 }
 
 impl<'a> MultiFileJsonFormatter<'a> {
     /// Create a new multi-file JSON diagnostic formatter.
     pub fn new(sources: impl IntoIterator<Item = (FileId, SourceInfo<'a>)>) -> Self {
         Self {
-            sources: sources.into_iter().collect(),
+            sources: SourceMap::new(sources),
         }
-    }
-
-    /// Get the source info for a file ID, if it exists.
-    fn get_source(&self, file_id: FileId) -> Option<&SourceInfo<'a>> {
-        self.sources.get(&file_id)
-    }
-
-    /// Get a fallback source info (for FileId::DEFAULT or when no specific source is found).
-    fn fallback_source(&self) -> Option<&SourceInfo<'a>> {
-        self.sources
-            .get(&FileId::DEFAULT)
-            .or_else(|| self.sources.values().next())
-    }
-
-    /// Calculate line and column for a byte offset in a specific source.
-    fn offset_to_line_col(&self, source: &str, offset: u32) -> (u32, u32) {
-        let offset = offset as usize;
-        let mut line = 1u32;
-        let mut col = 1u32;
-        for (i, ch) in source.char_indices() {
-            if i >= offset {
-                break;
-            }
-            if ch == '\n' {
-                line += 1;
-                col = 1;
-            } else {
-                col += 1;
-            }
-        }
-        (line, col)
     }
 
     /// Get the path and source for a span, using the span's file ID.
     fn source_for_span(&self, span: Span) -> Option<(&str, &str)> {
-        self.get_source(span.file_id)
-            .or_else(|| self.fallback_source())
+        self.sources
+            .get_or_fallback(span.file_id)
             .map(|info| (info.path, info.source))
+    }
+
+    fn make_span(&self, span: Span, label: Option<String>, primary: bool) -> Option<JsonSpan> {
+        self.source_for_span(span).map(|(path, source)| {
+            let (line, col) = byte_offset_to_line_col(source, span.start as usize);
+            JsonSpan {
+                file: path.to_string(),
+                start: span.start,
+                end: span.end,
+                line: line as u32,
+                column: col as u32,
+                label,
+                primary,
+            }
+        })
+    }
+
+    fn build_diagnostic(
+        &self,
+        code: String,
+        message: String,
+        severity: &'static str,
+        primary: Option<Span>,
+        diag: &Diagnostic,
+    ) -> JsonDiagnostic {
+        let mut spans: Vec<JsonSpan> = primary
+            .and_then(|span| self.make_span(span, None, true))
+            .into_iter()
+            .collect();
+        spans.extend(
+            diag.labels
+                .iter()
+                .filter_map(|l| self.make_span(l.span, Some(l.message.clone()), false)),
+        );
+
+        let suggestions = diag
+            .suggestions
+            .iter()
+            .filter_map(|s| {
+                self.source_for_span(s.span)
+                    .map(|(path, _)| JsonSuggestion {
+                        message: s.message.clone(),
+                        file: path.to_string(),
+                        start: s.span.start,
+                        end: s.span.end,
+                        replacement: s.replacement.clone(),
+                        applicability: s.applicability.to_string(),
+                    })
+            })
+            .collect();
+
+        JsonDiagnostic {
+            code,
+            message,
+            severity,
+            spans,
+            suggestions,
+            notes: diag.notes.iter().map(|n| n.0.clone()).collect(),
+            helps: diag.helps.iter().map(|h| h.0.clone()).collect(),
+        }
     }
 
     /// Format a compile error as JSON.
     pub fn format_error(&self, error: &CompileError) -> JsonDiagnostic {
-        let diag = error.diagnostic();
-
-        let primary_span = error.span().and_then(|span| {
-            self.source_for_span(span).map(|(path, source)| {
-                let (line, col) = self.offset_to_line_col(source, span.start);
-                JsonSpan {
-                    file: path.to_string(),
-                    start: span.start,
-                    end: span.end,
-                    line,
-                    column: col,
-                    label: None,
-                    primary: true,
-                }
-            })
-        });
-
-        let secondary_spans: Vec<JsonSpan> = diag
-            .labels
-            .iter()
-            .filter_map(|label| {
-                self.source_for_span(label.span).map(|(path, source)| {
-                    let (line, col) = self.offset_to_line_col(source, label.span.start);
-                    JsonSpan {
-                        file: path.to_string(),
-                        start: label.span.start,
-                        end: label.span.end,
-                        line,
-                        column: col,
-                        label: Some(label.message.clone()),
-                        primary: false,
-                    }
-                })
-            })
-            .collect();
-
-        let mut spans: Vec<JsonSpan> = primary_span.into_iter().collect();
-        spans.extend(secondary_spans);
-
-        let suggestions: Vec<JsonSuggestion> = diag
-            .suggestions
-            .iter()
-            .filter_map(|s| {
-                self.source_for_span(s.span)
-                    .map(|(path, _)| JsonSuggestion {
-                        message: s.message.clone(),
-                        file: path.to_string(),
-                        start: s.span.start,
-                        end: s.span.end,
-                        replacement: s.replacement.clone(),
-                        applicability: s.applicability.to_string(),
-                    })
-            })
-            .collect();
-
-        JsonDiagnostic {
-            code: format!("{}", error.kind.code()),
-            message: format!("{}", error.kind),
-            severity: "error",
-            spans,
-            suggestions,
-            notes: diag.notes.iter().map(|n| n.0.clone()).collect(),
-            helps: diag.helps.iter().map(|h| h.0.clone()).collect(),
-        }
+        self.build_diagnostic(
+            format!("{}", error.kind.code()),
+            format!("{}", error.kind),
+            "error",
+            error.span(),
+            error.diagnostic(),
+        )
     }
 
     /// Format a compile warning as JSON.
     pub fn format_warning(&self, warning: &CompileWarning) -> JsonDiagnostic {
-        let diag = warning.diagnostic();
-
-        let primary_span = warning.span().and_then(|span| {
-            self.source_for_span(span).map(|(path, source)| {
-                let (line, col) = self.offset_to_line_col(source, span.start);
-                JsonSpan {
-                    file: path.to_string(),
-                    start: span.start,
-                    end: span.end,
-                    line,
-                    column: col,
-                    label: None,
-                    primary: true,
-                }
-            })
-        });
-
-        let secondary_spans: Vec<JsonSpan> = diag
-            .labels
-            .iter()
-            .filter_map(|label| {
-                self.source_for_span(label.span).map(|(path, source)| {
-                    let (line, col) = self.offset_to_line_col(source, label.span.start);
-                    JsonSpan {
-                        file: path.to_string(),
-                        start: label.span.start,
-                        end: label.span.end,
-                        line,
-                        column: col,
-                        label: Some(label.message.clone()),
-                        primary: false,
-                    }
-                })
-            })
-            .collect();
-
-        let mut spans: Vec<JsonSpan> = primary_span.into_iter().collect();
-        spans.extend(secondary_spans);
-
-        let suggestions: Vec<JsonSuggestion> = diag
-            .suggestions
-            .iter()
-            .filter_map(|s| {
-                self.source_for_span(s.span)
-                    .map(|(path, _)| JsonSuggestion {
-                        message: s.message.clone(),
-                        file: path.to_string(),
-                        start: s.span.start,
-                        end: s.span.end,
-                        replacement: s.replacement.clone(),
-                        applicability: s.applicability.to_string(),
-                    })
-            })
-            .collect();
-
-        JsonDiagnostic {
-            code: String::new(), // Warnings don't have codes yet
-            message: format!("{}", warning.kind),
-            severity: "warning",
-            spans,
-            suggestions,
-            notes: diag.notes.iter().map(|n| n.0.clone()).collect(),
-            helps: diag.helps.iter().map(|h| h.0.clone()).collect(),
-        }
+        self.build_diagnostic(
+            String::new(), // Warnings don't have codes yet
+            format!("{}", warning.kind),
+            "warning",
+            warning.span(),
+            warning.diagnostic(),
+        )
     }
 
     /// Format multiple errors as a JSON array string.

@@ -59,11 +59,9 @@ impl<'a> Sema<'a> {
                     Err(e) => return Some(Err(e)),
                 };
                 if !n_res.ty.is_integer() && !n_res.ty.is_error() {
-                    return Some(Err(CompileError::new(
-                        ErrorKind::TypeMismatch {
-                            expected: "usize".to_string(),
-                            found: self.format_type_name(n_res.ty),
-                        },
+                    return Some(Err(CompileError::type_mismatch(
+                        "usize".to_string(),
+                        self.format_type_name(n_res.ty),
                         span,
                     )));
                 }
@@ -122,11 +120,9 @@ impl<'a> Sema<'a> {
                 }
                 let val = self.analyze_inst(air, args[0].value, ctx)?;
                 if val.ty != elem_ty && !val.ty.is_error() {
-                    return Err(CompileError::new(
-                        ErrorKind::TypeMismatch {
-                            expected: self.format_type_name(elem_ty),
-                            found: self.format_type_name(val.ty),
-                        },
+                    return Err(CompileError::type_mismatch(
+                        self.format_type_name(elem_ty),
+                        self.format_type_name(val.ty),
                         span,
                     ));
                 }
@@ -194,11 +190,9 @@ impl<'a> Sema<'a> {
                 }
                 let n = self.analyze_inst(air, args[0].value, ctx)?;
                 if !n.ty.is_integer() && !n.ty.is_error() {
-                    return Err(CompileError::new(
-                        ErrorKind::TypeMismatch {
-                            expected: "usize".to_string(),
-                            found: self.format_type_name(n.ty),
-                        },
+                    return Err(CompileError::type_mismatch(
+                        "usize".to_string(),
+                        self.format_type_name(n.ty),
                         span,
                     ));
                 }
@@ -248,11 +242,9 @@ impl<'a> Sema<'a> {
                 }
                 let s = self.analyze_inst(air, args[0].value, ctx)?;
                 if s.ty != elem_ty && !s.ty.is_error() {
-                    return Err(CompileError::new(
-                        ErrorKind::TypeMismatch {
-                            expected: self.format_type_name(elem_ty),
-                            found: self.format_type_name(s.ty),
-                        },
+                    return Err(CompileError::type_mismatch(
+                        self.format_type_name(elem_ty),
+                        self.format_type_name(s.ty),
                         span,
                     ));
                 }
@@ -395,11 +387,9 @@ impl<'a> Sema<'a> {
                 None => elem_ty = Some(res.ty),
                 Some(t) => {
                     if t != res.ty && !res.ty.is_error() && !t.is_error() {
-                        return Err(CompileError::new(
-                            ErrorKind::TypeMismatch {
-                                expected: self.format_type_name(t),
-                                found: self.format_type_name(res.ty),
-                            },
+                        return Err(CompileError::type_mismatch(
+                            self.format_type_name(t),
+                            self.format_type_name(res.ty),
                             span,
                         ));
                     }
@@ -455,11 +445,9 @@ impl<'a> Sema<'a> {
         let v = self.analyze_inst(air, args[0].value, ctx)?;
         let n = self.analyze_inst(air, args[1].value, ctx)?;
         if !n.ty.is_integer() && !n.ty.is_error() {
-            return Err(CompileError::new(
-                ErrorKind::TypeMismatch {
-                    expected: "usize".to_string(),
-                    found: self.format_type_name(n.ty),
-                },
+            return Err(CompileError::type_mismatch(
+                "usize".to_string(),
+                self.format_type_name(n.ty),
                 span,
             ));
         }
@@ -534,11 +522,9 @@ impl<'a> Sema<'a> {
         }
         let index_res = self.analyze_inst(air, index, ctx)?;
         if !index_res.ty.is_integer() && !index_res.ty.is_error() && !index_res.ty.is_never() {
-            return Err(CompileError::new(
-                ErrorKind::TypeMismatch {
-                    expected: "usize".to_string(),
-                    found: self.format_type_name(index_res.ty),
-                },
+            return Err(CompileError::type_mismatch(
+                "usize".to_string(),
+                self.format_type_name(index_res.ty),
                 self.rir.get(index).span,
             ));
         }
@@ -583,11 +569,9 @@ impl<'a> Sema<'a> {
         let index_res = self.analyze_inst(air, index, ctx)?;
         let value_res = self.analyze_inst(air, value, ctx)?;
         if value_res.ty != elem_ty && !value_res.ty.is_error() {
-            return Err(CompileError::new(
-                ErrorKind::TypeMismatch {
-                    expected: self.format_type_name(elem_ty),
-                    found: self.format_type_name(value_res.ty),
-                },
+            return Err(CompileError::type_mismatch(
+                self.format_type_name(elem_ty),
+                self.format_type_name(value_res.ty),
                 span,
             ));
         }
@@ -634,22 +618,18 @@ impl<'a> Sema<'a> {
         let elem_ty = match p.ty.kind() {
             TypeKind::PtrMut(id) => self.type_pool.ptr_mut_def(id),
             _ => {
-                return Err(CompileError::new(
-                    ErrorKind::TypeMismatch {
-                        expected: "MutPtr(T)".to_string(),
-                        found: self.format_type_name(p.ty),
-                    },
+                return Err(CompileError::type_mismatch(
+                    "MutPtr(T)".to_string(),
+                    self.format_type_name(p.ty),
                     span,
                 ));
             }
         };
         for arg_res in &[&len, &cap] {
             if !arg_res.ty.is_integer() && !arg_res.ty.is_error() {
-                return Err(CompileError::new(
-                    ErrorKind::TypeMismatch {
-                        expected: "usize".to_string(),
-                        found: self.format_type_name(arg_res.ty),
-                    },
+                return Err(CompileError::type_mismatch(
+                    "usize".to_string(),
+                    self.format_type_name(arg_res.ty),
                     span,
                 ));
             }
