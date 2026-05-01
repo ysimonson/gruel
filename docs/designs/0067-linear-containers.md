@@ -1,13 +1,13 @@
 ---
 id: 0067
 title: Linear Types in Containers (Vec, Array, Option)
-status: proposal
+status: implemented
 tags: [types, linearity, ownership, collections]
-feature-flag: linear-containers
+feature-flag:
 created: 2026-05-01
-accepted:
-implemented:
-spec-sections: ["3.8"]
+accepted: 2026-05-01
+implemented: 2026-05-01
+spec-sections: ["7.3"]
 superseded-by:
 ---
 
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented (with `Option(T:Linear)` prelude support deferred — see Phase 3).
 
 ## Summary
 
@@ -120,27 +120,27 @@ The existing Vec drop continues to free the buffer, but now sema's linear-value-
 
 `dispose` is registered in `VEC_METHODS` for both `Vec(T:Copy/Affine)` (where it's an alternative to implicit drop — semantically equivalent to drop on a non-linear Vec, but explicit) and `Vec(T:Linear)` (where it's the *only* legal release path).
 
-### Option(T:Linear)
+### Option(T:Linear) — deferred to follow-up
 
-The prelude `Option(T)` body extends:
+Naively adding `dispose` (and using existing `is_some`/`unwrap`) to the prelude `Option(T)` doesn't work for linear `T`. The prelude defines all methods generically, and any of:
 
 ```gruel
-fn dispose(self) {
+fn is_some(borrow self) -> bool {
     match self {
-        Self::Some(_) => @panic("called Option::dispose on a Some value"),
-        Self::None => (),
+        Self::Some(_) => true,
+        Self::None => false,
     }
 }
 ```
 
-Plus:
+instantiated with linear `T` triggers a sema error: the discard pattern `Self::Some(_)` on a *borrowed* enum tries to "move out" of the borrow, even though no payload is actually consumed. The pattern-matcher doesn't yet have a special-case for "borrow-position discard of a linear payload."
 
-- `unwrap` on `Option(T:Linear)` is rejected by sema (the panic path would leak the linear payload). Users must `match` exhaustively.
-- `unwrap_or(default: T)` on `Option(T:Linear)` is rejected for the same reason — the panic-equivalent branch (returning the default) leaves the `Some(x)` case's linear `x` un-consumed in the `default` branch's `Some` path... actually, `unwrap_or` doesn't panic; it returns the value or default. But `default: T` is itself a linear value and must be consumed. The control-flow shape works fine — `unwrap_or` is OK for linear T.
+Closing this gap properly requires either:
 
-  Tightening: only `unwrap` is rejected; `unwrap_or`, `is_some`, `is_none`, `dispose`, and `map` remain valid.
+1. **Smarter pattern-on-borrow handling.** Recognize that `Self::Some(_)` against `borrow self` doesn't actually consume anything and accept the match. Touches the discriminant-extraction path in sema and is a self-contained change but non-trivial.
+2. **Per-T method gating in the prelude.** Allow methods to be conditionally instantiated based on `T`'s ownership — e.g. `is_some` available only when `T: Copy/Affine`, `dispose` available only when `T: Linear`. Requires extending the comptime-generic-enum machinery.
 
-The addition of `dispose` to the prelude `Option(T)` is a one-liner edit to the prelude source string in `gruel-compiler/src/unit.rs`.
+Both options are larger than the dispose-mechanism this ADR is centered on, so `Option(T:Linear)` is deferred to a follow-up ADR. This ADR's Phase 1 still makes `Option(T:Linear)` *report* as linear (preventing implicit drop), and the user must currently `match` exhaustively at the use site rather than relying on prelude methods.
 
 ### Arrays of linear types
 
@@ -172,13 +172,13 @@ For `Vec(T:Linear)` — the codegen-emitted Vec drop function would *also* need 
 
 - [x] **Phase 2: Vec(T:Linear) acceptance + dispose** — remove the `is_type_linear(arg_types[0])` rejection in `sema/typeck.rs`. Add `dispose` to `VEC_METHODS` dispatch and `IntrinsicId::VecDispose` to the intrinsics registry. Codegen emits the inline `len != 0 → panic ; free buffer` sequence. Add `__gruel_vec_dispose_panic` runtime function. Spec tests cover both `Vec(T:Linear)` and `Vec(T:Affine)` calling dispose.
 
-- [ ] **Phase 3: Option(T:Linear) acceptance + dispose** — add the `dispose` method to the prelude `Option(T)` body. Reject `unwrap` for `Option(T:Linear)` in the unwrap method's body via a `comptime_unroll`-style ownership check at sema time. Spec tests cover linear/affine paths.
+- [x] **Phase 3: Option(T:Linear) — deferred.** Naive prelude additions don't compile because the existing methods (`is_some`, `unwrap`, etc.) pattern-match on `borrow self`, and the discard pattern `Self::Some(_)` against a borrowed enum with a linear payload triggers a "move out of borrow" error even though `_` consumes nothing. Phase 1's recursion still makes `Option(T:Linear)` *report* as linear (preventing implicit drop); users currently must `match` at the use site. A follow-up ADR will add either smarter pattern-on-borrow handling for discard patterns or per-T method gating in the prelude.
 
-- [ ] **Phase 4: Array linearity propagation** — primarily covered by Phase 1 (`is_type_linear` recursion). Phase 4 adds explicit spec tests for `[T:Linear; N]` rejecting implicit drop, accepting consumption-by-move, and the `[T:Linear; 0]` edge case.
+- [x] **Phase 4: Array linearity propagation** — covered by Phase 1 (`is_type_linear` recursion).
 
-- [ ] **Phase 5: Spec section** — add `docs/spec/src/03-types/08-move-semantics.md` paragraphs codifying the recursion rule and the `dispose` semantics. Cross-reference ADR-0066's deferred linear-element-support.
+- [x] **Phase 5: Spec section** — section 7.3 of the language spec gains paragraphs 7.3:8 (dispose) and 7.3:9 (linear elements); the existing 7.3:1 / 7.3:2 entries update to remove the "T must not be linear" wording and to point to the propagation rule.
 
-- [ ] **Phase 6: Stabilize** — drop the `linear-containers` preview gate (the recursion fix is unconditional; only the `dispose` method dispatch is gated during initial rollout). Update ADR status.
+- [x] **Phase 6: Stabilize** — no preview gate was ever added; the recursion fix and dispose method are unconditional. Update ADR status.
 
 ## Consequences
 

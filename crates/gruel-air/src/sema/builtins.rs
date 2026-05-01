@@ -253,8 +253,8 @@ impl<'a> Sema<'a> {
                 struct_def.is_linear
             }
             TypeKind::Array(array_id) => {
-                let (element_type, _) = self.type_pool.array_def(array_id);
-                self.is_type_linear(element_type)
+                let (element_type, length) = self.type_pool.array_def(array_id);
+                length > 0 && self.is_type_linear(element_type)
             }
             TypeKind::Vec(vec_id) => {
                 let element_type = self.type_pool.vec_def(vec_id);
