@@ -294,23 +294,29 @@ Net: `gruel-runtime/src/string.rs` collapses from ~490 LOC to ~50 LOC.
   - Add the missing `Vec(u8)` methods (`contains`, `starts_with`, `ends_with`, `concat`, `extend_from_slice`) as inline LLVM in `gruel-codegen-llvm`. Spec tests for each. *(Deferred — promoted to a follow-up; the existing `String` runtime keeps working with the new layout, so the user-facing privacy + structural rename ships independently.)*
   - Rewrite all existing `String` methods as composition over `self.bytes` (the bodies in §4). Delete the old `String__*` runtime functions. *(Deferred — current `String__*` runtime functions are bit-compatible with the new `{ Vec(u8) }` layout, so they continue to work. Final composition + runtime collapse is queued for stabilization.)*
   - Spec tests: every existing String operation still works; private-field access from user code is rejected.
-- [ ] **Phase 3: Validated conversions** *(requires ADR-0070 Phases 1–2)*
+- [ ] **Phase 3: Validated conversions** *(requires ADR-0070 Phases 1–2)* — *Deferred to follow-up*
   - `__gruel_utf8_validate` runtime fn.
   - `String::into_bytes`, `String::from_utf8` (returns `Result(String, Vec(u8))`), `String::from_utf8_unchecked` (in `checked`).
   - `Vec(u8).into_string` / `into_string_unchecked` sugar.
   - Spec tests covering valid/invalid bytes, `Ok`/`Err` paths, round-trips.
-- [ ] **Phase 4: Char-aware mutation** *(requires ADR-0071 Phases 1–5)*
-  - `String.push(c: char)` — body per §4.
-  - `String::from_char(c)`.
+
+  *Status:* deferred. The `Result(String, Vec(u8))` return type for `from_utf8` requires invoking the canonical comptime-generic `Result(T, E)` instantiation from compiler-built dispatch, which is non-trivial machinery to wire from a registry-described builtin method. Bit-cast paths (`into_bytes`, `from_utf8_unchecked`) and the runtime validator are tractable in isolation but are kept paired with the validated path so the API ships as one cohesive surface.
+- [ ] **Phase 4: Char-aware mutation** *(requires ADR-0071 Phases 1–5)* — *Partially landed (ADR-0071); rename pass deferred*
+  - `String.push(c: char)` — body per §4. *Already exists today as `push_char(c: char)` from ADR-0071.*
+  - `String::from_char(c)`. *Already exists from ADR-0071.*
   - Rename today's `String::push(byte: u8)` → `push_byte`, gate to `checked`.
   - Migrate existing callers.
   - Spec tests: ASCII / 2-byte / 3-byte / 4-byte char pushes, round-trip via `bytes`.
-- [ ] **Phase 5: C interop**
+
+  *Status:* the safe codepoint-pushing path was already provided by ADR-0071 under the name `push_char`. The dual rename (`push_char` → `push`; `push` → `push_byte` and gate to `checked`) is a source-breaking migration of existing callers that lands with the conversion API in the next pass.
+- [ ] **Phase 5: C interop** — *Deferred to follow-up*
   - `__gruel_vec_from_c_str` runtime fn.
   - `String::terminated_ptr(&mut self)` (in `checked`) — delegates to `Vec(u8)::terminated_ptr`.
   - `String::from_c_str` (returns `Result(String, Vec(u8))`) and `String::from_c_str_unchecked` (in `checked`).
   - Spec tests with a small C shim or runtime helper.
-- [ ] **Phase 6: Stabilize**
+
+  *Status:* deferred. Same blocker as Phase 3 — the validated `from_c_str` form returns `Result(String, Vec(u8))`. `terminated_ptr` is a thin delegation to `Vec(u8)::terminated_ptr` and ships with the rest of this surface.
+- [ ] **Phase 6: Stabilize** — *Pending Phases 3–5*
   - Remove preview gate.
   - Finalize spec section 7.4.
   - Update ADR-0066's "future work" note pointing to this ADR as resolved.
