@@ -182,6 +182,22 @@ impl MutSliceTypeId {
     }
 }
 
+/// A unique identifier for a `Vec(T)` type (ADR-0066).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VecTypeId(pub u32);
+
+impl VecTypeId {
+    #[inline]
+    pub fn from_pool_index(pool_index: u32) -> Self {
+        VecTypeId(pool_index)
+    }
+
+    #[inline]
+    pub fn pool_index(self) -> u32 {
+        self.0
+    }
+}
+
 /// A unique identifier for an interface declaration (ADR-0056).
 ///
 /// Mirrors `StructId` / `EnumId`: the inner value is a pool index into
@@ -288,6 +304,8 @@ pub enum TypeKind {
     Slice(SliceTypeId),
     /// Mutable slice (ADR-0064): `MutSlice(T)` — scope-bound exclusive fat pointer.
     MutSlice(MutSliceTypeId),
+    /// Owned, growable vector (ADR-0066): `Vec(T)` — heap-allocated `{ptr, len, cap}`.
+    Vec(VecTypeId),
     /// A module type (from @import)
     Module(ModuleId),
     /// An error type (used during type checking to continue after errors)
@@ -378,6 +396,7 @@ impl std::fmt::Debug for Type {
             TypeKind::MutRef(id) => write!(f, "Type::new_mut_ref(MutRefTypeId({}))", id.0),
             TypeKind::Slice(id) => write!(f, "Type::new_slice(SliceTypeId({}))", id.0),
             TypeKind::MutSlice(id) => write!(f, "Type::new_mut_slice(MutSliceTypeId({}))", id.0),
+            TypeKind::Vec(id) => write!(f, "Type::new_vec(VecTypeId({}))", id.0),
             TypeKind::Module(id) => write!(f, "Type::new_module(ModuleId({}))", id.0),
             TypeKind::Interface(id) => write!(f, "Type::new_interface(InterfaceId({}))", id.0),
         }
@@ -398,6 +417,7 @@ const TAG_REF: u32 = 107;
 const TAG_MUT_REF: u32 = 108;
 const TAG_SLICE: u32 = 109;
 const TAG_MUT_SLICE: u32 = 110;
+const TAG_VEC: u32 = 111;
 
 // Primitive type constants
 impl Type {
@@ -497,6 +517,12 @@ impl Type {
     #[inline]
     pub const fn new_mut_slice(id: MutSliceTypeId) -> Type {
         Type(TAG_MUT_SLICE | (id.0 << 8))
+    }
+
+    /// Create an owned vector type (ADR-0066) from a VecTypeId.
+    #[inline]
+    pub const fn new_vec(id: VecTypeId) -> Type {
+        Type(TAG_VEC | (id.0 << 8))
     }
 
     /// Create a module type from a ModuleId.
@@ -931,6 +957,7 @@ impl Type {
             TAG_MUT_REF => Some(TypeKind::MutRef(MutRefTypeId(self.0 >> 8))),
             TAG_SLICE => Some(TypeKind::Slice(SliceTypeId(self.0 >> 8))),
             TAG_MUT_SLICE => Some(TypeKind::MutSlice(MutSliceTypeId(self.0 >> 8))),
+            TAG_VEC => Some(TypeKind::Vec(VecTypeId(self.0 >> 8))),
             TAG_MODULE => Some(TypeKind::Module(ModuleId(self.0 >> 8))),
             TAG_INTERFACE => Some(TypeKind::Interface(InterfaceId(self.0 >> 8))),
             _ => None,
@@ -966,6 +993,7 @@ impl Type {
             TypeKind::MutRef(_) => "<mut ref>",
             TypeKind::Slice(_) => "<slice>",
             TypeKind::MutSlice(_) => "<mut slice>",
+            TypeKind::Vec(_) => "<vec>",
             TypeKind::Module(_) => "<module>",
             TypeKind::Interface(_) => "<interface>",
             TypeKind::Error => "<error>",
@@ -1231,6 +1259,22 @@ impl Type {
     pub fn is_any_slice(&self) -> bool {
         let tag = self.0 & 0xFF;
         tag == TAG_SLICE || tag == TAG_MUT_SLICE
+    }
+
+    /// Check if this is a `Vec(T)` type (ADR-0066).
+    #[inline]
+    pub fn is_vec(&self) -> bool {
+        (self.0 & 0xFF) == TAG_VEC
+    }
+
+    /// Get the vec type ID if this is a `Vec(T)`.
+    #[inline]
+    pub fn as_vec_type(&self) -> Option<VecTypeId> {
+        if self.is_vec() {
+            Some(VecTypeId(self.0 >> 8))
+        } else {
+            None
+        }
     }
 
     /// Check if this is a signed integer type.

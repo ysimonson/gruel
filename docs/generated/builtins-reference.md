@@ -22,6 +22,7 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 | `MutRef` | 1 | mutable reference (ADR-0062) |
 | `Slice` | 1 | immutable slice (ADR-0064) |
 | `MutSlice` | 1 | mutable slice (ADR-0064) |
+| `Vec` | 1 | owned, growable vector (ADR-0066) |
 
 ### Enums
 
@@ -104,6 +105,10 @@ immutable slice (ADR-0064).
 ### `MutSlice(T)`
 
 mutable slice (ADR-0064).
+
+### `Vec(T)`
+
+owned, growable vector (ADR-0066).
 
 ## Enums
 

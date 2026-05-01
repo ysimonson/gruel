@@ -314,7 +314,7 @@ Same pattern as ADR-0061 / 0062 / 0063 / 0064:
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Type system foundation** — add `TypeKind::Vec(TypeId)` with intern-pool support. LLVM lowering as `{ T*, i64, i64 }` aggregate. No surface form yet. Add `BuiltinTypeConstructorKind::Vec` and `VEC_CONSTRUCTOR` to `gruel-builtins`. Add `PreviewFeature::Vec` to `gruel-error`.
+- [x] **Phase 1: Type system foundation** — add `TypeKind::Vec(TypeId)` with intern-pool support. LLVM lowering as `{ T*, i64, i64 }` aggregate. No surface form yet. Add `BuiltinTypeConstructorKind::Vec` and `VEC_CONSTRUCTOR` to `gruel-builtins`. Add `PreviewFeature::Vec` to `gruel-error`.
 
 - [ ] **Phase 2: Construction** — sema accepts `Vec(T)` in type position behind `--preview vec`. Reject `Vec(T)` when `T: Linear` with a clear error pointing at this ADR. Implement `Vec::new()` and `Vec::with_capacity(n)`. Codegen emits the constructor inline (zero-init the aggregate; for `with_capacity` with `n > 0`, call `__gruel_alloc`). Drop function emission for `T: Copy` (just free).
 

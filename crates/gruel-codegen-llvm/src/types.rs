@@ -229,6 +229,14 @@ pub fn gruel_type_to_llvm<'ctx>(
             Some(ctx.struct_type(&[ptr, len], false).into())
         }
 
+        // Vec(T) (ADR-0066): owned fat pointer `{ ptr, i64, i64 }`.
+        // (data pointer, length, capacity).
+        TypeKind::Vec(_) => {
+            let ptr = ctx.ptr_type(AddressSpace::default()).into();
+            let i64_ty = ctx.i64_type().into();
+            Some(ctx.struct_type(&[ptr, i64_ty, i64_ty], false).into())
+        }
+
         // Enums:
         // - Unit-only enums: represented as their discriminant integer type (backward compat).
         // - Data enums: tagged union `{ discriminant_type, [max_payload_bytes x i8] }`.

@@ -82,6 +82,8 @@ impl<'a> Sema<'a> {
             // (ptr + len). Bitwise-copying is safe; borrow-checking enforces
             // exclusivity.
             TypeKind::Slice(_) | TypeKind::MutSlice(_) => true,
+            // Vec(T) (ADR-0066) is affine — owns heap memory.
+            TypeKind::Vec(_) => false,
         }
     }
 
@@ -272,6 +274,13 @@ impl<'a> Sema<'a> {
                     BuiltinTypeConstructorKind::MutSlice => {
                         let slice_id = self.type_pool.intern_mut_slice_from_type(arg_types[0]);
                         Ok(Type::new_mut_slice(slice_id))
+                    }
+                    BuiltinTypeConstructorKind::Vec => {
+                        // ADR-0066 Phase 1: lower `Vec(T)` in type position.
+                        // The preview gate / linear-rejection / copy-validation
+                        // land in Phase 2 alongside the construction methods.
+                        let vec_id = self.type_pool.intern_vec_from_type(arg_types[0]);
+                        Ok(Type::new_vec(vec_id))
                     }
                 };
             }
@@ -584,6 +593,8 @@ impl<'a> Sema<'a> {
             TypeKind::Interface(_) => 2,
             // Slices (ADR-0064): fat pointer `{ptr, len}` occupies 2 slots.
             TypeKind::Slice(_) | TypeKind::MutSlice(_) => 2,
+            // Vec(T) (ADR-0066): `{ptr, len, cap}` — 3 slots.
+            TypeKind::Vec(_) => 3,
         }
     }
 }

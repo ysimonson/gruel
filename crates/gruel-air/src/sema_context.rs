@@ -482,6 +482,8 @@ impl<'a> SemaContext<'a> {
             TypeKind::Interface(_) => true,
             // Slices (ADR-0064) are Copy — scope-bound fat pointers.
             TypeKind::Slice(_) | TypeKind::MutSlice(_) => true,
+            // Vec(T) (ADR-0066) is affine — owns heap memory.
+            TypeKind::Vec(_) => false,
         }
     }
 

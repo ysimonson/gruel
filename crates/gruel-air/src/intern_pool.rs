@@ -42,7 +42,7 @@ use lasso::Spur;
 
 use crate::types::{
     ArrayTypeId, EnumDef, EnumId, MutRefTypeId, MutSliceTypeId, PtrConstTypeId, PtrMutTypeId,
-    RefTypeId, SliceTypeId, StructDef, StructId, Type, TypeKind,
+    RefTypeId, SliceTypeId, StructDef, StructId, Type, TypeKind, VecTypeId,
 };
 
 /// Interned type index - 32 bits, Copy, cheap comparison.
@@ -220,6 +220,11 @@ pub enum TypeData {
     ///
     /// `MutSlice(T)` - scope-bound exclusive fat pointer `{ptr, len}`.
     MutSlice { element: InternedType },
+
+    /// Owned, growable vector (structural type, ADR-0066).
+    ///
+    /// `Vec(T)` - heap-allocated `{ptr, len, cap}`.
+    Vec { element: InternedType },
 }
 
 /// Data for a struct type in the intern pool.
@@ -312,6 +317,9 @@ struct TypeInternPoolInner {
     /// Structural type deduplication: element -> InternedType for `MutSlice(T)`.
     mut_slice_map: HashMap<InternedType, InternedType>,
 
+    /// Structural type deduplication: element -> InternedType for `Vec(T)` (ADR-0066).
+    vec_map: HashMap<InternedType, InternedType>,
+
     /// Nominal type lookup: name -> InternedType for structs.
     struct_by_name: HashMap<Spur, InternedType>,
 
@@ -332,6 +340,7 @@ impl TypeInternPool {
                 mut_ref_map: HashMap::default(),
                 slice_map: HashMap::default(),
                 mut_slice_map: HashMap::default(),
+                vec_map: HashMap::default(),
                 struct_by_name: HashMap::default(),
                 enum_by_name: HashMap::default(),
             }),
@@ -658,6 +667,25 @@ impl TypeInternPool {
         let interned = InternedType::from_pool_index(pool_index);
         inner.types.push(TypeData::MutSlice { element });
         inner.mut_slice_map.insert(element, interned);
+        interned
+    }
+
+    /// Intern a `Vec(T)` type (structural - deduplicates) (ADR-0066).
+    pub fn intern_vec(&self, element: InternedType) -> InternedType {
+        {
+            let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+            if let Some(&existing) = inner.vec_map.get(&element) {
+                return existing;
+            }
+        }
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(&existing) = inner.vec_map.get(&element) {
+            return existing;
+        }
+        let pool_index = inner.types.len() as u32;
+        let interned = InternedType::from_pool_index(pool_index);
+        inner.types.push(TypeData::Vec { element });
+        inner.vec_map.insert(element, interned);
         interned
     }
 
@@ -1054,6 +1082,37 @@ impl TypeInternPool {
         }
     }
 
+    /// Intern a `Vec(T)` type from a Type element (ADR-0066).
+    pub fn intern_vec_from_type(&self, element_type: Type) -> VecTypeId {
+        let element_interned = Self::type_to_interned_recursive(element_type);
+        let vec_interned = self.intern_vec(element_interned);
+        VecTypeId::from_pool_index(vec_interned.pool_index().expect("vec must have pool index"))
+    }
+
+    /// Get the element type of a `Vec(T)` (ADR-0066).
+    pub fn vec_def(&self, vec_id: VecTypeId) -> Type {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let pool_index = vec_id.0 as usize;
+        match &inner.types[pool_index] {
+            TypeData::Vec { element } => Self::interned_to_type_recursive(*element, &inner),
+            other => panic!("Expected vec at pool index {}, got {:?}", pool_index, other),
+        }
+    }
+
+    /// Get all `Vec(T)` type IDs registered in the pool (ADR-0066).
+    pub fn all_vec_ids(&self) -> Vec<VecTypeId> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner
+            .types
+            .iter()
+            .enumerate()
+            .filter_map(|(i, td)| match td {
+                TypeData::Vec { .. } => Some(VecTypeId::from_pool_index(i as u32)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Convert InternedType to Type recursively (handles composite types).
     ///
     /// This is used to convert array element types from InternedType back to Type.
@@ -1096,6 +1155,7 @@ impl TypeInternPool {
             TypeData::MutSlice { .. } => {
                 Type::new_mut_slice(MutSliceTypeId::from_pool_index(pool_index))
             }
+            TypeData::Vec { .. } => Type::new_vec(VecTypeId::from_pool_index(pool_index)),
         }
     }
 
@@ -1131,6 +1191,7 @@ impl TypeInternPool {
             TypeKind::MutRef(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::Slice(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::MutSlice(id) => InternedType::from_pool_index(id.pool_index()),
+            TypeKind::Vec(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::Module(_) => panic!("Cannot intern module types"),
             TypeKind::Interface(_) => panic!("Cannot intern interface types"),
             TypeKind::ComptimeType => panic!("Cannot intern comptime types"),
@@ -1224,8 +1285,9 @@ impl TypeInternPool {
                 | TypeData::Ref { .. }
                 | TypeData::MutRef { .. }
                 | TypeData::Slice { .. }
-                | TypeData::MutSlice { .. } => {
-                    // Pointer/reference/slice types are not counted separately in stats
+                | TypeData::MutSlice { .. }
+                | TypeData::Vec { .. } => {
+                    // Pointer/reference/slice/vec types are not counted separately in stats
                 }
             }
         }
@@ -1283,6 +1345,7 @@ impl TypeInternPool {
             | TypeKind::MutRef(_)
             | TypeKind::Slice(_)
             | TypeKind::MutSlice(_)
+            | TypeKind::Vec(_)
             | TypeKind::Module(_)
             | TypeKind::Interface(_) => None,
             // Comptime-only types cannot be interned for runtime
@@ -1345,6 +1408,8 @@ impl TypeInternPool {
             | TypeKind::Module(_) => 0,
             // Fat pointers: 2 slots (ptr + len or ptr + vtable)
             TypeKind::Slice(_) | TypeKind::MutSlice(_) | TypeKind::Interface(_) => 2,
+            // Vec(T) (ADR-0066): 3 slots (ptr + len + cap).
+            TypeKind::Vec(_) => 3,
             _ => 1,
         }
     }
@@ -1408,6 +1473,10 @@ impl TypeInternPool {
                 let element = self.mut_slice_def(id);
                 format!("MutSlice({})", self.format_type_name(element))
             }
+            TypeKind::Vec(id) => {
+                let element = self.vec_def(id);
+                format!("Vec({})", self.format_type_name(element))
+            }
             TypeKind::Module(_) => "<module>".to_string(),
             // Interface names are stored on `Sema::interfaces`, not in the
             // type pool. Caller-side error messages should resolve them via
@@ -1441,6 +1510,7 @@ impl Clone for TypeInternPool {
                 mut_ref_map: inner.mut_ref_map.clone(),
                 slice_map: inner.slice_map.clone(),
                 mut_slice_map: inner.mut_slice_map.clone(),
+                vec_map: inner.vec_map.clone(),
                 struct_by_name: inner.struct_by_name.clone(),
                 enum_by_name: inner.enum_by_name.clone(),
             }),
