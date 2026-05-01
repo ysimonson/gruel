@@ -144,26 +144,40 @@ impl<'a> CfgBuilder<'a> {
         // Inout/borrow parameters are not owned by the callee and must not be dropped.
         // Destructors must NOT auto-drop their self parameter — the destructor IS the
         // drop logic for that value.
+        //
+        // Multi-slot ABI parameters (Vec(T), String, Slice(T) — anything where
+        // `abi_slot_count > 1`) occupy several entries in `param_slot_types`
+        // but represent a single Gruel parameter at the source level. We must
+        // emit Drop exactly once per Gruel parameter; emitting once per slot
+        // would synthesize a multi-free at function exit (the fundamental
+        // shape of the bug fixed here, called out in ADR-0072's Phase 3
+        // open question for `Vec(u8)` pass-by-value). Walk the slot table in
+        // chunks: register a `LiveParam` for the first slot of each Gruel
+        // parameter and skip the trailing slots that belong to that same
+        // composite.
         let live_params: Vec<LiveParam> = if func.is_destructor {
             Vec::new()
         } else {
-            func.param_slot_types
-                .iter()
-                .enumerate()
-                .filter(|(i, ty)| {
-                    !func
-                        .param_modes
-                        .get(*i)
-                        .copied()
-                        .unwrap_or_default()
-                        .is_by_ref()
-                        && crate::drop_names::type_needs_drop(**ty, type_pool)
-                })
-                .map(|(i, ty)| LiveParam {
-                    param_slot: i as u32,
-                    ty: *ty,
-                })
-                .collect()
+            let mut out: Vec<LiveParam> = Vec::new();
+            let mut i = 0usize;
+            while i < func.param_slot_types.len() {
+                let ty = func.param_slot_types[i];
+                let by_ref = func
+                    .param_modes
+                    .get(i)
+                    .copied()
+                    .unwrap_or_default()
+                    .is_by_ref();
+                let slot_count = type_pool.abi_slot_count(ty).max(1) as usize;
+                if !by_ref && crate::drop_names::type_needs_drop(ty, type_pool) {
+                    out.push(LiveParam {
+                        param_slot: i as u32,
+                        ty,
+                    });
+                }
+                i += slot_count;
+            }
+            out
         };
 
         let mut builder = CfgBuilder {
