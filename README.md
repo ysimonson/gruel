@@ -37,6 +37,7 @@ Theme: rely on LLVM / libc to provide better performance and more diverse platfo
 - Replaced custom x86-64 and AArch64 backends with LLVM (ADR-0033)
 - Removed the custom linker in favor of the system linker LLVM (ADR-0033)
 - Replaced inline syscalls with libc-based platform abstraction (ADR-0035)
+- Added incremental compilation caching (ADR-0074)
 - Added layout niches to optimize e.g. `Option(bool)` (ADR-0069)
 - Significantly expanded benchmarks to track comptime and runtime performance (ADR-0043)
 
