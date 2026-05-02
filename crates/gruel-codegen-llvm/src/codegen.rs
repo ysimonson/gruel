@@ -238,6 +238,57 @@ fn run_llvm_passes(
         .map_err(|e| llvm_error(format!("LLVM pass pipeline failed: {}", e)))
 }
 
+/// Generate pre-optimization LLVM bitcode (ADR-0074 Phase 5).
+///
+/// Lowers all functions into a single LLVM module via [`build_module`] and
+/// returns the bitcode bytes WITHOUT running the optimizer. Pairs with
+/// [`compile_bitcode_to_object`] to round-trip through the cache.
+pub fn generate_bitcode(inputs: &CodegenInputs<'_>) -> CompileResult<Vec<u8>> {
+    let context = Context::create();
+    let module = build_module(&context, inputs)?;
+    let buffer = module.write_bitcode_to_memory();
+    Ok(buffer.as_slice().to_vec())
+}
+
+/// Run the LLVM mid-end optimizer + back-end on cached or fresh bitcode
+/// to produce a native object file (ADR-0074 Phase 5).
+///
+/// The bitcode is parsed into a fresh module, optimized at `opt_level`,
+/// and emitted as object bytes. Cache hits skip [`generate_bitcode`]
+/// entirely and call this directly.
+pub fn compile_bitcode_to_object(bitcode: &[u8], opt_level: OptLevel) -> CompileResult<Vec<u8>> {
+    LlvmTarget::initialize_native(&InitializationConfig::default())
+        .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
+
+    let context = Context::create();
+    let buffer =
+        inkwell::memory_buffer::MemoryBuffer::create_from_memory_range(bitcode, "cached_bitcode");
+    let module = inkwell::module::Module::parse_bitcode_from_buffer(&buffer, &context)
+        .map_err(|e| llvm_error(format!("failed to parse cached bitcode: {}", e)))?;
+
+    let target_triple = TargetMachine::get_default_triple();
+    let llvm_target = LlvmTarget::from_triple(&target_triple)
+        .map_err(|e| llvm_error(format!("failed to get LLVM target: {}", e)))?;
+    let target_machine = llvm_target
+        .create_target_machine(
+            &target_triple,
+            "generic",
+            "",
+            to_llvm_opt_level(opt_level),
+            RelocMode::PIC,
+            CodeModel::Default,
+        )
+        .ok_or_else(|| llvm_error("failed to create LLVM TargetMachine"))?;
+
+    run_llvm_passes(&module, &target_machine, opt_level)?;
+
+    let obj_buf = target_machine
+        .write_to_memory_buffer(&module, FileType::Object)
+        .map_err(|e| llvm_error(format!("LLVM object emission failed: {}", e)))?;
+
+    Ok(obj_buf.as_slice().to_vec())
+}
+
 /// Generate a native object file from a set of function CFGs.
 ///
 /// All functions are lowered into a single LLVM module. The module is then

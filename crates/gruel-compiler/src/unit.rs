@@ -29,7 +29,7 @@ use rayon::prelude::*;
 use tracing::{info, info_span};
 
 use crate::{
-    AnalyzedFunction, Ast, AstGen, CfgBuilder, CompileError, CompileErrors, CompileOptions,
+    AnalyzedFunction, Ast, AstGen, Cfg, CfgBuilder, CompileError, CompileErrors, CompileOptions,
     CompileOutput, CompileWarning, ErrorKind, FunctionWithCfg, Lexer, MultiErrorResult, OptLevel,
     Parser, Rir, Sema, SourceFile, Type, TypeInternPool, compile_backend,
 };
@@ -1001,7 +1001,75 @@ impl<'src> CompilationUnit<'src> {
             interface_defs,
             interface_vtables,
         };
+
+        // ADR-0074 Phase 5: bitcode cache. If the AIR cache is configured
+        // and air_key matches, we may have cached pre-optimization LLVM
+        // bitcode that lets us skip the AIR→IR translation step. The
+        // LLVM optimizer + back-end + linker still run on every build.
+        if let Some((store, key)) = self.open_air_cache() {
+            return self.compile_with_bitcode_cache(&inputs, &store, &key);
+        }
         compile_backend(&inputs, &self.options, &self.warnings)
+    }
+
+    /// Codegen path that consults the LLVM bitcode cache (ADR-0074
+    /// Phase 5). On hit, parses the cached bitcode and runs the
+    /// optimizer + back-end on it. On miss, generates bitcode, writes
+    /// it to the cache, then runs optimizer + back-end. Either way the
+    /// optimizer pipeline runs — the cache only saves the AIR→IR
+    /// translation step.
+    fn compile_with_bitcode_cache(
+        &self,
+        inputs: &crate::BackendInputs<'_>,
+        store: &CacheStore,
+        air_key: &CacheKey,
+    ) -> MultiErrorResult<CompileOutput> {
+        // Check for main function (matches compile_backend).
+        let _main_fn = inputs
+            .functions
+            .iter()
+            .find(|f| f.analyzed.name == "main")
+            .ok_or_else(|| {
+                CompileErrors::from(CompileError::without_span(ErrorKind::NoMainFunction))
+            })?;
+
+        // Bitcode cache key is the same as air_key — bitcode is a
+        // deterministic function of AIR, and cached AIR keys already
+        // factor in everything that influences codegen (target, opt
+        // level, preview features, source content, compiler binary).
+        let cfgs: Vec<&Cfg> = inputs.functions.iter().map(|f| &f.cfg).collect();
+        let codegen_inputs = inputs.to_codegen_inputs(&cfgs);
+
+        let object_bytes = match store.get(gruel_cache::CacheKind::LlvmIr, air_key) {
+            Ok(Some(bitcode)) => {
+                info!("bitcode cache hit");
+                gruel_codegen_llvm::compile_bitcode_to_object(&bitcode, self.options.opt_level)
+                    .map_err(CompileErrors::from)?
+            }
+            _ => {
+                info!("bitcode cache miss");
+                let bitcode = gruel_codegen_llvm::generate_bitcode(&codegen_inputs)
+                    .map_err(CompileErrors::from)?;
+                if let Err(e) = store.put(gruel_cache::CacheKind::LlvmIr, air_key, &bitcode) {
+                    tracing::warn!(error = %e, "bitcode cache write failed");
+                }
+                gruel_codegen_llvm::compile_bitcode_to_object(&bitcode, self.options.opt_level)
+                    .map_err(CompileErrors::from)?
+            }
+        };
+
+        // Reuse the same link tail as generate_llvm_objects_and_link.
+        let object_files = vec![object_bytes];
+        let linker_cmd = match &self.options.linker {
+            crate::LinkerMode::System(cmd) => cmd.clone(),
+            crate::LinkerMode::Internal => "cc".to_string(),
+        };
+        crate::link::link_system_with_warnings(
+            &self.options,
+            &object_files,
+            &linker_cmd,
+            &self.warnings,
+        )
     }
 
     // =========================================================================
