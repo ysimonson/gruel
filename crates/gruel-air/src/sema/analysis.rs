@@ -4213,6 +4213,23 @@ impl<'a> Sema<'a> {
                 .ok_or_compile_error(ErrorKind::UnknownType(type_name_str.clone()), span)?
         };
 
+        // ADR-0072: redirect `String::from_utf8(v)` to the prelude function
+        // `String__from_utf8` so the `Result(String, Utf8DecodeError)`
+        // return type can be constructed in source code (where comptime-
+        // generic enums work). The error type wraps `Vec(u8)` because
+        // `Result(String, Vec(u8))` itself can't be instantiated from a
+        // prelude body — see Utf8DecodeError in the prelude source.
+        if self.is_builtin_string(Type::new_struct(struct_id)) && function_name_str == "from_utf8" {
+            return self.dispatch_string_prelude_assoc_fn(
+                air,
+                ctx,
+                "String__from_utf8",
+                &function_name_str,
+                &args,
+                span,
+            );
+        }
+
         // Handle builtin type associated functions
         if let Some(builtin_def) = self.get_builtin_type_def(struct_id) {
             return self.analyze_builtin_assoc_fn(
@@ -4469,6 +4486,62 @@ impl<'a> Sema<'a> {
                 self.analyze_utf8_validate_intrinsic(air, &args, span, ctx)
             }
         }
+    }
+
+    /// ADR-0072: dispatch `String::name(args)` to a prelude function whose
+    /// body uses comptime-generic types like `Result(String, ...)`. Mirrors
+    /// the pattern used for `char::from_u32` -> `char__from_u32` in
+    /// ADR-0071.
+    fn dispatch_string_prelude_assoc_fn(
+        &mut self,
+        air: &mut Air,
+        ctx: &mut AnalysisContext,
+        prelude_fn_name: &str,
+        method_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+    ) -> CompileResult<AnalysisResult> {
+        // Enforce the same preview / checked gates the registry path would.
+        self.check_string_vec_bridge_method_gates("String", method_name, ctx, span)?;
+        let fn_name = self.interner.get_or_intern(prelude_fn_name);
+        let fn_info = self.functions.get(&fn_name).ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::InternalError(format!(
+                    "prelude function `{}` not found",
+                    prelude_fn_name
+                )),
+                span,
+            )
+        })?;
+        let return_ty = fn_info.return_type;
+        let expected_param_count = fn_info.params.len();
+        if args.len() != expected_param_count {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: expected_param_count,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+        ctx.referenced_functions.insert(fn_name);
+        let mut extra: Vec<u32> = Vec::with_capacity(args.len() * 2);
+        for arg in args {
+            let r = self.analyze_inst(air, arg.value, ctx)?;
+            extra.push(r.air_ref.as_u32());
+            extra.push(AirArgMode::Normal.as_u32());
+        }
+        let args_start = air.add_extra(&extra);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Call {
+                name: fn_name,
+                args_start,
+                args_len: args.len() as u32,
+            },
+            ty: return_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, return_ty))
     }
 
     /// Analyze `@utf8_validate(s: borrow Slice(u8)) -> bool` (ADR-0072).

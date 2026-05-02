@@ -116,17 +116,19 @@ exit_code = 1
 name = "from_utf8_valid_ok"
 spec = ["7.4:6"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = String::from_char('A');
     let v: Vec(u8) = s.into_bytes();
     let r = String::from_utf8(v);
+    let R = Result(String, Utf8DecodeError);
     match r {
-        Result::Ok(s2) => {
+        R::Ok(s2) => {
             let n: i32 = @cast(s2.bytes_len());
             n
         },
-        Result::Err(_) => -1,
+        R::Err(_) => -1,
     }
 }
 """
@@ -136,15 +138,19 @@ exit_code = 1
 name = "from_utf8_invalid_err"
 spec = ["7.4:6"]
 preview = "string_vec_bridge"
+preview_should_pass = true
 source = """
 fn main() -> i32 {
-    let mut v: Vec(u8) = Vec(u8)::with_capacity(2);
-    v.push(255);
-    v.push(254);
+    let mut v: Vec(u8) = Vec(u8)::new();
+    let b1: u8 = 255;
+    let b2: u8 = 254;
+    v.push(b1);
+    v.push(b2);
     let r = String::from_utf8(v);
+    let R = Result(String, Utf8DecodeError);
     match r {
-        Result::Ok(_) => 1,
-        Result::Err(_) => 0,
+        R::Ok(_) => 1,
+        R::Err(_) => 0,
     }
 }
 """

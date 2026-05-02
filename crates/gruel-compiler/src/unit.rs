@@ -230,6 +230,38 @@ fn char__encode_utf8(c: char, buf: MutRef([u8; 4])) -> usize {
     }
 }
 
+// ADR-0072: error wrapper used by `String::from_utf8` to ferry the
+// invalid byte buffer back to the caller. The struct wrapping makes the
+// second type argument concrete in `Result(String, Utf8DecodeError)` —
+// instantiating `Result(String, Vec(u8))` from a prelude body errors
+// because the comptime evaluator can't bind the `E` parameter to a
+// parameterized builtin type-call (`Vec(u8)` is a built-in constructor,
+// not a comptime function). The wrapper structurally pins the buffer
+// without burdening the caller with type-binding ceremony.
+struct Utf8DecodeError {
+    bytes: Vec(u8),
+}
+
+// ADR-0072: validated `Vec(u8) -> String` conversion. Performs a UTF-8
+// scan; on success consumes `v` and returns `Result::Ok(s)`, on failure
+// hands `v` back inside `Result::Err(Utf8DecodeError { bytes: v })`.
+fn String__from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
+    let valid: bool = checked {
+        let p = v.ptr();
+        let n = v.len();
+        let s: Slice(u8) = @parts_to_slice(p, n);
+        @utf8_validate(s)
+    };
+    if valid {
+        let s: String = checked { String::from_utf8_unchecked(v) };
+        let R = Result(String, Utf8DecodeError);
+        R::Ok(s)
+    } else {
+        let e = Utf8DecodeError { bytes: v };
+        let R = Result(String, Utf8DecodeError);
+        R::Err(e)
+    }
+}
 "#;
 
 /// Result of parsing a single file within a compilation unit.

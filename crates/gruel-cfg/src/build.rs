@@ -1905,11 +1905,19 @@ impl<'a> CfgBuilder<'a> {
                     .get_air_refs(*fields_start, *fields_len)
                     .collect::<Vec<_>>();
                 let mut field_vals = Vec::with_capacity(field_air_refs.len());
-                for field_ref in field_air_refs {
-                    let Some(val) = self.lower_value(field_ref) else {
+                for field_ref in &field_air_refs {
+                    let Some(val) = self.lower_value(*field_ref) else {
                         return Self::diverged();
                     };
                     field_vals.push(val);
+                }
+
+                // Forget consumed values: each payload field transfers
+                // ownership into the enum variant. Without this, a non-Copy
+                // payload (e.g. `Result::Ok(some_String)`) would be dropped
+                // at scope exit *and* via the enum's drop, double-freeing.
+                for field_ref in &field_air_refs {
+                    self.forget_consumed_value(*field_ref);
                 }
 
                 // Store field CfgValues in the extra array
@@ -1940,6 +1948,13 @@ impl<'a> CfgBuilder<'a> {
                 let Some(base_val) = self.lower_value(*base) else {
                     return Self::diverged();
                 };
+                // If the extracted payload owns drop responsibility, the source
+                // enum's payload has been moved out and the enum should not
+                // be dropped again (which would re-drop the same payload and
+                // double-free heap-owned buffers like Vec(u8) or String).
+                if self.type_needs_drop(ty) {
+                    self.forget_consumed_value(*base);
+                }
                 let value = self.emit(
                     CfgInstData::EnumPayloadGet {
                         base: base_val,
