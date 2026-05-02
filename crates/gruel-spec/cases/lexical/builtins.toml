@@ -222,13 +222,13 @@ exit_code = 0
 no_warnings = true
 
 # =============================================================================
-# @copy Directive
+# @derive(Copy) Directive
 # =============================================================================
 
 [[case]]
 name = "copy_directive_on_struct"
 spec = ["2.5:27", "2.5:28"]
-description = "@copy directive marks a struct as Copy type"
+description = "@derive(Copy) directive marks a struct as Copy type"
 source = """
 @derive(Copy)
 struct Point { x: i32, y: i32 }
@@ -257,17 +257,3 @@ fn main() -> i32 {
 """
 exit_code = 10
 
-# ADR-0059: the legacy `@copy` directive is rejected with a migration error
-# pointing at `@derive(Copy)`.
-[[case]]
-name = "legacy_copy_directive_rejected"
-spec = ["2.5:27"]
-description = "Legacy @copy directive errors with migration hint"
-source = """
-@copy
-struct Point { x: i32 }
-
-fn main() -> i32 { 0 }
-"""
-compile_fail = true
-error_contains = "no longer supported"

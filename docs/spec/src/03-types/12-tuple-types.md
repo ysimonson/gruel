@@ -24,7 +24,7 @@ Two tuple types are the same type if and only if they have the same arity and th
 
 {{ rule(id="3.12:5", cat="normative") }}
 
-A tuple type is `@copy` if and only if every element type is `@copy`. Otherwise the tuple is moved on use, subject to the same affine-type rules as other non-copy aggregates.
+A tuple type is `Copy` if and only if every element type is `Copy`. Otherwise the tuple is moved on use, subject to the same affine-type rules as other non-copy aggregates.
 
 {{ rule(id="3.12:6", cat="normative") }}
 
@@ -32,7 +32,7 @@ An element of a tuple value `t` is accessed with the expression `t.N`, where `N`
 
 {{ rule(id="3.12:7", cat="legality-rule") }}
 
-If a tuple element type is not `@copy`, the element **MUST NOT** be consumed via field access (`t.N`). To consume individual elements, the tuple **MUST** be destructured (see [Let Statements](../../05-statements)).
+If a tuple element type is not `Copy`, the element **MUST NOT** be consumed via field access (`t.N`). To consume individual elements, the tuple **MUST** be destructured (see [Let Statements](../../05-statements)).
 
 {{ rule(id="3.12:8") }}
 

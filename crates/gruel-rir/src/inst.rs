@@ -3797,12 +3797,12 @@ mod tests {
         let name = interner.get_or_intern("Point");
         let x_name = interner.get_or_intern("x");
         let i32_type = interner.get_or_intern("i32");
-        let copy_name = interner.get_or_intern("copy");
+        let directive_name = interner.get_or_intern("handle");
 
         let (directives_start, directives_len) = rir.add_directives(&[RirDirective {
-            name: copy_name,
+            name: directive_name,
             args: vec![],
-            span: Span::new(0, 5),
+            span: Span::new(0, 7),
         }]);
         let (fields_start, fields_len) = rir.add_field_decls(&[(x_name, i32_type)]);
         let (methods_start, methods_len) = rir.add_inst_refs(&[]);
@@ -3824,7 +3824,7 @@ mod tests {
 
         let printer = RirPrinter::new(&rir, &interner);
         let output = printer.to_string();
-        assert!(output.contains("@copy struct Point { x: i32 }"));
+        assert!(output.contains("@handle struct Point { x: i32 }"));
     }
 
     #[test]

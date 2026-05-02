@@ -97,7 +97,6 @@ impl ErrorCode {
     pub const DUPLICATE_METHOD: Self = Self(410);
     pub const DERIVE_DIRECT_FIELD_ACCESS: Self = Self(440);
     pub const DERIVE_NOT_A_DERIVE: Self = Self(441);
-    pub const DEPRECATED_DIRECTIVE: Self = Self(442);
     pub const UNDEFINED_METHOD: Self = Self(411);
     pub const PRIVATE_FIELD: Self = Self(443);
     pub const UNDEFINED_ASSOC_FN: Self = Self(412);
@@ -923,9 +922,6 @@ pub enum ErrorKind {
     /// @derive(Clone) v1 limitation: every field must be Copy.
     #[error("@derive(Clone) on struct '{struct_name}' requires every field to be Copy in v1; field '{field_name}' has type '{field_type}' which is not Copy. Hand-write `fn clone(borrow self) -> Self` instead.", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
     CloneStructNonCopyField(Box<CloneStructNonCopyFieldError>),
-    /// A directive that has been retired (ADR-0059).
-    #[error("the `@{name}` directive is no longer supported; use `{replacement}` instead")]
-    DeprecatedDirective { name: String, replacement: String },
     /// @handle struct missing required .handle() method
     #[error("struct '{struct_name}' is marked @handle but has no `handle` method")]
     HandleStructMissingMethod { struct_name: String },
@@ -1000,7 +996,7 @@ pub enum ErrorKind {
     /// Destructor for unknown type
     #[error("unknown type '{type_name}' in destructor")]
     DestructorUnknownType { type_name: String },
-    /// Inline `fn drop(self)` is invalid on this type (wrong signature, @copy,
+    /// Inline `fn drop(self)` is invalid on this type (wrong signature, `@derive(Copy)`,
     /// linear, etc). ADR-0053.
     #[error("invalid `fn drop` on type '{type_name}': {reason}")]
     InvalidInlineDrop { type_name: String, reason: String },
@@ -1251,7 +1247,6 @@ impl ErrorKind {
             ErrorKind::LinearStructCopy(_) => ErrorCode::LINEAR_STRUCT_COPY,
             ErrorKind::LinearStructClone(_) => ErrorCode::LINEAR_STRUCT_COPY,
             ErrorKind::CloneStructNonCopyField { .. } => ErrorCode::COPY_STRUCT_NON_COPY_FIELD,
-            ErrorKind::DeprecatedDirective { .. } => ErrorCode::DEPRECATED_DIRECTIVE,
             ErrorKind::HandleStructMissingMethod { .. } => ErrorCode::HANDLE_STRUCT_MISSING_METHOD,
             ErrorKind::HandleMethodWrongSignature { .. } => {
                 ErrorCode::HANDLE_METHOD_WRONG_SIGNATURE

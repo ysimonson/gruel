@@ -170,7 +170,7 @@ error_contains = "use of moved value"
 [[case]]
 name = "array_of_copy_struct_is_copy"
 spec = ["3.8:2", "3.8:16"]
-description = "Array of @copy struct is Copy"
+description = "Array of @derive(Copy) struct is Copy"
 source = """
 @derive(Copy)
 struct Point { x: i32, y: i32 }
@@ -185,7 +185,7 @@ exit_code = 4
 [[case]]
 name = "copy_struct_with_array_field"
 spec = ["3.8:2", "3.8:20"]
-description = "@copy struct can contain array of Copy type"
+description = "@derive(Copy) struct can contain array of Copy type"
 source = """
 @derive(Copy)
 struct Container { values: [i32; 3] }
@@ -200,7 +200,7 @@ exit_code = 40
 [[case]]
 name = "copy_struct_with_array_of_non_copy_error"
 spec = ["3.8:18", "3.8:20"]
-description = "@copy struct cannot contain array of non-Copy type"
+description = "@derive(Copy) struct cannot contain array of non-Copy type"
 source = """
 struct Data { value: i32 }
 
@@ -530,13 +530,13 @@ compile_fail = true
 error_contains = "use of moved value"
 
 # =============================================================================
-# @copy Directive
+# @derive(Copy) Directive
 # =============================================================================
 
 [[case]]
 name = "copy_struct_multiple_uses"
 spec = ["3.8:14", "3.8:15", "3.8:16", "3.8:17"]
-description = "@copy struct can be used multiple times without moving"
+description = "@derive(Copy) struct can be used multiple times without moving"
 source = """
 @derive(Copy)
 struct Point { x: i32, y: i32 }
@@ -552,7 +552,7 @@ exit_code = 3
 [[case]]
 name = "copy_struct_pass_to_function"
 spec = ["3.8:16"]
-description = "@copy struct can be passed to function and still used"
+description = "@derive(Copy) struct can be passed to function and still used"
 source = """
 @derive(Copy)
 struct Point { x: i32, y: i32 }
@@ -569,7 +569,7 @@ exit_code = 60
 [[case]]
 name = "copy_struct_all_primitive_fields"
 spec = ["3.8:20"]
-description = "@copy struct with all primitive Copy fields"
+description = "@derive(Copy) struct with all primitive Copy fields"
 source = """
 @derive(Copy)
 struct Data { a: i32, b: bool, c: i64 }
@@ -585,7 +585,7 @@ exit_code = 43
 [[case]]
 name = "copy_struct_nested_copy"
 spec = ["3.8:20", "3.8:21"]
-description = "@copy struct containing other @copy structs"
+description = "@derive(Copy) struct containing other @derive(Copy) structs"
 source = """
 @derive(Copy)
 struct Point { x: i32, y: i32 }
@@ -607,7 +607,7 @@ exit_code = 10
 [[case]]
 name = "copy_struct_deeply_nested"
 spec = ["3.8:20", "3.8:21"]
-description = "@copy struct with 3+ levels of nesting"
+description = "@derive(Copy) struct with 3+ levels of nesting"
 source = """
 @derive(Copy)
 struct Level0 { value: i32 }
@@ -629,7 +629,7 @@ exit_code = 6
 [[case]]
 name = "copy_struct_non_copy_field_error"
 spec = ["3.8:18", "3.8:19"]
-description = "@copy struct with non-Copy field is a compile error"
+description = "@derive(Copy) struct with non-Copy field is a compile error"
 source = """
 struct Inner { value: i32 }
 
@@ -644,7 +644,7 @@ error_contains = "non-Copy type"
 [[case]]
 name = "copy_struct_enum_field"
 spec = ["3.8:20"]
-description = "@copy struct with enum field (enums are Copy)"
+description = "@derive(Copy) struct with enum field (enums are Copy)"
 source = """
 enum Status { Active, Inactive }
 
@@ -665,7 +665,7 @@ exit_code = 20
 [[case]]
 name = "non_copy_struct_still_moves"
 spec = ["3.8:3"]
-description = "Struct without @copy still has move semantics"
+description = "Struct without @derive(Copy) still has move semantics"
 source = """
 struct Point { x: i32, y: i32 }
 fn main() -> i32 {
@@ -841,7 +841,7 @@ error_contains = "cannot be marked `@derive(Copy)`"
 [[case]]
 name = "linear_copy_reverse_order_error"
 spec = ["3.8:37"]
-description = "Linear and @copy in reverse order is also an error"
+description = "Linear and @derive(Copy) in reverse order is also an error"
 source = """
 linear struct Invalid { value: i32 }
 
@@ -1138,7 +1138,7 @@ exit_code = 5
 [[case]]
 name = "copy_struct_implicit_handle_semantics"
 spec = ["3.8:47"]
-description = "@copy struct can be duplicated without explicit .handle() method"
+description = "@derive(Copy) struct can be duplicated without explicit .handle() method"
 source = """
 @derive(Copy)
 struct Point { x: i32, y: i32 }

@@ -255,7 +255,7 @@ The inline destructor **MUST** take exactly one parameter (`self`) and return th
 
 {{ rule(id="3.9:36", cat="legality-rule") }}
 
-A type marked `@copy` or `linear` **MUST NOT** declare `fn drop`. `@copy` would risk a double-free on bitwise copy; `linear` values are never implicitly dropped, so the destructor would be unreachable.
+A type marked `@derive(Copy)` or `linear` **MUST NOT** declare `fn drop`. A `Copy` type would risk a double-free on bitwise copy; `linear` values are never implicitly dropped, so the destructor would be unreachable.
 
 {{ rule(id="3.9:37", cat="legality-rule") }}
 

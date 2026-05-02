@@ -169,13 +169,13 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:37", cat="legality-rule") }}
 
-A linear struct **MUST NOT** be marked with `@copy`. Linear types cannot be implicitly copied.
+A linear struct **MUST NOT** be marked with `@derive(Copy)`. Linear types cannot be implicitly copied.
 
 {{ rule(id="3.8:38", cat="example") }}
 
 ```gruel
-@copy
-linear struct Invalid { value: i32 }  // ERROR: linear types cannot be @copy
+@derive(Copy)
+linear struct Invalid { value: i32 }  // ERROR: linear struct cannot be marked `@derive(Copy)`
 ```
 
 {{ rule(id="3.8:39", cat="informative") }}
@@ -243,14 +243,14 @@ Handle types are useful for:
 
 {{ rule(id="3.8:47", cat="normative") }}
 
-A `@copy` struct implicitly supports handle semantics. Any `@copy` type can be explicitly duplicated, although the `.handle()` method is not required.
+A `Copy` struct implicitly supports handle semantics. Any `Copy` type can be explicitly duplicated, although the `.handle()` method is not required.
 
 {{ rule(id="3.8:48", cat="informative") }}
 
-The difference between `@copy` and `@handle`:
-- `@copy` types are duplicated implicitly when used
+The difference between `@derive(Copy)` and `@handle`:
+- `@derive(Copy)` types are duplicated implicitly when used
 - `@handle` types require explicit `.handle()` calls for duplication
-- `@copy` is appropriate for small, cheap-to-copy types (like `Point`)
+- `@derive(Copy)` is appropriate for small, cheap-to-copy types (like `Point`)
 - `@handle` is appropriate for types where duplication has visible cost (like reference-counted types)
 
 {{ rule(id="3.8:49", cat="normative") }}

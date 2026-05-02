@@ -7,7 +7,7 @@
 //! - Resolving struct field types
 //! - Collecting function signatures
 //! - Collecting method signatures from impl blocks
-//! - Validating @copy and @handle structs
+//! - Validating @derive(Copy) and @handle structs
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -154,10 +154,7 @@ impl<'a> Sema<'a> {
             enum_method_sigs,
         }
     }
-    /// Check if a directive list contains `@derive(Copy)`. ADR-0059 reframes
-    /// `@copy` as `@derive(Copy)`; the bare `@copy` directive is no longer
-    /// recognized (callers should run `validate_no_copy_directive` to surface
-    /// a migration error instead of silently treating `@copy` as a no-op).
+    /// Check if a directive list contains `@derive(Copy)` (ADR-0059).
     pub(crate) fn has_copy_directive(&self, directives: &[RirDirective]) -> bool {
         let derive_sym = self.interner.get("derive");
         let copy_iface_sym = self.interner.get("Copy");
@@ -185,29 +182,6 @@ impl<'a> Sema<'a> {
             }
         }
         false
-    }
-
-    /// Reject the legacy `@copy` directive with a migration error. ADR-0059
-    /// retired `@copy` in favor of `@derive(Copy)`; the directive parser is
-    /// generic so we surface the migration here.
-    pub(crate) fn validate_no_copy_directive(
-        &self,
-        directives: &[RirDirective],
-        _span: Span,
-    ) -> CompileResult<()> {
-        let copy_sym = self.interner.get("copy");
-        for directive in directives {
-            if Some(directive.name) == copy_sym {
-                return Err(CompileError::new(
-                    ErrorKind::DeprecatedDirective {
-                        name: "copy".to_string(),
-                        replacement: "@derive(Copy)".to_string(),
-                    },
-                    directive.span,
-                ));
-            }
-        }
-        Ok(())
     }
 
     /// Check if a directive list contains the @handle directive
@@ -499,11 +473,10 @@ impl<'a> Sema<'a> {
                     }
 
                     let directives = self.rir.get_directives(*directives_start, *directives_len);
-                    self.validate_no_copy_directive(&directives, inst.span)?;
                     let is_copy = self.has_copy_directive(&directives);
                     let is_handle = self.has_handle_directive(&directives);
 
-                    // Linear types cannot be @copy
+                    // Linear types cannot be @derive(Copy)
                     if *is_linear && is_copy {
                         return Err(CompileError::new(
                             ErrorKind::LinearStructCopy(struct_name.clone()),
@@ -540,8 +513,8 @@ impl<'a> Sema<'a> {
     /// Phase 2: Resolve all declarations.
     ///
     /// Now that all type names are registered, this resolves:
-    /// - Struct field types (must be done first for @copy validation)
-    /// - @copy struct validation, destructors, functions, and methods
+    /// - Struct field types (must be done first for @derive(Copy) validation)
+    /// - @derive(Copy) struct validation, destructors, functions, and methods
     ///
     /// # Array Type Registration
     ///
@@ -1264,7 +1237,7 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Resolve struct field types. Must run before @copy validation.
+    /// Resolve struct field types. Must run before @derive(Copy) validation.
     pub(crate) fn resolve_struct_fields(&mut self) -> CompileResult<()> {
         for (_, inst) in self.rir.iter() {
             if let InstData::StructDecl {
@@ -1350,7 +1323,7 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Resolve @copy validation, destructors, functions, and methods.
+    /// Resolve @derive(Copy) validation, destructors, functions, and methods.
     pub(crate) fn resolve_remaining_declarations(&mut self) -> CompileResult<()> {
         // Collect all method InstRefs from anonymous struct and enum types.
         // These need to be skipped during function declaration collection because:
@@ -1385,7 +1358,7 @@ impl<'a> Sema<'a> {
             }
         }
 
-        // First pass: collect all declarations and validate @copy structs
+        // First pass: collect all declarations and validate @derive(Copy) structs
         for (inst_ref, inst) in self.rir.iter() {
             match &inst.data {
                 InstData::StructDecl {
@@ -1477,7 +1450,7 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Validate that a @copy struct only contains Copy type fields.
+    /// Validate that a @derive(Copy) struct only contains Copy type fields.
     fn validate_copy_struct(
         &self,
         directives_start: u32,
@@ -1496,7 +1469,7 @@ impl<'a> Sema<'a> {
             return Err(CompileError::new(
                 ErrorKind::InternalError(
                     ice!(
-                        "struct not found during @copy validation",
+                        "struct not found during @derive(Copy) validation",
                         phase: "sema/declarations",
                         details: {
                             "struct_name" => struct_name.clone()
@@ -1513,7 +1486,7 @@ impl<'a> Sema<'a> {
             CompileError::new(
                 ErrorKind::InternalError(
                     ice!(
-                        "struct not found during @copy validation",
+                        "struct not found during @derive(Copy) validation",
                         phase: "sema/declarations",
                         details: {
                             "struct_name" => struct_name.clone()
@@ -2079,7 +2052,7 @@ impl<'a> Sema<'a> {
     ///
     /// Validates the signature (must be exactly `fn drop(self)`, no extra
     /// params, returns unit) and the type's copy/linear status (a destructor
-    /// is illegal on `@copy` and `linear` types per ADR-0053).
+    /// is illegal on `@derive(Copy)` and `linear` types per ADR-0053).
     fn register_inline_struct_drop(
         &mut self,
         type_name: Spur,
@@ -2125,7 +2098,7 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        // Affine-only: `@copy` structs cannot have destructors (double-free risk).
+        // Affine-only: `@derive(Copy)` structs cannot have destructors (double-free risk).
         // `linear` structs cannot either — they are never implicitly dropped, so
         // a destructor would be unreachable.
         let struct_def_snapshot = self.type_pool.struct_def(struct_id);
