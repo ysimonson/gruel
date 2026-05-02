@@ -11,7 +11,6 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@dbg` | expr | Debug & Diagnostics | — | — | Print values to stderr with a trailing newline. |
 | `@panic` | expr | Debug & Diagnostics | — | — | Abort the program with an optional message. |
 | `@assert` | expr | Debug & Diagnostics | — | — | Check a boolean condition; panic if false. |
-| `@compile_error` | expr | Compile-time Reflection | — | — | Emit a compile-time error. |
 | `@cast` | expr | Type Casts | — | — | Numeric type conversion. |
 | `@read_line` | expr | I/O | — | — | Read one line from stdin. |
 | `@parse_i32` | expr | String Parsing | — | — | Parse a String into i32. |
@@ -20,6 +19,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@parse_u64` | expr | String Parsing | — | — | Parse a String into u64. |
 | `@random_u32` | expr | Random Numbers | — | — | Uniform random 32-bit integer. |
 | `@random_u64` | expr | Random Numbers | — | — | Uniform random 64-bit integer. |
+| `@compile_error` | expr | Compile-time Reflection | — | — | Emit a compile-time error. |
 | `@size_of` | type | Compile-time Reflection | — | — | Size of a type in bytes. |
 | `@align_of` | type | Compile-time Reflection | — | — | Alignment of a type in bytes. |
 | `@type_name` | type | Compile-time Reflection | — | — | Name of a type as a comptime string. |
@@ -31,19 +31,6 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@embed_file` | expr | Compile-time Reflection | — | — | Embed a file's contents at compile time as `Slice(u8)`. |
 | `@target_arch` | expr | Target Platform | — | — | Compile target CPU architecture. |
 | `@target_os` | expr | Target Platform | — | — | Compile target operating system. |
-| `@ptr_read` | expr | Raw Pointers | — | yes | Load a value through a raw pointer (internal). |
-| `@ptr_write` | expr | Raw Pointers | — | yes | Store a value through a raw mutable pointer (internal). |
-| `@ptr_read_volatile` | expr | Raw Pointers | — | yes | Volatile load through a raw pointer (internal). |
-| `@ptr_write_volatile` | expr | Raw Pointers | — | yes | Volatile store through a raw mutable pointer (internal). |
-| `@ptr_offset` | expr | Raw Pointers | — | yes | Pointer arithmetic by element count (internal). |
-| `@ptr_to_int` | expr | Raw Pointers | — | yes | Convert a pointer to its integer address (internal). |
-| `@int_to_ptr` | expr | Raw Pointers | — | yes | Construct a pointer from an integer address (internal). |
-| `@null_ptr` | expr | Raw Pointers | — | yes | A null pointer of the inferred type (internal). |
-| `@is_null` | expr | Raw Pointers | — | yes | Test whether a pointer is null (internal). |
-| `@ptr_copy` | expr | Raw Pointers | — | yes | Bulk copy between pointers (internal). |
-| `@raw` | expr | Raw Pointers | — | yes | Take a const pointer to an lvalue (internal). |
-| `@raw_mut` | expr | Raw Pointers | — | yes | Take a mutable pointer to an lvalue (internal). |
-| `@syscall` | expr | System Calls | — | yes | Direct OS system call. |
 | `@range` | expr | Iteration | — | — | Iterable range for `for`-loops. |
 | `@slice_len` | expr | Slices | — | — | Length of a slice. |
 | `@slice_is_empty` | expr | Slices | — | — | Whether a slice has length zero. |
@@ -72,6 +59,19 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@vec_repeat` | expr | Vectors | — | — | Construct a Vec with N copies of a value. |
 | `@vec_dispose` | expr | Vectors | — | — | Free a Vec's heap buffer; panic if `len != 0`. |
 | `@parts_to_vec` | expr | Vectors | — | yes | Build a Vec from raw parts. |
+| `@ptr_read` | expr | Raw Pointers | — | yes | Load a value through a raw pointer (internal). |
+| `@ptr_write` | expr | Raw Pointers | — | yes | Store a value through a raw mutable pointer (internal). |
+| `@ptr_read_volatile` | expr | Raw Pointers | — | yes | Volatile load through a raw pointer (internal). |
+| `@ptr_write_volatile` | expr | Raw Pointers | — | yes | Volatile store through a raw mutable pointer (internal). |
+| `@ptr_offset` | expr | Raw Pointers | — | yes | Pointer arithmetic by element count (internal). |
+| `@ptr_to_int` | expr | Raw Pointers | — | yes | Convert a pointer to its integer address (internal). |
+| `@int_to_ptr` | expr | Raw Pointers | — | yes | Construct a pointer from an integer address (internal). |
+| `@null_ptr` | expr | Raw Pointers | — | yes | A null pointer of the inferred type (internal). |
+| `@is_null` | expr | Raw Pointers | — | yes | Test whether a pointer is null (internal). |
+| `@ptr_copy` | expr | Raw Pointers | — | yes | Bulk copy between pointers (internal). |
+| `@raw` | expr | Raw Pointers | — | yes | Take a const pointer to an lvalue (internal). |
+| `@raw_mut` | expr | Raw Pointers | — | yes | Take a mutable pointer to an lvalue (internal). |
+| `@syscall` | expr | System Calls | — | yes | Direct OS system call. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
 | `@vec_from_c_str` | expr | Preview / Meta | — | yes | Copy a NUL-terminated C string into a fresh Vec(u8). |
 | `@utf8_validate` | expr | Preview / Meta | — | — | Check whether a byte slice is well-formed UTF-8. |
@@ -366,6 +366,179 @@ if @target_arch() == Arch::Aarch64 { ... }
 if @target_os() == Os::Linux { ... }
 ```
 
+## Iteration
+
+### `@range`
+
+`@range(end)`, `@range(start, end)`, or `@range(start, end, step)` produces an iterable over integers.
+
+
+**Examples:**
+
+```gruel
+for i in @range(0, 10) { ... }
+```
+
+## Slices
+
+### `@slice_len`
+
+`@slice_len(s)` returns the number of elements in `s` (a `Slice(T)` or `MutSlice(T)`) as `usize`. Surface form: `s.len()`.
+
+
+### `@slice_is_empty`
+
+`@slice_is_empty(s)` returns `s.len() == 0`. Surface form: `s.is_empty()`.
+
+
+### `@slice_index_read`
+
+`@slice_index_read(s, i)` returns `s[i]`. Bounds-checks at runtime; panics on out-of-range. Surface form: `s[i]`.
+
+
+### `@slice_ptr`
+
+`@slice_ptr(s)` returns a `Ptr(T)` to the slice's first element. Requires a `checked` block. Surface form: `s.ptr()`.
+
+- **Requires:** `checked { ... }` block
+
+### `@slice_ptr_mut`
+
+`@slice_ptr_mut(m)` returns a `MutPtr(T)` to a `MutSlice(T)`'s first element. Requires a `checked` block. Surface form: `m.ptr_mut()`.
+
+- **Requires:** `checked { ... }` block
+
+### `@parts_to_slice`
+
+`@parts_to_slice(p: Ptr(T), n: usize) -> Slice(T)` constructs a slice without checking that the underlying storage is valid. Requires a `checked` block.
+
+- **Requires:** `checked { ... }` block
+
+### `@parts_to_mut_slice`
+
+`@parts_to_mut_slice(p: MutPtr(T), n: usize) -> MutSlice(T)`. Requires a `checked` block.
+
+- **Requires:** `checked { ... }` block
+
+### `@slice_index_write`
+
+`@slice_index_write(m, i, v)` performs `m[i] = v`. Requires `MutSlice(T)`. Bounds-checks at runtime. Surface form: `m[i] = v`.
+
+
+## Vectors
+
+### `@vec_new`
+
+`@vec_new(T)` returns an empty `Vec(T)` (cap=0, ptr=null). Surface form: `Vec(T)::new()`.
+
+
+### `@vec_with_capacity`
+
+`@vec_with_capacity(T, n)` returns an empty `Vec(T)` whose `cap >= n`. Surface form: `Vec(T)::with_capacity(n)`.
+
+
+### `@vec_len`
+
+`@vec_len(v)` returns the live element count. Surface form: `v.len()`.
+
+
+### `@vec_capacity`
+
+`@vec_capacity(v)` returns the allocated slot count. Surface form: `v.capacity()`.
+
+
+### `@vec_is_empty`
+
+`@vec_is_empty(v)` returns `v.len() == 0`. Surface form: `v.is_empty()`.
+
+
+### `@vec_push`
+
+`@vec_push(v, x)` appends `x` to `v`, growing the buffer if needed. Surface form: `v.push(x)`.
+
+
+### `@vec_pop`
+
+`@vec_pop(v)` returns `Option(T)` — `None` on empty, `Some(t)` otherwise. Surface form: `v.pop()`.
+
+
+### `@vec_clear`
+
+`@vec_clear(v)` runs the per-element drop loop and sets `len = 0`. Surface form: `v.clear()`.
+
+
+### `@vec_reserve`
+
+`@vec_reserve(v, n)` grows the buffer so that `cap >= len + n`. Surface form: `v.reserve(n)`.
+
+
+### `@vec_index_read`
+
+`@vec_index_read(v, i)` returns `v[i]`. Bounds-checked at runtime. Requires `T: Copy`. Surface form: `v[i]`.
+
+
+### `@vec_index_write`
+
+`@vec_index_write(v, i, x)` performs `v[i] = x`. Bounds-checked at runtime. Surface form: `v[i] = x`.
+
+
+### `@vec_ptr`
+
+`@vec_ptr(v)` returns a `Ptr(T)` to the first element. Requires a `checked` block. Surface form: `v.ptr()`.
+
+- **Requires:** `checked { ... }` block
+
+### `@vec_ptr_mut`
+
+`@vec_ptr_mut(v)` returns a `MutPtr(T)`. Requires a `checked` block. Surface form: `v.ptr_mut()`.
+
+- **Requires:** `checked { ... }` block
+
+### `@vec_terminated_ptr`
+
+`@vec_terminated_ptr(v, s)` writes `s` at `ptr[len]` (growing if needed), returns `Ptr(T)`. Requires a `checked` block. Surface form: `v.terminated_ptr(s)`.
+
+- **Requires:** `checked { ... }` block
+
+### `@vec_clone`
+
+`@vec_clone(v)` returns a deep copy of `v`. Requires `T: Clone`. Surface form: `v.clone()`.
+
+
+### `@vec`
+
+`@vec(a, b, c)` returns a `Vec(T)` of length 3 with the given elements. Mirrors Rust's `vec![…]`. Requires at least one argument; element types unify to a single `T`.
+
+
+**Examples:**
+
+```gruel
+@vec(1, 2, 3)
+```
+
+### `@vec_repeat`
+
+`@vec_repeat(v, n)` returns a `Vec(T)` of length `n` where every slot holds a clone of `v`. Requires `T: Clone`.
+
+
+**Examples:**
+
+```gruel
+@vec_repeat(0, 100)
+```
+
+### `@vec_dispose`
+
+`@vec_dispose(v)` is the explicit-release form for `Vec(T)`. It panics if `v.len != 0` (so any contained linear elements are still live), then frees the heap buffer. Surface form: `v.dispose()`. For `Vec(T:Linear)` this is the only legal release path; for non-linear `T` it's an explicit alternative to implicit drop.
+
+- **Runtime symbol:** `__gruel_vec_dispose_panic`
+
+### `@parts_to_vec`
+
+`@parts_to_vec(p: MutPtr(T), len: usize, cap: usize) -> Vec(T)` takes ownership of `p`. Requires a `checked` block.
+
+- **Requires:** `checked { ... }` block
+
 ## Raw Pointers
 
 ### `@ptr_read`
@@ -453,65 +626,6 @@ Internal lowering target for `MutPtr(T)::from(&mut x)` (ADR-0063).
 ```gruel
 checked { let ret = @syscall(1, 1, buf, n); }
 ```
-
-## Iteration
-
-### `@range`
-
-`@range(end)`, `@range(start, end)`, or `@range(start, end, step)` produces an iterable over integers.
-
-
-**Examples:**
-
-```gruel
-for i in @range(0, 10) { ... }
-```
-
-## Slices
-
-### `@slice_len`
-
-`@slice_len(s)` returns the number of elements in `s` (a `Slice(T)` or `MutSlice(T)`) as `usize`. Surface form: `s.len()`.
-
-
-### `@slice_is_empty`
-
-`@slice_is_empty(s)` returns `s.len() == 0`. Surface form: `s.is_empty()`.
-
-
-### `@slice_index_read`
-
-`@slice_index_read(s, i)` returns `s[i]`. Bounds-checks at runtime; panics on out-of-range. Surface form: `s[i]`.
-
-
-### `@slice_ptr`
-
-`@slice_ptr(s)` returns a `Ptr(T)` to the slice's first element. Requires a `checked` block. Surface form: `s.ptr()`.
-
-- **Requires:** `checked { ... }` block
-
-### `@slice_ptr_mut`
-
-`@slice_ptr_mut(m)` returns a `MutPtr(T)` to a `MutSlice(T)`'s first element. Requires a `checked` block. Surface form: `m.ptr_mut()`.
-
-- **Requires:** `checked { ... }` block
-
-### `@parts_to_slice`
-
-`@parts_to_slice(p: Ptr(T), n: usize) -> Slice(T)` constructs a slice without checking that the underlying storage is valid. Requires a `checked` block.
-
-- **Requires:** `checked { ... }` block
-
-### `@parts_to_mut_slice`
-
-`@parts_to_mut_slice(p: MutPtr(T), n: usize) -> MutSlice(T)`. Requires a `checked` block.
-
-- **Requires:** `checked { ... }` block
-
-### `@slice_index_write`
-
-`@slice_index_write(m, i, v)` performs `m[i] = v`. Requires `MutSlice(T)`. Bounds-checks at runtime. Surface form: `m[i] = v`.
-
 
 ## Preview / Meta
 

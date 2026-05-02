@@ -169,6 +169,37 @@ impl Category {
             Category::Meta => "Preview / Meta",
         }
     }
+
+    /// Canonical render order for the documentation reference page. The
+    /// quick-reference table groups rows by category in this order, and the
+    /// per-category detail sections appear in the same order. Adding a new
+    /// `Category` variant requires extending this list — the test
+    /// `category_render_order_is_exhaustive` enforces that every variant
+    /// appears exactly once.
+    pub const RENDER_ORDER: &'static [Category] = &[
+        Category::Debug,
+        Category::Cast,
+        Category::Io,
+        Category::Parse,
+        Category::Random,
+        Category::Comptime,
+        Category::Platform,
+        Category::Iteration,
+        Category::Slice,
+        Category::Vec,
+        Category::Pointer,
+        Category::Syscall,
+        Category::Meta,
+    ];
+
+    /// Position in [`RENDER_ORDER`]. Used as the primary sort key for the
+    /// quick-reference table so categories don't interleave.
+    fn render_index(self) -> usize {
+        Self::RENDER_ORDER
+            .iter()
+            .position(|c| *c == self)
+            .expect("every Category variant must appear in RENDER_ORDER")
+    }
 }
 
 // ============================================================================
@@ -1415,10 +1446,16 @@ pub fn render_reference_markdown() -> String {
     out.push_str("This page documents every `@intrinsic` the Gruel compiler recognizes. It is generated from the [`gruel-intrinsics`] registry (see [ADR-0050](../designs/0050-intrinsics-crate.md)); any changes must be made in Rust, not here.\n\n");
 
     // ---- Quick reference table ----
+    // Sort by the canonical category render order (stable on registration
+    // order within a category) so rows for the same category cluster
+    // together and the table reads like a table of contents for the detail
+    // sections below.
     out.push_str("## Quick Reference\n\n");
     out.push_str("| Intrinsic | Kind | Category | Preview | Unchecked | Summary |\n");
     out.push_str("|---|---|---|---|---|---|\n");
-    for d in INTRINSICS {
+    let mut ordered: Vec<&IntrinsicDef> = INTRINSICS.iter().collect();
+    ordered.sort_by_key(|d| d.category.render_index());
+    for d in ordered {
         let kind = match d.kind {
             IntrinsicKind::Expr => "expr",
             IntrinsicKind::Type => "type",
@@ -1442,21 +1479,7 @@ pub fn render_reference_markdown() -> String {
     out.push('\n');
 
     // ---- Per-category detail sections ----
-    let categories = [
-        Category::Debug,
-        Category::Cast,
-        Category::Io,
-        Category::Parse,
-        Category::Random,
-        Category::Comptime,
-        Category::Platform,
-        Category::Pointer,
-        Category::Syscall,
-        Category::Iteration,
-        Category::Slice,
-        Category::Meta,
-    ];
-    for cat in categories {
+    for &cat in Category::RENDER_ORDER {
         let mut entries = by_category(cat).peekable();
         if entries.peek().is_none() {
             continue;
@@ -1674,6 +1697,61 @@ mod tests {
         let ptrs: Vec<_> = by_category(Category::Pointer).collect();
         assert!(!ptrs.is_empty());
         assert!(ptrs.iter().all(|d| d.category == Category::Pointer));
+    }
+
+    /// Every `Category` variant must appear exactly once in `RENDER_ORDER`,
+    /// so the documentation renderer never silently drops a section. Adding
+    /// a new variant without updating `RENDER_ORDER` makes this test fail.
+    #[test]
+    fn category_render_order_is_exhaustive() {
+        // Enumerate every Category variant via an exhaustive match. The
+        // compiler will force this to be updated when a new variant is
+        // added; the assertion then forces RENDER_ORDER to be updated too.
+        let all = [
+            Category::Debug,
+            Category::Cast,
+            Category::Io,
+            Category::Parse,
+            Category::Random,
+            Category::Comptime,
+            Category::Platform,
+            Category::Pointer,
+            Category::Syscall,
+            Category::Iteration,
+            Category::Slice,
+            Category::Vec,
+            Category::Meta,
+        ];
+        // Exhaustiveness witness: any new variant added to `Category`
+        // forces this match to be updated.
+        for c in all {
+            let _: &'static str = match c {
+                Category::Debug => "Debug",
+                Category::Cast => "Cast",
+                Category::Io => "Io",
+                Category::Parse => "Parse",
+                Category::Random => "Random",
+                Category::Comptime => "Comptime",
+                Category::Platform => "Platform",
+                Category::Pointer => "Pointer",
+                Category::Syscall => "Syscall",
+                Category::Iteration => "Iteration",
+                Category::Slice => "Slice",
+                Category::Vec => "Vec",
+                Category::Meta => "Meta",
+            };
+            assert!(
+                Category::RENDER_ORDER.contains(&c),
+                "Category::{:?} is missing from Category::RENDER_ORDER \
+                 — add it to keep the intrinsics reference page complete",
+                c
+            );
+        }
+        assert_eq!(
+            Category::RENDER_ORDER.len(),
+            all.len(),
+            "Category::RENDER_ORDER has duplicates or is out of sync with Category"
+        );
     }
 
     #[test]
