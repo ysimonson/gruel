@@ -28,6 +28,7 @@ mod remap;
 mod signature;
 mod store;
 mod wire;
+mod wire_air;
 
 pub use compiler_fp::{compiler_fingerprint, current_binary_path};
 pub use fingerprint::{CacheKey, Hasher, blake3_bytes};
@@ -35,6 +36,7 @@ pub use remap::RemapSpurs;
 pub use signature::{SIG_FP_VERSION, compute_sig_fp};
 pub use store::{CacheKind, CacheStats, CacheStore};
 pub use wire::{CachedParseOutput, CachedRirOutput, InternerSnapshot};
+pub use wire_air::CachedAirOutput;
 
 /// On-disk cache schema version. Bump when the layout of any cached blob
 /// changes in an incompatible way. The store wipes the cache directory on
