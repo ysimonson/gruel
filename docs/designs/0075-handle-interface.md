@@ -143,7 +143,7 @@ Spec-side, this is a new legality rule in §2.5:
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Add `Handle` to the built-in interface registry.** Append
+- [x] **Phase 1: Add `Handle` to the built-in interface registry.** Append
   `HANDLE_INTERFACE` to `BUILTIN_INTERFACES` in `gruel-builtins`.
   Method-presence conformance — no derive variant. Sema picks it up
   automatically through the existing iteration. Generated built-in

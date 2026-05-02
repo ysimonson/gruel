@@ -975,12 +975,31 @@ pub static CLONE_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
     },
 };
 
+/// `Handle` — types that may be explicitly duplicated by call. ADR-0075.
+pub static HANDLE_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
+    name: "Handle",
+    methods: &[BuiltinInterfaceMethod {
+        name: "handle",
+        receiver_mode: ReceiverMode::ByRef,
+        param_types: &[],
+        return_type: BuiltinIfaceTy::SelfType,
+    }],
+    description: "Types that may be explicitly duplicated via `.handle()`, typically because the duplication has visible cost (refcount bumps, transaction forks). Unlike `Clone`, `Handle` is permitted on `linear` types (ADR-0075).",
+    conformance: BuiltinInterfaceConformance::MethodPresence(
+        "Defining `fn handle(borrow self) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.",
+    ),
+};
+
 /// All compiler-recognized interfaces.
 ///
 /// `gruel-air` iterates over this slice in `inject_builtin_interfaces` to
 /// register the names before user code is parsed.
-pub static BUILTIN_INTERFACES: &[&BuiltinInterfaceDef] =
-    &[&DROP_INTERFACE, &COPY_INTERFACE, &CLONE_INTERFACE];
+pub static BUILTIN_INTERFACES: &[&BuiltinInterfaceDef] = &[
+    &DROP_INTERFACE,
+    &COPY_INTERFACE,
+    &CLONE_INTERFACE,
+    &HANDLE_INTERFACE,
+];
 
 /// Look up a built-in interface by name.
 pub fn get_builtin_interface(name: &str) -> Option<&'static BuiltinInterfaceDef> {
