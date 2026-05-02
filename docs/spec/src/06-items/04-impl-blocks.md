@@ -15,8 +15,9 @@ Methods are functions defined inside a struct block that can be called on instan
 ```ebnf
 struct_def = [ directives ] [ "pub" ] "struct" IDENT "{" [ field_list ] [ method_list ] "}" ;
 field_list = field_def { "," field_def } [ "," ] ;
+field_def = [ "pub" ] IDENT ":" type ;
 method_list = method_def { method_def } ;
-method_def = [ directives ] "fn" IDENT "(" [ method_params ] ")" [ "->" type ] block ;
+method_def = [ directives ] [ "pub" ] "fn" IDENT "(" [ method_params ] ")" [ "->" type ] block ;
 method_params = method_param { "," method_param } [ "," ] ;
 method_param = "self" | ( IDENT ":" type ) ;
 ```
@@ -178,3 +179,32 @@ Calling an associated function with method call syntax (receiver.function()) is 
 {{ rule(id="6.4:23", cat="legality-rule") }}
 
 Calling a method with associated function syntax (Type::method()) is a compile-time error.
+
+## Method Visibility
+
+{{ rule(id="6.4:24", cat="informative") }}
+
+(ADR-0073, preview `field_method_visibility`.) A method definition **MAY**
+be prefixed with the `pub` keyword. A method marked `pub` is callable from
+any module that can name the enclosing struct or enum. A method without
+`pub` is callable only from within the same module as the type definition.
+
+{{ rule(id="6.4:25", cat="informative") }}
+
+The visibility check applies to both instance method calls
+(`receiver.method(...)`) and associated function calls
+(`Type::function(...)`). Interface methods (declared in `interface`
+blocks) are not subject to this check; an interface's methods are part of
+the interface's public contract wherever the interface itself is in scope.
+
+{{ rule(id="6.4:26", cat="informative") }}
+
+```gruel
+pub struct Counter {
+    value: i32,
+
+    pub fn new() -> Counter { Counter { value: 0 } }     // public
+    pub fn get(self) -> i32 { self.value }               // public
+    fn validate(self) -> bool { self.value >= 0 }        // module-private
+}
+```
