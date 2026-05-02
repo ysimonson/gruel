@@ -23,8 +23,8 @@ fn main() -> i32 {
     let sum = add(3, 4);
     @dbg(sum);  // prints: 7
 
-    @dbg(is_positive(sum));   // prints: 1 (true)
-    @dbg(is_positive(-5));    // prints: 0 (false)
+    @dbg(is_positive(sum));   // prints: true
+    @dbg(is_positive(-5));    // prints: false
 
     sum
 }

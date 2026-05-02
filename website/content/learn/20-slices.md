@@ -24,7 +24,7 @@ fn main() -> i32 {
     let middle: Slice(i32) = &arr[1..4];   // 3 elements: [20, 30, 40]
     let _tail: Slice(i32) = &arr[2..];     // [30, 40, 50]
     let _head: Slice(i32) = &arr[..3];     // [10, 20, 30]
-    let n: i32 = @cast(middle.len(), i32);
+    let n: i32 = @cast(middle.len());
     n                                      // 3
 }
 ```

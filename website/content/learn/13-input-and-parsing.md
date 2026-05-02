@@ -109,7 +109,7 @@ fn main() -> i32 {
 }
 ```
 
-These read from the platform's entropy source (getrandom on Linux, getentropy on macOS), so they're suitable for random number generation but not for cryptographic use.
+These read from the platform's entropy source (`getrandom` on Linux, `getentropy` on macOS) and are cryptographically secure, suitable for both general use and security-sensitive contexts like key generation.
 
 ## Building an Interactive Program
 

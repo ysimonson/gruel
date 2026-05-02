@@ -59,21 +59,25 @@ fn main() -> i32 {
 }
 ```
 
-## Appending Individual Bytes
+## Appending a Character
 
-Use `push` to append a single byte:
+`push` takes a `char` and appends its UTF-8 encoding (1–4 bytes). Because `char` is guaranteed to be a valid Unicode scalar, this can never produce invalid UTF-8:
 
 ```gruel
 fn main() -> i32 {
     let mut s = String::new();
     s.push_str("hello");
-    s.push(33);  // 33 is '!'
+    s.push('!');
+    s.push(' ');
+    s.push('☃');   // multi-byte codepoint, encoded as 3 bytes
 
-    @dbg(s);  // prints: hello!
+    @dbg(s);  // prints: hello! ☃
 
     0
 }
 ```
+
+If you need raw byte-level access — for example to construct a string out of pre-validated bytes coming from FFI — use `push_byte(b: u8)` from inside a `checked` block. The compiler gates byte-level mutation that way because arbitrary bytes can break the UTF-8 invariant.
 
 ## Querying a String
 
@@ -83,11 +87,12 @@ Query methods take `&self`, so they don't consume the string:
 fn main() -> i32 {
     let s = "hello, world!";
 
-    @dbg(s.len());       // prints: 13
-    @dbg(s.is_empty());  // prints: false (0)
+    let n: i32 = @cast(s.len());
+    @dbg(n);             // prints: 13
+    @dbg(s.is_empty());  // prints: false
 
     let empty = String::new();
-    @dbg(empty.is_empty());  // prints: true (1)
+    @dbg(empty.is_empty());  // prints: true
 
     0
 }

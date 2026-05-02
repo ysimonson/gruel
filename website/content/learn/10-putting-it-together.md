@@ -18,7 +18,7 @@ Quicksort is a classic divide-and-conquer sorting algorithm:
 ## The Implementation
 
 ```gruel
-fn partition(inout arr: [i32; 5], lo: u64, hi: u64) -> u64 {
+fn partition(inout arr: [i32; 5], lo: usize, hi: usize) -> usize {
     let pivot = arr[hi];
     let mut i = lo;
     let mut j = lo;
@@ -41,7 +41,7 @@ fn partition(inout arr: [i32; 5], lo: u64, hi: u64) -> u64 {
     i
 }
 
-fn quicksort(inout arr: [i32; 5], lo: u64, hi: u64) {
+fn quicksort(inout arr: [i32; 5], lo: usize, hi: usize) {
     if lo < hi {
         let p = partition(inout arr, lo, hi);
         if p > lo {
@@ -124,13 +124,17 @@ The [GitHub repository](https://github.com/ysimonson/gruel) has more examples in
 
 You've learned the fundamentals of Gruel! The next chapters cover more features:
 
-- [Methods](/learn/11-methods/) — dot-syntax operations on structs using `impl` blocks
+- [Methods](/learn/11-methods/) — dot-syntax operations defined inside struct and enum bodies
 - [Strings](/learn/12-strings/) — the `String` type with heap allocation and automatic cleanup
 - [Input and Parsing](/learn/13-input-and-parsing/) — reading user input and converting strings to numbers
 - [Comptime and Generics](/learn/14-comptime/) — compile-time evaluation and generic functions
 - [Modules](/learn/15-modules/) — splitting code across multiple files with `@import`
 - [Linear Types](/learn/16-linear-types/) — must-consume types and explicit duplication with `@handle`
 - [Unchecked Code and Raw Pointers](/learn/17-unchecked/) — `checked` blocks, raw pointers, and syscalls
+- [Tuples](/learn/19-tuples/) — fixed-size groupings of heterogeneous values
+- [Slices](/learn/20-slices/) — borrowed views over contiguous elements with runtime length
+- [Interfaces](/learn/21-interfaces/) — structural conformance, derives, and `Copy`/`Drop`
+- [Destructors](/learn/destructors/) — automatic cleanup, drop order, and custom `fn drop`
 
 For the complete language reference, read the [Language Specification](/spec/).
 

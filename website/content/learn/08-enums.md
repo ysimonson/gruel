@@ -269,7 +269,7 @@ fn main() -> i32 {
         status: Status::Active,
     };
 
-    @dbg(is_done(task));  // prints: 0 (false)
+    @dbg(is_done(task));  // prints: false
     0
 }
 ```

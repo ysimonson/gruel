@@ -132,10 +132,10 @@ fn main() -> i32 {
 
 You cannot move a non-copy field out of a struct individually. To access individual fields as independent values, use destructuring (see below).
 
-If you want a type to be copyable instead, mark it with `@copy`:
+If you want a type to be copyable instead, mark it with `@derive(Copy)`:
 
 ```gruel
-@copy
+@derive(Copy)
 struct Point {
     x: i32,
     y: i32,

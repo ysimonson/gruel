@@ -12,9 +12,9 @@ Gruel's type system has three levels of ownership discipline:
 |------------|-----------|
 | *(none)* | Affine — used at most once; can be silently dropped |
 | `linear` | Linear — must be consumed exactly once |
-| `@copy` | Copy — implicitly duplicated on use |
+| `@derive(Copy)` | Copy — implicitly duplicated on use |
 
-You've already seen affine structs (move semantics) and `@copy` structs. This page covers `linear` types and the related `@handle` directive.
+You've already seen affine structs (move semantics) and `@derive(Copy)` structs. This page covers `linear` types and the related `@handle` directive.
 
 ## Linear Types Must Be Consumed
 
@@ -105,14 +105,14 @@ fn main() -> i32 {
 }
 ```
 
-## Linear Types Cannot Be `@copy`
+## Linear Types Cannot Be `@derive(Copy)`
 
 Allowing implicit copies would defeat the purpose of linear types — you could copy before dropping to avoid the consume requirement. The compiler rejects this combination:
 
 ```gruel
-@copy
+@derive(Copy)
 linear struct Bad { value: i32 }
-// ERROR: linear type cannot be marked @copy
+// ERROR: linear struct cannot be marked `@derive(Copy)`
 ```
 
 ## Explicit Duplication with `@handle`
@@ -138,7 +138,7 @@ fn main() -> i32 {
 }
 ```
 
-Unlike `@copy`, duplication is never implicit. You must call `.handle()`, making the cost visible at every use site.
+Unlike `@derive(Copy)`, duplication is never implicit. You must call `.handle()`, making the cost visible at every use site.
 
 ## `@handle` with `linear`
 

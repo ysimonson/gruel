@@ -67,12 +67,31 @@ fn main() -> i32 {
     let flag: bool = true;
     let done = false;
 
-    @dbg(flag);   // prints: 1 (true)
-    @dbg(done);   // prints: 0 (false)
+    @dbg(flag);   // prints: true
+    @dbg(done);   // prints: false
 
     0
 }
 ```
+
+## Characters
+
+The `char` type holds a single Unicode scalar value. Char literals use single quotes:
+
+```gruel
+fn main() -> i32 {
+    let letter: char = 'A';
+    let snowman: char = '☃';
+
+    @dbg(letter.is_ascii());   // prints: true
+    @dbg(letter.to_u32());     // prints: 65
+    let bytes: u32 = @cast(snowman.len_utf8());
+    @dbg(bytes);               // prints: 3
+    0
+}
+```
+
+A `char` is always 4 bytes and can represent any Unicode codepoint. Common escapes work too: `'\n'`, `'\t'`, `'\\'`, `'\''`, and `'\u{1F600}'` for an arbitrary codepoint. It's distinct from `u32` — converting between them is explicit, via `c.to_u32()` and `char::from_u32(n)`. Arithmetic operators are not defined on `char`; convert through `u32` if you need to do codepoint math.
 
 ## Numeric Casts
 
