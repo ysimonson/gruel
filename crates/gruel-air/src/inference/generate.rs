@@ -724,7 +724,7 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::U64)
                     }
-                    Some(IntrinsicId::PtrWrite) => {
+                    Some(IntrinsicId::PtrWrite) | Some(IntrinsicId::PtrWriteVolatile) => {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::UNIT)
                     }
@@ -732,7 +732,7 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::BOOL)
                     }
-                    Some(IntrinsicId::PtrRead) => {
+                    Some(IntrinsicId::PtrRead) | Some(IntrinsicId::PtrReadVolatile) => {
                         // Return type depends on pointee type of the argument —
                         // resolved in sema once the concrete pointer type is known.
                         visit_args(self, ctx);
@@ -1447,8 +1447,8 @@ impl<'a> ConstraintGenerator<'a> {
                         }
                         return ExprInfo {
                             ty: match method_str {
-                                "read" => InferType::Concrete(pointee),
-                                "write" => InferType::Concrete(Type::UNIT),
+                                "read" | "read_volatile" => InferType::Concrete(pointee),
+                                "write" | "write_volatile" => InferType::Concrete(Type::UNIT),
                                 "offset" => InferType::Concrete(*ty),
                                 "is_null" => InferType::Concrete(Type::BOOL),
                                 "to_int" => InferType::Concrete(Type::U64),

@@ -33,6 +33,8 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@target_os` | expr | Target Platform | — | — | Compile target operating system. |
 | `@ptr_read` | expr | Raw Pointers | — | yes | Load a value through a raw pointer (internal). |
 | `@ptr_write` | expr | Raw Pointers | — | yes | Store a value through a raw mutable pointer (internal). |
+| `@ptr_read_volatile` | expr | Raw Pointers | — | yes | Volatile load through a raw pointer (internal). |
+| `@ptr_write_volatile` | expr | Raw Pointers | — | yes | Volatile store through a raw mutable pointer (internal). |
 | `@ptr_offset` | expr | Raw Pointers | — | yes | Pointer arithmetic by element count (internal). |
 | `@ptr_to_int` | expr | Raw Pointers | — | yes | Convert a pointer to its integer address (internal). |
 | `@int_to_ptr` | expr | Raw Pointers | — | yes | Construct a pointer from an integer address (internal). |
@@ -375,6 +377,18 @@ Internal lowering target for `p.read()` (ADR-0063).
 ### `@ptr_write`
 
 Internal lowering target for `p.write(v)` (ADR-0063).
+
+- **Requires:** `checked { ... }` block
+
+### `@ptr_read_volatile`
+
+Internal lowering target for `p.read_volatile()`. Lowers to an LLVM `load volatile`, which the optimizer may not elide, duplicate, or reorder relative to other volatile accesses. Intended for memory-mapped I/O where every read has externally visible side effects.
+
+- **Requires:** `checked { ... }` block
+
+### `@ptr_write_volatile`
+
+Internal lowering target for `p.write_volatile(v)`. Lowers to an LLVM `store volatile`, which the optimizer may not elide, duplicate, or reorder relative to other volatile accesses. Intended for memory-mapped I/O where every write has externally visible side effects.
 
 - **Requires:** `checked { ... }` block
 

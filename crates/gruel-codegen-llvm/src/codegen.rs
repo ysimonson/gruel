@@ -3462,23 +3462,33 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- Pointer operations ----
-            IntrinsicId::PtrRead => {
+            IntrinsicId::PtrRead | IntrinsicId::PtrReadVolatile => {
                 let ptr_val = args[0];
                 let ptr = self.get_value(ptr_val).into_pointer_value();
                 let result_llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
                     .expect("ptr_read must return a non-void type");
-                Some(
-                    self.builder
-                        .build_load(result_llvm_ty, ptr, "ptrrd")
-                        .unwrap(),
-                )
+                let loaded = self
+                    .builder
+                    .build_load(result_llvm_ty, ptr, "ptrrd")
+                    .unwrap();
+                if matches!(id, IntrinsicId::PtrReadVolatile) {
+                    loaded
+                        .as_instruction_value()
+                        .expect("load returns an instruction")
+                        .set_volatile(true)
+                        .expect("set_volatile on load");
+                }
+                Some(loaded)
             }
-            IntrinsicId::PtrWrite => {
+            IntrinsicId::PtrWrite | IntrinsicId::PtrWriteVolatile => {
                 let ptr_val = args[0];
                 let written_val = args[1];
                 let ptr = self.get_value(ptr_val).into_pointer_value();
                 let v = self.get_value(written_val);
-                self.builder.build_store(ptr, v).unwrap();
+                let store = self.builder.build_store(ptr, v).unwrap();
+                if matches!(id, IntrinsicId::PtrWriteVolatile) {
+                    store.set_volatile(true).expect("set_volatile on store");
+                }
                 None
             }
             IntrinsicId::PtrOffset => {

@@ -199,6 +199,63 @@ fn main() -> i32 {
 exit_code = 42
 
 # =============================================================================
+# `p.read_volatile()` on a Ptr(T) — value round-trip.
+# =============================================================================
+
+[[case]]
+name = "ptr_read_volatile_method"
+spec = ["9.2:17", "9.2:18"]
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    checked {
+        let p = Ptr(i32)::from(&x);
+        p.read_volatile()
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# `p.write_volatile(v)` on a MutPtr(T) — value round-trip via volatile read.
+# =============================================================================
+
+[[case]]
+name = "mut_ptr_write_volatile_method"
+spec = ["9.2:17", "9.2:18"]
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 0;
+    checked {
+        let p = MutPtr(i32)::from(&mut x);
+        p.write_volatile(42);
+        p.read_volatile()
+    }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# `p.write_volatile(...)` on Ptr(T) is rejected (mirrors `p.write`).
+# =============================================================================
+
+[[case]]
+name = "ptr_write_volatile_on_const_rejected"
+spec = ["9.2:17"]
+source = """
+fn main() -> i32 {
+    let x: i32 = 0;
+    checked {
+        let p = Ptr(i32)::from(&x);
+        p.write_volatile(1);
+    };
+    0
+}
+"""
+compile_fail = true
+error_contains = "no method"
+
+# =============================================================================
 # `dst.copy_from(src, n)` — replacement for `@ptr_copy(dst, src, n)`.
 # =============================================================================
 
