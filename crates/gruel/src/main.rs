@@ -77,7 +77,13 @@ enum LogFormat {
 }
 
 /// Version string for the gruel compiler.
-const VERSION: &str = "0.1.0";
+///
+/// Includes the git SHA and (if applicable) a `+dirty` marker, embedded
+/// by `build.rs` per ADR-0074. These are diagnostic only — they let users
+/// answer "which build of gruel am I running, and why did my cache
+/// invalidate?" — and are NOT mixed into cache keys themselves (the
+/// binary-bytes hash already covers everything they encode).
+const VERSION: &str = env!("GRUEL_VERSION");
 
 #[derive(Parser, Debug)]
 #[command(
@@ -151,6 +157,13 @@ struct Cli {
     /// Output timing as JSON (for benchmarking).
     #[arg(long)]
     benchmark_json: bool,
+
+    /// Cache directory for incremental compilation (ADR-0074).
+    /// Requires --preview incremental_compilation.
+    /// Defaults to `target/gruel-cache/` next to the first source file.
+    /// Also overridable via `GRUEL_CACHE_DIR` env var.
+    #[arg(long, value_name = "PATH", env = "GRUEL_CACHE_DIR")]
+    cache_dir: Option<String>,
 }
 
 struct Options {
@@ -171,6 +184,13 @@ struct Options {
     jobs: usize,
     /// When true, suppress stderr printing of comptime `@dbg` output.
     capture_comptime_dbg: bool,
+    /// Optional explicit cache directory (ADR-0074). When `None` and
+    /// `incremental_compilation` is enabled, the driver uses
+    /// `target/gruel-cache/` next to the first source file.
+    /// Phase 2 wires this into the compilation pipeline; Phase 1 only
+    /// plumbs the field and validates the preview-feature gate.
+    #[allow(dead_code)]
+    cache_dir: Option<String>,
 }
 
 /// Result of parsing command-line arguments.
@@ -232,6 +252,17 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
 
     let preview_features: PreviewFeatures = cli.preview.into_iter().collect();
 
+    // ADR-0074: --cache-dir is meaningful only when the incremental cache
+    // is enabled. Reject explicit --cache-dir without the preview gate
+    // rather than silently ignoring it.
+    if cli.cache_dir.is_some()
+        && !preview_features.contains(&PreviewFeature::IncrementalCompilation)
+    {
+        return Err(
+            "--cache-dir requires --preview incremental_compilation (ADR-0074)".to_string(),
+        );
+    }
+
     Ok(Options {
         source_paths,
         output_path,
@@ -246,6 +277,7 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
         benchmark_json: cli.benchmark_json,
         jobs: cli.jobs,
         capture_comptime_dbg: cli.capture_comptime_dbg,
+        cache_dir: cli.cache_dir,
     })
 }
 
@@ -1110,6 +1142,50 @@ mod tests {
             "nonexistent",
             "source.gruel"
         ])));
+    }
+
+    // ========== --cache-dir tests (ADR-0074) ==========
+
+    #[test]
+    fn cache_dir_requires_preview_feature() {
+        // Without --preview incremental_compilation, --cache-dir is rejected.
+        assert!(is_error(&parse_args_from(&[
+            "--cache-dir",
+            "/tmp/foo",
+            "source.gruel",
+        ])));
+    }
+
+    #[test]
+    fn cache_dir_accepted_with_preview() {
+        let opts = unwrap_options(parse_args_from(&[
+            "--preview",
+            "incremental_compilation",
+            "--cache-dir",
+            "/tmp/foo",
+            "source.gruel",
+        ]));
+        assert_eq!(opts.cache_dir.as_deref(), Some("/tmp/foo"));
+        assert!(
+            opts.preview_features
+                .contains(&PreviewFeature::IncrementalCompilation)
+        );
+    }
+
+    #[test]
+    fn cache_dir_optional_with_preview() {
+        // The preview can be enabled without --cache-dir; the driver will
+        // fall back to a default location.
+        let opts = unwrap_options(parse_args_from(&[
+            "--preview",
+            "incremental_compilation",
+            "source.gruel",
+        ]));
+        assert!(opts.cache_dir.is_none());
+        assert!(
+            opts.preview_features
+                .contains(&PreviewFeature::IncrementalCompilation)
+        );
     }
 
     // ========== --log-level tests ==========

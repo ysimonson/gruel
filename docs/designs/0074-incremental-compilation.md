@@ -304,7 +304,7 @@ These benchmarks are required to land *before* the feature can be considered for
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Cache infrastructure** — Create `gruel-cache` crate. Implement `CacheStore` with atomic writes, BLAKE3 keying, version stamping. Implement `compiler_fp` (hash of own binary, memoized at `~/.cache/gruel/binary-hash/` keyed by `(path, mtime, size)`). Add `build.rs` embedding `git_sha` + `dirty` flag for diagnostics. Add `--preview incremental_compilation` and `--cache-dir` plumbing. No pipeline integration yet; tested in isolation.
+- [x] **Phase 1: Cache infrastructure** — Create `gruel-cache` crate. Implement `CacheStore` with atomic writes, BLAKE3 keying, version stamping. Implement `compiler_fp` (hash of own binary, memoized at `~/.cache/gruel/binary-hash/` keyed by `(path, mtime, size)`). Add `build.rs` embedding `git_sha` + `dirty` flag for diagnostics. Add `--preview incremental_compilation` and `--cache-dir` plumbing. No pipeline integration yet; tested in isolation.
 
 - [ ] **Phase 2: Parse + RIR caching** — Cache parser output (AST + interner slice) and per-file RIR keyed by `parse_key`. Wire into `parse_all_files` / `validate_and_generate_rir_parallel`. Adds the lowest-risk slice end-to-end and validates serialization, interner remapping, and the manifest. Add cache-hit metrics to `--time-passes`.
 
