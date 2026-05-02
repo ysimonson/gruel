@@ -294,6 +294,96 @@ pub struct TypeInternPool {
     inner: RwLock<TypeInternPoolInner>,
 }
 
+// ADR-0074 Phase 4: serialize / deserialize TypeInternPool by snapshotting
+// only its canonical `types: Vec<TypeData>`. The structural-dedup HashMaps
+// (array_map, ptr_const_map, etc.) are reconstructed from `types` on load
+// because they are pure caches over its contents. The lazy layout_cache
+// starts empty after deserialization and re-populates on demand.
+//
+// IMPORTANT: cached InternedType values index into `types` and are stable
+// only against the snapshotted pool. Loading a pool replaces — does not
+// merge — the build's TypeInternPool. Any cross-file use of cached AIR
+// requires a TypeId remap walker (Phase 4 follow-up).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct TypeInternPoolWire {
+    types: Vec<TypeData>,
+}
+
+impl serde::Serialize for TypeInternPool {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let wire = TypeInternPoolWire {
+            types: inner.types.clone(),
+        };
+        wire.serialize(ser)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TypeInternPool {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let wire = TypeInternPoolWire::deserialize(de)?;
+        // Reconstruct the dedup maps by walking `types` in order. Each
+        // TypeData index becomes the InternedType key (offset by the
+        // primitive count via try_from_index, identical to the original
+        // intern path).
+        let mut inner = TypeInternPoolInner {
+            types: Vec::with_capacity(wire.types.len()),
+            array_map: HashMap::default(),
+            ptr_const_map: HashMap::default(),
+            ptr_mut_map: HashMap::default(),
+            ref_map: HashMap::default(),
+            mut_ref_map: HashMap::default(),
+            slice_map: HashMap::default(),
+            mut_slice_map: HashMap::default(),
+            vec_map: HashMap::default(),
+            struct_by_name: HashMap::default(),
+            enum_by_name: HashMap::default(),
+            layout_cache: HashMap::default(),
+        };
+        for data in wire.types {
+            // The interned index is `PRIMITIVE_COUNT + types.len()` BEFORE
+            // pushing the new entry, matching the original intern path.
+            let idx = InternedType(InternedType::PRIMITIVE_COUNT + inner.types.len() as u32);
+            match &data {
+                TypeData::Struct(s) => {
+                    inner.struct_by_name.insert(s.name, idx);
+                }
+                TypeData::Enum(e) => {
+                    inner.enum_by_name.insert(e.name, idx);
+                }
+                TypeData::Array { element, len } => {
+                    inner.array_map.insert((*element, *len), idx);
+                }
+                TypeData::PtrConst { pointee } => {
+                    inner.ptr_const_map.insert(*pointee, idx);
+                }
+                TypeData::PtrMut { pointee } => {
+                    inner.ptr_mut_map.insert(*pointee, idx);
+                }
+                TypeData::Ref { referent } => {
+                    inner.ref_map.insert(*referent, idx);
+                }
+                TypeData::MutRef { referent } => {
+                    inner.mut_ref_map.insert(*referent, idx);
+                }
+                TypeData::Slice { element } => {
+                    inner.slice_map.insert(*element, idx);
+                }
+                TypeData::MutSlice { element } => {
+                    inner.mut_slice_map.insert(*element, idx);
+                }
+                TypeData::Vec { element } => {
+                    inner.vec_map.insert(*element, idx);
+                }
+            }
+            inner.types.push(data);
+        }
+        Ok(Self {
+            inner: RwLock::new(inner),
+        })
+    }
+}
+
 #[derive(Debug)]
 struct TypeInternPoolInner {
     /// All composite type data, indexed by (InternedType.0 - PRIMITIVE_COUNT).
@@ -1592,6 +1682,29 @@ mod tests {
     // ========================================================================
     // InternedType tests
     // ========================================================================
+
+    #[test]
+    fn type_intern_pool_round_trips_through_serde() {
+        // ADR-0074 Phase 4: snapshot a pool, serialize via bincode, load
+        // back, verify all interned types resolve to the same data.
+        let pool = TypeInternPool::new();
+        let inner_array = pool.intern_array(InternedType::I32, 4);
+        let outer_array = pool.intern_array(inner_array, 2);
+        let ptr = pool.intern_ptr_const(InternedType::I64);
+
+        let bytes =
+            bincode::serde::encode_to_vec(&pool, bincode::config::standard()).expect("serialize");
+        let (restored, _): (TypeInternPool, _) =
+            bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
+                .expect("deserialize");
+
+        // The restored pool's structural-dedup maps should be reconstructed:
+        // re-interning identical types should return the same InternedType
+        // values that the original pool produced.
+        assert_eq!(restored.intern_array(InternedType::I32, 4), inner_array);
+        assert_eq!(restored.intern_array(inner_array, 2), outer_array);
+        assert_eq!(restored.intern_ptr_const(InternedType::I64), ptr);
+    }
 
     #[test]
     fn test_interned_type_primitives() {
