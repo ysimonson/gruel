@@ -119,7 +119,9 @@ The operations on `Ptr(T)` / `MutPtr(T)` defined by ADR-0028 are also exposed as
 | Form | Defined on | Signature |
 |------|------------|-----------|
 | `p.read()` | `Ptr(T)`, `MutPtr(T)` | `(self) -> T` |
+| `p.read_volatile()` | `Ptr(T)`, `MutPtr(T)` | `(self) -> T` |
 | `p.write(v)` | `MutPtr(T)` only | `(self, v: T) -> ()` |
+| `p.write_volatile(v)` | `MutPtr(T)` only | `(self, v: T) -> ()` |
 | `p.offset(n)` | `Ptr(T)`, `MutPtr(T)` | `(self, n: i64) -> Self` |
 | `p.is_null()` | `Ptr(T)`, `MutPtr(T)` | `(self) -> bool` |
 | `p.to_int()` | `Ptr(T)`, `MutPtr(T)` | `(self) -> u64` |
@@ -148,5 +150,24 @@ fn main() -> i32 {
         p.write(p.read() + 1);
     };
     x  // 42
+}
+```
+
+{{ rule(id="9.2:17", cat="normative") }}
+
+The `read_volatile` and `write_volatile` methods are semantically identical to `read` and `write` respectively, except that the implementation is required to perform exactly one memory access per call, in program order with respect to other volatile accesses, and may not elide, duplicate, or reorder it relative to other volatile accesses. They are intended for memory-mapped I/O, where every access has externally visible side effects. They do **not** imply atomicity, do not synchronize with other threads, and do not act as memory barriers.
+
+{{ rule(id="9.2:18", cat="example") }}
+
+```gruel
+fn main() -> i32 {
+    // Pretend `0x4000_0000` is a hardware register. Every access must
+    // hit memory exactly once, even after optimization.
+    checked {
+        let reg = MutPtr(u32)::from_int(0x4000_0000u64);
+        reg.write_volatile(0x1u32);
+        let _status: u32 = reg.read_volatile();
+    };
+    0
 }
 ```

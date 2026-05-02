@@ -62,6 +62,8 @@ pub enum IntrinsicId {
     // ---- Pointer operations (require unchecked) ----
     PtrRead,
     PtrWrite,
+    PtrReadVolatile,
+    PtrWriteVolatile,
     PtrOffset,
     PtrToInt,
     IntToPtr,
@@ -525,6 +527,30 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         runtime_fn: None,
         summary: "Store a value through a raw mutable pointer (internal).",
         description: "Internal lowering target for `p.write(v)` (ADR-0063).",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::PtrReadVolatile,
+        name: "ptr_read_volatile",
+        kind: IntrinsicKind::Expr,
+        category: Category::Pointer,
+        requires_unchecked: true,
+        preview: None,
+        runtime_fn: None,
+        summary: "Volatile load through a raw pointer (internal).",
+        description: "Internal lowering target for `p.read_volatile()`. Lowers to an LLVM `load volatile`, which the optimizer may not elide, duplicate, or reorder relative to other volatile accesses. Intended for memory-mapped I/O where every read has externally visible side effects.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::PtrWriteVolatile,
+        name: "ptr_write_volatile",
+        kind: IntrinsicKind::Expr,
+        category: Category::Pointer,
+        requires_unchecked: true,
+        preview: None,
+        runtime_fn: None,
+        summary: "Volatile store through a raw mutable pointer (internal).",
+        description: "Internal lowering target for `p.write_volatile(v)`. Lowers to an LLVM `store volatile`, which the optimizer may not elide, duplicate, or reorder relative to other volatile accesses. Intended for memory-mapped I/O where every write has externally visible side effects.",
         examples: &[],
     },
     IntrinsicDef {
@@ -1085,6 +1111,14 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
     },
     PointerMethod {
         kind: PointerKind::Ptr,
+        name: "read_volatile",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrReadVolatile,
+        intrinsic_name: "ptr_read_volatile",
+        requires_checked: true,
+    },
+    PointerMethod {
+        kind: PointerKind::Ptr,
         name: "offset",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrOffset,
@@ -1143,10 +1177,26 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
+        name: "read_volatile",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrReadVolatile,
+        intrinsic_name: "ptr_read_volatile",
+        requires_checked: true,
+    },
+    PointerMethod {
+        kind: PointerKind::MutPtr,
         name: "write",
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrWrite,
         intrinsic_name: "ptr_write",
+        requires_checked: true,
+    },
+    PointerMethod {
+        kind: PointerKind::MutPtr,
+        name: "write_volatile",
+        form: PointerOpForm::Method,
+        intrinsic: IntrinsicId::PtrWriteVolatile,
+        intrinsic_name: "ptr_write_volatile",
         requires_checked: true,
     },
     PointerMethod {
@@ -1502,6 +1552,8 @@ mod tests {
                 | IntrinsicId::TargetOs
                 | IntrinsicId::PtrRead
                 | IntrinsicId::PtrWrite
+                | IntrinsicId::PtrReadVolatile
+                | IntrinsicId::PtrWriteVolatile
                 | IntrinsicId::PtrOffset
                 | IntrinsicId::PtrToInt
                 | IntrinsicId::IntToPtr
@@ -1590,6 +1642,8 @@ mod tests {
         let expected: HashSet<&'static str> = [
             "ptr_read",
             "ptr_write",
+            "ptr_read_volatile",
+            "ptr_write_volatile",
             "ptr_offset",
             "ptr_to_int",
             "int_to_ptr",

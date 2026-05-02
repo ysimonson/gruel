@@ -4380,6 +4380,8 @@ impl<'a> Sema<'a> {
             id,
             IntrinsicId::PtrRead
                 | IntrinsicId::PtrWrite
+                | IntrinsicId::PtrReadVolatile
+                | IntrinsicId::PtrWriteVolatile
                 | IntrinsicId::PtrOffset
                 | IntrinsicId::PtrToInt
                 | IntrinsicId::IntToPtr
@@ -4417,8 +4419,12 @@ impl<'a> Sema<'a> {
             IntrinsicId::EmbedFile => self.analyze_embed_file_intrinsic(air, &args, span, ctx),
             IntrinsicId::RandomU32 => self.analyze_random_u32_intrinsic(air, name, &args, span),
             IntrinsicId::RandomU64 => self.analyze_random_u64_intrinsic(air, name, &args, span),
-            IntrinsicId::PtrRead => self.analyze_ptr_read_intrinsic(air, name, &args, span, ctx),
-            IntrinsicId::PtrWrite => self.analyze_ptr_write_intrinsic(air, name, &args, span, ctx),
+            IntrinsicId::PtrRead | IntrinsicId::PtrReadVolatile => {
+                self.analyze_ptr_read_intrinsic(air, name, &args, span, ctx)
+            }
+            IntrinsicId::PtrWrite | IntrinsicId::PtrWriteVolatile => {
+                self.analyze_ptr_write_intrinsic(air, name, &args, span, ctx)
+            }
             IntrinsicId::PtrOffset => {
                 self.analyze_ptr_offset_intrinsic(air, name, &args, span, ctx)
             }
@@ -11006,8 +11012,8 @@ impl<'a> Sema<'a> {
         };
 
         match intrinsic {
-            // p.read() — receiver: pointer; args: 0; result: pointee T
-            IntrinsicId::PtrRead => {
+            // p.read() / p.read_volatile() — receiver: pointer; args: 0; result: pointee T
+            IntrinsicId::PtrRead | IntrinsicId::PtrReadVolatile => {
                 if !args.is_empty() {
                     return Err(self.pointer_op_arg_count_err(op_name, 0, args.len(), span));
                 }
@@ -11016,8 +11022,8 @@ impl<'a> Sema<'a> {
                 let air_ref = make_intrinsic(air, &[recv.air_ref.as_u32()], pointee);
                 Ok(AnalysisResult::new(air_ref, pointee))
             }
-            // p.write(v) — receiver: MutPtr(T); args: [v: T]; result: ()
-            IntrinsicId::PtrWrite => {
+            // p.write(v) / p.write_volatile(v) — receiver: MutPtr(T); args: [v: T]; result: ()
+            IntrinsicId::PtrWrite | IntrinsicId::PtrWriteVolatile => {
                 if args.len() != 1 {
                     return Err(self.pointer_op_arg_count_err(op_name, 1, args.len(), span));
                 }
