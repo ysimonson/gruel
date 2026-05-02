@@ -34,11 +34,12 @@ impl<'a> Sema<'a> {
                 .map(|f| StructField {
                     name: f.name.to_string(),
                     ty: self.resolve_builtin_field_type(f.ty),
-                    is_private: f.private,
-                    // ADR-0073: builtin field publicity is the inverse of
-                    // the legacy `private` flag. Phase 4 retires `private`
-                    // and routes through the unified is_accessible check.
-                    is_pub: !f.private,
+                    // ADR-0073: builtins now use the unified is_pub flag;
+                    // is_private is retained as a no-op for the legacy
+                    // sema check sites (they're still in place for
+                    // back-compat but always read `false` after this phase).
+                    is_private: false,
+                    is_pub: f.is_pub,
                 })
                 .collect();
 
@@ -53,8 +54,12 @@ impl<'a> Sema<'a> {
                 is_linear: false, // Built-in types are not linear
                 destructor: builtin.drop_fn.map(|s| s.to_string()),
                 is_builtin: true,
-                is_pub: true,                        // Built-in types are always public
-                file_id: gruel_util::FileId::new(0), // Synthetic, no source file
+                is_pub: true, // Built-in types are always public
+                // ADR-0073: built-ins live in a sentinel "builtin module"
+                // that user code is never part of. Non-pub fields and
+                // methods are unreachable from user code by the unified
+                // visibility check (`is_accessible(user_file, BUILTIN, ...)`).
+                file_id: gruel_util::FileId::BUILTIN,
             };
 
             // Register in type pool and get pool-based StructId

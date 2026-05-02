@@ -32,9 +32,9 @@
 //! pub static VEC_TYPE: BuiltinTypeDef = BuiltinTypeDef {
 //!     name: "Vec",  // How users refer to it in source code
 //!     fields: &[
-//!         BuiltinField { name: "ptr", ty: BuiltinFieldType::U64, private: false },
-//!         BuiltinField { name: "len", ty: BuiltinFieldType::U64, private: false },
-//!         BuiltinField { name: "cap", ty: BuiltinFieldType::U64, private: false },
+//!         BuiltinField { name: "ptr", ty: BuiltinFieldType::U64, is_pub: false },
+//!         BuiltinField { name: "len", ty: BuiltinFieldType::U64, is_pub: false },
+//!         BuiltinField { name: "cap", ty: BuiltinFieldType::U64, is_pub: false },
 //!     ],
 //!     is_copy: false,  // Vec owns heap memory, so it's a move type
 //!     drop_fn: Some("__gruel_drop_Vec"),  // Runtime destructor
@@ -47,12 +47,14 @@
 //!             params: &[],
 //!             return_ty: BuiltinReturnType::SelfType,
 //!             runtime_fn: "Vec__new",
+//!             is_pub: true,
 //!         },
 //!         BuiltinAssociatedFn {
 //!             name: "with_capacity",
 //!             params: &[BuiltinParam { name: "capacity", ty: BuiltinParamType::U64 }],
 //!             return_ty: BuiltinReturnType::SelfType,
 //!             runtime_fn: "Vec__with_capacity",
+//!             is_pub: true,
 //!         },
 //!     ],
 //!     methods: &[
@@ -62,6 +64,7 @@
 //!             params: &[],
 //!             return_ty: BuiltinReturnType::U64,
 //!             runtime_fn: "Vec__len",
+//!             is_pub: true,
 //!         },
 //!         BuiltinMethod {
 //!             name: "push",
@@ -69,6 +72,7 @@
 //!             params: &[BuiltinParam { name: "value", ty: BuiltinParamType::U64 }],
 //!             return_ty: BuiltinReturnType::SelfType,
 //!             runtime_fn: "Vec__push",
+//!             is_pub: true,
 //!         },
 //!         // ... more methods
 //!     ],
@@ -177,11 +181,11 @@ pub struct BuiltinField {
     pub name: &'static str,
     /// Field type
     pub ty: BuiltinFieldType,
-    /// Whether this field is private (rejected by sema when accessed outside
-    /// the built-in's own methods). Defaults to false. Per ADR-0072 this is
-    /// used to hide synthetic-struct internals (currently `String::bytes`)
-    /// without committing to a full visibility / module system.
-    pub private: bool,
+    /// ADR-0073: whether this field is `pub`. Non-pub built-in fields are
+    /// unreachable from user code (built-ins live in a synthetic module
+    /// the user is never part of). Replaces the old ADR-0072 `private`
+    /// flag and routes through the unified visibility check.
+    pub is_pub: bool,
 }
 
 /// How the receiver is passed to a method.
@@ -267,6 +271,10 @@ pub struct BuiltinAssociatedFn {
     pub return_ty: BuiltinReturnType,
     /// Runtime function name (e.g., "String__new")
     pub runtime_fn: &'static str,
+    /// ADR-0073: whether this associated function is `pub`. Defaults to
+    /// `true` for everything currently exposed; future internal helpers
+    /// can be hidden by setting this to `false`.
+    pub is_pub: bool,
 }
 
 /// An instance method on a built-in type (e.g., `s.len()`).
@@ -282,6 +290,10 @@ pub struct BuiltinMethod {
     pub return_ty: BuiltinReturnType,
     /// Runtime function name (e.g., "String__len")
     pub runtime_fn: &'static str,
+    /// ADR-0073: whether this method is `pub`. Defaults to `true` for
+    /// everything currently exposed; future internal helpers can be
+    /// hidden by setting this to `false`.
+    pub is_pub: bool,
 }
 
 /// Definition of a built-in type.
@@ -326,7 +338,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
     fields: &[BuiltinField {
         name: "bytes",
         ty: BuiltinFieldType::BuiltinType("Vec(u8)"),
-        private: true,
+        is_pub: false,
     }],
     is_copy: false,
     drop_fn: Some("__gruel_drop_String"),
@@ -368,6 +380,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__new",
+            is_pub: true,
         },
         BuiltinAssociatedFn {
             name: "with_capacity",
@@ -377,6 +390,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__with_capacity",
+            is_pub: true,
         },
         // ADR-0071: build a String containing the UTF-8 encoding of a single
         // char.  Implemented in the runtime via UTF-8 encode + heap alloc.
@@ -388,6 +402,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__from_char",
+            is_pub: true,
         },
         // ADR-0072: zero-cost trusted construction from a Vec(u8). The
         // memory layout matches String exactly, so the runtime is a memcpy.
@@ -401,6 +416,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__from_utf8_unchecked",
+            is_pub: true,
         },
         // ADR-0072: ingest a NUL-terminated C string and return a String,
         // skipping UTF-8 validation. Caller-asserted invariant.
@@ -412,6 +428,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__from_c_str_unchecked",
+            is_pub: true,
         },
     ],
     methods: &[
@@ -422,6 +439,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::Usize,
             runtime_fn: "String__len",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "capacity",
@@ -429,6 +447,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::Usize,
             runtime_fn: "String__capacity",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "is_empty",
@@ -436,6 +455,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::Bool,
             runtime_fn: "String__is_empty",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "clone",
@@ -443,6 +463,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__clone",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "contains",
@@ -453,6 +474,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::Bool,
             runtime_fn: "String__contains",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "starts_with",
@@ -463,6 +485,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::Bool,
             runtime_fn: "String__starts_with",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "ends_with",
@@ -473,6 +496,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::Bool,
             runtime_fn: "String__ends_with",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "concat",
@@ -483,6 +507,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__concat",
+            is_pub: true,
         },
         // Mutation methods (take &mut self, return modified String)
         BuiltinMethod {
@@ -494,6 +519,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__push_str",
+            is_pub: true,
         },
         // ADR-0072: `push(c: char)` is the safe codepoint-aware primary
         // (was `push_char` in ADR-0071, renamed at ADR-0072 stabilization).
@@ -509,6 +535,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__push_char",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "clear",
@@ -516,6 +543,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__clear",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "reserve",
@@ -526,6 +554,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__reserve",
+            is_pub: true,
         },
         // ADR-0072: byte-count accessor (synonym for `len`). The split
         // naming leaves room for future `chars_len()` once codepoint
@@ -536,6 +565,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::Usize,
             runtime_fn: "String__len",
+            is_pub: true,
         },
         BuiltinMethod {
             name: "bytes_capacity",
@@ -543,6 +573,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::Usize,
             runtime_fn: "String__capacity",
+            is_pub: true,
         },
         // ADR-0072: consume the String, return its underlying Vec(u8).
         // O(1); runtime is a memcpy because the layouts are identical.
@@ -552,6 +583,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::BuiltinType("Vec(u8)"),
             runtime_fn: "String__into_bytes",
+            is_pub: true,
         },
         // ADR-0072: niche escape hatch — append a single raw byte. Caller
         // assumes the UTF-8 invariant burden. Sema gates this method to
@@ -565,6 +597,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             }],
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__push",
+            is_pub: true,
         },
         // ADR-0072: NUL-terminated handoff for C interop. Delegates to
         // Vec(u8)::terminated_ptr with sentinel 0u8. `checked` block only
@@ -575,6 +608,7 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             params: &[],
             return_ty: BuiltinReturnType::BuiltinType("Ptr(u8)"),
             runtime_fn: "String__terminated_ptr",
+            is_pub: true,
         },
     ],
 };
@@ -1153,10 +1187,10 @@ mod tests {
     #[test]
     fn test_string_type_exists() {
         assert_eq!(STRING_TYPE.name, "String");
-        // ADR-0072: single private `bytes: Vec(u8)` field.
+        // ADR-0072 + ADR-0073: single non-pub `bytes: Vec(u8)` field.
         assert_eq!(STRING_TYPE.fields.len(), 1);
         assert_eq!(STRING_TYPE.fields[0].name, "bytes");
-        assert!(STRING_TYPE.fields[0].private);
+        assert!(!STRING_TYPE.fields[0].is_pub);
         assert!(!STRING_TYPE.is_copy);
         assert_eq!(STRING_TYPE.drop_fn, Some("__gruel_drop_String"));
     }

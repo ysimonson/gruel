@@ -20,6 +20,12 @@ impl FileId {
     /// from any user file.
     pub const PRELUDE: FileId = FileId(0xFFFF_FFFE);
 
+    /// File ID reserved for synthetic built-in types (ADR-0073). Built-ins
+    /// like `String` are not in any user file; the visibility check uses
+    /// this sentinel as their "home module" so non-`pub` builtin fields and
+    /// methods are unreachable from user code without any special-case path.
+    pub const BUILTIN: FileId = FileId(0xFFFF_FFFD);
+
     /// Create a new file ID from an index.
     #[inline]
     pub const fn new(id: u32) -> Self {

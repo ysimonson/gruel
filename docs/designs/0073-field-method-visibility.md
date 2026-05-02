@@ -342,7 +342,7 @@ Each phase is independently committable.
     accessible, struct literal across modules rejected, struct literal
     intra-module accepted.
 
-- [ ] **Phase 4: Built-in unification**
+- [x] **Phase 4: Built-in unification**
   - Add `is_pub: bool` to `BuiltinField`, `BuiltinMethod`,
     `BuiltinAssociatedFn`. Replace `BuiltinField::private` with `is_pub`
     (inverted) at every declaration site in `gruel-builtins`. Remove the

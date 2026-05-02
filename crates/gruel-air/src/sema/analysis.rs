@@ -1457,24 +1457,22 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// ADR-0073: gated check for cross-module field visibility.
+    /// ADR-0073: cross-module field visibility check.
     ///
-    /// No-op unless `--preview field_method_visibility` is enabled. Built-in
-    /// types continue to use the legacy `StructField::is_private` flag
-    /// until Phase 4 routes them through this same `is_accessible` check.
+    /// Built-in types always run the check (they live in the synthetic
+    /// `<builtin>` file, so non-`pub` fields are unreachable from user
+    /// code). User-defined types only run the check when `--preview
+    /// field_method_visibility` is enabled, until ADR-0073 stabilizes.
     pub(crate) fn check_field_visibility(
         &self,
         struct_def: &crate::types::StructDef,
         field: &crate::types::StructField,
         access_span: Span,
     ) -> CompileResult<()> {
-        if !self
+        let preview_on = self
             .preview_features
-            .contains(&PreviewFeature::FieldMethodVisibility)
-        {
-            return Ok(());
-        }
-        if struct_def.is_builtin {
+            .contains(&PreviewFeature::FieldMethodVisibility);
+        if !struct_def.is_builtin && !preview_on {
             return Ok(());
         }
         let accessing_file_id = access_span.file_id;
@@ -1491,11 +1489,10 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// ADR-0073: gated check for cross-module method visibility.
+    /// ADR-0073: cross-module method visibility check.
     ///
-    /// No-op unless `--preview field_method_visibility` is enabled. Built-ins
-    /// are exempt until Phase 4 unifies them. Pass the type's name so the
-    /// diagnostic can render `TypeName::method`.
+    /// Built-in types always run the check. User-defined types only run
+    /// when `--preview field_method_visibility` is enabled.
     pub(crate) fn check_method_visibility(
         &self,
         type_name: &str,
@@ -1505,13 +1502,10 @@ impl<'a> Sema<'a> {
         method_name: &str,
         access_span: Span,
     ) -> CompileResult<()> {
-        if !self
+        let preview_on = self
             .preview_features
-            .contains(&PreviewFeature::FieldMethodVisibility)
-        {
-            return Ok(());
-        }
-        if is_builtin {
+            .contains(&PreviewFeature::FieldMethodVisibility);
+        if !is_builtin && !preview_on {
             return Ok(());
         }
         let accessing_file_id = access_span.file_id;
@@ -2293,16 +2287,7 @@ impl<'a> Sema<'a> {
                     inst.span,
                 )?;
 
-            // ADR-0072 + ADR-0073: privacy and visibility checks.
-            if struct_field.is_private {
-                return Err(CompileError::new(
-                    ErrorKind::PrivateField {
-                        struct_name: struct_def.name.clone(),
-                        field_name: field_name_str.clone(),
-                    },
-                    inst.span,
-                ));
-            }
+            // ADR-0073: unified visibility check.
             self.check_field_visibility(&struct_def, struct_field, inst.span)?;
 
             let field_type = struct_field.ty;
@@ -3039,17 +3024,7 @@ impl<'a> Sema<'a> {
                     span,
                 )?;
 
-            // ADR-0072: reject writes to private fields.
-            if struct_field.is_private {
-                return Err(CompileError::new(
-                    ErrorKind::PrivateField {
-                        struct_name: struct_def.name.clone(),
-                        field_name: field_name_str.clone(),
-                    },
-                    span,
-                ));
-            }
-            // ADR-0073: gated cross-module visibility check.
+            // ADR-0073: unified visibility check on field write.
             self.check_field_visibility(&struct_def, struct_field, span)?;
 
             let field_type = struct_field.ty;

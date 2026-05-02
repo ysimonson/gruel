@@ -36,6 +36,15 @@ impl Sema<'_> {
             return true;
         }
 
+        // ADR-0073: a non-pub item homed in the synthetic `<builtin>`
+        // module is unreachable from any user file. The builtin sentinel
+        // FileId is never registered in `file_paths`, so the
+        // unknown-paths fallback below would otherwise be permissive —
+        // short-circuit explicitly.
+        if target_file_id == FileId::BUILTIN && accessing_file_id != FileId::BUILTIN {
+            return false;
+        }
+
         // Get paths for both files
         let accessing_path = self.get_file_path(accessing_file_id);
         let target_path = self.get_file_path(target_file_id);

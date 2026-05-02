@@ -353,21 +353,9 @@ impl<'a> Sema<'a> {
                                 None => return Ok(None), // Unknown field
                             };
 
-                        // ADR-0072: reject access to private fields. v1
-                        // applies to synthetic builtins (e.g. `String::bytes`)
-                        // only — user-defined struct fields are public.
-                        if struct_field.is_private {
-                            return Err(CompileError::new(
-                                ErrorKind::PrivateField {
-                                    struct_name: struct_def.name.clone(),
-                                    field_name: resolved_name_str.clone(),
-                                },
-                                self.rir.get(inst_ref).span,
-                            ));
-                        }
-
-                        // ADR-0073: gated cross-module visibility check
-                        // for user-defined struct fields.
+                        // ADR-0073: unified visibility check (subsumes the
+                        // ADR-0072 builtin-private path; built-ins always
+                        // run, user-defined types only under preview).
                         self.check_field_visibility(
                             &struct_def,
                             struct_field,
@@ -4432,19 +4420,10 @@ impl<'a> Sema<'a> {
                 ));
             }
 
-            // ADR-0072 + ADR-0073: privacy and visibility checks on each
-            // field referenced by the struct literal.
+            // ADR-0073: unified visibility check on each field referenced
+            // by the struct literal.
             let field_idx = field_index_map[init_name];
             let struct_field = &struct_def.fields[field_idx];
-            if struct_field.is_private {
-                return Err(CompileError::new(
-                    ErrorKind::PrivateField {
-                        struct_name: struct_def.name.clone(),
-                        field_name: init_name.to_string(),
-                    },
-                    span,
-                ));
-            }
             self.check_field_visibility(&struct_def, struct_field, span)?;
         }
 
@@ -5044,17 +5023,7 @@ impl<'a> Sema<'a> {
         };
         let (field_index, struct_field) = match struct_def.find_field(&field_name_str) {
             Some(f) => {
-                // ADR-0072: privacy check.
-                if f.1.is_private {
-                    return Err(CompileError::new(
-                        ErrorKind::PrivateField {
-                            struct_name: struct_def.name.clone(),
-                            field_name: field_name_str.clone(),
-                        },
-                        span,
-                    ));
-                }
-                // ADR-0073: gated cross-module visibility check.
+                // ADR-0073: unified visibility check.
                 self.check_field_visibility(&struct_def, f.1, span)?;
                 f
             }
