@@ -329,7 +329,7 @@ Each phase is independently committable.
     `EnumVariantField`. Default `Private` when absent.
   - Snapshot tests for both presence and absence; no behavior change yet.
 
-- [ ] **Phase 3: User-defined sema check (gated)**
+- [x] **Phase 3: User-defined sema check (gated)**
   - In sema, propagate field/method visibility into `StructField` /
     `StructDef::methods` (or wherever method visibility lives in AIR).
   - At every field-access and method-call site, call

@@ -290,10 +290,11 @@ impl<'a> AstGen<'a> {
             .map(|f| {
                 let field_name = f.name.name; // Already a Spur
                 let field_type = self.intern_type(&f.ty);
-                (field_name, field_type)
+                let is_pub = f.visibility == gruel_parser::ast::Visibility::Public;
+                (field_name, field_type, is_pub)
             })
             .collect();
-        let (fields_start, fields_len) = self.rir.add_field_decls(&fields);
+        let (fields_start, fields_len) = self.rir.add_field_decls_with_vis(&fields);
 
         // Generate each method defined inline in the struct
         let methods: Vec<_> = struct_decl
@@ -517,13 +518,15 @@ impl<'a> AstGen<'a> {
 
         // Emit methods as FnDecl instructions with has_self flag.
         // Sema uses has_self to add the implicit self parameter for methods.
-        // Methods don't have their own visibility - they're accessible if the type is accessible.
-        // Methods cannot be marked unchecked (that's a function-level modifier).
+        // ADR-0073: methods carry their own `pub` flag, propagated from the
+        // parsed `Method::visibility`. Methods cannot be marked unchecked
+        // (that's a function-level modifier).
+        let is_pub = method.visibility == gruel_parser::ast::Visibility::Public;
         let decl = self.rir.add_inst(Inst {
             data: InstData::FnDecl {
                 directives_start,
                 directives_len,
-                is_pub: false,
+                is_pub,
                 is_unchecked: false,
                 name,
                 params_start,
@@ -1148,15 +1151,20 @@ impl<'a> AstGen<'a> {
                         let rir_directives = self.convert_directives(directives);
                         let (directives_start, directives_len) =
                             self.rir.add_directives(&rir_directives);
-                        let field_decls: Vec<(Spur, Spur)> = fields
+                        // Anonymous struct fields are always treated as public:
+                        // anonymous types are structurally typed and have no
+                        // owning module, so module-scoped visibility doesn't
+                        // apply (ADR-0073).
+                        let field_decls: Vec<(Spur, Spur, bool)> = fields
                             .iter()
                             .map(|f| {
                                 let name = f.name.name;
                                 let ty = self.intern_type(&f.ty);
-                                (name, ty)
+                                (name, ty, true)
                             })
                             .collect();
-                        let (fields_start, fields_len) = self.rir.add_field_decls(&field_decls);
+                        let (fields_start, fields_len) =
+                            self.rir.add_field_decls_with_vis(&field_decls);
 
                         // Generate each method inside the anonymous struct
                         // (reusing gen_method, which generates FnDecl instructions)

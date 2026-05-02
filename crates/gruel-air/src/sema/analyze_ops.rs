@@ -366,6 +366,14 @@ impl<'a> Sema<'a> {
                             ));
                         }
 
+                        // ADR-0073: gated cross-module visibility check
+                        // for user-defined struct fields.
+                        self.check_field_visibility(
+                            &struct_def,
+                            struct_field,
+                            self.rir.get(inst_ref).span,
+                        )?;
+
                         let field_type = struct_field.ty;
 
                         // Add this projection with field name for move checking
@@ -4423,6 +4431,21 @@ impl<'a> Sema<'a> {
                     span,
                 ));
             }
+
+            // ADR-0072 + ADR-0073: privacy and visibility checks on each
+            // field referenced by the struct literal.
+            let field_idx = field_index_map[init_name];
+            let struct_field = &struct_def.fields[field_idx];
+            if struct_field.is_private {
+                return Err(CompileError::new(
+                    ErrorKind::PrivateField {
+                        struct_name: struct_def.name.clone(),
+                        field_name: init_name.to_string(),
+                    },
+                    span,
+                ));
+            }
+            self.check_field_visibility(&struct_def, struct_field, span)?;
         }
 
         // Check that all fields are provided
@@ -4546,6 +4569,7 @@ impl<'a> Sema<'a> {
                 name: i.to_string(),
                 ty: r.ty,
                 is_private: false,
+                is_pub: true,
             })
             .collect();
 
@@ -5030,6 +5054,8 @@ impl<'a> Sema<'a> {
                         span,
                     ));
                 }
+                // ADR-0073: gated cross-module visibility check.
+                self.check_field_visibility(&struct_def, f.1, span)?;
                 f
             }
             None => {

@@ -182,7 +182,7 @@ Calling a method with associated function syntax (Type::method()) is a compile-t
 
 ## Method Visibility
 
-{{ rule(id="6.4:24", cat="informative") }}
+{{ rule(id="6.4:24", cat="dynamic-semantics") }}
 
 (ADR-0073, preview `field_method_visibility`.) A method definition **MAY**
 be prefixed with the `pub` keyword. A method marked `pub` is callable from

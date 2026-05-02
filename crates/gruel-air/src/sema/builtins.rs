@@ -35,6 +35,10 @@ impl<'a> Sema<'a> {
                     name: f.name.to_string(),
                     ty: self.resolve_builtin_field_type(f.ty),
                     is_private: f.private,
+                    // ADR-0073: builtin field publicity is the inverse of
+                    // the legacy `private` flag. Phase 4 retires `private`
+                    // and routes through the unified is_accessible check.
+                    is_pub: !f.private,
                 })
                 .collect();
 

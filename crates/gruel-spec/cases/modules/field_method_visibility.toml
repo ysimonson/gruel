@@ -1,0 +1,189 @@
+[section]
+id = "modules.field_method_visibility"
+name = "Field and Method Visibility"
+description = "ADR-0073: pub on fields and methods. Visibility checks gated behind --preview field_method_visibility until stabilization."
+
+# =============================================================================
+# Same-module access (always allowed, no preview gate needed)
+# =============================================================================
+
+[[case]]
+name = "intra_module_private_field_accessible"
+spec = ["6.2:11"]
+description = "Private fields are accessible within the same module"
+source = """
+struct Account { balance: i32 }
+fn main() -> i32 {
+    let a = Account { balance: 42 };
+    a.balance
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "intra_module_private_method_accessible"
+spec = ["6.4:24"]
+description = "Private methods are accessible within the same module"
+source = """
+struct Counter {
+    value: i32,
+    fn get(self) -> i32 { self.value }
+}
+fn main() -> i32 {
+    let c = Counter { value: 42 };
+    c.get()
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "intra_module_pub_field_accessible"
+spec = ["6.2:11"]
+description = "Pub fields are accessible within the same module"
+source = """
+pub struct Account { pub balance: i32 }
+fn main() -> i32 {
+    let a = Account { balance: 42 };
+    a.balance
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Cross-directory access with preview gate
+# =============================================================================
+
+[[case]]
+name = "cross_dir_pub_field_accessible"
+spec = ["6.2:11"]
+preview = "field_method_visibility"
+preview_should_pass = true
+description = "Pub fields are accessible from another directory module"
+source = """
+fn main() -> i32 {
+    let lib = @import("subdir/lib");
+    let Account = lib.Account;
+    let a = Account { id: 42 };
+    a.id
+}
+"""
+aux_files = { "subdir/lib.gruel" = """
+pub struct Account { pub id: i32 }
+""" }
+pass_aux_files = true
+exit_code = 42
+
+[[case]]
+name = "cross_dir_private_field_rejected_read"
+spec = ["6.2:11"]
+preview = "field_method_visibility"
+preview_should_pass = true
+description = "Reading a non-pub field from another directory module is rejected"
+source = """
+fn main() -> i32 {
+    let lib = @import("subdir/lib");
+    let a = lib.make();
+    a.balance
+}
+"""
+aux_files = { "subdir/lib.gruel" = """
+pub struct Account { pub id: i32, balance: i32 }
+pub fn make() -> Account { Account { id: 1, balance: 0 } }
+""" }
+pass_aux_files = true
+compile_fail = true
+error_contains = "balance"
+
+[[case]]
+name = "cross_dir_private_field_rejected_in_literal"
+spec = ["6.2:11"]
+preview = "field_method_visibility"
+preview_should_pass = true
+description = "Constructing with a non-pub field name from another directory is rejected"
+source = """
+fn main() -> i32 {
+    let lib = @import("subdir/lib");
+    let Account = lib.Account;
+    let a = Account { id: 1, balance: 0 };
+    0
+}
+"""
+aux_files = { "subdir/lib.gruel" = """
+pub struct Account { pub id: i32, balance: i32 }
+""" }
+pass_aux_files = true
+compile_fail = true
+error_contains = "balance"
+
+[[case]]
+name = "cross_dir_pub_method_accessible"
+spec = ["6.4:24"]
+preview = "field_method_visibility"
+preview_should_pass = true
+description = "Pub methods are callable from another directory module"
+source = """
+fn main() -> i32 {
+    let lib = @import("subdir/lib");
+    let Counter = lib.Counter;
+    let c = Counter::new();
+    c.get()
+}
+"""
+aux_files = { "subdir/lib.gruel" = """
+pub struct Counter {
+    pub value: i32,
+
+    pub fn new() -> Counter { Counter { value: 42 } }
+    pub fn get(self) -> i32 { self.value }
+}
+""" }
+pass_aux_files = true
+exit_code = 42
+
+[[case]]
+name = "cross_dir_private_method_rejected"
+spec = ["6.4:24"]
+preview = "field_method_visibility"
+preview_should_pass = true
+description = "Calling a non-pub method from another directory is rejected"
+source = """
+fn main() -> i32 {
+    let lib = @import("subdir/lib");
+    let Counter = lib.Counter;
+    let c = Counter::new();
+    c.helper()
+}
+"""
+aux_files = { "subdir/lib.gruel" = """
+pub struct Counter {
+    pub value: i32,
+
+    pub fn new() -> Counter { Counter { value: 42 } }
+    fn helper(self) -> i32 { self.value }
+}
+""" }
+pass_aux_files = true
+compile_fail = true
+error_contains = "helper"
+
+# =============================================================================
+# Cross-directory access without preview (no gating yet)
+# =============================================================================
+
+[[case]]
+name = "cross_dir_private_field_allowed_without_preview"
+spec = ["6.2:11"]
+description = "Without --preview field_method_visibility, cross-module non-pub field access still works"
+source = """
+fn main() -> i32 {
+    let lib = @import("subdir/lib");
+    let a = lib.make();
+    a.balance
+}
+"""
+aux_files = { "subdir/lib.gruel" = """
+pub struct Account { pub id: i32, balance: i32 }
+pub fn make() -> Account { Account { id: 1, balance: 42 } }
+""" }
+pass_aux_files = true
+exit_code = 42

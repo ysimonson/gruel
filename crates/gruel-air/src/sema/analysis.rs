@@ -1457,6 +1457,76 @@ impl<'a> Sema<'a> {
         }
     }
 
+    /// ADR-0073: gated check for cross-module field visibility.
+    ///
+    /// No-op unless `--preview field_method_visibility` is enabled. Built-in
+    /// types continue to use the legacy `StructField::is_private` flag
+    /// until Phase 4 routes them through this same `is_accessible` check.
+    pub(crate) fn check_field_visibility(
+        &self,
+        struct_def: &crate::types::StructDef,
+        field: &crate::types::StructField,
+        access_span: Span,
+    ) -> CompileResult<()> {
+        if !self
+            .preview_features
+            .contains(&PreviewFeature::FieldMethodVisibility)
+        {
+            return Ok(());
+        }
+        if struct_def.is_builtin {
+            return Ok(());
+        }
+        let accessing_file_id = access_span.file_id;
+        let target_file_id = struct_def.file_id;
+        if !self.is_accessible(accessing_file_id, target_file_id, field.is_pub) {
+            return Err(CompileError::new(
+                ErrorKind::PrivateField {
+                    struct_name: struct_def.name.clone(),
+                    field_name: field.name.clone(),
+                },
+                access_span,
+            ));
+        }
+        Ok(())
+    }
+
+    /// ADR-0073: gated check for cross-module method visibility.
+    ///
+    /// No-op unless `--preview field_method_visibility` is enabled. Built-ins
+    /// are exempt until Phase 4 unifies them. Pass the type's name so the
+    /// diagnostic can render `TypeName::method`.
+    pub(crate) fn check_method_visibility(
+        &self,
+        type_name: &str,
+        is_builtin: bool,
+        method_is_pub: bool,
+        method_file_id: gruel_util::FileId,
+        method_name: &str,
+        access_span: Span,
+    ) -> CompileResult<()> {
+        if !self
+            .preview_features
+            .contains(&PreviewFeature::FieldMethodVisibility)
+        {
+            return Ok(());
+        }
+        if is_builtin {
+            return Ok(());
+        }
+        let accessing_file_id = access_span.file_id;
+        if !self.is_accessible(accessing_file_id, method_file_id, method_is_pub) {
+            return Err(CompileError::new(
+                ErrorKind::PrivateMemberAccess {
+                    item_kind: "method".to_string(),
+                    name: format!("{}::{}", type_name, method_name),
+                },
+                access_span,
+            ));
+        }
+        Ok(())
+    }
+
     /// Check that we are inside a `checked` block.
     /// Returns an error if `checked_depth` is zero.
     pub(crate) fn require_checked_for_intrinsic(
@@ -2223,6 +2293,18 @@ impl<'a> Sema<'a> {
                     inst.span,
                 )?;
 
+            // ADR-0072 + ADR-0073: privacy and visibility checks.
+            if struct_field.is_private {
+                return Err(CompileError::new(
+                    ErrorKind::PrivateField {
+                        struct_name: struct_def.name.clone(),
+                        field_name: field_name_str.clone(),
+                    },
+                    inst.span,
+                ));
+            }
+            self.check_field_visibility(&struct_def, struct_field, inst.span)?;
+
             let field_type = struct_field.ty;
 
             let air_ref = air.add_inst(AirInst {
@@ -2692,6 +2774,7 @@ impl<'a> Sema<'a> {
                         name: name_str,
                         ty: field_ty,
                         is_private: false,
+                        is_pub: true,
                     });
                 }
 
@@ -2966,6 +3049,8 @@ impl<'a> Sema<'a> {
                     span,
                 ));
             }
+            // ADR-0073: gated cross-module visibility check.
+            self.check_field_visibility(&struct_def, struct_field, span)?;
 
             let field_type = struct_field.ty;
 
@@ -3184,6 +3269,18 @@ impl<'a> Sema<'a> {
                     span,
                 ));
             }
+
+            // ADR-0073: gated cross-module visibility check on the enum
+            // method. Enums aren't built-in, so the synthetic-builtin
+            // exemption doesn't apply.
+            self.check_method_visibility(
+                &enum_def.name,
+                false,
+                method_info.is_pub,
+                method_info.file_id,
+                &method_name_str,
+                span,
+            )?;
 
             let method_param_types = self.param_arena.types(method_info.params);
             if args.len() != method_param_types.len() {
@@ -3486,6 +3583,17 @@ impl<'a> Sema<'a> {
                 span,
             ));
         }
+
+        // ADR-0073: gated cross-module visibility check on the method.
+        let struct_def = self.type_pool.struct_def(struct_id);
+        self.check_method_visibility(
+            &struct_def.name,
+            struct_def.is_builtin,
+            method_info.is_pub,
+            method_info.file_id,
+            &method_name_str,
+            span,
+        )?;
 
         // ADR-0062: a `&self` / `&mut self` receiver is sugar for a borrow
         // (immutable / mutable). The receiver expression's `analyze_inst`
@@ -4277,6 +4385,19 @@ impl<'a> Sema<'a> {
                 span,
             ));
         }
+
+        // ADR-0073: gated cross-module visibility check.
+        let method_is_pub = method_info.is_pub;
+        let method_file_id = method_info.file_id;
+        let struct_def = self.type_pool.struct_def(struct_id);
+        self.check_method_visibility(
+            &struct_def.name,
+            struct_def.is_builtin,
+            method_is_pub,
+            method_file_id,
+            &function_name_str,
+            span,
+        )?;
 
         // Check if calling an unchecked associated function requires a checked block
         if method_info.is_unchecked && ctx.checked_depth == 0 {
@@ -5748,6 +5869,7 @@ impl<'a> Sema<'a> {
                         name: name_str,
                         ty: field_ty,
                         is_private: false,
+                        is_pub: true,
                     });
                 }
 
@@ -6105,6 +6227,7 @@ impl<'a> Sema<'a> {
                         name: name_str,
                         ty: field_ty,
                         is_private: false,
+                        is_pub: true,
                     });
                 }
 
@@ -6737,11 +6860,13 @@ impl<'a> Sema<'a> {
                 name: "kind".to_string(),
                 ty: typekind_type,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
                 is_private: false,
+                is_pub: true,
             },
         ];
         let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::default());
@@ -6773,21 +6898,25 @@ impl<'a> Sema<'a> {
                 name: "kind".to_string(),
                 ty: typekind_type,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "bits".to_string(),
                 ty: Type::I32,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "is_signed".to_string(),
                 ty: Type::BOOL,
                 is_private: false,
+                is_pub: true,
             },
         ];
         let (info_type, _) = self.find_or_create_anon_struct(&fields, &[], &HashMap::default());
@@ -6837,11 +6966,13 @@ impl<'a> Sema<'a> {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "field_type".to_string(),
                 ty: Type::COMPTIME_TYPE,
                 is_private: false,
+                is_pub: true,
             },
         ];
         let (field_info_type, _) =
@@ -6874,21 +7005,25 @@ impl<'a> Sema<'a> {
                 name: "kind".to_string(),
                 ty: typekind_type,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "field_count".to_string(),
                 ty: Type::I32,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "fields".to_string(),
                 ty: fields_array_type,
                 is_private: false,
+                is_pub: true,
             },
         ];
         let (info_type, _) =
@@ -6956,11 +7091,13 @@ impl<'a> Sema<'a> {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "field_type".to_string(),
                 ty: Type::COMPTIME_TYPE,
                 is_private: false,
+                is_pub: true,
             },
         ];
         let (field_info_type, _) =
@@ -6996,16 +7133,19 @@ impl<'a> Sema<'a> {
                     name: "name".to_string(),
                     ty: Type::COMPTIME_STR,
                     is_private: false,
+                    is_pub: true,
                 },
                 StructField {
                     name: "field_count".to_string(),
                     ty: Type::I32,
                     is_private: false,
+                    is_pub: true,
                 },
                 StructField {
                     name: "fields".to_string(),
                     ty: vfields_array_type,
                     is_private: false,
+                    is_pub: true,
                 },
             ];
             let (variant_info_type, _) =
@@ -7037,16 +7177,19 @@ impl<'a> Sema<'a> {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "field_count".to_string(),
                 ty: Type::I32,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "fields".to_string(),
                 ty: empty_fields_array_type,
                 is_private: false,
+                is_pub: true,
             },
         ];
         let (variant_info_type, _) =
@@ -7060,21 +7203,25 @@ impl<'a> Sema<'a> {
                 name: "kind".to_string(),
                 ty: typekind_type,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "variant_count".to_string(),
                 ty: Type::I32,
                 is_private: false,
+                is_pub: true,
             },
             StructField {
                 name: "variants".to_string(),
                 ty: variants_array_type,
                 is_private: false,
+                is_pub: true,
             },
         ];
         let (info_type, _) =
@@ -9470,6 +9617,7 @@ impl<'a> Sema<'a> {
             let method_inst = self.rir.get(method_ref);
             if let InstData::FnDecl {
                 name: method_name,
+                is_pub: method_is_pub,
                 is_unchecked,
                 params_start,
                 params_len,
@@ -9576,6 +9724,8 @@ impl<'a> Sema<'a> {
                         is_unchecked: *is_unchecked,
                         is_generic: !method_type_param_names.is_empty(),
                         return_type_sym: *return_type,
+                        is_pub: *method_is_pub,
+                        file_id: method_inst.span.file_id,
                     },
                 );
             }
@@ -9760,6 +9910,10 @@ impl<'a> Sema<'a> {
                 // own method-level comptime type params.
                 is_generic: false,
                 return_type_sym: return_type,
+                // Synthetic `__call` is part of the lambda's surface — pub
+                // so it can be invoked at any call site.
+                is_pub: true,
+                file_id: method_inst.span.file_id,
             },
         );
         Ok(())
@@ -9785,6 +9939,7 @@ impl<'a> Sema<'a> {
             let method_inst = self.rir.get(method_ref);
             if let InstData::FnDecl {
                 name: method_name,
+                is_pub: method_is_pub,
                 is_unchecked,
                 params_start,
                 params_len,
@@ -9847,6 +10002,8 @@ impl<'a> Sema<'a> {
                         // are not yet supported; set to false.
                         is_generic: false,
                         return_type_sym: *return_type,
+                        is_pub: *method_is_pub,
+                        file_id: method_inst.span.file_id,
                     },
                 );
             }

@@ -747,10 +747,12 @@ impl<'a> Sema<'a> {
         let host_type = Type::new_struct(host_id);
         let self_type_sym = self.interner.get_or_intern("Self");
 
+        let host_file_id = self.type_pool.struct_def(host_id).file_id;
         for dm in methods {
             let m = self.rir.get(dm.method_ref);
             let InstData::FnDecl {
                 name: method_name,
+                is_pub: method_is_pub,
                 is_unchecked,
                 params_start,
                 params_len,
@@ -812,6 +814,9 @@ impl<'a> Sema<'a> {
                 self.param_arena
                     .alloc(param_names, param_types, param_modes, param_comptime);
 
+            // ADR-0073: derived methods are scoped to the host's module —
+            // the host's file_id is the relevant target_file_id for any
+            // visibility check at a call site.
             self.methods.insert(
                 key,
                 MethodInfo {
@@ -825,6 +830,8 @@ impl<'a> Sema<'a> {
                     is_unchecked,
                     is_generic: false,
                     return_type_sym: return_type,
+                    is_pub: method_is_pub,
+                    file_id: host_file_id,
                 },
             );
         }
@@ -847,11 +854,13 @@ impl<'a> Sema<'a> {
         };
         let host_type = Type::new_enum(host_id);
         let self_type_sym = self.interner.get_or_intern("Self");
+        let host_file_id = self.type_pool.enum_def(host_id).file_id;
 
         for dm in methods {
             let m = self.rir.get(dm.method_ref);
             let InstData::FnDecl {
                 name: method_name,
+                is_pub: method_is_pub,
                 is_unchecked,
                 params_start,
                 params_len,
@@ -922,6 +931,8 @@ impl<'a> Sema<'a> {
                     is_unchecked,
                     is_generic: false,
                     return_type_sym: return_type,
+                    is_pub: method_is_pub,
+                    file_id: host_file_id,
                 },
             );
         }
@@ -1299,11 +1310,13 @@ impl<'a> Sema<'a> {
                 })?;
 
                 let struct_name = name_str.clone();
-                let fields = self.rir.get_field_decls(*fields_start, *fields_len);
+                let fields = self
+                    .rir
+                    .get_field_decls_with_vis(*fields_start, *fields_len);
 
                 // Check for duplicate field names
                 let mut seen_fields: HashSet<Spur> = HashSet::default();
-                for (field_name, _) in &fields {
+                for (field_name, _, _) in &fields {
                     if !seen_fields.insert(*field_name) {
                         let field_name_str = self.interner.resolve(field_name).to_string();
                         return Err(CompileError::new(
@@ -1318,12 +1331,13 @@ impl<'a> Sema<'a> {
 
                 // Resolve field types
                 let mut resolved_fields = Vec::new();
-                for (field_name, field_type) in &fields {
+                for (field_name, field_type, is_pub) in &fields {
                     let field_ty = self.resolve_type(*field_type, inst.span)?;
                     resolved_fields.push(StructField {
                         name: self.interner.resolve(field_name).to_string(),
                         ty: field_ty,
                         is_private: false,
+                        is_pub: *is_pub,
                     });
                 }
 
@@ -1909,6 +1923,7 @@ impl<'a> Sema<'a> {
             let method_inst = self.rir.get(method_ref);
             if let InstData::FnDecl {
                 name: method_name,
+                is_pub: method_is_pub,
                 is_unchecked,
                 params_start,
                 params_len,
@@ -2051,6 +2066,8 @@ impl<'a> Sema<'a> {
                         is_unchecked: *is_unchecked,
                         is_generic: is_method_generic,
                         return_type_sym: *return_type,
+                        is_pub: *method_is_pub,
+                        file_id: method_inst.span.file_id,
                     },
                 );
             }
@@ -2250,6 +2267,7 @@ impl<'a> Sema<'a> {
             let method_inst = self.rir.get(method_ref);
             if let InstData::FnDecl {
                 name: method_name,
+                is_pub: method_is_pub,
                 is_unchecked,
                 params_start,
                 params_len,
@@ -2332,6 +2350,8 @@ impl<'a> Sema<'a> {
                         // comptime type params (ADR-0055 defers that path).
                         is_generic: false,
                         return_type_sym: *return_type,
+                        is_pub: *method_is_pub,
+                        file_id: method_inst.span.file_id,
                     },
                 );
             }

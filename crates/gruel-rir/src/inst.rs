@@ -658,7 +658,7 @@ const FIELD_INIT_SIZE: u32 = 2;
 
 /// Stored representation of struct field declaration.
 /// Layout: [field_name: u32, field_type: u32] = 2 u32s per field
-const FIELD_DECL_SIZE: u32 = 2;
+const FIELD_DECL_SIZE: u32 = 3;
 
 /// Stored representation of directive in the extra array.
 /// Layout: [name: u32, span_start: u32, span_len: u32, args_len: u32, args...]
@@ -1372,26 +1372,44 @@ impl Rir {
         fields
     }
 
-    /// Store field declarations (name, type) and return (start, len).
-    /// Layout: [name: u32, type: u32] per field
+    /// Store field declarations (name, type, is_pub) and return (start, len).
+    /// Layout: [name: u32, type: u32, is_pub: u32] per field. ADR-0073 added
+    /// the `is_pub` slot; pre-ADR call sites pass `false` for compatibility.
     pub fn add_field_decls(&mut self, fields: &[(Spur, Spur)]) -> (u32, u32) {
+        let with_vis: Vec<(Spur, Spur, bool)> =
+            fields.iter().map(|(n, t)| (*n, *t, false)).collect();
+        self.add_field_decls_with_vis(&with_vis)
+    }
+
+    /// Store field declarations including visibility (ADR-0073).
+    pub fn add_field_decls_with_vis(&mut self, fields: &[(Spur, Spur, bool)]) -> (u32, u32) {
         let mut data = Vec::with_capacity(fields.len() * FIELD_DECL_SIZE as usize);
-        for (name, ty) in fields {
+        for (name, ty, is_pub) in fields {
             data.push(name.into_usize() as u32);
             data.push(ty.into_usize() as u32);
+            data.push(if *is_pub { 1 } else { 0 });
         }
         let start = self.add_extra(&data);
         (start, fields.len() as u32)
     }
 
-    /// Retrieve field declarations from the extra array.
+    /// Retrieve field declarations (name, type) from the extra array.
     pub fn get_field_decls(&self, start: u32, len: u32) -> Vec<(Spur, Spur)> {
+        self.get_field_decls_with_vis(start, len)
+            .into_iter()
+            .map(|(n, t, _)| (n, t))
+            .collect()
+    }
+
+    /// Retrieve field declarations with visibility (ADR-0073).
+    pub fn get_field_decls_with_vis(&self, start: u32, len: u32) -> Vec<(Spur, Spur, bool)> {
         let data = self.get_extra(start, len * FIELD_DECL_SIZE);
         let mut fields = Vec::with_capacity(len as usize);
         for chunk in data.chunks(FIELD_DECL_SIZE as usize) {
             let name = Spur::try_from_usize(chunk[0] as usize).unwrap();
             let ty = Spur::try_from_usize(chunk[1] as usize).unwrap();
-            fields.push((name, ty));
+            let is_pub = chunk[2] != 0;
+            fields.push((name, ty, is_pub));
         }
         fields
     }

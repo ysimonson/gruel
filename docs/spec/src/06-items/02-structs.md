@@ -79,7 +79,7 @@ fn main() -> i32 {
 
 ## Field Visibility
 
-{{ rule(id="6.2:11", cat="informative") }}
+{{ rule(id="6.2:11", cat="dynamic-semantics") }}
 
 (ADR-0073, preview `field_method_visibility`.) A field declaration **MAY**
 be prefixed with the `pub` keyword. A field marked `pub` is accessible from

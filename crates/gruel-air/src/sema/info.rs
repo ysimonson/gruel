@@ -70,6 +70,11 @@ pub struct MethodInfo {
     /// resolved `return_type` above) so that generic-method specialization
     /// can substitute method-level comptime type params in the return type.
     pub return_type_sym: lasso::Spur,
+    /// ADR-0073: whether this method is `pub`. Cross-module callers need
+    /// `is_pub` to be true; intra-module callers always succeed.
+    pub is_pub: bool,
+    /// ADR-0073: file the method was declared in (for visibility checks).
+    pub file_id: FileId,
 }
 
 /// Method signature for anonymous struct structural equality comparison.

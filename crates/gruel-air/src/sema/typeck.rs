@@ -388,6 +388,7 @@ impl<'a> Sema<'a> {
                         name: i.to_string(),
                         ty: elem_ty,
                         is_private: false,
+                        is_pub: true,
                     });
                 }
                 let (ty, _is_new) = self.find_or_create_anon_struct(
