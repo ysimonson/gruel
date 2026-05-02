@@ -25,10 +25,12 @@
 mod compiler_fp;
 mod fingerprint;
 mod store;
+mod wire;
 
 pub use compiler_fp::{compiler_fingerprint, current_binary_path};
 pub use fingerprint::{CacheKey, Hasher, blake3_bytes};
 pub use store::{CacheKind, CacheStats, CacheStore};
+pub use wire::{CachedParseOutput, CachedRirOutput, InternerSnapshot};
 
 /// On-disk cache schema version. Bump when the layout of any cached blob
 /// changes in an incompatible way. The store wipes the cache directory on

@@ -35,7 +35,7 @@ use smallvec::SmallVec;
 pub type Directives = SmallVec<[Directive; 1]>;
 
 /// A complete source file (list of items).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Ast {
     pub items: Vec<Item>,
 }
@@ -44,7 +44,7 @@ pub struct Ast {
 ///
 /// Directives use the `@name(args)` syntax and appear before items or statements.
 /// For example: `@allow(unused_variable)`
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Directive {
     /// The directive name (without the @)
     pub name: Ident,
@@ -55,14 +55,14 @@ pub struct Directive {
 }
 
 /// An argument to a directive.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DirectiveArg {
     /// An identifier argument (e.g., `unused_variable` in `@allow(unused_variable)`)
     Ident(Ident),
 }
 
 /// A top-level item in a source file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Item {
     Function(Function),
     Struct(StructDecl),
@@ -90,7 +90,7 @@ pub enum Item {
 /// pub const strings = @import("utils/strings.gruel");
 /// pub const helper = @import("utils/internal.gruel").helper;
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ConstDecl {
     /// Directives applied to this const
     pub directives: Directives,
@@ -121,7 +121,7 @@ pub struct ConstDecl {
 ///     }
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StructDecl {
     /// Directives applied to this struct (e.g., @copy)
     pub directives: Directives,
@@ -140,7 +140,7 @@ pub struct StructDecl {
 }
 
 /// A field declaration in a struct.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FieldDecl {
     /// Visibility (ADR-0073). Defaults to `Private` when `pub` is absent.
     pub visibility: Visibility,
@@ -166,7 +166,7 @@ pub struct FieldDecl {
 ///     }
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnumDecl {
     /// Visibility of this enum
     pub visibility: Visibility,
@@ -181,7 +181,7 @@ pub struct EnumDecl {
 }
 
 /// A variant in an enum declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnumVariant {
     /// Variant name
     pub name: Ident,
@@ -192,7 +192,7 @@ pub struct EnumVariant {
 }
 
 /// The kind of an enum variant.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EnumVariantKind {
     /// Unit variant: `Red`
     Unit,
@@ -203,7 +203,7 @@ pub enum EnumVariantKind {
 }
 
 /// A named field in a struct-style enum variant.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnumVariantField {
     /// Visibility (ADR-0073). Defaults to `Private` when `pub` is absent.
     pub visibility: Visibility,
@@ -226,7 +226,7 @@ pub struct EnumVariantField {
 ///     fn drop(self);
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceDecl {
     /// Visibility (currently always private; module-system support is future
     /// work).
@@ -244,7 +244,7 @@ pub struct InterfaceDecl {
 /// A method signature inside an interface declaration.
 ///
 /// No body and no associated functions (no-`self`) are allowed in MVP.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MethodSig {
     /// Method name
     pub name: Ident,
@@ -274,7 +274,7 @@ pub struct MethodSig {
 ///     }
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeriveDecl {
     /// Derive name (e.g., `Drop`)
     pub name: Ident,
@@ -287,7 +287,7 @@ pub struct DeriveDecl {
 /// A user-defined destructor declaration.
 ///
 /// Syntax: `drop fn TypeName(self) { body }`
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DropFn {
     /// The struct type this destructor is for
     pub type_name: Ident,
@@ -300,7 +300,7 @@ pub struct DropFn {
 }
 
 /// A method definition in an impl block.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Method {
     /// Directives applied to this method
     pub directives: Directives,
@@ -321,7 +321,7 @@ pub struct Method {
 }
 
 /// A self parameter in a method.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SelfParam {
     /// Receiver mode written before `self` (`inout self`, `borrow self`,
     /// or just `self`). `comptime self` is not allowed by the grammar
@@ -335,7 +335,7 @@ pub struct SelfParam {
 ///
 /// Mirrors the runtime portion of [`ParamMode`] but excludes `Comptime`,
 /// which the grammar rejects on receivers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum SelfMode {
     /// Plain `self` — by-value receiver.
     #[default]
@@ -347,7 +347,7 @@ pub enum SelfMode {
 }
 
 /// Visibility of an item (function, struct, enum, etc.)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Visibility {
     /// Private to the current file (default)
     #[default]
@@ -357,7 +357,7 @@ pub enum Visibility {
 }
 
 /// A function definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Function {
     /// Directives applied to this function
     pub directives: Directives,
@@ -378,7 +378,7 @@ pub struct Function {
 }
 
 /// Parameter passing mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ParamMode {
     /// Normal pass-by-value parameter
     #[default]
@@ -392,7 +392,7 @@ pub enum ParamMode {
 }
 
 /// A function parameter.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Param {
     /// Whether this parameter is evaluated at compile time
     pub is_comptime: bool,
@@ -407,14 +407,14 @@ pub struct Param {
 }
 
 /// An identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Ident {
     pub name: Spur,
     pub span: Span,
 }
 
 /// A type expression in the AST.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TypeExpr {
     /// A simple named type (e.g., i32, bool, MyStruct)
     Named(Ident),
@@ -482,7 +482,7 @@ pub enum TypeExpr {
 }
 
 /// A field in an anonymous struct type expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AnonStructField {
     /// Field name
     pub name: Ident,
@@ -592,13 +592,13 @@ impl fmt::Display for TypeExpr {
 }
 
 /// A unit literal expression - represents `()` or implicit unit.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UnitLit {
     pub span: Span,
 }
 
 /// An expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Expr {
     /// Integer literal
     Int(IntLit),
@@ -684,14 +684,14 @@ pub enum Expr {
 }
 
 /// An integer literal.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IntLit {
     pub value: u64,
     pub span: Span,
 }
 
 /// A floating-point literal, stored as f64 bits for Eq compatibility.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FloatLit {
     /// The f64 value stored as bits via `f64::to_bits()`.
     pub bits: u64,
@@ -699,28 +699,28 @@ pub struct FloatLit {
 }
 
 /// A string literal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StringLit {
     pub value: Spur,
     pub span: Span,
 }
 
 /// A character literal — Unicode scalar value (ADR-0071).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CharLit {
     pub value: u32,
     pub span: Span,
 }
 
 /// A boolean literal.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BoolLit {
     pub value: bool,
     pub span: Span,
 }
 
 /// A binary expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BinaryExpr {
     pub left: Box<Expr>,
     pub op: BinaryOp,
@@ -729,7 +729,7 @@ pub struct BinaryExpr {
 }
 
 /// Binary operators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BinaryOp {
     // Arithmetic
     Add, // +
@@ -756,7 +756,7 @@ pub enum BinaryOp {
 }
 
 /// A unary expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UnaryExpr {
     pub op: UnaryOp,
     pub operand: Box<Expr>,
@@ -764,7 +764,7 @@ pub struct UnaryExpr {
 }
 
 /// Unary operators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum UnaryOp {
     Neg,    // -
     Not,    // !
@@ -776,14 +776,14 @@ pub enum UnaryOp {
 }
 
 /// A parenthesized expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParenExpr {
     pub inner: Box<Expr>,
     pub span: Span,
 }
 
 /// A block expression containing statements and a final expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockExpr {
     /// Statements in the block
     pub statements: Vec<Statement>,
@@ -793,7 +793,7 @@ pub struct BlockExpr {
 }
 
 /// An if expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IfExpr {
     /// Condition (must be bool)
     pub cond: Box<Expr>,
@@ -805,7 +805,7 @@ pub struct IfExpr {
 }
 
 /// A match expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MatchExpr {
     /// The value being matched (scrutinee)
     pub scrutinee: Box<Expr>,
@@ -815,7 +815,7 @@ pub struct MatchExpr {
 }
 
 /// A single arm in a match expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MatchArm {
     /// The pattern to match
     pub pattern: Pattern,
@@ -828,7 +828,7 @@ pub struct MatchArm {
 ///
 /// A single recursive `Pattern` type is used in both contexts. Sema enforces
 /// refutability per context (let requires irrefutable patterns, match accepts any).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Pattern {
     /// Wildcard pattern `_` - matches anything, irrefutable
     Wildcard(Span),
@@ -887,7 +887,7 @@ pub enum Pattern {
 
 /// One position in a tuple-like sequence (tuple pattern or data-variant fields):
 /// either a sub-pattern or the rest-pattern `..` (ADR-0049 Phase 6).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TupleElemPattern {
     Pattern(Pattern),
     /// `..` at this position; matches zero or more remaining positions.
@@ -902,7 +902,7 @@ pub enum TupleElemPattern {
 /// - `Some(Pattern::Wildcard(..))` — `field: _` drops the field.
 /// - `Some(Pattern::Ident { ... })` — `field: name` renames.
 /// - `Some(other)` — recursive destructure of the field's value.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FieldPattern {
     pub field_name: Option<Ident>,
     pub sub: Option<Pattern>,
@@ -921,7 +921,7 @@ impl TupleElemPattern {
 }
 
 /// A negative integer literal pattern.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NegIntLit {
     /// The absolute value of the negative integer
     pub value: u64,
@@ -930,7 +930,7 @@ pub struct NegIntLit {
 }
 
 /// A path pattern (e.g., `Color::Red` or `module.Color::Red` for enum variant matching).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PathPattern {
     /// Optional module/namespace prefix (e.g., `utils` in `utils.Color::Red`)
     pub base: Option<Box<Expr>>,
@@ -960,7 +960,7 @@ impl Pattern {
 }
 
 /// Argument passing mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ArgMode {
     /// Normal pass-by-value argument
     #[default]
@@ -972,7 +972,7 @@ pub enum ArgMode {
 }
 
 /// An argument in a function call.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CallArg {
     /// The passing mode for this argument
     pub mode: ArgMode,
@@ -996,7 +996,7 @@ impl CallArg {
 }
 
 /// A function call expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CallExpr {
     /// Function name
     pub name: Ident,
@@ -1006,7 +1006,7 @@ pub struct CallExpr {
 }
 
 /// An argument to an intrinsic call (can be an expression or a type).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IntrinsicArg {
     /// An expression argument (e.g., `@dbg(42)`)
     Expr(Expr),
@@ -1015,7 +1015,7 @@ pub enum IntrinsicArg {
 }
 
 /// An intrinsic call expression (e.g., `@dbg(42)` or `@size_of(i32)`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IntrinsicCallExpr {
     /// Intrinsic name (without the @)
     pub name: Ident,
@@ -1025,7 +1025,7 @@ pub struct IntrinsicCallExpr {
 }
 
 /// A struct literal expression (e.g., `Point { x: 1, y: 2 }` or `module.Point { x: 1, y: 2 }`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StructLitExpr {
     /// Optional module/namespace prefix (e.g., `utils` in `utils.Point { ... }`)
     pub base: Option<Box<Expr>>,
@@ -1037,7 +1037,7 @@ pub struct StructLitExpr {
 }
 
 /// A field initializer in a struct literal.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FieldInit {
     /// Field name
     pub name: Ident,
@@ -1047,7 +1047,7 @@ pub struct FieldInit {
 }
 
 /// A tuple literal expression (e.g., `(1, true)`, `(42,)`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TupleExpr {
     /// Element expressions
     pub elems: Vec<Expr>,
@@ -1059,7 +1059,7 @@ pub struct TupleExpr {
 /// ADR-0055: desugars to an anonymous struct with a single `__call` method
 /// and is instantiated as an empty struct literal. Each `AnonFn` site produces
 /// a distinct type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AnonFnExpr {
     /// Parameters (all require type annotations, like named functions).
     pub params: Vec<Param>,
@@ -1072,7 +1072,7 @@ pub struct AnonFnExpr {
 }
 
 /// A tuple index expression (e.g., `t.0`, `t.1`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TupleIndexExpr {
     /// Base expression (the tuple value)
     pub base: Box<Expr>,
@@ -1085,7 +1085,7 @@ pub struct TupleIndexExpr {
 }
 
 /// A field access expression (e.g., `point.x`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FieldExpr {
     /// Base expression (the struct value)
     pub base: Box<Expr>,
@@ -1095,7 +1095,7 @@ pub struct FieldExpr {
 }
 
 /// A method call expression (e.g., `point.distance()`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MethodCallExpr {
     /// Base expression (the receiver)
     pub receiver: Box<Expr>,
@@ -1107,7 +1107,7 @@ pub struct MethodCallExpr {
 }
 
 /// An array literal expression (e.g., `[1, 2, 3]`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ArrayLitExpr {
     /// Array elements
     pub elements: Vec<Expr>,
@@ -1115,7 +1115,7 @@ pub struct ArrayLitExpr {
 }
 
 /// An array index expression (e.g., `arr[0]`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IndexExpr {
     /// The array being indexed
     pub base: Box<Expr>,
@@ -1130,7 +1130,7 @@ pub struct IndexExpr {
 ///
 /// Ranges are recognized only inside `[ … ]`. `lo` and `hi` are optional
 /// (defaulting to 0 and `arr.len()` respectively).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RangeExpr {
     pub lo: Option<Box<Expr>>,
     pub hi: Option<Box<Expr>>,
@@ -1138,7 +1138,7 @@ pub struct RangeExpr {
 }
 
 /// A path expression (e.g., `Color::Red` or `module.Color::Red` for enum variant).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PathExpr {
     /// Optional module/namespace prefix (e.g., `utils` in `utils.Color::Red`)
     pub base: Option<Box<Expr>>,
@@ -1150,7 +1150,7 @@ pub struct PathExpr {
 }
 
 /// An enum struct variant literal expression (e.g., `Shape::Circle { radius: 5 }`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnumStructLitExpr {
     /// Optional module/namespace prefix
     pub base: Option<Box<Expr>>,
@@ -1170,7 +1170,7 @@ pub struct EnumStructLitExpr {
 /// are empty for the legacy form (`Point::origin()`) and non-empty for the
 /// type-call form. Sema interprets each `type_args` entry as a type
 /// expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AssocFnCallExpr {
     /// Optional module/namespace prefix (e.g., `utils` in `utils.Point::origin()`)
     pub base: Option<Box<Expr>>,
@@ -1187,7 +1187,7 @@ pub struct AssocFnCallExpr {
 }
 
 /// A statement (does not produce a value).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Statement {
     /// Let binding: `let x = expr;` or `let mut x = expr;`
     Let(LetStatement),
@@ -1198,7 +1198,7 @@ pub enum Statement {
 }
 
 /// A let binding statement.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LetStatement {
     /// Directives applied to this let binding
     pub directives: Directives,
@@ -1218,7 +1218,7 @@ pub struct LetStatement {
 }
 
 /// An assignment statement.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AssignStatement {
     /// Assignment target (variable or field)
     pub target: AssignTarget,
@@ -1228,7 +1228,7 @@ pub struct AssignStatement {
 }
 
 /// An assignment target.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AssignTarget {
     /// Variable assignment (e.g., `x = 5`)
     Var(Ident),
@@ -1239,7 +1239,7 @@ pub enum AssignTarget {
 }
 
 /// A while loop expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WhileExpr {
     /// Condition (must be bool)
     pub cond: Box<Expr>,
@@ -1249,7 +1249,7 @@ pub struct WhileExpr {
 }
 
 /// A for-in loop expression (e.g., `for x in expr { body }`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ForExpr {
     /// Loop variable name
     pub binding: Ident,
@@ -1263,7 +1263,7 @@ pub struct ForExpr {
 }
 
 /// An infinite loop expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LoopExpr {
     /// Loop body
     pub body: BlockExpr,
@@ -1271,19 +1271,19 @@ pub struct LoopExpr {
 }
 
 /// A break expression (exits the innermost loop).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BreakExpr {
     pub span: Span,
 }
 
 /// A continue expression (skips to the next iteration of the innermost loop).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ContinueExpr {
     pub span: Span,
 }
 
 /// A return expression (returns a value from the current function).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ReturnExpr {
     /// The value to return (None for `return;` in unit-returning functions)
     pub value: Option<Box<Expr>>,
@@ -1291,14 +1291,14 @@ pub struct ReturnExpr {
 }
 
 /// A self expression (the `self` keyword in method bodies).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SelfExpr {
     pub span: Span,
 }
 
 /// A comptime block expression (e.g., `comptime { 1 + 2 }`).
 /// The expression inside must be evaluable at compile time.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ComptimeBlockExpr {
     /// The expression to evaluate at compile time
     pub expr: Box<Expr>,
@@ -1307,7 +1307,7 @@ pub struct ComptimeBlockExpr {
 
 /// A comptime_unroll for expression.
 /// The collection is evaluated at compile time, then the body is unrolled once per element.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ComptimeUnrollForExpr {
     /// Loop variable name
     pub binding: Ident,
@@ -1321,7 +1321,7 @@ pub struct ComptimeUnrollForExpr {
 /// A checked block expression (e.g., `checked { @ptr_read(p) }`).
 /// Unchecked operations (raw pointer manipulation, calling unchecked functions)
 /// are only allowed inside checked blocks.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CheckedBlockExpr {
     /// The expression inside the checked block
     pub expr: Box<Expr>,
@@ -1331,7 +1331,7 @@ pub struct CheckedBlockExpr {
 /// A type literal expression (e.g., `i32` used as a value).
 /// This represents a type used as a value in expression context, typically
 /// as an argument to a generic function with comptime parameters.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TypeLitExpr {
     /// The type being used as a value
     pub type_expr: TypeExpr,
@@ -2027,7 +2027,7 @@ fn fmt_stmt(f: &mut fmt::Formatter<'_>, stmt: &Statement, level: usize) -> fmt::
 ///
 /// Nodes are stored in parallel arrays (tags, data, extra) and referenced
 /// by their index. This is similar to how RIR uses InstRef.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct NodeIndex(pub u32);
 
 impl NodeIndex {
@@ -2066,7 +2066,7 @@ pub fn encode_unary_op(op: UnaryOp) -> u32 {
 ///
 /// The tag determines how to interpret the lhs/rhs fields in NodeData.
 /// See docs/designs/soa-ast-layout.md for encoding details.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum NodeTag {
     // ===== Items (top-level declarations) =====

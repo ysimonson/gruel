@@ -10,7 +10,7 @@ use std::fmt;
 ///
 /// `And`/`Or` are short-circuiting and are lowered to control flow in the
 /// CFG builder; they should never appear in CFG instructions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BinOp {
     Add,
     Sub,
@@ -114,7 +114,7 @@ impl fmt::Display for BinOp {
 }
 
 /// Unary operator. Used in expressions of the form `<op>operand`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum UnaryOp {
     /// Arithmetic negation: `-x`
     Neg,
