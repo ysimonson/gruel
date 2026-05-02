@@ -513,15 +513,26 @@ where
         .boxed()
 }
 
-/// Parser for struct field declarations: name: type
+/// Parser for struct field declarations: [pub] name: type
 fn field_decl_parser<'src, I>() -> GruelParser<'src, I, FieldDecl>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    ident_parser()
+    // ADR-0073: optional `pub` prefix.
+    let visibility = just(TokenKind::Pub).or_not().map(|opt| {
+        if opt.is_some() {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        }
+    });
+
+    visibility
+        .then(ident_parser())
         .then_ignore(just(TokenKind::Colon))
         .then(type_parser())
-        .map_with(|(name, ty), e| FieldDecl {
+        .map_with(|((visibility, name), ty), e| FieldDecl {
+            visibility,
             name,
             ty,
             span: span_from_extra(e),
@@ -2909,11 +2920,20 @@ where
         .collect::<Vec<_>>()
         .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen));
 
-    // Struct-style fields: { name: Type, name: Type, ... }
-    let struct_field = ident_parser()
+    // Struct-style fields: { [pub] name: Type, ... }  (ADR-0073)
+    let variant_field_visibility = just(TokenKind::Pub).or_not().map(|opt| {
+        if opt.is_some() {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        }
+    });
+    let struct_field = variant_field_visibility
+        .then(ident_parser())
         .then_ignore(just(TokenKind::Colon))
         .then(type_parser())
-        .map_with(|(name, ty), e| EnumVariantField {
+        .map_with(|((visibility, name), ty), e| EnumVariantField {
+            visibility,
             name,
             ty,
             span: span_from_extra(e),
@@ -3040,8 +3060,19 @@ where
     // Box the method head early to keep subsequent type accumulation short.
     // Uses method_name_parser so that `fn drop(self)` parses as a method named "drop"
     // (ADR-0053 destructor syntax).
-    let method_head: GruelParser<I, (Directives, Ident)> = directives_parser()
+    //
+    // ADR-0073: optional `pub` prefix sits between any directives and `fn`.
+    let method_visibility = just(TokenKind::Pub).or_not().map(|opt| {
+        if opt.is_some() {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        }
+    });
+    let method_head: GruelParser<I, (Directives, Visibility, Ident)> = directives_parser()
+        .then(method_visibility)
         .then(just(TokenKind::Fn).ignore_then(method_name_parser()))
+        .map(|((directives, visibility), name)| (directives, visibility, name))
         .boxed();
 
     let method_params: GruelParser<I, (Option<SelfParam>, Vec<Param>)> = params_with_optional_self
@@ -3058,14 +3089,17 @@ where
         .then(method_return)
         .then(block_parser(expr))
         .map_with(
-            |((((directives, name), (receiver, params)), return_type), body), e| Method {
-                directives,
-                name,
-                receiver,
-                params,
-                return_type,
-                body,
-                span: span_from_extra(e),
+            |((((directives, visibility, name), (receiver, params)), return_type), body), e| {
+                Method {
+                    directives,
+                    visibility,
+                    name,
+                    receiver,
+                    params,
+                    return_type,
+                    body,
+                    span: span_from_extra(e),
+                }
             },
         )
         .boxed()
@@ -4090,6 +4124,94 @@ mod tests {
                 assert_eq!(result.get(method.directives[0].name.name), "inline");
             }
             _ => panic!("expected Struct"),
+        }
+    }
+
+    // ==================== Field/Method Visibility (ADR-0073) ====================
+
+    #[test]
+    fn test_struct_field_visibility_default_private() {
+        let result = parse("struct Point { x: i32, y: i32 }").unwrap();
+        match &result.ast.items[0] {
+            Item::Struct(s) => {
+                assert_eq!(s.fields[0].visibility, Visibility::Private);
+                assert_eq!(s.fields[1].visibility, Visibility::Private);
+            }
+            _ => panic!("expected Struct"),
+        }
+    }
+
+    #[test]
+    fn test_struct_field_visibility_pub() {
+        let result = parse("struct Account { pub id: u64, balance: i64 }").unwrap();
+        match &result.ast.items[0] {
+            Item::Struct(s) => {
+                assert_eq!(s.fields[0].visibility, Visibility::Public);
+                assert_eq!(result.get(s.fields[0].name.name), "id");
+                assert_eq!(s.fields[1].visibility, Visibility::Private);
+                assert_eq!(result.get(s.fields[1].name.name), "balance");
+            }
+            _ => panic!("expected Struct"),
+        }
+    }
+
+    #[test]
+    fn test_method_visibility_default_private() {
+        let result = parse("struct Foo { fn bar(self) -> i32 { 42 } }").unwrap();
+        match &result.ast.items[0] {
+            Item::Struct(s) => {
+                assert_eq!(s.methods[0].visibility, Visibility::Private);
+            }
+            _ => panic!("expected Struct"),
+        }
+    }
+
+    #[test]
+    fn test_method_visibility_pub() {
+        let result =
+            parse("struct Foo { pub fn bar(self) -> i32 { 42 } fn helper(self) -> i32 { 1 } }")
+                .unwrap();
+        match &result.ast.items[0] {
+            Item::Struct(s) => {
+                assert_eq!(s.methods[0].visibility, Visibility::Public);
+                assert_eq!(result.get(s.methods[0].name.name), "bar");
+                assert_eq!(s.methods[1].visibility, Visibility::Private);
+                assert_eq!(result.get(s.methods[1].name.name), "helper");
+            }
+            _ => panic!("expected Struct"),
+        }
+    }
+
+    #[test]
+    fn test_method_visibility_pub_with_directive() {
+        // `pub` sits between the directive and `fn`.
+        let result = parse("struct Foo { @inline pub fn bar(self) -> i32 { 42 } }").unwrap();
+        match &result.ast.items[0] {
+            Item::Struct(s) => {
+                let m = &s.methods[0];
+                assert_eq!(m.visibility, Visibility::Public);
+                assert_eq!(m.directives.len(), 1);
+                assert_eq!(result.get(m.directives[0].name.name), "inline");
+            }
+            _ => panic!("expected Struct"),
+        }
+    }
+
+    #[test]
+    fn test_enum_struct_variant_field_visibility() {
+        let result = parse("enum Shape { Circle { pub r: i32, color: i32 } }").unwrap();
+        match &result.ast.items[0] {
+            Item::Enum(e) => {
+                use crate::ast::EnumVariantKind;
+                match &e.variants[0].kind {
+                    EnumVariantKind::Struct(fields) => {
+                        assert_eq!(fields[0].visibility, Visibility::Public);
+                        assert_eq!(fields[1].visibility, Visibility::Private);
+                    }
+                    _ => panic!("expected struct variant"),
+                }
+            }
+            _ => panic!("expected Enum"),
         }
     }
 

@@ -316,14 +316,14 @@ is non-blocking.
 
 Each phase is independently committable.
 
-- [ ] **Phase 1: Preview gate + spec scaffolding**
+- [x] **Phase 1: Preview gate + spec scaffolding**
   - Add `PreviewFeature::FieldMethodVisibility` to `gruel-error` (and
     `name()`, `adr()`, `all()`, `FromStr`).
   - Draft spec §6.2 and §6.4 deltas with rule IDs (no implementation yet):
     `pub` on `struct_field` and `method_def`, dynamic-semantics rules tying
     field/method access to the same module-equivalence rule used by items.
 
-- [ ] **Phase 2: Parser**
+- [x] **Phase 2: Parser**
   - Accept optional `pub` in `field_decl_parser` and `method_parser_with_expr`.
   - Add `visibility: Visibility` to `FieldDecl`, `Method`, and
     `EnumVariantField`. Default `Private` when absent.

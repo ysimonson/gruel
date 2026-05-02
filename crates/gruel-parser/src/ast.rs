@@ -142,6 +142,8 @@ pub struct StructDecl {
 /// A field declaration in a struct.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldDecl {
+    /// Visibility (ADR-0073). Defaults to `Private` when `pub` is absent.
+    pub visibility: Visibility,
     /// Field name
     pub name: Ident,
     /// Field type
@@ -203,6 +205,8 @@ pub enum EnumVariantKind {
 /// A named field in a struct-style enum variant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumVariantField {
+    /// Visibility (ADR-0073). Defaults to `Private` when `pub` is absent.
+    pub visibility: Visibility,
     /// Field name
     pub name: Ident,
     /// Field type
@@ -300,6 +304,8 @@ pub struct DropFn {
 pub struct Method {
     /// Directives applied to this method
     pub directives: Directives,
+    /// Visibility (ADR-0073). Defaults to `Private` when `pub` is absent.
+    pub visibility: Visibility,
     /// Method name
     pub name: Ident,
     /// Whether this method takes self (None = associated function, Some = method with receiver)

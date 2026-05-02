@@ -1367,6 +1367,7 @@ impl<'a> AstGen<'a> {
                 };
                 let synth_method = Method {
                     directives: Directives::new(),
+                    visibility: gruel_parser::ast::Visibility::Public,
                     name: call_ident,
                     receiver: Some(SelfParam {
                         mode: gruel_parser::ast::SelfMode::ByValue,
