@@ -63,3 +63,26 @@ pub fn generate(inputs: &CodegenInputs<'_>, opt_level: OptLevel) -> CompileResul
 pub fn generate_ir(inputs: &CodegenInputs<'_>, opt_level: OptLevel) -> CompileResult<String> {
     codegen::generate_ir(inputs, opt_level)
 }
+
+/// Generate pre-optimization LLVM bitcode from a collection of function CFGs.
+///
+/// Returns the LLVM bitcode bytes (the binary equivalent of `.ll` text) BEFORE
+/// the optimizer pipeline runs. Used by ADR-0074's bitcode cache: on miss,
+/// generate + cache; on hit, skip this step and pass the cached bitcode to
+/// [`compile_bitcode_to_object`].
+///
+/// The output is a `.bc` blob — same format `clang -emit-llvm -c` produces.
+pub fn generate_bitcode(inputs: &CodegenInputs<'_>) -> CompileResult<Vec<u8>> {
+    codegen::generate_bitcode(inputs)
+}
+
+/// Compile cached or freshly-emitted LLVM bitcode into a native object file.
+///
+/// Runs the LLVM mid-end optimizer pipeline at the given level (no-op at
+/// `-O0`) and emits an object via the host machine's back-end. Used by
+/// ADR-0074's bitcode cache to consume the output of either
+/// [`generate_bitcode`] (cache miss) or a previously cached `.bc` blob
+/// (cache hit).
+pub fn compile_bitcode_to_object(bitcode: &[u8], opt_level: OptLevel) -> CompileResult<Vec<u8>> {
+    codegen::compile_bitcode_to_object(bitcode, opt_level)
+}

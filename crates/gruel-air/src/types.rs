@@ -6,7 +6,7 @@
 ///
 /// As of Phase 3 (ADR-0024), the inner value is a pool index into `TypeInternPool`,
 /// not a vector index into a separate struct definitions array.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct StructId(pub u32);
 
 impl StructId {
@@ -32,7 +32,7 @@ impl StructId {
 ///
 /// As of Phase 3 (ADR-0024), the inner value is a pool index into `TypeInternPool`,
 /// not a vector index into a separate enum definitions array.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct EnumId(pub u32);
 
 impl EnumId {
@@ -56,7 +56,7 @@ impl EnumId {
 
 /// A unique identifier for an array type.
 /// This is needed because Type is Copy, so we can't use Box<Type> for the element type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ArrayTypeId(pub u32);
 
 impl ArrayTypeId {
@@ -80,7 +80,7 @@ impl ArrayTypeId {
 
 /// A unique identifier for a `ptr const T` type.
 /// This is needed because Type is Copy, so we can't use Box<Type> for the pointee type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PtrConstTypeId(pub u32);
 
 impl PtrConstTypeId {
@@ -99,7 +99,7 @@ impl PtrConstTypeId {
 
 /// A unique identifier for a `ptr mut T` type.
 /// This is needed because Type is Copy, so we can't use Box<Type> for the pointee type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PtrMutTypeId(pub u32);
 
 impl PtrMutTypeId {
@@ -118,7 +118,7 @@ impl PtrMutTypeId {
 
 /// A unique identifier for a `Ref(T)` type (ADR-0062).
 /// Mirrors `PtrConstTypeId` — uses pool indices for type interning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RefTypeId(pub u32);
 
 impl RefTypeId {
@@ -135,7 +135,7 @@ impl RefTypeId {
 
 /// A unique identifier for a `MutRef(T)` type (ADR-0062).
 /// Mirrors `PtrMutTypeId`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct MutRefTypeId(pub u32);
 
 impl MutRefTypeId {
@@ -151,7 +151,7 @@ impl MutRefTypeId {
 }
 
 /// A unique identifier for a `Slice(T)` type (ADR-0064).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SliceTypeId(pub u32);
 
 impl SliceTypeId {
@@ -167,7 +167,7 @@ impl SliceTypeId {
 }
 
 /// A unique identifier for a `MutSlice(T)` type (ADR-0064).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct MutSliceTypeId(pub u32);
 
 impl MutSliceTypeId {
@@ -183,7 +183,7 @@ impl MutSliceTypeId {
 }
 
 /// A unique identifier for a `Vec(T)` type (ADR-0066).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct VecTypeId(pub u32);
 
 impl VecTypeId {
@@ -205,7 +205,7 @@ impl VecTypeId {
 /// declarations with the same name still produce distinct IDs (and we reject
 /// that at gather time); structural conformance happens at the *use* site
 /// against this nominal ID.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceId(pub u32);
 
 impl InterfaceId {
@@ -224,7 +224,7 @@ impl InterfaceId {
 ///
 /// Modules are created by `@import("path.gruel")` and represent the public
 /// declarations of an imported file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ModuleId(pub u32);
 
 impl ModuleId {
@@ -250,7 +250,7 @@ impl ModuleId {
 /// This separation allows incremental migration: all pattern matches can be
 /// updated to use `.kind()` while `Type` is still an enum, then `Type` can be
 /// replaced with `Type(InternedType)` without breaking existing code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TypeKind {
     /// 8-bit signed integer
     I8,
@@ -356,7 +356,7 @@ pub enum TypeKind {
 ///     _ => { /* ... */ }
 /// }
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Type(u32);
 
 impl Default for Type {
@@ -595,7 +595,7 @@ impl StructDef {
 /// `is_pub` and `file_id` are populated now and consumed in later phases
 /// (visibility checks during cross-module conformance) — `#[allow(dead_code)]`
 /// keeps them in shape until then.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct InterfaceDef {
     /// Interface name (as written in source).
@@ -615,7 +615,7 @@ pub struct InterfaceDef {
 /// distinction so `check_conforms` can substitute the candidate's concrete
 /// type at compare time. Concrete (non-`Self`) slots are resolved during
 /// `validate_interface_decls` via the regular `resolve_type` path.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IfaceTy {
     /// `Self` — substituted with the candidate type at conformance time.
     SelfType,
@@ -643,7 +643,7 @@ impl IfaceTy {
 ///
 /// Mirrors the parameter modes available on regular methods. `check_conforms`
 /// requires the candidate method's receiver mode to match exactly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReceiverMode {
     /// `self` — by-value receiver.
     ByValue,
@@ -668,7 +668,7 @@ impl ReceiverMode {
 ///
 /// Per ADR-0060, parameter and return slots are `IfaceTy` so that `Self` can
 /// be substituted with the candidate at conformance check time.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceMethodReq {
     /// Method name.
     pub name: String,
@@ -693,7 +693,7 @@ impl InterfaceDef {
 }
 
 /// Definition of a struct type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructDef {
     /// Struct name
     pub name: String,
@@ -724,7 +724,7 @@ pub struct StructDef {
 }
 
 /// A field in a struct definition.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct StructField {
     /// Field name
     pub name: String,
@@ -750,7 +750,7 @@ impl StructDef {
 }
 
 /// A single variant in an enum definition.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumVariantDef {
     /// Variant name
     pub name: String,
@@ -789,7 +789,7 @@ impl EnumVariantDef {
 }
 
 /// Definition of an enum type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumDef {
     /// Enum name
     pub name: String,
@@ -848,7 +848,7 @@ impl EnumDef {
 /// A module contains the public declarations from an imported file.
 /// When code accesses `math.add()`, the module definition is consulted
 /// to find the corresponding function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleDef {
     /// The path used in @import (e.g., "math.gruel")
     pub import_path: String,
@@ -1507,7 +1507,7 @@ impl std::fmt::Display for Type {
 }
 
 /// Pointer mutability - whether the pointed-to data can be modified.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PtrMutability {
     /// Immutable pointer (`ptr const T`)
     Const,

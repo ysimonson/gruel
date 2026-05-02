@@ -11,7 +11,7 @@ use lasso::{Key, Spur};
 /// A reference to an instruction in the RIR.
 ///
 /// This is a lightweight handle (4 bytes) that indexes into the instruction array.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct InstRef(u32);
 
 impl InstRef {
@@ -29,7 +29,7 @@ impl InstRef {
 }
 
 /// A directive in the RIR (e.g., @allow(unused_variable))
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RirDirective {
     /// Directive name (e.g., "allow")
     pub name: Spur,
@@ -40,7 +40,7 @@ pub struct RirDirective {
 }
 
 /// Parameter passing mode in RIR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RirParamMode {
     /// Normal pass-by-value parameter
     #[default]
@@ -54,7 +54,7 @@ pub enum RirParamMode {
 }
 
 /// A parameter in a function declaration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RirParam {
     /// Parameter name
     pub name: Spur,
@@ -67,7 +67,7 @@ pub struct RirParam {
 }
 
 /// Argument passing mode in RIR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RirArgMode {
     /// Normal pass-by-value argument
     #[default]
@@ -79,7 +79,7 @@ pub enum RirArgMode {
 }
 
 /// An argument in a function call.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RirCallArg {
     /// The argument expression
     pub value: InstRef,
@@ -109,7 +109,7 @@ impl RirCallArg {
 /// nested sub-patterns inside variant fields still go through the
 /// elaboration layer until a follow-up RIR migration replaces their flat
 /// bindings with `RirPattern` leaves.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum RirPattern {
     /// Wildcard pattern `_` - matches anything
     Wildcard(Span),
@@ -191,7 +191,7 @@ pub enum RirPattern {
 /// - `is_wildcard = false, name = None, sub_pattern = Some(p)` → `p` (nested refutable sub-pattern, ADR-0051)
 /// - `is_wildcard = false, name = Some(x), sub_pattern = Some(p)` → `x @ p` (reserved; not yet
 ///   exposed in surface syntax)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RirPatternBinding {
     /// Whether this is a wildcard binding (`_`)
     pub is_wildcard: bool,
@@ -206,7 +206,7 @@ pub struct RirPatternBinding {
 }
 
 /// A named field binding in a struct variant pattern.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RirStructPatternBinding {
     /// The field name being matched
     pub field_name: Spur,
@@ -216,7 +216,7 @@ pub struct RirStructPatternBinding {
 
 /// A field in an ADR-0051 `RirPattern::Struct` arm, carrying the matched
 /// field's name plus its recursive sub-pattern.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RirStructField {
     pub field_name: Spur,
     pub pattern: RirPattern,
@@ -601,7 +601,7 @@ const PARAM_SIZE: u32 = 4;
 /// Pattern data varies by kind (see PatternKind enum).
 /// Pattern kinds encoded in extra array
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PatternKind {
     /// Wildcard pattern: [kind, span_start, span_len]
     Wildcard = 0,
@@ -640,7 +640,7 @@ const PATTERN_PATH_SIZE: u32 = 7; // kind, span_start, span_len, module, type_na
 const DESTRUCTURE_FIELD_SIZE: u32 = 4;
 
 /// A decoded destructure field from the extra array.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RirDestructureField {
     /// The struct field being bound
     pub field_name: Spur,
@@ -667,7 +667,7 @@ const FIELD_DECL_SIZE: u32 = 3;
 ///
 /// This allows efficient per-function analysis by identifying which instructions
 /// belong to each function without scanning the entire instruction array.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionSpan {
     /// Function name symbol
     pub name: Spur,
@@ -757,7 +757,7 @@ impl<'a> RirFunctionView<'a> {
 }
 
 /// The complete RIR for a source file.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Rir {
     /// All instructions in the file
     instructions: Vec<Inst>,
@@ -2298,14 +2298,14 @@ impl Rir {
 }
 
 /// A single RIR instruction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Inst {
     pub data: InstData,
     pub span: Span,
 }
 
 /// Instruction data - the actual operation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InstData {
     /// Integer constant
     IntConst(u64),

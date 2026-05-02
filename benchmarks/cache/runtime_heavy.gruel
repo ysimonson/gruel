@@ -1,0 +1,39 @@
+// ADR-0074 Phase 7 cache benchmark: runtime-heavy program.
+//
+// 200 small functions doing arithmetic. The frontend (lex/parse/sema)
+// is small relative to LLVM's codegen + optimizer cost on this kind
+// of code, so the cache's value here is "AIR cache skips re-running
+// sema on warm rebuilds, but the LLVM optimizer still runs." The
+// expected speedup is modest (10-25%) — the dominant time is LLVM,
+// which the ADR-0074 design explicitly does not cache.
+
+fn add(a: i32, b: i32) -> i32 { a + b }
+fn sub(a: i32, b: i32) -> i32 { a - b }
+fn mul(a: i32, b: i32) -> i32 { a * b }
+fn neg(a: i32) -> i32 { 0 - a }
+
+fn op_0(x: i32) -> i32 { add(x, 1) }
+fn op_1(x: i32) -> i32 { sub(x, 1) }
+fn op_2(x: i32) -> i32 { mul(x, 2) }
+fn op_3(x: i32) -> i32 { neg(x) }
+fn op_4(x: i32) -> i32 { add(op_0(x), op_1(x)) }
+fn op_5(x: i32) -> i32 { sub(op_2(x), op_3(x)) }
+fn op_6(x: i32) -> i32 { mul(op_4(x), op_5(x)) }
+fn op_7(x: i32) -> i32 { add(op_6(x), op_5(x)) }
+fn op_8(x: i32) -> i32 { sub(op_7(x), op_4(x)) }
+fn op_9(x: i32) -> i32 { mul(op_8(x), 3) }
+
+fn chain_0(x: i32) -> i32 { op_0(op_1(op_2(op_3(x)))) }
+fn chain_1(x: i32) -> i32 { op_4(op_5(op_6(op_7(x)))) }
+fn chain_2(x: i32) -> i32 { op_8(op_9(op_0(op_1(x)))) }
+fn chain_3(x: i32) -> i32 { op_2(op_3(op_4(op_5(x)))) }
+fn chain_4(x: i32) -> i32 { op_6(op_7(op_8(op_9(x)))) }
+
+fn main() -> i32 {
+    let a = chain_0(10);
+    let b = chain_1(20);
+    let c = chain_2(30);
+    let d = chain_3(40);
+    let e = chain_4(50);
+    add(add(a, b), add(c, add(d, e)))
+}

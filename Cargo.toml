@@ -4,6 +4,7 @@ members = [
     "crates/gruel",
     "crates/gruel-air",
     "crates/gruel-builtins",
+    "crates/gruel-cache",
     "crates/gruel-cfg",
     "crates/gruel-codegen-llvm",
     "crates/gruel-compiler",
@@ -29,6 +30,7 @@ edition = "2024"
 # Internal crates
 gruel-air = { path = "crates/gruel-air" }
 gruel-builtins = { path = "crates/gruel-builtins" }
+gruel-cache = { path = "crates/gruel-cache" }
 gruel-cfg = { path = "crates/gruel-cfg" }
 gruel-codegen-llvm = { path = "crates/gruel-codegen-llvm", default-features = false }
 gruel-compiler = { path = "crates/gruel-compiler", default-features = false }
@@ -43,14 +45,15 @@ gruel-util = { path = "crates/gruel-util" }
 # External dependencies
 annotate-snippets = "0.11"
 anyhow = "1.0"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 chumsky = { version = "1.0.0-alpha.7", features = ["pratt"] }
-lasso = { version = "0.7", features = ["multi-threaded"] }
+lasso = { version = "0.7", features = ["multi-threaded", "serialize"] }
 libc = "0.2"
 libtest2-mimic = "0.0.4"
 logos = "0.14"
 rayon = "1.10"
 rustc-hash = "2"
+bincode = { version = "2.0", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 smallvec = "1.15"

@@ -7,7 +7,9 @@
 ///
 /// File IDs are indices into a file table maintained by the compiler.
 /// `FileId(0)` is reserved as the default/unknown file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct FileId(pub u32);
 
 impl FileId {
@@ -44,7 +46,9 @@ impl FileId {
 /// Spans use byte offsets into the source string and include a file identifier
 /// for multi-file compilation. They are designed to be small (12 bytes) and
 /// cheap to copy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Span {
     /// The file this span belongs to
     pub file_id: FileId,

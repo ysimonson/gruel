@@ -499,6 +499,15 @@ cargo run -p gruel -- fuzz/artifacts/compiler/crash-*.txt output
 
 When adding or changing language features, follow this checklist.
 
+### Grounding Design Work
+
+When writing or revising an ADR, ground every citation in the source rather than paraphrasing from prior knowledge:
+
+- **Read the body of every ADR you cite**, not just the title or summary. At minimum, read the Decision section. Titles routinely understate or mislead about scope.
+- **Follow the `superseded-by` chain.** If an ADR's frontmatter sets `superseded-by`, also read the superseding ADR(s) — the original may not reflect current behavior.
+- **Read the actual source of any module you make architectural claims about.** Statements like "codegen does X" or "the parser handles Y" need a 30-second source read, not an assumption.
+- **Don't import Rust assumptions.** Gruel diverges from Rust on load-bearing details (`@import` not `use`/`mod`, files-as-structs not crate hierarchies, affine types not borrow checker, whole-program LLVM module not per-crate codegen). When something feels obvious "from Rust," verify it.
+
 ### Preview Features (Gating New Features)
 
 **IMPORTANT**: New language features MUST be gated behind preview flags until complete. See [ADR-0005](docs/designs/0005-preview-features.md) for the full design.
