@@ -276,10 +276,10 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// ADR-0072: enforce preview-feature and `checked`-block gating for the
-    /// String / Vec(u8) bridge surface. Hardcoded by name because the
-    /// builtin registry has no per-method gate today; if more synthetic
-    /// surfaces want gates the right move is to add fields to
+    /// ADR-0072: enforce `checked`-block gating for the String / Vec(u8)
+    /// bridge surface. Hardcoded by name because the builtin registry
+    /// has no per-method gate today; if more synthetic surfaces want
+    /// `checked` annotations the right move is to add a field to
     /// `BuiltinMethod` / `BuiltinAssociatedFn` rather than extending this
     /// match.
     pub(crate) fn check_string_vec_bridge_method_gates(
@@ -292,39 +292,8 @@ impl<'a> Sema<'a> {
         if type_name != "String" {
             return Ok(());
         }
-        // Skip preview gating for the synthetic prelude — its body uses
-        // these methods to implement `String::from_utf8` etc., and is
-        // analyzed eagerly before the user's `--preview` flags can apply.
-        // The user-facing `String::from_utf8` call still goes through
-        // its dispatcher which performs the gate check at the call site.
-        if span.file_id == gruel_util::FileId::PRELUDE {
-            return Ok(());
-        }
-        // Methods/assoc-fns gated on the `string_vec_bridge` preview feature.
-        // Pre-existing String surface (len/capacity/is_empty/clone/contains/
-        // starts_with/ends_with/concat/push_str/push/clear/reserve/new/
-        // with_capacity/from_char/push_char) is unchanged.
-        let preview_gated = matches!(
-            method_name,
-            "into_bytes"
-                | "bytes_len"
-                | "bytes_capacity"
-                | "from_utf8"
-                | "from_utf8_unchecked"
-                | "from_c_str"
-                | "from_c_str_unchecked"
-                | "push_byte"
-                | "terminated_ptr"
-        );
-        if preview_gated {
-            self.require_preview(
-                gruel_util::PreviewFeature::StringVecBridge,
-                method_name,
-                span,
-            )?;
-        }
-        // Subset that additionally requires a `checked` block (caller
-        // assumes UTF-8 invariant or raw-pointer responsibility).
+        // Subset that requires a `checked` block (caller assumes UTF-8
+        // invariant or raw-pointer responsibility).
         let checked_gated = matches!(
             method_name,
             "from_utf8_unchecked" | "from_c_str_unchecked" | "push_byte" | "terminated_ptr"

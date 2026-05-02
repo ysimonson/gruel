@@ -334,11 +334,6 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
-    /// ADR-0072: redefining `String` as a newtype over `Vec(u8)`, with
-    /// privacy-gated internal field, validated/unchecked conversions
-    /// between `String` and `Vec(u8)`, char-aware mutation, and
-    /// C-string interop.
-    StringVecBridge,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -370,7 +365,6 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
-            PreviewFeature::StringVecBridge => "ADR-0072",
         }
     }
 
@@ -2041,7 +2035,7 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra, string_vec_bridge");
+        assert_eq!(names, "test_infra");
     }
 
     // ========================================================================

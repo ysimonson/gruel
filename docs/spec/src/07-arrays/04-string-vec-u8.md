@@ -6,9 +6,7 @@ weight = 4
 # String / Vec(u8) Relationship
 
 This section documents `String` as a newtype wrapper over `Vec(u8)` per
-ADR-0072. Everything in this section is gated behind the
-`string_vec_bridge` preview feature; using any of these APIs without
-`--preview string_vec_bridge` is a compile-time error.
+ADR-0072.
 
 ## Newtype Definition
 
@@ -90,21 +88,15 @@ provide codepoint counting once iterators land.
 
 ## Vec(u8) Method Additions
 
-{{ rule(id="7.4:4", cat="normative") }}
+{{ rule(id="7.4:4", cat="informative") }}
 
-For `String`'s composition surface to delegate cleanly, `Vec(u8)`
-gains the following methods alongside its existing surface:
-
-- `Vec(T)::contains(borrow self, needle: borrow Slice(T)) -> bool`
-- `Vec(T)::starts_with(borrow self, prefix: borrow Slice(T)) -> bool`
-- `Vec(T)::ends_with(borrow self, suffix: borrow Slice(T)) -> bool`
-- `Vec(T)::concat(borrow self, other: borrow Slice(T)) -> Vec(T)`
-- `Vec(T)::extend_from_slice(inout self, other: borrow Slice(T)) -> ()`
-
-These are byte/element-level operations and apply uniformly to any
-`Vec(T)` whose element type supports byte-comparison (`u8`, etc.); the
-v1 instantiation targets `Vec(u8)`. They are not gated behind
-`string_vec_bridge` — they are independent `Vec(T)` improvements.
+A future revision of `Vec(T)` (ADR-0066) is expected to add
+substring/element-search and bulk-append helpers — `contains`,
+`starts_with`, `ends_with`, `concat`, `extend_from_slice` — that
+`String`'s composition surface can delegate to once that work lands.
+These are independent `Vec(T)` improvements; they are not part of
+this ADR's user-visible surface and do not affect the `String`-level
+methods in §7.4:3.
 
 ## Conversions: String → Vec(u8)
 

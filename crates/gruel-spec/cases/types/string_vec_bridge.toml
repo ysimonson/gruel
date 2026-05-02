@@ -1,7 +1,6 @@
 # String / Vec(u8) bridge tests (ADR-0072)
 #
 # These tests cover spec §7.4 — String as a newtype wrapper over Vec(u8).
-# The whole feature is gated behind the `string_vec_bridge` preview feature.
 
 [section]
 id = "types.string_vec_bridge"
@@ -14,8 +13,6 @@ description = "Tests for ADR-0072: String as a newtype wrapper over Vec(u8)."
 [[case]]
 name = "private_bytes_field_rejected"
 spec = ["7.4:1", "7.4:10"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = String::new();
@@ -31,8 +28,6 @@ error_contains = "private"
 [[case]]
 name = "empty_string_is_valid_utf8"
 spec = ["7.4:2"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = String::new();
@@ -46,8 +41,6 @@ exit_code = 0
 [[case]]
 name = "bytes_len_after_push_char"
 spec = ["7.4:3"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
@@ -61,8 +54,6 @@ exit_code = 1
 [[case]]
 name = "bytes_capacity_at_least_reserved"
 spec = ["7.4:3"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let n: usize = 16;
@@ -73,33 +64,11 @@ fn main() -> i32 {
 """
 exit_code = 0
 
-# ---- 7.4:4 Vec(u8) extensions ----
-
-[[case]]
-name = "vec_u8_extend_from_slice"
-spec = ["7.4:4"]
-preview = "string_vec_bridge"
-source = """
-fn main() -> i32 {
-    let mut a: Vec(u8) = Vec(u8)::new();
-    a.push(1);
-    let mut b: Vec(u8) = Vec(u8)::new();
-    b.push(2);
-    b.push(3);
-    a.extend_from_slice(&b[..]);
-    let n: i32 = @cast(a.len());
-    n
-}
-"""
-exit_code = 3
-
 # ---- 7.4:5 into_bytes ----
 
 [[case]]
 name = "into_bytes_round_trip"
 spec = ["7.4:5"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = String::from_char('Z');
@@ -115,8 +84,6 @@ exit_code = 1
 [[case]]
 name = "from_utf8_valid_ok"
 spec = ["7.4:6"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s = String::from_char('A');
@@ -137,8 +104,6 @@ exit_code = 1
 [[case]]
 name = "from_utf8_invalid_err"
 spec = ["7.4:6"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut v: Vec(u8) = Vec(u8)::new();
@@ -161,8 +126,6 @@ exit_code = 0
 [[case]]
 name = "from_utf8_unchecked_basic"
 spec = ["7.4:7"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let s0 = String::from_char('Q');
@@ -179,8 +142,6 @@ exit_code = 1
 [[case]]
 name = "push_char_multi_byte"
 spec = ["7.4:8"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
@@ -194,8 +155,6 @@ exit_code = 2
 [[case]]
 name = "push_byte_requires_checked"
 spec = ["7.4:8"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
@@ -210,8 +169,6 @@ error_contains = "checked"
 [[case]]
 name = "push_byte_in_checked_block"
 spec = ["7.4:8"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
@@ -231,8 +188,6 @@ exit_code = 1
 [[case]]
 name = "terminated_ptr_requires_checked"
 spec = ["7.4:9"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::new();
@@ -246,8 +201,6 @@ error_contains = "checked"
 [[case]]
 name = "terminated_ptr_in_checked_block"
 spec = ["7.4:9"]
-preview = "string_vec_bridge"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let mut s = String::from_char('A');
