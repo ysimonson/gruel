@@ -34,7 +34,7 @@ use lasso::{Key, Spur};
 /// A reference to a place in AIR - stored as index into the places array.
 ///
 /// This is a lightweight handle that can be copied and compared efficiently.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AirPlaceRef(u32);
 
 impl AirPlaceRef {
@@ -69,7 +69,7 @@ impl fmt::Display for AirPlaceRef {
 /// - `arr[i]` → `AirPlace { base: Local(0), ... }` with `Index` projection
 /// - `point.x` → `AirPlace { base: Local(0), ... }` with `Field` projection
 /// - `arr[i].x` → `AirPlace { base: Local(0), ... }` with `Index` then `Field`
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AirPlace {
     /// The base of the place - either a local slot or parameter slot
     pub base: AirPlaceBase,
@@ -143,7 +143,7 @@ pub use gruel_util::PlaceBase as AirPlaceBase;
 ///
 /// Projections are stored in `Air::projections` and referenced by
 /// `AirPlace::projections_start` and `AirPlace::projections_len`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AirProjection {
     /// Field access: `.field_name`
     ///
@@ -161,7 +161,7 @@ pub enum AirProjection {
 }
 
 /// Parameter passing mode in AIR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum AirParamMode {
     /// Normal pass-by-value parameter
     #[default]
@@ -207,7 +207,7 @@ impl From<gruel_rir::RirParamMode> for AirParamMode {
 }
 
 /// Argument passing mode in AIR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum AirArgMode {
     /// Normal pass-by-value argument
     #[default]
@@ -252,7 +252,7 @@ impl From<gruel_rir::RirArgMode> for AirArgMode {
 }
 
 /// An argument in a function call (AIR level).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AirCallArg {
     /// The argument expression
     pub value: AirRef,
@@ -291,7 +291,7 @@ impl fmt::Display for AirCallArg {
 /// and `EnumUnitVariant` are the recursive variants produced by the new
 /// lowering. During Phases 1-3 both encodings coexist; Phase 4 drops the
 /// flat `EnumVariant`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AirPattern {
     /// Wildcard pattern `_` - matches anything, binds nothing.
     Wildcard,
@@ -683,7 +683,7 @@ impl fmt::Display for AirPattern {
 }
 
 /// A reference to an instruction in the AIR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AirRef(u32);
 
 impl AirRef {
@@ -960,7 +960,7 @@ impl Air {
 }
 
 /// A single AIR instruction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AirInst {
     pub data: AirInstData,
     pub ty: Type,
@@ -968,7 +968,7 @@ pub struct AirInst {
 }
 
 /// AIR instruction data - fully typed operations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AirInstData {
     /// Integer constant (typed)
     Const(u64),
