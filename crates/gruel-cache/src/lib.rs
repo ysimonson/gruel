@@ -24,11 +24,13 @@
 
 mod compiler_fp;
 mod fingerprint;
+mod remap;
 mod store;
 mod wire;
 
 pub use compiler_fp::{compiler_fingerprint, current_binary_path};
 pub use fingerprint::{CacheKey, Hasher, blake3_bytes};
+pub use remap::RemapSpurs;
 pub use store::{CacheKind, CacheStats, CacheStore};
 pub use wire::{CachedParseOutput, CachedRirOutput, InternerSnapshot};
 
