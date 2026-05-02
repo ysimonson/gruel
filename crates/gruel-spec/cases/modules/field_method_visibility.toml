@@ -166,24 +166,3 @@ pass_aux_files = true
 compile_fail = true
 error_contains = "helper"
 
-# =============================================================================
-# Cross-directory access without preview (no gating yet)
-# =============================================================================
-
-[[case]]
-name = "cross_dir_private_field_allowed_without_preview"
-spec = ["6.2:11"]
-description = "Without --preview field_method_visibility, cross-module non-pub field access still works"
-source = """
-fn main() -> i32 {
-    let lib = @import("subdir/lib");
-    let a = lib.make();
-    a.balance
-}
-"""
-aux_files = { "subdir/lib.gruel" = """
-pub struct Account { pub id: i32, balance: i32 }
-pub fn make() -> Account { Account { id: 1, balance: 42 } }
-""" }
-pass_aux_files = true
-exit_code = 42

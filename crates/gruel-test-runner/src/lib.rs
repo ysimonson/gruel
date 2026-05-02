@@ -855,6 +855,11 @@ fn run_test_case_inner(case: &Case, gruel_binary: &Path) -> TestResult {
         if let Some(ref feature) = case.preview {
             cmd.arg("--preview").arg(feature);
         }
+        // ADR-0073 Phase 5: pre-stabilization audit. Force the
+        // field/method visibility preview on for every spec/UI test so
+        // any cross-module field or method access that lacks `pub`
+        // surfaces here, before the gate is removed in Phase 6.
+        cmd.arg("--preview").arg("field_method_visibility");
         if let Some(level) = case.opt_level {
             cmd.arg(format!("-O{}", level));
         }

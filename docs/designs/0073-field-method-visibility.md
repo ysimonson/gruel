@@ -359,7 +359,7 @@ Each phase is independently committable.
   - Verify ADR-0072's existing `String::bytes` privacy test still passes
     unchanged.
 
-- [ ] **Phase 5: Stdlib audit**
+- [x] **Phase 5: Stdlib audit**
   - `crates/gruel-spec/cases/`, `crates/gruel-ui-tests/cases/`, and any
     in-tree examples that perform cross-module field access add `pub` where
     needed.
