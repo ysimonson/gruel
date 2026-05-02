@@ -129,7 +129,7 @@ You've learned the fundamentals of Gruel! The next chapters cover more features:
 - [Input and Parsing](/learn/13-input-and-parsing/) — reading user input and converting strings to numbers
 - [Comptime and Generics](/learn/14-comptime/) — compile-time evaluation and generic functions
 - [Modules](/learn/15-modules/) — splitting code across multiple files with `@import`
-- [Linear Types](/learn/16-linear-types/) — must-consume types and explicit duplication with `@handle`
+- [Linear Types](/learn/16-linear-types/) — must-consume types and explicit duplication via the `Handle` interface
 - [Unchecked Code and Raw Pointers](/learn/17-unchecked/) — `checked` blocks, raw pointers, and syscalls
 - [Tuples](/learn/19-tuples/) — fixed-size groupings of heterogeneous values
 - [Slices](/learn/20-slices/) — borrowed views over contiguous elements with runtime length

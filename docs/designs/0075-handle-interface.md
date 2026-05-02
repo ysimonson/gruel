@@ -153,7 +153,7 @@ Spec-side, this is a new legality rule in §2.5:
   the expected truth for a hand-written conforming type. **Adds
   the new path; touches nothing existing yet.**
 
-- [ ] **Phase 2: Migrate the corpus off `@handle`.** Convert all
+- [x] **Phase 2: Migrate the corpus off `@handle`.** Convert all
   `@handle` users in `crates/gruel-spec/cases/`, `docs/spec/src/`,
   `website/content/learn/`, and `scratch/` to define
   `fn handle(borrow self) -> Self` directly. Update spec rules
