@@ -29,7 +29,10 @@ mod clone_glue;
 mod diagnostic;
 mod drop_glue;
 mod link;
+mod parse_cache;
 mod unit;
+
+pub use parse_cache::{ParseCacheStats, parse_all_files_cached, parse_key};
 
 pub use unit::CompilationUnit;
 
