@@ -730,15 +730,10 @@ pub struct StructField {
     pub name: String,
     /// Field type
     pub ty: Type,
-    /// ADR-0072: whether this field is private. Currently only set on
-    /// synthetic builtins (e.g. `String::bytes`); ADR-0073 supersedes this
-    /// for user-defined fields via `is_pub` and the module-equivalence
-    /// check. Phase 4 retires this flag in favor of the unified path.
-    pub is_private: bool,
     /// ADR-0073: whether this field is `pub`. For user-defined structs,
     /// `false` means module-private (same-directory accessible). For
-    /// built-ins (Phase 4), the comparison runs against the synthetic
-    /// `<builtin>` FileId.
+    /// built-ins, the comparison runs against the synthetic `<builtin>`
+    /// FileId.
     pub is_pub: bool,
 }
 
@@ -2137,13 +2132,13 @@ mod tests {
                 StructField {
                     name: "x".to_string(),
                     ty: Type::I32,
-                    is_private: false,
+
                     is_pub: true,
                 },
                 StructField {
                     name: "y".to_string(),
                     ty: Type::I32,
-                    is_private: false,
+
                     is_pub: true,
                 },
             ],
@@ -2191,19 +2186,19 @@ mod tests {
                 StructField {
                     name: "a".to_string(),
                     ty: Type::I32,
-                    is_private: false,
+
                     is_pub: true,
                 },
                 StructField {
                     name: "b".to_string(),
                     ty: Type::BOOL,
-                    is_private: false,
+
                     is_pub: true,
                 },
                 StructField {
                     name: "c".to_string(),
                     ty: Type::I64,
-                    is_private: false,
+
                     is_pub: true,
                 },
             ],

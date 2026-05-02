@@ -342,7 +342,7 @@ Net: `gruel-runtime/src/string.rs` collapses from ~490 LOC to ~50 LOC.
 
 - **Should `terminated_ptr` mirror `Vec`'s explicit-sentinel form for consistency, even though `0` is the only sensible choice for C strings?** I.e., `s.terminated_ptr(0u8)` vs `s.terminated_ptr()`. Leaning toward the no-arg form (NUL is implicit for strings); revisit if non-NUL-terminated FFI use cases emerge.
 - **Should `from_utf8`'s `Err` carry a UTF-8-error position alongside the `Vec(u8)`?** v1 says no — just `Result(String, Vec(u8))`. A future `from_utf8_with_position` returning `Result(String, (Vec(u8), usize))` is cheap to add when there's demand.
-- **Should the `private` flag default to `true` for new built-in fields, with public being opt-in?** v1 makes both opt-in (default `false`). When more built-ins use private fields, revisit the default — it's a one-line change.
+- **Should the `private` flag default to `true` for new built-in fields, with public being opt-in?** Resolved by ADR-0073: `BuiltinField` now carries `is_pub: bool` (the inverse), and built-ins are homed in the synthetic `<builtin>` module so non-`pub` fields are unreachable from user code via the unified `is_accessible` check. New built-in fields default to non-`pub` (i.e., the safer "hidden" state).
 
 ## Future Work
 

@@ -184,10 +184,10 @@ Calling a method with associated function syntax (Type::method()) is a compile-t
 
 {{ rule(id="6.4:24", cat="dynamic-semantics") }}
 
-(ADR-0073, preview `field_method_visibility`.) A method definition **MAY**
-be prefixed with the `pub` keyword. A method marked `pub` is callable from
-any module that can name the enclosing struct or enum. A method without
-`pub` is callable only from within the same module as the type definition.
+(ADR-0073.) A method definition **MAY** be prefixed with the `pub`
+keyword. A method marked `pub` is callable from any module that can
+name the enclosing struct or enum. A method without `pub` is callable
+only from within the same module as the type definition.
 
 {{ rule(id="6.4:25", cat="informative") }}
 

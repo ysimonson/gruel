@@ -1336,7 +1336,7 @@ impl<'a> Sema<'a> {
                     resolved_fields.push(StructField {
                         name: self.interner.resolve(field_name).to_string(),
                         ty: field_ty,
-                        is_private: false,
+
                         is_pub: *is_pub,
                     });
                 }

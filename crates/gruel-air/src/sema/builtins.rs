@@ -34,11 +34,9 @@ impl<'a> Sema<'a> {
                 .map(|f| StructField {
                     name: f.name.to_string(),
                     ty: self.resolve_builtin_field_type(f.ty),
-                    // ADR-0073: builtins now use the unified is_pub flag;
-                    // is_private is retained as a no-op for the legacy
-                    // sema check sites (they're still in place for
-                    // back-compat but always read `false` after this phase).
-                    is_private: false,
+                    // ADR-0073: built-ins are homed in `<builtin>`, so
+                    // non-pub fields are unreachable from user code via
+                    // the unified `is_accessible` check.
                     is_pub: f.is_pub,
                 })
                 .collect();

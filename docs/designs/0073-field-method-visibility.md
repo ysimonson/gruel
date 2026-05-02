@@ -1,12 +1,12 @@
 ---
 id: 0073
 title: Field and Method Visibility
-status: proposal
+status: implemented
 tags: [visibility, modules, builtins, types]
 feature-flag: field_method_visibility
 created: 2026-05-01
-accepted:
-implemented:
+accepted: 2026-05-01
+implemented: 2026-05-01
 spec-sections: ["6.2", "6.4"]
 superseded-by:
 ---
@@ -15,7 +15,10 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented and stabilized. The `field_method_visibility` preview gate
+has been retired; `pub` on fields and methods ships as part of the
+language proper, and the ad-hoc `BuiltinField::private` flag from
+ADR-0072 §2 is replaced by the unified module-equivalence check.
 
 ## Summary
 
@@ -367,7 +370,7 @@ Each phase is independently committable.
     default in the spec runner (to catch missed audit cases before
     stabilization).
 
-- [ ] **Phase 6: Stabilize**
+- [x] **Phase 6: Stabilize**
   - Remove the preview gate; the new behavior becomes the default and the
     only behavior. Remove `PreviewFeature::FieldMethodVisibility`.
   - Update ADR-0072's status note: §2 (the ad-hoc `private` flag) is

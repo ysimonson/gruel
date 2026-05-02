@@ -387,7 +387,7 @@ impl<'a> Sema<'a> {
                     struct_fields.push(crate::types::StructField {
                         name: i.to_string(),
                         ty: elem_ty,
-                        is_private: false,
+
                         is_pub: true,
                     });
                 }

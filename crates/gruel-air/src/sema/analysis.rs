@@ -1459,22 +1459,15 @@ impl<'a> Sema<'a> {
 
     /// ADR-0073: cross-module field visibility check.
     ///
-    /// Built-in types always run the check (they live in the synthetic
-    /// `<builtin>` file, so non-`pub` fields are unreachable from user
-    /// code). User-defined types only run the check when `--preview
-    /// field_method_visibility` is enabled, until ADR-0073 stabilizes.
+    /// Non-`pub` fields are accessible only from inside the type's home
+    /// module. Built-ins are homed in the synthetic `<builtin>` file, so
+    /// their non-`pub` fields are unreachable from user code.
     pub(crate) fn check_field_visibility(
         &self,
         struct_def: &crate::types::StructDef,
         field: &crate::types::StructField,
         access_span: Span,
     ) -> CompileResult<()> {
-        let preview_on = self
-            .preview_features
-            .contains(&PreviewFeature::FieldMethodVisibility);
-        if !struct_def.is_builtin && !preview_on {
-            return Ok(());
-        }
         let accessing_file_id = access_span.file_id;
         let target_file_id = struct_def.file_id;
         if !self.is_accessible(accessing_file_id, target_file_id, field.is_pub) {
@@ -1491,23 +1484,17 @@ impl<'a> Sema<'a> {
 
     /// ADR-0073: cross-module method visibility check.
     ///
-    /// Built-in types always run the check. User-defined types only run
-    /// when `--preview field_method_visibility` is enabled.
+    /// Non-`pub` methods are callable only from inside the type's home
+    /// module.
     pub(crate) fn check_method_visibility(
         &self,
         type_name: &str,
-        is_builtin: bool,
+        _is_builtin: bool,
         method_is_pub: bool,
         method_file_id: gruel_util::FileId,
         method_name: &str,
         access_span: Span,
     ) -> CompileResult<()> {
-        let preview_on = self
-            .preview_features
-            .contains(&PreviewFeature::FieldMethodVisibility);
-        if !is_builtin && !preview_on {
-            return Ok(());
-        }
         let accessing_file_id = access_span.file_id;
         if !self.is_accessible(accessing_file_id, method_file_id, method_is_pub) {
             return Err(CompileError::new(
@@ -2758,7 +2745,7 @@ impl<'a> Sema<'a> {
                     struct_fields.push(StructField {
                         name: name_str,
                         ty: field_ty,
-                        is_private: false,
+
                         is_pub: true,
                     });
                 }
@@ -5843,7 +5830,7 @@ impl<'a> Sema<'a> {
                     struct_fields.push(StructField {
                         name: name_str,
                         ty: field_ty,
-                        is_private: false,
+
                         is_pub: true,
                     });
                 }
@@ -6201,7 +6188,7 @@ impl<'a> Sema<'a> {
                     struct_fields.push(StructField {
                         name: name_str,
                         ty: field_ty,
-                        is_private: false,
+
                         is_pub: true,
                     });
                 }
@@ -6834,13 +6821,13 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "kind".to_string(),
                 ty: typekind_type,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
-                is_private: false,
+
                 is_pub: true,
             },
         ];
@@ -6872,25 +6859,25 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "kind".to_string(),
                 ty: typekind_type,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "bits".to_string(),
                 ty: Type::I32,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "is_signed".to_string(),
                 ty: Type::BOOL,
-                is_private: false,
+
                 is_pub: true,
             },
         ];
@@ -6940,13 +6927,13 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "field_type".to_string(),
                 ty: Type::COMPTIME_TYPE,
-                is_private: false,
+
                 is_pub: true,
             },
         ];
@@ -6979,25 +6966,25 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "kind".to_string(),
                 ty: typekind_type,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "field_count".to_string(),
                 ty: Type::I32,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "fields".to_string(),
                 ty: fields_array_type,
-                is_private: false,
+
                 is_pub: true,
             },
         ];
@@ -7065,13 +7052,13 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "field_type".to_string(),
                 ty: Type::COMPTIME_TYPE,
-                is_private: false,
+
                 is_pub: true,
             },
         ];
@@ -7107,19 +7094,19 @@ impl<'a> Sema<'a> {
                 StructField {
                     name: "name".to_string(),
                     ty: Type::COMPTIME_STR,
-                    is_private: false,
+
                     is_pub: true,
                 },
                 StructField {
                     name: "field_count".to_string(),
                     ty: Type::I32,
-                    is_private: false,
+
                     is_pub: true,
                 },
                 StructField {
                     name: "fields".to_string(),
                     ty: vfields_array_type,
-                    is_private: false,
+
                     is_pub: true,
                 },
             ];
@@ -7151,19 +7138,19 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "field_count".to_string(),
                 ty: Type::I32,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "fields".to_string(),
                 ty: empty_fields_array_type,
-                is_private: false,
+
                 is_pub: true,
             },
         ];
@@ -7177,25 +7164,25 @@ impl<'a> Sema<'a> {
             StructField {
                 name: "kind".to_string(),
                 ty: typekind_type,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "name".to_string(),
                 ty: Type::COMPTIME_STR,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "variant_count".to_string(),
                 ty: Type::I32,
-                is_private: false,
+
                 is_pub: true,
             },
             StructField {
                 name: "variants".to_string(),
                 ty: variants_array_type,
-                is_private: false,
+
                 is_pub: true,
             },
         ];

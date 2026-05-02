@@ -4547,7 +4547,7 @@ impl<'a> Sema<'a> {
             .map(|(i, r)| StructField {
                 name: i.to_string(),
                 ty: r.ty,
-                is_private: false,
+
                 is_pub: true,
             })
             .collect();

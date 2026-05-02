@@ -1,16 +1,16 @@
 [section]
 id = "modules.field_method_visibility"
 name = "Field and Method Visibility"
-description = "ADR-0073: pub on fields and methods. Visibility checks gated behind --preview field_method_visibility until stabilization."
+description = "ADR-0073: pub on fields and methods. Cross-module access requires pub; intra-module access is unrestricted."
 
 # =============================================================================
-# Same-module access (always allowed, no preview gate needed)
+# Same-module access
 # =============================================================================
 
 [[case]]
 name = "intra_module_private_field_accessible"
 spec = ["6.2:11"]
-description = "Private fields are accessible within the same module"
+description = "Non-pub fields are accessible within the same module"
 source = """
 struct Account { balance: i32 }
 fn main() -> i32 {
@@ -23,7 +23,7 @@ exit_code = 42
 [[case]]
 name = "intra_module_private_method_accessible"
 spec = ["6.4:24"]
-description = "Private methods are accessible within the same module"
+description = "Non-pub methods are accessible within the same module"
 source = """
 struct Counter {
     value: i32,
@@ -50,14 +50,12 @@ fn main() -> i32 {
 exit_code = 42
 
 # =============================================================================
-# Cross-directory access with preview gate
+# Cross-directory access
 # =============================================================================
 
 [[case]]
 name = "cross_dir_pub_field_accessible"
 spec = ["6.2:11"]
-preview = "field_method_visibility"
-preview_should_pass = true
 description = "Pub fields are accessible from another directory module"
 source = """
 fn main() -> i32 {
@@ -76,8 +74,6 @@ exit_code = 42
 [[case]]
 name = "cross_dir_private_field_rejected_read"
 spec = ["6.2:11"]
-preview = "field_method_visibility"
-preview_should_pass = true
 description = "Reading a non-pub field from another directory module is rejected"
 source = """
 fn main() -> i32 {
@@ -97,8 +93,6 @@ error_contains = "balance"
 [[case]]
 name = "cross_dir_private_field_rejected_in_literal"
 spec = ["6.2:11"]
-preview = "field_method_visibility"
-preview_should_pass = true
 description = "Constructing with a non-pub field name from another directory is rejected"
 source = """
 fn main() -> i32 {
@@ -118,8 +112,6 @@ error_contains = "balance"
 [[case]]
 name = "cross_dir_pub_method_accessible"
 spec = ["6.4:24"]
-preview = "field_method_visibility"
-preview_should_pass = true
 description = "Pub methods are callable from another directory module"
 source = """
 fn main() -> i32 {
@@ -143,8 +135,6 @@ exit_code = 42
 [[case]]
 name = "cross_dir_private_method_rejected"
 spec = ["6.4:24"]
-preview = "field_method_visibility"
-preview_should_pass = true
 description = "Calling a non-pub method from another directory is rejected"
 source = """
 fn main() -> i32 {
@@ -165,4 +155,3 @@ pub struct Counter {
 pass_aux_files = true
 compile_fail = true
 error_contains = "helper"
-

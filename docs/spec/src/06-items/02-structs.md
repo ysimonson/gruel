@@ -81,11 +81,11 @@ fn main() -> i32 {
 
 {{ rule(id="6.2:11", cat="dynamic-semantics") }}
 
-(ADR-0073, preview `field_method_visibility`.) A field declaration **MAY**
-be prefixed with the `pub` keyword. A field marked `pub` is accessible from
-any module that can name the enclosing struct. A field without `pub` is
-accessible only from within the same module as the struct definition (per
-the same module-equivalence rule used by item visibility in ADR-0026).
+(ADR-0073.) A field declaration **MAY** be prefixed with the `pub`
+keyword. A field marked `pub` is accessible from any module that can
+name the enclosing struct. A field without `pub` is accessible only
+from within the same module as the struct definition (per the same
+module-equivalence rule used by item visibility in ADR-0026).
 
 {{ rule(id="6.2:12", cat="informative") }}
 
