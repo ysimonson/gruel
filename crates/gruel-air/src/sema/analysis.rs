@@ -4229,6 +4229,18 @@ impl<'a> Sema<'a> {
                 span,
             );
         }
+        // ADR-0072: same redirect for `String::from_c_str(p)`.
+        if self.is_builtin_string(Type::new_struct(struct_id)) && function_name_str == "from_c_str"
+        {
+            return self.dispatch_string_prelude_assoc_fn(
+                air,
+                ctx,
+                "String__from_c_str",
+                &function_name_str,
+                &args,
+                span,
+            );
+        }
 
         // Handle builtin type associated functions
         if let Some(builtin_def) = self.get_builtin_type_def(struct_id) {
@@ -4485,7 +4497,55 @@ impl<'a> Sema<'a> {
             IntrinsicId::Utf8Validate => {
                 self.analyze_utf8_validate_intrinsic(air, &args, span, ctx)
             }
+            // ADR-0072: copy a NUL-terminated C string into a fresh Vec(u8).
+            IntrinsicId::VecFromCStr => {
+                self.analyze_vec_from_c_str_intrinsic(air, &args, span, ctx)
+            }
         }
+    }
+
+    /// Analyze `@vec_from_c_str(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).
+    fn analyze_vec_from_c_str_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        Self::require_checked_for_intrinsic(ctx, "vec_from_c_str", span)?;
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: 1,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+        let p = self.analyze_inst(air, args[0].value, ctx)?;
+        // Accept Ptr(u8) only.
+        let is_ptr_u8 = matches!(p.ty.kind(), TypeKind::PtrConst(_));
+        if !is_ptr_u8 && !p.ty.is_error() {
+            return Err(CompileError::type_mismatch(
+                "Ptr(u8)".to_string(),
+                self.format_type_name(p.ty),
+                span,
+            ));
+        }
+        let vec_id = self.type_pool.intern_vec_from_type(Type::U8);
+        let vec_ty = Type::new_vec(vec_id);
+        let args_start = air.add_extra(&[p.air_ref.as_u32()]);
+        let name = self.interner.get_or_intern_static("vec_from_c_str");
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name,
+                args_start,
+                args_len: 1,
+            },
+            ty: vec_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, vec_ty))
     }
 
     /// ADR-0072: dispatch `String::name(args)` to a prelude function whose

@@ -110,6 +110,7 @@ pub enum IntrinsicId {
 
     // ---- ADR-0072 String / Vec(u8) bridge ----
     Utf8Validate,
+    VecFromCStr,
 
     // ---- Preview / test infra ----
     TestPreviewGate,
@@ -984,6 +985,21 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &[],
     },
     IntrinsicDef {
+        id: IntrinsicId::VecFromCStr,
+        name: "vec_from_c_str",
+        kind: IntrinsicKind::Expr,
+        category: Category::Meta,
+        requires_unchecked: true,
+        // Implementation-detail intrinsic invoked by the prelude
+        // `String__from_c_str` body. The user-visible gate is on
+        // `String::from_c_str` itself (ADR-0072).
+        preview: None,
+        runtime_fn: Some("__gruel_vec_from_c_str"),
+        summary: "Copy a NUL-terminated C string into a fresh Vec(u8).",
+        description: "`@vec_from_c_str(p: Ptr(u8)) -> Vec(u8)` runs `strlen(p)`, allocates `cap >= len` bytes, and copies. Used by `String::from_c_str` (ADR-0072).",
+        examples: &["@vec_from_c_str(p)"],
+    },
+    IntrinsicDef {
         id: IntrinsicId::Utf8Validate,
         name: "utf8_validate",
         kind: IntrinsicKind::Expr,
@@ -1524,7 +1540,8 @@ mod tests {
                 | IntrinsicId::VecDispose
                 | IntrinsicId::PartsToVec
                 | IntrinsicId::TestPreviewGate
-                | IntrinsicId::Utf8Validate => {}
+                | IntrinsicId::Utf8Validate
+                | IntrinsicId::VecFromCStr => {}
             }
         }
     }
@@ -1590,6 +1607,8 @@ mod tests {
             "vec_ptr_mut",
             "vec_terminated_ptr",
             "parts_to_vec",
+            // ADR-0072
+            "vec_from_c_str",
         ]
         .into_iter()
         .collect();

@@ -71,6 +71,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@vec_dispose` | expr | Vectors | — | — | Free a Vec's heap buffer; panic if `len != 0`. |
 | `@parts_to_vec` | expr | Vectors | — | yes | Build a Vec from raw parts. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
+| `@vec_from_c_str` | expr | Preview / Meta | — | yes | Copy a NUL-terminated C string into a fresh Vec(u8). |
 | `@utf8_validate` | expr | Preview / Meta | — | — | Check whether a byte slice is well-formed UTF-8. |
 
 ## Debug & Diagnostics
@@ -505,6 +506,19 @@ for i in @range(0, 10) { ... }
 `@test_preview_gate()` exists solely to verify that the preview-feature gating mechanism works. Always gated behind `--preview test_infra`.
 
 - **Preview gate:** `--preview test_infra` (ADR-0005)
+
+### `@vec_from_c_str`
+
+`@vec_from_c_str(p: Ptr(u8)) -> Vec(u8)` runs `strlen(p)`, allocates `cap >= len` bytes, and copies. Used by `String::from_c_str` (ADR-0072).
+
+- **Runtime symbol:** `__gruel_vec_from_c_str`
+- **Requires:** `checked { ... }` block
+
+**Examples:**
+
+```gruel
+@vec_from_c_str(p)
+```
 
 ### `@utf8_validate`
 

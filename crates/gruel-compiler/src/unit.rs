@@ -262,6 +262,14 @@ fn String__from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
         R::Err(e)
     }
 }
+
+// ADR-0072: validated `Ptr(u8) -> String` conversion. strlen + alloc +
+// memcpy into a `Vec(u8)` (via `__gruel_vec_from_c_str`), then forwards
+// to `String__from_utf8`.
+fn String__from_c_str(p: Ptr(u8)) -> Result(String, Utf8DecodeError) {
+    let v: Vec(u8) = checked { @vec_from_c_str(p) };
+    String__from_utf8(v)
+}
 "#;
 
 /// Result of parsing a single file within a compilation unit.

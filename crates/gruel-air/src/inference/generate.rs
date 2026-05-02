@@ -847,6 +847,12 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::BOOL)
                     }
+                    Some(IntrinsicId::VecFromCStr) => {
+                        // ADR-0072: returns Vec(u8).
+                        visit_args(self, ctx);
+                        let vec_id = self.type_pool.intern_vec_from_type(Type::U8);
+                        InferType::Concrete(Type::new_vec(vec_id))
+                    }
                     // Other intrinsics (@dbg, @assert, @test_preview_gate, @import)
                     // and any unknown name return Unit. Sema handles the unknown case
                     // with a proper diagnostic; we just pick a coherent type here.

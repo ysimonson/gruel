@@ -4068,9 +4068,40 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             // convert to bool.
             IntrinsicId::Utf8Validate => Some(self.translate_utf8_validate(args)),
 
+            // ADR-0072: @vec_from_c_str(p) — call __gruel_vec_from_c_str(out, p)
+            // via sret, return the Vec(u8) aggregate.
+            IntrinsicId::VecFromCStr => Some(self.translate_vec_from_c_str(args)),
+
             // ---- Fallback: return zero value for unimplemented intrinsics ----
             _ => gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero()),
         }
+    }
+
+    /// Codegen for `@vec_from_c_str(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).
+    /// Calls `__gruel_vec_from_c_str(out: *mut VecU8Result, p: *const u8)`
+    /// via the sret convention and loads the resulting Vec(u8) aggregate.
+    fn translate_vec_from_c_str(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
+        let p = self.get_value(args[0]).into_pointer_value();
+        let agg_ty = self.vec_agg_type();
+        let sret_slot = self.build_entry_alloca(agg_ty.into(), "vfcs_sret");
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let fn_ty = self
+            .ctx
+            .void_type()
+            .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
+        let callee = self
+            .module
+            .get_function("__gruel_vec_from_c_str")
+            .unwrap_or_else(|| {
+                self.module
+                    .add_function("__gruel_vec_from_c_str", fn_ty, None)
+            });
+        self.builder
+            .build_call(callee, &[sret_slot.into(), p.into()], "")
+            .unwrap();
+        self.builder
+            .build_load(agg_ty, sret_slot, "vfcs_load")
+            .unwrap()
     }
 
     /// Codegen for `@utf8_validate(s: borrow Slice(u8)) -> bool` (ADR-0072).
