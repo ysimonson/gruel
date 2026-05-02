@@ -17,7 +17,7 @@ use rustc_hash::FxHashMap as HashMap;
 pub type InterfaceVtables = HashMap<(StructId, InterfaceId), Vec<(StructId, Spur)>>;
 
 /// Result of analyzing a function.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct AnalyzedFunction {
     pub name: String,
     pub air: Air,

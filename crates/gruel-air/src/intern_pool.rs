@@ -72,7 +72,7 @@ use crate::types::{
 /// - 15: never
 /// - 16: error
 /// - 17-18: reserved for future primitives
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub struct InternedType(u32);
 
 impl InternedType {
@@ -176,7 +176,7 @@ impl std::fmt::Debug for InternedType {
 ///
 /// - **Struct** and **Enum** are nominal types: identity comes from the name
 /// - **Array**, **PtrConst**, and **PtrMut** are structural types: identity comes from element/pointee type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TypeData {
     /// User-defined struct (nominal type).
     ///
@@ -234,7 +234,7 @@ pub enum TypeData {
 ///
 /// During Phase 1, this mirrors the existing `StructDef` to verify correctness.
 /// In later phases, `StructDef` will be replaced by this.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructData {
     /// The name symbol (interned string).
     pub name: Spur,
@@ -248,7 +248,7 @@ pub struct StructData {
 ///
 /// During Phase 1, this mirrors the existing `EnumDef` to verify correctness.
 /// In later phases, `EnumDef` will be replaced by this.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumData {
     /// The name symbol (interned string).
     pub name: Spur,
