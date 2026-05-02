@@ -5,13 +5,31 @@
 //! Built-in types are registered before user code is processed,
 //! enabling collision detection and proper type resolution.
 
-use gruel_builtins::{BUILTIN_ENUMS, BUILTIN_TYPES, BuiltinFieldType, BuiltinTypeDef};
+use gruel_builtins::{
+    BUILTIN_ENUMS, BUILTIN_INTERFACES, BUILTIN_TYPES, BuiltinFieldType, BuiltinIfaceTy,
+    BuiltinTypeDef, ReceiverMode as BuiltinReceiverMode,
+};
 
 use super::Sema;
 use crate::types::{
     EnumDef, EnumVariantDef, IfaceTy, InterfaceDef, InterfaceId, InterfaceMethodReq, ReceiverMode,
     StructDef, StructField, StructId, Type, TypeKind,
 };
+
+fn convert_receiver_mode(mode: BuiltinReceiverMode) -> ReceiverMode {
+    match mode {
+        BuiltinReceiverMode::ByValue => ReceiverMode::ByValue,
+        BuiltinReceiverMode::ByRef => ReceiverMode::Borrow,
+        BuiltinReceiverMode::ByMutRef => ReceiverMode::Inout,
+    }
+}
+
+fn convert_iface_ty(ty: BuiltinIfaceTy) -> IfaceTy {
+    match ty {
+        BuiltinIfaceTy::SelfType => IfaceTy::SelfType,
+        BuiltinIfaceTy::Unit => IfaceTy::Concrete(Type::UNIT),
+    }
+}
 
 impl<'a> Sema<'a> {
     /// Phase 0: Inject built-in types as synthetic structs and enums.
@@ -121,62 +139,34 @@ impl<'a> Sema<'a> {
         self.inject_builtin_interfaces();
     }
 
-    /// Register `Drop` and `Copy` as compiler-recognized interfaces. Called
-    /// from `inject_builtin_types` so the names are already resolvable when
-    /// user code is parsed.
+    /// Register the compiler-recognized interfaces (`Drop`, `Copy`, `Clone`)
+    /// from the [`BUILTIN_INTERFACES`] registry. Called from
+    /// `inject_builtin_types` so the names are already resolvable when user
+    /// code is parsed.
     fn inject_builtin_interfaces(&mut self) {
-        let drop_name = self.interner.get_or_intern_static("Drop");
-        if !self.interfaces.contains_key(&drop_name) {
+        for builtin in BUILTIN_INTERFACES {
+            let name_spur = self.interner.get_or_intern_static(builtin.name);
+            if self.interfaces.contains_key(&name_spur) {
+                continue;
+            }
+            let methods = builtin
+                .methods
+                .iter()
+                .map(|m| InterfaceMethodReq {
+                    name: m.name.to_string(),
+                    receiver: convert_receiver_mode(m.receiver_mode),
+                    param_types: m.param_types.iter().map(|t| convert_iface_ty(*t)).collect(),
+                    return_type: convert_iface_ty(m.return_type),
+                })
+                .collect();
             let id = InterfaceId(self.interface_defs.len() as u32);
             self.interface_defs.push(InterfaceDef {
-                name: "Drop".to_string(),
-                methods: vec![InterfaceMethodReq {
-                    name: "drop".to_string(),
-                    receiver: ReceiverMode::ByValue,
-                    param_types: Vec::new(),
-                    return_type: IfaceTy::Concrete(Type::UNIT),
-                }],
+                name: builtin.name.to_string(),
+                methods,
                 is_pub: true,
                 file_id: gruel_util::FileId::new(0),
             });
-            self.interfaces.insert(drop_name, id);
-        }
-
-        let copy_name = self.interner.get_or_intern_static("Copy");
-        if !self.interfaces.contains_key(&copy_name) {
-            let id = InterfaceId(self.interface_defs.len() as u32);
-            self.interface_defs.push(InterfaceDef {
-                name: "Copy".to_string(),
-                methods: vec![InterfaceMethodReq {
-                    name: "copy".to_string(),
-                    receiver: ReceiverMode::Borrow,
-                    param_types: Vec::new(),
-                    return_type: IfaceTy::SelfType,
-                }],
-                is_pub: true,
-                file_id: gruel_util::FileId::new(0),
-            });
-            self.interfaces.insert(copy_name, id);
-        }
-
-        // ADR-0065: Clone is the third compiler-recognized interface.
-        // `fn clone(borrow self) -> Self`. Conformance is determined by
-        // `check_clone_conformance` in conformance.rs.
-        let clone_name = self.interner.get_or_intern_static("Clone");
-        if !self.interfaces.contains_key(&clone_name) {
-            let id = InterfaceId(self.interface_defs.len() as u32);
-            self.interface_defs.push(InterfaceDef {
-                name: "Clone".to_string(),
-                methods: vec![InterfaceMethodReq {
-                    name: "clone".to_string(),
-                    receiver: ReceiverMode::Borrow,
-                    param_types: Vec::new(),
-                    return_type: IfaceTy::SelfType,
-                }],
-                is_pub: true,
-                file_id: gruel_util::FileId::new(0),
-            });
-            self.interfaces.insert(clone_name, id);
+            self.interfaces.insert(name_spur, id);
         }
     }
 

@@ -33,6 +33,14 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 | `TypeKind` | `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array` |
 | `Ownership` | `Copy`, `Affine`, `Linear` |
 
+### Interfaces
+
+| Name | Methods | Conformance |
+|---|---|---|
+| `Drop` | `drop` | method presence |
+| `Copy` | `copy` | `@derive(Copy)` |
+| `Clone` | `clone` | `@derive(Clone)` |
+
 ## Types
 
 ### `String`
@@ -153,4 +161,38 @@ Built-in enums are injected as synthetic enum types. They are used by reflection
 | 0 | `Ownership::Copy` |
 | 1 | `Ownership::Affine` |
 | 2 | `Ownership::Linear` |
+
+## Interfaces
+
+Built-in interfaces are injected before user code is processed so their names are always resolvable. Conformance is structural — a type satisfies the interface when it provides matching methods.
+
+### `Drop`
+
+Types with custom cleanup logic that runs when the value goes out of scope (ADR-0059).
+
+**Required methods:**
+
+- `fn drop(self)`
+
+**Conformance:** structural (no derive). Defining `fn drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.
+
+### `Copy`
+
+Types that may be implicitly duplicated by bitwise copy on use (ADR-0059).
+
+**Required methods:**
+
+- `fn copy(&self) -> Self`
+
+**Conformance derive:** `@derive(Copy)` (compiler-recognized; no user `derive` declaration required). Validates that every field is `Copy` and tags the type as Copy. The `copy` method itself is never user-written; the compiler emits a bitwise copy. Mutually exclusive with `Drop`.
+
+### `Clone`
+
+Types that may be explicitly duplicated via `.clone()`. All `Copy` types auto-conform (ADR-0065).
+
+**Required methods:**
+
+- `fn clone(&self) -> Self`
+
+**Conformance derive:** `@derive(Clone)` (compiler-recognized; no user `derive` declaration required). Synthesizes a `clone` method that recursively calls `clone` on every field (struct) or variant payload (enum). Synthesis fails if any field is not `Clone`. Rejected on `linear` types.
 
