@@ -64,7 +64,7 @@ description = "push_char('B') extends 'A' to 'AB'"
 source = """
 fn main() -> i32 {
     let mut s: String = String::from_char('A');
-    s.push_char('B');
+    s.push('B');
     @cast(s.len())
 }
 """
@@ -78,7 +78,7 @@ description = "push_char('😀') extends a String by 4 UTF-8 bytes"
 source = """
 fn main() -> i32 {
     let mut s: String = String::from_char('A');
-    s.push_char('\\u{1F600}');
+    s.push('\\u{1F600}');
     @cast(s.len())
 }
 """
@@ -92,7 +92,7 @@ description = "Building 'AB' via from_char + push_char equals the literal \"AB\"
 source = """
 fn main() -> i32 {
     let mut s: String = String::from_char('A');
-    s.push_char('B');
+    s.push('B');
     if s == "AB" { 1 } else { 0 }
 }
 """

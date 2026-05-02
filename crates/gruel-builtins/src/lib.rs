@@ -495,19 +495,13 @@ pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
             return_ty: BuiltinReturnType::SelfType,
             runtime_fn: "String__push_str",
         },
+        // ADR-0072: `push(c: char)` is the safe codepoint-aware primary
+        // (was `push_char` in ADR-0071, renamed at ADR-0072 stabilization).
+        // Append the UTF-8 encoding of `c` (1-4 bytes) to `self`. The
+        // `char` invariant guarantees the appended bytes are well-formed
+        // UTF-8 by construction.
         BuiltinMethod {
             name: "push",
-            receiver_mode: ReceiverMode::ByMutRef,
-            params: &[BuiltinParam {
-                name: "byte",
-                ty: BuiltinParamType::U8,
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__push",
-        },
-        // ADR-0071: append the UTF-8 encoding of `c` (1-4 bytes) to `self`.
-        BuiltinMethod {
-            name: "push_char",
             receiver_mode: ReceiverMode::ByMutRef,
             params: &[BuiltinParam {
                 name: "c",

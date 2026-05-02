@@ -10,7 +10,7 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 
 | Name | Ownership | Methods | Associated fns | Operators |
 |---|---|---|---|---|
-| `String` | affine | 18 | 5 | `==`, `!=`, `<`, `<=`, `>`, `>=` |
+| `String` | affine | 17 | 5 | `==`, `!=`, `<`, `<=`, `>`, `>=` |
 
 ### Type Constructors
 
@@ -75,8 +75,7 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 - `fn ends_with(&self, suffix: String) -> bool` — runtime: `String__ends_with`
 - `fn concat(&self, other: String) -> String` — runtime: `String__concat`
 - `fn push_str(&mut self, other: String) -> String` — runtime: `String__push_str`
-- `fn push(&mut self, byte: u8) -> String` — runtime: `String__push`
-- `fn push_char(&mut self, c: char) -> String` — runtime: `String__push_char`
+- `fn push(&mut self, c: char) -> String` — runtime: `String__push_char`
 - `fn clear(&mut self) -> String` — runtime: `String__clear`
 - `fn reserve(&mut self, additional: usize) -> String` — runtime: `String__reserve`
 - `fn bytes_len(&self) -> usize` — runtime: `String__len`

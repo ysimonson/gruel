@@ -228,13 +228,18 @@ exit_code = 0
 [[case]]
 name = "string_push_byte"
 spec = ["3.10:16", "3.10:19"]
-description = "push() appends a single byte"
+preview = "string_vec_bridge"
+preview_should_pass = true
+description = "push_byte() appends a single byte (ADR-0072)"
 source = """
 fn main() -> i32 {
     let mut s = String::new();
     s.push_str("hello");
     let exclaim: u8 = 33;  // '!'
-    s.push(exclaim);
+    let _ = checked {
+        s.push_byte(exclaim);
+        0
+    };
     let six: usize = 6;
     if s.len() == six { 0 } else { 1 }
 }
@@ -446,15 +451,20 @@ exit_code = 0
 [[case]]
 name = "string_byte_semantics"
 spec = ["3.10:32"]
-description = "Strings are byte sequences"
+preview = "string_vec_bridge"
+preview_should_pass = true
+description = "Strings are byte sequences (push_byte from ADR-0072)"
 source = """
 fn main() -> i32 {
     let mut s = String::new();
     // Push some bytes
     let h: u8 = 72;   // 'H'
     let i: u8 = 105;  // 'i'
-    s.push(h);
-    s.push(i);
+    let _ = checked {
+        s.push_byte(h);
+        s.push_byte(i);
+        0
+    };
     let two: usize = 2;
     if s.len() == two { 0 } else { 1 }
 }
@@ -468,7 +478,9 @@ exit_code = 0
 [[case]]
 name = "string_building_message"
 spec = ["3.10:15", "3.10:16", "3.10:20"]
-description = "Build a complete message through appending"
+preview = "string_vec_bridge"
+preview_should_pass = true
+description = "Build a complete message through appending (push_byte from ADR-0072)"
 source = """
 fn main() -> i32 {
     let mut msg = String::new();
@@ -476,7 +488,10 @@ fn main() -> i32 {
     msg.push_str(", ");
     msg.push_str("world");
     let exclaim: u8 = 33;  // '!'
-    msg.push(exclaim);
+    let _ = checked {
+        msg.push_byte(exclaim);
+        0
+    };
     // "Hello, world!" is 13 bytes
     let thirteen: usize = 13;
     if msg.len() == thirteen { 0 } else { 1 }
