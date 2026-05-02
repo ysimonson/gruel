@@ -81,11 +81,34 @@ pub fn parse_all_files_cached(
     cache: &CacheStore,
     build_fp: &CacheKey,
 ) -> MultiErrorResult<(ParsedProgram, ParseCacheStats)> {
+    let build_interner = ThreadedRodeo::new();
+    let (files, stats) =
+        parse_files_into(&build_interner, sources, preview_features, cache, build_fp)?;
+    Ok((
+        ParsedProgram {
+            files,
+            interner: build_interner,
+        },
+        stats,
+    ))
+}
+
+/// Like [`parse_all_files_cached`], but appends parsed files into a
+/// caller-supplied build interner. Used by `CompilationUnit::parse` to
+/// share one `ThreadedRodeo` between the synthetic prelude (parsed
+/// uncached, the existing path) and user files (parsed cached, this
+/// path).
+pub fn parse_files_into(
+    build_interner: &ThreadedRodeo,
+    sources: &[SourceFile<'_>],
+    preview_features: &PreviewFeatures,
+    cache: &CacheStore,
+    build_fp: &CacheKey,
+) -> MultiErrorResult<(Vec<ParsedFile>, ParseCacheStats)> {
     let _span = info_span!("parse_cached", file_count = sources.len()).entered();
 
     let mut stats = ParseCacheStats::default();
     let mut parsed_files = Vec::with_capacity(sources.len());
-    let build_interner = ThreadedRodeo::new();
 
     for source in sources {
         let key = parse_key(build_fp, source.source.as_bytes());
@@ -139,7 +162,7 @@ pub fn parse_all_files_cached(
         // the AST's Spurs from cached numbering to build numbering. The
         // path is identical for hits and misses, so any latent bug in
         // remap shows up on cold builds too.
-        let remap = file_interner_snap.restore_into(&build_interner);
+        let remap = file_interner_snap.restore_into(build_interner);
         ast.remap_spurs(&remap);
 
         parsed_files.push(ParsedFile {
@@ -159,13 +182,7 @@ pub fn parse_all_files_cached(
         "parse cache pass complete"
     );
 
-    Ok((
-        ParsedProgram {
-            files: parsed_files,
-            interner: build_interner,
-        },
-        stats,
-    ))
+    Ok((parsed_files, stats))
 }
 
 /// Lex + parse one file into its own fresh `ThreadedRodeo`, returning

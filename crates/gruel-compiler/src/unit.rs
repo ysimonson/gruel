@@ -30,10 +30,20 @@ use tracing::{info, info_span};
 
 use crate::{
     AnalyzedFunction, Ast, AstGen, CfgBuilder, CompileError, CompileErrors, CompileOptions,
-    CompileOutput, CompileWarning, ErrorKind, FunctionWithCfg, Lexer, MultiErrorResult, Parser,
-    Rir, Sema, SourceFile, Type, TypeInternPool, compile_backend,
+    CompileOutput, CompileWarning, ErrorKind, FunctionWithCfg, Lexer, MultiErrorResult, OptLevel,
+    Parser, Rir, Sema, SourceFile, Type, TypeInternPool, compile_backend,
 };
-use gruel_util::FileId;
+use gruel_cache::{CacheKey, CacheStore, Hasher, compiler_fingerprint};
+use gruel_util::{FileId, PreviewFeature};
+
+fn opt_level_to_u32(o: OptLevel) -> u32 {
+    match o {
+        OptLevel::O0 => 0,
+        OptLevel::O1 => 1,
+        OptLevel::O2 => 2,
+        OptLevel::O3 => 3,
+    }
+}
 
 /// ADR-0065 / ADR-0070: the synthetic compiler prelude.
 ///
@@ -378,6 +388,68 @@ impl<'src> CompilationUnit<'src> {
     // Phase 1: Parsing
     // =========================================================================
 
+    /// Open the parse cache when `--preview incremental_compilation` is
+    /// enabled and `cache_dir` is configured. Returns `None` if either
+    /// requirement is missing, or if opening the store / hashing the
+    /// compiler binary fails (in which case the build silently
+    /// continues uncached — correctness is preserved).
+    fn open_parse_cache(&self) -> Option<(CacheStore, CacheKey)> {
+        if !self
+            .options
+            .preview_features
+            .contains(&PreviewFeature::IncrementalCompilation)
+        {
+            return None;
+        }
+        let dir = self.options.cache_dir.as_ref()?;
+
+        let store = match CacheStore::open(dir) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, dir = %dir.display(), "failed to open cache");
+                return None;
+            }
+        };
+
+        // Compose the compilation fingerprint from compiler-binary hash
+        // + target + opt level + sorted preview features.
+        let bin_path = match gruel_cache::current_binary_path() {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(error = %e, "could not resolve current binary path");
+                return None;
+            }
+        };
+        let memo_dir = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .map(|h| h.join(".cache").join("gruel").join("binary-hash"))
+            .unwrap_or_else(|| std::env::temp_dir().join("gruel-binary-hash"));
+        let compiler_fp = match compiler_fingerprint(&bin_path, &memo_dir) {
+            Ok(fp) => fp,
+            Err(e) => {
+                tracing::warn!(error = %e, "compiler_fingerprint failed");
+                return None;
+            }
+        };
+
+        let mut h = Hasher::new();
+        h.update(compiler_fp.as_bytes());
+        h.update_str(&format!("{}", self.options.target));
+        h.update_u32(opt_level_to_u32(self.options.opt_level));
+        let mut feats: Vec<&'static str> = self
+            .options
+            .preview_features
+            .iter()
+            .map(|f| f.name())
+            .collect();
+        feats.sort_unstable();
+        for f in feats {
+            h.update_str(f);
+        }
+        let build_fp = h.finalize();
+        Some((store, build_fp))
+    }
+
     /// Parse all source files.
     ///
     /// This runs lexing and parsing on each source file, producing ASTs.
@@ -414,30 +486,60 @@ impl<'src> CompilationUnit<'src> {
             ast: prelude_ast,
         });
 
-        for source in &self.sources {
-            let _file_span = info_span!("parse_file", path = %source.path).entered();
+        // ADR-0074 Phase 2: when --preview incremental_compilation is on
+        // AND a cache_dir is configured, route user-file parsing through
+        // the on-disk cache. The prelude (above) is always parsed
+        // uncached because its source is a constant in the binary; its
+        // Spurs are already in `interner`, which the cache wiring then
+        // reuses as the build-shared interner.
+        let cache_handle = self.open_parse_cache();
+        if let Some((store, build_fp)) = cache_handle {
+            let (cached_files, stats) = crate::parse_cache::parse_files_into(
+                &interner,
+                &self.sources,
+                &self.options.preview_features,
+                &store,
+                &build_fp,
+            )?;
+            info!(
+                hits = stats.hits,
+                misses = stats.misses,
+                files = self.sources.len(),
+                "parse cache complete"
+            );
+            for file in cached_files {
+                parsed_files.push(ParsedFileData {
+                    path: file.path,
+                    ast: file.ast,
+                });
+            }
+        } else {
+            for source in &self.sources {
+                let _file_span = info_span!("parse_file", path = %source.path).entered();
 
-            // Create lexer with shared interner and file ID
-            let lexer = Lexer::with_interner_and_file_id(source.source, interner, source.file_id);
+                // Create lexer with shared interner and file ID
+                let lexer =
+                    Lexer::with_interner_and_file_id(source.source, interner, source.file_id);
 
-            // Tokenize
-            let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
-            interner = returned_interner;
+                // Tokenize
+                let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
+                interner = returned_interner;
 
-            info!(token_count = tokens.len(), "lexing complete");
+                info!(token_count = tokens.len(), "lexing complete");
 
-            // Parse
-            let parser = Parser::new(tokens, interner)
-                .with_preview_features(self.options.preview_features.clone());
-            let (ast, returned_interner) = parser.parse()?;
-            interner = returned_interner;
+                // Parse
+                let parser = Parser::new(tokens, interner)
+                    .with_preview_features(self.options.preview_features.clone());
+                let (ast, returned_interner) = parser.parse()?;
+                interner = returned_interner;
 
-            info!(item_count = ast.items.len(), "parsing complete");
+                info!(item_count = ast.items.len(), "parsing complete");
 
-            parsed_files.push(ParsedFileData {
-                path: source.path.to_string(),
-                ast,
-            });
+                parsed_files.push(ParsedFileData {
+                    path: source.path.to_string(),
+                    ast,
+                });
+            }
         }
 
         // Merge symbols and check for duplicates

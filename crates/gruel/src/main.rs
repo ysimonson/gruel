@@ -540,7 +540,30 @@ fn main() {
         return;
     }
 
-    // Normal compilation - uses multi-file compilation for all source files
+    // Normal compilation - uses multi-file compilation for all source files.
+    //
+    // ADR-0074: when --preview incremental_compilation is enabled, route
+    // parsing through the on-disk cache. cache_dir defaults to
+    // `target/gruel-cache/` next to the first source file when not
+    // explicitly provided.
+    let resolved_cache_dir = if options
+        .preview_features
+        .contains(&PreviewFeature::IncrementalCompilation)
+    {
+        Some(match &options.cache_dir {
+            Some(p) => std::path::PathBuf::from(p),
+            None => {
+                let first = std::path::Path::new(&options.source_paths[0]);
+                first
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."))
+                    .join("target")
+                    .join("gruel-cache")
+            }
+        })
+    } else {
+        None
+    };
     let compile_options = CompileOptions {
         target: options.target,
         linker: options.linker.clone(),
@@ -548,6 +571,7 @@ fn main() {
         preview_features: options.preview_features.clone(),
         jobs: options.jobs,
         capture_comptime_dbg: options.capture_comptime_dbg,
+        cache_dir: resolved_cache_dir,
     };
     match compile_multi_file_with_options(&source_files, &compile_options) {
         Ok(output) => {
