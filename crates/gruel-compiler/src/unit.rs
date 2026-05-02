@@ -45,6 +45,38 @@ fn opt_level_to_u32(o: OptLevel) -> u32 {
     }
 }
 
+/// Run sema on the merged RIR. Extracted so the AIR-cache miss path
+/// (ADR-0074 Phase 4) can call it in two places without duplicating
+/// the boilerplate.
+fn run_sema(
+    rir: &Rir,
+    interner: &ThreadedRodeo,
+    options: &CompileOptions,
+    file_paths: HashMap<FileId, String>,
+) -> MultiErrorResult<gruel_air::SemaOutput> {
+    let _span = info_span!("sema").entered();
+    let mut sema = Sema::new(rir, interner, options.preview_features.clone());
+    sema.set_file_paths(file_paths);
+    sema.set_suppress_comptime_dbg_print(options.capture_comptime_dbg);
+    let output = sema.analyze_all()?;
+    info!(
+        function_count = output.functions.len(),
+        struct_count = output.type_pool.stats().struct_count,
+        "semantic analysis complete"
+    );
+    Ok(output)
+}
+
+/// Clone a slice of analyzed functions for the AIR cache write path.
+fn clone_functions(fns: &[gruel_air::AnalyzedFunction]) -> Vec<gruel_air::AnalyzedFunction> {
+    fns.to_vec()
+}
+
+/// Snapshot a TypeInternPool for the AIR cache write path.
+fn clone_type_pool(pool: &gruel_air::TypeInternPool) -> gruel_air::TypeInternPool {
+    pool.clone_snapshot()
+}
+
 /// ADR-0065 / ADR-0070: the synthetic compiler prelude.
 ///
 /// Contains canonical type definitions injected into every compilation:
@@ -387,6 +419,25 @@ impl<'src> CompilationUnit<'src> {
     // =========================================================================
     // Phase 1: Parsing
     // =========================================================================
+
+    /// Open the AIR cache for whole-program AIR caching (ADR-0074
+    /// Phase 4). Returns `None` when the preview gate is off, the
+    /// cache_dir is not configured, or the underlying machinery
+    /// (CacheStore / compiler_fingerprint) fails. The cache key
+    /// concatenates every source file's content so any change to any
+    /// file invalidates the whole-program AIR — the per-file
+    /// granularity from the ADR design needs sema to run per-file,
+    /// which is its own refactor.
+    fn open_air_cache(&self) -> Option<(CacheStore, CacheKey)> {
+        let (store, build_fp) = self.open_parse_cache()?;
+        let mut h = Hasher::new();
+        h.update(build_fp.as_bytes());
+        for source in &self.sources {
+            h.update_str(source.path);
+            h.update_str(source.source);
+        }
+        Some((store, h.finalize()))
+    }
 
     /// Open the parse cache when `--preview incremental_compilation` is
     /// enabled and `cache_dir` is configured. Returns `None` if either
@@ -764,19 +815,81 @@ impl<'src> CompilationUnit<'src> {
         let rir = self.rir.as_ref().expect("analyze() called before lower()");
         let interner = self.interner.as_ref().expect("interner not initialized");
 
+        // ADR-0074 Phase 4: try the whole-program AIR cache first.
+        // Per-file AIR caching needs sema to run per-file (currently
+        // it runs program-wide on the merged AST). Whole-program is
+        // coarser but exercises the full cache pipeline end-to-end.
+        let air_cache_handle = self.open_air_cache();
+
         // Semantic analysis
-        let sema_output = {
-            let _span = info_span!("sema").entered();
-            let mut sema = Sema::new(rir, interner, self.options.preview_features.clone());
-            sema.set_file_paths(self.file_paths.clone());
-            sema.set_suppress_comptime_dbg_print(self.options.capture_comptime_dbg);
-            let output = sema.analyze_all()?;
-            info!(
-                function_count = output.functions.len(),
-                struct_count = output.type_pool.stats().struct_count,
-                "semantic analysis complete"
-            );
-            output
+        let sema_output = if let Some((store, key)) = &air_cache_handle {
+            match store.get(gruel_cache::CacheKind::Air, key) {
+                Ok(Some(bytes)) => match gruel_cache::CachedAirOutput::decode(&bytes) {
+                    Ok(cached) => {
+                        info!("air cache hit");
+                        // Restore the build's interner to the cached
+                        // state. This is sound because the AIR cache is
+                        // whole-program — every Spur in cached AIR was
+                        // produced against this snapshot. Replay
+                        // re-interns each cached string back into the
+                        // build's interner; for newly-empty interners
+                        // (typical at this point), this restores the
+                        // original Spur values.
+                        let _remap = cached.interner.restore_into(interner);
+                        // Replay comptime @dbg output to stderr so cache
+                        // hits are observably identical to cold builds
+                        // (ADR-0074 "Comptime side-effects replay").
+                        if !self.options.capture_comptime_dbg {
+                            for line in &cached.comptime_dbg_output {
+                                eprintln!("{}", line);
+                            }
+                        }
+                        // Note: warnings are not cached yet (DiagnosticWrapper
+                        // serde is its own follow-up); cache hits omit
+                        // them. Documented in ADR-0074.
+                        gruel_air::SemaOutput {
+                            functions: cached.functions,
+                            strings: cached.strings,
+                            bytes: cached.bytes,
+                            warnings: Vec::new(),
+                            type_pool: cached.type_pool,
+                            comptime_dbg_output: cached.comptime_dbg_output,
+                            interface_defs: cached.interface_defs,
+                            interface_vtables: cached.interface_vtables,
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "air cache decode failed; recomputing");
+                        run_sema(rir, interner, &self.options, self.file_paths.clone())?
+                    }
+                },
+                _ => {
+                    info!("air cache miss");
+                    let output = run_sema(rir, interner, &self.options, self.file_paths.clone())?;
+                    // Best-effort cache write; failure is not a build error.
+                    let cached = gruel_cache::CachedAirOutput {
+                        interner: gruel_cache::InternerSnapshot::capture(interner),
+                        functions: clone_functions(&output.functions),
+                        type_pool: clone_type_pool(&output.type_pool),
+                        strings: output.strings.clone(),
+                        bytes: output.bytes.clone(),
+                        interface_defs: output.interface_defs.clone(),
+                        interface_vtables: output.interface_vtables.clone(),
+                        comptime_dbg_output: output.comptime_dbg_output.clone(),
+                    };
+                    match cached.encode() {
+                        Ok(bytes) => {
+                            if let Err(e) = store.put(gruel_cache::CacheKind::Air, key, &bytes) {
+                                tracing::warn!(error = %e, "air cache write failed");
+                            }
+                        }
+                        Err(e) => tracing::warn!(error = %e, "air cache encode failed"),
+                    }
+                    output
+                }
+            }
+        } else {
+            run_sema(rir, interner, &self.options, self.file_paths.clone())?
         };
 
         // Synthesize drop glue functions

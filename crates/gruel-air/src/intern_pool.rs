@@ -426,6 +426,70 @@ struct TypeInternPoolInner {
 }
 
 impl TypeInternPool {
+    /// Clone the pool by snapshotting its canonical types and
+    /// reconstructing the structural-dedup HashMaps. Used by
+    /// ADR-0074 Phase 4's AIR cache write to capture sema's pool
+    /// state without taking ownership of it. Behavior matches
+    /// serde round-trip — both produce a pool whose
+    /// `intern_*(...)` calls return the same `InternedType`s as
+    /// the original.
+    pub fn clone_snapshot(&self) -> Self {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let mut new_inner = TypeInternPoolInner {
+            types: Vec::with_capacity(inner.types.len()),
+            array_map: HashMap::default(),
+            ptr_const_map: HashMap::default(),
+            ptr_mut_map: HashMap::default(),
+            ref_map: HashMap::default(),
+            mut_ref_map: HashMap::default(),
+            slice_map: HashMap::default(),
+            mut_slice_map: HashMap::default(),
+            vec_map: HashMap::default(),
+            struct_by_name: HashMap::default(),
+            enum_by_name: HashMap::default(),
+            layout_cache: HashMap::default(),
+        };
+        for data in &inner.types {
+            let idx = InternedType(InternedType::PRIMITIVE_COUNT + new_inner.types.len() as u32);
+            match data {
+                TypeData::Struct(s) => {
+                    new_inner.struct_by_name.insert(s.name, idx);
+                }
+                TypeData::Enum(e) => {
+                    new_inner.enum_by_name.insert(e.name, idx);
+                }
+                TypeData::Array { element, len } => {
+                    new_inner.array_map.insert((*element, *len), idx);
+                }
+                TypeData::PtrConst { pointee } => {
+                    new_inner.ptr_const_map.insert(*pointee, idx);
+                }
+                TypeData::PtrMut { pointee } => {
+                    new_inner.ptr_mut_map.insert(*pointee, idx);
+                }
+                TypeData::Ref { referent } => {
+                    new_inner.ref_map.insert(*referent, idx);
+                }
+                TypeData::MutRef { referent } => {
+                    new_inner.mut_ref_map.insert(*referent, idx);
+                }
+                TypeData::Slice { element } => {
+                    new_inner.slice_map.insert(*element, idx);
+                }
+                TypeData::MutSlice { element } => {
+                    new_inner.mut_slice_map.insert(*element, idx);
+                }
+                TypeData::Vec { element } => {
+                    new_inner.vec_map.insert(*element, idx);
+                }
+            }
+            new_inner.types.push(data.clone());
+        }
+        Self {
+            inner: RwLock::new(new_inner),
+        }
+    }
+
     /// Create a new empty pool.
     pub fn new() -> Self {
         Self {

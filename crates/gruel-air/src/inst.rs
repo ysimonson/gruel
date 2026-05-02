@@ -699,7 +699,7 @@ impl AirRef {
 }
 
 /// The complete AIR for a function.
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Air {
     instructions: Vec<AirInst>,
     /// Extra data for variable-length instruction payloads (args, elements, etc.)
