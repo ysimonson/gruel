@@ -685,31 +685,30 @@ pub extern "C" fn String__from_c_str_unchecked(out: *mut StringResult, p: *const
 }
 
 /// ADR-0072: `String::terminated_ptr` — ensure `cap > len`, write a NUL
-/// byte at `ptr[len]`, and return the buffer pointer.  Modifies `*out`
-/// (the new String fields) and returns the buffer pointer suitable for
-/// passing to a C function expecting `const char *`.
+/// byte at `ptr[len]`, and return the buffer pointer suitable for passing
+/// to a C function expecting `const char *`. Mutates the receiver in
+/// place via the inout pointer so a grow rebinds the String's
+/// `(ptr, len, cap)` triple correctly.
 ///
-/// Mirrors `Vec(u8)::terminated_ptr(0u8)` semantics. The sentinel sits
-/// outside the live `[0..len]` range and is overwritten by the next
-/// mutating call.
+/// The receiver is passed as `*mut StringResult` (the inout convention
+/// codegen uses for builtin methods where the receiver mode is `ByMutRef`
+/// and the return type is not `Self`). Mirrors `Vec(u8)::terminated_ptr`'s
+/// in-place mutation pattern.
 #[unsafe(no_mangle)]
 #[allow(non_snake_case)]
-pub extern "C" fn String__terminated_ptr(
-    out: *mut StringResult,
-    ptr: *mut u8,
-    len: u64,
-    cap: u64,
-) -> *mut u8 {
-    let (new_ptr, new_cap) = string_ensure_capacity(ptr, len, cap, 1);
+pub extern "C" fn String__terminated_ptr(s: *mut StringResult) -> *mut u8 {
     unsafe {
+        let ptr = (*s).ptr;
+        let len = (*s).len;
+        let cap = (*s).cap;
+        let (new_ptr, new_cap) = string_ensure_capacity(ptr, len, cap, 1);
         if !new_ptr.is_null() {
             *new_ptr.add(len as usize) = 0;
         }
-        (*out).ptr = new_ptr;
-        (*out).len = len;
-        (*out).cap = new_cap;
+        (*s).ptr = new_ptr;
+        (*s).cap = new_cap;
+        new_ptr
     }
-    new_ptr
 }
 
 // =============================================================================

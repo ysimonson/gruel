@@ -8964,11 +8964,27 @@ impl<'a> Sema<'a> {
             ));
         }
 
+        // ADR-0072: `ByMutRef` methods that return a non-`Self` value (e.g.
+        // `String::terminated_ptr -> Ptr(u8)`) need to mutate the receiver
+        // in place — but the regular `store_string_result` write-back path
+        // assumes the call returns the new `Self` value. Pass the receiver
+        // as `Inout` (pointer-to-aggregate) so the runtime can mutate it
+        // directly, and skip the write-back below.
+        let mutates_in_place = matches!(method.receiver_mode, ReceiverMode::ByMutRef)
+            && matches!(method.return_ty, BuiltinReturnType::BuiltinType(_));
+
         // Analyze arguments and check types
         let mut air_args: Vec<(AirRef, AirArgMode)> = Vec::with_capacity(args.len() + 1);
 
-        // Add receiver as first argument
-        air_args.push((receiver.result.air_ref, AirArgMode::Normal));
+        // Add receiver as first argument. Use `Inout` for in-place mutators
+        // so codegen passes a pointer to the receiver storage; otherwise
+        // pass by value and rely on the write-back path.
+        let recv_mode = if mutates_in_place {
+            AirArgMode::Inout
+        } else {
+            AirArgMode::Normal
+        };
+        air_args.push((receiver.result.air_ref, recv_mode));
 
         // Analyze and add other arguments
         for (i, arg) in args.iter().enumerate() {
@@ -9034,8 +9050,11 @@ impl<'a> Sema<'a> {
             span: method_ctx.span,
         });
 
-        // For mutation methods, store the result back to the receiver
-        if method.receiver_mode == ReceiverMode::ByMutRef {
+        // For mutation methods that return `Self`, store the result back
+        // to the receiver. ADR-0072 in-place mutators (e.g.
+        // `terminated_ptr`) skip this — the runtime already mutated the
+        // receiver via the `Inout` pointer.
+        if method.receiver_mode == ReceiverMode::ByMutRef && !mutates_in_place {
             let storage = receiver.storage.ok_or_else(|| {
                 CompileError::new(ErrorKind::InvalidAssignmentTarget, method_ctx.span)
             })?;
