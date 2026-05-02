@@ -13,6 +13,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 
 mod timing;
 
+use gruel_cache::{CacheKind, CacheStore};
 use gruel_compiler::{
     CompileOptions, FileId, Lexer, LinkerMode, MultiFileFormatter, OptLevel, ParsedProgram,
     PreviewFeature, PreviewFeatures, SourceFile, SourceInfo,
@@ -74,6 +75,92 @@ enum LogFormat {
     Text,
     /// Machine-readable JSON format.
     Json,
+}
+
+/// ADR-0074 Phase 6: print incremental-compilation cache statistics
+/// to stdout and exit. Format is human-readable (per-kind entry count
+/// + bytes + total).
+fn run_cache_stats(dir: &std::path::Path) {
+    if !dir.exists() {
+        println!(
+            "cache directory {} does not exist (no builds yet)",
+            dir.display()
+        );
+        return;
+    }
+    let store = match CacheStore::open(dir) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error opening cache at {}: {}", dir.display(), e);
+            std::process::exit(1);
+        }
+    };
+    let stats = match store.stats() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error reading cache stats: {}", e);
+            std::process::exit(1);
+        }
+    };
+    println!("gruel cache: {}", dir.display());
+    let mut total_entries = 0usize;
+    let mut total_bytes = 0u64;
+    for (kind, st) in stats {
+        let kind_name = match kind {
+            CacheKind::Parse => "parse",
+            CacheKind::Air => "air",
+            CacheKind::LlvmIr => "llvm-ir",
+        };
+        println!(
+            "  {:8} {:>6} entries  {:>10}",
+            kind_name,
+            st.entries,
+            human_bytes(st.bytes),
+        );
+        total_entries += st.entries;
+        total_bytes += st.bytes;
+    }
+    println!(
+        "  {:8} {:>6} entries  {:>10}",
+        "total",
+        total_entries,
+        human_bytes(total_bytes),
+    );
+}
+
+/// ADR-0074 Phase 6: wipe the cache directory.
+fn run_cache_clean(dir: &std::path::Path) {
+    if !dir.exists() {
+        println!("cache directory {} already clean", dir.display());
+        return;
+    }
+    let store = match CacheStore::open(dir) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error opening cache at {}: {}", dir.display(), e);
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = store.clean() {
+        eprintln!("error cleaning cache: {}", e);
+        std::process::exit(1);
+    }
+    println!("cleaned cache at {}", dir.display());
+}
+
+fn human_bytes(n: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if n >= GB {
+        format!("{:.1} GB", n as f64 / GB as f64)
+    } else if n >= MB {
+        format!("{:.1} MB", n as f64 / MB as f64)
+    } else if n >= KB {
+        format!("{:.1} KB", n as f64 / KB as f64)
+    } else {
+        format!("{} B", n)
+    }
 }
 
 /// Version string for the gruel compiler.
@@ -164,6 +251,16 @@ struct Cli {
     /// Also overridable via `GRUEL_CACHE_DIR` env var.
     #[arg(long, value_name = "PATH", env = "GRUEL_CACHE_DIR")]
     cache_dir: Option<String>,
+
+    /// Print incremental-compilation cache statistics and exit
+    /// (ADR-0074). Requires --cache-dir or GRUEL_CACHE_DIR.
+    #[arg(long, conflicts_with = "cache_clean")]
+    cache_stats: bool,
+
+    /// Wipe the incremental-compilation cache directory and exit
+    /// (ADR-0074). Requires --cache-dir or GRUEL_CACHE_DIR.
+    #[arg(long, conflicts_with = "cache_stats")]
+    cache_clean: bool,
 }
 
 struct Options {
@@ -191,6 +288,11 @@ struct Options {
     /// plumbs the field and validates the preview-feature gate.
     #[allow(dead_code)]
     cache_dir: Option<String>,
+    /// Phase 6 cache subcommands (ADR-0074): when set, the driver
+    /// performs the requested cache action and exits before any
+    /// compilation work. At most one may be set; clap enforces.
+    cache_stats: bool,
+    cache_clean: bool,
 }
 
 /// Result of parsing command-line arguments.
@@ -219,6 +321,38 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
             Some(_) => unreachable!("clap value_parser bounds to 0..=3"),
         }
     };
+
+    // Cache subcommands don't need source files. Synthesize empty
+    // source_paths/output_path so the rest of cli_to_options can ignore
+    // the special case. Compute preview_features locally because the
+    // existing flow does that further down.
+    if cli.cache_stats || cli.cache_clean {
+        let preview_features: PreviewFeatures = cli.preview.clone().into_iter().collect();
+        if cli.cache_dir.is_none() {
+            return Err(
+                "--cache-stats and --cache-clean require --cache-dir (or GRUEL_CACHE_DIR)"
+                    .to_string(),
+            );
+        }
+        return Ok(Options {
+            source_paths: Vec::new(),
+            output_path: String::new(),
+            emit_stages: cli.emit,
+            target: cli.target,
+            linker: LinkerMode::default(),
+            opt_level,
+            preview_features,
+            log_level: cli.log_level,
+            log_format: cli.log_format,
+            time_passes: cli.time_passes,
+            benchmark_json: cli.benchmark_json,
+            jobs: cli.jobs,
+            capture_comptime_dbg: cli.capture_comptime_dbg,
+            cache_dir: cli.cache_dir,
+            cache_stats: cli.cache_stats,
+            cache_clean: cli.cache_clean,
+        });
+    }
 
     let (source_paths, output_path) = if let Some(out) = cli.output {
         if cli.sources.is_empty() {
@@ -255,11 +389,22 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
     // ADR-0074: --cache-dir is meaningful only when the incremental cache
     // is enabled. Reject explicit --cache-dir without the preview gate
     // rather than silently ignoring it.
+    //
+    // Cache subcommands (--cache-stats / --cache-clean) are exempt — they
+    // operate on the cache directory directly and don't need the cache
+    // to be active for a build.
     if cli.cache_dir.is_some()
         && !preview_features.contains(&PreviewFeature::IncrementalCompilation)
+        && !cli.cache_stats
+        && !cli.cache_clean
     {
         return Err(
             "--cache-dir requires --preview incremental_compilation (ADR-0074)".to_string(),
+        );
+    }
+    if (cli.cache_stats || cli.cache_clean) && cli.cache_dir.is_none() {
+        return Err(
+            "--cache-stats and --cache-clean require --cache-dir (or GRUEL_CACHE_DIR)".to_string(),
         );
     }
 
@@ -278,6 +423,8 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
         jobs: cli.jobs,
         capture_comptime_dbg: cli.capture_comptime_dbg,
         cache_dir: cli.cache_dir,
+        cache_stats: cli.cache_stats,
+        cache_clean: cli.cache_clean,
     })
 }
 
@@ -469,6 +616,25 @@ fn main() {
         options.time_passes,
         options.benchmark_json,
     );
+
+    // ADR-0074 Phase 6: cache subcommands. Run before any compilation
+    // work since they don't need sources or the rest of the pipeline.
+    if options.cache_stats {
+        let dir = options
+            .cache_dir
+            .as_deref()
+            .expect("validated by cli_to_options");
+        run_cache_stats(std::path::Path::new(dir));
+        return;
+    }
+    if options.cache_clean {
+        let dir = options
+            .cache_dir
+            .as_deref()
+            .expect("validated by cli_to_options");
+        run_cache_clean(std::path::Path::new(dir));
+        return;
+    }
 
     // Read all source files into memory
     let sources: Vec<(String, String)> = options
