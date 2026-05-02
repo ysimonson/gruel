@@ -29,11 +29,53 @@ use rayon::prelude::*;
 use tracing::{info, info_span};
 
 use crate::{
-    AnalyzedFunction, Ast, AstGen, CfgBuilder, CompileError, CompileErrors, CompileOptions,
-    CompileOutput, CompileWarning, ErrorKind, FunctionWithCfg, Lexer, MultiErrorResult, Parser,
-    Rir, Sema, SourceFile, Type, TypeInternPool, compile_backend,
+    AnalyzedFunction, Ast, AstGen, Cfg, CfgBuilder, CompileError, CompileErrors, CompileOptions,
+    CompileOutput, CompileWarning, ErrorKind, FunctionWithCfg, Lexer, MultiErrorResult, OptLevel,
+    Parser, Rir, Sema, SourceFile, Type, TypeInternPool, compile_backend,
 };
-use gruel_util::FileId;
+use gruel_cache::{CacheKey, CacheStore, Hasher, compiler_fingerprint};
+use gruel_util::{FileId, PreviewFeature};
+
+fn opt_level_to_u32(o: OptLevel) -> u32 {
+    match o {
+        OptLevel::O0 => 0,
+        OptLevel::O1 => 1,
+        OptLevel::O2 => 2,
+        OptLevel::O3 => 3,
+    }
+}
+
+/// Run sema on the merged RIR. Extracted so the AIR-cache miss path
+/// (ADR-0074 Phase 4) can call it in two places without duplicating
+/// the boilerplate.
+fn run_sema(
+    rir: &Rir,
+    interner: &ThreadedRodeo,
+    options: &CompileOptions,
+    file_paths: HashMap<FileId, String>,
+) -> MultiErrorResult<gruel_air::SemaOutput> {
+    let _span = info_span!("sema").entered();
+    let mut sema = Sema::new(rir, interner, options.preview_features.clone());
+    sema.set_file_paths(file_paths);
+    sema.set_suppress_comptime_dbg_print(options.capture_comptime_dbg);
+    let output = sema.analyze_all()?;
+    info!(
+        function_count = output.functions.len(),
+        struct_count = output.type_pool.stats().struct_count,
+        "semantic analysis complete"
+    );
+    Ok(output)
+}
+
+/// Clone a slice of analyzed functions for the AIR cache write path.
+fn clone_functions(fns: &[gruel_air::AnalyzedFunction]) -> Vec<gruel_air::AnalyzedFunction> {
+    fns.to_vec()
+}
+
+/// Snapshot a TypeInternPool for the AIR cache write path.
+fn clone_type_pool(pool: &gruel_air::TypeInternPool) -> gruel_air::TypeInternPool {
+    pool.clone_snapshot()
+}
 
 /// ADR-0065 / ADR-0070: the synthetic compiler prelude.
 ///
@@ -378,6 +420,87 @@ impl<'src> CompilationUnit<'src> {
     // Phase 1: Parsing
     // =========================================================================
 
+    /// Open the AIR cache for whole-program AIR caching (ADR-0074
+    /// Phase 4). Returns `None` when the preview gate is off, the
+    /// cache_dir is not configured, or the underlying machinery
+    /// (CacheStore / compiler_fingerprint) fails. The cache key
+    /// concatenates every source file's content so any change to any
+    /// file invalidates the whole-program AIR — the per-file
+    /// granularity from the ADR design needs sema to run per-file,
+    /// which is its own refactor.
+    fn open_air_cache(&self) -> Option<(CacheStore, CacheKey)> {
+        let (store, build_fp) = self.open_parse_cache()?;
+        let mut h = Hasher::new();
+        h.update(build_fp.as_bytes());
+        for source in &self.sources {
+            h.update_str(source.path);
+            h.update_str(source.source);
+        }
+        Some((store, h.finalize()))
+    }
+
+    /// Open the parse cache when `--preview incremental_compilation` is
+    /// enabled and `cache_dir` is configured. Returns `None` if either
+    /// requirement is missing, or if opening the store / hashing the
+    /// compiler binary fails (in which case the build silently
+    /// continues uncached — correctness is preserved).
+    fn open_parse_cache(&self) -> Option<(CacheStore, CacheKey)> {
+        if !self
+            .options
+            .preview_features
+            .contains(&PreviewFeature::IncrementalCompilation)
+        {
+            return None;
+        }
+        let dir = self.options.cache_dir.as_ref()?;
+
+        let store = match CacheStore::open(dir) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, dir = %dir.display(), "failed to open cache");
+                return None;
+            }
+        };
+
+        // Compose the compilation fingerprint from compiler-binary hash
+        // + target + opt level + sorted preview features.
+        let bin_path = match gruel_cache::current_binary_path() {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(error = %e, "could not resolve current binary path");
+                return None;
+            }
+        };
+        let memo_dir = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .map(|h| h.join(".cache").join("gruel").join("binary-hash"))
+            .unwrap_or_else(|| std::env::temp_dir().join("gruel-binary-hash"));
+        let compiler_fp = match compiler_fingerprint(&bin_path, &memo_dir) {
+            Ok(fp) => fp,
+            Err(e) => {
+                tracing::warn!(error = %e, "compiler_fingerprint failed");
+                return None;
+            }
+        };
+
+        let mut h = Hasher::new();
+        h.update(compiler_fp.as_bytes());
+        h.update_str(&format!("{}", self.options.target));
+        h.update_u32(opt_level_to_u32(self.options.opt_level));
+        let mut feats: Vec<&'static str> = self
+            .options
+            .preview_features
+            .iter()
+            .map(|f| f.name())
+            .collect();
+        feats.sort_unstable();
+        for f in feats {
+            h.update_str(f);
+        }
+        let build_fp = h.finalize();
+        Some((store, build_fp))
+    }
+
     /// Parse all source files.
     ///
     /// This runs lexing and parsing on each source file, producing ASTs.
@@ -414,30 +537,60 @@ impl<'src> CompilationUnit<'src> {
             ast: prelude_ast,
         });
 
-        for source in &self.sources {
-            let _file_span = info_span!("parse_file", path = %source.path).entered();
+        // ADR-0074 Phase 2: when --preview incremental_compilation is on
+        // AND a cache_dir is configured, route user-file parsing through
+        // the on-disk cache. The prelude (above) is always parsed
+        // uncached because its source is a constant in the binary; its
+        // Spurs are already in `interner`, which the cache wiring then
+        // reuses as the build-shared interner.
+        let cache_handle = self.open_parse_cache();
+        if let Some((store, build_fp)) = cache_handle {
+            let (cached_files, stats) = crate::parse_cache::parse_files_into(
+                &interner,
+                &self.sources,
+                &self.options.preview_features,
+                &store,
+                &build_fp,
+            )?;
+            info!(
+                hits = stats.hits,
+                misses = stats.misses,
+                files = self.sources.len(),
+                "parse cache complete"
+            );
+            for file in cached_files {
+                parsed_files.push(ParsedFileData {
+                    path: file.path,
+                    ast: file.ast,
+                });
+            }
+        } else {
+            for source in &self.sources {
+                let _file_span = info_span!("parse_file", path = %source.path).entered();
 
-            // Create lexer with shared interner and file ID
-            let lexer = Lexer::with_interner_and_file_id(source.source, interner, source.file_id);
+                // Create lexer with shared interner and file ID
+                let lexer =
+                    Lexer::with_interner_and_file_id(source.source, interner, source.file_id);
 
-            // Tokenize
-            let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
-            interner = returned_interner;
+                // Tokenize
+                let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
+                interner = returned_interner;
 
-            info!(token_count = tokens.len(), "lexing complete");
+                info!(token_count = tokens.len(), "lexing complete");
 
-            // Parse
-            let parser = Parser::new(tokens, interner)
-                .with_preview_features(self.options.preview_features.clone());
-            let (ast, returned_interner) = parser.parse()?;
-            interner = returned_interner;
+                // Parse
+                let parser = Parser::new(tokens, interner)
+                    .with_preview_features(self.options.preview_features.clone());
+                let (ast, returned_interner) = parser.parse()?;
+                interner = returned_interner;
 
-            info!(item_count = ast.items.len(), "parsing complete");
+                info!(item_count = ast.items.len(), "parsing complete");
 
-            parsed_files.push(ParsedFileData {
-                path: source.path.to_string(),
-                ast,
-            });
+                parsed_files.push(ParsedFileData {
+                    path: source.path.to_string(),
+                    ast,
+                });
+            }
         }
 
         // Merge symbols and check for duplicates
@@ -662,19 +815,81 @@ impl<'src> CompilationUnit<'src> {
         let rir = self.rir.as_ref().expect("analyze() called before lower()");
         let interner = self.interner.as_ref().expect("interner not initialized");
 
+        // ADR-0074 Phase 4: try the whole-program AIR cache first.
+        // Per-file AIR caching needs sema to run per-file (currently
+        // it runs program-wide on the merged AST). Whole-program is
+        // coarser but exercises the full cache pipeline end-to-end.
+        let air_cache_handle = self.open_air_cache();
+
         // Semantic analysis
-        let sema_output = {
-            let _span = info_span!("sema").entered();
-            let mut sema = Sema::new(rir, interner, self.options.preview_features.clone());
-            sema.set_file_paths(self.file_paths.clone());
-            sema.set_suppress_comptime_dbg_print(self.options.capture_comptime_dbg);
-            let output = sema.analyze_all()?;
-            info!(
-                function_count = output.functions.len(),
-                struct_count = output.type_pool.stats().struct_count,
-                "semantic analysis complete"
-            );
-            output
+        let sema_output = if let Some((store, key)) = &air_cache_handle {
+            match store.get(gruel_cache::CacheKind::Air, key) {
+                Ok(Some(bytes)) => match gruel_cache::CachedAirOutput::decode(&bytes) {
+                    Ok(cached) => {
+                        info!("air cache hit");
+                        // Restore the build's interner to the cached
+                        // state. This is sound because the AIR cache is
+                        // whole-program — every Spur in cached AIR was
+                        // produced against this snapshot. Replay
+                        // re-interns each cached string back into the
+                        // build's interner; for newly-empty interners
+                        // (typical at this point), this restores the
+                        // original Spur values.
+                        let _remap = cached.interner.restore_into(interner);
+                        // Replay comptime @dbg output to stderr so cache
+                        // hits are observably identical to cold builds
+                        // (ADR-0074 "Comptime side-effects replay").
+                        if !self.options.capture_comptime_dbg {
+                            for line in &cached.comptime_dbg_output {
+                                eprintln!("{}", line);
+                            }
+                        }
+                        // Note: warnings are not cached yet (DiagnosticWrapper
+                        // serde is its own follow-up); cache hits omit
+                        // them. Documented in ADR-0074.
+                        gruel_air::SemaOutput {
+                            functions: cached.functions,
+                            strings: cached.strings,
+                            bytes: cached.bytes,
+                            warnings: Vec::new(),
+                            type_pool: cached.type_pool,
+                            comptime_dbg_output: cached.comptime_dbg_output,
+                            interface_defs: cached.interface_defs,
+                            interface_vtables: cached.interface_vtables,
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "air cache decode failed; recomputing");
+                        run_sema(rir, interner, &self.options, self.file_paths.clone())?
+                    }
+                },
+                _ => {
+                    info!("air cache miss");
+                    let output = run_sema(rir, interner, &self.options, self.file_paths.clone())?;
+                    // Best-effort cache write; failure is not a build error.
+                    let cached = gruel_cache::CachedAirOutput {
+                        interner: gruel_cache::InternerSnapshot::capture(interner),
+                        functions: clone_functions(&output.functions),
+                        type_pool: clone_type_pool(&output.type_pool),
+                        strings: output.strings.clone(),
+                        bytes: output.bytes.clone(),
+                        interface_defs: output.interface_defs.clone(),
+                        interface_vtables: output.interface_vtables.clone(),
+                        comptime_dbg_output: output.comptime_dbg_output.clone(),
+                    };
+                    match cached.encode() {
+                        Ok(bytes) => {
+                            if let Err(e) = store.put(gruel_cache::CacheKind::Air, key, &bytes) {
+                                tracing::warn!(error = %e, "air cache write failed");
+                            }
+                        }
+                        Err(e) => tracing::warn!(error = %e, "air cache encode failed"),
+                    }
+                    output
+                }
+            }
+        } else {
+            run_sema(rir, interner, &self.options, self.file_paths.clone())?
         };
 
         // Synthesize drop glue functions
@@ -786,7 +1001,75 @@ impl<'src> CompilationUnit<'src> {
             interface_defs,
             interface_vtables,
         };
+
+        // ADR-0074 Phase 5: bitcode cache. If the AIR cache is configured
+        // and air_key matches, we may have cached pre-optimization LLVM
+        // bitcode that lets us skip the AIR→IR translation step. The
+        // LLVM optimizer + back-end + linker still run on every build.
+        if let Some((store, key)) = self.open_air_cache() {
+            return self.compile_with_bitcode_cache(&inputs, &store, &key);
+        }
         compile_backend(&inputs, &self.options, &self.warnings)
+    }
+
+    /// Codegen path that consults the LLVM bitcode cache (ADR-0074
+    /// Phase 5). On hit, parses the cached bitcode and runs the
+    /// optimizer + back-end on it. On miss, generates bitcode, writes
+    /// it to the cache, then runs optimizer + back-end. Either way the
+    /// optimizer pipeline runs — the cache only saves the AIR→IR
+    /// translation step.
+    fn compile_with_bitcode_cache(
+        &self,
+        inputs: &crate::BackendInputs<'_>,
+        store: &CacheStore,
+        air_key: &CacheKey,
+    ) -> MultiErrorResult<CompileOutput> {
+        // Check for main function (matches compile_backend).
+        let _main_fn = inputs
+            .functions
+            .iter()
+            .find(|f| f.analyzed.name == "main")
+            .ok_or_else(|| {
+                CompileErrors::from(CompileError::without_span(ErrorKind::NoMainFunction))
+            })?;
+
+        // Bitcode cache key is the same as air_key — bitcode is a
+        // deterministic function of AIR, and cached AIR keys already
+        // factor in everything that influences codegen (target, opt
+        // level, preview features, source content, compiler binary).
+        let cfgs: Vec<&Cfg> = inputs.functions.iter().map(|f| &f.cfg).collect();
+        let codegen_inputs = inputs.to_codegen_inputs(&cfgs);
+
+        let object_bytes = match store.get(gruel_cache::CacheKind::LlvmIr, air_key) {
+            Ok(Some(bitcode)) => {
+                info!("bitcode cache hit");
+                gruel_codegen_llvm::compile_bitcode_to_object(&bitcode, self.options.opt_level)
+                    .map_err(CompileErrors::from)?
+            }
+            _ => {
+                info!("bitcode cache miss");
+                let bitcode = gruel_codegen_llvm::generate_bitcode(&codegen_inputs)
+                    .map_err(CompileErrors::from)?;
+                if let Err(e) = store.put(gruel_cache::CacheKind::LlvmIr, air_key, &bitcode) {
+                    tracing::warn!(error = %e, "bitcode cache write failed");
+                }
+                gruel_codegen_llvm::compile_bitcode_to_object(&bitcode, self.options.opt_level)
+                    .map_err(CompileErrors::from)?
+            }
+        };
+
+        // Reuse the same link tail as generate_llvm_objects_and_link.
+        let object_files = vec![object_bytes];
+        let linker_cmd = match &self.options.linker {
+            crate::LinkerMode::System(cmd) => cmd.clone(),
+            crate::LinkerMode::Internal => "cc".to_string(),
+        };
+        crate::link::link_system_with_warnings(
+            &self.options,
+            &object_files,
+            &linker_cmd,
+            &self.warnings,
+        )
     }
 
     // =========================================================================

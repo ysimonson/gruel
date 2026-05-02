@@ -1,0 +1,51 @@
+// ADR-0074 Phase 7 cache benchmark: comptime-heavy program.
+//
+// Comptime work happens during sema, which is exactly what AIR caching
+// skips on hits. The cache's headline win lives here: a warm rebuild
+// should skip ALL of the comptime evaluation that the cold build paid
+// for. Expected speedup is significantly higher than runtime-heavy
+// (target: 50%+).
+
+fn fib_at_comptime(n: i32) -> i32 {
+    if n < 2 {
+        n
+    } else {
+        fib_at_comptime(n - 1) + fib_at_comptime(n - 2)
+    }
+}
+
+fn factorial_at_comptime(n: i32) -> i32 {
+    if n <= 1 { 1 } else { n * factorial_at_comptime(n - 1) }
+}
+
+fn sum_at_comptime(n: i32) -> i32 {
+    let mut total: i32 = 0;
+    let mut i: i32 = 1;
+    while i <= n {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> i32 {
+    // Each comptime block forces sema's interpreter to evaluate the
+    // body at compile time. Multiplied across many blocks this is the
+    // workload the AIR cache lets us skip.
+    let a: i32 = comptime { fib_at_comptime(20) };
+    let b: i32 = comptime { factorial_at_comptime(10) };
+    let c: i32 = comptime { sum_at_comptime(100) };
+    let d: i32 = comptime { fib_at_comptime(15) + factorial_at_comptime(7) };
+    let e: i32 = comptime { sum_at_comptime(200) - fib_at_comptime(18) };
+    let f: i32 = comptime {
+        let mut acc: i32 = 0;
+        let mut i: i32 = 0;
+        while i < 50 {
+            acc = acc + fib_at_comptime(10);
+            i = i + 1;
+        }
+        acc
+    };
+
+    a + b + c + d + e + f
+}

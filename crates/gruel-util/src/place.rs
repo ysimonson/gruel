@@ -9,7 +9,7 @@
 //! a `CfgValue`), so those stay per-IR for now.
 
 /// Where a memory location starts: a local slot or a parameter slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PlaceBase {
     /// Local variable slot.
     Local(u32),

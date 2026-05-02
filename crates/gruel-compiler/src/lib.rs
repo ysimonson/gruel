@@ -29,7 +29,10 @@ mod clone_glue;
 mod diagnostic;
 mod drop_glue;
 mod link;
+mod parse_cache;
 mod unit;
+
+pub use parse_cache::{ParseCacheStats, parse_all_files_cached, parse_key};
 
 pub use unit::CompilationUnit;
 
@@ -630,6 +633,11 @@ pub struct CompileOptions {
     /// output. The output is still collected on `SemaOutput.comptime_dbg_output`
     /// and a warning is still emitted for each call. Used by fuzz harnesses.
     pub capture_comptime_dbg: bool,
+    /// Optional path to the on-disk cache directory (ADR-0074). When `Some`
+    /// AND `PreviewFeature::IncrementalCompilation` is enabled, the
+    /// per-file parse cache lives here. When `None` or the preview is
+    /// off, no cache is consulted or written.
+    pub cache_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for CompileOptions {
@@ -641,6 +649,7 @@ impl Default for CompileOptions {
             preview_features: PreviewFeatures::default(),
             jobs: 0,
             capture_comptime_dbg: false,
+            cache_dir: None,
         }
     }
 }

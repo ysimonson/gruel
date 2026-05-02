@@ -333,6 +333,10 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// On-disk incremental compilation cache (ADR-0074).
+    /// Skips lex/parse/RIR/sema and AIR→bitcode work for files whose
+    /// inputs haven't changed since the last build.
+    IncrementalCompilation,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -364,6 +368,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::IncrementalCompilation => "ADR-0074",
         }
     }
 
@@ -2030,7 +2035,8 @@ mod tests {
     #[test]
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
-        assert_eq!(names, "test_infra");
+        // Order follows the enum declaration order via strum::EnumIter.
+        assert_eq!(names, "test_infra, incremental_compilation");
     }
 
     // ========================================================================
