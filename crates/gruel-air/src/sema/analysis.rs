@@ -1766,26 +1766,11 @@ impl<'a> Sema<'a> {
         type_subst: Option<&rustc_hash::FxHashMap<Spur, Type>>,
         value_subst: Option<&rustc_hash::FxHashMap<Spur, ConstValue>>,
     ) -> RawFnAnalysis {
-        // ADR-0062: a parameter typed `Ref(T)` / `MutRef(T)` with the default
-        // `Normal` mode is the new-form spelling of the legacy `borrow x: T` /
-        // `inout x: T` keyword forms. Lower it to the legacy mode so the rest
-        // of sema (place tracing, exclusivity, mutability, codegen) handles
-        // both surface forms uniformly. Function bodies then see the bare `T`
-        // and field projection / indexing / scalar reads / through-assignment
-        // all work without a user-facing deref operator.
-        let normalized_params: Vec<(Spur, Type, RirParamMode)> = params
-            .iter()
-            .map(|(name, ty, mode)| match (mode, ty.try_kind()) {
-                (RirParamMode::Normal, Some(TypeKind::Ref(id))) => {
-                    (*name, self.type_pool.ref_def(id), RirParamMode::Borrow)
-                }
-                (RirParamMode::Normal, Some(TypeKind::MutRef(id))) => {
-                    (*name, self.type_pool.mut_ref_def(id), RirParamMode::Inout)
-                }
-                _ => (*name, *ty, *mode),
-            })
-            .collect();
-        let params: &[(Spur, Type, RirParamMode)] = &normalized_params;
+        // ADR-0076 internal collapse: bindings keep their surface
+        // `Ref(T)` / `MutRef(T)` types end-to-end. Body-analysis sites
+        // (HM, sema, CFG/codegen) read ref-ness off the type pool
+        // (`TypeKind::Ref` / `TypeKind::MutRef`) instead of off a
+        // parallel mode field. Auto-deref happens at the use site.
 
         let mut air = Air::new(return_type);
         let mut param_vec: Vec<ParamInfo> = Vec::new();
