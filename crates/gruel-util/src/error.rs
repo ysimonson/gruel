@@ -92,8 +92,6 @@ impl ErrorCode {
     pub const DUPLICATE_TYPE_DEFINITION: Self = Self(405);
     pub const LINEAR_VALUE_NOT_CONSUMED: Self = Self(406);
     pub const LINEAR_STRUCT_COPY: Self = Self(407);
-    pub const HANDLE_STRUCT_MISSING_METHOD: Self = Self(408);
-    pub const HANDLE_METHOD_WRONG_SIGNATURE: Self = Self(409);
     pub const DUPLICATE_METHOD: Self = Self(410);
     pub const DERIVE_DIRECT_FIELD_ACCESS: Self = Self(440);
     pub const DERIVE_NOT_A_DERIVE: Self = Self(441);
@@ -927,17 +925,6 @@ pub enum ErrorKind {
     /// @derive(Clone) v1 limitation: every field must be Copy.
     #[error("@derive(Clone) on struct '{struct_name}' requires every field to be Copy in v1; field '{field_name}' has type '{field_type}' which is not Copy. Hand-write `fn clone(borrow self) -> Self` instead.", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
     CloneStructNonCopyField(Box<CloneStructNonCopyFieldError>),
-    /// @handle struct missing required .handle() method
-    #[error("struct '{struct_name}' is marked @handle but has no `handle` method")]
-    HandleStructMissingMethod { struct_name: String },
-    /// @handle struct's .handle() method has wrong signature
-    #[error(
-        "struct '{struct_name}' has `handle` method with wrong signature: expected `fn handle(self: {struct_name}) -> {struct_name}`, found `{found_signature}`"
-    )]
-    HandleMethodWrongSignature {
-        struct_name: String,
-        found_signature: String,
-    },
     /// Duplicate method definition in impl blocks for the same type
     #[error("duplicate method '{method_name}' for type '{type_name}'")]
     DuplicateMethod {
@@ -1252,10 +1239,6 @@ impl ErrorKind {
             ErrorKind::LinearStructCopy(_) => ErrorCode::LINEAR_STRUCT_COPY,
             ErrorKind::LinearStructClone(_) => ErrorCode::LINEAR_STRUCT_COPY,
             ErrorKind::CloneStructNonCopyField { .. } => ErrorCode::COPY_STRUCT_NON_COPY_FIELD,
-            ErrorKind::HandleStructMissingMethod { .. } => ErrorCode::HANDLE_STRUCT_MISSING_METHOD,
-            ErrorKind::HandleMethodWrongSignature { .. } => {
-                ErrorCode::HANDLE_METHOD_WRONG_SIGNATURE
-            }
             ErrorKind::DuplicateMethod { .. } => ErrorCode::DUPLICATE_METHOD,
             ErrorKind::DeriveDirectFieldAccess { .. } => ErrorCode::DERIVE_DIRECT_FIELD_ACCESS,
             ErrorKind::DeriveNotADerive { .. } => ErrorCode::DERIVE_NOT_A_DERIVE,

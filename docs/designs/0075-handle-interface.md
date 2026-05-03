@@ -162,7 +162,7 @@ Spec-side, this is a new legality rule in §2.5:
   test still passes against the Phase 1 compiler (both forms
   coexist at this point).
 
-- [ ] **Phase 3: Delete the `@handle` directive.** Remove
+- [x] **Phase 3: Delete the `@handle` directive.** Remove
   `has_handle_directive`, `validate_handle_structs`,
   `StructDef::is_handle`, `ErrorKind::HandleStructMissingMethod`,
   `ErrorKind::HandleMethodWrongSignature`, and the matching

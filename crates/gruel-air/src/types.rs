@@ -706,8 +706,6 @@ pub struct StructDef {
     /// every Copy type is automatically Clone, but `@derive(Clone)` can also
     /// be applied to affine types whose fields are all `Clone`.
     pub is_clone: bool,
-    /// Whether this struct is marked with @handle (can be explicitly duplicated via .handle())
-    pub is_handle: bool,
     /// Whether this struct is a linear type (must be consumed, cannot be dropped)
     pub is_linear: bool,
     /// User-defined destructor function name, if any (e.g., "Data.__drop")
@@ -2144,7 +2142,6 @@ mod tests {
             ],
             is_copy: false,
             is_clone: false,
-            is_handle: false,
             is_linear: false,
             destructor: None,
             is_builtin: false,
@@ -2171,7 +2168,6 @@ mod tests {
             fields: vec![],
             is_copy: false,
             is_clone: false,
-            is_handle: false,
             is_linear: false,
             destructor: None,
             is_builtin: false,
@@ -2204,7 +2200,6 @@ mod tests {
             ],
             is_copy: false,
             is_clone: false,
-            is_handle: false,
             is_linear: false,
             destructor: None,
             is_builtin: false,

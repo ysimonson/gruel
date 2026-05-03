@@ -184,16 +184,6 @@ impl<'a> Sema<'a> {
         false
     }
 
-    /// Check if a directive list contains the @handle directive
-    pub(crate) fn has_handle_directive(&self, directives: &[RirDirective]) -> bool {
-        let handle_sym = self.interner.get("handle");
-        for directive in directives {
-            if Some(directive.name) == handle_sym {
-                return true;
-            }
-        }
-        false
-    }
     /// Phase 1: Register all type names (enum and struct IDs).
     ///
     /// This creates name → ID mappings for all enums and structs in a single pass,
@@ -474,7 +464,6 @@ impl<'a> Sema<'a> {
 
                     let directives = self.rir.get_directives(*directives_start, *directives_len);
                     let is_copy = self.has_copy_directive(&directives);
-                    let is_handle = self.has_handle_directive(&directives);
 
                     // Linear types cannot be @derive(Copy)
                     if *is_linear && is_copy {
@@ -490,7 +479,6 @@ impl<'a> Sema<'a> {
                         fields: Vec::new(), // Filled in during resolve_declarations
                         is_copy,
                         is_clone: false, // Filled in during resolve_declarations after fields known
-                        is_handle,
                         is_linear: *is_linear,
                         destructor: None,  // Filled in during resolve_declarations
                         is_builtin: false, // User-defined struct
@@ -1444,9 +1432,6 @@ impl<'a> Sema<'a> {
             }
         }
 
-        // Second pass: validate @handle structs (after all methods are collected)
-        self.validate_handle_structs()?;
-
         Ok(())
     }
 
@@ -1584,135 +1569,6 @@ impl<'a> Sema<'a> {
         let mut updated = self.type_pool.struct_def(struct_id);
         updated.is_clone = true;
         self.type_pool.update_struct_def(struct_id, updated);
-        Ok(())
-    }
-
-    /// Validate that all @handle structs have a valid .handle() method.
-    ///
-    /// This runs after all methods are collected so we can look up
-    /// method signatures in the `methods` map.
-    pub(crate) fn validate_handle_structs(&self) -> CompileResult<()> {
-        // We need to iterate through structs and find their spans
-        for (_, inst) in self.rir.iter() {
-            if let InstData::StructDecl {
-                directives_start,
-                directives_len,
-                name,
-                ..
-            } = &inst.data
-            {
-                let directives = self.rir.get_directives(*directives_start, *directives_len);
-                if !self.has_handle_directive(&directives) {
-                    continue;
-                }
-
-                let struct_name = self.interner.resolve(name).to_string();
-                let struct_id = *self.structs.get(name).ok_or_else(|| {
-                    CompileError::new(
-                        ErrorKind::InternalError(
-                            ice!(
-                                "struct not found during @handle validation",
-                                phase: "sema/declarations",
-                                details: {
-                                    "struct_name" => struct_name.clone()
-                                }
-                            )
-                            .to_string(),
-                        ),
-                        inst.span,
-                    )
-                })?;
-                let struct_type = Type::new_struct(struct_id);
-
-                // Look for a .handle() method using StructId
-                let handle_sym = self.interner.get("handle");
-                let method_key = match handle_sym {
-                    Some(sym) => (struct_id, sym),
-                    None => {
-                        // "handle" not interned means no .handle() method exists
-                        return Err(CompileError::new(
-                            ErrorKind::HandleStructMissingMethod { struct_name },
-                            inst.span,
-                        ));
-                    }
-                };
-
-                let method_info = match self.methods.get(&method_key) {
-                    Some(info) => info,
-                    None => {
-                        return Err(CompileError::new(
-                            ErrorKind::HandleStructMissingMethod { struct_name },
-                            inst.span,
-                        ));
-                    }
-                };
-
-                // Validate: must be a method (has self), not associated function
-                if !method_info.has_self {
-                    let param_types = self.param_arena.types(method_info.params);
-                    let found_signature = format!(
-                        "fn handle({}) -> {}",
-                        param_types
-                            .iter()
-                            .map(|t| self.format_type_name(*t))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        self.format_type_name(method_info.return_type)
-                    );
-                    return Err(CompileError::new(
-                        ErrorKind::HandleMethodWrongSignature {
-                            struct_name,
-                            found_signature,
-                        },
-                        method_info.span,
-                    ));
-                }
-
-                // Validate: should take no extra parameters (just self)
-                let param_types = self.param_arena.types(method_info.params);
-                if !param_types.is_empty() {
-                    let param_names = self.param_arena.names(method_info.params);
-                    let params = std::iter::once(format!("self: {}", struct_name))
-                        .chain(param_types.iter().zip(param_names).map(|(ty, name)| {
-                            format!(
-                                "{}: {}",
-                                self.interner.resolve(name),
-                                self.format_type_name(*ty)
-                            )
-                        }))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let found_signature = format!(
-                        "fn handle({}) -> {}",
-                        params,
-                        self.format_type_name(method_info.return_type)
-                    );
-                    return Err(CompileError::new(
-                        ErrorKind::HandleMethodWrongSignature {
-                            struct_name,
-                            found_signature,
-                        },
-                        method_info.span,
-                    ));
-                }
-
-                // Validate: return type must be the same struct type
-                if method_info.return_type != struct_type {
-                    let found_signature = format!(
-                        "fn handle(self: {}) -> {}",
-                        struct_name,
-                        self.format_type_name(method_info.return_type)
-                    );
-                    return Err(CompileError::new(
-                        ErrorKind::HandleMethodWrongSignature {
-                            struct_name,
-                            found_signature,
-                        },
-                        method_info.span,
-                    ));
-                }
-            }
-        }
         Ok(())
     }
 
