@@ -14,7 +14,7 @@ Gruel's type system has three levels of ownership discipline:
 | `linear` | Linear — must be consumed exactly once |
 | `@derive(Copy)` | Copy — implicitly duplicated on use |
 
-You've already seen affine structs (move semantics) and `@derive(Copy)` structs. This page covers `linear` types and the related `@handle` directive.
+You've already seen affine structs (move semantics) and `@derive(Copy)` structs. This page covers `linear` types and the `Handle` interface for explicit duplication.
 
 ## Linear Types Must Be Consumed
 
@@ -115,18 +115,15 @@ linear struct Bad { value: i32 }
 // ERROR: linear struct cannot be marked `@derive(Copy)`
 ```
 
-## Explicit Duplication with `@handle`
+## Explicit Duplication with `Handle`
 
-Sometimes you legitimately need two handles to the same logical resource — for example, forking a value for two code paths. The `@handle` directive enables this with explicit syntax.
-
-A type marked `@handle` must define a `handle` method that produces a new owned value:
+Sometimes you legitimately need two handles to the same logical resource — for example, forking a value for two code paths. The compiler-recognized `Handle` interface enables this with explicit syntax. A type conforms to `Handle` by defining a method with the exact shape `fn handle(borrow self) -> Self`:
 
 ```gruel
-@handle
 struct Counter {
     count: i32,
 
-    fn handle(self) -> Counter {
+    fn handle(borrow self) -> Counter {
         Counter { count: self.count }
     }
 }
@@ -134,22 +131,21 @@ struct Counter {
 fn main() -> i32 {
     let a = Counter { count: 42 };
     let b = a.handle();  // explicit duplication — cost is visible
-    b.count
+    a.count + b.count    // a is still valid; .handle() borrows
 }
 ```
 
-Unlike `@derive(Copy)`, duplication is never implicit. You must call `.handle()`, making the cost visible at every use site.
+There is no `@derive(Handle)` directive — conformance is structural. If a type defines that exact method, it conforms; otherwise it doesn't. Unlike `@derive(Copy)`, duplication is never implicit. You must call `.handle()`, making the cost visible at every use site.
 
-## `@handle` with `linear`
+## `Handle` with `linear`
 
-You can combine `@handle` and `linear`. This gives you explicit duplication while still requiring every handle to be consumed:
+`Handle` and `linear` compose freely. This gives you explicit duplication while still requiring every handle to be consumed:
 
 ```gruel
-@handle
 linear struct Task {
     id: i32,
 
-    fn handle(self) -> Task {
+    fn handle(borrow self) -> Task {
         Task { id: self.id }
     }
 }
@@ -159,10 +155,11 @@ fn run(t: Task) -> i32 { t.id }
 fn main() -> i32 {
     let t = Task { id: 42 };
     let t2 = t.handle();  // fork — both handles must be consumed
-    run(t2)               // consume t2
-    // ERROR if t is not also consumed — add: run(t)
+    run(t) + run(t2)      // consume both
 }
 ```
+
+This is the one place `Handle` and `Clone` diverge: `Clone` is rejected on linear types because cloning would create an unaccounted-for second linear value, but `Handle` is allowed because `.handle()` is an explicit, opt-in fork.
 
 ## When to Use Linear Types
 

@@ -32,7 +32,7 @@ This representation allows string literals to remain cheap (no allocation) while
 
 {{ rule(id="3.10:5", cat="normative") }}
 
-`String` is not `@copy`. Passing a string to a function or assigning it to another binding moves the string.
+`String` is not `Copy`. Passing a string to a function or assigning it to another binding moves the string.
 
 {{ rule(id="3.10:6", cat="example") }}
 

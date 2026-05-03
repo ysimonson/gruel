@@ -169,13 +169,13 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:37", cat="legality-rule") }}
 
-A linear struct **MUST NOT** be marked with `@copy`. Linear types cannot be implicitly copied.
+A linear struct **MUST NOT** be marked with `@derive(Copy)`. Linear types cannot be implicitly copied.
 
 {{ rule(id="3.8:38", cat="example") }}
 
 ```gruel
-@copy
-linear struct Invalid { value: i32 }  // ERROR: linear types cannot be @copy
+@derive(Copy)
+linear struct Invalid { value: i32 }  // ERROR: linear struct cannot be marked `@derive(Copy)`
 ```
 
 {{ rule(id="3.8:39", cat="informative") }}
@@ -185,40 +185,35 @@ Linear types are useful for:
 - Protocol enforcement (ensuring state machine transitions are completed)
 - Results that must be checked (similar to `must_use` attributes)
 
-## The `@handle` Directive
+## The `Handle` Interface
 
 {{ rule(id="3.8:40", cat="normative") }}
 
-A struct type **MAY** be declared as a handle type using the `@handle` directive before the struct definition. Handle types support explicit duplication via a `.handle()` method.
+`Handle` is a compiler-recognized structural interface (ADR-0075). A type conforms to `Handle` when it provides a method named `handle` with the signature `fn handle(borrow self) -> Self`. Conformance enables explicit duplication via a `.handle()` call: the receiver is borrowed and a freshly owned value is returned.
 
 {{ rule(id="3.8:41", cat="syntax") }}
 
+There is no directive for `Handle`. The interface is opted into by defining the conforming method directly on the struct or enum:
+
 ```ebnf
-handle_struct = "@handle" struct_def ;
+handle_method = "fn" "handle" "(" "borrow" "self" ")" "->" "Self" block ;
 ```
 
 {{ rule(id="3.8:42", cat="normative") }}
 
-A struct marked with `@handle` **MUST** provide a method named `handle` with the following signature:
-
-```gruel
-fn handle(self) -> T
-```
-
-where `T` is the handle struct type. It is a compile-time error to mark a struct with `@handle` if it does not provide this method.
+A method named `handle` with the receiver mode `borrow self`, no other parameters, and return type `Self` makes the host type conform to `Handle`. A method named `handle` with any other shape does **NOT** make the host type conform — it is an ordinary method, and `@conforms(T, Handle)` returns `false` for that type.
 
 {{ rule(id="3.8:43", cat="legality-rule") }}
 
-The `handle` method **MUST** take exactly one parameter (`self` of the struct type) and **MUST** return the same struct type. It is a compile-time error if the method signature differs.
+It is a compile-time error to call `.handle()` on a value whose type does not have a `handle` method.
 
 {{ rule(id="3.8:44", cat="example") }}
 
 ```gruel
-@handle
 struct Counter {
     count: i32,
 
-    fn handle(self) -> Counter {
+    fn handle(borrow self) -> Counter {
         Counter { count: self.count }
     }
 }
@@ -226,36 +221,38 @@ struct Counter {
 fn main() -> i32 {
     let a = Counter { count: 1 };
     let b = a.handle();  // explicit duplication
-    b.count
+    a.count + b.count    // a is still valid
 }
 ```
 
 {{ rule(id="3.8:45", cat="normative") }}
 
-Calling `.handle()` on a handle type does not consume the receiver and returns a new owned value. Both the original and the returned value are valid after the call.
+Calling `.handle()` on a `Handle` type does not consume the receiver and returns a new owned value. Both the original and the returned value are valid after the call. This is enforced by the `borrow self` receiver: the type system treats `.handle()` as a borrow, not a move.
 
 {{ rule(id="3.8:46", cat="informative") }}
 
-Handle types are useful for:
-- Reference-counted types (Rc, Arc) where duplication increments the count
+`Handle` is useful for:
+- Reference-counted types (`Rc`, `Arc`) where duplication increments the count
 - Interned strings where duplication is cheap
 - Shared resources where explicit duplication makes cost visible
 
 {{ rule(id="3.8:47", cat="normative") }}
 
-A `@copy` struct implicitly supports handle semantics. Any `@copy` type can be explicitly duplicated, although the `.handle()` method is not required.
+A `Copy` struct implicitly supports handle-like semantics: any `Copy` value can be duplicated by use, with no `.handle()` call required. `Copy` types are not required to conform to `Handle`.
 
 {{ rule(id="3.8:48", cat="informative") }}
 
-The difference between `@copy` and `@handle`:
-- `@copy` types are duplicated implicitly when used
-- `@handle` types require explicit `.handle()` calls for duplication
-- `@copy` is appropriate for small, cheap-to-copy types (like `Point`)
-- `@handle` is appropriate for types where duplication has visible cost (like reference-counted types)
+The difference between `Copy` and `Handle`:
+- `Copy` types are duplicated implicitly when used
+- `Handle` types require explicit `.handle()` calls for duplication
+- `Copy` is appropriate for small, cheap-to-copy types (like `Point`)
+- `Handle` is appropriate for types where duplication has visible cost (like reference-counted types)
+
+`Handle` shares its signature shape with `Clone` (both are `fn name(borrow self) -> Self`); they remain distinct interfaces because `Handle` is permitted on linear types whereas `Clone` is not (§3.8:49).
 
 {{ rule(id="3.8:49", cat="normative") }}
 
-A linear struct **MAY** be marked with `@handle` if explicit duplication is meaningful (e.g., forking a transaction).
+A linear struct **MAY** conform to `Handle`. Explicit duplication of a linear value is the canonical use case for `Handle` (e.g., forking a transaction).
 
 ## Use After Move
 

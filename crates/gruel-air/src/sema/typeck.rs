@@ -25,7 +25,7 @@ impl<'a> Sema<'a> {
 
     /// Check if a type is a Copy type.
     /// This differs from Type::is_copy() because it can look up struct definitions
-    /// to check if a struct is marked with @copy.
+    /// to check if a struct is marked with @derive(Copy).
     pub(crate) fn is_type_copy(&self, ty: Type) -> bool {
         match ty.kind() {
             // Primitive Copy types
@@ -57,7 +57,7 @@ impl<'a> Sema<'a> {
             TypeKind::ComptimeInt => true,
             // Never and Error are Copy for convenience
             TypeKind::Never | TypeKind::Error => true,
-            // Struct types: check if marked with @copy
+            // Struct types: check if marked with @derive(Copy)
             TypeKind::Struct(struct_id) => {
                 let struct_def = self.type_pool.struct_def(struct_id);
                 struct_def.is_copy

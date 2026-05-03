@@ -58,7 +58,7 @@ Nested tuple access of the form `t.0.1` is not currently supported because the l
 
 {{ rule(id="4.15:11", cat="legality-rule") }}
 
-If the element type at index `N` is not `@copy`, the expression `t.N` **MUST NOT** be used to consume that element. Such an expression is a compile-time error; the programmer **MUST** use tuple destructuring (see [Let Statements](../../05-statements)) to consume non-copy elements.
+If the element type at index `N` is not `Copy`, the expression `t.N` **MUST NOT** be used to consume that element. Such an expression is a compile-time error; the programmer **MUST** use tuple destructuring (see [Let Statements](../../05-statements)) to consume non-copy elements.
 
 {{ rule(id="4.15:12") }}
 

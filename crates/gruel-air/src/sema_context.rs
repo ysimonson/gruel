@@ -468,7 +468,7 @@ impl<'a> SemaContext<'a> {
             | TypeKind::ComptimeType
             | TypeKind::ComptimeStr
             | TypeKind::ComptimeInt => true,
-            // Struct types: check if marked with @copy
+            // Struct types: check if marked with `@derive(Copy)`
             TypeKind::Struct(struct_id) => {
                 let struct_def = self.type_pool.struct_def(struct_id);
                 struct_def.is_copy

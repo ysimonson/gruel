@@ -696,15 +696,13 @@ pub struct StructDef {
     pub name: String,
     /// Fields in declaration order
     pub fields: Vec<StructField>,
-    /// Whether this struct is marked with @copy (can be implicitly duplicated)
+    /// Whether this struct conforms to the `Copy` interface via `@derive(Copy)` (ADR-0059).
     pub is_copy: bool,
     /// Whether this struct is marked with @derive(Clone) (compiler-synthesized
     /// recursive clone). ADR-0065. Mutually compatible with `is_copy` because
     /// every Copy type is automatically Clone, but `@derive(Clone)` can also
     /// be applied to affine types whose fields are all `Clone`.
     pub is_clone: bool,
-    /// Whether this struct is marked with @handle (can be explicitly duplicated via .handle())
-    pub is_handle: bool,
     /// Whether this struct is a linear type (must be consumed, cannot be dropped)
     pub is_linear: bool,
     /// User-defined destructor function name, if any (e.g., "Data.__drop")
@@ -1316,7 +1314,7 @@ impl Type {
     /// - Never type and Error type (for convenience in error recovery)
     ///
     /// Non-Copy types (move types) are:
-    /// - Struct types (unless marked @copy, checked via StructDef.is_copy)
+    /// - Struct types (unless marked `@derive(Copy)`, checked via StructDef.is_copy)
     /// - Array types (unless element type is Copy, checked via Sema.is_type_copy)
     ///
     /// Note: This method can't check struct's is_copy attribute or array element
@@ -2141,7 +2139,6 @@ mod tests {
             ],
             is_copy: false,
             is_clone: false,
-            is_handle: false,
             is_linear: false,
             destructor: None,
             is_builtin: false,
@@ -2168,7 +2165,6 @@ mod tests {
             fields: vec![],
             is_copy: false,
             is_clone: false,
-            is_handle: false,
             is_linear: false,
             destructor: None,
             is_builtin: false,
@@ -2201,7 +2197,6 @@ mod tests {
             ],
             is_copy: false,
             is_clone: false,
-            is_handle: false,
             is_linear: false,
             destructor: None,
             is_builtin: false,

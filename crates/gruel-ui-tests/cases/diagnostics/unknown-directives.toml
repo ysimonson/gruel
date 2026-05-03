@@ -1,0 +1,85 @@
+[section]
+id = "diagnostics.unknown-directives"
+name = "Unknown Directive Diagnostics"
+description = "Quality of the E0442 diagnostic emitted by ADR-0075 for unrecognized directive names: bare unknowns, edit-distance suggestions, and retirement notes for `@handle` and `@copy`."
+
+# =============================================================================
+# Bare unknowns: no near-match suggestion, just the rejection.
+# =============================================================================
+
+[[case]]
+name = "bare_unknown_directive_no_suggestion"
+source = """
+@xyzzy
+struct Foo { x: i32 }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["E0442", "unknown directive `@xyzzy`"]
+
+# =============================================================================
+# Edit-distance suggestions for typos near a recognized name.
+# =============================================================================
+
+[[case]]
+name = "typo_near_allow_suggests_allow"
+source = """
+@allwo(unused_variable)
+fn main() -> i32 {
+    let x = 0;
+    0
+}
+"""
+compile_fail = true
+error_contains = ["unknown directive `@allwo`", "did you mean `@allow`?"]
+
+[[case]]
+name = "typo_near_derive_suggests_derive"
+source = """
+@dervie(Copy)
+struct P { x: i32 }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["unknown directive `@dervie`", "did you mean `@derive`?"]
+
+# =============================================================================
+# Retired directives: targeted retirement note pointing at the ADR that
+# removed them and the current replacement.
+# =============================================================================
+
+[[case]]
+name = "retired_handle_directive_points_to_handle_interface"
+source = """
+@handle
+struct Counter {
+    count: i32,
+    fn handle(borrow self) -> Counter { Counter { count: self.count } }
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = [
+    "unknown directive `@handle`",
+    "ADR-0075",
+    "Handle",
+    "fn handle(borrow self) -> Self",
+]
+
+[[case]]
+name = "retired_copy_directive_points_to_derive_copy"
+source = """
+@copy
+struct Point { x: i32 }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = [
+    "unknown directive `@copy`",
+    "ADR-0059",
+    "@derive(Copy)",
+]

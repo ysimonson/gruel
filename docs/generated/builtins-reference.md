@@ -40,6 +40,7 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 | `Drop` | `drop` | method presence |
 | `Copy` | `copy` | `@derive(Copy)` |
 | `Clone` | `clone` | `@derive(Clone)` |
+| `Handle` | `handle` | method presence |
 
 ## Types
 
@@ -195,4 +196,14 @@ Types that may be explicitly duplicated via `.clone()`. All `Copy` types auto-co
 - `fn clone(&self) -> Self`
 
 **Conformance derive:** `@derive(Clone)` (compiler-recognized; no user `derive` declaration required). Synthesizes a `clone` method that recursively calls `clone` on every field (struct) or variant payload (enum). Synthesis fails if any field is not `Clone`. Rejected on `linear` types.
+
+### `Handle`
+
+Types that may be explicitly duplicated via `.handle()`, typically because the duplication has visible cost (refcount bumps, transaction forks). Unlike `Clone`, `Handle` is permitted on `linear` types (ADR-0075).
+
+**Required methods:**
+
+- `fn handle(&self) -> Self`
+
+**Conformance:** structural (no derive). Defining `fn handle(borrow self) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.
 

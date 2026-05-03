@@ -7,7 +7,7 @@
 //! - Resolving struct field types
 //! - Collecting function signatures
 //! - Collecting method signatures from impl blocks
-//! - Validating @copy and @handle structs
+//! - Validating @derive(Copy) and @handle structs
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -154,10 +154,7 @@ impl<'a> Sema<'a> {
             enum_method_sigs,
         }
     }
-    /// Check if a directive list contains `@derive(Copy)`. ADR-0059 reframes
-    /// `@copy` as `@derive(Copy)`; the bare `@copy` directive is no longer
-    /// recognized (callers should run `validate_no_copy_directive` to surface
-    /// a migration error instead of silently treating `@copy` as a no-op).
+    /// Check if a directive list contains `@derive(Copy)` (ADR-0059).
     pub(crate) fn has_copy_directive(&self, directives: &[RirDirective]) -> bool {
         let derive_sym = self.interner.get("derive");
         let copy_iface_sym = self.interner.get("Copy");
@@ -187,22 +184,56 @@ impl<'a> Sema<'a> {
         false
     }
 
-    /// Reject the legacy `@copy` directive with a migration error. ADR-0059
-    /// retired `@copy` in favor of `@derive(Copy)`; the directive parser is
-    /// generic so we surface the migration here.
-    pub(crate) fn validate_no_copy_directive(
-        &self,
-        directives: &[RirDirective],
-        _span: Span,
-    ) -> CompileResult<()> {
-        let copy_sym = self.interner.get("copy");
-        for directive in directives {
-            if Some(directive.name) == copy_sym {
+    /// ADR-0075: walk every directive collected during parsing and reject any
+    /// whose name isn't in the recognized set (`@allow`, `@derive`). Retired
+    /// directives (`@handle`, `@copy`) get a targeted retirement note; other
+    /// unknowns get an edit-distance suggestion when there's a near-match.
+    pub(crate) fn validate_directives(&self) -> CompileResult<()> {
+        for (_, inst) in self.rir.iter() {
+            let (start, len) = match &inst.data {
+                InstData::StructDecl {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::FnDecl {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::Alloc {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::ConstDecl {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::AnonStructType {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::AnonEnumType {
+                    directives_start,
+                    directives_len,
+                    ..
+                } => (*directives_start, *directives_len),
+                _ => continue,
+            };
+            if len == 0 {
+                continue;
+            }
+            for directive in self.rir.get_directives(start, len) {
+                let name = self.interner.resolve(&directive.name).to_string();
+                if name == "allow" || name == "derive" {
+                    continue;
+                }
+                let note = directive_diagnosis_note(&name);
                 return Err(CompileError::new(
-                    ErrorKind::DeprecatedDirective {
-                        name: "copy".to_string(),
-                        replacement: "@derive(Copy)".to_string(),
-                    },
+                    ErrorKind::UnknownDirective { name, note },
                     directive.span,
                 ));
             }
@@ -210,16 +241,6 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Check if a directive list contains the @handle directive
-    pub(crate) fn has_handle_directive(&self, directives: &[RirDirective]) -> bool {
-        let handle_sym = self.interner.get("handle");
-        for directive in directives {
-            if Some(directive.name) == handle_sym {
-                return true;
-            }
-        }
-        false
-    }
     /// Phase 1: Register all type names (enum and struct IDs).
     ///
     /// This creates name → ID mappings for all enums and structs in a single pass,
@@ -499,11 +520,9 @@ impl<'a> Sema<'a> {
                     }
 
                     let directives = self.rir.get_directives(*directives_start, *directives_len);
-                    self.validate_no_copy_directive(&directives, inst.span)?;
                     let is_copy = self.has_copy_directive(&directives);
-                    let is_handle = self.has_handle_directive(&directives);
 
-                    // Linear types cannot be @copy
+                    // Linear types cannot be @derive(Copy)
                     if *is_linear && is_copy {
                         return Err(CompileError::new(
                             ErrorKind::LinearStructCopy(struct_name.clone()),
@@ -517,7 +536,6 @@ impl<'a> Sema<'a> {
                         fields: Vec::new(), // Filled in during resolve_declarations
                         is_copy,
                         is_clone: false, // Filled in during resolve_declarations after fields known
-                        is_handle,
                         is_linear: *is_linear,
                         destructor: None,  // Filled in during resolve_declarations
                         is_builtin: false, // User-defined struct
@@ -540,8 +558,8 @@ impl<'a> Sema<'a> {
     /// Phase 2: Resolve all declarations.
     ///
     /// Now that all type names are registered, this resolves:
-    /// - Struct field types (must be done first for @copy validation)
-    /// - @copy struct validation, destructors, functions, and methods
+    /// - Struct field types (must be done first for @derive(Copy) validation)
+    /// - @derive(Copy) struct validation, destructors, functions, and methods
     ///
     /// # Array Type Registration
     ///
@@ -551,6 +569,9 @@ impl<'a> Sema<'a> {
     /// are created on-demand via the thread-safe `TypeInternPool` during function
     /// body analysis.
     pub(crate) fn resolve_declarations(&mut self) -> CompileResult<()> {
+        // ADR-0075: surface unrecognized `@name` directives before any
+        // downstream pass that would silently ignore them.
+        self.validate_directives()?;
         // Derives (ADR-0058) are gated by the `comptime_derives` preview
         // feature. Reject any `derive` item before we touch the rest of
         // declaration gathering so users get a clear diagnostic.
@@ -1264,7 +1285,7 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Resolve struct field types. Must run before @copy validation.
+    /// Resolve struct field types. Must run before @derive(Copy) validation.
     pub(crate) fn resolve_struct_fields(&mut self) -> CompileResult<()> {
         for (_, inst) in self.rir.iter() {
             if let InstData::StructDecl {
@@ -1350,7 +1371,7 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Resolve @copy validation, destructors, functions, and methods.
+    /// Resolve @derive(Copy) validation, destructors, functions, and methods.
     pub(crate) fn resolve_remaining_declarations(&mut self) -> CompileResult<()> {
         // Collect all method InstRefs from anonymous struct and enum types.
         // These need to be skipped during function declaration collection because:
@@ -1385,7 +1406,7 @@ impl<'a> Sema<'a> {
             }
         }
 
-        // First pass: collect all declarations and validate @copy structs
+        // First pass: collect all declarations and validate @derive(Copy) structs
         for (inst_ref, inst) in self.rir.iter() {
             match &inst.data {
                 InstData::StructDecl {
@@ -1471,13 +1492,10 @@ impl<'a> Sema<'a> {
             }
         }
 
-        // Second pass: validate @handle structs (after all methods are collected)
-        self.validate_handle_structs()?;
-
         Ok(())
     }
 
-    /// Validate that a @copy struct only contains Copy type fields.
+    /// Validate that a @derive(Copy) struct only contains Copy type fields.
     fn validate_copy_struct(
         &self,
         directives_start: u32,
@@ -1496,7 +1514,7 @@ impl<'a> Sema<'a> {
             return Err(CompileError::new(
                 ErrorKind::InternalError(
                     ice!(
-                        "struct not found during @copy validation",
+                        "struct not found during @derive(Copy) validation",
                         phase: "sema/declarations",
                         details: {
                             "struct_name" => struct_name.clone()
@@ -1513,7 +1531,7 @@ impl<'a> Sema<'a> {
             CompileError::new(
                 ErrorKind::InternalError(
                     ice!(
-                        "struct not found during @copy validation",
+                        "struct not found during @derive(Copy) validation",
                         phase: "sema/declarations",
                         details: {
                             "struct_name" => struct_name.clone()
@@ -1611,135 +1629,6 @@ impl<'a> Sema<'a> {
         let mut updated = self.type_pool.struct_def(struct_id);
         updated.is_clone = true;
         self.type_pool.update_struct_def(struct_id, updated);
-        Ok(())
-    }
-
-    /// Validate that all @handle structs have a valid .handle() method.
-    ///
-    /// This runs after all methods are collected so we can look up
-    /// method signatures in the `methods` map.
-    pub(crate) fn validate_handle_structs(&self) -> CompileResult<()> {
-        // We need to iterate through structs and find their spans
-        for (_, inst) in self.rir.iter() {
-            if let InstData::StructDecl {
-                directives_start,
-                directives_len,
-                name,
-                ..
-            } = &inst.data
-            {
-                let directives = self.rir.get_directives(*directives_start, *directives_len);
-                if !self.has_handle_directive(&directives) {
-                    continue;
-                }
-
-                let struct_name = self.interner.resolve(name).to_string();
-                let struct_id = *self.structs.get(name).ok_or_else(|| {
-                    CompileError::new(
-                        ErrorKind::InternalError(
-                            ice!(
-                                "struct not found during @handle validation",
-                                phase: "sema/declarations",
-                                details: {
-                                    "struct_name" => struct_name.clone()
-                                }
-                            )
-                            .to_string(),
-                        ),
-                        inst.span,
-                    )
-                })?;
-                let struct_type = Type::new_struct(struct_id);
-
-                // Look for a .handle() method using StructId
-                let handle_sym = self.interner.get("handle");
-                let method_key = match handle_sym {
-                    Some(sym) => (struct_id, sym),
-                    None => {
-                        // "handle" not interned means no .handle() method exists
-                        return Err(CompileError::new(
-                            ErrorKind::HandleStructMissingMethod { struct_name },
-                            inst.span,
-                        ));
-                    }
-                };
-
-                let method_info = match self.methods.get(&method_key) {
-                    Some(info) => info,
-                    None => {
-                        return Err(CompileError::new(
-                            ErrorKind::HandleStructMissingMethod { struct_name },
-                            inst.span,
-                        ));
-                    }
-                };
-
-                // Validate: must be a method (has self), not associated function
-                if !method_info.has_self {
-                    let param_types = self.param_arena.types(method_info.params);
-                    let found_signature = format!(
-                        "fn handle({}) -> {}",
-                        param_types
-                            .iter()
-                            .map(|t| self.format_type_name(*t))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        self.format_type_name(method_info.return_type)
-                    );
-                    return Err(CompileError::new(
-                        ErrorKind::HandleMethodWrongSignature {
-                            struct_name,
-                            found_signature,
-                        },
-                        method_info.span,
-                    ));
-                }
-
-                // Validate: should take no extra parameters (just self)
-                let param_types = self.param_arena.types(method_info.params);
-                if !param_types.is_empty() {
-                    let param_names = self.param_arena.names(method_info.params);
-                    let params = std::iter::once(format!("self: {}", struct_name))
-                        .chain(param_types.iter().zip(param_names).map(|(ty, name)| {
-                            format!(
-                                "{}: {}",
-                                self.interner.resolve(name),
-                                self.format_type_name(*ty)
-                            )
-                        }))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let found_signature = format!(
-                        "fn handle({}) -> {}",
-                        params,
-                        self.format_type_name(method_info.return_type)
-                    );
-                    return Err(CompileError::new(
-                        ErrorKind::HandleMethodWrongSignature {
-                            struct_name,
-                            found_signature,
-                        },
-                        method_info.span,
-                    ));
-                }
-
-                // Validate: return type must be the same struct type
-                if method_info.return_type != struct_type {
-                    let found_signature = format!(
-                        "fn handle(self: {}) -> {}",
-                        struct_name,
-                        self.format_type_name(method_info.return_type)
-                    );
-                    return Err(CompileError::new(
-                        ErrorKind::HandleMethodWrongSignature {
-                            struct_name,
-                            found_signature,
-                        },
-                        method_info.span,
-                    ));
-                }
-            }
-        }
         Ok(())
     }
 
@@ -2079,7 +1968,7 @@ impl<'a> Sema<'a> {
     ///
     /// Validates the signature (must be exactly `fn drop(self)`, no extra
     /// params, returns unit) and the type's copy/linear status (a destructor
-    /// is illegal on `@copy` and `linear` types per ADR-0053).
+    /// is illegal on `@derive(Copy)` and `linear` types per ADR-0053).
     fn register_inline_struct_drop(
         &mut self,
         type_name: Spur,
@@ -2125,7 +2014,7 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        // Affine-only: `@copy` structs cannot have destructors (double-free risk).
+        // Affine-only: `@derive(Copy)` structs cannot have destructors (double-free risk).
         // `linear` structs cannot either — they are never implicitly dropped, so
         // a destructor would be unreachable.
         let struct_def_snapshot = self.type_pool.struct_def(struct_id);
@@ -2508,5 +2397,113 @@ impl<'a> Sema<'a> {
                 span,
             )),
         }
+    }
+}
+
+/// Build the trailing note for an unknown-directive error (ADR-0075).
+///
+/// Retired directives get a targeted retirement message pointing at the
+/// ADR that took them out of service. Other names get an edit-distance
+/// hint when there's a near-match in the recognized set; otherwise no
+/// note is attached.
+fn directive_diagnosis_note(name: &str) -> Option<String> {
+    match name {
+        "handle" => {
+            return Some(
+                "the `@handle` directive was retired in ADR-0075; \
+                 conform to the `Handle` interface by defining \
+                 `fn handle(borrow self) -> Self` directly"
+                    .to_string(),
+            );
+        }
+        "copy" => {
+            return Some(
+                "the `@copy` directive was retired in ADR-0059; \
+                 use `@derive(Copy)` instead"
+                    .to_string(),
+            );
+        }
+        _ => {}
+    }
+
+    const RECOGNIZED: &[&str] = &["allow", "derive"];
+    RECOGNIZED
+        .iter()
+        .map(|cand| (cand, levenshtein_distance(name, cand)))
+        .filter(|(_, d)| *d <= 2)
+        .min_by_key(|(_, d)| *d)
+        .map(|(cand, _)| format!("did you mean `@{cand}`?"))
+}
+
+/// Wagner-Fischer Levenshtein distance. Used by `directive_diagnosis_note`
+/// to suggest near-matches for typo'd directive names. Both inputs are
+/// short identifiers (~10 chars), so the O(n·m) cost is negligible and the
+/// dependency-free implementation is preferable to pulling in `strsim`.
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (n, m) = (a.len(), b.len());
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
+    }
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr: Vec<usize> = vec![0; m + 1];
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (curr[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
+}
+
+#[cfg(test)]
+mod directive_validation_tests {
+    use super::{directive_diagnosis_note, levenshtein_distance};
+
+    #[test]
+    fn levenshtein_basics() {
+        assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
+        assert_eq!(levenshtein_distance("allow", "allwo"), 2);
+        assert_eq!(levenshtein_distance("derive", "dervie"), 2);
+        assert_eq!(levenshtein_distance("derive", "derive"), 0);
+        assert_eq!(levenshtein_distance("", "abc"), 3);
+        assert_eq!(levenshtein_distance("abc", ""), 3);
+    }
+
+    #[test]
+    fn note_for_typo_near_allow() {
+        let note = directive_diagnosis_note("allwo").expect("near-match should suggest");
+        assert!(note.contains("@allow"), "got: {note}");
+    }
+
+    #[test]
+    fn note_for_typo_near_derive() {
+        let note = directive_diagnosis_note("dervie").expect("near-match should suggest");
+        assert!(note.contains("@derive"), "got: {note}");
+    }
+
+    #[test]
+    fn note_for_far_typo_is_none() {
+        assert!(directive_diagnosis_note("xyzzy").is_none());
+    }
+
+    #[test]
+    fn note_for_retired_handle_mentions_adr_0075() {
+        let note = directive_diagnosis_note("handle").expect("retirement note");
+        assert!(note.contains("ADR-0075"), "got: {note}");
+        assert!(note.contains("Handle"), "got: {note}");
+    }
+
+    #[test]
+    fn note_for_retired_copy_mentions_adr_0059() {
+        let note = directive_diagnosis_note("copy").expect("retirement note");
+        assert!(note.contains("ADR-0059"), "got: {note}");
+        assert!(note.contains("@derive(Copy)"), "got: {note}");
     }
 }
