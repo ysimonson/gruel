@@ -503,7 +503,6 @@ pub(crate) fn exhaustiveness_witnesses(
 /// simpler per-kind bookkeeping in `analyze_match`. This hook lives
 /// here so a follow-up can surface `WarningKind::UnreachablePattern`
 /// for nested arms that the bookkeeping misses.
-#[allow(dead_code)]
 pub(crate) fn arm_reachability(
     arms: &[AirPattern],
     scrutinee_type: Type,

@@ -62,7 +62,7 @@ impl VariableMoveState {
 
     /// Check if a field path is moved.
     /// Returns Some(span) if the path (or any ancestor) is moved.
-    #[allow(dead_code)] // Used in tests; may be needed when partial moves are re-enabled
+    #[allow(dead_code)]
     pub fn is_path_moved(&self, path: &[Spur]) -> Option<Span> {
         // If fully moved, everything is moved
         if let Some(span) = self.full_move {
