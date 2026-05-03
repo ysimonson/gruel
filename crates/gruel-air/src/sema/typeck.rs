@@ -193,6 +193,22 @@ impl<'a> Sema<'a> {
     pub(crate) fn resolve_type(&mut self, type_sym: Spur, span: Span) -> CompileResult<Type> {
         let type_name = self.interner.resolve(&type_sym);
 
+        // ADR-0076: pervasive `Self`. Substitute the literal symbol `Self`
+        // with `current_self` whenever we are inside a struct/enum/derive
+        // body. This is the *only* place Self resolution happens — every
+        // recursive type call inside a `TypeCall` (`Vec(Self)`, `Ref(Self)`,
+        // …), array element, tuple element, etc. routes back through here.
+        if type_name == "Self" {
+            return match self.current_self {
+                Some(ty) => Ok(ty),
+                None => Err(
+                    CompileError::new(ErrorKind::UnknownType("Self".to_string()), span).with_help(
+                        "`Self` is only valid inside a struct, enum, derive, or interface body",
+                    ),
+                ),
+            };
+        }
+
         // Check primitive types first.
         // Note: String is handled below via struct lookup (it's a builtin struct).
         match type_name {
@@ -430,6 +446,14 @@ impl<'a> Sema<'a> {
         }
 
         let type_name = self.interner.resolve(&type_sym);
+
+        // ADR-0076: pervasive `Self` — substitute from `current_self` if set.
+        // Mirrors the resolver in `resolve_type` so that comptime-resolution
+        // paths (e.g. anonymous-fn methods, generic specialization) honour
+        // the same Self in scope.
+        if type_name == "Self" {
+            return self.current_self;
+        }
 
         // Check primitive types first
         match type_name {

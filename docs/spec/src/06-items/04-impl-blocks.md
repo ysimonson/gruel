@@ -208,3 +208,53 @@ pub struct Counter {
     fn validate(self) -> bool { self.value >= 0 }        // module-private
 }
 ```
+
+## `Self` Inside Methods and Associated Functions (ADR-0076)
+
+{{ rule(id="6.4:27", cat="normative") }}
+
+Inside any method or associated function defined within a `struct` or
+`enum` body, the type symbol `Self` denotes the enclosing struct or
+enum type. `Self` is in scope for the method's parameter types, return
+type, local-binding type annotations, struct/enum literals, enum
+variant paths, and pattern paths.
+
+{{ rule(id="6.4:28", cat="normative") }}
+
+`Self` substitutes uniformly at every depth of a type expression:
+inside `Ref(Self)`, `MutRef(Self)`, `Ptr(Self)`, `MutPtr(Self)`,
+`Vec(Self)`, `Option(Self)`, `Result(Self, E)`, `[Self; N]`,
+`(Self, T)`, and any user-defined parameterised type. There is no
+position in a type expression where `Self` is meaningful but does not
+resolve.
+
+{{ rule(id="6.4:29", cat="normative") }}
+
+Associated functions — methods declared without a `self` parameter —
+also have `Self` in scope. Their return type and parameter types
+**MAY** mention `Self`, and so **MAY** their bodies via expressions
+such as `Self { ... }` (struct literal), `Self::Variant(...)` (enum
+variant constructor), and `Self::associated_fn(...)` (associated call).
+
+{{ rule(id="6.4:30", cat="example") }}
+
+```gruel
+struct Pair {
+    a: i32,
+    b: i32,
+
+    fn new(a: i32, b: i32) -> Self {                    // 6.4:29
+        Self { a: a, b: b }                             // 6.4:29
+    }
+
+    fn combine(&self, other: Ref(Self)) -> Self {       // 6.4:28 (Ref(Self))
+        Self { a: self.a + other.a, b: self.b + other.b }
+    }
+}
+```
+
+{{ rule(id="6.4:31", cat="legality-rule") }}
+
+Using `Self` in a position where no enclosing struct, enum, derive,
+or interface body is in scope (for example, in a free top-level
+function) is a compile-time error.

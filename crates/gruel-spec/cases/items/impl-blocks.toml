@@ -313,3 +313,161 @@ fn main() -> i32 { 0 }
 """
 compile_fail = true
 error_contains = "duplicate"
+
+# =============================================================================
+# Pervasive `Self` (ADR-0076)
+# =============================================================================
+
+[[case]]
+name = "self_in_associated_fn_return"
+spec = ["6.4:27", "6.4:29"]
+description = "`Self` resolves to the host struct in an associated function's return type and body"
+source = """
+struct Pair {
+    a: i32,
+    b: i32,
+
+    fn new(a: i32, b: i32) -> Self {
+        Self { a: a, b: b }
+    }
+}
+
+fn main() -> i32 {
+    let p = Pair::new(20, 22);
+    p.a + p.b
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "self_in_method_param_type"
+spec = ["6.4:27", "6.4:28"]
+description = "`Self` resolves to the host struct in a method parameter type"
+source = """
+struct Pair {
+    a: i32,
+    b: i32,
+
+    fn new(a: i32, b: i32) -> Self { Self { a: a, b: b } }
+
+    fn combine(self, other: Self) -> i32 {
+        self.a + self.b + other.a + other.b
+    }
+}
+
+fn main() -> i32 {
+    let p = Pair::new(1, 2);
+    let q = Pair::new(10, 29);
+    p.combine(q)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "ref_self_param"
+spec = ["6.4:28"]
+description = "`Ref(Self)` resolves at depth inside the type-call constructor"
+source = """
+struct Box {
+    value: i32,
+
+    fn new(v: i32) -> Self { Self { value: v } }
+
+    fn add(&self, other: Ref(Self)) -> i32 {
+        self.value + other.value
+    }
+}
+
+fn main() -> i32 {
+    let a = Box::new(10);
+    let b = Box::new(32);
+    a.add(&b)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "mut_ref_self_param"
+spec = ["6.4:28"]
+description = "`MutRef(Self)` resolves at depth inside the type-call constructor"
+source = """
+struct Box {
+    value: i32,
+
+    fn new(v: i32) -> Self { Self { value: v } }
+
+    fn assign(other: MutRef(Self), v: i32) {
+        other.value = v;
+    }
+}
+
+fn main() -> i32 {
+    let mut a = Box::new(0);
+    Box::assign(&mut a, 42);
+    a.value
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "self_array_param"
+spec = ["6.4:28"]
+description = "`[Self; N]` resolves at depth inside an array type"
+source = """
+struct Pair {
+    a: i32,
+    b: i32,
+
+    fn new(a: i32, b: i32) -> Self { Self { a: a, b: b } }
+
+    fn sum_pair(arr: [Self; 2]) -> i32 {
+        arr[0].a + arr[0].b + arr[1].a + arr[1].b
+    }
+}
+
+fn main() -> i32 {
+    let p = Pair::new(10, 20);
+    let q = Pair::new(5, 7);
+    let arr = [p, q];
+    Pair::sum_pair(arr)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "self_in_enum_method"
+spec = ["6.4:27", "6.4:28"]
+description = "`Self` resolves inside an enum method"
+source = """
+enum Shape {
+    Square(i32),
+    Circle(i32),
+
+    fn area(self) -> i32 {
+        match self {
+            Self::Square(s) => s * s,
+            Self::Circle(r) => r * r * 3,
+        }
+    }
+}
+
+fn main() -> i32 {
+    let s = Shape::Square(6);
+    s.area() + 6
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "self_outside_struct_rejected"
+spec = ["6.4:31"]
+description = "`Self` in a free top-level function is rejected"
+source = """
+fn make() -> Self {
+    0
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "Self"

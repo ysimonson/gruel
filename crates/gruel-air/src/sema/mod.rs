@@ -195,6 +195,15 @@ pub struct Sema<'a> {
     /// is still appended to `comptime_dbg_output` and a warning is still emitted.
     /// Set by the `--capture-comptime-dbg` CLI flag (used by the fuzzer).
     pub(crate) suppress_comptime_dbg_print: bool,
+    /// ADR-0076: the in-scope `Self` type, set whenever we resolve types
+    /// inside a struct/enum body (its methods or its inline destructor),
+    /// inside a `derive` splice into a host type, or inside the body of a
+    /// method that was synthesized for a comptime-built anonymous type.
+    /// Consumed by `resolve_type` / `resolve_type_for_comptime_with_subst`
+    /// to substitute the literal symbol `Self` at any depth in a type
+    /// expression. `None` means `Self` is not in scope; using it is an
+    /// error.
+    pub(crate) current_self: Option<Type>,
 }
 
 impl<'a> Sema<'a> {
@@ -246,6 +255,7 @@ impl<'a> Sema<'a> {
             comptime_dbg_output: Vec::new(),
             comptime_log_output: Vec::new(),
             suppress_comptime_dbg_print: false,
+            current_self: None,
         }
     }
 

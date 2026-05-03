@@ -204,7 +204,7 @@ form is already stable, and we are removing legacy spellings.
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Pervasive `Self` resolution.** Introduce
+- [x] **Phase 1: Pervasive `Self` resolution.** Introduce
       `Sema::current_self: Option<Type>` (and the matching
       `IfaceTy::SelfType` carry-through for interface bodies). Make
       `resolve_type` and `resolve_param_type` substitute `Self` at

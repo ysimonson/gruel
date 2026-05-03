@@ -766,7 +766,10 @@ impl<'a> Sema<'a> {
             None => return Ok(()),
         };
         let host_type = Type::new_struct(host_id);
-        let self_type_sym = self.interner.get_or_intern("Self");
+
+        // ADR-0076: bind `Self` to the host struct while resolving derived
+        // method signatures.
+        let saved_self = self.current_self.replace(host_type);
 
         let host_file_id = self.type_pool.struct_def(host_id).file_id;
         for dm in methods {
@@ -819,18 +822,10 @@ impl<'a> Sema<'a> {
             let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
             let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
             for p in &params {
-                let ty = if p.ty == self_type_sym {
-                    host_type
-                } else {
-                    self.resolve_param_type(p.ty, p.mode, m.span)?
-                };
+                let ty = self.resolve_param_type(p.ty, p.mode, m.span)?;
                 param_types.push(ty);
             }
-            let ret_type = if return_type == self_type_sym {
-                host_type
-            } else {
-                self.resolve_type(return_type, m.span)?
-            };
+            let ret_type = self.resolve_type(return_type, m.span)?;
             let param_range =
                 self.param_arena
                     .alloc(param_names, param_types, param_modes, param_comptime);
@@ -856,6 +851,7 @@ impl<'a> Sema<'a> {
                 },
             );
         }
+        self.current_self = saved_self;
         Ok(())
     }
 
@@ -874,7 +870,9 @@ impl<'a> Sema<'a> {
             None => return Ok(()),
         };
         let host_type = Type::new_enum(host_id);
-        let self_type_sym = self.interner.get_or_intern("Self");
+        // ADR-0076: bind `Self` to the host enum while resolving derived
+        // method signatures.
+        let saved_self = self.current_self.replace(host_type);
         let host_file_id = self.type_pool.enum_def(host_id).file_id;
 
         for dm in methods {
@@ -923,18 +921,10 @@ impl<'a> Sema<'a> {
             let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
             let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
             for p in &params {
-                let ty = if p.ty == self_type_sym {
-                    host_type
-                } else {
-                    self.resolve_param_type(p.ty, p.mode, m.span)?
-                };
+                let ty = self.resolve_param_type(p.ty, p.mode, m.span)?;
                 param_types.push(ty);
             }
-            let ret_type = if return_type == self_type_sym {
-                host_type
-            } else {
-                self.resolve_type(return_type, m.span)?
-            };
+            let ret_type = self.resolve_type(return_type, m.span)?;
             let param_range =
                 self.param_arena
                     .alloc(param_names, param_types, param_modes, param_comptime);
@@ -957,6 +947,7 @@ impl<'a> Sema<'a> {
                 },
             );
         }
+        self.current_self = saved_self;
         Ok(())
     }
 
@@ -1373,10 +1364,16 @@ impl<'a> Sema<'a> {
 
     /// Resolve @derive(Copy) validation, destructors, functions, and methods.
     pub(crate) fn resolve_remaining_declarations(&mut self) -> CompileResult<()> {
-        // Collect all method InstRefs from anonymous struct and enum types.
-        // These need to be skipped during function declaration collection because:
-        // - They may use `Self` type which requires struct/enum context
-        // - They are registered later during comptime evaluation with proper Self resolution
+        // Collect all method InstRefs that should NOT be processed as
+        // top-level functions:
+        //
+        // - Anonymous struct/enum methods are registered later during
+        //   comptime evaluation with proper Self resolution.
+        // - `derive` body methods (ADR-0058) are spliced into a host type
+        //   at expansion time.
+        // - Named struct/enum methods (including associated functions like
+        //   `fn new() -> Self`) are collected via `collect_struct_methods` /
+        //   `collect_enum_methods` with `current_self` set per ADR-0076.
         let mut anon_type_method_refs = rustc_hash::FxHashSet::default();
         for (_, inst) in self.rir.iter() {
             let (methods_start, methods_len) = match &inst.data {
@@ -1390,10 +1387,17 @@ impl<'a> Sema<'a> {
                     methods_len,
                     ..
                 } => (*methods_start, *methods_len),
-                // Methods inside `derive` bodies (ADR-0058) are not standalone
-                // functions either — they are spliced into a host type's
-                // method list at derive expansion.
                 InstData::DeriveDecl {
+                    methods_start,
+                    methods_len,
+                    ..
+                } => (*methods_start, *methods_len),
+                InstData::StructDecl {
+                    methods_start,
+                    methods_len,
+                    ..
+                } => (*methods_start, *methods_len),
+                InstData::EnumDecl {
                     methods_start,
                     methods_len,
                     ..
@@ -1807,6 +1811,11 @@ impl<'a> Sema<'a> {
         let struct_type = Type::new_struct(struct_id);
         let drop_name_sym = self.interner.get_or_intern("drop");
 
+        // ADR-0076: bind `Self` to the host struct while resolving method
+        // signatures. Errors abort the whole analysis pass so a leak is
+        // harmless; on the success path we restore the previous binding.
+        let saved_self = self.current_self.replace(struct_type);
+
         let methods = self.rir.get_inst_refs(methods_start, methods_len);
         for method_ref in methods {
             let method_inst = self.rir.get(method_ref);
@@ -1961,6 +1970,7 @@ impl<'a> Sema<'a> {
                 );
             }
         }
+        self.current_self = saved_self;
         Ok(())
     }
 
@@ -2151,6 +2161,10 @@ impl<'a> Sema<'a> {
         let enum_type = Type::new_enum(enum_id);
         let drop_name_sym = self.interner.get_or_intern("drop");
 
+        // ADR-0076: bind `Self` to the host enum while resolving method
+        // signatures.
+        let saved_self = self.current_self.replace(enum_type);
+
         let methods = self.rir.get_inst_refs(methods_start, methods_len);
         for method_ref in methods {
             let method_inst = self.rir.get(method_ref);
@@ -2201,24 +2215,9 @@ impl<'a> Sema<'a> {
                 let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
                 let param_types: Vec<Type> = params
                     .iter()
-                    .map(|p| {
-                        // `Self` inside enum method signatures resolves to the enum type.
-                        let type_str = self.interner.resolve(&p.ty);
-                        if type_str == "Self" {
-                            Ok(enum_type)
-                        } else {
-                            self.resolve_type(p.ty, method_inst.span)
-                        }
-                    })
+                    .map(|p| self.resolve_type(p.ty, method_inst.span))
                     .collect::<CompileResult<Vec<_>>>()?;
-                let ret_type = {
-                    let ret_str = self.interner.resolve(return_type);
-                    if ret_str == "Self" {
-                        enum_type
-                    } else {
-                        self.resolve_type(*return_type, method_inst.span)?
-                    }
-                };
+                let ret_type = self.resolve_type(*return_type, method_inst.span)?;
 
                 let param_range = self
                     .param_arena
@@ -2245,6 +2244,7 @@ impl<'a> Sema<'a> {
                 );
             }
         }
+        self.current_self = saved_self;
         Ok(())
     }
 

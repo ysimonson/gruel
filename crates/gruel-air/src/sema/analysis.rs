@@ -77,11 +77,20 @@ struct MethodBodySpec<'a> {
     return_type: Spur,
     params: &'a [gruel_rir::RirParam],
     body: InstRef,
-    /// The type of `self`, or `None` if this is a static/associated function.
-    self_type: Option<Type>,
+    /// The host struct/enum type. Always set when analyzing a method or
+    /// associated function inside a `struct` / `enum` body, regardless of
+    /// whether the function has a `self` parameter. ADR-0076 uses this to
+    /// bind `Self` for the duration of method-body analysis so that
+    /// associated functions like `fn new() -> Self` resolve `Self` to the
+    /// host type. `None` when analyzing a free top-level function.
+    host_type: Option<Type>,
+    /// Whether the function has a `self` parameter (i.e., it is a method
+    /// rather than an associated function). When `true`, `self` is added
+    /// as the first parameter with `host_type` as its type.
+    has_self: bool,
     /// Receiver mode (`self` / `&self` / `&mut self`). Encoded as
     /// `RirParamMode` (0 = Normal, 1 = Inout, 2 = Borrow). Ignored when
-    /// `self_type` is `None`.
+    /// `has_self` is `false`.
     self_mode: u8,
 }
 
@@ -301,7 +310,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                             return_type: *return_type,
                             params: &params,
                             body: *body,
-                            self_type: has_self.then_some(struct_type),
+                            host_type: Some(struct_type),
+                            has_self: *has_self,
                             self_mode: *receiver_mode,
                         },
                         method_inst.span,
@@ -383,7 +393,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                             return_type: *return_type,
                             params: &params,
                             body: *body,
-                            self_type: has_self.then_some(enum_type),
+                            host_type: Some(enum_type),
+                            has_self: *has_self,
                             self_mode: *receiver_mode,
                         },
                         method_inst.span,
@@ -457,7 +468,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         return_type: *return_type,
                         params: &params,
                         body: *body,
-                        self_type: has_self.then_some(enum_type),
+                        host_type: Some(enum_type),
+                        has_self: *has_self,
                         self_mode: *receiver_mode,
                     },
                     m.span,
@@ -505,7 +517,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                         return_type: *return_type,
                         params: &params,
                         body: *body,
-                        self_type: has_self.then_some(struct_type),
+                        host_type: Some(struct_type),
+                        has_self: *has_self,
                         self_mode: *receiver_mode,
                     },
                     m.span,
@@ -1176,7 +1189,8 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                                     return_type: *return_type,
                                     params: &params,
                                     body: *body,
-                                    self_type: has_self.then_some(method_info.struct_type),
+                                    host_type: Some(method_info.struct_type),
+                                    has_self: *has_self,
                                     self_mode: *receiver_mode,
                                 },
                                 method_inst.span,
@@ -1589,12 +1603,25 @@ impl<'a> Sema<'a> {
         spec: MethodBodySpec<'_>,
         span: Span,
     ) -> AnalyzedFnResult {
+        // ADR-0076: bind `Self` for the duration of body analysis whenever
+        // we are inside a struct/enum body — including associated functions
+        // like `fn new() -> Self` that have no `self` parameter. The host
+        // type is what `Self` refers to in `Self::Variant`, `Self { ... }`,
+        // and any wrapped form (`Vec(Self)`, `Ref(Self)`, …).
+        let saved_self = self.current_self;
+        if let Some(host) = spec.host_type {
+            self.current_self = Some(host);
+        }
+
         let ret_type = self.resolve_type(spec.return_type, span)?;
 
         // Build parameter list, adding self as first parameter for methods
         let mut param_info: Vec<(Spur, Type, RirParamMode)> = Vec::new();
 
-        if let Some(struct_type) = spec.self_type {
+        if spec.has_self {
+            let host = spec
+                .host_type
+                .expect("MethodBodySpec.has_self=true requires host_type to be set");
             // Decode the receiver mode set by the parser (`self` / `&self` /
             // `&mut self` — see ADR-0062). Receiver normalization parallels
             // the regular-parameter normalization in
@@ -1607,7 +1634,7 @@ impl<'a> Sema<'a> {
                 _ => RirParamMode::Normal,
             };
             let self_sym = self.interner.get_or_intern("self");
-            param_info.push((self_sym, struct_type, self_mode));
+            param_info.push((self_sym, host, self_mode));
         }
 
         // Add regular parameters with their modes. Use `resolve_param_type`
@@ -1629,6 +1656,8 @@ impl<'a> Sema<'a> {
             ref_fns,
             ref_meths,
         ) = self.analyze_function(infer_ctx, ret_type, &param_info, spec.body)?;
+
+        self.current_self = saved_self;
 
         Ok((
             AnalyzedFunction {
@@ -1661,6 +1690,10 @@ impl<'a> Sema<'a> {
         _span: Span,
         struct_type: Type,
     ) -> AnalyzedFnResult {
+        // ADR-0076: bind `Self` to the host struct/enum while analyzing the
+        // destructor body so `Self::Variant` / `Self { ... }` resolve.
+        let saved_self = self.current_self.replace(struct_type);
+
         // Destructors take self parameter and return unit
         let self_sym = self.interner.get_or_intern("self");
         let param_info: Vec<(Spur, Type, RirParamMode)> =
@@ -1678,6 +1711,8 @@ impl<'a> Sema<'a> {
             ref_fns,
             ref_meths,
         ) = self.analyze_function(infer_ctx, Type::UNIT, &param_info, body)?;
+
+        self.current_self = saved_self;
 
         Ok((
             AnalyzedFunction {
@@ -1800,7 +1835,16 @@ impl<'a> Sema<'a> {
         // Create analysis context with resolved types
         // If type_subst is provided, initialize comptime_type_vars with the substitutions
         // so that type parameters can be resolved during struct initialization.
-        let comptime_type_vars = type_subst.cloned().unwrap_or_default();
+        let mut comptime_type_vars = type_subst.cloned().unwrap_or_default();
+        // ADR-0076: pervasive `Self`. When analyzing a method/associated-fn
+        // body with a host type in scope, expose `Self` to the body's name
+        // resolution machinery so struct literals (`Self { ... }`), enum
+        // variant paths (`Self::Variant`), and pattern paths
+        // (`Self::Variant(x)`) all resolve to the host type.
+        if let Some(host) = self.current_self {
+            let self_sym = self.interner.get_or_intern("Self");
+            comptime_type_vars.entry(self_sym).or_insert(host);
+        }
         let comptime_value_vars = value_subst.cloned().unwrap_or_default();
         let mut ctx = AnalysisContext {
             locals: HashMap::default(),
@@ -9581,6 +9625,10 @@ impl<'a> Sema<'a> {
 
         let mut seen_methods: rustc_hash::FxHashSet<Spur> = rustc_hash::FxHashSet::default();
 
+        // ADR-0076: bind `Self` to the anonymous struct's `Type` while
+        // resolving method signatures.
+        let saved_self = self.current_self.replace(struct_type);
+
         for method_ref in method_refs {
             let method_inst = self.rir.get(method_ref);
             if let InstData::FnDecl {
@@ -9648,10 +9696,7 @@ impl<'a> Sema<'a> {
                 };
 
                 for p in params {
-                    let type_str = self.interner.resolve(&p.ty);
-                    let resolved_ty = if type_str == "Self" {
-                        struct_type
-                    } else if p.is_comptime && p.ty == type_sym {
+                    let resolved_ty = if p.is_comptime && p.ty == type_sym {
                         // `comptime X: type` param — placeholder until call.
                         Type::COMPTIME_TYPE
                     } else if references_method_type_param(self, p.ty) {
@@ -9664,10 +9709,7 @@ impl<'a> Sema<'a> {
                     param_types.push(resolved_ty);
                 }
 
-                let ret_type_str = self.interner.resolve(return_type);
-                let ret_type = if ret_type_str == "Self" {
-                    struct_type
-                } else if references_method_type_param(self, *return_type) {
+                let ret_type = if references_method_type_param(self, *return_type) {
                     Type::COMPTIME_TYPE
                 } else {
                     self.resolve_type_for_comptime_with_subst(*return_type, type_subst)?
@@ -9698,6 +9740,7 @@ impl<'a> Sema<'a> {
                 );
             }
         }
+        self.current_self = saved_self;
         Some(())
     }
 
@@ -9841,25 +9884,21 @@ impl<'a> Sema<'a> {
             return Ok(());
         }
 
+        // ADR-0076: bind `Self` to the anonymous struct's `Type` while
+        // resolving the synthesized `__call` method signature.
+        let saved_self = self.current_self.replace(struct_type);
+
         let params = self.rir.get_params(params_start, params_len);
         let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
         let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
         for p in params {
-            let type_str = self.interner.resolve(&p.ty);
-            let resolved = if type_str == "Self" {
-                struct_type
-            } else {
-                self.resolve_type(p.ty, span)?
-            };
+            let resolved = self.resolve_type(p.ty, span)?;
             param_types.push(resolved);
         }
 
-        let ret_type_str = self.interner.resolve(&return_type);
-        let ret_ty = if ret_type_str == "Self" {
-            struct_type
-        } else {
-            self.resolve_type(return_type, span)?
-        };
+        let ret_ty = self.resolve_type(return_type, span)?;
+
+        self.current_self = saved_self;
 
         let param_range = self.param_arena.alloc_method(param_names, param_types);
 
@@ -9903,6 +9942,10 @@ impl<'a> Sema<'a> {
 
         let mut seen_methods: rustc_hash::FxHashSet<Spur> = rustc_hash::FxHashSet::default();
 
+        // ADR-0076: bind `Self` to the anonymous enum's `Type` while
+        // resolving method signatures.
+        let saved_self = self.current_self.replace(enum_type);
+
         for method_ref in method_refs {
             let method_inst = self.rir.get(method_ref);
             if let InstData::FnDecl {
@@ -9935,21 +9978,13 @@ impl<'a> Sema<'a> {
                 let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
 
                 for p in params {
-                    let type_str = self.interner.resolve(&p.ty);
-                    let resolved_ty = if type_str == "Self" {
-                        enum_type
-                    } else {
-                        self.resolve_type_for_comptime_with_subst(p.ty, type_subst)?
-                    };
+                    let resolved_ty =
+                        self.resolve_type_for_comptime_with_subst(p.ty, type_subst)?;
                     param_types.push(resolved_ty);
                 }
 
-                let ret_type_str = self.interner.resolve(return_type);
-                let ret_type = if ret_type_str == "Self" {
-                    enum_type
-                } else {
-                    self.resolve_type_for_comptime_with_subst(*return_type, type_subst)?
-                };
+                let ret_type =
+                    self.resolve_type_for_comptime_with_subst(*return_type, type_subst)?;
 
                 let param_range = self
                     .param_arena
@@ -9976,6 +10011,7 @@ impl<'a> Sema<'a> {
                 );
             }
         }
+        self.current_self = saved_self;
         Some(())
     }
 
