@@ -92,14 +92,14 @@ fn Option(comptime T: type) -> type {
         Some(T),
         None,
 
-        fn is_some(borrow self) -> bool {
+        fn is_some(self: Ref(Self)) -> bool {
             match self {
                 Self::Some(_) => true,
                 Self::None => false,
             }
         }
 
-        fn is_none(borrow self) -> bool {
+        fn is_none(self: Ref(Self)) -> bool {
             match self {
                 Self::Some(_) => false,
                 Self::None => true,
@@ -127,14 +127,14 @@ fn Result(comptime T: type, comptime E: type) -> type {
         Ok(T),
         Err(E),
 
-        fn is_ok(borrow self) -> bool {
+        fn is_ok(self: Ref(Self)) -> bool {
             match self {
                 Self::Ok(_) => true,
                 Self::Err(_) => false,
             }
         }
 
-        fn is_err(borrow self) -> bool {
+        fn is_err(self: Ref(Self)) -> bool {
             match self {
                 Self::Ok(_) => false,
                 Self::Err(_) => true,

@@ -245,7 +245,7 @@ form is already stable, and we are removing legacy spellings.
       Run `make test` after the sweep; expect a green tree against the
       old compiler that still accepts both forms.
 
-- [ ] **Phase 5: Remove receiver-mode sugar from the parser.** Drop
+- [x] **Phase 5: Remove receiver-mode sugar from the parser.** Drop
       the `&self` / `&mut self` / `borrow self` / `inout self`
       branches from `self_param_parser`. `SelfParam` becomes the
       identifier `self` plus an optional `: T` annotation. Update

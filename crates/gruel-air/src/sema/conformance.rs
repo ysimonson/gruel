@@ -667,15 +667,16 @@ mod tests {
 
     #[test]
     fn receiver_mode_must_match() {
-        // ADR-0060: candidate's `borrow self` matches interface's `borrow self`.
+        // ADR-0060/0076: candidate's `self: Ref(Self)` matches interface's
+        // `self: Ref(Self)`.
         let sema = gather(
             r#"
             interface Reader {
-                fn read(borrow self) -> i32;
+                fn read(self: Ref(Self)) -> i32;
             }
 
             struct Buf {
-                fn read(borrow self) -> i32 { 0 }
+                fn read(self: Ref(Self)) -> i32 { 0 }
             }
 
             fn main() -> i32 { 0 }
@@ -689,11 +690,11 @@ mod tests {
 
     #[test]
     fn receiver_mode_mismatch_rejected() {
-        // ADR-0060: by-value self does not satisfy `borrow self`.
+        // ADR-0060/0076: by-value `self` does not satisfy `self: Ref(Self)`.
         let sema = gather(
             r#"
             interface Reader {
-                fn read(borrow self) -> i32;
+                fn read(self: Ref(Self)) -> i32;
             }
 
             struct Buf {

@@ -3192,24 +3192,21 @@ where
         .boxed()
 }
 
-/// Shared parser for receivers: `self`, `inout self`, or `borrow self`.
+/// Shared parser for method receivers (ADR-0076 sole form).
 /// Used by methods, interface method signatures, and `drop fn`.
 ///
-/// Accepts the legacy `inout self` / `borrow self` / `self` forms (ADR-0013)
-/// and the ADR-0062 surface forms `&mut self` / `&self`. The two ref forms
-/// normalise to the existing `SelfMode::Inout` / `SelfMode::Borrow` so that
-/// downstream IR is unchanged.
+/// Accepts:
+///   `self`                  → ByValue (annotation elided)
+///   `self : Self`           → ByValue
+///   `self : Ref ( Self )`   → Borrow (immutable reference)
+///   `self : MutRef ( Self )` → Inout (exclusive mutable reference)
+///
+/// The legacy `&self` / `&mut self` / `borrow self` / `inout self` sugars
+/// were removed by ADR-0076 Phase 5.
 fn self_param_parser<'src, I>() -> GruelParser<'src, I, SelfParam>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    // ADR-0076: `self : <type>` is the new sole-form receiver. The type
-    // expression's shape determines the receiver mode. Accepts:
-    //   `self : Self`            → ByValue
-    //   `self : Ref ( Self )`    → Borrow
-    //   `self : MutRef ( Self )` → Inout
-    // Any other type expression is rejected at parse time — methods can
-    // only be defined on the host type.
     let typed_byvalue = just(TokenKind::SelfValue)
         .then_ignore(just(TokenKind::Colon))
         .then_ignore(just(TokenKind::SelfType))
@@ -3256,37 +3253,15 @@ where
         })
         .boxed();
 
-    // ADR-0062: `&` followed by optional `mut` then `self`. The combined
-    // parser keeps backtracking simple — chumsky `choice` over multiple
-    // alternatives that share the `&` prefix can fail to commit cleanly.
-    let amp_self = just(TokenKind::Amp)
-        .ignore_then(just(TokenKind::Mut).or_not())
-        .then_ignore(just(TokenKind::SelfValue))
-        .map_with(|mut_kw, e| SelfParam {
-            mode: if mut_kw.is_some() {
-                SelfMode::Inout
-            } else {
-                SelfMode::Borrow
-            },
+    // Bare `self` (no annotation) is ByValue.
+    let bare_self = just(TokenKind::SelfValue)
+        .map_with(|_, e| SelfParam {
+            mode: SelfMode::ByValue,
             span: span_from_extra(e),
         })
         .boxed();
 
-    // Legacy `[inout|borrow] self`.
-    let mode = choice((
-        just(TokenKind::Inout).to(SelfMode::Inout).boxed(),
-        just(TokenKind::Borrow).to(SelfMode::Borrow).boxed(),
-    ))
-    .or_not();
-    let keyword_self = mode
-        .then(just(TokenKind::SelfValue))
-        .map_with(|(mode, _), e| SelfParam {
-            mode: mode.unwrap_or(SelfMode::ByValue),
-            span: span_from_extra(e),
-        })
-        .boxed();
-
-    choice((typed_ref, typed_byvalue, amp_self, keyword_self)).boxed()
+    choice((typed_ref, typed_byvalue, bare_self)).boxed()
 }
 
 /// Parser for top-level items (functions, structs, enums, drop fns, and consts)
