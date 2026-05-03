@@ -224,3 +224,13 @@ fn main() -> i32 {
 
 See [Move Semantics](@/03-types/08-move-semantics.md#the-derive-copy-directive)
 for the full semantics of `@derive(Copy)` structs.
+
+## Unrecognized Directives
+
+{{ rule(id="2.5:32", cat="legality-rule") }}
+
+A directive whose name is not one of the recognized directives (`@allow`, `@derive`) is a compile-time error. Unrecognized directives are not silently ignored, so a typo in a directive name (`@allwo`, `@dervie`) surfaces immediately at the directive site. The diagnostic includes a suggestion when the misspelled name is within edit distance 2 of a recognized directive.
+
+{{ rule(id="2.5:33", cat="informative") }}
+
+Retired directive names (`@handle`, removed by ADR-0075; `@copy`, removed by ADR-0059) trigger the same error with a note pointing at the ADR that removed them and the replacement to use.

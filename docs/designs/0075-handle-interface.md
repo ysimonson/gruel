@@ -1,12 +1,12 @@
 ---
 id: 0075
 title: Handle interface; retire `@handle`; reject unknown directives
-status: proposal
+status: implemented
 tags: [interfaces, directives, ownership]
 feature-flag: none
 created: 2026-05-02
-accepted:
-implemented:
+accepted: 2026-05-02
+implemented: 2026-05-02
 spec-sections: ["2.5", "3.8"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -171,7 +171,7 @@ Spec-side, this is a new legality rule in §2.5:
   `@handle` becomes one more silently-accepted unknown directive
   (resolved by Phase 4).
 
-- [ ] **Phase 4: Reject unknown directives.** Add
+- [x] **Phase 4: Reject unknown directives.** Add
   `ErrorKind::UnknownDirective` with Levenshtein-suggestion logic.
   Validate every directive collected during decl gathering against
   `{allow, derive}`. Special-case `@handle` and `@copy` with

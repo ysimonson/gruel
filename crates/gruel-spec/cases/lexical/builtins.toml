@@ -257,3 +257,76 @@ fn main() -> i32 {
 """
 exit_code = 10
 
+# =============================================================================
+# Unrecognized directives (ADR-0075)
+# =============================================================================
+
+[[case]]
+name = "unknown_directive_rejected"
+spec = ["2.5:32"]
+description = "Unrecognized directive names error at the directive site"
+source = """
+@xyzzy
+struct Foo { x: i32 }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "unknown directive `@xyzzy`"
+
+[[case]]
+name = "unknown_directive_typo_suggests_allow"
+spec = ["2.5:32"]
+description = "Edit-distance near-match suggests the recognized name"
+source = """
+@allwo(unused_variable)
+fn main() -> i32 {
+    let x = 0;
+    0
+}
+"""
+compile_fail = true
+error_contains = "did you mean `@allow`?"
+
+[[case]]
+name = "unknown_directive_typo_suggests_derive"
+spec = ["2.5:32"]
+description = "Edit-distance near-match suggests @derive"
+source = """
+@dervie(Copy)
+struct P { x: i32 }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "did you mean `@derive`?"
+
+[[case]]
+name = "retired_handle_directive_points_to_adr_0075"
+spec = ["2.5:33"]
+description = "Retired @handle directive errors with retirement note"
+source = """
+@handle
+struct Counter {
+    count: i32,
+    fn handle(borrow self) -> Counter { Counter { count: self.count } }
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "ADR-0075"
+
+[[case]]
+name = "retired_copy_directive_points_to_adr_0059"
+spec = ["2.5:33"]
+description = "Retired @copy directive errors with retirement note"
+source = """
+@copy
+struct Point { x: i32 }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "ADR-0059"
+

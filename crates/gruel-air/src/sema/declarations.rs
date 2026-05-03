@@ -184,6 +184,63 @@ impl<'a> Sema<'a> {
         false
     }
 
+    /// ADR-0075: walk every directive collected during parsing and reject any
+    /// whose name isn't in the recognized set (`@allow`, `@derive`). Retired
+    /// directives (`@handle`, `@copy`) get a targeted retirement note; other
+    /// unknowns get an edit-distance suggestion when there's a near-match.
+    pub(crate) fn validate_directives(&self) -> CompileResult<()> {
+        for (_, inst) in self.rir.iter() {
+            let (start, len) = match &inst.data {
+                InstData::StructDecl {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::FnDecl {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::Alloc {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::ConstDecl {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::AnonStructType {
+                    directives_start,
+                    directives_len,
+                    ..
+                }
+                | InstData::AnonEnumType {
+                    directives_start,
+                    directives_len,
+                    ..
+                } => (*directives_start, *directives_len),
+                _ => continue,
+            };
+            if len == 0 {
+                continue;
+            }
+            for directive in self.rir.get_directives(start, len) {
+                let name = self.interner.resolve(&directive.name).to_string();
+                if name == "allow" || name == "derive" {
+                    continue;
+                }
+                let note = directive_diagnosis_note(&name);
+                return Err(CompileError::new(
+                    ErrorKind::UnknownDirective { name, note },
+                    directive.span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Phase 1: Register all type names (enum and struct IDs).
     ///
     /// This creates name → ID mappings for all enums and structs in a single pass,
@@ -512,6 +569,9 @@ impl<'a> Sema<'a> {
     /// are created on-demand via the thread-safe `TypeInternPool` during function
     /// body analysis.
     pub(crate) fn resolve_declarations(&mut self) -> CompileResult<()> {
+        // ADR-0075: surface unrecognized `@name` directives before any
+        // downstream pass that would silently ignore them.
+        self.validate_directives()?;
         // Derives (ADR-0058) are gated by the `comptime_derives` preview
         // feature. Reject any `derive` item before we touch the rest of
         // declaration gathering so users get a clear diagnostic.
@@ -2337,5 +2397,113 @@ impl<'a> Sema<'a> {
                 span,
             )),
         }
+    }
+}
+
+/// Build the trailing note for an unknown-directive error (ADR-0075).
+///
+/// Retired directives get a targeted retirement message pointing at the
+/// ADR that took them out of service. Other names get an edit-distance
+/// hint when there's a near-match in the recognized set; otherwise no
+/// note is attached.
+fn directive_diagnosis_note(name: &str) -> Option<String> {
+    match name {
+        "handle" => {
+            return Some(
+                "the `@handle` directive was retired in ADR-0075; \
+                 conform to the `Handle` interface by defining \
+                 `fn handle(borrow self) -> Self` directly"
+                    .to_string(),
+            );
+        }
+        "copy" => {
+            return Some(
+                "the `@copy` directive was retired in ADR-0059; \
+                 use `@derive(Copy)` instead"
+                    .to_string(),
+            );
+        }
+        _ => {}
+    }
+
+    const RECOGNIZED: &[&str] = &["allow", "derive"];
+    RECOGNIZED
+        .iter()
+        .map(|cand| (cand, levenshtein_distance(name, cand)))
+        .filter(|(_, d)| *d <= 2)
+        .min_by_key(|(_, d)| *d)
+        .map(|(cand, _)| format!("did you mean `@{cand}`?"))
+}
+
+/// Wagner-Fischer Levenshtein distance. Used by `directive_diagnosis_note`
+/// to suggest near-matches for typo'd directive names. Both inputs are
+/// short identifiers (~10 chars), so the O(n·m) cost is negligible and the
+/// dependency-free implementation is preferable to pulling in `strsim`.
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (n, m) = (a.len(), b.len());
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
+    }
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr: Vec<usize> = vec![0; m + 1];
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (curr[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
+}
+
+#[cfg(test)]
+mod directive_validation_tests {
+    use super::{directive_diagnosis_note, levenshtein_distance};
+
+    #[test]
+    fn levenshtein_basics() {
+        assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
+        assert_eq!(levenshtein_distance("allow", "allwo"), 2);
+        assert_eq!(levenshtein_distance("derive", "dervie"), 2);
+        assert_eq!(levenshtein_distance("derive", "derive"), 0);
+        assert_eq!(levenshtein_distance("", "abc"), 3);
+        assert_eq!(levenshtein_distance("abc", ""), 3);
+    }
+
+    #[test]
+    fn note_for_typo_near_allow() {
+        let note = directive_diagnosis_note("allwo").expect("near-match should suggest");
+        assert!(note.contains("@allow"), "got: {note}");
+    }
+
+    #[test]
+    fn note_for_typo_near_derive() {
+        let note = directive_diagnosis_note("dervie").expect("near-match should suggest");
+        assert!(note.contains("@derive"), "got: {note}");
+    }
+
+    #[test]
+    fn note_for_far_typo_is_none() {
+        assert!(directive_diagnosis_note("xyzzy").is_none());
+    }
+
+    #[test]
+    fn note_for_retired_handle_mentions_adr_0075() {
+        let note = directive_diagnosis_note("handle").expect("retirement note");
+        assert!(note.contains("ADR-0075"), "got: {note}");
+        assert!(note.contains("Handle"), "got: {note}");
+    }
+
+    #[test]
+    fn note_for_retired_copy_mentions_adr_0059() {
+        let note = directive_diagnosis_note("copy").expect("retirement note");
+        assert!(note.contains("ADR-0059"), "got: {note}");
+        assert!(note.contains("@derive(Copy)"), "got: {note}");
     }
 }

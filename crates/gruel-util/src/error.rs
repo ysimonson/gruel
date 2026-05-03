@@ -95,6 +95,7 @@ impl ErrorCode {
     pub const DUPLICATE_METHOD: Self = Self(410);
     pub const DERIVE_DIRECT_FIELD_ACCESS: Self = Self(440);
     pub const DERIVE_NOT_A_DERIVE: Self = Self(441);
+    pub const UNKNOWN_DIRECTIVE: Self = Self(442);
     pub const UNDEFINED_METHOD: Self = Self(411);
     pub const PRIVATE_FIELD: Self = Self(443);
     pub const UNDEFINED_ASSOC_FN: Self = Self(412);
@@ -925,6 +926,11 @@ pub enum ErrorKind {
     /// @derive(Clone) v1 limitation: every field must be Copy.
     #[error("@derive(Clone) on struct '{struct_name}' requires every field to be Copy in v1; field '{field_name}' has type '{field_type}' which is not Copy. Hand-write `fn clone(borrow self) -> Self` instead.", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
     CloneStructNonCopyField(Box<CloneStructNonCopyFieldError>),
+    /// A directive name that is not in the recognized set (ADR-0075).
+    /// `note` carries either a near-match suggestion or a retirement
+    /// pointer (for `@handle` and `@copy`).
+    #[error("unknown directive `@{name}`{}", note.as_deref().map(|n| format!("; {n}")).unwrap_or_default())]
+    UnknownDirective { name: String, note: Option<String> },
     /// Duplicate method definition in impl blocks for the same type
     #[error("duplicate method '{method_name}' for type '{type_name}'")]
     DuplicateMethod {
@@ -1239,6 +1245,7 @@ impl ErrorKind {
             ErrorKind::LinearStructCopy(_) => ErrorCode::LINEAR_STRUCT_COPY,
             ErrorKind::LinearStructClone(_) => ErrorCode::LINEAR_STRUCT_COPY,
             ErrorKind::CloneStructNonCopyField { .. } => ErrorCode::COPY_STRUCT_NON_COPY_FIELD,
+            ErrorKind::UnknownDirective { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
             ErrorKind::DuplicateMethod { .. } => ErrorCode::DUPLICATE_METHOD,
             ErrorKind::DeriveDirectFieldAccess { .. } => ErrorCode::DERIVE_DIRECT_FIELD_ACCESS,
             ErrorKind::DeriveNotADerive { .. } => ErrorCode::DERIVE_NOT_A_DERIVE,
