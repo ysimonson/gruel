@@ -976,6 +976,43 @@ exit_code = 42
 # =============================================================================
 
 [[case]]
+name = "handle_opted_in_without_directive"
+spec = ["3.8:41"]
+description = "Handle is opted into by defining the method directly; no directive is required"
+source = """
+struct Token {
+    n: i32,
+
+    fn handle(borrow self) -> Token {
+        Token { n: self.n }
+    }
+}
+
+fn main() -> i32 {
+    let a = Token { n: 7 };
+    let b = a.handle();
+    b.n
+}
+"""
+exit_code = 7
+
+[[case]]
+name = "handle_call_on_non_handle_type_is_error"
+spec = ["3.8:43"]
+description = "Calling .handle() on a type without a handle method is a compile-time error"
+source = """
+struct Plain { n: i32 }
+
+fn main() -> i32 {
+    let p = Plain { n: 1 };
+    let _ = p.handle();
+    0
+}
+"""
+compile_fail = true
+error_contains = "no method"
+
+[[case]]
 name = "handle_struct_basic"
 spec = ["3.8:40", "3.8:42", "3.8:44", "3.8:45"]
 description = "Struct conforms to Handle by defining fn handle(borrow self) -> Self"
