@@ -201,6 +201,13 @@ pub(crate) struct AnalysisContext<'a> {
     /// Methods referenced during analysis of this function.
     /// Each entry is (struct_id, method_name) matching the key format in methods map.
     pub referenced_methods: HashSet<(StructId, Spur)>,
+    /// ADR-0076: when set, the named binding is being read as part of a
+    /// borrowing call argument (`borrow x`, `inout x`, or the implicit
+    /// re-borrow of a `Ref(T)` / `MutRef(T)` parameter forwarded to a
+    /// `Ref(T)` / `MutRef(T)` callee param). The move-out check on
+    /// `Borrow`-mode parameter reads is suppressed for this binding —
+    /// passing a borrow on is not a move.
+    pub borrow_arg_skip_move: Option<Spur>,
 }
 
 // Import InstRef for use in resolved_types

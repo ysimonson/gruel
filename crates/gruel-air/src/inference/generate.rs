@@ -40,6 +40,13 @@ pub struct LocalVarInfo {
 pub struct ParamVarInfo {
     /// The type of this parameter, as InferType for uniform handling.
     pub ty: InferType,
+    /// Internal-mode after Phase-2/`analyze_function` normalization. A
+    /// `MutRef(T)` parameter has been lowered to `(T, Inout)`; a `Ref(T)`
+    /// parameter to `(T, Borrow)`. The mode is needed at HM constraint
+    /// generation so that ADR-0076's implicit forwarding can relax the
+    /// constraint when a `Ref(T)` / `MutRef(T)`-shaped binding is passed
+    /// onward to a `Ref(T)` / `MutRef(T)` callee param.
+    pub mode: gruel_rir::RirParamMode,
 }
 
 /// Information about a function during constraint generation.
@@ -236,6 +243,67 @@ impl<'a> ConstraintGenerator<'a> {
     /// Add a constraint.
     pub fn add_constraint(&mut self, constraint: Constraint) {
         self.constraints.push(constraint);
+    }
+
+    /// ADR-0076: when a call argument is a bare `Var(name)` referencing a
+    /// `Borrow`/`Inout`-mode parameter, and the callee expects `Ref(T)` /
+    /// `MutRef(T)` of the param's inner type, the arg's inferred type is
+    /// the inner `T` (the parameter has been normalized post-Phase-2). The
+    /// caller would have written `&name` / `&mut name` explicitly under
+    /// the old surface; per ADR-0076 the reference is implicit. Relax
+    /// the constraint target to `T` so the call type-checks.
+    fn relax_ref_param_for_implicit_forwarding(
+        &self,
+        arg_ref: InstRef,
+        param_ty: &InferType,
+        ctx: &ConstraintContext<'_>,
+    ) -> Option<InferType> {
+        let InferType::Concrete(param_concrete) = param_ty else {
+            return None;
+        };
+        let inner_ty = match param_concrete.kind() {
+            crate::types::TypeKind::Ref(id) => self.type_pool.ref_def(id),
+            crate::types::TypeKind::MutRef(id) => self.type_pool.mut_ref_def(id),
+            _ => return None,
+        };
+        let InstData::VarRef { name } = &self.rir.get(arg_ref).data else {
+            return None;
+        };
+        let p = ctx.params.get(name)?;
+        // The arg binding's normalized inner type must match the callee's
+        // referent. The mode must be Borrow or Inout (i.e. the binding
+        // came from an original `Ref(T)` / `MutRef(T)` declaration).
+        if !matches!(
+            p.mode,
+            gruel_rir::RirParamMode::Borrow | gruel_rir::RirParamMode::Inout
+        ) {
+            return None;
+        }
+        // Convert the referent Type to InferType for the comparison —
+        // arrays are stored structurally as `InferType::Array { ... }`
+        // rather than `InferType::Concrete(Type::Array(...))`.
+        let inner_infer = self.type_to_infer(inner_ty);
+        if p.ty != inner_infer {
+            return None;
+        }
+        Some(inner_infer)
+    }
+
+    /// Convert a concrete `Type` to `InferType`, preserving the structural
+    /// form for arrays (mirrors `Sema::type_to_infer_type`).
+    fn type_to_infer(&self, ty: Type) -> InferType {
+        match ty.kind() {
+            crate::types::TypeKind::Array(array_id) => {
+                let (element_type, length) = self.type_pool.array_def(array_id);
+                let element_infer = self.type_to_infer(element_type);
+                InferType::Array {
+                    element: Box::new(element_infer),
+                    length,
+                }
+            }
+            crate::types::TypeKind::ComptimeInt => InferType::IntLiteral,
+            _ => InferType::Concrete(ty),
+        }
     }
 
     /// Record the type of an expression.
@@ -662,9 +730,21 @@ impl<'a> ConstraintGenerator<'a> {
                                 )
                             );
                             if !is_iface {
+                                // ADR-0076: implicit forwarding. If the
+                                // callee expects `Ref(T)` / `MutRef(T)` and
+                                // the arg is a bare reference to a
+                                // Borrow/Inout-mode parameter, the arg's
+                                // inferred type is the inner `T`. Relax
+                                // the constraint to be against the inner
+                                // referent type so the call type-checks.
+                                let constraint_target = self
+                                    .relax_ref_param_for_implicit_forwarding(
+                                        arg.value, param_ty, ctx,
+                                    )
+                                    .unwrap_or_else(|| param_ty.clone());
                                 self.add_constraint(Constraint::equal(
                                     arg_info.ty,
-                                    param_ty.clone(),
+                                    constraint_target,
                                     arg_info.span,
                                 ));
                             }

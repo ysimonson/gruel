@@ -784,7 +784,7 @@ exit_code = 42
 [[case]]
 name = "inout_forward_struct"
 spec = ["6.1:14", "6.1:18"]
-description = "MutRef struct parameter increments through field projection"
+description = "Forwarding MutRef struct parameter to another function (implicit re-borrow)"
 source = """
 struct Counter { value: i32 }
 
@@ -792,9 +792,13 @@ fn increment_by(c: MutRef(Counter), amount: i32) {
     c.value = c.value + amount;
 }
 
+fn double_increment(c: MutRef(Counter)) {
+    increment_by(c, 2);
+}
+
 fn main() -> i32 {
     let mut counter = Counter { value: 40 };
-    increment_by(&mut counter, 2);
+    double_increment(&mut counter);
     counter.value
 }
 """
@@ -864,15 +868,19 @@ exit_code = 42
 [[case]]
 name = "inout_array_forward"
 spec = ["6.1:14", "6.1:18"]
-description = "MutRef array parameter increments via element-write"
+description = "Forwarding MutRef array parameter to another function (implicit re-borrow)"
 source = """
 fn increment_by(arr: MutRef([i32; 3]), amount: i32) {
     arr[0] = arr[0] + amount;
 }
 
+fn double_increment(arr: MutRef([i32; 3])) {
+    increment_by(arr, 2);
+}
+
 fn main() -> i32 {
     let mut a = [40, 0, 0];
-    increment_by(&mut a, 2);
+    double_increment(&mut a);
     a[0]
 }
 """

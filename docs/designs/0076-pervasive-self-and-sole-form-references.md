@@ -15,7 +15,11 @@ superseded-by:
 
 ## Status
 
-Implemented (Phase 7 partial — internal mode enums kept as a compiler-internal lowering bridge; full collapse deferred to a follow-up ADR. See Phase 7 note.)
+Implemented. Phase 7's full structural collapse of the internal mode
+enums (`SelfMode`, `ParamMode`, `RirParamMode`, `RirArgMode`,
+`AirArgMode`) is deferred to a follow-up ADR; that work is purely
+compiler-internal — the user-facing surface this ADR specifies is
+complete.
 
 ## Summary
 
@@ -259,31 +263,34 @@ form is already stable, and we are removing legacy spellings.
       now treats `borrow` / `inout` as plain identifiers.
 
 - [x] **Phase 7: Collapse internal modes.** *(Partial — same pattern
-      ADR-0062's Phase 8 used.)* The user-facing surface is collapsed:
-      no parser path produces `ParamMode::Borrow` / `ParamMode::Inout`
-      or `ArgMode::Borrow` / `ArgMode::Inout` anymore (Phase 6 removed
-      the keyword tokens; Phase 5 removed `&self` / `&mut self`
-      sugar). The internal mode enums (`SelfMode`, `ParamMode`,
-      `RirParamMode`, `RirArgMode`, plus the parallel AIR
-      `AirArgMode` variants) remain as a compiler-internal lowering
-      bridge: `resolve_param_type` lowers `Ref(I)` / `MutRef(I)` to
-      `(Interface, Borrow|Inout)`; `analyze_function` lowers a
-      `Ref(T)` / `MutRef(T)` parameter to `(T, Borrow|Inout)` for the
-      duration of body analysis; and the AIR / CFG / codegen path
-      consumes the mode to emit by-pointer ABI. Removing this bridge
-      requires teaching every body-analysis site (place projection,
-      indexing, struct-init, move tracking, the borrow checker, the
-      drop glue, codegen for parameters) to read ref-ness off the
-      type pool instead of off a parallel mode field — touching
-      hundreds of lines spread across `gruel-air`, `gruel-cfg`, and
-      `gruel-codegen-llvm`. That work is its own ADR; this ADR
-      stops at "no user-visible mode enum survives" so the reader
-      cannot tell the difference at the source level. Two
-      forwarding spec tests (`inout_array_forward`,
-      `inout_forward_struct`) had to be simplified — re-borrowing a
-      `MutRef`-typed binding through another `&mut` is the canonical
-      shape that exposes the bridge, and is the intended motivating
-      example for the follow-up ADR.
+      ADR-0062's Phase 8 used; nothing user-facing is missing.)* No
+      parser path produces `ParamMode::Borrow` / `ParamMode::Inout`
+      or `ArgMode::Borrow` / `ArgMode::Inout` anymore (Phase 6
+      removed the keyword tokens; Phase 5 removed `&self` /
+      `&mut self` sugar). The internal mode enums (`SelfMode`,
+      `ParamMode`, `RirParamMode`, `RirArgMode`, plus the parallel
+      AIR `AirArgMode` variants) remain as a compiler-internal
+      lowering bridge: `resolve_param_type` lowers `Ref(I)` /
+      `MutRef(I)` to `(Interface, Borrow|Inout)`; `analyze_function`
+      lowers a `Ref(T)` / `MutRef(T)` parameter to `(T, Borrow|Inout)`
+      for the duration of body analysis; the AIR / CFG / codegen
+      path consumes the mode to emit by-pointer ABI. Three small
+      bridges keep this invisible from the source side:
+      (a) `lower_air_lvalue_place` accepts a `Param` instruction so
+      `&c` / `&mut c` re-borrowing a parameter lowers cleanly;
+      (b) HM constraint generation relaxes the call constraint when
+      a `Ref(T)` / `MutRef(T)` callee param receives a bare reference
+      to a Borrow/Inout-mode parameter binding (implicit re-borrow);
+      (c) the call-site sema pre-process flips the AIR-arg mode and
+      sets `ctx.borrow_arg_skip_move` so the by-pointer ABI fires and
+      the borrow-out check doesn't misfire on the re-borrow read.
+      The result: forwarding `increment_by(c, 2)` where `c` is a
+      `MutRef(Counter)` parameter works without writing `&mut c`
+      explicitly — the reference is implicit, as the user requested.
+      Removing the internal mode enums entirely is its own
+      architectural ADR (touches hundreds of lines across
+      `gruel-air`, `gruel-cfg`, and `gruel-codegen-llvm`); it has no
+      user-visible effect.
 
 - [x] **Phase 8: Spec rewrite and ADR closeout.** Rewrite
       `06-items/01-functions.md` and `06-items/05-interfaces.md` to

@@ -1870,6 +1870,7 @@ impl<'a> Sema<'a> {
             comptime_value_vars,
             referenced_functions: HashSet::default(),
             referenced_methods: HashSet::default(),
+            borrow_arg_skip_move: None,
         };
 
         // ======================================================================
@@ -1981,11 +1982,12 @@ impl<'a> Sema<'a> {
         // Convert Type to InferType so arrays are represented structurally.
         let mut param_vars: HashMap<Spur, ParamVarInfo> = params
             .iter()
-            .map(|(name, ty, _mode)| {
+            .map(|(name, ty, mode)| {
                 (
                     *name,
                     ParamVarInfo {
                         ty: self.type_to_infer_type(*ty),
+                        mode: *mode,
                     },
                 )
             })
@@ -2018,6 +2020,7 @@ impl<'a> Sema<'a> {
                     *name,
                     ParamVarInfo {
                         ty: self.type_to_infer_type(ty),
+                        mode: RirParamMode::Comptime,
                     },
                 );
             }
@@ -7329,6 +7332,7 @@ impl<'a> Sema<'a> {
             comptime_value_vars: HashMap::default(),
             referenced_functions: HashSet::default(),
             referenced_methods: HashSet::default(),
+            borrow_arg_skip_move: None,
         };
         self.evaluate_comptime_block(inst_ref, &stub, span)
     }

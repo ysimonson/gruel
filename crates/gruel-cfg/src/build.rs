@@ -2920,8 +2920,13 @@ impl<'a> CfgBuilder<'a> {
         match &inst.data {
             AirInstData::Load { slot } => Some(Place::local(*slot)),
             AirInstData::PlaceRead { place } => self.lower_air_place(*place),
+            // ADR-0076: `&c` / `&mut c` where `c` is a function parameter
+            // (e.g. forwarding a `MutRef(T)` parameter onward). Param-mode
+            // parameters carry an LLVM pointer, so the place is just
+            // `Param(index)`.
+            AirInstData::Param { index } => Some(Place::param(*index)),
             other => panic!(
-                "lower_air_lvalue_place: expected Load or PlaceRead, got {:?}",
+                "lower_air_lvalue_place: expected Load, PlaceRead, or Param, got {:?}",
                 other
             ),
         }

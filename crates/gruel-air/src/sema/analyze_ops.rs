@@ -3945,12 +3945,29 @@ impl<'a> Sema<'a> {
                             .mark_path_moved(&[], span);
                     }
                     RirParamMode::Borrow => {
-                        let name_str = self.interner.resolve(&name);
-                        return Err(CompileError::new(
-                            ErrorKind::MoveOutOfBorrow {
-                                variable: name_str.to_string(),
-                            },
-                            span,
+                        // ADR-0076: when forwarding a `Ref(T)` parameter as
+                        // an arg to another `Ref(T)` callee param, the read
+                        // is a re-borrow, not a move. The call-site
+                        // pre-process sets `ctx.borrow_arg_skip_move` for
+                        // exactly this binding.
+                        if ctx.borrow_arg_skip_move != Some(name) {
+                            let name_str = self.interner.resolve(&name);
+                            return Err(CompileError::new(
+                                ErrorKind::MoveOutOfBorrow {
+                                    variable: name_str.to_string(),
+                                },
+                                span,
+                            ));
+                        }
+                        return Ok(AnalysisResult::new(
+                            air.add_inst(AirInst {
+                                data: AirInstData::Param {
+                                    index: param_info.abi_slot,
+                                },
+                                ty,
+                                span,
+                            }),
+                            ty,
                         ));
                     }
                 }
@@ -6289,8 +6306,89 @@ impl<'a> Sema<'a> {
             }
         }
 
-        // Analyze all arguments
-        let mut air_args = self.analyze_call_args(air, &args, ctx)?;
+        // ADR-0076: implicit forwarding of a `Ref(T)` / `MutRef(T)` parameter.
+        // If the callee expects `MutRef(T)` / `Ref(T)` and the arg is a bare
+        // `Var(name)` referencing a Borrow/Inout-mode parameter whose inner
+        // type is `T`, treat the arg as if the user had written `&name` /
+        // `&mut name`. Re-mode the arg here (before `analyze_call_args`)
+        // so the existing borrow-tracking machinery sees it as a borrow
+        // and doesn't apply move semantics; the post-process loop below
+        // also flips the AIR-arg mode so codegen passes the param pointer.
+        // Also stash the binding name in `ctx.borrow_arg_skip_move` for the
+        // duration of this arg's analysis so a `Borrow` parameter read
+        // doesn't trigger a "move out of borrow" error.
+        let mut args: Vec<RirCallArg> = args.to_vec();
+        let mut implicit_borrow_arg: Vec<Option<Spur>> = vec![None; args.len()];
+        for (i, param_ty) in param_types.iter().enumerate() {
+            let inner_ty = match param_ty.kind() {
+                crate::types::TypeKind::MutRef(id) => Some(self.type_pool.mut_ref_def(id)),
+                crate::types::TypeKind::Ref(id) => Some(self.type_pool.ref_def(id)),
+                _ => None,
+            };
+            let Some(inner_ty) = inner_ty else { continue };
+            if args[i].mode != gruel_rir::RirArgMode::Normal {
+                continue;
+            }
+            if let InstData::VarRef { name } = &self.rir.get(args[i].value).data
+                && let Some(p) = ctx.params.iter().find(|p| p.name == *name)
+                && p.ty == inner_ty
+            {
+                let promoted_mode = match (param_ty.kind(), p.mode) {
+                    (crate::types::TypeKind::MutRef(_), RirParamMode::Inout) => {
+                        gruel_rir::RirArgMode::Inout
+                    }
+                    (crate::types::TypeKind::Ref(_), RirParamMode::Borrow) => {
+                        gruel_rir::RirArgMode::Borrow
+                    }
+                    (crate::types::TypeKind::Ref(_), RirParamMode::Inout) => {
+                        // A `MutRef(T)` parameter can be re-borrowed as `Ref(T)`
+                        // (downgrading exclusivity to shared read-only).
+                        gruel_rir::RirArgMode::Borrow
+                    }
+                    _ => continue,
+                };
+                args[i].mode = promoted_mode;
+                if matches!(p.mode, RirParamMode::Borrow) {
+                    implicit_borrow_arg[i] = Some(*name);
+                }
+            }
+        }
+
+        // Analyze all arguments. For each implicit-borrow arg we set
+        // `ctx.borrow_arg_skip_move` so the param read inside the arg
+        // doesn't fire the move-out check.
+        let mut air_args: Vec<AirCallArg> = Vec::with_capacity(args.len());
+        for (arg_idx, arg) in args.iter().enumerate() {
+            let saved = ctx.borrow_arg_skip_move;
+            ctx.borrow_arg_skip_move = implicit_borrow_arg[arg_idx];
+            let air_arg = self
+                .analyze_call_args(air, std::slice::from_ref(arg), ctx)
+                .map(|mut v| v.remove(0));
+            ctx.borrow_arg_skip_move = saved;
+            air_args.push(air_arg?);
+        }
+
+        // ADR-0076: also flip the AIR-arg mode so codegen recognises the
+        // implicit forward as by-pointer ABI.
+        for (i, param_ty) in param_types.iter().enumerate() {
+            let arg_air = air_args[i].value;
+            let inner_ty = match param_ty.kind() {
+                crate::types::TypeKind::MutRef(id) => Some(self.type_pool.mut_ref_def(id)),
+                crate::types::TypeKind::Ref(id) => Some(self.type_pool.ref_def(id)),
+                _ => None,
+            };
+            if let Some(inner_ty) = inner_ty
+                && air.get(arg_air).ty == inner_ty
+                && matches!(air.get(arg_air).data, AirInstData::Param { .. })
+                && air_args[i].mode == AirArgMode::Normal
+            {
+                air_args[i].mode = match param_ty.kind() {
+                    crate::types::TypeKind::MutRef(_) => AirArgMode::Inout,
+                    crate::types::TypeKind::Ref(_) => AirArgMode::Borrow,
+                    _ => unreachable!(),
+                };
+            }
+        }
 
         // ADR-0056 Phase 4c/4d: for any argument whose corresponding
         // parameter has an interface type, run structural conformance
