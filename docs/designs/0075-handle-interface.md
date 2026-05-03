@@ -149,7 +149,7 @@ Spec-side, this is a new legality rule in §2.5:
   automatically through the existing iteration. Generated built-in
   types reference rebuilds via `make gen-builtins-docs`; `Handle`
   appears in the Quick Reference and detail sections alongside
-  `Drop`, `Copy`, `Clone`. Verify `@conforms(T, Handle)` returns
+  `Drop`, `Copy`, `Clone`. Verify `@implements(T, Handle)` returns
   the expected truth for a hand-written conforming type. **Adds
   the new path; touches nothing existing yet.**
 
@@ -189,7 +189,7 @@ Spec-side, this is a new legality rule in §2.5:
   to two (`@allow`, `@derive`).
 - `Handle` joins `Drop`/`Copy`/`Clone` in the `BUILTIN_INTERFACES`
   registry, with uniform documentation generation and uniform
-  introspection via `@conforms(T, ...)`.
+  introspection via `@implements(T, ...)`.
 - The receiver-mode contract is enforced by the type system instead
   of being an unenforced spec note.
 - `@xyzzy` (and `@dervie(Copy)`, `@allwo(...)`) become loud errors

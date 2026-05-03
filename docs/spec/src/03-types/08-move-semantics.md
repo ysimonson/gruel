@@ -201,7 +201,7 @@ handle_method = "fn" "handle" "(" "borrow" "self" ")" "->" "Self" block ;
 
 {{ rule(id="3.8:42", cat="normative") }}
 
-A method named `handle` with the receiver mode `borrow self`, no other parameters, and return type `Self` makes the host type conform to `Handle`. A method named `handle` with any other shape does **NOT** make the host type conform — it is an ordinary method, and `@conforms(T, Handle)` returns `false` for that type.
+A method named `handle` with the receiver mode `borrow self`, no other parameters, and return type `Self` makes the host type conform to `Handle`. A method named `handle` with any other shape does **NOT** make the host type conform — it is an ordinary method, and `@implements(T, Handle)` returns `false` for that type.
 
 {{ rule(id="3.8:43", cat="legality-rule") }}
 

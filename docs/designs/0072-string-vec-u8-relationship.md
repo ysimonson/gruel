@@ -266,7 +266,7 @@ After this ADR, the only String-specific runtime symbols are:
 | Symbol | Purpose |
 |---|---|
 | `__gruel_utf8_validate(ptr: *const u8, len: u64) -> u8` | Returns 1 if valid UTF-8, 0 otherwise. Used by `from_utf8` and `from_c_str`. |
-| `__gruel_vec_from_c_str(out: *mut VecU8Result, p: *const u8)` | strlen + allocate + copy. Returns a `Vec(u8)` via sret. |
+| `__gruel_cstr_to_vec(out: *mut VecU8Result, p: *const u8)` | strlen + allocate + copy. Returns a `Vec(u8)` via sret. |
 
 That's it. Everything else delegates to `Vec(u8)` operations (drop, eq, cmp, alloc, realloc, clone) which already exist or are added as part of §4. The 14 `String__*` runtime functions and the byte-level `__gruel_str_*` helpers in today's `gruel-runtime/src/string.rs` are all deleted.
 
@@ -307,10 +307,10 @@ Net: `gruel-runtime/src/string.rs` collapses from ~490 LOC to ~50 LOC.
   - The legacy `String::push(byte: u8)` is removed; the byte-level form lives on as `push_byte(byte: u8)`, gated to `checked` blocks. In-tree callers migrated to `checked { s.push_byte(byte); 0 }`.
   - Spec tests: 1- / 2-byte char pushes through `push`, `push_byte` rejected without `checked`, accepted inside.
 - [x] **Phase 5: C interop**
-  - `__gruel_vec_from_c_str` runtime fn.
+  - `__gruel_cstr_to_vec` runtime fn.
   - `String::terminated_ptr` (in `checked`) — runtime function takes the receiver by `*mut StringResult` (the new in-place-mutator codegen path for `ByMutRef` builtin methods returning a non-`Self` value), grows the buffer if needed, writes the NUL sentinel at `ptr[len]`, and returns the buffer pointer.
   - `String::from_c_str_unchecked` (in `checked`).
-  - `String::from_c_str` returning `Result(String, Utf8DecodeError)` — implemented in the prelude as `String::from_utf8(@vec_from_c_str(p))`.
+  - `String::from_c_str` returning `Result(String, Utf8DecodeError)` — implemented in the prelude as `String::from_utf8(@cstr_to_vec(p))`.
   - Spec tests: gating tests for `terminated_ptr`, `from_c_str` ingest path.
 - [x] **Phase 6: Stabilize**
   - Preview gate removed; `PreviewFeature::StringVecBridge` retired.

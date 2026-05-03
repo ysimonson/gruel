@@ -632,7 +632,7 @@ pub extern "C" fn __gruel_utf8_validate(ptr: *const u8, len: u64) -> u8 {
 /// ADR-0072: ingest a NUL-terminated C string into a fresh `Vec(u8)` with
 /// strlen + alloc + memcpy. Used by `String::from_c_str(_unchecked)`.
 #[unsafe(no_mangle)]
-pub extern "C" fn __gruel_vec_from_c_str(out: *mut VecU8Result, p: *const u8) {
+pub extern "C" fn __gruel_cstr_to_vec(out: *mut VecU8Result, p: *const u8) {
     if p.is_null() {
         unsafe {
             (*out).ptr = core::ptr::null_mut();
@@ -676,7 +676,7 @@ pub extern "C" fn String__from_c_str_unchecked(out: *mut StringResult, p: *const
         len: 0,
         cap: 0,
     };
-    __gruel_vec_from_c_str(&mut v as *mut VecU8Result, p);
+    __gruel_cstr_to_vec(&mut v as *mut VecU8Result, p);
     unsafe {
         (*out).ptr = v.ptr;
         (*out).len = v.len;

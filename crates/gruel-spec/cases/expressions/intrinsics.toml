@@ -1635,11 +1635,11 @@ fn main() -> i32 {
 exit_code = 2
 
 # =============================================================================
-# @conforms Intrinsic
+# @implements Intrinsic
 # =============================================================================
 
 [[case]]
-name = "conforms_struct_method_set_satisfies_interface"
+name = "implements_struct_method_set_satisfies_interface"
 spec = ["4.13:115", "4.13:116", "4.13:117", "4.13:118"]
 source = """
 interface Greeter {
@@ -1652,13 +1652,13 @@ struct Friendly {
 }
 
 fn main() -> i32 {
-    if @conforms(Friendly, Greeter) { 1 } else { 0 }
+    if @implements(Friendly, Greeter) { 1 } else { 0 }
 }
 """
 exit_code = 1
 
 [[case]]
-name = "conforms_struct_missing_method_returns_false"
+name = "implements_struct_missing_method_returns_false"
 spec = ["4.13:118"]
 source = """
 interface Greeter {
@@ -1668,53 +1668,53 @@ interface Greeter {
 struct Silent { value: i32 }
 
 fn main() -> i32 {
-    if @conforms(Silent, Greeter) { 1 } else { 0 }
+    if @implements(Silent, Greeter) { 1 } else { 0 }
 }
 """
 exit_code = 0
 
 [[case]]
-name = "conforms_primitive_is_copy"
+name = "implements_primitive_is_copy"
 spec = ["4.13:118"]
 source = """
 fn main() -> i32 {
-    if @conforms(i32, Copy) { 1 } else { 0 }
+    if @implements(i32, Copy) { 1 } else { 0 }
 }
 """
 exit_code = 1
 
 [[case]]
-name = "conforms_string_is_not_copy"
+name = "implements_string_is_not_copy"
 spec = ["4.13:118"]
 source = """
 fn main() -> i32 {
-    if @conforms(String, Copy) { 1 } else { 0 }
+    if @implements(String, Copy) { 1 } else { 0 }
 }
 """
 exit_code = 0
 
 [[case]]
-name = "conforms_string_is_drop"
+name = "implements_string_is_drop"
 spec = ["4.13:118"]
 source = """
 fn main() -> i32 {
-    if @conforms(String, Drop) { 1 } else { 0 }
+    if @implements(String, Drop) { 1 } else { 0 }
 }
 """
 exit_code = 1
 
 [[case]]
-name = "conforms_primitive_is_not_drop"
+name = "implements_primitive_is_not_drop"
 spec = ["4.13:118"]
 source = """
 fn main() -> i32 {
-    if @conforms(i32, Drop) { 1 } else { 0 }
+    if @implements(i32, Drop) { 1 } else { 0 }
 }
 """
 exit_code = 0
 
 [[case]]
-name = "conforms_returns_bool_type"
+name = "implements_returns_bool_type"
 spec = ["4.13:117"]
 source = """
 fn classify(b: bool) -> i32 {
@@ -1722,30 +1722,30 @@ fn classify(b: bool) -> i32 {
 }
 
 fn main() -> i32 {
-    classify(@conforms(i32, Copy))
+    classify(@implements(i32, Copy))
 }
 """
 exit_code = 7
 
 [[case]]
-name = "conforms_compile_time_constant"
+name = "implements_compile_time_constant"
 spec = ["4.13:120"]
 source = """
 fn main() -> i32 {
-    let c: bool = @conforms(i32, Copy);
+    let c: bool = @implements(i32, Copy);
     if c { 42 } else { 0 }
 }
 """
 exit_code = 42
 
 [[case]]
-name = "conforms_second_arg_must_name_interface"
+name = "implements_second_arg_must_name_interface"
 spec = ["4.13:119"]
 source = """
 struct Foo { x: i32 }
 
 fn main() -> i32 {
-    let _ = @conforms(Foo, i32);
+    let _ = @implements(Foo, i32);
     0
 }
 """
@@ -1753,7 +1753,7 @@ compile_fail = true
 error_contains = "is not an interface"
 
 [[case]]
-name = "conforms_signature_mismatch_returns_false"
+name = "implements_signature_mismatch_returns_false"
 spec = ["4.13:118"]
 source = """
 interface Reader {
@@ -1766,20 +1766,20 @@ struct Buf {
 }
 
 fn main() -> i32 {
-    if @conforms(Buf, Reader) { 1 } else { 0 }
+    if @implements(Buf, Reader) { 1 } else { 0 }
 }
 """
 exit_code = 0
 
 [[case]]
-name = "conforms_derive_copy_struct_is_copy"
+name = "implements_derive_copy_struct_is_copy"
 spec = ["4.13:118"]
 source = """
 @derive(Copy)
 struct Pair { x: i32, y: i32 }
 
 fn main() -> i32 {
-    if @conforms(Pair, Copy) { 1 } else { 0 }
+    if @implements(Pair, Copy) { 1 } else { 0 }
 }
 """
 exit_code = 1

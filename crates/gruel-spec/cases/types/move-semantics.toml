@@ -1055,9 +1055,9 @@ fn main() -> i32 {
 exit_code = 20
 
 [[case]]
-name = "handle_conforms_when_method_present"
+name = "handle_implements_when_method_present"
 spec = ["3.8:42"]
-description = "@conforms(T, Handle) is true when the type defines fn handle(borrow self) -> Self"
+description = "@implements(T, Handle) is true when the type defines fn handle(borrow self) -> Self"
 source = """
 struct Counter {
     count: i32,
@@ -1068,22 +1068,22 @@ struct Counter {
 }
 
 fn main() -> i32 {
-    let conforms = comptime { @conforms(Counter, Handle) };
-    if conforms { 1 } else { 0 }
+    let implements = comptime { @implements(Counter, Handle) };
+    if implements { 1 } else { 0 }
 }
 """
 exit_code = 1
 
 [[case]]
-name = "handle_does_not_conform_when_method_absent"
+name = "handle_does_not_implement_when_method_absent"
 spec = ["3.8:42"]
-description = "@conforms(T, Handle) is false when the type lacks fn handle"
+description = "@implements(T, Handle) is false when the type lacks fn handle"
 source = """
 struct NotHandle { n: i32 }
 
 fn main() -> i32 {
-    let conforms = comptime { @conforms(NotHandle, Handle) };
-    if conforms { 1 } else { 0 }
+    let implements = comptime { @implements(NotHandle, Handle) };
+    if implements { 1 } else { 0 }
 }
 """
 exit_code = 0
