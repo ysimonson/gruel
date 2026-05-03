@@ -146,6 +146,47 @@ pub(crate) struct PlaceTrace {
     pub is_borrow_param: bool,
 }
 
+/// ADR-0076 collapse: when a place's result type is `Ref(T)` /
+/// `MutRef(T)`, projecting into the referent should look up fields /
+/// indices on `T`. The binding's storage IS the pointer (params are
+/// by-pointer at the LLVM ABI level for ref types), so the GEP starts
+/// at the same base pointer — no extra dereference is added at codegen.
+fn unwrap_ref_for_place<'a>(sema: &super::Sema<'a>, ty: Type) -> Type {
+    match ty.kind() {
+        crate::types::TypeKind::Ref(id) => sema.type_pool.ref_def(id),
+        crate::types::TypeKind::MutRef(id) => sema.type_pool.mut_ref_def(id),
+        _ => ty,
+    }
+}
+
+/// ADR-0076 collapse: derive (mutable, is_borrow_param) flags from a
+/// parameter's type and mode. A `MutRef(T)` typed parameter is treated as
+/// mutable for write-validation purposes (write-through is allowed); a
+/// `Ref(T)` typed parameter is treated as a borrow (writes rejected).
+fn param_kind_flags(param: &super::context::ParamInfo) -> (bool, bool) {
+    match param.ty.kind() {
+        crate::types::TypeKind::MutRef(_) => (true, false),
+        crate::types::TypeKind::Ref(_) => (false, true),
+        _ => match param.mode {
+            gruel_rir::RirParamMode::Inout => (true, false),
+            gruel_rir::RirParamMode::Borrow => (false, true),
+            _ => (false, false),
+        },
+    }
+}
+
+/// ADR-0076 collapse: same for a local binding. A local of type
+/// `MutRef(T)` is mutable through-write regardless of the binding's
+/// `let mut` annotation (rebinding a ref is meaningless; write-through
+/// is the only useful operation).
+fn local_kind_flags(local: &LocalVar) -> (bool, bool) {
+    match local.ty.kind() {
+        crate::types::TypeKind::MutRef(_) => (true, false),
+        crate::types::TypeKind::Ref(_) => (false, true),
+        _ => (local.is_mut, false),
+    }
+}
+
 impl PlaceTrace {
     /// Get the final type of the place (after all projections).
     pub fn result_type(&self) -> Type {
@@ -265,25 +306,34 @@ impl<'a> Sema<'a> {
             InstData::VarRef { name } => {
                 // First check if it's actually a parameter
                 if let Some(param_info) = ctx.params.iter().find(|p| p.name == *name) {
+                    let (mutable, is_borrow) = param_kind_flags(param_info);
+                    // ADR-0076: a `Ref(T)` / `MutRef(T)` binding's storage
+                    // is the pointer; its place semantics target the
+                    // referent `T`. Unwrapping here lets every downstream
+                    // projection (field, index) operate on `T` without
+                    // each site repeating the auto-deref.
+                    let base_type = unwrap_ref_for_place(self, param_info.ty);
                     return Ok(Some(PlaceTrace {
                         base: AirPlaceBase::Param(param_info.abi_slot),
-                        base_type: param_info.ty,
+                        base_type,
                         projections: Vec::new(),
                         root_var: *name,
-                        is_root_mutable: matches!(param_info.mode, RirParamMode::Inout),
-                        is_borrow_param: matches!(param_info.mode, RirParamMode::Borrow),
+                        is_root_mutable: mutable,
+                        is_borrow_param: is_borrow,
                     }));
                 }
 
                 // Check if it's a local variable
                 if let Some(local) = ctx.locals.get(name) {
+                    let (mutable, is_borrow) = local_kind_flags(local);
+                    let base_type = unwrap_ref_for_place(self, local.ty);
                     return Ok(Some(PlaceTrace {
                         base: AirPlaceBase::Local(local.slot),
-                        base_type: local.ty,
+                        base_type,
                         projections: Vec::new(),
                         root_var: *name,
-                        is_root_mutable: local.is_mut,
-                        is_borrow_param: false,
+                        is_root_mutable: mutable,
+                        is_borrow_param: is_borrow,
                     }));
                 }
 
@@ -294,13 +344,15 @@ impl<'a> Sema<'a> {
             // Base case: explicit parameter reference
             InstData::ParamRef { name, .. } => {
                 if let Some(param_info) = ctx.params.iter().find(|p| p.name == *name) {
+                    let (mutable, is_borrow) = param_kind_flags(param_info);
+                    let base_type = unwrap_ref_for_place(self, param_info.ty);
                     return Ok(Some(PlaceTrace {
                         base: AirPlaceBase::Param(param_info.abi_slot),
-                        base_type: param_info.ty,
+                        base_type,
                         projections: Vec::new(),
                         root_var: *name,
-                        is_root_mutable: matches!(param_info.mode, RirParamMode::Inout),
-                        is_borrow_param: matches!(param_info.mode, RirParamMode::Borrow),
+                        is_root_mutable: mutable,
+                        is_borrow_param: is_borrow,
                     }));
                 }
                 Ok(None)
@@ -313,8 +365,8 @@ impl<'a> Sema<'a> {
 
                 match base_trace {
                     Some(mut trace) => {
-                        // Get the struct type from the base
-                        let base_type = trace.result_type();
+                        // ADR-0076: auto-deref through `Ref(T)` / `MutRef(T)`.
+                        let base_type = unwrap_ref_for_place(self, trace.result_type());
                         let struct_id = match base_type.as_struct() {
                             Some(id) => id,
                             None => {
@@ -390,8 +442,13 @@ impl<'a> Sema<'a> {
 
                 match base_trace {
                     Some(mut trace) => {
-                        // Get the array type from the base
-                        let base_type = trace.result_type();
+                        // ADR-0076: auto-deref through `Ref(T)` / `MutRef(T)`.
+                        // The binding's storage IS the pointer (params are
+                        // by-pointer at the LLVM ABI level for ref types),
+                        // so projecting into the referent doesn't add an
+                        // extra dereference at codegen — the GEP starts at
+                        // the same base pointer.
+                        let base_type = unwrap_ref_for_place(self, trace.result_type());
                         let (_array_type_id, elem_type) = match base_type.as_array() {
                             Some(id) => {
                                 let (elem, _len) = self.type_pool.array_def(id);
@@ -3917,7 +3974,15 @@ impl<'a> Sema<'a> {
     ) -> CompileResult<AnalysisResult> {
         // First check if it's a parameter
         if let Some(param_info) = ctx.params.iter().find(|p| p.name == name) {
-            let ty = param_info.ty;
+            // ADR-0076: a `Ref(T)` / `MutRef(T)`-typed parameter is by-pointer
+            // at the LLVM level (`is_param_by_ref` returns true based on the
+            // type). When read as a value, the AIR result is typed as the
+            // inner `T` and codegen does the load-through-pointer.
+            let ty = match param_info.ty.kind() {
+                crate::types::TypeKind::Ref(id) => self.type_pool.ref_def(id),
+                crate::types::TypeKind::MutRef(id) => self.type_pool.mut_ref_def(id),
+                _ => param_info.ty,
+            };
             let name_str = self.interner.resolve(&name);
 
             // Check if this parameter has been moved
@@ -3927,50 +3992,54 @@ impl<'a> Sema<'a> {
                 return Err(CompileError::use_after_move(name_str, span, moved_span));
             }
 
-            // Handle move semantics based on parameter mode
-            if !self.is_type_copy(ty) {
-                match param_info.mode {
-                    // Normal and comptime parameters behave similarly for moves
-                    // (comptime params are substituted at compile time)
-                    RirParamMode::Normal | RirParamMode::Comptime => {
-                        ctx.moved_vars
-                            .entry(name)
-                            .or_default()
-                            .mark_path_moved(&[], span);
-                    }
-                    RirParamMode::Inout => {
-                        ctx.moved_vars
-                            .entry(name)
-                            .or_default()
-                            .mark_path_moved(&[], span);
-                    }
-                    RirParamMode::Borrow => {
-                        // ADR-0076: when forwarding a `Ref(T)` parameter as
-                        // an arg to another `Ref(T)` callee param, the read
-                        // is a re-borrow, not a move. The call-site
-                        // pre-process sets `ctx.borrow_arg_skip_move` for
-                        // exactly this binding.
-                        if ctx.borrow_arg_skip_move != Some(name) {
-                            let name_str = self.interner.resolve(&name);
-                            return Err(CompileError::new(
-                                ErrorKind::MoveOutOfBorrow {
-                                    variable: name_str.to_string(),
-                                },
-                                span,
-                            ));
-                        }
-                        return Ok(AnalysisResult::new(
-                            air.add_inst(AirInst {
-                                data: AirInstData::Param {
-                                    index: param_info.abi_slot,
-                                },
-                                ty,
-                                span,
-                            }),
-                            ty,
+            // ADR-0076 collapse: read ref-ness off the type pool. A
+            // `Ref(T)` parameter behaves like the legacy `borrow` mode
+            // (move-out is rejected); a `MutRef(T)` parameter behaves
+            // like the legacy `inout` mode. The "is_type_copy" check
+            // consults the *referent* `T` because the move semantics
+            // are about ownership of the underlying data, not the
+            // ref-handle itself.
+            let by_ref_kind = match param_info.ty.kind() {
+                crate::types::TypeKind::Ref(_) => Some(false),
+                crate::types::TypeKind::MutRef(_) => Some(true),
+                _ => None,
+            };
+            // For move-tracking purposes, treat a `Ref(T)` / `MutRef(T)`
+            // binding as if it were a non-Copy `T` (so reads need to
+            // be borrows to avoid an "implicit move"). For non-ref
+            // types, fall back to the actual type's Copy-ness.
+            let needs_move_check = match by_ref_kind {
+                Some(_) => !self.is_type_copy(ty),
+                None => !self.is_type_copy(param_info.ty),
+            };
+            if needs_move_check {
+                let is_borrow = matches!(by_ref_kind, Some(false))
+                    || matches!(param_info.mode, RirParamMode::Borrow);
+                if is_borrow {
+                    if ctx.borrow_arg_skip_move != Some(name) {
+                        let name_str = self.interner.resolve(&name);
+                        return Err(CompileError::new(
+                            ErrorKind::MoveOutOfBorrow {
+                                variable: name_str.to_string(),
+                            },
+                            span,
                         ));
                     }
+                    return Ok(AnalysisResult::new(
+                        air.add_inst(AirInst {
+                            data: AirInstData::Param {
+                                index: param_info.abi_slot,
+                            },
+                            ty,
+                            span,
+                        }),
+                        ty,
+                    ));
                 }
+                ctx.moved_vars
+                    .entry(name)
+                    .or_default()
+                    .mark_path_moved(&[], span);
             }
 
             // Zero-sized parameter types (e.g. empty structs used as ZST
@@ -4192,7 +4261,14 @@ impl<'a> Sema<'a> {
             .find(|p| p.name == name)
             .ok_or_compile_error(ErrorKind::UndefinedVariable(name_str.to_string()), span)?;
 
-        let ty = param_info.ty;
+        // ADR-0076: auto-deref `Ref(T)` / `MutRef(T)` parameters when read
+        // as a value — codegen's `is_param_by_ref` will load through the
+        // by-pointer ABI based on the parameter's *declared* type.
+        let ty = match param_info.ty.kind() {
+            crate::types::TypeKind::Ref(id) => self.type_pool.ref_def(id),
+            crate::types::TypeKind::MutRef(id) => self.type_pool.mut_ref_def(id),
+            _ => param_info.ty,
+        };
 
         let air_ref = air.add_inst(AirInst {
             data: AirInstData::Param {
@@ -4217,31 +4293,40 @@ impl<'a> Sema<'a> {
 
         // First check if it's a parameter (for inout params)
         if let Some(param_info) = ctx.params.iter().find(|p| p.name == name) {
-            // Check parameter mode - only inout can be assigned to
-            match param_info.mode {
-                // Normal and comptime parameters are immutable
-                RirParamMode::Normal | RirParamMode::Comptime => {
-                    return Err(CompileError::new(
-                        ErrorKind::AssignToImmutable(name_str.to_string()),
-                        span,
-                    )
-                    .with_help(format!(
-                        "consider making parameter `{}` inout: `inout {}: {}`",
-                        name_str,
-                        name_str,
-                        param_info.ty.name()
-                    )));
+            // ADR-0076 collapse: read ref-ness off the type pool. A param
+            // of type `MutRef(T)` permits bare-name write-through; a param
+            // of type `Ref(T)` rejects it as a borrow mutation. The
+            // legacy `Inout` / `Borrow` modes still flow through for
+            // pre-collapse callers.
+            let by_ref_kind = match param_info.ty.kind() {
+                TypeKind::MutRef(_) => Some(true),
+                TypeKind::Ref(_) => Some(false),
+                _ => None,
+            };
+            match (by_ref_kind, param_info.mode) {
+                (Some(true), _) | (_, RirParamMode::Inout) => {
+                    // MutRef(T) param OR legacy `inout` mode — write-through.
                 }
-                RirParamMode::Inout => {
-                    // Inout parameters can be assigned to
-                }
-                RirParamMode::Borrow => {
+                (Some(false), _) | (_, RirParamMode::Borrow) => {
                     return Err(CompileError::new(
                         ErrorKind::MutateBorrowedValue {
                             variable: name_str.to_string(),
                         },
                         span,
                     ));
+                }
+                (_, RirParamMode::Normal | RirParamMode::Comptime) => {
+                    return Err(CompileError::new(
+                        ErrorKind::AssignToImmutable(name_str.to_string()),
+                        span,
+                    )
+                    .with_help(format!(
+                        "parameter `{}` of type `{}` is not mutable; declare it as `{}: MutRef({})` to allow write-through",
+                        name_str,
+                        param_info.ty.name(),
+                        name_str,
+                        param_info.ty.name()
+                    )));
                 }
             }
 

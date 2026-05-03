@@ -2020,8 +2020,23 @@ impl<'a> Sema<'a> {
         // The function body's type must match the return type.
         // This handles implicit returns like `fn foo() -> i8 { 42 }`.
         // For arrays, we need to convert Type to InferType structurally.
+        // ADR-0076: auto-deref `Ref(T)` / `MutRef(T)` body values so
+        // implicit returns from a `Ref(T)`-typed binding constrain
+        // against `T` (sema separately rejects moving out of a borrow).
+        let body_ty = match &body_info.ty {
+            crate::inference::InferType::Concrete(t) => match t.kind() {
+                crate::types::TypeKind::Ref(id) => {
+                    crate::inference::InferType::Concrete(self.type_pool.ref_def(id))
+                }
+                crate::types::TypeKind::MutRef(id) => {
+                    crate::inference::InferType::Concrete(self.type_pool.mut_ref_def(id))
+                }
+                _ => body_info.ty.clone(),
+            },
+            _ => body_info.ty.clone(),
+        };
         cgen.add_constraint(Constraint::equal(
-            body_info.ty,
+            body_ty,
             self.type_to_infer_type(return_type),
             body_info.span,
         ));

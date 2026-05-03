@@ -289,6 +289,23 @@ impl<'a> ConstraintGenerator<'a> {
         Some(inner_infer)
     }
 
+    /// ADR-0076: auto-deref a `Ref(T)` / `MutRef(T)` value type to its
+    /// referent `T` for constraint purposes. Used at every site that
+    /// expects a "value" type (arithmetic, comparison, equality with a
+    /// callee param). Non-ref types pass through unchanged.
+    fn auto_deref(&self, ty: InferType) -> InferType {
+        match &ty {
+            InferType::Concrete(t) => match t.kind() {
+                crate::types::TypeKind::Ref(id) => InferType::Concrete(self.type_pool.ref_def(id)),
+                crate::types::TypeKind::MutRef(id) => {
+                    InferType::Concrete(self.type_pool.mut_ref_def(id))
+                }
+                _ => ty,
+            },
+            _ => ty,
+        }
+    }
+
     /// Convert a concrete `Type` to `InferType`, preserving the structural
     /// form for arrays (mirrors `Sema::type_to_infer_type`).
     fn type_to_infer(&self, ty: Type) -> InferType {
@@ -590,30 +607,26 @@ impl<'a> ConstraintGenerator<'a> {
             // Assignment
             InstData::Assign { name, value } => {
                 let value_info = self.generate(*value, ctx);
-                if let Some(local) = ctx.locals.get(name) {
-                    // ADR-0076 Phase 3: a `MutRef(T)`-typed local makes
-                    // bare-name assign a write-through; the value's type
-                    // must match the *referent* `T`, not `MutRef(T)`. A
-                    // `Ref(T)`-typed local is a read-only ref — the
-                    // through-write is rejected later by sema, but for
-                    // constraint-generation symmetry we still constrain
-                    // against the referent so the user gets a clean
-                    // diagnostic from sema rather than a confused
-                    // "literal out of range for `<ref>`".
-                    let target_ty = match &local.ty {
-                        InferType::Concrete(t) => match t.kind() {
-                            crate::types::TypeKind::MutRef(id) => {
-                                InferType::Concrete(self.type_pool.mut_ref_def(id))
-                            }
-                            crate::types::TypeKind::Ref(id) => {
-                                InferType::Concrete(self.type_pool.ref_def(id))
-                            }
-                            _ => local.ty.clone(),
-                        },
-                        _ => local.ty.clone(),
-                    };
-                    // Constrain value to match the (possibly unwrapped) target type.
-                    self.add_constraint(Constraint::equal(value_info.ty, target_ty, span));
+                // ADR-0076: a `MutRef(T)`-typed binding (param or local)
+                // makes bare-name assign a write-through; the value's
+                // type must match the referent `T`, not `MutRef(T)`. A
+                // `Ref(T)`-typed binding is a read-only ref — the
+                // through-write is rejected later by sema, but for
+                // constraint-generation symmetry we still constrain
+                // against the referent so the user gets a clean
+                // diagnostic from sema rather than a confused
+                // "literal out of range for `<ref>`".
+                let binding_ty = ctx
+                    .locals
+                    .get(name)
+                    .map(|l| l.ty.clone())
+                    .or_else(|| ctx.params.get(name).map(|p| p.ty.clone()));
+                if let Some(ty) = binding_ty {
+                    let target_ty = self.auto_deref(ty);
+                    // Both sides auto-deref so `a = b` where both bindings
+                    // are `MutRef(T)` constrains `T ≈ T`, not `MutRef(T) ≈ T`.
+                    let value_ty = self.auto_deref(value_info.ty);
+                    self.add_constraint(Constraint::equal(value_ty, target_ty, span));
                 }
                 // Assignment produces unit
                 InferType::Concrete(Type::UNIT)
@@ -623,9 +636,12 @@ impl<'a> ConstraintGenerator<'a> {
             InstData::Ret(value) => {
                 if let Some(val_ref) = value {
                     let value_info = self.generate(*val_ref, ctx);
-                    // Constrain return value to match function return type
+                    // Constrain return value to match function return type.
+                    // ADR-0076: auto-deref so `return d` for a `Ref(T)` /
+                    // `MutRef(T)` binding constrains against `T`. Sema
+                    // separately rejects moving out of a borrow.
                     self.add_constraint(Constraint::equal(
-                        value_info.ty,
+                        self.auto_deref(value_info.ty),
                         InferType::Concrete(ctx.return_type),
                         span,
                     ));
@@ -1782,12 +1798,12 @@ impl<'a> ConstraintGenerator<'a> {
         let result_ty = InferType::Var(result_var);
 
         self.add_constraint(Constraint::equal(
-            lhs_info.ty,
+            self.auto_deref(lhs_info.ty),
             result_ty.clone(),
             lhs_info.span,
         ));
         self.add_constraint(Constraint::equal(
-            rhs_info.ty,
+            self.auto_deref(rhs_info.ty),
             result_ty.clone(),
             rhs_info.span,
         ));
