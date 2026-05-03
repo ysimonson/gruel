@@ -1902,6 +1902,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             // ADR-0062 / ADR-0063: `&x` / `&mut x` lower to the storage
             // pointer of the operand place. For a plain local we return the
             // alloca; for a field / index path we GEP into the local.
+            //
+            // Zero-sized referent types (empty structs etc.) have no
+            // backing storage; `build_place_gep_chain` returns None. Emit a
+            // null pointer so consumers (e.g. MakeInterfaceRef) still see
+            // a defined value — the pointer is never dereferenced because
+            // the referent has zero size.
             CfgInstData::MakeRef { place, is_mut: _ } => {
                 let elem_ty = ty;
                 let inner_ty = match elem_ty.kind() {
@@ -1909,7 +1915,14 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     gruel_air::TypeKind::MutRef(id) => self.type_pool.mut_ref_def(id),
                     _ => elem_ty,
                 };
-                self.build_place_gep_chain(&place, inner_ty).map(Into::into)
+                let ptr = self
+                    .build_place_gep_chain(&place, inner_ty)
+                    .unwrap_or_else(|| {
+                        self.ctx
+                            .ptr_type(inkwell::AddressSpace::default())
+                            .const_null()
+                    });
+                Some(ptr.into())
             }
             // ADR-0064: build a fat pointer `{ptr, len}` over a sub-range
             // of an array place. The base array's storage pointer is
@@ -3179,6 +3192,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 self.get_or_create_param_alloca(index, source_ty)
                             }
                         }
+                        // ADR-0076 Phase 2: `&x` / `&mut x` (MakeRef) already
+                        // produces the storage pointer of the source place.
+                        // Use it directly as the data pointer rather than
+                        // materializing an extra alloca-of-pointer.
+                        CfgInstData::MakeRef { .. } => self.get_value(value).into_pointer_value(),
                         _ => {
                             // Materialize an alloca and store the value into
                             // it.

@@ -818,12 +818,13 @@ impl<'a> Sema<'a> {
 
             let params = self.rir.get_params(params_start, params_len);
             let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
-            let param_modes: Vec<gruel_rir::RirParamMode> = params.iter().map(|p| p.mode).collect();
             let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
             let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
+            let mut param_modes: Vec<gruel_rir::RirParamMode> = Vec::with_capacity(params.len());
             for p in &params {
-                let ty = self.resolve_param_type(p.ty, p.mode, m.span)?;
+                let (ty, mode) = self.resolve_param_type(p.ty, p.mode, m.span)?;
                 param_types.push(ty);
+                param_modes.push(mode);
             }
             let ret_type = self.resolve_type(return_type, m.span)?;
             let param_range =
@@ -917,12 +918,13 @@ impl<'a> Sema<'a> {
 
             let params = self.rir.get_params(params_start, params_len);
             let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
-            let param_modes: Vec<gruel_rir::RirParamMode> = params.iter().map(|p| p.mode).collect();
             let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
             let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
+            let mut param_modes: Vec<gruel_rir::RirParamMode> = Vec::with_capacity(params.len());
             for p in &params {
-                let ty = self.resolve_param_type(p.ty, p.mode, m.span)?;
+                let (ty, mode) = self.resolve_param_type(p.ty, p.mode, m.span)?;
                 param_types.push(ty);
+                param_modes.push(mode);
             }
             let ret_type = self.resolve_type(return_type, m.span)?;
             let param_range =
@@ -1700,7 +1702,6 @@ impl<'a> Sema<'a> {
         let params = self.rir.get_params(params_start, params_len);
 
         let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
-        let param_modes: Vec<RirParamMode> = params.iter().map(|p| p.mode).collect();
 
         // Check if this function has any comptime TYPE parameters (not value parameters).
         // A type parameter is a comptime param whose declared type is either:
@@ -1737,26 +1738,24 @@ impl<'a> Sema<'a> {
 
         // For generic functions, we defer type resolution of type parameters until specialization.
         // We use Type::COMPTIME_TYPE as a placeholder for comptime type parameters.
-        let param_types: Vec<Type> = params
-            .iter()
-            .zip(is_type_param.iter())
-            .map(|(p, &is_tp)| {
-                if is_tp {
-                    // comptime type parameter (bound = `type` or an interface)
-                    Ok(Type::COMPTIME_TYPE)
-                } else if type_param_names.contains(&p.ty) {
-                    // This parameter's type is a type parameter (e.g., `x: T` where T is comptime)
-                    // Use ComptimeType as a placeholder - actual type determined at specialization
-                    Ok(Type::COMPTIME_TYPE)
-                } else {
-                    // Regular params OR comptime VALUE params (comptime n: i32).
-                    // `resolve_param_type` accepts interface names for borrow/inout
-                    // modes (ADR-0056 Phase 4) and otherwise delegates to
-                    // `resolve_type`.
-                    self.resolve_param_type(p.ty, p.mode, span)
-                }
-            })
-            .collect::<CompileResult<Vec<_>>>()?;
+        // ADR-0076 Phase 2: also collect the (possibly normalized) param mode
+        // returned by `resolve_param_type` so `Ref(I)` / `MutRef(I)` lower to
+        // the same `(Interface, Borrow|Inout)` shape as legacy `borrow t: I`
+        // / `inout t: I`.
+        let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
+        let mut param_modes: Vec<RirParamMode> = Vec::with_capacity(params.len());
+        for (p, &is_tp) in params.iter().zip(is_type_param.iter()) {
+            let (ty, mode) = if is_tp || type_param_names.contains(&p.ty) {
+                // Comptime type parameter, or a parameter whose declared type
+                // is a type parameter (`x: T`). The concrete type is resolved
+                // at specialization; mode is taken verbatim from RIR.
+                (Type::COMPTIME_TYPE, p.mode)
+            } else {
+                self.resolve_param_type(p.ty, p.mode, span)?
+            };
+            param_types.push(ty);
+            param_modes.push(mode);
+        }
         let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
 
         // For generic functions, we can't resolve the return type yet if it references
@@ -1866,7 +1865,6 @@ impl<'a> Sema<'a> {
 
                 let params = self.rir.get_params(*params_start, *params_len);
                 let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
-                let param_modes: Vec<RirParamMode> = params.iter().map(|p| p.mode).collect();
                 let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
 
                 // Detect method-level comptime type parameters (e.g.,
@@ -1927,18 +1925,21 @@ impl<'a> Sema<'a> {
                     with_subst.is_some() && without_subst.is_none()
                 };
 
-                let param_types: Vec<Type> = params
-                    .iter()
-                    .map(|p| {
-                        if (p.is_comptime && p.ty == type_sym)
-                            || references_method_type_param(p.ty, self)
-                        {
-                            Ok(Type::COMPTIME_TYPE)
-                        } else {
-                            self.resolve_param_type(p.ty, p.mode, method_inst.span)
-                        }
-                    })
-                    .collect::<CompileResult<Vec<_>>>()?;
+                // ADR-0076 Phase 2: collect normalized modes alongside types
+                // so `Ref(I)` / `MutRef(I)` lower like the legacy keyword form.
+                let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
+                let mut param_modes: Vec<RirParamMode> = Vec::with_capacity(params.len());
+                for p in &params {
+                    let (ty, mode) = if (p.is_comptime && p.ty == type_sym)
+                        || references_method_type_param(p.ty, self)
+                    {
+                        (Type::COMPTIME_TYPE, p.mode)
+                    } else {
+                        self.resolve_param_type(p.ty, p.mode, method_inst.span)?
+                    };
+                    param_types.push(ty);
+                    param_modes.push(mode);
+                }
                 let ret_type = if references_method_type_param(*return_type, self) {
                     Type::COMPTIME_TYPE
                 } else {

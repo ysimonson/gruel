@@ -214,7 +214,7 @@ form is already stable, and we are removing legacy spellings.
       `(Self, Self)`, and `[Self; N]` in parameter, return, and
       local-binding positions.
 
-- [ ] **Phase 2: Interface-typed references.** Rewrite
+- [x] **Phase 2: Interface-typed references.** Rewrite
       `resolve_param_type` to accept `Ref(I)` / `MutRef(I)` for
       interface names `I` and dispatch through the ADR-0056 fat-pointer
       ABI. Add spec tests showing an interface-typed parameter using

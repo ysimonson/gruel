@@ -138,21 +138,29 @@ impl<'a> Sema<'a> {
         }
     }
     /// Resolve a parameter type symbol, accepting interface names when the
-    /// parameter mode is `inout` or `borrow` (ADR-0056 Phase 4).
+    /// parameter mode is `inout` or `borrow` (ADR-0056 Phase 4) or when the
+    /// declared type is `Ref(I)` / `MutRef(I)` (ADR-0076 Phase 2).
     ///
     /// Outside of parameter positions, callers should use `resolve_type`
     /// directly — interfaces are not yet legal as field types, return
     /// types, or local-binding types.
+    ///
+    /// Returns the resolved `Type` and the (possibly normalized) mode. The
+    /// mode is `Borrow` for `Ref(I)` and `Inout` for `MutRef(I)` so the
+    /// rest of sema sees the same `(Interface, Borrow|Inout)` shape that
+    /// the legacy keyword form produced.
     pub(crate) fn resolve_param_type(
         &mut self,
         type_sym: Spur,
         mode: gruel_rir::RirParamMode,
         span: Span,
-    ) -> CompileResult<Type> {
+    ) -> CompileResult<(Type, gruel_rir::RirParamMode)> {
+        // Bare interface name in parameter position — legacy form requires
+        // `borrow` / `inout`.
         if let Some(&interface_id) = self.interfaces.get(&type_sym) {
-            match mode {
+            return match mode {
                 gruel_rir::RirParamMode::Inout | gruel_rir::RirParamMode::Borrow => {
-                    Ok(Type::new_interface(interface_id))
+                    Ok((Type::new_interface(interface_id), mode))
                 }
                 _ => {
                     let name = self.interner.resolve(&type_sym).to_string();
@@ -161,14 +169,35 @@ impl<'a> Sema<'a> {
                         span,
                     )
                     .with_help(format!(
-                        "interface-typed parameters require a borrow mode: use `borrow t: {}` or `inout t: {}`. By-value `t: {}` is not supported (ADR-0056).",
-                        name, name, name
+                        "`{name}` is an interface; pass it through a reference: `Ref({name})` for read-only or `MutRef({name})` for exclusive-mutable. (ADR-0056 / ADR-0076)"
                     )))
                 }
-            }
-        } else {
-            self.resolve_type(type_sym, span)
+            };
         }
+
+        // ADR-0076 Phase 2: `Ref(I)` / `MutRef(I)` where `I` names an
+        // interface. The intern pool cannot pool a `Ref(Interface)` as a
+        // first-class parametric type (interface types are not poolable),
+        // so we lower the pair directly to `(Interface, Borrow|Inout)` —
+        // the same shape the legacy keyword form produced. Subsequent
+        // ABI / borrow-checking machinery is unchanged.
+        let type_name = self.interner.resolve(&type_sym);
+        if let Some((callee, args)) = parse_type_call_syntax(type_name)
+            && args.len() == 1
+            && (callee == "Ref" || callee == "MutRef")
+        {
+            let arg_sym = self.interner.get_or_intern(&args[0]);
+            if let Some(&interface_id) = self.interfaces.get(&arg_sym) {
+                let normalized_mode = if callee == "MutRef" {
+                    gruel_rir::RirParamMode::Inout
+                } else {
+                    gruel_rir::RirParamMode::Borrow
+                };
+                return Ok((Type::new_interface(interface_id), normalized_mode));
+            }
+        }
+
+        Ok((self.resolve_type(type_sym, span)?, mode))
     }
 
     /// Resolve a type slot inside an interface method signature (ADR-0060).

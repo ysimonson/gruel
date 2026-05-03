@@ -296,7 +296,81 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
-error_contains = ["borrow t: Marker"]
+error_contains = ["Ref(Marker)"]
+
+# =============================================================================
+# Ref(I) / MutRef(I) — ADR-0076 Phase 2
+# =============================================================================
+
+# `Ref(I)` is the new-form spelling of `borrow t: I`. Same fat-pointer ABI.
+[[case]]
+name = "interface_ref_new_form_empty"
+spec = ["6.5:11", "6.5:12"]
+description = "Ref(I) parameter accepts &x of conforming concrete type"
+source = """
+interface Marker {}
+
+struct Foo {}
+
+fn ignore(t: Ref(Marker)) {
+}
+
+fn main() -> i32 {
+    let f = Foo {};
+    ignore(&f);
+    77
+}
+"""
+exit_code = 77
+
+# `Ref(I)` with a non-empty conforming struct, dispatching a method that
+# reads a field through &self.
+[[case]]
+name = "interface_ref_new_form_dispatch"
+spec = ["6.5:11", "6.5:14", "6.5:16"]
+description = "Ref(I) param dispatches through the vtable on a non-empty conformer"
+source = """
+interface Counter {
+    fn count(&self) -> i32;
+}
+
+struct Box {
+    n: i32,
+
+    fn count(&self) -> i32 { self.n }
+}
+
+fn invoke(t: Ref(Counter)) -> i32 {
+    t.count()
+}
+
+fn main() -> i32 {
+    let b = Box { n: 42 };
+    invoke(&b)
+}
+"""
+exit_code = 42
+
+# `MutRef(I)` mirrors `inout t: I`.
+[[case]]
+name = "interface_mut_ref_new_form"
+spec = ["6.5:11", "6.5:14"]
+description = "MutRef(I) parameter accepts &mut x of conforming concrete type"
+source = """
+interface Marker {}
+
+struct Foo {}
+
+fn ignore(t: MutRef(Marker)) {
+}
+
+fn main() -> i32 {
+    let mut f = Foo {};
+    ignore(&mut f);
+    9
+}
+"""
+exit_code = 9
 
 # Two distinct concrete types both flowing through the same generic
 # function each get their own specialization.

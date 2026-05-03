@@ -1551,12 +1551,14 @@ impl<'a> Sema<'a> {
         let ret_type = self.resolve_type(return_type, span)?;
 
         // Resolve parameter types and modes. Use `resolve_param_type` so
-        // interface-typed parameters (ADR-0056 Phase 4) resolve correctly.
+        // interface-typed parameters (ADR-0056 Phase 4) and `Ref(I)` /
+        // `MutRef(I)` interface refs (ADR-0076 Phase 2) resolve correctly.
+        // The returned mode may differ from `p.mode` after normalization.
         let param_info: Vec<(Spur, Type, RirParamMode)> = params
             .iter()
             .map(|p| {
-                let ty = self.resolve_param_type(p.ty, p.mode, span)?;
-                Ok((p.name, ty, p.mode))
+                let (ty, mode) = self.resolve_param_type(p.ty, p.mode, span)?;
+                Ok((p.name, ty, mode))
             })
             .collect::<CompileResult<Vec<_>>>()?;
 
@@ -1638,10 +1640,12 @@ impl<'a> Sema<'a> {
         }
 
         // Add regular parameters with their modes. Use `resolve_param_type`
-        // for ADR-0056 interface-typed parameters.
+        // for ADR-0056 interface-typed parameters; ADR-0076 Phase 2 also
+        // normalizes `Ref(I)` / `MutRef(I)` here, so the returned mode may
+        // differ from `p.mode`.
         for p in spec.params.iter() {
-            let ty = self.resolve_param_type(p.ty, p.mode, span)?;
-            param_info.push((p.name, ty, p.mode));
+            let (ty, mode) = self.resolve_param_type(p.ty, p.mode, span)?;
+            param_info.push((p.name, ty, mode));
         }
 
         let (

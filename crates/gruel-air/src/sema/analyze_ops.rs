@@ -6126,12 +6126,25 @@ impl<'a> Sema<'a> {
         // Check for exclusive access violation
         self.check_exclusive_access(&args, span)?;
 
-        // Check that call-site argument modes match function parameter modes
-        // Do this before the mutable borrow in analyze_call_args, accessing fn_info directly
+        // Check that call-site argument modes match function parameter modes.
+        // ADR-0076 Phase 2: a `&x` (`MakeRef { is_mut: false }`) expression in
+        // argument position is accepted for a `Borrow`-mode param, and a
+        // `&mut x` (`MakeRef { is_mut: true }`) is accepted for an
+        // `Inout`-mode param. This composes the new `Ref(I)` / `MutRef(I)`
+        // surface form (which normalizes to the Borrow/Inout legacy mode at
+        // signature time) with the new construction syntax.
         for (i, (arg, expected_mode)) in args.iter().zip(param_modes.iter()).enumerate() {
+            let arg_is_make_ref_immut = matches!(
+                self.rir.get(arg.value).data,
+                gruel_rir::InstData::MakeRef { is_mut: false, .. }
+            );
+            let arg_is_make_ref_mut = matches!(
+                self.rir.get(arg.value).data,
+                gruel_rir::InstData::MakeRef { is_mut: true, .. }
+            );
             match expected_mode {
                 RirParamMode::Inout => {
-                    if arg.mode != RirArgMode::Inout {
+                    if arg.mode != RirArgMode::Inout && !arg_is_make_ref_mut {
                         return Err(CompileError::new(
                             ErrorKind::InoutKeywordMissing,
                             self.rir.get(args[i].value).span,
@@ -6139,7 +6152,7 @@ impl<'a> Sema<'a> {
                     }
                 }
                 RirParamMode::Borrow => {
-                    if arg.mode != RirArgMode::Borrow {
+                    if arg.mode != RirArgMode::Borrow && !arg_is_make_ref_immut {
                         return Err(CompileError::new(
                             ErrorKind::BorrowKeywordMissing,
                             self.rir.get(args[i].value).span,
@@ -6240,10 +6253,21 @@ impl<'a> Sema<'a> {
         // against the argument's concrete type and replace the argument
         // AIR with a `MakeInterfaceRef` coercion. Codegen (Phase 4d)
         // lowers that to a `(data_ptr, vtable_ptr)` fat-pointer struct.
+        //
+        // ADR-0076 Phase 2: with `Ref(I)` / `MutRef(I)` parameters, the
+        // call-site arg may be a `&x` / `&mut x` expression whose AIR type
+        // is `Ref(Concrete)` / `MutRef(Concrete)`. Unwrap the reference
+        // before conformance and witness extraction so the same path
+        // handles both legacy `borrow x` and new `&x` arg shapes.
         for (i, param_ty) in param_types.iter().enumerate() {
             if let crate::types::TypeKind::Interface(iface_id) = param_ty.kind() {
                 let arg_air = air_args[i].value;
-                let arg_ty = air.get(arg_air).ty;
+                let raw_arg_ty = air.get(arg_air).ty;
+                let arg_ty = match raw_arg_ty.kind() {
+                    crate::types::TypeKind::Ref(id) => self.type_pool.ref_def(id),
+                    crate::types::TypeKind::MutRef(id) => self.type_pool.mut_ref_def(id),
+                    _ => raw_arg_ty,
+                };
                 let arg_span = self.rir.get(args[i].value).span;
                 let witness = self.check_conforms(arg_ty, iface_id, arg_span)?;
                 let struct_id = match arg_ty.kind() {
