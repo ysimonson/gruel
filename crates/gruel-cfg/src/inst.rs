@@ -328,6 +328,10 @@ pub enum CfgInstData {
     Store { slot: u32, value: CfgValue },
     /// Store value to a parameter (for inout params)
     ParamStore { param_slot: u32, value: CfgValue },
+    /// Bare-name write-through for a `MutRef(T)`-typed local binding
+    /// (ADR-0076 Phase 3). Loads the pointer held in the local slot and
+    /// stores `value` (typed as the referent `T`) through that pointer.
+    RefStore { slot: u32, value: CfgValue },
 
     // Place operations (ADR-0030)
     /// Read a value from a memory location.
@@ -1239,6 +1243,9 @@ impl Cfg {
             CfgInstData::Store { slot, value } => write!(f, "store ${} = {}", slot, value),
             CfgInstData::ParamStore { param_slot, value } => {
                 write!(f, "param_store %{} = {}", param_slot, value)
+            }
+            CfgInstData::RefStore { slot, value } => {
+                write!(f, "ref_store ${} = {}", slot, value)
             }
             CfgInstData::PlaceRead { place } => {
                 write!(f, "place_read ")?;

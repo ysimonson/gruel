@@ -523,8 +523,29 @@ impl<'a> ConstraintGenerator<'a> {
             InstData::Assign { name, value } => {
                 let value_info = self.generate(*value, ctx);
                 if let Some(local) = ctx.locals.get(name) {
-                    // Constrain value to match variable type
-                    self.add_constraint(Constraint::equal(value_info.ty, local.ty.clone(), span));
+                    // ADR-0076 Phase 3: a `MutRef(T)`-typed local makes
+                    // bare-name assign a write-through; the value's type
+                    // must match the *referent* `T`, not `MutRef(T)`. A
+                    // `Ref(T)`-typed local is a read-only ref — the
+                    // through-write is rejected later by sema, but for
+                    // constraint-generation symmetry we still constrain
+                    // against the referent so the user gets a clean
+                    // diagnostic from sema rather than a confused
+                    // "literal out of range for `<ref>`".
+                    let target_ty = match &local.ty {
+                        InferType::Concrete(t) => match t.kind() {
+                            crate::types::TypeKind::MutRef(id) => {
+                                InferType::Concrete(self.type_pool.mut_ref_def(id))
+                            }
+                            crate::types::TypeKind::Ref(id) => {
+                                InferType::Concrete(self.type_pool.ref_def(id))
+                            }
+                            _ => local.ty.clone(),
+                        },
+                        _ => local.ty.clone(),
+                    };
+                    // Constrain value to match the (possibly unwrapped) target type.
+                    self.add_constraint(Constraint::equal(value_info.ty, target_ty, span));
                 }
                 // Assignment produces unit
                 InferType::Concrete(Type::UNIT)

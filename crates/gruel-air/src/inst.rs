@@ -1086,6 +1086,16 @@ pub enum AirInstData {
         value: AirRef,
     },
 
+    /// Bare-name write-through for a `MutRef(T)`-typed local binding
+    /// (ADR-0076 Phase 3). Loads the pointer held in the local's slot and
+    /// stores `value` (typed as the referent `T`) through that pointer.
+    RefStore {
+        /// Slot index of the local (whose stored value is the pointer)
+        slot: u32,
+        /// Value to store at the pointee
+        value: AirRef,
+    },
+
     /// Return from function (None for `return;` in unit-returning functions)
     Ret(Option<AirRef>),
 
@@ -1495,6 +1505,9 @@ impl fmt::Display for Air {
                 }
                 AirInstData::ParamStore { param_slot, value } => {
                     writeln!(f, "param_store %{} = {}", param_slot, value)?
+                }
+                AirInstData::RefStore { slot, value } => {
+                    writeln!(f, "ref_store ${} = {}", slot, value)?
                 }
                 AirInstData::Ret(inner) => {
                     if let Some(inner) = inner {

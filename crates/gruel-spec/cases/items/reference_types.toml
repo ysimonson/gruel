@@ -292,3 +292,57 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "cannot escape"
+
+# =============================================================================
+# Bare-name write-through (ADR-0076 Phase 3)
+# =============================================================================
+
+# Scalar `MutRef(T)` parameter: bare-name `r = v` writes through.
+[[case]]
+name = "mut_ref_scalar_param_write_through"
+spec = ["6.1:43", "6.1:45"]
+description = "Bare-name assignment writes through a MutRef(i32) parameter"
+source = """
+fn set(r: MutRef(i32), v: i32) {
+    r = v;
+}
+
+fn main() -> i32 {
+    let mut x: i32 = 0;
+    set(&mut x, 42);
+    x
+}
+"""
+exit_code = 42
+
+# Scalar `MutRef(T)` local binding: same rule.
+[[case]]
+name = "mut_ref_scalar_local_write_through"
+spec = ["6.1:43", "6.1:45", "6.1:46"]
+description = "Bare-name assignment writes through a MutRef(i32) local"
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 0;
+    let r: MutRef(i32) = &mut x;
+    r = 42;
+    x
+}
+"""
+exit_code = 42
+
+# `Ref(T)` is read-only: bare-name assign through a local Ref binding is
+# rejected.
+[[case]]
+name = "ref_local_bare_assign_rejected"
+spec = ["6.1:44"]
+description = "`r = v` on a Ref(T) local is a compile-time error"
+source = """
+fn main() -> i32 {
+    let x: i32 = 7;
+    let r: Ref(i32) = &x;
+    r = 5;
+    0
+}
+"""
+compile_fail = true
+error_contains = "borrow"

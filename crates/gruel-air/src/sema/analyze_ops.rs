@@ -4252,21 +4252,65 @@ impl<'a> Sema<'a> {
             .locals
             .get(&name)
             .ok_or_compile_error(ErrorKind::UndefinedVariable(name_str.to_string()), span)?;
+        let local_slot = local.slot;
+        let local_ty = local.ty;
+        let local_is_mut = local.is_mut;
+        let local_span = local.span;
+
+        // ADR-0076 Phase 3: a local binding of type `MutRef(T)` supports
+        // bare-name write-through — `r = v` stores `v` (typed as `T`)
+        // through the pointer held in `r`'s slot. The binding mutability
+        // (`let r` vs `let mut r`) does not gate this; rebinding a ref
+        // is unsupported, so the only meaningful read of `r = v` is
+        // write-through.
+        if let TypeKind::MutRef(referent_id) = local_ty.kind() {
+            let referent_ty = self.type_pool.mut_ref_def(referent_id);
+            let value_result = self.analyze_inst(air, value, ctx)?;
+            // Through-write is governed by the referent's type; the binding
+            // identity is unchanged so no `moved_vars` book-keeping fires.
+            if value_result.ty != referent_ty && value_result.ty != Type::ERROR {
+                return Err(CompileError::type_mismatch(
+                    self.format_type_name(referent_ty),
+                    self.format_type_name(value_result.ty),
+                    span,
+                ));
+            }
+            let air_ref = air.add_inst(AirInst {
+                data: AirInstData::RefStore {
+                    slot: local_slot,
+                    value: value_result.air_ref,
+                },
+                ty: Type::UNIT,
+                span,
+            });
+            return Ok(AnalysisResult::new(air_ref, Type::UNIT));
+        }
+
+        // A `Ref(T)`-typed local is a read-only ref; bare-name assign is
+        // a compile-time error (mirrors the borrow-mode param case).
+        if let TypeKind::Ref(_) = local_ty.kind() {
+            return Err(CompileError::new(
+                ErrorKind::MutateBorrowedValue {
+                    variable: name_str.to_string(),
+                },
+                span,
+            ));
+        }
 
         // Check mutability
-        if !local.is_mut {
+        if !local_is_mut {
             return Err(CompileError::new(
                 ErrorKind::AssignToImmutable(name_str.to_string()),
                 span,
             )
-            .with_label("variable declared as immutable here", local.span)
+            .with_label("variable declared as immutable here", local_span)
             .with_help(format!(
                 "consider making `{}` mutable: `let mut {}`",
                 name_str, name_str
             )));
         }
 
-        let slot = local.slot;
+        let slot = local_slot;
 
         // Analyze the value
         let value_result = self.analyze_inst(air, value, ctx)?;

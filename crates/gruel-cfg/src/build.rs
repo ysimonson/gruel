@@ -651,6 +651,24 @@ impl<'a> CfgBuilder<'a> {
                 }
             }
 
+            AirInstData::RefStore { slot, value } => {
+                let Some(val) = self.lower_value(*value) else {
+                    return Self::diverged();
+                };
+                self.emit(
+                    CfgInstData::RefStore {
+                        slot: *slot,
+                        value: val,
+                    },
+                    Type::UNIT,
+                    span,
+                );
+                ExprResult {
+                    value: None,
+                    continuation: Continuation::Continues,
+                }
+            }
+
             AirInstData::Call {
                 name,
                 args_start,

@@ -241,6 +241,37 @@ Method receivers accept the surface forms `&self` and `&mut self` as sugar for `
 self_param = ( "&" [ "mut" ] | "borrow" | "inout" )? "self" ;
 ```
 
+### Bare-Name Write-Through (ADR-0076)
+
+{{ rule(id="6.1:43", cat="dynamic-semantics") }}
+
+For any binding `r` whose declared type is `MutRef(T)` — whether a parameter (`fn set(r: MutRef(T), ...)`) or a local (`let r: MutRef(T) = &mut x;`) — the assignment `r = e` evaluates `e` to a value of type `T` and stores it at the place referenced by `r`. The binding `r` itself is never rebound. There is no separate dereference operator; this is the only write-through form.
+
+{{ rule(id="6.1:44", cat="legality-rule") }}
+
+For a binding whose declared type is `Ref(T)`, the assignment `r = e` is a compile-time error. `Ref(T)` is read-only.
+
+{{ rule(id="6.1:45", cat="example") }}
+
+```gruel
+// Parameter-position write-through.
+fn set(r: MutRef(i32), v: i32) {
+    r = v;            // stores v through r
+}
+
+// Local-position write-through.
+fn local() -> i32 {
+    let mut x: i32 = 0;
+    let r: MutRef(i32) = &mut x;
+    r = 42;           // stores 42 through r
+    x                  // 42
+}
+```
+
+{{ rule(id="6.1:46", cat="dynamic-semantics") }}
+
+`e` is evaluated before the address of the pointee is taken. References remain scope-bound (6.1:41); a `let r: MutRef(T) = &mut x;` binding obeys the same non-escape rules as a `MutRef`-typed parameter.
+
 ## Parameter Immutability
 
 {{ rule(id="6.1:32", cat="legality-rule") }}

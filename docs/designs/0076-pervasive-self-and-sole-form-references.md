@@ -222,7 +222,7 @@ form is already stable, and we are removing legacy spellings.
       the existing "use `borrow`/`inout`" diagnostic to suggest the
       new form.
 
-- [ ] **Phase 3: Bare-name write-through, specified.** Add normative
+- [x] **Phase 3: Bare-name write-through, specified.** Add normative
       paragraphs to `docs/spec/src/06-items/01-functions.md` defining
       `name = e` as write-through when `name` has type `MutRef(T)`.
       Add spec tests for the previously underspecified scalar-MutRef

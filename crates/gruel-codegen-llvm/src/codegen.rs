@@ -2098,6 +2098,23 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 None
             }
 
+            // ADR-0076 Phase 3: bare-name write-through for a `MutRef(T)`-
+            // typed local binding. The local slot stores a pointer; load it
+            // and store the value through it.
+            CfgInstData::RefStore { slot, value } => {
+                let v = self.get_value(value);
+                let local_ptr =
+                    self.locals[slot as usize].expect("RefStore on uninitialized local");
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let target_ptr = self
+                    .builder
+                    .build_load(ptr_ty, local_ptr, "ref.target")
+                    .unwrap()
+                    .into_pointer_value();
+                self.builder.build_store(target_ptr, v).unwrap();
+                None
+            }
+
             // ---- Function calls ----
             CfgInstData::Call {
                 name,
