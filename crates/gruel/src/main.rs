@@ -286,7 +286,6 @@ struct Options {
     /// `target/gruel-cache/` next to the first source file.
     /// Phase 2 wires this into the compilation pipeline; Phase 1 only
     /// plumbs the field and validates the preview-feature gate.
-    #[allow(dead_code)]
     cache_dir: Option<String>,
     /// Phase 6 cache subcommands (ADR-0074): when set, the driver
     /// performs the requested cache action and exits before any

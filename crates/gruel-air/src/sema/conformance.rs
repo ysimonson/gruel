@@ -30,7 +30,6 @@ use crate::types::{IfaceTy, InterfaceId, StructId, Type, TypeKind};
 ///
 /// Currently only used by Phase 2 unit tests; Phase 3 will consume it during
 /// monomorphization, and Phase 4 during vtable generation.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ConformanceWitness {
     /// Resolved methods, one per interface slot. Each entry is the
@@ -39,7 +38,6 @@ pub struct ConformanceWitness {
     pub slot_methods: Vec<(StructId, Spur)>,
 }
 
-#[allow(dead_code)] // exercised by Phase 2 unit tests; consumed by Phase 3+
 impl<'a> Sema<'a> {
     /// Check whether `candidate` conforms to `interface_id`.
     ///

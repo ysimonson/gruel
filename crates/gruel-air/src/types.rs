@@ -593,10 +593,8 @@ impl StructDef {
 /// are listed in declaration order.
 ///
 /// `is_pub` and `file_id` are populated now and consumed in later phases
-/// (visibility checks during cross-module conformance) — `#[allow(dead_code)]`
-/// keeps them in shape until then.
+/// (visibility checks during cross-module conformance).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
 pub struct InterfaceDef {
     /// Interface name (as written in source).
     pub name: String,
@@ -683,7 +681,6 @@ pub struct InterfaceMethodReq {
 impl InterfaceDef {
     /// Find a required method by name. Returns its slot index plus the
     /// requirement. Used by later phases for vtable lookup.
-    #[allow(dead_code)]
     pub fn find_method(&self, name: &str) -> Option<(usize, &InterfaceMethodReq)> {
         self.methods
             .iter()

@@ -425,10 +425,7 @@ fn encode_pattern_tree(pattern: &RirPattern, out: &mut Vec<u32>) {
 }
 
 /// Decode a single `RirPattern` from the tree encoding in `data`,
-/// returning the pattern and how many u32 words it consumed. Unused in
-/// Phase 4a (astgen does not emit Tuple/Struct arms yet); turns live
-/// when Phase 4b wires astgen and sema consumes nested sub-patterns.
-#[allow(dead_code)]
+/// returning the pattern and how many u32 words it consumed.
 fn decode_pattern_tree(data: &[u32]) -> (RirPattern, usize) {
     let kind = data[0];
     if kind == PatternKind::Wildcard as u32 {

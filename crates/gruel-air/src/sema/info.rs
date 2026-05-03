@@ -105,7 +105,7 @@ pub struct AnonMethodSig {
 /// preserved verbatim — the existing generic-method machinery substitutes
 /// `Self` at first call.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // fields populated in phase 2; consumed in phase 4
+#[allow(dead_code)]
 pub struct DeriveMethod {
     /// Method name.
     pub name: Spur,
@@ -123,7 +123,7 @@ pub struct DeriveMethod {
 /// Recorded during Phase 3 (directive resolution); consumed by Phase 4
 /// to splice the derive's methods into the host type's method list.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // fields populated in phase 3; consumed in phase 4
+#[allow(dead_code)]
 pub struct DeriveBinding {
     /// Host type — the struct or enum whose declaration carries the
     /// `@derive(...)` directive.
@@ -141,7 +141,7 @@ pub struct DeriveBinding {
 
 /// Information about a `derive` item (ADR-0058).
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // fields populated in phase 2; consumed in phase 4
+#[allow(dead_code)]
 pub struct DeriveInfo {
     /// Derive name (e.g., `Drop`).
     pub name: Spur,

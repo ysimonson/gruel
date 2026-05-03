@@ -452,14 +452,12 @@ Fuzz testing uses [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (libFuzz
 cargo +nightly fuzz list
 
 # Targets:
-# - lexer:               Tokenization (raw bytes)
-# - parser:              Lexing + parsing (raw bytes)
-# - compiler:            Full frontend (raw bytes)
-# - emitter:             x86-64 instruction encoding (raw bytes)
-# - emitter_sequence:    Instruction sequences with labels/jumps (raw bytes)
-# - structured_compiler: Valid Gruel programs (arbitrary crate)
-# - structured_invalid:  Semantically invalid programs (arbitrary crate)
-# - structured_emitter:  Structured x86-64 MIR sequences (arbitrary crate)
+# - lexer:                Tokenization (raw bytes)
+# - parser:               Lexing + parsing (raw bytes)
+# - compiler:             Full frontend (raw bytes)
+# - structured_compiler:  Valid Gruel programs (arbitrary crate)
+# - structured_invalid:   Semantically invalid programs (arbitrary crate)
+# - comptime_differential: Comptime vs. runtime evaluation differential (arbitrary crate)
 ```
 
 #### Running Fuzz Tests
@@ -472,7 +470,7 @@ cargo +nightly fuzz run lexer
 cargo +nightly fuzz run parser -- -max_total_time=300
 
 # Run all targets for 5 minutes each
-for target in lexer parser compiler emitter emitter_sequence structured_compiler structured_invalid structured_emitter; do
+for target in lexer parser compiler structured_compiler structured_invalid comptime_differential; do
     cargo +nightly fuzz run $target -- -max_total_time=300
 done
 ```
