@@ -44,39 +44,48 @@ fn do_nothing() {
 }
 ```
 
-## Inout Parameters
+## Reference Parameters: `Ref(T)` and `MutRef(T)` (ADR-0076)
+
+> **Historical note (informative):** Through ADR-0062 the language
+> exposed parameter modes `borrow` / `inout` for non-owning parameter
+> passing. ADR-0076 retired those keywords; `Ref(T)` and `MutRef(T)`
+> (constructed at call sites with `&x` / `&mut x`) are now the only
+> form. Paragraph IDs 6.1:14..31 are kept stable so prior spec test
+> references continue to resolve.
 
 {{ rule(id="6.1:14", cat="normative") }}
 
-A parameter **MAY** be marked with the `inout` keyword to indicate that it is passed by reference and may be mutated by the callee. Changes made to an `inout` parameter are visible to the caller after the call returns.
+A parameter declared with type `MutRef(T)` is passed by reference and may be mutated by the callee. Changes made through a `MutRef(T)` parameter are visible to the caller after the call returns.
 
 {{ rule(id="6.1:15", cat="syntax") }}
 
 ```ebnf
-param = [ param_mode ] IDENT ":" type ;
-param_mode = "inout" | "borrow" ;
+param = [ "comptime" ] IDENT ":" type ;
+type  = …                                      (* see 3.1, including
+                                                 `Ref ( T )` and
+                                                 `MutRef ( T )` *) ;
 ```
 
 {{ rule(id="6.1:16", cat="legality-rule") }}
 
-At the call site, an argument passed to an `inout` parameter **MUST** be marked with the `inout` keyword.
+A call site argument supplied to a `MutRef(T)` parameter **MUST** be a `&mut x` expression (6.1:35). Argument expressions of any other shape are rejected as a type mismatch.
 
 {{ rule(id="6.1:17", cat="legality-rule") }}
 
-An argument to an `inout` parameter **MUST** be an lvalue (a variable, field access, or array index expression).
+The operand of `&mut` **MUST** be an lvalue (a variable, field access, or array index expression).
 
 {{ rule(id="6.1:18", cat="dynamic-semantics") }}
 
-When a function is called with an `inout` argument:
-1. The address of the argument is passed to the callee
-2. The callee reads and writes to the argument through this address
-3. After the call returns, the original variable holds the updated value
+When a function is called with a `&mut x` argument:
+1. The address of `x` is passed to the callee.
+2. The callee reads and writes through this address.
+3. After the call returns, the original variable holds the updated value.
 
 {{ rule(id="6.1:19", cat="example") }}
 
 ```gruel
 fn increment(x: MutRef(i32)) {
-    x = x + 1;
+    x = x + 1;     // bare-name write-through (6.1:43)
 }
 
 fn main() -> i32 {
@@ -88,7 +97,7 @@ fn main() -> i32 {
 
 {{ rule(id="6.1:20", cat="legality-rule") }}
 
-A single function call **MUST NOT** pass the same variable to multiple `inout` parameters. This prevents aliasing of mutable references within a single call.
+A single function call **MUST NOT** target the same lvalue with multiple `&mut` references. This prevents aliasing of mutable references within a single call.
 
 {{ rule(id="6.1:21", cat="example") }}
 
@@ -101,38 +110,35 @@ fn swap(a: MutRef(i32), b: MutRef(i32)) {
 
 fn main() -> i32 {
     let mut x = 1;
-    swap(&mut x, &mut x);  // error: cannot pass same variable to multiple inout parameters
+    swap(&mut x, &mut x);  // error: cannot alias `x` for two MutRefs
     0
 }
 ```
 
-## Borrow Parameters
-
 {{ rule(id="6.1:22", cat="normative") }}
 
-A parameter **MAY** be marked with the `borrow` keyword to indicate that it is passed by reference for read-only access. The callee cannot mutate the borrowed value, and the value is not consumed (ownership is not transferred).
+A parameter declared with type `Ref(T)` is passed by reference for read-only access. The callee cannot mutate through a `Ref(T)` parameter, and the value is not consumed (ownership is not transferred).
 
 {{ rule(id="6.1:23", cat="legality-rule") }}
 
-At the call site, an argument passed to a `borrow` parameter **MUST** be marked with the `borrow` keyword.
+A call-site argument supplied to a `Ref(T)` parameter **MUST** be a `&x` expression (6.1:35). Argument expressions of any other shape are rejected as a type mismatch.
 
 {{ rule(id="6.1:24", cat="legality-rule") }}
 
-The body of a function **MUST NOT** mutate a `borrow` parameter. This includes:
-- Assignment to the parameter itself
-- Assignment to fields of the parameter
-- Assignment to array elements of the parameter
+The body of a function **MUST NOT** mutate through a `Ref(T)` parameter. This includes:
+- Bare-name assignment to the parameter (6.1:44).
+- Assignment to fields or array elements reached through the parameter.
 
 {{ rule(id="6.1:25", cat="legality-rule") }}
 
-The body of a function **MUST NOT** move out of a `borrow` parameter. A borrowed value cannot be returned, stored in a struct field, or passed to a function expecting an owned value.
+The body of a function **MUST NOT** move out of a `Ref(T)` parameter. A reference cannot be returned, stored in a struct field, or passed to a function expecting an owned value.
 
 {{ rule(id="6.1:26", cat="dynamic-semantics") }}
 
-When a function is called with a `borrow` argument:
-1. The address of the argument is passed to the callee
-2. The callee reads from the argument through this address
-3. After the call returns, the original variable is unchanged and still valid
+When a function is called with a `&x` argument:
+1. The address of `x` is passed to the callee.
+2. The callee reads through this address.
+3. After the call returns, the original variable is unchanged and still valid.
 
 {{ rule(id="6.1:27", cat="example") }}
 
@@ -146,13 +152,13 @@ fn sum_coords(p: Ref(Point)) -> i32 {
 fn main() -> i32 {
     let p = Point { x: 10, y: 32 };
     let result = sum_coords(&p);
-    result + p.x - p.x  // p is still valid after the borrow
+    result + p.x - p.x  // p is still valid after the call
 }
 ```
 
 {{ rule(id="6.1:28", cat="normative") }}
 
-Multiple `borrow` parameters **MAY** refer to the same variable. Unlike `inout`, borrows are shared read-only access.
+Multiple `Ref(T)` parameters **MAY** target the same lvalue at one call site. Unlike `MutRef(T)`, immutable references are shared read-only access.
 
 {{ rule(id="6.1:29", cat="example") }}
 
@@ -163,13 +169,13 @@ fn sum_both(a: Ref(i32), b: Ref(i32)) -> i32 {
 
 fn main() -> i32 {
     let x = 21;
-    sum_both(&x, &x)  // OK: multiple borrows of same variable
+    sum_both(&x, &x)  // OK: multiple immutable refs of same lvalue
 }
 ```
 
 {{ rule(id="6.1:30", cat="legality-rule") }}
 
-A single function call **MUST NOT** pass the same variable to both a `borrow` parameter and an `inout` parameter. This enforces the law of exclusivity: either one `inout` or any number of `borrow` accesses, but never both simultaneously.
+A single function call **MUST NOT** target the same lvalue with both a `&` reference and a `&mut` reference. This enforces the law of exclusivity: either one `MutRef` or any number of `Ref`s, but never both simultaneously.
 
 {{ rule(id="6.1:31", cat="example") }}
 
@@ -180,14 +186,12 @@ fn mixed(a: Ref(i32), b: MutRef(i32)) {
 
 fn main() -> i32 {
     let mut x = 41;
-    mixed(&x, &mut x);  // error: cannot borrow and inout same variable
+    mixed(&x, &mut x);  // error: cannot alias `x` as both Ref and MutRef
     0
 }
 ```
 
-## Reference Types (ADR-0062, preview)
-
-> **Migration note (informative):** `Ref(T)` / `MutRef(T)` and the `&` / `&mut` prefix forms supersede the surface syntax of the `borrow` / `inout` parameter modes (sections 6.1:14..31, originally from ADR-0013). The rules in this subsection are equivalent to the corresponding `inout`/`borrow` rules — only the surface form differs. Both forms parse and type-check during the migration; phase 8 of ADR-0062 removes the keyword form.
+## Reference Types (ADR-0062, ADR-0076)
 
 {{ rule(id="6.1:34", cat="normative") }}
 
@@ -223,7 +227,7 @@ fn main() -> i32 {
 
 {{ rule(id="6.1:39", cat="legality-rule") }}
 
-Within a single function call, the same lvalue **MUST NOT** be the target of multiple `&mut` references, and **MUST NOT** be the target of both a `&` reference and a `&mut` reference. This is the same exclusivity rule that applies to `borrow` / `inout` arguments (6.1:20, 6.1:30) — the trigger is the type of the constructed reference, not the parameter mode.
+Within a single function call, the same lvalue **MUST NOT** be the target of multiple `&mut` references, and **MUST NOT** be the target of both a `&` reference and a `&mut` reference (cf. 6.1:20, 6.1:30). The trigger is the type of the constructed reference.
 
 {{ rule(id="6.1:40", cat="legality-rule") }}
 
@@ -235,10 +239,10 @@ A function **MUST NOT** return a value whose type is `Ref(T)` or `MutRef(T)`. Re
 
 {{ rule(id="6.1:42", cat="syntax") }}
 
-Method receivers accept the surface forms `self: Ref(Self)` and `self: MutRef(Self)` as sugar for `self: Ref(Self)` and `self: MutRef(Self)` respectively.
+Method receivers (ADR-0076) follow the parameter form. The annotation is required only when not by-value:
 
 ```ebnf
-self_param = ( "&" [ "mut" ] | "borrow" | "inout" )? "self" ;
+self_param = "self" [ ":" ( "Self" | "Ref" "(" "Self" ")" | "MutRef" "(" "Self" ")" ) ] ;
 ```
 
 ### Bare-Name Write-Through (ADR-0076)
@@ -276,7 +280,7 @@ fn local() -> i32 {
 
 {{ rule(id="6.1:32", cat="legality-rule") }}
 
-A parameter that is not marked `inout` is immutable within the function body. Assigning to such a parameter or modifying its fields is a compile-time error.
+A parameter whose declared type is not `MutRef(T)` is immutable within the function body. Assigning to such a parameter or modifying its fields is a compile-time error.
 
 {{ rule(id="6.1:33", cat="example") }}
 

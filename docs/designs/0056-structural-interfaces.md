@@ -8,7 +8,7 @@ created: 2026-04-25
 accepted: 2026-04-25
 implemented: 2026-04-25
 spec-sections: ["6.5"]
-superseded-by:
+superseded-by: 0076
 ---
 
 # ADR-0056: Structurally Typed Interfaces

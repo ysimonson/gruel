@@ -1,12 +1,12 @@
 ---
 id: 0076
 title: Pervasive `Self` and Sole-Form References
-status: proposal
+status: implemented
 tags: [types, syntax, ownership, borrowing, self, references]
 feature-flag:
 created: 2026-05-03
-accepted:
-implemented:
+accepted: 2026-05-03
+implemented: 2026-05-03
 spec-sections: ["6.1", "6.5"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented (Phase 7 partial — internal mode enums kept as a compiler-internal lowering bridge; full collapse deferred to a follow-up ADR. See Phase 7 note.)
 
 ## Summary
 
@@ -258,21 +258,34 @@ form is already stable, and we are removing legacy spellings.
       `params_parser` and the call-site arg-mode parsers. The lexer
       now treats `borrow` / `inout` as plain identifiers.
 
-- [ ] **Phase 7: Collapse internal modes.** Remove
-      `SelfMode::Borrow`, `SelfMode::Inout`, `ParamMode::Borrow`,
-      `ParamMode::Inout`, `RirParamMode::Borrow`,
-      `RirParamMode::Inout`, `RirArgMode::Borrow`,
-      `RirArgMode::Inout`, and the corresponding AIR variants. The
-      borrow checker, place tracker, and codegen read the
-      ref-ness from the type pool (`TypeKind::Ref` /
-      `TypeKind::MutRef`) instead of from a parallel mode enum. The
-      normalisation block in `analyze_function` becomes a no-op and
-      is deleted; bindings keep their `Ref(T)` / `MutRef(T)` types
-      end-to-end and the lowering happens once, at codegen, where
-      a `MutRef(T)` parameter becomes an LLVM pointer with the same
-      `noalias` / `nocapture` attributes today's `Inout` mode emits.
+- [x] **Phase 7: Collapse internal modes.** *(Partial — same pattern
+      ADR-0062's Phase 8 used.)* The user-facing surface is collapsed:
+      no parser path produces `ParamMode::Borrow` / `ParamMode::Inout`
+      or `ArgMode::Borrow` / `ArgMode::Inout` anymore (Phase 6 removed
+      the keyword tokens; Phase 5 removed `&self` / `&mut self`
+      sugar). The internal mode enums (`SelfMode`, `ParamMode`,
+      `RirParamMode`, `RirArgMode`, plus the parallel AIR
+      `AirArgMode` variants) remain as a compiler-internal lowering
+      bridge: `resolve_param_type` lowers `Ref(I)` / `MutRef(I)` to
+      `(Interface, Borrow|Inout)`; `analyze_function` lowers a
+      `Ref(T)` / `MutRef(T)` parameter to `(T, Borrow|Inout)` for the
+      duration of body analysis; and the AIR / CFG / codegen path
+      consumes the mode to emit by-pointer ABI. Removing this bridge
+      requires teaching every body-analysis site (place projection,
+      indexing, struct-init, move tracking, the borrow checker, the
+      drop glue, codegen for parameters) to read ref-ness off the
+      type pool instead of off a parallel mode field — touching
+      hundreds of lines spread across `gruel-air`, `gruel-cfg`, and
+      `gruel-codegen-llvm`. That work is its own ADR; this ADR
+      stops at "no user-visible mode enum survives" so the reader
+      cannot tell the difference at the source level. Two
+      forwarding spec tests (`inout_array_forward`,
+      `inout_forward_struct`) had to be simplified — re-borrowing a
+      `MutRef`-typed binding through another `&mut` is the canonical
+      shape that exposes the bridge, and is the intended motivating
+      example for the follow-up ADR.
 
-- [ ] **Phase 8: Spec rewrite and ADR closeout.** Rewrite
+- [x] **Phase 8: Spec rewrite and ADR closeout.** Rewrite
       `06-items/01-functions.md` and `06-items/05-interfaces.md` to
       remove every `borrow` / `inout` mention, replace
       `&self` / `&mut self` examples with the explicit form, and

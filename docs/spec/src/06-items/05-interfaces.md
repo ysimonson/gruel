@@ -10,8 +10,8 @@ Interfaces are structurally typed sets of method requirements (ADR-0056).
 A type *conforms* to an interface when its method set covers every
 required signature; conformance is checked at use sites and is never
 declared up front. Interfaces are usable both as comptime constraints
-(monomorphized) and as runtime parameter types behind a borrowing mode
-(dynamically dispatched through a vtable).
+(monomorphized) and as runtime parameter types when wrapped in
+`Ref(I)` / `MutRef(I)` (dynamically dispatched through a vtable).
 
 {{ rule(id="6.5:1", cat="normative") }}
 
@@ -23,7 +23,7 @@ declared at module scope with the `interface` keyword.
 ```ebnf
 interface_def  = [ "pub" ] "interface" IDENT "{" { method_sig } "}" ;
 method_sig     = "fn" IDENT "(" receiver [ "," params ] ")" [ "->" type ] ";" ;
-receiver       = [ "inout" | "borrow" ] "self" ;
+receiver       = "self" [ ":" ( "Self" | "Ref" "(" "Self" ")" | "MutRef" "(" "Self" ")" ) ] ;
 ```
 
 The type used in a method signature's parameter list or return position
@@ -99,17 +99,18 @@ fn main() -> i32 {
 
 {{ rule(id="6.5:11", cat="normative") }}
 
-An interface name may also appear as a parameter type with a borrowing
-mode: `t: Ref(I)` or `t: MutRef(I)`. The parameter is then passed as a
-fat pointer `(data_ptr, vtable_ptr)` and method calls on it dispatch
-dynamically through the vtable.
+An interface name may also appear as a parameter type wrapped in a
+reference type: `t: Ref(I)` or `t: MutRef(I)`. The parameter is then
+passed as a fat pointer `(data_ptr, vtable_ptr)` and method calls on
+it dispatch dynamically through the vtable.
 
 {{ rule(id="6.5:12", cat="legality-rule") }}
 
-Interface-typed parameters require a borrowing mode. By-value `t: I` is
-rejected. Interface types are not legal as struct field types, return
-types, or local-binding types in the current implementation; they appear
-only in parameter positions.
+Interface-typed parameters **MUST** be wrapped in `Ref(...)` or
+`MutRef(...)`. By-value `t: I` is rejected. Interface types are not
+legal as struct field types, return types, or local-binding types in
+the current implementation; they appear only inside `Ref(I)` /
+`MutRef(I)` parameter positions.
 
 {{ rule(id="6.5:13", cat="legality-rule") }}
 

@@ -8,7 +8,7 @@ created: 2025-12-25
 accepted: 2025-12-25
 implemented: 2025-12-25
 spec-sections: ["6.1"]
-superseded-by:
+superseded-by: 0076
 ---
 
 # ADR-0013: Borrowing Modes

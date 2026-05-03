@@ -8,7 +8,7 @@ created: 2026-04-26
 accepted: 2026-04-26
 implemented: 2026-04-27
 spec-sections: ["6.1"]
-superseded-by:
+superseded-by: 0076
 ---
 
 # ADR-0062: Reference Types Replacing Borrow Modes
