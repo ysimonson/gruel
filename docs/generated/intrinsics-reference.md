@@ -25,7 +25,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@type_name` | type | Compile-time Reflection | — | — | Name of a type as a comptime string. |
 | `@type_info` | type | Compile-time Reflection | — | — | Reflective info about a type. |
 | `@ownership` | type | Compile-time Reflection | — | — | Ownership posture of a type (`Copy`, `Affine`, or `Linear`). |
-| `@conforms` | type+iface | Compile-time Reflection | — | — | Whether a type structurally conforms to an interface. |
+| `@implements` | type+iface | Compile-time Reflection | — | — | Whether a type structurally implements an interface. |
 | `@field` | expr | Compile-time Reflection | — | — | Access a field by comptime-known name. |
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
 | `@embed_file` | expr | Compile-time Reflection | — | — | Embed a file's contents at compile time as `Slice(u8)`. |
@@ -73,7 +73,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@raw_mut` | expr | Raw Pointers | — | yes | Take a mutable pointer to an lvalue (internal). |
 | `@syscall` | expr | System Calls | — | yes | Direct OS system call. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
-| `@vec_from_c_str` | expr | Preview / Meta | — | yes | Copy a NUL-terminated C string into a fresh Vec(u8). |
+| `@cstr_to_vec` | expr | Preview / Meta | — | yes | Copy a NUL-terminated C string into a fresh Vec(u8). |
 | `@utf8_validate` | expr | Preview / Meta | — | — | Check whether a byte slice is well-formed UTF-8. |
 
 ## Debug & Diagnostics
@@ -290,23 +290,23 @@ let r = @random_u64();
 match @ownership(T) { Ownership::Copy => ..., Ownership::Affine => ..., Ownership::Linear => ... }
 ```
 
-### `@conforms`
+### `@implements`
 
-`@conforms(T, I)` returns `true` if type `T` satisfies every method requirement of interface `I` (see ADR-0056), and `false` otherwise. Built-in interfaces `Copy` and `Drop` use the language's ownership rules rather than user methods. The result is a `bool` evaluated at compile time, so `@conforms(...)` can be used to gate `comptime if` branches and other comptime decisions.
+`@implements(T, I)` returns `true` if type `T` satisfies every method requirement of interface `I` (see ADR-0056), and `false` otherwise. Built-in interfaces `Copy` and `Drop` use the language's ownership rules rather than user methods. The result is a `bool` evaluated at compile time, so `@implements(...)` can be used to gate `comptime if` branches and other comptime decisions.
 
 
 **Examples:**
 
 ```gruel
-@conforms(i32, Copy) // true
+@implements(i32, Copy) // true
 ```
 
 ```gruel
-@conforms(String, Copy) // false
+@implements(String, Copy) // false
 ```
 
 ```gruel
-@conforms(MyType, Drop)
+@implements(MyType, Drop)
 ```
 
 ### `@field`
@@ -635,17 +635,17 @@ checked { let ret = @syscall(1, 1, buf, n); }
 
 - **Preview gate:** `--preview test_infra` (ADR-0005)
 
-### `@vec_from_c_str`
+### `@cstr_to_vec`
 
-`@vec_from_c_str(p: Ptr(u8)) -> Vec(u8)` runs `strlen(p)`, allocates `cap >= len` bytes, and copies. Used by `String::from_c_str` (ADR-0072).
+`@cstr_to_vec(p: Ptr(u8)) -> Vec(u8)` runs `strlen(p)`, allocates `cap >= len` bytes, and copies. Used by `String::from_c_str` (ADR-0072).
 
-- **Runtime symbol:** `__gruel_vec_from_c_str`
+- **Runtime symbol:** `__gruel_cstr_to_vec`
 - **Requires:** `checked { ... }` block
 
 **Examples:**
 
 ```gruel
-@vec_from_c_str(p)
+@cstr_to_vec(p)
 ```
 
 ### `@utf8_validate`

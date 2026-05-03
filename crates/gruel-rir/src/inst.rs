@@ -2480,7 +2480,7 @@ pub enum InstData {
     },
 
     /// Intrinsic call with a type argument and an interface argument
-    /// (e.g., `@conforms(T, Drop)`).
+    /// (e.g., `@implements(T, Drop)`).
     TypeInterfaceIntrinsic {
         /// Intrinsic name (without @)
         name: Spur,

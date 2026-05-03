@@ -278,34 +278,34 @@ fn main() -> i32 {
 }
 ```
 
-## `@conforms`
+## `@implements`
 
 {{ rule(id="4.13:115", cat="normative") }}
 
-The `@conforms` intrinsic reports whether a type structurally conforms to
+The `@implements` intrinsic reports whether a type structurally implements
 an interface (see §6 and ADR-0056).
 
 {{ rule(id="4.13:116", cat="normative") }}
 
-`@conforms` accepts exactly two arguments. The first **MUST** be a type;
+`@implements` accepts exactly two arguments. The first **MUST** be a type;
 the second **MUST** name an interface.
 
 {{ rule(id="4.13:117", cat="normative") }}
 
-The return type of `@conforms` is `bool`.
+The return type of `@implements` is `bool`.
 
 {{ rule(id="4.13:118", cat="normative") }}
 
-`@conforms(T, I)` evaluates to `true` if every method requirement of
+`@implements(T, I)` evaluates to `true` if every method requirement of
 interface `I` is satisfied by a method of type `T` whose receiver mode,
 parameter types, and return type all match the requirement (with `Self`
 substituted by `T`); otherwise it evaluates to `false`. For the
 compiler-recognized interfaces `Copy` and `Drop`, conformance is
 determined by the language's ownership rules rather than user-declared
-methods (see §3.8 and ADR-0059): `@conforms(T, Copy)` is `true` iff `T`
+methods (see §3.8 and ADR-0059): `@implements(T, Copy)` is `true` iff `T`
 is non-`linear` and either a primitive, enum, pointer, array of `Copy`
 elements, or a struct/enum declared with `@derive(Copy)`;
-`@conforms(T, Drop)` is `true` iff `T` is non-`linear` and not `Copy`.
+`@implements(T, Drop)` is `true` iff `T` is non-`linear` and not `Copy`.
 
 {{ rule(id="4.13:119", cat="legality-rule") }}
 
@@ -314,7 +314,7 @@ interface, or if either argument cannot be resolved.
 
 {{ rule(id="4.13:120", cat="normative") }}
 
-The value returned by `@conforms` is determined at compile time.
+The value returned by `@implements` is determined at compile time.
 
 {{ rule(id="4.13:121") }}
 
@@ -329,7 +329,7 @@ struct Friendly {
 }
 
 fn main() -> i32 {
-    if @conforms(Friendly, Greeter) { 1 } else { 0 }  // 1
+    if @implements(Friendly, Greeter) { 1 } else { 0 }  // 1
 }
 ```
 
@@ -337,7 +337,7 @@ fn main() -> i32 {
 
 ```gruel
 fn main() -> i32 {
-    if @conforms(i32, Copy) { 1 } else { 0 }  // 1
+    if @implements(i32, Copy) { 1 } else { 0 }  // 1
 }
 ```
 

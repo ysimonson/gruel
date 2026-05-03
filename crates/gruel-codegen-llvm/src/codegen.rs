@@ -4129,22 +4129,22 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             // convert to bool.
             IntrinsicId::Utf8Validate => Some(self.translate_utf8_validate(args)),
 
-            // ADR-0072: @vec_from_c_str(p) — call __gruel_vec_from_c_str(out, p)
+            // ADR-0072: @cstr_to_vec(p) — call __gruel_cstr_to_vec(out, p)
             // via sret, return the Vec(u8) aggregate.
-            IntrinsicId::VecFromCStr => Some(self.translate_vec_from_c_str(args)),
+            IntrinsicId::CStrToVec => Some(self.translate_cstr_to_vec(args)),
 
             // ---- Fallback: return zero value for unimplemented intrinsics ----
             _ => gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero()),
         }
     }
 
-    /// Codegen for `@vec_from_c_str(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).
-    /// Calls `__gruel_vec_from_c_str(out: *mut VecU8Result, p: *const u8)`
+    /// Codegen for `@cstr_to_vec(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).
+    /// Calls `__gruel_cstr_to_vec(out: *mut VecU8Result, p: *const u8)`
     /// via the sret convention and loads the resulting Vec(u8) aggregate.
-    fn translate_vec_from_c_str(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
+    fn translate_cstr_to_vec(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
         let p = self.get_value(args[0]).into_pointer_value();
         let agg_ty = self.vec_agg_type();
-        let sret_slot = self.build_entry_alloca(agg_ty.into(), "vfcs_sret");
+        let sret_slot = self.build_entry_alloca(agg_ty.into(), "ctv_sret");
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let fn_ty = self
             .ctx
@@ -4152,16 +4152,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
         let callee = self
             .module
-            .get_function("__gruel_vec_from_c_str")
-            .unwrap_or_else(|| {
-                self.module
-                    .add_function("__gruel_vec_from_c_str", fn_ty, None)
-            });
+            .get_function("__gruel_cstr_to_vec")
+            .unwrap_or_else(|| self.module.add_function("__gruel_cstr_to_vec", fn_ty, None));
         self.builder
             .build_call(callee, &[sret_slot.into(), p.into()], "")
             .unwrap();
         self.builder
-            .build_load(agg_ty, sret_slot, "vfcs_load")
+            .build_load(agg_ty, sret_slot, "ctv_load")
             .unwrap()
     }
 

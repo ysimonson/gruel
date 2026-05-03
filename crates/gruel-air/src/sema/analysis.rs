@@ -4536,7 +4536,7 @@ impl<'a> Sema<'a> {
             | IntrinsicId::TypeName
             | IntrinsicId::TypeInfo
             | IntrinsicId::Ownership
-            | IntrinsicId::Conforms
+            | IntrinsicId::Implements
             | IntrinsicId::Range
             // Slice methods/indexing are dispatched via the SLICE_METHODS
             // registry and `analyze_index_*`, not as direct expression-position
@@ -4587,21 +4587,21 @@ impl<'a> Sema<'a> {
                 self.analyze_utf8_validate_intrinsic(air, &args, span, ctx)
             }
             // ADR-0072: copy a NUL-terminated C string into a fresh Vec(u8).
-            IntrinsicId::VecFromCStr => {
-                self.analyze_vec_from_c_str_intrinsic(air, &args, span, ctx)
+            IntrinsicId::CStrToVec => {
+                self.analyze_cstr_to_vec_intrinsic(air, &args, span, ctx)
             }
         }
     }
 
-    /// Analyze `@vec_from_c_str(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).
-    fn analyze_vec_from_c_str_intrinsic(
+    /// Analyze `@cstr_to_vec(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).
+    fn analyze_cstr_to_vec_intrinsic(
         &mut self,
         air: &mut Air,
         args: &[RirCallArg],
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
-        Self::require_checked_for_intrinsic(ctx, "vec_from_c_str", span)?;
+        Self::require_checked_for_intrinsic(ctx, "cstr_to_vec", span)?;
         if args.len() != 1 {
             return Err(CompileError::new(
                 ErrorKind::WrongArgumentCount {
@@ -4624,7 +4624,7 @@ impl<'a> Sema<'a> {
         let vec_id = self.type_pool.intern_vec_from_type(Type::U8);
         let vec_ty = Type::new_vec(vec_id);
         let args_start = air.add_extra(&[p.air_ref.as_u32()]);
-        let name = self.interner.get_or_intern_static("vec_from_c_str");
+        let name = self.interner.get_or_intern_static("cstr_to_vec");
         let air_ref = air.add_inst(AirInst {
             data: AirInstData::Intrinsic {
                 name,
@@ -8806,7 +8806,7 @@ impl<'a> Sema<'a> {
                 }
             }
 
-            // ── Type+interface intrinsic (@conforms) ───────────────────────────
+            // ── Type+interface intrinsic (@implements) ────────────────────────
             InstData::TypeInterfaceIntrinsic {
                 name,
                 type_arg,
@@ -8821,7 +8821,7 @@ impl<'a> Sema<'a> {
                         .map_err(|_| not_const(inst_span))?
                 };
                 match self.known.intrinsic_id(name) {
-                    Some(IntrinsicId::Conforms) => {
+                    Some(IntrinsicId::Implements) => {
                         let interface_id = self
                             .interfaces
                             .get(&interface_arg)

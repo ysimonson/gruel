@@ -306,10 +306,10 @@ fn String__from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
 }
 
 // ADR-0072: validated `Ptr(u8) -> String` conversion. strlen + alloc +
-// memcpy into a `Vec(u8)` (via `__gruel_vec_from_c_str`), then forwards
+// memcpy into a `Vec(u8)` (via `__gruel_cstr_to_vec`), then forwards
 // to `String__from_utf8`.
 fn String__from_c_str(p: Ptr(u8)) -> Result(String, Utf8DecodeError) {
-    let v: Vec(u8) = checked { @vec_from_c_str(p) };
+    let v: Vec(u8) = checked { @cstr_to_vec(p) };
     String__from_utf8(v)
 }
 "#;

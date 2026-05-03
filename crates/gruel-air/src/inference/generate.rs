@@ -847,7 +847,7 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::BOOL)
                     }
-                    Some(IntrinsicId::VecFromCStr) => {
+                    Some(IntrinsicId::CStrToVec) => {
                         // ADR-0072: returns Vec(u8).
                         visit_args(self, ctx);
                         let vec_id = self.type_pool.intern_vec_from_type(Type::U8);
@@ -894,11 +894,11 @@ impl<'a> ConstraintGenerator<'a> {
                 }
             }
 
-            // Type+interface intrinsic (@conforms)
+            // Type+interface intrinsic (@implements)
             InstData::TypeInterfaceIntrinsic { name, .. } => {
                 let intrinsic_name = self.interner.resolve(name);
                 match lookup_by_name(intrinsic_name).map(|d| d.id) {
-                    Some(IntrinsicId::Conforms) => InferType::Concrete(Type::BOOL),
+                    Some(IntrinsicId::Implements) => InferType::Concrete(Type::BOOL),
                     _ => InferType::Concrete(Type::ERROR),
                 }
             }

@@ -6544,7 +6544,7 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Analyze a type+interface intrinsic (`@conforms(T, I)`).
+    /// Analyze a type+interface intrinsic (`@implements(T, I)`).
     fn analyze_type_interface_intrinsic(
         &mut self,
         air: &mut Air,
@@ -6566,7 +6566,7 @@ impl<'a> Sema<'a> {
         };
 
         match id {
-            IntrinsicId::Conforms => {
+            IntrinsicId::Implements => {
                 let ty = self.resolve_type(type_arg, span)?;
                 let interface_id = match self.interfaces.get(&interface_arg).copied() {
                     Some(id) => id,
@@ -6577,7 +6577,7 @@ impl<'a> Sema<'a> {
                             span,
                         )
                         .with_help(format!(
-                            "`{iface_name}` is not an interface. The second argument to `@conforms` must name an interface."
+                            "`{iface_name}` is not an interface. The second argument to `@implements` must name an interface."
                         )));
                     }
                 };

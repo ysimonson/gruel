@@ -944,7 +944,7 @@ impl<'a> AstGen<'a> {
                 }
 
                 // Two-argument type+interface intrinsics like
-                // `@conforms(T, Iface)`. Both arguments must be type-name-shaped
+                // `@implements(T, Iface)`. Both arguments must be type-name-shaped
                 // (an explicit type expr or a bare identifier) — anything else
                 // falls through to the generic expression intrinsic path so
                 // sema can produce the usual diagnostic.

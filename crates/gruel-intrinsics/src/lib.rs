@@ -50,7 +50,7 @@ pub enum IntrinsicId {
     TypeName,
     TypeInfo,
     Ownership,
-    Conforms,
+    Implements,
     Field,
     Import,
     EmbedFile,
@@ -112,7 +112,7 @@ pub enum IntrinsicId {
 
     // ---- ADR-0072 String / Vec(u8) bridge ----
     Utf8Validate,
-    VecFromCStr,
+    CStrToVec,
 
     // ---- Preview / test infra ----
     TestPreviewGate,
@@ -128,7 +128,7 @@ pub enum IntrinsicKind {
     Type,
     /// Type-and-interface intrinsic: `@name(Type, Interface)` where the
     /// first argument is a type expression and the second names an
-    /// interface (e.g. `@conforms(T, Drop)`).
+    /// interface (e.g. `@implements(T, Drop)`).
     TypeInterface,
 }
 
@@ -454,19 +454,19 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         ],
     },
     IntrinsicDef {
-        id: IntrinsicId::Conforms,
-        name: "conforms",
+        id: IntrinsicId::Implements,
+        name: "implements",
         kind: IntrinsicKind::TypeInterface,
         category: Category::Comptime,
         requires_unchecked: false,
         preview: None,
         runtime_fn: None,
-        summary: "Whether a type structurally conforms to an interface.",
-        description: "`@conforms(T, I)` returns `true` if type `T` satisfies every method requirement of interface `I` (see ADR-0056), and `false` otherwise. Built-in interfaces `Copy` and `Drop` use the language's ownership rules rather than user methods. The result is a `bool` evaluated at compile time, so `@conforms(...)` can be used to gate `comptime if` branches and other comptime decisions.",
+        summary: "Whether a type structurally implements an interface.",
+        description: "`@implements(T, I)` returns `true` if type `T` satisfies every method requirement of interface `I` (see ADR-0056), and `false` otherwise. Built-in interfaces `Copy` and `Drop` use the language's ownership rules rather than user methods. The result is a `bool` evaluated at compile time, so `@implements(...)` can be used to gate `comptime if` branches and other comptime decisions.",
         examples: &[
-            "@conforms(i32, Copy) // true",
-            "@conforms(String, Copy) // false",
-            "@conforms(MyType, Drop)",
+            "@implements(i32, Copy) // true",
+            "@implements(String, Copy) // false",
+            "@implements(MyType, Drop)",
         ],
     },
     IntrinsicDef {
@@ -1042,8 +1042,8 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &[],
     },
     IntrinsicDef {
-        id: IntrinsicId::VecFromCStr,
-        name: "vec_from_c_str",
+        id: IntrinsicId::CStrToVec,
+        name: "cstr_to_vec",
         kind: IntrinsicKind::Expr,
         category: Category::Meta,
         requires_unchecked: true,
@@ -1051,10 +1051,10 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         // `String__from_c_str` body. The user-visible gate is on
         // `String::from_c_str` itself (ADR-0072).
         preview: None,
-        runtime_fn: Some("__gruel_vec_from_c_str"),
+        runtime_fn: Some("__gruel_cstr_to_vec"),
         summary: "Copy a NUL-terminated C string into a fresh Vec(u8).",
-        description: "`@vec_from_c_str(p: Ptr(u8)) -> Vec(u8)` runs `strlen(p)`, allocates `cap >= len` bytes, and copies. Used by `String::from_c_str` (ADR-0072).",
-        examples: &["@vec_from_c_str(p)"],
+        description: "`@cstr_to_vec(p: Ptr(u8)) -> Vec(u8)` runs `strlen(p)`, allocates `cap >= len` bytes, and copies. Used by `String::from_c_str` (ADR-0072).",
+        examples: &["@cstr_to_vec(p)"],
     },
     IntrinsicDef {
         id: IntrinsicId::Utf8Validate,
@@ -1567,7 +1567,7 @@ mod tests {
                 | IntrinsicId::TypeName
                 | IntrinsicId::TypeInfo
                 | IntrinsicId::Ownership
-                | IntrinsicId::Conforms
+                | IntrinsicId::Implements
                 | IntrinsicId::Field
                 | IntrinsicId::Import
                 | IntrinsicId::EmbedFile
@@ -1616,7 +1616,7 @@ mod tests {
                 | IntrinsicId::PartsToVec
                 | IntrinsicId::TestPreviewGate
                 | IntrinsicId::Utf8Validate
-                | IntrinsicId::VecFromCStr => {}
+                | IntrinsicId::CStrToVec => {}
             }
         }
     }
@@ -1685,7 +1685,7 @@ mod tests {
             "vec_terminated_ptr",
             "parts_to_vec",
             // ADR-0072
-            "vec_from_c_str",
+            "cstr_to_vec",
         ]
         .into_iter()
         .collect();
