@@ -56,7 +56,7 @@ source = """
 @handle
 struct Counter {
     count: i32,
-    fn handle(borrow self) -> Counter { Counter { count: self.count } }
+    fn handle(self: Ref(Self)) -> Counter { Counter { count: self.count } }
 }
 
 fn main() -> i32 { 0 }
@@ -66,7 +66,7 @@ error_contains = [
     "unknown directive `@handle`",
     "ADR-0075",
     "Handle",
-    "fn handle(borrow self) -> Self",
+    "fn handle(self: Ref(Self)) -> Self",
 ]
 
 [[case]]

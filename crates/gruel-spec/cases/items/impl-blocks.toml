@@ -373,7 +373,7 @@ struct Box {
 
     fn new(v: i32) -> Self { Self { value: v } }
 
-    fn add(&self, other: Ref(Self)) -> i32 {
+    fn add(self: Ref(Self), other: Ref(Self)) -> i32 {
         self.value + other.value
     }
 }

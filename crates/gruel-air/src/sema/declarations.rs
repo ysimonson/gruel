@@ -2413,7 +2413,7 @@ fn directive_diagnosis_note(name: &str) -> Option<String> {
             return Some(
                 "the `@handle` directive was retired in ADR-0075; \
                  conform to the `Handle` interface by defining \
-                 `fn handle(borrow self) -> Self` directly"
+                 `fn handle(self: Ref(Self)) -> Self` directly"
                     .to_string(),
             );
         }

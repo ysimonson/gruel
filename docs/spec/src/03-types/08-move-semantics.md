@@ -48,7 +48,7 @@ fn main() -> i32 {
 A struct type **MAY** be declared as a Copy type using the `@derive(Copy)`
 directive before the struct definition (ADR-0059). `Copy` is a
 compiler-recognized structural interface (see §6.5) whose method shape is
-`fn copy(borrow self) -> Self`.
+`fn copy(self: Ref(Self)) -> Self`.
 
 {{ rule(id="3.8:15", cat="syntax") }}
 
@@ -189,7 +189,7 @@ Linear types are useful for:
 
 {{ rule(id="3.8:40", cat="normative") }}
 
-`Handle` is a compiler-recognized structural interface (ADR-0075). A type conforms to `Handle` when it provides a method named `handle` with the signature `fn handle(borrow self) -> Self`. Conformance enables explicit duplication via a `.handle()` call: the receiver is borrowed and a freshly owned value is returned.
+`Handle` is a compiler-recognized structural interface (ADR-0075). A type conforms to `Handle` when it provides a method named `handle` with the signature `fn handle(self: Ref(Self)) -> Self`. Conformance enables explicit duplication via a `.handle()` call: the receiver is borrowed and a freshly owned value is returned.
 
 {{ rule(id="3.8:41", cat="syntax") }}
 
@@ -201,7 +201,7 @@ handle_method = "fn" "handle" "(" "borrow" "self" ")" "->" "Self" block ;
 
 {{ rule(id="3.8:42", cat="normative") }}
 
-A method named `handle` with the receiver mode `borrow self`, no other parameters, and return type `Self` makes the host type conform to `Handle`. A method named `handle` with any other shape does **NOT** make the host type conform — it is an ordinary method, and `@implements(T, Handle)` returns `false` for that type.
+A method named `handle` with the receiver mode `self: Ref(Self)`, no other parameters, and return type `Self` makes the host type conform to `Handle`. A method named `handle` with any other shape does **NOT** make the host type conform — it is an ordinary method, and `@implements(T, Handle)` returns `false` for that type.
 
 {{ rule(id="3.8:43", cat="legality-rule") }}
 
@@ -213,7 +213,7 @@ It is a compile-time error to call `.handle()` on a value whose type does not ha
 struct Counter {
     count: i32,
 
-    fn handle(borrow self) -> Counter {
+    fn handle(self: Ref(Self)) -> Counter {
         Counter { count: self.count }
     }
 }
@@ -227,7 +227,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:45", cat="normative") }}
 
-Calling `.handle()` on a `Handle` type does not consume the receiver and returns a new owned value. Both the original and the returned value are valid after the call. This is enforced by the `borrow self` receiver: the type system treats `.handle()` as a borrow, not a move.
+Calling `.handle()` on a `Handle` type does not consume the receiver and returns a new owned value. Both the original and the returned value are valid after the call. This is enforced by the `self: Ref(Self)` receiver: the type system treats `.handle()` as a borrow, not a move.
 
 {{ rule(id="3.8:46", cat="informative") }}
 
@@ -248,7 +248,7 @@ The difference between `Copy` and `Handle`:
 - `Copy` is appropriate for small, cheap-to-copy types (like `Point`)
 - `Handle` is appropriate for types where duplication has visible cost (like reference-counted types)
 
-`Handle` shares its signature shape with `Clone` (both are `fn name(borrow self) -> Self`); they remain distinct interfaces because `Handle` is permitted on linear types whereas `Clone` is not (§3.8:49).
+`Handle` shares its signature shape with `Clone` (both are `fn name(self: Ref(Self)) -> Self`); they remain distinct interfaces because `Handle` is permitted on linear types whereas `Clone` is not (§3.8:49).
 
 {{ rule(id="3.8:49", cat="normative") }}
 
@@ -398,7 +398,7 @@ fn main() -> i32 {
 {{ rule(id="3.8:60", cat="normative") }}
 
 Gruel's three ownership postures are mediated by two compiler-recognized
-structural interfaces: `Copy` (`fn copy(borrow self) -> Self`) and `Drop`
+structural interfaces: `Copy` (`fn copy(self: Ref(Self)) -> Self`) and `Drop`
 (`fn drop(self)`). Conformance to these interfaces is computed by the
 compiler — built-in types acquire conformance through synthetic rules,
 user types via `@derive(Copy)` or by defining the corresponding inline
@@ -433,7 +433,7 @@ machinery as user-defined interfaces (§6.5).
 {{ rule(id="3.8:70", cat="normative") }}
 
 Gruel exposes a third compiler-recognized structural interface, `Clone`
-(`fn clone(borrow self) -> Self`). `Clone` formalizes "explicit deep
+(`fn clone(self: Ref(Self)) -> Self`). `Clone` formalizes "explicit deep
 duplication" for affine types and is the single conformance every
 collection method, generic constraint, and built-in clone helper resolves
 against.
@@ -448,7 +448,7 @@ For every type `T`:
   - `T` is a built-in type whose registered method set contains a
     `clone` method (e.g. `String`); or
   - `T` is a struct or enum that defines a method with the signature
-    `fn clone(borrow self) -> Self` (written inline, spliced via
+    `fn clone(self: Ref(Self)) -> Self` (written inline, spliced via
     `@derive(Clone)`, or hand-written in an extension block).
 
 {{ rule(id="3.8:72", cat="legality-rule") }}

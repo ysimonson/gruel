@@ -175,17 +175,21 @@ impl<'a> Sema<'a> {
             };
         }
 
-        // ADR-0076 Phase 2: `Ref(I)` / `MutRef(I)` where `I` names an
-        // interface. The intern pool cannot pool a `Ref(Interface)` as a
-        // first-class parametric type (interface types are not poolable),
-        // so we lower the pair directly to `(Interface, Borrow|Inout)` —
-        // the same shape the legacy keyword form produced. Subsequent
-        // ABI / borrow-checking machinery is unchanged.
-        let type_name = self.interner.resolve(&type_sym);
-        if let Some((callee, args)) = parse_type_call_syntax(type_name)
+        // ADR-0076 Phase 2: `Ref(I)` / `MutRef(I)` where the inner type
+        // resolves to an interface (named or comptime-built like
+        // `Sized(i32)`). The intern pool cannot pool a `Ref(Interface)` as
+        // a first-class parametric type (interface types are not
+        // poolable), so we lower the pair directly to
+        // `(Interface, Borrow|Inout)` — the same shape the legacy keyword
+        // form produced. Subsequent ABI / borrow-checking machinery is
+        // unchanged.
+        let type_name = self.interner.resolve(&type_sym).to_string();
+        if let Some((callee, args)) = parse_type_call_syntax(&type_name)
             && args.len() == 1
             && (callee == "Ref" || callee == "MutRef")
         {
+            // Try the cheap path first: bare identifier naming an
+            // interface in the table.
             let arg_sym = self.interner.get_or_intern(&args[0]);
             if let Some(&interface_id) = self.interfaces.get(&arg_sym) {
                 let normalized_mode = if callee == "MutRef" {
@@ -194,6 +198,19 @@ impl<'a> Sema<'a> {
                     gruel_rir::RirParamMode::Borrow
                 };
                 return Ok((Type::new_interface(interface_id), normalized_mode));
+            }
+            // Comptime-evaluated interface (e.g. `Sized(i32)`): resolve the
+            // inner type expression first; if it produces an interface
+            // type, lower as above.
+            if let Ok(inner_ty) = self.resolve_type(arg_sym, span)
+                && let TypeKind::Interface(_) = inner_ty.kind()
+            {
+                let normalized_mode = if callee == "MutRef" {
+                    gruel_rir::RirParamMode::Inout
+                } else {
+                    gruel_rir::RirParamMode::Borrow
+                };
+                return Ok((inner_ty, normalized_mode));
             }
         }
 

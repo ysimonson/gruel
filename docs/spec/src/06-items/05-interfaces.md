@@ -100,7 +100,7 @@ fn main() -> i32 {
 {{ rule(id="6.5:11", cat="normative") }}
 
 An interface name may also appear as a parameter type with a borrowing
-mode: `borrow t: I` or `inout t: I`. The parameter is then passed as a
+mode: `t: Ref(I)` or `t: MutRef(I)`. The parameter is then passed as a
 fat pointer `(data_ptr, vtable_ptr)` and method calls on it dispatch
 dynamically through the vtable.
 
@@ -120,7 +120,7 @@ comptime path). Non-conforming arguments are rejected at the call site.
 {{ rule(id="6.5:14", cat="dynamic-semantics") }}
 
 The fat pointer's data field references the caller's storage; passing
-through `borrow t: I` does not copy the underlying value. The vtable
+through `t: Ref(I)` does not copy the underlying value. The vtable
 field is a static, deduplicated global per `(concrete type, interface)`
 pair.
 
@@ -132,12 +132,12 @@ interface Marker {}
 
 struct Foo {}
 
-fn ignore(borrow t: Marker) {
+fn ignore(t: Ref(Marker)) {
 }
 
 fn main() -> i32 {
     let f = Foo {};
-    ignore(borrow f);
+    ignore(&f);
     0
 }
 ```
@@ -166,14 +166,14 @@ struct Five {
     fn count(self) -> i32 { 5 }
 }
 
-fn invoke(borrow t: Counter) -> i32 {
+fn invoke(t: Ref(Counter)) -> i32 {
     t.count()
 }
 
 fn main() -> i32 {
     let a = One {};
     let b = Five {};
-    invoke(borrow a) + invoke(borrow b)  // 6
+    invoke(&a) + invoke(&b)  // 6
 }
 ```
 
@@ -190,8 +190,8 @@ runtime type and may not appear outside an interface method signature.
 
 {{ rule(id="6.5:19", cat="normative") }}
 
-An interface method's receiver is one of `self`, `inout self`, or
-`borrow self`. The receiver mode is part of the method's required
+An interface method's receiver is one of `self`, `self: MutRef(Self)`, or
+`self: Ref(Self)`. The receiver mode is part of the method's required
 signature: a candidate type's method conforms only if its receiver mode
 is identical to the interface's. Mismatched receiver modes are a compile
 error at the call site, distinct from a parameter or return type
@@ -209,13 +209,13 @@ analysis time as an unknown type.
 ```gruel
 // Compiled with --preview interfaces
 interface Cloner {
-    fn clone(borrow self) -> Self;
+    fn clone(self: Ref(Self)) -> Self;
 }
 
 struct Buf {
     n: i32,
 
-    fn clone(borrow self) -> Buf {
+    fn clone(self: Ref(Self)) -> Buf {
         Buf { n: self.n }
     }
 }
@@ -238,11 +238,11 @@ conform when the interface declares `-> Self`:
 ```gruel
 // Compile error: type `Buf` does not conform to interface `Cloner`
 interface Cloner {
-    fn clone(borrow self) -> Self;
+    fn clone(self: Ref(Self)) -> Self;
 }
 
 struct Buf {
-    fn clone(borrow self) -> i32 { 0 }
+    fn clone(self: Ref(Self)) -> i32 { 0 }
 }
 ```
 
@@ -254,7 +254,7 @@ parameter and return types align:
 ```gruel
 // Compile error: type `Buf` does not conform to interface `Reader`
 interface Reader {
-    fn read(borrow self) -> i32;
+    fn read(self: Ref(Self)) -> i32;
 }
 
 struct Buf {

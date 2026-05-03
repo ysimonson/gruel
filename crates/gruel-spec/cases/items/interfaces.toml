@@ -150,7 +150,7 @@ error_contains = "wrong signature"
 # Runtime dispatch (Phase 4)
 # =============================================================================
 
-# Phase 4d: a function with `borrow t: I` parameter compiles end-to-end
+# Phase 4d: a function with `t: Ref(I)` parameter compiles end-to-end
 # when called with a concrete value that conforms to the interface.
 [[case]]
 name = "interface_runtime_borrow_empty"
@@ -160,12 +160,12 @@ interface Marker {}
 
 struct Foo {}
 
-fn ignore(borrow t: Marker) {
+fn ignore(t: Ref(Marker)) {
 }
 
 fn main() -> i32 {
     let f = Foo {};
-    ignore(borrow f);
+    ignore(&f);
     77
 }
 """
@@ -183,12 +183,12 @@ struct Point {
     y: i32,
 }
 
-fn ignore(borrow t: Marker) {
+fn ignore(t: Ref(Marker)) {
 }
 
 fn main() -> i32 {
     let p = Point { x: 10, y: 20 };
-    ignore(borrow p);
+    ignore(&p);
     p.x + p.y
 }
 """
@@ -209,13 +209,13 @@ struct Foo {
     fn greet(self) {}
 }
 
-fn invoke(borrow t: Greeter) {
+fn invoke(t: Ref(Greeter)) {
     t.greet();
 }
 
 fn main() -> i32 {
     let f = Foo {};
-    invoke(borrow f);
+    invoke(&f);
     99
 }
 """
@@ -238,7 +238,7 @@ struct One {
     fn count(self) -> i32 { 1 }
 }
 
-fn invoke(borrow t: Counter) -> i32 {
+fn invoke(t: Ref(Counter)) -> i32 {
     t.count()
 }
 
@@ -246,7 +246,7 @@ fn main() -> i32 {
     let a = One {};
     let b = One {};
     let c = One {};
-    invoke(borrow a) + invoke(borrow b) + invoke(borrow c)
+    invoke(&a) + invoke(&b) + invoke(&c)
 }
 """
 exit_code = 3
@@ -269,14 +269,14 @@ struct Five {
     fn count(self) -> i32 { 5 }
 }
 
-fn invoke(borrow t: Counter) -> i32 {
+fn invoke(t: Ref(Counter)) -> i32 {
     t.count()
 }
 
 fn main() -> i32 {
     let a = One {};
     let b = Five {};
-    invoke(borrow a) + invoke(borrow b)
+    invoke(&a) + invoke(&b)
 }
 """
 exit_code = 6
@@ -302,7 +302,7 @@ error_contains = ["Ref(Marker)"]
 # Ref(I) / MutRef(I) — ADR-0076 Phase 2
 # =============================================================================
 
-# `Ref(I)` is the new-form spelling of `borrow t: I`. Same fat-pointer ABI.
+# `Ref(I)` is the new-form spelling of `t: Ref(I)`. Same fat-pointer ABI.
 [[case]]
 name = "interface_ref_new_form_empty"
 spec = ["6.5:11", "6.5:12"]
@@ -324,20 +324,20 @@ fn main() -> i32 {
 exit_code = 77
 
 # `Ref(I)` with a non-empty conforming struct, dispatching a method that
-# reads a field through &self.
+# reads a field through self: Ref(Self).
 [[case]]
 name = "interface_ref_new_form_dispatch"
 spec = ["6.5:11", "6.5:14", "6.5:16"]
 description = "Ref(I) param dispatches through the vtable on a non-empty conformer"
 source = """
 interface Counter {
-    fn count(&self) -> i32;
+    fn count(self: Ref(Self)) -> i32;
 }
 
 struct Box {
     n: i32,
 
-    fn count(&self) -> i32 { self.n }
+    fn count(self: Ref(Self)) -> i32 { self.n }
 }
 
 fn invoke(t: Ref(Counter)) -> i32 {
@@ -351,7 +351,7 @@ fn main() -> i32 {
 """
 exit_code = 42
 
-# `MutRef(I)` mirrors `inout t: I`.
+# `MutRef(I)` mirrors `t: MutRef(I)`.
 [[case]]
 name = "interface_mut_ref_new_form"
 spec = ["6.5:11", "6.5:14"]
@@ -498,19 +498,19 @@ exit_code = 0
 # Receiver modes on interface methods (ADR-0060)
 # =============================================================================
 
-# `borrow self` on the interface requires `borrow self` on the candidate.
+# `self: Ref(Self)` on the interface requires `self: Ref(Self)` on the candidate.
 [[case]]
 name = "interface_borrow_self_conforms"
 spec = ["6.5:19"]
 source = """
 interface Reader {
-    fn read(borrow self) -> i32;
+    fn read(self: Ref(Self)) -> i32;
 }
 
 struct Buf {
     n: i32,
 
-    fn read(borrow self) -> i32 { self.n }
+    fn read(self: Ref(Self)) -> i32 { self.n }
 }
 
 fn use_reader(comptime T: Reader, t: T) {
@@ -523,13 +523,13 @@ fn main() -> i32 {
 """
 exit_code = 0
 
-# A by-value `self` on the candidate does not satisfy `borrow self`.
+# A by-value `self` on the candidate does not satisfy `self: Ref(Self)`.
 [[case]]
 name = "interface_receiver_mode_mismatch_rejected"
 spec = ["6.5:19", "6.5:23"]
 source = """
 interface Reader {
-    fn read(borrow self) -> i32;
+    fn read(self: Ref(Self)) -> i32;
 }
 
 struct Buf {

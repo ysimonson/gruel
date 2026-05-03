@@ -75,13 +75,13 @@ When a function is called with an `inout` argument:
 {{ rule(id="6.1:19", cat="example") }}
 
 ```gruel
-fn increment(inout x: i32) {
+fn increment(x: MutRef(i32)) {
     x = x + 1;
 }
 
 fn main() -> i32 {
     let mut n = 10;
-    increment(inout n);
+    increment(&mut n);
     n  // 11
 }
 ```
@@ -93,7 +93,7 @@ A single function call **MUST NOT** pass the same variable to multiple `inout` p
 {{ rule(id="6.1:21", cat="example") }}
 
 ```gruel
-fn swap(inout a: i32, inout b: i32) {
+fn swap(a: MutRef(i32), b: MutRef(i32)) {
     let tmp = a;
     a = b;
     b = tmp;
@@ -101,7 +101,7 @@ fn swap(inout a: i32, inout b: i32) {
 
 fn main() -> i32 {
     let mut x = 1;
-    swap(inout x, inout x);  // error: cannot pass same variable to multiple inout parameters
+    swap(&mut x, &mut x);  // error: cannot pass same variable to multiple inout parameters
     0
 }
 ```
@@ -139,13 +139,13 @@ When a function is called with a `borrow` argument:
 ```gruel
 struct Point { x: i32, y: i32 }
 
-fn sum_coords(borrow p: Point) -> i32 {
+fn sum_coords(p: Ref(Point)) -> i32 {
     p.x + p.y
 }
 
 fn main() -> i32 {
     let p = Point { x: 10, y: 32 };
-    let result = sum_coords(borrow p);
+    let result = sum_coords(&p);
     result + p.x - p.x  // p is still valid after the borrow
 }
 ```
@@ -157,13 +157,13 @@ Multiple `borrow` parameters **MAY** refer to the same variable. Unlike `inout`,
 {{ rule(id="6.1:29", cat="example") }}
 
 ```gruel
-fn sum_both(borrow a: i32, borrow b: i32) -> i32 {
+fn sum_both(a: Ref(i32), b: Ref(i32)) -> i32 {
     a + b
 }
 
 fn main() -> i32 {
     let x = 21;
-    sum_both(borrow x, borrow x)  // OK: multiple borrows of same variable
+    sum_both(&x, &x)  // OK: multiple borrows of same variable
 }
 ```
 
@@ -174,13 +174,13 @@ A single function call **MUST NOT** pass the same variable to both a `borrow` pa
 {{ rule(id="6.1:31", cat="example") }}
 
 ```gruel
-fn mixed(borrow a: i32, inout b: i32) {
+fn mixed(a: Ref(i32), b: MutRef(i32)) {
     b = a + 1;
 }
 
 fn main() -> i32 {
     let mut x = 41;
-    mixed(borrow x, inout x);  // error: cannot borrow and inout same variable
+    mixed(&x, &mut x);  // error: cannot borrow and inout same variable
     0
 }
 ```
@@ -235,7 +235,7 @@ A function **MUST NOT** return a value whose type is `Ref(T)` or `MutRef(T)`. Re
 
 {{ rule(id="6.1:42", cat="syntax") }}
 
-Method receivers accept the surface forms `&self` and `&mut self` as sugar for `borrow self` and `inout self` respectively.
+Method receivers accept the surface forms `self: Ref(Self)` and `self: MutRef(Self)` as sugar for `self: Ref(Self)` and `self: MutRef(Self)` respectively.
 
 ```ebnf
 self_param = ( "&" [ "mut" ] | "borrow" | "inout" )? "self" ;

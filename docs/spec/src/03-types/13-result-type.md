@@ -32,8 +32,8 @@ carries forbidden bit patterns.
 
 `Result(T, E)` ships with the following methods, defined in the prelude:
 
-- `fn is_ok(borrow self) -> bool` — true iff the receiver is `Ok`.
-- `fn is_err(borrow self) -> bool` — true iff the receiver is `Err`.
+- `fn is_ok(self: Ref(Self)) -> bool` — true iff the receiver is `Ok`.
+- `fn is_err(self: Ref(Self)) -> bool` — true iff the receiver is `Err`.
 - `fn unwrap(self) -> T` — returns the contained `Ok` value, or panics
   with `"called unwrap on an Err value"` if `Err`.
 - `fn unwrap_err(self) -> E` — returns the contained `Err` value, or

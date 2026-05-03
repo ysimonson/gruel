@@ -51,18 +51,18 @@ support is future work alongside the Clone synthesis path.
 
 The instance method surface:
 
-- `len(borrow self) -> usize` / `capacity(borrow self) -> usize` /
-  `is_empty(borrow self) -> bool` — runtime field reads.
-- `push(inout self, value: T) -> ()` — append `value`, growing the
+- `len(self: Ref(Self)) -> usize` / `capacity(self: Ref(Self)) -> usize` /
+  `is_empty(self: Ref(Self)) -> bool` — runtime field reads.
+- `push(self: MutRef(Self), value: T) -> ()` — append `value`, growing the
   buffer (doubling, min cap 4) on `len == cap`.
-- `pop(inout self) -> T` — panic if empty, else remove and return
+- `pop(self: MutRef(Self)) -> T` — panic if empty, else remove and return
   the last element. (v1 returns `T` directly; future work to wrap
   in `Option(T)`.)
-- `clear(inout self) -> ()` — drop each live element if `T` needs
+- `clear(self: MutRef(Self)) -> ()` — drop each live element if `T` needs
   drop, then set `len = 0`. Capacity is preserved.
-- `reserve(inout self, additional: usize) -> ()` — ensure
+- `reserve(self: MutRef(Self), additional: usize) -> ()` — ensure
   `cap >= len + additional`.
-- `clone(borrow self) -> Vec(T)` — deep copy. v1: requires
+- `clone(self: Ref(Self)) -> Vec(T)` — deep copy. v1: requires
   `T: Copy` (memcpy path).
 
 Indexing: `v[i]` reads bounds-checked at runtime, requires `T: Copy`.

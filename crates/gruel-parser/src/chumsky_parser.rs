@@ -50,6 +50,11 @@ pub struct PrimitiveTypeSpurs {
     pub char: Spur,
     /// Self type keyword - used in methods to refer to the containing struct type
     pub self_type: Spur,
+    /// `Ref` identifier (ADR-0076) — used by self-param parsing to
+    /// recognise `self : Ref(Self)` without a separate keyword token.
+    pub ref_name: Spur,
+    /// `MutRef` identifier (ADR-0076) — likewise for `self : MutRef(Self)`.
+    pub mut_ref_name: Spur,
     /// The identifier "drop" — recognized as a method name to define a destructor
     /// inside a type body (ADR-0053).
     pub drop_name: Spur,
@@ -79,6 +84,8 @@ impl PrimitiveTypeSpurs {
             bool: interner.get_or_intern("bool"),
             char: interner.get_or_intern("char"),
             self_type: interner.get_or_intern("Self"),
+            ref_name: interner.get_or_intern("Ref"),
+            mut_ref_name: interner.get_or_intern("MutRef"),
             drop_name: interner.get_or_intern("drop"),
             derive_name: interner.get_or_intern("derive"),
         }
@@ -3196,6 +3203,59 @@ fn self_param_parser<'src, I>() -> GruelParser<'src, I, SelfParam>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
+    // ADR-0076: `self : <type>` is the new sole-form receiver. The type
+    // expression's shape determines the receiver mode. Accepts:
+    //   `self : Self`            → ByValue
+    //   `self : Ref ( Self )`    → Borrow
+    //   `self : MutRef ( Self )` → Inout
+    // Any other type expression is rejected at parse time — methods can
+    // only be defined on the host type.
+    let typed_byvalue = just(TokenKind::SelfValue)
+        .then_ignore(just(TokenKind::Colon))
+        .then_ignore(just(TokenKind::SelfType))
+        .map_with(|_, e| SelfParam {
+            mode: SelfMode::ByValue,
+            span: span_from_extra(e),
+        })
+        .boxed();
+
+    // `self : Ref ( Self )` and `self : MutRef ( Self )` need to inspect
+    // the identifier text since the lexer doesn't tokenize `Ref`/`MutRef`
+    // distinctly. Match `TokenKind::Ident(spur)` and resolve the spur.
+    let ref_or_mut_ref = any().try_map_with(
+        |t: TokenKind, e: &mut chumsky::input::MapExtra<I, ParserExtras<'src>>| match t {
+            TokenKind::Ident(s) => {
+                let syms = &e.state().syms;
+                if s == syms.ref_name {
+                    Ok(SelfMode::Borrow)
+                } else if s == syms.mut_ref_name {
+                    Ok(SelfMode::Inout)
+                } else {
+                    Err(chumsky::error::Rich::custom(
+                        e.span(),
+                        "expected identifier `Ref` or `MutRef`",
+                    ))
+                }
+            }
+            _ => Err(chumsky::error::Rich::custom(
+                e.span(),
+                "expected identifier `Ref` or `MutRef`",
+            )),
+        },
+    );
+
+    let typed_ref = just(TokenKind::SelfValue)
+        .then_ignore(just(TokenKind::Colon))
+        .ignore_then(ref_or_mut_ref)
+        .then_ignore(just(TokenKind::LParen))
+        .then_ignore(just(TokenKind::SelfType))
+        .then_ignore(just(TokenKind::RParen))
+        .map_with(|mode, e| SelfParam {
+            mode,
+            span: span_from_extra(e),
+        })
+        .boxed();
+
     // ADR-0062: `&` followed by optional `mut` then `self`. The combined
     // parser keeps backtracking simple — chumsky `choice` over multiple
     // alternatives that share the `&` prefix can fail to commit cleanly.
@@ -3226,7 +3286,7 @@ where
         })
         .boxed();
 
-    choice((amp_self, keyword_self)).boxed()
+    choice((typed_ref, typed_byvalue, amp_self, keyword_self)).boxed()
 }
 
 /// Parser for top-level items (functions, structs, enums, drop fns, and consts)

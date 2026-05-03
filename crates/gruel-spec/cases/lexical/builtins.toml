@@ -309,7 +309,7 @@ source = """
 @handle
 struct Counter {
     count: i32,
-    fn handle(borrow self) -> Counter { Counter { count: self.count } }
+    fn handle(self: Ref(Self)) -> Counter { Counter { count: self.count } }
 }
 
 fn main() -> i32 { 0 }

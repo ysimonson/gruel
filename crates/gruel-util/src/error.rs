@@ -924,7 +924,7 @@ pub enum ErrorKind {
     #[error("linear struct '{0}' cannot be marked `@derive(Clone)`")]
     LinearStructClone(String),
     /// @derive(Clone) v1 limitation: every field must be Copy.
-    #[error("@derive(Clone) on struct '{struct_name}' requires every field to be Copy in v1; field '{field_name}' has type '{field_type}' which is not Copy. Hand-write `fn clone(borrow self) -> Self` instead.", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
+    #[error("@derive(Clone) on struct '{struct_name}' requires every field to be Copy in v1; field '{field_name}' has type '{field_type}' which is not Copy. Hand-write `fn clone(self: Ref(Self)) -> Self` instead.", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
     CloneStructNonCopyField(Box<CloneStructNonCopyFieldError>),
     /// A directive name that is not in the recognized set (ADR-0075).
     /// `note` carries either a near-match suggestion or a retirement

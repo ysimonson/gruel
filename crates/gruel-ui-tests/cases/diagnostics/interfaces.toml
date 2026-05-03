@@ -3,7 +3,7 @@ id = "diagnostics.interfaces"
 name = "Interface Diagnostics"
 description = "Error messages around interface usage (ADR-0056)."
 
-# Interfaces are accepted in `borrow t: I` / `inout t: I` parameter
+# Interfaces are accepted in `t: Ref(I)` / `t: MutRef(I)` parameter
 # positions. They are rejected as struct field types, return types, and
 # local-binding types — those contexts get a tailored error redirecting
 # to the comptime path or the borrow-mode parameter form.
@@ -25,7 +25,7 @@ fn main() -> i32 {
 compile_fail = true
 error_contains = ["is an interface"]
 
-# By-value `t: I` (no borrow mode) is rejected with a tailored message
+# By-value `t: I` (no &mode) is rejected with a tailored message
 # pointing at `Ref(I)` / `MutRef(I)` (ADR-0076).
 [[case]]
 name = "interface_by_value_param_rejected"
@@ -75,12 +75,12 @@ interface Greeter {
 
 struct Foo {}
 
-fn use_it(borrow t: Greeter) {
+fn use_it(t: Ref(Greeter)) {
 }
 
 fn main() -> i32 {
     let f = Foo {};
-    use_it(borrow f);
+    use_it(&f);
     0
 }
 """

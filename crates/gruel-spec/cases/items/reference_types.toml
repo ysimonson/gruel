@@ -151,7 +151,7 @@ compile_fail = true
 error_contains = "multiple inout"
 
 # =============================================================================
-# Method receivers (ADR-0062 phase 4): `&self` is sugar for `borrow self`.
+# Method receivers (ADR-0062 phase 4): `self: Ref(Self)` is sugar for `self: Ref(Self)`.
 # =============================================================================
 
 [[case]]
@@ -161,7 +161,7 @@ source = """
 struct Counter {
     n: i32,
 
-    fn read(&self) -> i32 { self.n }
+    fn read(self: Ref(Self)) -> i32 { self.n }
 }
 
 fn main() -> i32 {
@@ -171,7 +171,7 @@ fn main() -> i32 {
 """
 exit_code = 42
 
-# `&mut self` lowers to a mutable receiver: the method body can write
+# `self: MutRef(Self)` lowers to a mutable receiver: the method body can write
 # through `self.field`, and the receiver isn't consumed at the call site.
 [[case]]
 name = "mut_ref_self_method_mutates"
@@ -180,7 +180,7 @@ source = """
 struct Counter {
     n: i32,
 
-    fn bump(&mut self) {
+    fn bump(self: MutRef(Self)) {
         self.n = self.n + 1;
     }
 }
@@ -195,7 +195,7 @@ fn main() -> i32 {
 """
 exit_code = 3
 
-# `&self` borrows the receiver: a method can be called many times in a row
+# `self: Ref(Self)` borrows the receiver: a method can be called many times in a row
 # on the same non-Copy value without consuming it.
 [[case]]
 name = "ref_self_method_does_not_consume"
@@ -204,7 +204,7 @@ source = """
 struct R {
     n: i32,
 
-    fn get(&self) -> i32 { self.n }
+    fn get(self: Ref(Self)) -> i32 { self.n }
 }
 
 fn main() -> i32 {

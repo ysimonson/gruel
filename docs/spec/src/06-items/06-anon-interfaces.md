@@ -59,12 +59,12 @@ struct Box {
     fn size(self) -> i32 { 42 }
 }
 
-fn use_sized(borrow s: Sized(i32)) -> i32 {
+fn use_sized(s: Ref(Sized(i32))) -> i32 {
     s.size()
 }
 
 fn main() -> i32 {
     let b = Box {};
-    use_sized(borrow b)  // 42, dispatched dynamically
+    use_sized(&b)  // 42, dispatched dynamically
 }
 ```

@@ -247,7 +247,7 @@ struct Pair {
         Self { a: a, b: b }                             // 6.4:29
     }
 
-    fn combine(&self, other: Ref(Self)) -> Self {       // 6.4:28 (Ref(Self))
+    fn combine(self: Ref(Self), other: Ref(Self)) -> Self {       // 6.4:28 (Ref(Self))
         Self { a: self.a + other.a, b: self.b + other.b }
     }
 }

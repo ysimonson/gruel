@@ -119,7 +119,7 @@ asm_contains = ["@llvm.lifetime.start.p0(ptr %slot0)", "@llvm.lifetime.start.p0(
 [[case]]
 name = "inout_params_have_noalias"
 source = """
-fn swap(inout a: i32, inout b: i32) {
+fn swap(a: MutRef(i32), b: MutRef(i32)) {
     let t = a;
     a = b;
     b = t;
@@ -127,7 +127,7 @@ fn swap(inout a: i32, inout b: i32) {
 fn main() -> i32 {
     let mut x = 1;
     let mut y = 2;
-    swap(inout x, inout y);
+    swap(&mut x, &mut y);
     x
 }
 """
@@ -136,12 +136,12 @@ asm_contains = ["ptr noalias %0, ptr noalias %1"]
 [[case]]
 name = "mixed_params_only_inout_gets_noalias"
 source = """
-fn update(val: i32, inout target: i32) {
+fn update(val: i32, target: MutRef(i32)) {
     target = val;
 }
 fn main() -> i32 {
     let mut x = 0;
-    update(42, inout x);
+    update(42, &mut x);
     x
 }
 """

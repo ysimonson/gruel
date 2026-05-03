@@ -71,19 +71,19 @@ fn main() -> i32 {
 
 {{ rule(id="3.10:10", cat="normative") }}
 
-`fn len(borrow self) -> usize` returns the length of the string in bytes.
+`fn len(self: Ref(Self)) -> usize` returns the length of the string in bytes.
 
 {{ rule(id="3.10:11", cat="normative") }}
 
-`fn capacity(borrow self) -> usize` returns the allocated capacity of the string. Returns zero for string literals.
+`fn capacity(self: Ref(Self)) -> usize` returns the allocated capacity of the string. Returns zero for string literals.
 
 {{ rule(id="3.10:12", cat="normative") }}
 
-`fn is_empty(borrow self) -> bool` returns true if the string length is zero.
+`fn is_empty(self: Ref(Self)) -> bool` returns true if the string length is zero.
 
 {{ rule(id="3.10:13", cat="informative") }}
 
-Query methods use `borrow self` to access the string without consuming it, leaving the string valid after the call.
+Query methods use `self: Ref(Self)` to access the string without consuming it, leaving the string valid after the call.
 
 {{ rule(id="3.10:14", cat="example") }}
 
@@ -102,23 +102,23 @@ fn main() -> i32 {
 
 {{ rule(id="3.10:15", cat="normative") }}
 
-`fn push_str(inout self, other: String)` appends the contents of `other` to the string. If the string is a literal (capacity zero), it is first promoted to the heap.
+`fn push_str(self: MutRef(Self), other: String)` appends the contents of `other` to the string. If the string is a literal (capacity zero), it is first promoted to the heap.
 
 {{ rule(id="3.10:16", cat="normative") }}
 
-`fn push(inout self, byte: u8)` appends a single byte to the string.
+`fn push(self: MutRef(Self), byte: u8)` appends a single byte to the string.
 
 {{ rule(id="3.10:17", cat="normative") }}
 
-`fn clear(inout self)` removes all content from the string but retains the allocated capacity.
+`fn clear(self: MutRef(Self))` removes all content from the string but retains the allocated capacity.
 
 {{ rule(id="3.10:18", cat="normative") }}
 
-`fn reserve(inout self, additional: usize)` ensures the string has capacity for at least `additional` more bytes.
+`fn reserve(self: MutRef(Self), additional: usize)` ensures the string has capacity for at least `additional` more bytes.
 
 {{ rule(id="3.10:19", cat="informative") }}
 
-Mutation methods use `inout self` to modify the string in place. The variable must be declared with `var` to allow mutation.
+Mutation methods use `self: MutRef(Self)` to modify the string in place. The variable must be declared with `var` to allow mutation.
 
 {{ rule(id="3.10:20", cat="example") }}
 
@@ -171,7 +171,7 @@ The doubling growth strategy amortizes allocation cost over many appends, provid
 
 {{ rule(id="3.10:26", cat="normative") }}
 
-`fn clone(borrow self) -> String` creates a deep copy of the string, allocating a new heap buffer with the same content.
+`fn clone(self: Ref(Self)) -> String` creates a deep copy of the string, allocating a new heap buffer with the same content.
 
 {{ rule(id="3.10:27", cat="informative") }}
 
@@ -228,19 +228,19 @@ This approach matches Go's `string` and Rust's `bstr` crate: UTF-8 is the conven
 
 {{ rule(id="3.10:34", cat="normative") }}
 
-`fn contains(borrow self, needle: String) -> bool` returns true if the string contains the given substring.
+`fn contains(self: Ref(Self), needle: String) -> bool` returns true if the string contains the given substring.
 
 {{ rule(id="3.10:35", cat="normative") }}
 
-`fn starts_with(borrow self, prefix: String) -> bool` returns true if the string begins with the given prefix.
+`fn starts_with(self: Ref(Self), prefix: String) -> bool` returns true if the string begins with the given prefix.
 
 {{ rule(id="3.10:36", cat="normative") }}
 
-`fn ends_with(borrow self, suffix: String) -> bool` returns true if the string ends with the given suffix.
+`fn ends_with(self: Ref(Self), suffix: String) -> bool` returns true if the string ends with the given suffix.
 
 {{ rule(id="3.10:37", cat="informative") }}
 
-Search methods use `borrow self` and borrow the argument, leaving both strings valid after the call. An empty needle, prefix, or suffix always matches.
+Search methods use `self: Ref(Self)` and borrow the argument, leaving both strings valid after the call. An empty needle, prefix, or suffix always matches.
 
 {{ rule(id="3.10:38", cat="example") }}
 
@@ -259,7 +259,7 @@ fn main() -> i32 {
 
 {{ rule(id="3.10:39", cat="normative") }}
 
-`fn concat(borrow self, other: String) -> String` returns a new string that is the concatenation of `self` and `other`. Neither input is consumed.
+`fn concat(self: Ref(Self), other: String) -> String` returns a new string that is the concatenation of `self` and `other`. Neither input is consumed.
 
 {{ rule(id="3.10:40", cat="informative") }}
 

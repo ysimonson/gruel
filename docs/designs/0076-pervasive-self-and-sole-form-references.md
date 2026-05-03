@@ -233,7 +233,7 @@ form is already stable, and we are removing legacy spellings.
       normalisation; this phase ensures locals follow the same rule
       and that the spec matches the implementation.
 
-- [ ] **Phase 4: Code-base codemod.** Mechanical sweep of
+- [x] **Phase 4: Code-base codemod.** Mechanical sweep of
       `crates/gruel-spec/cases/`, `crates/gruel-ui-tests/cases/`,
       `scratch/`, ADR examples, and the spec markdown. Convert:
       - `borrow x: T` → `x: Ref(T)`

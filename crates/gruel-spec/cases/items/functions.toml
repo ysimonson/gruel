@@ -434,7 +434,7 @@ name = "inout_param_{variant}"
 spec = ["6.1:14", "6.1:15", "6.1:16", "6.1:18"]
 description = "Basic inout parameter operations"
 source = """
-fn {fn_name}(inout x: i32{extra_params}) {
+fn {fn_name}(x: MutRef(i32){extra_params}) {
     {body}
 }
 fn main() -> i32 {
@@ -444,10 +444,10 @@ fn main() -> i32 {
 }
 """
 params = [
-  { variant = "increment", fn_name = "increment", extra_params = "", body = "x = x + 1;", init = "41", calls = "increment(inout n)", exit_code = 42 },
-  { variant = "double", fn_name = "double", extra_params = "", body = "x = x * 2;", init = "21", calls = "double(inout n)", exit_code = 42 },
-  { variant = "multiple_calls", fn_name = "increment", extra_params = "", body = "x = x + 1;", init = "39", calls = "increment(inout n); increment(inout n); increment(inout n)", exit_code = 42 },
-  { variant = "with_regular", fn_name = "add_to", extra_params = ", amount: i32", body = "x = x + amount;", init = "32", calls = "add_to(inout n, 10)", exit_code = 42, spec_extra = ["6.1:15"] },
+  { variant = "increment", fn_name = "increment", extra_params = "", body = "x = x + 1;", init = "41", calls = "increment(&mut n)", exit_code = 42 },
+  { variant = "double", fn_name = "double", extra_params = "", body = "x = x * 2;", init = "21", calls = "double(&mut n)", exit_code = 42 },
+  { variant = "multiple_calls", fn_name = "increment", extra_params = "", body = "x = x + 1;", init = "39", calls = "increment(&mut n); increment(&mut n); increment(&mut n)", exit_code = 42 },
+  { variant = "with_regular", fn_name = "add_to", extra_params = ", amount: i32", body = "x = x + amount;", init = "32", calls = "add_to(&mut n, 10)", exit_code = 42, spec_extra = ["6.1:15"] },
 ]
 
 [[case]]
@@ -455,7 +455,7 @@ name = "inout_param_swap"
 spec = ["6.1:14", "6.1:18"]
 description = "Multiple inout parameters for swap"
 source = """
-fn swap(inout a: i32, inout b: i32) {
+fn swap(a: MutRef(i32), b: MutRef(i32)) {
     let tmp = a;
     a = b;
     b = tmp;
@@ -463,7 +463,7 @@ fn swap(inout a: i32, inout b: i32) {
 fn main() -> i32 {
     let mut x = 10;
     let mut y = 42;
-    swap(inout x, inout y);
+    swap(&mut x, &mut y);
     x
 }
 """
@@ -492,14 +492,14 @@ name = "inout_param_return_value"
 spec = ["6.1:14", "6.1:18"]
 description = "Inout function that also returns a value"
 source = """
-fn increment_and_return_old(inout x: i32) -> i32 {
+fn increment_and_return_old(x: MutRef(i32)) -> i32 {
     let old = x;
     x = x + 1;
     old
 }
 fn main() -> i32 {
     let mut n = 41;
-    let old = increment_and_return_old(inout n);
+    let old = increment_and_return_old(&mut n);
     old + 1
 }
 """
@@ -510,13 +510,13 @@ name = "inout_value_valid_after_call"
 spec = ["6.1:18"]
 description = "Variable is still valid after inout call (no ownership transfer)"
 source = """
-fn double(inout x: i32) {
+fn double(x: MutRef(i32)) {
     x = x * 2;
 }
 fn main() -> i32 {
     let mut n = 10;
-    double(inout n);
-    double(inout n);
+    double(&mut n);
+    double(&mut n);
     n + 2
 }
 """
@@ -531,7 +531,7 @@ name = "inout_requires_lvalue"
 spec = ["6.1:17"]
 description = "Inout argument must be an lvalue (not a literal)"
 source = """
-fn increment(inout x: i32) {
+fn increment(x: MutRef(i32)) {
     x = x + 1;
 }
 fn main() -> i32 {
@@ -574,7 +574,7 @@ spec = ["6.1:22", "6.1:26"]
 description = "Basic borrow parameter operations"
 source = """
 struct Point { x: i32, y: i32 }
-fn {fn_name}(borrow p: Point) -> i32 {
+fn {fn_name}(p: Ref(Point)) -> i32 {
     {body}
 }
 fn main() -> i32 {
@@ -583,8 +583,8 @@ fn main() -> i32 {
 }
 """
 params = [
-  { variant = "read_only", fn_name = "sum", body = "p.x + p.y", x = "10", y = "32", expr = "sum(borrow p)", exit_code = 42, spec_extra = ["6.1:23"] },
-  { variant = "multiple_uses", fn_name = "get_x", body = "p.x", x = "21", y = "21", expr = "get_x(borrow p) + get_x(borrow p)", exit_code = 42 },
+  { variant = "read_only", fn_name = "sum", body = "p.x + p.y", x = "10", y = "32", expr = "sum(&p)", exit_code = 42, spec_extra = ["6.1:23"] },
+  { variant = "multiple_uses", fn_name = "get_x", body = "p.x", x = "21", y = "21", expr = "get_x(&p) + get_x(&p)", exit_code = 42 },
 ]
 
 [[case]]
@@ -595,9 +595,9 @@ source = "{source}"
 compile_fail = true
 error_contains = "cannot mutate borrowed"
 params = [
-  { kind = "field", source = "struct Point { x: i32, y: i32 }\nfn try_mutate(borrow p: Point) -> i32 {\n    p.x = 10;\n    p.x\n}\nfn main() -> i32 {\n    let p = Point { x: 1, y: 2 };\n    try_mutate(borrow p)\n}" },
-  { kind = "array", source = "fn try_mutate(borrow arr: [i32; 3]) -> i32 {\n    arr[0] = 99;\n    arr[0]\n}\nfn main() -> i32 {\n    let a = [1, 2, 3];\n    try_mutate(borrow a)\n}" },
-  { kind = "param", source = "struct Data { value: i32 }\nfn try_reassign(borrow d: Data) -> i32 {\n    d = Data { value: 99 };\n    d.value\n}\nfn main() -> i32 {\n    let d = Data { value: 42 };\n    try_reassign(borrow d)\n}" },
+  { kind = "field", source = "struct Point { x: i32, y: i32 }\nfn try_mutate(p: Ref(Point)) -> i32 {\n    p.x = 10;\n    p.x\n}\nfn main() -> i32 {\n    let p = Point { x: 1, y: 2 };\n    try_mutate(&p)\n}" },
+  { kind = "array", source = "fn try_mutate(arr: Ref([i32; 3])) -> i32 {\n    arr[0] = 99;\n    arr[0]\n}\nfn main() -> i32 {\n    let a = [1, 2, 3];\n    try_mutate(&a)\n}" },
+  { kind = "param", source = "struct Data { value: i32 }\nfn try_reassign(d: Ref(Data)) -> i32 {\n    d = Data { value: 99 };\n    d.value\n}\nfn main() -> i32 {\n    let d = Data { value: 42 };\n    try_reassign(&d)\n}" },
 ]
 
 [[case]]
@@ -606,12 +606,12 @@ spec = ["6.1:25"]
 description = "Cannot move out of a borrowed value"
 source = """
 struct Data { value: i32 }
-fn try_move(borrow d: Data) -> Data {
+fn try_move(d: Ref(Data)) -> Data {
     d
 }
 fn main() -> i32 {
     let d = Data { value: 42 };
-    let e = try_move(borrow d);
+    let e = try_move(&d);
     e.value
 }
 """
@@ -623,12 +623,12 @@ name = "borrow_inout_conflict"
 spec = ["6.1:30"]
 description = "Cannot borrow and inout the same variable in one call"
 source = """
-fn conflict(borrow a: i32, inout b: i32) {
+fn conflict(a: Ref(i32), b: MutRef(i32)) {
     b = a + 1;
 }
 fn main() -> i32 {
     let mut x = 41;
-    conflict(borrow x, inout x);
+    conflict(&x, &mut x);
     x
 }
 """
@@ -640,12 +640,12 @@ name = "borrow_multiple_same_var_ok"
 spec = ["6.1:28"]
 description = "Multiple borrows of the same variable is allowed"
 source = """
-fn sum_both(borrow a: i32, borrow b: i32) -> i32 {
+fn sum_both(a: Ref(i32), b: Ref(i32)) -> i32 {
     a + b
 }
 fn main() -> i32 {
     let x = 21;
-    sum_both(borrow x, borrow x)
+    sum_both(&x, &x)
 }
 """
 exit_code = 42
@@ -656,12 +656,12 @@ spec = ["6.1:22", "6.1:15"]
 description = "Mixing borrow and regular parameters"
 source = """
 struct Point { x: i32, y: i32 }
-fn offset_x(borrow p: Point, delta: i32) -> i32 {
+fn offset_x(p: Ref(Point), delta: i32) -> i32 {
     p.x + delta
 }
 fn main() -> i32 {
     let p = Point { x: 32, y: 0 };
-    offset_x(borrow p, 10)
+    offset_x(&p, 10)
 }
 """
 exit_code = 42
@@ -672,12 +672,12 @@ spec = ["6.1:26", "6.1:27"]
 description = "Value can be used after being borrowed"
 source = """
 struct Point { x: i32, y: i32 }
-fn read_x(borrow p: Point) -> i32 {
+fn read_x(p: Ref(Point)) -> i32 {
     p.x
 }
 fn main() -> i32 {
     let p = Point { x: 42, y: 10 };
-    let first = read_x(borrow p);
+    let first = read_x(&p);
     let second = p.y;
     first
 }
@@ -690,18 +690,18 @@ spec = ["6.1:22", "6.1:26"]
 description = "Borrow works with various types"
 source = "{source}"
 params = [
-  { type = "integer", source = "fn double(borrow x: i32) -> i32 {\n    x + x\n}\nfn main() -> i32 {\n    let n = 21;\n    double(borrow n)\n}", exit_code = 42, spec_extra = ["6.1:23"] },
-  { type = "array", source = "fn first(borrow arr: [i32; 3]) -> i32 {\n    arr[0]\n}\nfn main() -> i32 {\n    let a = [42, 2, 3];\n    first(borrow a)\n}", exit_code = 42 },
-  { type = "nested_struct", source = "struct Inner { value: i32 }\nstruct Outer { inner: Inner }\nfn get_inner_value(borrow o: Outer) -> i32 {\n    o.inner.value\n}\nfn main() -> i32 {\n    let o = Outer { inner: Inner { value: 42 } };\n    get_inner_value(borrow o)\n}", exit_code = 42 },
+  { type = "integer", source = "fn double(x: Ref(i32)) -> i32 {\n    x + x\n}\nfn main() -> i32 {\n    let n = 21;\n    double(&n)\n}", exit_code = 42, spec_extra = ["6.1:23"] },
+  { type = "array", source = "fn first(arr: Ref([i32; 3])) -> i32 {\n    arr[0]\n}\nfn main() -> i32 {\n    let a = [42, 2, 3];\n    first(&a)\n}", exit_code = 42 },
+  { type = "nested_struct", source = "struct Inner { value: i32 }\nstruct Outer { inner: Inner }\nfn get_inner_value(o: Ref(Outer)) -> i32 {\n    o.inner.value\n}\nfn main() -> i32 {\n    let o = Outer { inner: Inner { value: 42 } };\n    get_inner_value(&o)\n}", exit_code = 42 },
 ]
 
 [[case]]
 name = "borrow_call_site_missing_keyword"
 spec = ["6.1:23"]
-description = "Call site must include borrow keyword"
+description = "Passing a value where Ref(T) is expected fails type-check"
 source = """
 struct Point { x: i32, y: i32 }
-fn read(borrow p: Point) -> i32 {
+fn read(p: Ref(Point)) -> i32 {
     p.x
 }
 fn main() -> i32 {
@@ -710,7 +710,7 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
-error_contains = "borrow"
+error_contains = "type mismatch"
 
 # =============================================================================
 # Inout parameters with structs
@@ -733,11 +733,11 @@ fn main() -> i32 {
 }
 """
 params = [
-  { variant = "field_set", struct_def = "Point { x: i32, y: i32 }", fn_name = "increment_x", param = "p", type = "Point", extra_params = "", return_type = "", body = "p.x = p.x + 1;", var = "pt", init = "Point { x: 41, y: 0 }", calls = "increment_x(inout pt);\n    pt.x", exit_code = 42, spec_extra = ["6.1:15", "6.1:16"] },
-  { variant = "field_get", struct_def = "Point { x: i32, y: i32 }", fn_name = "get_sum", param = "p", type = "Point", extra_params = "", return_type = "-> i32", body = "p.x + p.y", var = "pt", init = "Point { x: 20, y: 22 }", calls = "get_sum(inout pt)", exit_code = 42 },
-  { variant = "multiple_fields", struct_def = "Point { x: i32, y: i32 }", fn_name = "swap_xy", param = "p", type = "Point", extra_params = "", return_type = "", body = "let tmp = p.x;\n    p.x = p.y;\n    p.y = tmp;", var = "pt", init = "Point { x: 10, y: 42 }", calls = "swap_xy(inout pt);\n    pt.x", exit_code = 42 },
-  { variant = "with_regular", struct_def = "Counter { value: i32 }", fn_name = "add_to", param = "c", type = "Counter", extra_params = ", amount: i32", return_type = "", body = "c.value = c.value + amount;", var = "counter", init = "Counter { value: 32 }", calls = "add_to(inout counter, 10);\n    counter.value", exit_code = 42, spec_extra = ["6.1:15"] },
-  { variant = "multiple_calls", struct_def = "Counter { value: i32 }", fn_name = "increment", param = "c", type = "Counter", extra_params = "", return_type = "", body = "c.value = c.value + 1;", var = "counter", init = "Counter { value: 39 }", calls = "increment(inout counter);\n    increment(inout counter);\n    increment(inout counter);\n    counter.value", exit_code = 42 },
+  { variant = "field_set", struct_def = "Point { x: i32, y: i32 }", fn_name = "increment_x", param = "p", type = "Point", extra_params = "", return_type = "", body = "p.x = p.x + 1;", var = "pt", init = "Point { x: 41, y: 0 }", calls = "increment_x(&mut pt);\n    pt.x", exit_code = 42, spec_extra = ["6.1:15", "6.1:16"] },
+  { variant = "field_get", struct_def = "Point { x: i32, y: i32 }", fn_name = "get_sum", param = "p", type = "Point", extra_params = "", return_type = "-> i32", body = "p.x + p.y", var = "pt", init = "Point { x: 20, y: 22 }", calls = "get_sum(&mut pt)", exit_code = 42 },
+  { variant = "multiple_fields", struct_def = "Point { x: i32, y: i32 }", fn_name = "swap_xy", param = "p", type = "Point", extra_params = "", return_type = "", body = "let tmp = p.x;\n    p.x = p.y;\n    p.y = tmp;", var = "pt", init = "Point { x: 10, y: 42 }", calls = "swap_xy(&mut pt);\n    pt.x", exit_code = 42 },
+  { variant = "with_regular", struct_def = "Counter { value: i32 }", fn_name = "add_to", param = "c", type = "Counter", extra_params = ", amount: i32", return_type = "", body = "c.value = c.value + amount;", var = "counter", init = "Counter { value: 32 }", calls = "add_to(&mut counter, 10);\n    counter.value", exit_code = 42, spec_extra = ["6.1:15"] },
+  { variant = "multiple_calls", struct_def = "Counter { value: i32 }", fn_name = "increment", param = "c", type = "Counter", extra_params = "", return_type = "", body = "c.value = c.value + 1;", var = "counter", init = "Counter { value: 39 }", calls = "increment(&mut counter);\n    increment(&mut counter);\n    increment(&mut counter);\n    counter.value", exit_code = 42 },
 ]
 
 [[case]]
@@ -747,7 +747,7 @@ description = "Inout struct parameter with return value"
 source = """
 struct Point { x: i32, y: i32 }
 
-fn increment_x_return_old(inout p: Point) -> i32 {
+fn increment_x_return_old(p: MutRef(Point)) -> i32 {
     let old = p.x;
     p.x = p.x + 1;
     old
@@ -755,7 +755,7 @@ fn increment_x_return_old(inout p: Point) -> i32 {
 
 fn main() -> i32 {
     let mut pt = Point { x: 40, y: 0 };
-    let old = increment_x_return_old(inout pt);
+    let old = increment_x_return_old(&mut pt);
     old + pt.x
 }
 """
@@ -769,13 +769,13 @@ source = """
 struct Inner { value: i32 }
 struct Outer { inner: Inner, extra: i32 }
 
-fn increment_inner(inout o: Outer) {
+fn increment_inner(o: MutRef(Outer)) {
     o.inner.value = o.inner.value + 1;
 }
 
 fn main() -> i32 {
     let mut data = Outer { inner: Inner { value: 41 }, extra: 0 };
-    increment_inner(inout data);
+    increment_inner(&mut data);
     data.inner.value
 }
 """
@@ -830,7 +830,7 @@ name = "inout_array_{variant}"
 spec = ["6.1:14", "6.1:18"]
 description = "Inout array parameter operations"
 source = """
-fn {fn_name}(inout arr: [i32; 3]{extra_params}) {return_type} {
+fn {fn_name}(arr: MutRef([i32; 3]){extra_params}) {return_type} {
     {body}
 }
 
@@ -840,12 +840,12 @@ fn main() -> i32 {
 }
 """
 params = [
-  { variant = "element_get", fn_name = "get_first", extra_params = "", return_type = "-> i32", body = "arr[0]", init = "[42, 0, 0]", calls = "get_first(inout a)", exit_code = 42 },
-  { variant = "element_set", fn_name = "increment_first", extra_params = "", return_type = "", body = "arr[0] = arr[0] + 1;", init = "[41, 0, 0]", calls = "increment_first(inout a);\n    a[0]", exit_code = 42 },
-  { variant = "swap_elements", fn_name = "swap_first_two", extra_params = "", return_type = "", body = "let tmp = arr[0];\n    arr[0] = arr[1];\n    arr[1] = tmp;", init = "[10, 42, 0]", calls = "swap_first_two(inout a);\n    a[0]", exit_code = 42 },
-  { variant = "return_and_modify", fn_name = "increment_return_old", extra_params = "", return_type = "-> i32", body = "let old = arr[0];\n    arr[0] = arr[0] + 1;\n    old", init = "[40, 0, 0]", calls = "let old = increment_return_old(inout a);\n    old + a[0]", exit_code = 81 },
-  { variant = "multiple_calls", fn_name = "increment_first", extra_params = "", return_type = "", body = "arr[0] = arr[0] + 1;", init = "[39, 0, 0]", calls = "increment_first(inout a);\n    increment_first(inout a);\n    increment_first(inout a);\n    a[0]", exit_code = 42 },
-  { variant = "sum", fn_name = "sum_array", extra_params = "", return_type = "-> i32", body = "arr[0] + arr[1] + arr[2]", init = "[10, 20, 12]", calls = "sum_array(inout a)", exit_code = 42 },
+  { variant = "element_get", fn_name = "get_first", extra_params = "", return_type = "-> i32", body = "arr[0]", init = "[42, 0, 0]", calls = "get_first(&mut a)", exit_code = 42 },
+  { variant = "element_set", fn_name = "increment_first", extra_params = "", return_type = "", body = "arr[0] = arr[0] + 1;", init = "[41, 0, 0]", calls = "increment_first(&mut a);\n    a[0]", exit_code = 42 },
+  { variant = "swap_elements", fn_name = "swap_first_two", extra_params = "", return_type = "", body = "let tmp = arr[0];\n    arr[0] = arr[1];\n    arr[1] = tmp;", init = "[10, 42, 0]", calls = "swap_first_two(&mut a);\n    a[0]", exit_code = 42 },
+  { variant = "return_and_modify", fn_name = "increment_return_old", extra_params = "", return_type = "-> i32", body = "let old = arr[0];\n    arr[0] = arr[0] + 1;\n    old", init = "[40, 0, 0]", calls = "let old = increment_return_old(&mut a);\n    old + a[0]", exit_code = 81 },
+  { variant = "multiple_calls", fn_name = "increment_first", extra_params = "", return_type = "", body = "arr[0] = arr[0] + 1;", init = "[39, 0, 0]", calls = "increment_first(&mut a);\n    increment_first(&mut a);\n    increment_first(&mut a);\n    a[0]", exit_code = 42 },
+  { variant = "sum", fn_name = "sum_array", extra_params = "", return_type = "-> i32", body = "arr[0] + arr[1] + arr[2]", init = "[10, 20, 12]", calls = "sum_array(&mut a)", exit_code = 42 },
 ]
 
 [[case]]
@@ -853,13 +853,13 @@ name = "inout_array_with_index_variable"
 spec = ["6.1:14", "6.1:18"]
 description = "Inout array with variable index"
 source = """
-fn set_element(inout arr: [i32; 3], idx: usize, val: i32) {
+fn set_element(arr: MutRef([i32; 3]), idx: usize, val: i32) {
     arr[idx] = val;
 }
 
 fn main() -> i32 {
     let mut a = [0, 0, 0];
-    set_element(inout a, 1, 42);
+    set_element(&mut a, 1, 42);
     a[1]
 }
 """

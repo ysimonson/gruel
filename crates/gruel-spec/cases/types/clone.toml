@@ -56,14 +56,14 @@ fn main() -> i32 {
 """
 exit_code = 0
 
-# A user affine struct with `fn clone(borrow self) -> Self` conforms.
+# A user affine struct with `fn clone(self: Ref(Self)) -> Self` conforms.
 [[case]]
 name = "clone_interface_accepts_user_struct_with_clone_method"
 spec = ["3.8:70", "3.8:71"]
 description = "comptime T: Clone accepts a user struct with a clone method"
 source = """
 struct Foo {
-    fn clone(borrow self) -> Foo { Foo {} }
+    fn clone(self: Ref(Self)) -> Foo { Foo {} }
 }
 
 fn use_clone(comptime T: Clone, t: T) -> i32 {
@@ -164,7 +164,7 @@ source = """
 struct Wrap {
     n: i32,
 
-    fn clone(borrow self) -> Wrap {
+    fn clone(self: Ref(Self)) -> Wrap {
         Wrap { n: self.n }
     }
 }
@@ -255,7 +255,7 @@ source = """
 struct Wrap {
     n: i32,
 
-    fn clone(borrow self) -> Wrap {
+    fn clone(self: Ref(Self)) -> Wrap {
         Wrap { n: self.n }
     }
 }

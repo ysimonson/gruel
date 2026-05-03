@@ -983,7 +983,7 @@ source = """
 struct Token {
     n: i32,
 
-    fn handle(borrow self) -> Token {
+    fn handle(self: Ref(Self)) -> Token {
         Token { n: self.n }
     }
 }
@@ -1015,12 +1015,12 @@ error_contains = "no method"
 [[case]]
 name = "handle_struct_basic"
 spec = ["3.8:40", "3.8:42", "3.8:44", "3.8:45"]
-description = "Struct conforms to Handle by defining fn handle(borrow self) -> Self"
+description = "Struct conforms to Handle by defining fn handle(self: Ref(Self)) -> Self"
 source = """
 struct Counter {
     count: i32,
 
-    fn handle(borrow self) -> Counter {
+    fn handle(self: Ref(Self)) -> Counter {
         Counter { count: self.count }
     }
 }
@@ -1041,7 +1041,7 @@ source = """
 struct Value {
     n: i32,
 
-    fn handle(borrow self) -> Value {
+    fn handle(self: Ref(Self)) -> Value {
         Value { n: self.n }
     }
 }
@@ -1057,12 +1057,12 @@ exit_code = 20
 [[case]]
 name = "handle_implements_when_method_present"
 spec = ["3.8:42"]
-description = "@implements(T, Handle) is true when the type defines fn handle(borrow self) -> Self"
+description = "@implements(T, Handle) is true when the type defines fn handle(self: Ref(Self)) -> Self"
 source = """
 struct Counter {
     count: i32,
 
-    fn handle(borrow self) -> Counter {
+    fn handle(self: Ref(Self)) -> Counter {
         Counter { count: self.count }
     }
 }
@@ -1096,7 +1096,7 @@ source = """
 linear struct Transaction {
     id: i32,
 
-    fn handle(borrow self) -> Transaction {
+    fn handle(self: Ref(Self)) -> Transaction {
         Transaction { id: self.id }
     }
 }
