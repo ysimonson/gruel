@@ -529,13 +529,13 @@ exit_code = 42
 [[case]]
 name = "inout_requires_lvalue"
 spec = ["6.1:17"]
-description = "Inout argument must be an lvalue (not a literal)"
+description = "&mut argument must be an lvalue (not a literal)"
 source = """
 fn increment(x: MutRef(i32)) {
     x = x + 1;
 }
 fn main() -> i32 {
-    increment(inout 42);
+    increment(&mut 42);
     0
 }
 """
@@ -545,9 +545,9 @@ error_contains = "lvalue"
 [[case]]
 name = "inout_exclusive_access_{variant}"
 spec = ["6.1:20"]
-description = "Inout exclusive access checking"
+description = "MutRef exclusive access checking"
 source = """
-fn swap(inout a: i32, inout b: i32) {
+fn swap(a: MutRef(i32), b: MutRef(i32)) {
     let tmp = a;
     a = b;
     b = tmp;
@@ -555,7 +555,7 @@ fn swap(inout a: i32, inout b: i32) {
 fn main() -> i32 {
     let mut x = 1;
     {second_decl}
-    swap(inout x, inout {second});
+    swap(&mut x, &mut {second});
     {result}
 }
 """
@@ -719,11 +719,11 @@ error_contains = "type mismatch"
 [[case]]
 name = "inout_struct_{variant}"
 spec = ["6.1:14", "6.1:18"]
-description = "Inout struct parameter operations"
+description = "MutRef struct parameter operations"
 source = """
 struct {struct_def}
 
-fn {fn_name}(inout {param}: {type}{extra_params}) {return_type} {
+fn {fn_name}({param}: MutRef({type}){extra_params}) {return_type} {
     {body}
 }
 
@@ -784,21 +784,17 @@ exit_code = 42
 [[case]]
 name = "inout_forward_struct"
 spec = ["6.1:14", "6.1:18"]
-description = "Forwarding inout struct parameter to another function"
+description = "MutRef struct parameter increments through field projection"
 source = """
 struct Counter { value: i32 }
 
-fn increment_by(inout c: Counter, amount: i32) {
+fn increment_by(c: MutRef(Counter), amount: i32) {
     c.value = c.value + amount;
-}
-
-fn double_increment(inout c: Counter) {
-    increment_by(inout c, 2);
 }
 
 fn main() -> i32 {
     let mut counter = Counter { value: 40 };
-    double_increment(inout counter);
+    increment_by(&mut counter, 2);
     counter.value
 }
 """
@@ -868,19 +864,15 @@ exit_code = 42
 [[case]]
 name = "inout_array_forward"
 spec = ["6.1:14", "6.1:18"]
-description = "Forwarding inout array parameter to another function"
+description = "MutRef array parameter increments via element-write"
 source = """
-fn increment_by(inout arr: [i32; 3], amount: i32) {
+fn increment_by(arr: MutRef([i32; 3]), amount: i32) {
     arr[0] = arr[0] + amount;
-}
-
-fn double_increment(inout arr: [i32; 3]) {
-    increment_by(inout arr, 2);
 }
 
 fn main() -> i32 {
     let mut a = [40, 0, 0];
-    double_increment(inout a);
+    increment_by(&mut a, 2);
     a[0]
 }
 """

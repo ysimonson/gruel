@@ -252,7 +252,7 @@ form is already stable, and we are removing legacy spellings.
       `Method`, `MethodSig`, and `DropFn` constructors. Run the test
       suite (already codemodded in Phase 4).
 
-- [ ] **Phase 6: Remove `borrow` / `inout` keywords.** Delete
+- [x] **Phase 6: Remove `borrow` / `inout` keywords.** Delete
       `TokenKind::Borrow` / `TokenKind::Inout` from
       `gruel-lexer`. Delete the keyword-mode branches from
       `params_parser` and the call-site arg-mode parsers. The lexer

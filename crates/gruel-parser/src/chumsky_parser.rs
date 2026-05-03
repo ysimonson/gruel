@@ -486,17 +486,14 @@ where
     .boxed()
 }
 
-/// Parser for parameter mode: inout, borrow, or comptime
+/// Parser for parameter mode: comptime. The legacy `inout` / `borrow`
+/// keyword modes were retired by ADR-0076 Phase 6 — the new sole form
+/// is `name: Ref(T)` / `name: MutRef(T)`.
 fn param_mode_parser<'src, I>() -> GruelParser<'src, I, ParamMode>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    choice((
-        just(TokenKind::Inout).to(ParamMode::Inout).boxed(),
-        just(TokenKind::Borrow).to(ParamMode::Borrow).boxed(),
-        just(TokenKind::Comptime).to(ParamMode::Comptime).boxed(),
-    ))
-    .boxed()
+    just(TokenKind::Comptime).to(ParamMode::Comptime).boxed()
 }
 
 /// Parser for function parameters: [comptime] [inout|borrow] name: type
@@ -628,25 +625,15 @@ where
         .boxed()
 }
 
-/// Parser for argument mode: inout or borrow
-fn arg_mode_parser<'src, I>() -> GruelParser<'src, I, ArgMode>
-where
-    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
-{
-    choice((
-        just(TokenKind::Inout).to(ArgMode::Inout).boxed(),
-        just(TokenKind::Borrow).to(ArgMode::Borrow).boxed(),
-    ))
-    .boxed()
-}
-
-/// Parser for a single call argument: [inout|borrow] expr
+/// Parser for a single call argument. The legacy `inout` / `borrow`
+/// keyword arg modes were retired by ADR-0076 Phase 6 — the new sole
+/// form is `&expr` / `&mut expr`.
 fn call_arg_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, CallArg>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    arg_mode_parser()
-        .or_not()
+    chumsky::primitive::empty()
+        .map(|_| None::<ArgMode>)
         .then(expr)
         .map_with(|(mode, expr), e| CallArg {
             mode: mode.unwrap_or(ArgMode::Normal),
@@ -4477,226 +4464,6 @@ mod tests {
                 assert_eq!(call.args.len(), 2);
             }
             _ => panic!("expected AssocFnCall, got {:?}", result.expr),
-        }
-    }
-
-    // ==================== Borrow Parameter Parsing Tests ====================
-
-    #[test]
-    fn test_borrow_param_simple() {
-        // Function with a borrow parameter
-        let result = parse("fn read(borrow x: i32) -> i32 { x }").unwrap();
-        match &result.ast.items[0] {
-            Item::Function(f) => {
-                assert_eq!(f.params.len(), 1);
-                assert_eq!(f.params[0].mode, ParamMode::Borrow);
-                assert_eq!(result.get(f.params[0].name.name), "x");
-            }
-            _ => panic!("expected Function"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_param_with_struct_type() {
-        // Borrow parameter with a user-defined type
-        let result =
-            parse("struct Point { x: i32 } fn read(borrow p: Point) -> i32 { p.x }").unwrap();
-        match &result.ast.items[1] {
-            Item::Function(f) => {
-                assert_eq!(f.params.len(), 1);
-                assert_eq!(f.params[0].mode, ParamMode::Borrow);
-                assert_eq!(result.get(f.params[0].name.name), "p");
-                match &f.params[0].ty {
-                    TypeExpr::Named(ident) => assert_eq!(result.get(ident.name), "Point"),
-                    _ => panic!("expected Named type"),
-                }
-            }
-            _ => panic!("expected Function"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_param_mixed_with_normal() {
-        // Mixed borrow and normal parameters
-        let result = parse("fn add(borrow a: i32, b: i32) -> i32 { a + b }").unwrap();
-        match &result.ast.items[0] {
-            Item::Function(f) => {
-                assert_eq!(f.params.len(), 2);
-                assert_eq!(f.params[0].mode, ParamMode::Borrow);
-                assert_eq!(result.get(f.params[0].name.name), "a");
-                assert_eq!(f.params[1].mode, ParamMode::Normal);
-                assert_eq!(result.get(f.params[1].name.name), "b");
-            }
-            _ => panic!("expected Function"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_param_mixed_with_inout() {
-        // Borrow and inout parameters in the same function
-        let result = parse("fn modify(borrow a: i32, inout b: i32) { b = a; }").unwrap();
-        match &result.ast.items[0] {
-            Item::Function(f) => {
-                assert_eq!(f.params.len(), 2);
-                assert_eq!(f.params[0].mode, ParamMode::Borrow);
-                assert_eq!(result.get(f.params[0].name.name), "a");
-                assert_eq!(f.params[1].mode, ParamMode::Inout);
-                assert_eq!(result.get(f.params[1].name.name), "b");
-            }
-            _ => panic!("expected Function"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_param_with_array_type() {
-        // Borrow parameter with array type
-        let result = parse("fn first(borrow arr: [i32; 3]) -> i32 { arr[0] }").unwrap();
-        match &result.ast.items[0] {
-            Item::Function(f) => {
-                assert_eq!(f.params.len(), 1);
-                assert_eq!(f.params[0].mode, ParamMode::Borrow);
-                match &f.params[0].ty {
-                    TypeExpr::Array { length, .. } => assert_eq!(*length, 3),
-                    _ => panic!("expected Array type"),
-                }
-            }
-            _ => panic!("expected Function"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_param_multiple() {
-        // Multiple borrow parameters
-        let result = parse("fn sum(borrow a: i32, borrow b: i32) -> i32 { a + b }").unwrap();
-        match &result.ast.items[0] {
-            Item::Function(f) => {
-                assert_eq!(f.params.len(), 2);
-                assert_eq!(f.params[0].mode, ParamMode::Borrow);
-                assert_eq!(f.params[1].mode, ParamMode::Borrow);
-            }
-            _ => panic!("expected Function"),
-        }
-    }
-
-    // ==================== Borrow Argument Parsing Tests ====================
-
-    #[test]
-    fn test_borrow_arg_simple() {
-        // Function call with a borrow argument
-        let result = parse_expr("read(borrow x)").unwrap();
-        match &result.expr {
-            Expr::Call(call) => {
-                assert_eq!(result.get(call.name.name), "read");
-                assert_eq!(call.args.len(), 1);
-                assert_eq!(call.args[0].mode, ArgMode::Borrow);
-                match &call.args[0].expr {
-                    Expr::Ident(ident) => assert_eq!(result.get(ident.name), "x"),
-                    _ => panic!("expected Ident argument"),
-                }
-            }
-            _ => panic!("expected Call, got {:?}", result.expr),
-        }
-    }
-
-    #[test]
-    fn test_borrow_arg_mixed_with_normal() {
-        // Mixed borrow and normal arguments
-        let result = parse_expr("foo(borrow a, b)").unwrap();
-        match &result.expr {
-            Expr::Call(call) => {
-                assert_eq!(call.args.len(), 2);
-                assert_eq!(call.args[0].mode, ArgMode::Borrow);
-                assert_eq!(call.args[1].mode, ArgMode::Normal);
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_arg_mixed_with_inout() {
-        // Borrow and inout arguments in the same call
-        let result = parse_expr("modify(borrow a, inout b)").unwrap();
-        match &result.expr {
-            Expr::Call(call) => {
-                assert_eq!(call.args.len(), 2);
-                assert_eq!(call.args[0].mode, ArgMode::Borrow);
-                assert_eq!(call.args[1].mode, ArgMode::Inout);
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_arg_multiple() {
-        // Multiple borrow arguments
-        let result = parse_expr("sum(borrow x, borrow y)").unwrap();
-        match &result.expr {
-            Expr::Call(call) => {
-                assert_eq!(call.args.len(), 2);
-                assert_eq!(call.args[0].mode, ArgMode::Borrow);
-                assert_eq!(call.args[1].mode, ArgMode::Borrow);
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_arg_with_field_access() {
-        // Borrow argument with field access expression
-        let result = parse_expr("read(borrow point.x)").unwrap();
-        match &result.expr {
-            Expr::Call(call) => {
-                assert_eq!(call.args.len(), 1);
-                assert_eq!(call.args[0].mode, ArgMode::Borrow);
-                match &call.args[0].expr {
-                    Expr::Field(field) => assert_eq!(result.get(field.field.name), "x"),
-                    _ => panic!("expected Field expression"),
-                }
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_arg_in_method_call() {
-        // Borrow argument in method call
-        let result = parse_expr("obj.method(borrow x)").unwrap();
-        match &result.expr {
-            Expr::MethodCall(call) => {
-                assert_eq!(call.args.len(), 1);
-                assert_eq!(call.args[0].mode, ArgMode::Borrow);
-            }
-            _ => panic!("expected MethodCall"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_arg_in_associated_function() {
-        // Borrow argument in associated function call
-        let result = parse_expr("Foo::bar(borrow x)").unwrap();
-        match &result.expr {
-            Expr::AssocFnCall(call) => {
-                assert_eq!(call.args.len(), 1);
-                assert_eq!(call.args[0].mode, ArgMode::Borrow);
-            }
-            _ => panic!("expected AssocFnCall"),
-        }
-    }
-
-    #[test]
-    fn test_borrow_helper_methods() {
-        // Test CallArg helper methods
-        let result = parse_expr("foo(borrow x, inout y, z)").unwrap();
-        match &result.expr {
-            Expr::Call(call) => {
-                assert!(call.args[0].is_borrow());
-                assert!(!call.args[0].is_inout());
-                assert!(call.args[1].is_inout());
-                assert!(!call.args[1].is_borrow());
-                assert!(!call.args[2].is_borrow());
-                assert!(!call.args[2].is_inout());
-            }
-            _ => panic!("expected Call"),
         }
     }
 

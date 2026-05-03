@@ -92,17 +92,20 @@ spec = ["2.4:1", "2.4:2"]
 source = "fn main() -> i32 { let struct = 1; 0 }"
 compile_fail = true
 
+# `inout` and `borrow` were reserved keywords through ADR-0062; ADR-0076
+# Phase 6 retired them. They are now ordinary identifiers — the test
+# suite verifies the lexer/parser accepts them as variable names.
 [[case]]
-name = "keyword_inout_reserved"
-spec = ["2.4:1", "2.4:2"]
-source = "fn main() -> i32 { let inout = 1; 0 }"
-compile_fail = true
+name = "former_keyword_inout_now_identifier"
+spec = ["2.4:1"]
+source = "fn main() -> i32 { let inout: i32 = 42; inout }"
+exit_code = 42
 
 [[case]]
-name = "keyword_borrow_reserved"
-spec = ["2.4:1", "2.4:2"]
-source = "fn main() -> i32 { let borrow = 1; 0 }"
-compile_fail = true
+name = "former_keyword_borrow_now_identifier"
+spec = ["2.4:1"]
+source = "fn main() -> i32 { let borrow: i32 = 42; borrow }"
+exit_code = 42
 
 # =============================================================================
 # Type Names Are Reserved
