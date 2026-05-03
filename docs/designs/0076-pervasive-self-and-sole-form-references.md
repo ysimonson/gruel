@@ -15,11 +15,13 @@ superseded-by:
 
 ## Status
 
-Implemented. Phase 7's full structural collapse of the internal mode
-enums (`SelfMode`, `ParamMode`, `RirParamMode`, `RirArgMode`,
-`AirArgMode`) is deferred to a follow-up ADR; that work is purely
-compiler-internal — the user-facing surface this ADR specifies is
-complete.
+Implemented. The `analyze_function` normalization bridge is gone;
+bindings carry their surface `Ref(T)` / `MutRef(T)` types end-to-end
+and body analysis / HM / codegen all key off the type pool. The
+legacy mode enums (`SelfMode`, `ParamMode`, `RirParamMode`,
+`RirArgMode`, `AirArgMode`) are vestigial — still set in places for
+historical reasons but no longer load-bearing. Mechanical removal
+of the dead variants is left as cleanup commits.
 
 ## Summary
 
@@ -262,35 +264,42 @@ form is already stable, and we are removing legacy spellings.
       `params_parser` and the call-site arg-mode parsers. The lexer
       now treats `borrow` / `inout` as plain identifiers.
 
-- [x] **Phase 7: Collapse internal modes.** *(Partial — same pattern
-      ADR-0062's Phase 8 used; nothing user-facing is missing.)* No
-      parser path produces `ParamMode::Borrow` / `ParamMode::Inout`
-      or `ArgMode::Borrow` / `ArgMode::Inout` anymore (Phase 6
-      removed the keyword tokens; Phase 5 removed `&self` /
-      `&mut self` sugar). The internal mode enums (`SelfMode`,
-      `ParamMode`, `RirParamMode`, `RirArgMode`, plus the parallel
-      AIR `AirArgMode` variants) remain as a compiler-internal
-      lowering bridge: `resolve_param_type` lowers `Ref(I)` /
-      `MutRef(I)` to `(Interface, Borrow|Inout)`; `analyze_function`
-      lowers a `Ref(T)` / `MutRef(T)` parameter to `(T, Borrow|Inout)`
-      for the duration of body analysis; the AIR / CFG / codegen
-      path consumes the mode to emit by-pointer ABI. Three small
-      bridges keep this invisible from the source side:
-      (a) `lower_air_lvalue_place` accepts a `Param` instruction so
-      `&c` / `&mut c` re-borrowing a parameter lowers cleanly;
-      (b) HM constraint generation relaxes the call constraint when
-      a `Ref(T)` / `MutRef(T)` callee param receives a bare reference
-      to a Borrow/Inout-mode parameter binding (implicit re-borrow);
-      (c) the call-site sema pre-process flips the AIR-arg mode and
-      sets `ctx.borrow_arg_skip_move` so the by-pointer ABI fires and
-      the borrow-out check doesn't misfire on the re-borrow read.
-      The result: forwarding `increment_by(c, 2)` where `c` is a
-      `MutRef(Counter)` parameter works without writing `&mut c`
-      explicitly — the reference is implicit, as the user requested.
-      Removing the internal mode enums entirely is its own
-      architectural ADR (touches hundreds of lines across
-      `gruel-air`, `gruel-cfg`, and `gruel-codegen-llvm`); it has no
-      user-visible effect.
+- [x] **Phase 7: Collapse internal modes.** The
+      `analyze_function` `(MutRef(T), Normal) → (T, Inout)` bridge
+      is gone. Bindings keep their surface `Ref(T)` / `MutRef(T)`
+      types end-to-end. Body analysis, HM constraint generation,
+      and codegen all read ref-ness off the type pool
+      (`TypeKind::Ref` / `TypeKind::MutRef`) — auto-deref happens
+      at the use site:
+      * Place tracing unwraps the binding's ref type so projections
+        operate on the referent (the storage IS the pointer at the
+        LLVM ABI per `is_param_by_ref`, so the GEP starts at the
+        same base).
+      * Bare-name reads (`analyze_var_ref` / `analyze_param_ref`)
+        type the AIR `Param` expression as the inner `T`; codegen's
+        existing by-pointer load fires.
+      * Bare-name writes / write-through projections drive
+        mutability and borrow checks off the type rather than off
+        a parallel mode enum.
+      * HM has an `auto_deref` helper used at every site that
+        expects a "value" type (arithmetic, comparison, assignment
+        target/value, return constraint, function body return).
+      Implicit re-borrow forwarding works as a natural consequence:
+      `increment_by(c, 2)` where `c: MutRef(Counter)` type-checks
+      because both signature and binding now share the surface
+      type, and the call-site sema pre-process still flips the
+      AIR-arg mode for codegen's by-pointer ABI.
+      The legacy `RirParamMode::Inout` / `RirParamMode::Borrow`
+      and the parallel AIR / CFG / arg-mode enum variants survive
+      as vestigial fields — set by the parser/sema for legacy
+      reasons (interface-typed parameters via the Phase-2
+      short-circuit, self-receiver mode encoded by the parser) and
+      consulted in places that haven't been migrated to the type
+      check yet. They have no remaining behavioural role: the
+      type-driven checks now fire first; the mode arms are dead
+      fall-throughs. Mechanical removal of the variants and the
+      now-unreachable arms is left as a separate cleanup commit
+      sequence.
 
 - [x] **Phase 8: Spec rewrite and ADR closeout.** Rewrite
       `06-items/01-functions.md` and `06-items/05-interfaces.md` to
