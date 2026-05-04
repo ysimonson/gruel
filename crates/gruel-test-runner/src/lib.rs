@@ -1136,7 +1136,8 @@ impl CacheStore {
         let cache_root = target_dir.join("gruel-spec-cache");
         let cache_dir = cache_root.join(&bin_key);
 
-        // Prune old binary-version directories, keeping only the 5 most recent.
+        // Prune old binary-version directories: keep entries from the last 7
+        // days, but never more than 50 (newest first).
         if let Ok(entries) = fs::read_dir(&cache_root) {
             let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = entries
                 .flatten()
@@ -1146,10 +1147,14 @@ impl CacheStore {
                     Some((mtime, e.path()))
                 })
                 .collect();
-            // Newest first; delete everything past the 5th slot.
             dirs.sort_by(|a, b| b.0.cmp(&a.0));
-            for (_, path) in dirs.into_iter().skip(5) {
-                let _ = fs::remove_dir_all(&path);
+            let cutoff =
+                std::time::SystemTime::now().checked_sub(Duration::from_secs(7 * 24 * 60 * 60));
+            for (i, (mtime, path)) in dirs.into_iter().enumerate() {
+                let too_old = cutoff.map(|c| mtime < c).unwrap_or(false);
+                if i >= 50 || too_old {
+                    let _ = fs::remove_dir_all(&path);
+                }
             }
         }
 
