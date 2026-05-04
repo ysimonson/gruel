@@ -130,6 +130,16 @@ impl ModuleRegistry {
         self.len() == 0
     }
 
+    /// Snapshot every module definition in registration order. Used by
+    /// `Sema::has_imports` to filter out prelude-internal `@import`s when
+    /// deciding lazy vs. eager analysis.
+    pub fn all_defs(&self) -> Vec<ModuleDef> {
+        self.defs
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// Extract the module definitions (consumes the registry).
     pub fn into_defs(self) -> Vec<ModuleDef> {
         self.defs

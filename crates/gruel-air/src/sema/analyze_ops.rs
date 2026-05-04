@@ -4960,6 +4960,12 @@ impl<'a> Sema<'a> {
         let is_unchecked = method_info.is_unchecked;
         let has_self = method_info.has_self;
 
+        // ADR-0026 lazy analysis: track this `__call` method as referenced
+        // so its body is analyzed by the work queue. Otherwise the
+        // anonymous-struct method ends up registered in `self.methods`
+        // but never analyzed, producing a link error at codegen time.
+        ctx.referenced_methods.insert((struct_id, call_sym));
+
         // `__call` must be a method (has self) — we enforce it in astgen, but
         // defensive check keeps the failure mode clear for user-defined
         // callable types.
@@ -6248,6 +6254,13 @@ impl<'a> Sema<'a> {
                 span,
             ));
         }
+
+        // ADR-0078: if this entry is an item-level re-export alias
+        // (`pub const X = mod.Y`), use the original symbol name `Y` from
+        // here on so the emitted `Call` targets the actual function
+        // definition, and so the lazy work queue tracks the right
+        // identifier.
+        let name = fn_info.canonical_name.unwrap_or(name);
 
         // Track this function as referenced (for lazy analysis)
         ctx.referenced_functions.insert(name);

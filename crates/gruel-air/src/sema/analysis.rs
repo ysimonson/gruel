@@ -906,6 +906,23 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
 
     all_warnings.sort_by_key(|w| w.span().map(|s| s.start));
 
+    eprintln!(
+        "DEBUG: pre-specialize functions ({} items):",
+        functions.len()
+    );
+    for f in &functions {
+        eprintln!("  - {}", f.name);
+    }
+    eprintln!("DEBUG: sema.methods has {} entries", sema.methods.len());
+    for ((sid, m), info) in sema.methods.iter() {
+        let sname = sema.type_pool.struct_def(*sid).name.clone();
+        let mname = sema.interner.resolve(m).to_string();
+        eprintln!(
+            "  - method ({}.{}) is_generic={} body={:?}",
+            sname, mname, info.is_generic, info.body
+        );
+    }
+
     let mut output = SemaOutput {
         functions,
         strings: global_strings,
@@ -921,6 +938,13 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     // and create specialized function bodies
     if let Err(e) = crate::specialize::specialize(&mut output, sema, &infer_ctx, sema.interner) {
         errors.push(e);
+    }
+    eprintln!(
+        "DEBUG: post-specialize functions ({} items):",
+        output.functions.len()
+    );
+    for f in &output.functions {
+        eprintln!("  - {}", f.name);
     }
 
     // Surface any errors raised during anonymous-host derive expansion
@@ -1072,20 +1096,36 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
             }
             analyzed_methods.insert((struct_id, method_name));
 
-            // Look up the method info
-            let method_info = match sema.methods.get(&(struct_id, method_name)) {
-                Some(info) => *info,
-                None => continue,
-            };
+            // Look up the method info — first in struct methods, then in
+            // enum methods. Enum methods are recorded with the same
+            // `(StructId, Spur)` key shape (StructId reusing the EnumId's
+            // raw u32) so the work queue can dispatch them uniformly.
+            let (method_info, is_enum_method) =
+                if let Some(info) = sema.methods.get(&(struct_id, method_name)) {
+                    (*info, false)
+                } else if let Some(info) = sema
+                    .enum_methods
+                    .get(&(crate::types::EnumId(struct_id.0), method_name))
+                {
+                    (*info, true)
+                } else {
+                    continue;
+                };
 
             // Method-level generic: defer body analysis to specialization.
             if method_info.is_generic {
                 continue;
             }
 
-            // Get the struct definition to find its name for impl block lookup
-            let struct_def = sema.type_pool.struct_def(struct_id);
-            let type_name_str = struct_def.name.clone();
+            // Get the type definition to find its name for impl block lookup
+            let type_name_str = if is_enum_method {
+                sema.type_pool
+                    .enum_def(crate::types::EnumId(struct_id.0))
+                    .name
+                    .clone()
+            } else {
+                sema.type_pool.struct_def(struct_id).name.clone()
+            };
             let type_name_sym = sema.interner.get_or_intern(&type_name_str);
             let method_name_str = sema.interner.resolve(&method_name).to_string();
 
@@ -1180,6 +1220,89 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 continue;
             }
 
+            // ADR-0078: enum methods (named enums declared in source — not
+            // anonymous, those are handled by the fixed-point loop below).
+            // Find the matching `fn` inside the enum's declaration and
+            // analyze its body, mirroring the struct branch below.
+            if is_enum_method {
+                for (_, inst) in sema.rir.iter() {
+                    if let InstData::EnumDecl {
+                        name: enum_name,
+                        methods_start,
+                        methods_len,
+                        ..
+                    } = &inst.data
+                        && *enum_name == type_name_sym
+                    {
+                        let methods = sema.rir.get_inst_refs(*methods_start, *methods_len);
+                        for method_ref in methods {
+                            let method_inst = sema.rir.get(method_ref);
+                            if let InstData::FnDecl {
+                                name: m_name,
+                                params_start,
+                                params_len,
+                                return_type,
+                                body,
+                                has_self,
+                                receiver_mode,
+                                ..
+                            } = &method_inst.data
+                                && *m_name == method_name
+                            {
+                                let params = sema.rir.get_params(*params_start, *params_len);
+                                let full_name = if *has_self {
+                                    format!("{}.{}", type_name_str, method_name_str)
+                                } else {
+                                    format!("{}::{}", type_name_str, method_name_str)
+                                };
+
+                                match sema.analyze_method_function(
+                                    &infer_ctx,
+                                    &full_name,
+                                    MethodBodySpec {
+                                        return_type: *return_type,
+                                        params: &params,
+                                        body: *body,
+                                        host_type: Some(method_info.struct_type),
+                                        has_self: *has_self,
+                                        self_mode: *receiver_mode,
+                                    },
+                                    method_inst.span,
+                                ) {
+                                    Ok((
+                                        analyzed,
+                                        warnings,
+                                        local_strings,
+                                        local_bytes,
+                                        referenced_fns,
+                                        referenced_meths,
+                                    )) => {
+                                        functions_with_strings.push((
+                                            analyzed,
+                                            local_strings,
+                                            local_bytes,
+                                        ));
+                                        all_warnings.extend(warnings);
+                                        for ref_fn in referenced_fns {
+                                            if !analyzed_functions.contains(&ref_fn) {
+                                                pending_functions.push(ref_fn);
+                                            }
+                                        }
+                                        for ref_meth in referenced_meths {
+                                            if !analyzed_methods.contains(&ref_meth) {
+                                                pending_methods.push(ref_meth);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => errors.push(e),
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+
             // Find the method in struct declarations (for named structs)
             for (_, inst) in sema.rir.iter() {
                 if let InstData::StructDecl {
@@ -1262,6 +1385,110 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // ADR-0078: catch-all for anonymous struct methods registered after the
+    // work queue drained. Specialization (for `comptime F: type` parameters
+    // bound to anonymous-struct callable types) and other late-registration
+    // paths can leave `__call` methods unanalyzed if their references
+    // weren't tracked through `ctx.referenced_methods`. The fixed-point
+    // loop here mirrors the anonymous-enum fixed-point loop just below.
+    let mut analyzed_anon_struct_methods: HashSet<(StructId, Spur)> = HashSet::default();
+    // Pre-seed with the methods the work queue already analyzed so we don't
+    // double-emit.
+    for (struct_id, method_name) in &analyzed_methods {
+        analyzed_anon_struct_methods.insert((*struct_id, *method_name));
+    }
+    loop {
+        let pending_anon_struct_methods: Vec<(StructId, Spur, MethodInfo)> = sema
+            .methods
+            .iter()
+            .filter_map(|((struct_id, method_name), method_info)| {
+                let struct_def = sema.type_pool.struct_def(*struct_id);
+                if struct_def.name.starts_with("__anon_struct_")
+                    && !analyzed_anon_struct_methods.contains(&(*struct_id, *method_name))
+                    && !method_info.is_generic
+                {
+                    Some((*struct_id, *method_name, *method_info))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if pending_anon_struct_methods.is_empty() {
+            break;
+        }
+        for (struct_id, method_name, method_info) in pending_anon_struct_methods {
+            analyzed_anon_struct_methods.insert((struct_id, method_name));
+            let struct_def = sema.type_pool.struct_def(struct_id);
+            let type_name_str = struct_def.name.clone();
+            let method_name_str = sema.interner.resolve(&method_name).to_string();
+            let full_name = if method_info.has_self {
+                format!("{}.{}", type_name_str, method_name_str)
+            } else {
+                format!("{}::{}", type_name_str, method_name_str)
+            };
+
+            let param_names = sema.param_arena.names(method_info.params);
+            let param_types = sema.param_arena.types(method_info.params);
+            let param_modes = sema.param_arena.modes(method_info.params);
+            let mut param_info: Vec<(Spur, Type, RirParamMode)> = Vec::new();
+            if method_info.has_self {
+                let self_sym = sema.interner.get_or_intern("self");
+                let self_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                };
+                param_info.push((self_sym, method_info.struct_type, self_mode));
+            }
+            for i in 0..param_names.len() {
+                param_info.push((param_names[i], param_types[i], param_modes[i]));
+            }
+            let struct_id = method_info
+                .struct_type
+                .as_struct()
+                .expect("method must belong to struct");
+            let captured_values = sema
+                .anon_struct_captured_values
+                .get(&struct_id)
+                .cloned()
+                .unwrap_or_else(HashMap::default);
+            match sema.analyze_method_body(
+                &infer_ctx,
+                method_info.return_type,
+                &param_info,
+                method_info.body,
+                method_info.struct_type,
+                &captured_values,
+            ) {
+                Ok((
+                    air,
+                    num_locals,
+                    num_param_slots,
+                    param_modes_result,
+                    param_slot_types,
+                    warnings,
+                    local_strings,
+                    local_bytes,
+                    _ref_fns,
+                    _ref_meths,
+                )) => {
+                    let analyzed = AnalyzedFunction {
+                        name: full_name,
+                        air,
+                        num_locals,
+                        num_param_slots,
+                        param_modes: param_modes_result,
+                        param_slot_types,
+                        is_destructor: false,
+                    };
+                    functions_with_strings.push((analyzed, local_strings, local_bytes));
+                    all_warnings.extend(warnings);
+                }
+                Err(e) => errors.push(e),
             }
         }
     }
@@ -1391,6 +1618,292 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 }
                 Err(e) => errors.push(e),
             }
+        }
+    }
+
+    // ADR-0056 vtable population: every (struct, interface) pair recorded
+    // in `interface_vtables_needed` references the conformer's slot
+    // methods. Codegen emits the vtable, so those methods must be in the
+    // analyzed functions list. Queue them for analysis if the work loop
+    // didn't already pick them up.
+    let vtable_methods: Vec<(StructId, Spur)> = sema
+        .interface_vtables_needed
+        .values()
+        .flat_map(|witness| witness.iter().copied())
+        .collect();
+    for (struct_id, method_name) in vtable_methods {
+        if !analyzed_methods.contains(&(struct_id, method_name)) {
+            pending_methods.push((struct_id, method_name));
+        }
+    }
+    // Drain again now that vtable methods may have been queued.
+    while !pending_methods.is_empty() {
+        let queue = std::mem::take(&mut pending_methods);
+        let mut local_pending = queue;
+        while let Some((struct_id, method_name)) = local_pending.pop() {
+            if analyzed_methods.contains(&(struct_id, method_name)) {
+                continue;
+            }
+            analyzed_methods.insert((struct_id, method_name));
+
+            let (method_info, is_enum_method) =
+                if let Some(info) = sema.methods.get(&(struct_id, method_name)) {
+                    (*info, false)
+                } else if let Some(info) = sema
+                    .enum_methods
+                    .get(&(crate::types::EnumId(struct_id.0), method_name))
+                {
+                    (*info, true)
+                } else {
+                    continue;
+                };
+            if method_info.is_generic {
+                continue;
+            }
+
+            let type_name_str = if is_enum_method {
+                sema.type_pool
+                    .enum_def(crate::types::EnumId(struct_id.0))
+                    .name
+                    .clone()
+            } else {
+                sema.type_pool.struct_def(struct_id).name.clone()
+            };
+            let type_name_sym = sema.interner.get_or_intern(&type_name_str);
+            let method_name_str = sema.interner.resolve(&method_name).to_string();
+
+            // Find the FnDecl in either struct or enum declarations and
+            // analyze its body. (Anon types are handled by the fixed-point
+            // loops below.)
+            let decl_iter: Vec<_> = sema.rir.iter().collect();
+            let mut handled = false;
+            for (_, inst) in decl_iter {
+                let (decl_name, methods_start, methods_len) = match &inst.data {
+                    InstData::StructDecl {
+                        name,
+                        methods_start,
+                        methods_len,
+                        ..
+                    } if !is_enum_method => (*name, *methods_start, *methods_len),
+                    InstData::EnumDecl {
+                        name,
+                        methods_start,
+                        methods_len,
+                        ..
+                    } if is_enum_method => (*name, *methods_start, *methods_len),
+                    _ => continue,
+                };
+                if decl_name != type_name_sym {
+                    continue;
+                }
+                let methods = sema.rir.get_inst_refs(methods_start, methods_len);
+                for method_ref in methods {
+                    let method_inst = sema.rir.get(method_ref);
+                    let InstData::FnDecl {
+                        name: m_name,
+                        params_start,
+                        params_len,
+                        return_type,
+                        body,
+                        has_self,
+                        receiver_mode,
+                        ..
+                    } = &method_inst.data
+                    else {
+                        continue;
+                    };
+                    if *m_name != method_name {
+                        continue;
+                    }
+                    let params = sema.rir.get_params(*params_start, *params_len);
+                    let full_name = if *has_self {
+                        format!("{}.{}", type_name_str, method_name_str)
+                    } else {
+                        format!("{}::{}", type_name_str, method_name_str)
+                    };
+                    match sema.analyze_method_function(
+                        &infer_ctx,
+                        &full_name,
+                        MethodBodySpec {
+                            return_type: *return_type,
+                            params: &params,
+                            body: *body,
+                            host_type: Some(method_info.struct_type),
+                            has_self: *has_self,
+                            self_mode: *receiver_mode,
+                        },
+                        method_inst.span,
+                    ) {
+                        Ok((analyzed, warnings, local_strings, local_bytes, _, _)) => {
+                            functions_with_strings.push((analyzed, local_strings, local_bytes));
+                            all_warnings.extend(warnings);
+                        }
+                        Err(e) => errors.push(e),
+                    }
+                    handled = true;
+                    break;
+                }
+                if handled {
+                    break;
+                }
+            }
+        }
+    }
+
+    // ADR-0058: derive-bound methods spliced onto host types via
+    // `@derive(...)` directives. Same as the sequential path; the work
+    // queue doesn't reach these because they aren't discovered through
+    // direct call lookup.
+    let derive_jobs: Vec<(Spur, Spur, bool, super::DeriveBinding)> = sema
+        .derive_bindings
+        .iter()
+        .map(|b| (b.derive_name, b.host_name, b.host_is_enum, *b))
+        .collect();
+    for (derive_name, host_name, host_is_enum, _binding) in derive_jobs {
+        let dmethods: Vec<crate::sema::info::DeriveMethod> = match sema.derives.get(&derive_name) {
+            Some(info) => info.methods.clone(),
+            None => continue,
+        };
+        if host_is_enum {
+            let enum_id = match sema.enums.get(&host_name).copied() {
+                Some(id) => id,
+                None => continue,
+            };
+            let enum_type = Type::new_enum(enum_id);
+            let host_str = sema.type_pool.enum_def(enum_id).name.clone();
+            for dm in dmethods {
+                let m = sema.rir.get(dm.method_ref);
+                let InstData::FnDecl {
+                    name: method_name,
+                    params_start,
+                    params_len,
+                    return_type,
+                    body,
+                    has_self,
+                    receiver_mode,
+                    ..
+                } = &m.data
+                else {
+                    continue;
+                };
+                let method_str = sema.interner.resolve(method_name).to_string();
+                let params = sema.rir.get_params(*params_start, *params_len);
+                let full_name = if *has_self {
+                    format!("{}.{}", host_str, method_str)
+                } else {
+                    format!("{}::{}", host_str, method_str)
+                };
+                match sema.analyze_method_function(
+                    &infer_ctx,
+                    &full_name,
+                    MethodBodySpec {
+                        return_type: *return_type,
+                        params: &params,
+                        body: *body,
+                        host_type: Some(enum_type),
+                        has_self: *has_self,
+                        self_mode: *receiver_mode,
+                    },
+                    m.span,
+                ) {
+                    Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                        functions_with_strings.push((analyzed, local_strings, local_bytes));
+                        all_warnings.extend(warnings);
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+        } else {
+            let struct_id = match sema.structs.get(&host_name).copied() {
+                Some(id) => id,
+                None => continue,
+            };
+            let struct_type = Type::new_struct(struct_id);
+            let host_str = sema.type_pool.struct_def(struct_id).name.clone();
+            for dm in dmethods {
+                let m = sema.rir.get(dm.method_ref);
+                let InstData::FnDecl {
+                    name: method_name,
+                    params_start,
+                    params_len,
+                    return_type,
+                    body,
+                    has_self,
+                    receiver_mode,
+                    ..
+                } = &m.data
+                else {
+                    continue;
+                };
+                let method_str = sema.interner.resolve(method_name).to_string();
+                let params = sema.rir.get_params(*params_start, *params_len);
+                let full_name = if *has_self {
+                    format!("{}.{}", host_str, method_str)
+                } else {
+                    format!("{}::{}", host_str, method_str)
+                };
+                match sema.analyze_method_function(
+                    &infer_ctx,
+                    &full_name,
+                    MethodBodySpec {
+                        return_type: *return_type,
+                        params: &params,
+                        body: *body,
+                        host_type: Some(struct_type),
+                        has_self: *has_self,
+                        self_mode: *receiver_mode,
+                    },
+                    m.span,
+                ) {
+                    Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                        functions_with_strings.push((analyzed, local_strings, local_bytes));
+                        all_warnings.extend(warnings);
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+        }
+    }
+
+    // ADR-0053 phase 3 / 3b: also analyze inline `fn drop(self)` destructors
+    // (struct- or enum-body declared) — same as the sequential path. The
+    // lazy work queue doesn't reach these because the methods aren't
+    // discovered through call dispatch.
+    let inline_struct_drops: Vec<(StructId, InstRef, Span)> = sema
+        .inline_struct_drops
+        .iter()
+        .map(|(sid, (body, span))| (*sid, *body, *span))
+        .collect();
+    for (struct_id, body, drop_span) in inline_struct_drops {
+        let struct_def = sema.type_pool.struct_def(struct_id);
+        let type_name_str = struct_def.name.clone();
+        let full_name = format!("{}.__drop", type_name_str);
+        let struct_type = Type::new_struct(struct_id);
+        match sema.analyze_destructor_function(&infer_ctx, &full_name, body, drop_span, struct_type)
+        {
+            Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                functions_with_strings.push((analyzed, local_strings, local_bytes));
+                all_warnings.extend(warnings);
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+    let inline_enum_drops_vec: Vec<(EnumId, InstRef, Span)> = sema
+        .inline_enum_drops
+        .iter()
+        .map(|(eid, (body, span))| (*eid, *body, *span))
+        .collect();
+    for (enum_id, body, drop_span) in inline_enum_drops_vec {
+        let enum_def = sema.type_pool.enum_def(enum_id);
+        let type_name_str = enum_def.name.clone();
+        let full_name = format!("{}.__drop", type_name_str);
+        let enum_type = Type::new_enum(enum_id);
+        match sema.analyze_destructor_function(&infer_ctx, &full_name, body, drop_span, enum_type) {
+            Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                functions_with_strings.push((analyzed, local_strings, local_bytes));
+                all_warnings.extend(warnings);
+            }
+            Err(e) => errors.push(e),
         }
     }
 
@@ -3316,6 +3829,10 @@ impl<'a> Sema<'a> {
                 },
                 span,
             )?;
+            // ADR-0026 lazy analysis: track this enum method as referenced
+            // so its body is analyzed by the work queue. The same fix as
+            // the struct-method path above.
+            ctx.referenced_methods.insert((StructId(enum_id.0), method));
 
             if !method_info.has_self {
                 return Err(CompileError::new(
@@ -3628,6 +4145,13 @@ impl<'a> Sema<'a> {
             },
             span,
         )?;
+        // ADR-0026 lazy analysis (and ADR-0078 prelude module loading):
+        // record the dispatched method as referenced so the lazy work
+        // queue analyzes its body. Without this, anonymous-struct
+        // `__call` methods (and any other dispatched-by-method-call
+        // method) are registered but their bodies never get codegen,
+        // causing link errors.
+        ctx.referenced_methods.insert(method_key);
         let method_info = &method_info;
 
         // Check that this is a method (has self), not an associated function

@@ -1784,6 +1784,7 @@ impl<'a> Sema<'a> {
                 is_pub,
                 is_unchecked,
                 file_id: span.file_id,
+                canonical_name: None,
             },
         );
         Ok(())
@@ -2360,7 +2361,14 @@ impl<'a> Sema<'a> {
             if fn_path == module_file_path {
                 if !same_name {
                     self.check_alias_collision(name, span)?;
-                    let alias = FunctionInfo { is_pub, ..fn_info };
+                    // Resolve to the canonical (non-aliased) name so chains
+                    // of re-exports collapse to the original function symbol.
+                    let canonical = fn_info.canonical_name.unwrap_or(field);
+                    let alias = FunctionInfo {
+                        is_pub,
+                        canonical_name: Some(canonical),
+                        ..fn_info
+                    };
                     self.functions.insert(name, alias);
                 }
                 return Ok(true);

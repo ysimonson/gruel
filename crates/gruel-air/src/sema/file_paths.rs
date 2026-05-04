@@ -35,7 +35,25 @@ impl<'a> Sema<'a> {
     /// When imports are present, lazy analysis is used to only analyze
     /// functions reachable from main(). For single-file compilation,
     /// eager analysis is used for backwards compatibility.
+    ///
+    /// ADR-0078: prelude files (under `std/prelude/`) using `@import`
+    /// shouldn't switch the user's compilation into lazy mode — that's a
+    /// behavioral change visible to user code that has nothing to do
+    /// with whether *they* used `@import`. Filter the registry to count
+    /// only modules whose files live outside `std/prelude/`.
     pub(crate) fn has_imports(&self) -> bool {
-        !self.module_registry.is_empty()
+        for def in self.module_registry.all_defs() {
+            if !is_prelude_path(&def.file_path) {
+                return true;
+            }
+        }
+        false
     }
+}
+
+/// Path-based predicate: the file lives inside the prelude directory
+/// (`std/prelude/...`). Used by `has_imports` to ignore prelude-internal
+/// `@import`s when deciding lazy vs. eager analysis.
+fn is_prelude_path(path: &str) -> bool {
+    path.contains("std/prelude/") || path.contains("std\\prelude\\")
 }

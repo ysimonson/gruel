@@ -196,7 +196,7 @@ fn read_disk_std(std_dir: &Path) -> Option<ResolvedPrelude> {
     let root_path = std_dir.join(PRELUDE_ROOT_REL);
     let root_source = std::fs::read_to_string(&root_path).ok()?;
     let mut aux_collected = Vec::new();
-    collect_gruel_files(std_dir, std_dir, &mut aux_collected);
+    collect_gruel_files(std_dir, &mut aux_collected);
     let root = ResolvedPreludeFile {
         path: root_path.to_string_lossy().into_owned(),
         source: root_source,
@@ -218,7 +218,7 @@ fn read_disk_std(std_dir: &Path) -> Option<ResolvedPrelude> {
     Some(split_prelude_dir(by_rel, root))
 }
 
-fn collect_gruel_files(base: &Path, dir: &Path, out: &mut Vec<ResolvedPreludeFile>) {
+fn collect_gruel_files(dir: &Path, out: &mut Vec<ResolvedPreludeFile>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -226,7 +226,7 @@ fn collect_gruel_files(base: &Path, dir: &Path, out: &mut Vec<ResolvedPreludeFil
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_gruel_files(base, &path, out);
+            collect_gruel_files(&path, out);
         } else if path.extension().and_then(|s| s.to_str()) == Some("gruel")
             && let Ok(source) = std::fs::read_to_string(&path)
         {

@@ -32,6 +32,13 @@ pub struct FunctionInfo {
     pub is_unchecked: bool,
     /// File ID this function was declared in (for visibility checking)
     pub file_id: FileId,
+    /// ADR-0078: when this entry is an item-level re-export alias
+    /// (`pub const X = mod.Y`), this is the canonical name `Y` of the
+    /// re-exported function. Call-site codegen uses this name so the
+    /// emitted `Call` instruction targets the original function symbol
+    /// (which is what's actually defined in the binary). For
+    /// non-aliased entries this is `None`.
+    pub canonical_name: Option<Spur>,
 }
 
 /// Information about a method in an impl block.
