@@ -867,162 +867,19 @@ pub fn is_reserved_type_constructor_name(name: &str) -> bool {
 }
 
 // ============================================================================
-// Built-in Interfaces (compiler-recognized)
+// Built-in Interfaces (Drop, Copy, Clone, Handle)
 // ============================================================================
+//
+// ADR-0078 Phase 2: the interface declarations live in
+// `std/prelude/interfaces.gruel`. The compiler still recognizes them by
+// interned name (the hardcoded behaviors — drop glue, @derive(Copy/Clone)
+// synthesis, Handle linearity carve-out — key off these names).
 
-/// A type slot inside a built-in interface method signature.
-///
-/// Mirrors the air-side `IfaceTy`, but stays free of any dependency on the
-/// type system so this crate can describe the signatures declaratively. Sema
-/// translates these into `IfaceTy` when injecting the interfaces.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltinIfaceTy {
-    /// `Self` — substituted with the candidate type at conformance time.
-    SelfType,
-    /// Unit type `()`.
-    Unit,
-}
-
-impl BuiltinIfaceTy {
-    fn name(self, self_ty: &str) -> String {
-        match self {
-            BuiltinIfaceTy::SelfType => self_ty.to_string(),
-            BuiltinIfaceTy::Unit => "()".to_string(),
-        }
-    }
-}
-
-/// A required method signature inside a built-in interface.
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinInterfaceMethod {
-    /// Method name (e.g., "drop").
-    pub name: &'static str,
-    /// How the receiver is passed.
-    pub receiver_mode: ReceiverMode,
-    /// Parameter slots after the receiver.
-    pub param_types: &'static [BuiltinIfaceTy],
-    /// Return slot.
-    pub return_type: BuiltinIfaceTy,
-}
-
-/// Definition of a compiler-recognized interface (e.g., `Drop`, `Copy`).
-///
-/// These interfaces are injected before user code is processed so their names
-/// are always resolvable. Conformance is checked structurally — a type
-/// satisfies the interface when it provides matching methods.
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinInterfaceDef {
-    /// Interface name as it appears in source code (e.g., "Drop").
-    pub name: &'static str,
-    /// Required method signatures, in declaration order.
-    pub methods: &'static [BuiltinInterfaceMethod],
-    /// One-line description for the generated reference page.
-    pub description: &'static str,
-    /// How a type opts in to this interface. Surfaced in the generated
-    /// reference so the interface and its conformance shortcut stay
-    /// documented together.
-    pub conformance: BuiltinInterfaceConformance,
-}
-
-/// How a type comes to satisfy a built-in interface.
-#[derive(Debug, Clone, Copy)]
-pub enum BuiltinInterfaceConformance {
-    /// Conformance is triggered by the presence of a method matching the
-    /// interface signature. No `@derive` directive is recognized.
-    /// The string is a human-readable summary (e.g., "defining `fn drop(self)`").
-    MethodPresence(&'static str),
-    /// Conformance is requested via a compiler-recognized
-    /// `@derive(Name)` directive that the compiler short-circuits
-    /// (no user `derive` declaration required). The string describes
-    /// what the directive does (e.g., "validates all fields are `Copy`").
-    CompilerDerive {
-        directive: &'static str,
-        synthesis: &'static str,
-    },
-}
-
-/// `Drop` — types with cleanup logic. ADR-0059.
-pub static DROP_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
-    name: "Drop",
-    methods: &[BuiltinInterfaceMethod {
-        name: "drop",
-        receiver_mode: ReceiverMode::ByValue,
-        param_types: &[],
-        return_type: BuiltinIfaceTy::Unit,
-    }],
-    description: "Types with custom cleanup logic that runs when the value goes out of scope (ADR-0059).",
-    conformance: BuiltinInterfaceConformance::MethodPresence(
-        "Defining `fn drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.",
-    ),
-};
-
-/// `Copy` — types that may be implicitly duplicated. ADR-0059.
-pub static COPY_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
-    name: "Copy",
-    methods: &[BuiltinInterfaceMethod {
-        name: "copy",
-        receiver_mode: ReceiverMode::ByRef,
-        param_types: &[],
-        return_type: BuiltinIfaceTy::SelfType,
-    }],
-    description: "Types that may be implicitly duplicated by bitwise copy on use (ADR-0059).",
-    conformance: BuiltinInterfaceConformance::CompilerDerive {
-        directive: "@derive(Copy)",
-        synthesis: "Validates that every field is `Copy` and tags the type as Copy. The `copy` method itself is never user-written; the compiler emits a bitwise copy. Mutually exclusive with `Drop`.",
-    },
-};
-
-/// `Clone` — types that may be explicitly duplicated. ADR-0065.
-pub static CLONE_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
-    name: "Clone",
-    methods: &[BuiltinInterfaceMethod {
-        name: "clone",
-        receiver_mode: ReceiverMode::ByRef,
-        param_types: &[],
-        return_type: BuiltinIfaceTy::SelfType,
-    }],
-    description: "Types that may be explicitly duplicated via `.clone()`. All `Copy` types auto-conform (ADR-0065).",
-    conformance: BuiltinInterfaceConformance::CompilerDerive {
-        directive: "@derive(Clone)",
-        synthesis: "Synthesizes a `clone` method that recursively calls `clone` on every field (struct) or variant payload (enum). Synthesis fails if any field is not `Clone`. Rejected on `linear` types.",
-    },
-};
-
-/// `Handle` — types that may be explicitly duplicated by call. ADR-0075.
-pub static HANDLE_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
-    name: "Handle",
-    methods: &[BuiltinInterfaceMethod {
-        name: "handle",
-        receiver_mode: ReceiverMode::ByRef,
-        param_types: &[],
-        return_type: BuiltinIfaceTy::SelfType,
-    }],
-    description: "Types that may be explicitly duplicated via `.handle()`, typically because the duplication has visible cost (refcount bumps, transaction forks). Unlike `Clone`, `Handle` is permitted on `linear` types (ADR-0075).",
-    conformance: BuiltinInterfaceConformance::MethodPresence(
-        "Defining `fn handle(borrow self) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.",
-    ),
-};
-
-/// All compiler-recognized interfaces.
-///
-/// `gruel-air` iterates over this slice in `inject_builtin_interfaces` to
-/// register the names before user code is parsed.
-pub static BUILTIN_INTERFACES: &[&BuiltinInterfaceDef] = &[
-    &DROP_INTERFACE,
-    &COPY_INTERFACE,
-    &CLONE_INTERFACE,
-    &HANDLE_INTERFACE,
-];
-
-/// Look up a built-in interface by name.
-pub fn get_builtin_interface(name: &str) -> Option<&'static BuiltinInterfaceDef> {
-    BUILTIN_INTERFACES.iter().find(|i| i.name == name).copied()
-}
-
-/// Check if a name is reserved for a built-in interface.
-pub fn is_reserved_interface_name(name: &str) -> bool {
-    BUILTIN_INTERFACES.iter().any(|i| i.name == name)
-}
+/// Names of the four compiler-recognized built-in interfaces. Kept here only
+/// so the doc generator can point at `std/prelude/interfaces.gruel` for
+/// canonical declarations. Do not use this for anything load-bearing — the
+/// compiler resolves these names through the prelude scope.
+pub static BUILTIN_INTERFACE_NAMES: &[&str] = &["Drop", "Copy", "Clone", "Handle"];
 
 // ============================================================================
 // Helper methods
@@ -1250,26 +1107,13 @@ pub fn render_reference_markdown() -> String {
     out.push('\n');
 
     out.push_str("### Interfaces\n\n");
-    out.push_str("| Name | Methods | Conformance |\n");
+    out.push_str("Compiler-recognized interfaces are declared in `std/prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Copy)` / `@derive(Clone)` synthesis, `Handle` linearity carve-out).\n\n");
+    out.push_str("| Name | Method | Conformance |\n");
     out.push_str("|---|---|---|\n");
-    for i in BUILTIN_INTERFACES {
-        let methods = i
-            .methods
-            .iter()
-            .map(|m| format!("`{}`", m.name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let conformance = match i.conformance {
-            BuiltinInterfaceConformance::MethodPresence(_) => "method presence".to_string(),
-            BuiltinInterfaceConformance::CompilerDerive { directive, .. } => {
-                format!("`{}`", directive)
-            }
-        };
-        out.push_str(&format!(
-            "| `{}` | {} | {} |\n",
-            i.name, methods, conformance
-        ));
-    }
+    out.push_str("| `Drop` | `fn drop(self)` | method presence |\n");
+    out.push_str("| `Copy` | `fn copy(self: Ref(Self)) -> Self` | `@derive(Copy)` |\n");
+    out.push_str("| `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |\n");
+    out.push_str("| `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |\n");
     out.push('\n');
 
     // ---- Types in detail ----
@@ -1372,52 +1216,38 @@ pub fn render_reference_markdown() -> String {
     }
 
     // ---- Interfaces in detail ----
+    //
+    // ADR-0078 Phase 2: declarations live in `std/prelude/interfaces.gruel`.
+    // Names listed here as a directory; canonical signatures and method
+    // bodies are in the prelude file.
     out.push_str("## Interfaces\n\n");
-    out.push_str("Built-in interfaces are injected before user code is processed so their names are always resolvable. Conformance is structural — a type satisfies the interface when it provides matching methods.\n\n");
-    for i in BUILTIN_INTERFACES {
-        out.push_str(&format!("### `{}`\n\n", i.name));
-        out.push_str(&format!("{}\n\n", i.description));
-        out.push_str("**Required methods:**\n\n");
-        for m in i.methods {
-            out.push_str(&format!("- `{}`\n", interface_method_signature(m, "Self")));
-        }
-        out.push('\n');
-        match i.conformance {
-            BuiltinInterfaceConformance::MethodPresence(notes) => {
-                out.push_str("**Conformance:** structural (no derive). ");
-                out.push_str(notes);
-                out.push_str("\n\n");
-            }
-            BuiltinInterfaceConformance::CompilerDerive {
-                directive,
-                synthesis,
-            } => {
-                out.push_str(&format!("**Conformance derive:** `{}` ", directive));
-                out.push_str("(compiler-recognized; no user `derive` declaration required). ");
-                out.push_str(synthesis);
-                out.push_str("\n\n");
-            }
-        }
-    }
+    out.push_str("Compiler-recognized interfaces. Declarations live in `std/prelude/interfaces.gruel`; the compiler keys off the interface names for hardcoded behaviors. Conformance is structural — a type satisfies the interface when it provides matching methods.\n\n");
+
+    out.push_str("### `Drop`\n\n");
+    out.push_str("Types with custom cleanup logic that runs when the value goes out of scope (ADR-0059).\n\n");
+    out.push_str("**Required methods:**\n\n");
+    out.push_str("- `fn drop(self)`\n\n");
+    out.push_str("**Conformance:** structural (no derive). Defining `fn drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.\n\n");
+
+    out.push_str("### `Copy`\n\n");
+    out.push_str("Types that may be implicitly duplicated by bitwise copy on use (ADR-0059).\n\n");
+    out.push_str("**Required methods:**\n\n");
+    out.push_str("- `fn copy(self: Ref(Self)) -> Self`\n\n");
+    out.push_str("**Conformance derive:** `@derive(Copy)` (compiler-recognized; no user `derive` declaration required). Validates that every field is `Copy` and tags the type as Copy. The `copy` method itself is never user-written; the compiler emits a bitwise copy. Mutually exclusive with `Drop`.\n\n");
+
+    out.push_str("### `Clone`\n\n");
+    out.push_str("Types that may be explicitly duplicated via `.clone()`. All `Copy` types auto-conform (ADR-0065).\n\n");
+    out.push_str("**Required methods:**\n\n");
+    out.push_str("- `fn clone(self: Ref(Self)) -> Self`\n\n");
+    out.push_str("**Conformance derive:** `@derive(Clone)` (compiler-recognized; no user `derive` declaration required). Synthesizes a `clone` method that recursively calls `clone` on every field (struct) or variant payload (enum). Synthesis fails if any field is not `Clone`. Rejected on `linear` types.\n\n");
+
+    out.push_str("### `Handle`\n\n");
+    out.push_str("Types that may be explicitly duplicated via `.handle()`, typically because the duplication has visible cost (refcount bumps, transaction forks). Unlike `Clone`, `Handle` is permitted on `linear` types (ADR-0075).\n\n");
+    out.push_str("**Required methods:**\n\n");
+    out.push_str("- `fn handle(self: Ref(Self)) -> Self`\n\n");
+    out.push_str("**Conformance:** structural (no derive). Defining `fn handle(self: Ref(Self)) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.\n\n");
 
     out
-}
-
-fn interface_method_signature(m: &BuiltinInterfaceMethod, self_ty: &str) -> String {
-    let mut s = String::from("fn ");
-    s.push_str(m.name);
-    s.push('(');
-    s.push_str(m.receiver_mode.signature());
-    for (i, p) in m.param_types.iter().enumerate() {
-        s.push_str(", ");
-        s.push_str(&format!("arg{}: {}", i, p.name(self_ty)));
-    }
-    s.push(')');
-    if !matches!(m.return_type, BuiltinIfaceTy::Unit) {
-        s.push_str(" -> ");
-        s.push_str(&m.return_type.name(self_ty));
-    }
-    s
 }
 
 #[cfg(test)]

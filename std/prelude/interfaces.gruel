@@ -1,0 +1,35 @@
+// ADR-0078 Phase 2: built-in interface declarations.
+//
+// `Drop`, `Copy`, `Clone`, `Handle` are compiler-recognized interfaces. The
+// compiler keys off these names for hardcoded behaviors:
+//
+//   - `Drop` (ADR-0059): auto-runs `.drop(self)` at scope end. Conformance
+//     by method presence — no `@derive(Drop)` directive.
+//   - `Copy` (ADR-0059): types tagged via `@derive(Copy)` are implicitly
+//     duplicated by bitwise copy. The `copy` method body is never
+//     user-written; codegen emits the bitwise copy.
+//   - `Clone` (ADR-0065): types tagged via `@derive(Clone)` get a recursive
+//     `clone` method synthesized field-by-field. Rejected on linear types.
+//   - `Handle` (ADR-0075): explicit duplication via `.handle()`, permitted
+//     on linear types. Conformance by method presence.
+//
+// Moving the *declarations* here (ADR-0078) lets contributors edit interface
+// shapes as Gruel source. The compiler still recognizes the names by interned
+// lookup — adding a method to one of these interfaces requires both editing
+// the declaration here and updating the corresponding hardcoded behavior.
+
+pub interface Drop {
+    fn drop(self);
+}
+
+pub interface Copy {
+    fn copy(self: Ref(Self)) -> Self;
+}
+
+pub interface Clone {
+    fn clone(self: Ref(Self)) -> Self;
+}
+
+pub interface Handle {
+    fn handle(self: Ref(Self)) -> Self;
+}

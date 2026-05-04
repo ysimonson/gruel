@@ -234,12 +234,12 @@ Each phase ships independently behind the `stdlib_mvp` preview gate, ends with `
 
 ### Phase 2: Built-in interfaces → Gruel
 
-- [ ] Verify ADR-0056 surface syntax for `interface` declarations; if absent, this phase blocks until ADR-0056 ships its surface form. Adjust syntax of the four interface declarations accordingly.
-- [ ] Create `std/prelude/interfaces.gruel` with `Drop`, `Copy`, `Clone`, `Handle`.
-- [ ] Replace `inject_builtin_interfaces` with name-lookup against the prelude scope; the four hardcoded behaviors (drop glue, `@derive(Copy)`/`@derive(Clone)`, `Handle` linearity) keep working keyed off interned names.
-- [ ] Delete `BUILTIN_INTERFACES`, the four interface constants, `BuiltinInterfaceDef`/`Method`/`IfaceTy`/`Conformance` types.
-- [ ] Update generated docs that pull from `BUILTIN_INTERFACES` to read from the prelude module.
-- [ ] `make test`.
+- [x] ADR-0056 surface syntax verified: `interface Name { fn method(self...) -> RetType; }` with receiver modes `self`, `self: Self`, `self: Ref(Self)`, `self: MutRef(Self)`.
+- [x] Created `std/prelude/interfaces.gruel` with `Drop`, `Copy`, `Clone`, `Handle` declarations.
+- [x] Removed `inject_builtin_interfaces` from `gruel-air/src/sema/builtins.rs`. Interface declarations now flow through standard `resolve_declarations`; conformance still keys off interned names (`"Copy"`, `"Drop"`, `"Clone"`).
+- [x] Deleted `BUILTIN_INTERFACES`, `DROP_INTERFACE`, `COPY_INTERFACE`, `CLONE_INTERFACE`, `HANDLE_INTERFACE`, `BuiltinInterfaceDef`, `BuiltinInterfaceMethod`, `BuiltinIfaceTy`, `BuiltinInterfaceConformance` from `gruel-builtins/src/lib.rs`. Kept a small `BUILTIN_INTERFACE_NAMES` static for breadcrumbs.
+- [x] Replaced doc-generator iteration over `BUILTIN_INTERFACES` with static text; `make gen-builtins-docs` and `make check-builtins-docs` clean.
+- [x] All 2073 spec tests + 89 UI tests pass.
 
 ### Phase 3: Built-in enums → Gruel
 

@@ -32,6 +32,10 @@ use std::path::{Path, PathBuf};
 /// corresponding on-disk file under `std/prelude/`.
 const PRELUDE_FILES: &[(&str, &str)] = &[
     (
+        "interfaces.gruel",
+        include_str!("../../../std/prelude/interfaces.gruel"),
+    ),
+    (
         "option.gruel",
         include_str!("../../../std/prelude/option.gruel"),
     ),

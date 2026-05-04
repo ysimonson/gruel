@@ -35,12 +35,14 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 
 ### Interfaces
 
-| Name | Methods | Conformance |
+Compiler-recognized interfaces are declared in `std/prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Copy)` / `@derive(Clone)` synthesis, `Handle` linearity carve-out).
+
+| Name | Method | Conformance |
 |---|---|---|
-| `Drop` | `drop` | method presence |
-| `Copy` | `copy` | `@derive(Copy)` |
-| `Clone` | `clone` | `@derive(Clone)` |
-| `Handle` | `handle` | method presence |
+| `Drop` | `fn drop(self)` | method presence |
+| `Copy` | `fn copy(self: Ref(Self)) -> Self` | `@derive(Copy)` |
+| `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |
+| `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |
 
 ## Types
 
@@ -174,7 +176,7 @@ Built-in enums are injected as synthetic enum types. They are used by reflection
 
 ## Interfaces
 
-Built-in interfaces are injected before user code is processed so their names are always resolvable. Conformance is structural — a type satisfies the interface when it provides matching methods.
+Compiler-recognized interfaces. Declarations live in `std/prelude/interfaces.gruel`; the compiler keys off the interface names for hardcoded behaviors. Conformance is structural — a type satisfies the interface when it provides matching methods.
 
 ### `Drop`
 
@@ -192,7 +194,7 @@ Types that may be implicitly duplicated by bitwise copy on use (ADR-0059).
 
 **Required methods:**
 
-- `fn copy(&self) -> Self`
+- `fn copy(self: Ref(Self)) -> Self`
 
 **Conformance derive:** `@derive(Copy)` (compiler-recognized; no user `derive` declaration required). Validates that every field is `Copy` and tags the type as Copy. The `copy` method itself is never user-written; the compiler emits a bitwise copy. Mutually exclusive with `Drop`.
 
@@ -202,7 +204,7 @@ Types that may be explicitly duplicated via `.clone()`. All `Copy` types auto-co
 
 **Required methods:**
 
-- `fn clone(&self) -> Self`
+- `fn clone(self: Ref(Self)) -> Self`
 
 **Conformance derive:** `@derive(Clone)` (compiler-recognized; no user `derive` declaration required). Synthesizes a `clone` method that recursively calls `clone` on every field (struct) or variant payload (enum). Synthesis fails if any field is not `Clone`. Rejected on `linear` types.
 
@@ -212,7 +214,7 @@ Types that may be explicitly duplicated via `.handle()`, typically because the d
 
 **Required methods:**
 
-- `fn handle(&self) -> Self`
+- `fn handle(self: Ref(Self)) -> Self`
 
-**Conformance:** structural (no derive). Defining `fn handle(borrow self) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.
+**Conformance:** structural (no derive). Defining `fn handle(self: Ref(Self)) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.
 

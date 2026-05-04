@@ -5,31 +5,10 @@
 //! Built-in types are registered before user code is processed,
 //! enabling collision detection and proper type resolution.
 
-use gruel_builtins::{
-    BUILTIN_ENUMS, BUILTIN_INTERFACES, BUILTIN_TYPES, BuiltinFieldType, BuiltinIfaceTy,
-    BuiltinTypeDef, ReceiverMode as BuiltinReceiverMode,
-};
+use gruel_builtins::{BUILTIN_ENUMS, BUILTIN_TYPES, BuiltinFieldType, BuiltinTypeDef};
 
 use super::Sema;
-use crate::types::{
-    EnumDef, EnumVariantDef, IfaceTy, InterfaceDef, InterfaceId, InterfaceMethodReq, ReceiverMode,
-    StructDef, StructField, StructId, Type, TypeKind,
-};
-
-fn convert_receiver_mode(mode: BuiltinReceiverMode) -> ReceiverMode {
-    match mode {
-        BuiltinReceiverMode::ByValue => ReceiverMode::ByValue,
-        BuiltinReceiverMode::ByRef => ReceiverMode::Borrow,
-        BuiltinReceiverMode::ByMutRef => ReceiverMode::Inout,
-    }
-}
-
-fn convert_iface_ty(ty: BuiltinIfaceTy) -> IfaceTy {
-    match ty {
-        BuiltinIfaceTy::SelfType => IfaceTy::SelfType,
-        BuiltinIfaceTy::Unit => IfaceTy::Concrete(Type::UNIT),
-    }
-}
+use crate::types::{EnumDef, EnumVariantDef, StructDef, StructField, StructId, Type, TypeKind};
 
 impl<'a> Sema<'a> {
     /// Phase 0: Inject built-in types as synthetic structs and enums.
@@ -131,42 +110,12 @@ impl<'a> Sema<'a> {
             }
         }
 
-        // Inject the compiler-recognized `Drop` and `Copy` interfaces
-        // (ADR-0059). Drop has `fn drop(self)`; Copy has
-        // `fn copy(borrow self) -> Self`. The shapes are referenced by the
-        // ownership trichotomy and by `@derive(Copy)` validation.
-        self.inject_builtin_interfaces();
-    }
-
-    /// Register the compiler-recognized interfaces (`Drop`, `Copy`, `Clone`)
-    /// from the [`BUILTIN_INTERFACES`] registry. Called from
-    /// `inject_builtin_types` so the names are already resolvable when user
-    /// code is parsed.
-    fn inject_builtin_interfaces(&mut self) {
-        for builtin in BUILTIN_INTERFACES {
-            let name_spur = self.interner.get_or_intern_static(builtin.name);
-            if self.interfaces.contains_key(&name_spur) {
-                continue;
-            }
-            let methods = builtin
-                .methods
-                .iter()
-                .map(|m| InterfaceMethodReq {
-                    name: m.name.to_string(),
-                    receiver: convert_receiver_mode(m.receiver_mode),
-                    param_types: m.param_types.iter().map(|t| convert_iface_ty(*t)).collect(),
-                    return_type: convert_iface_ty(m.return_type),
-                })
-                .collect();
-            let id = InterfaceId(self.interface_defs.len() as u32);
-            self.interface_defs.push(InterfaceDef {
-                name: builtin.name.to_string(),
-                methods,
-                is_pub: true,
-                file_id: gruel_util::FileId::new(0),
-            });
-            self.interfaces.insert(name_spur, id);
-        }
+        // ADR-0078 Phase 2: the compiler-recognized interfaces (Drop, Copy,
+        // Clone, Handle) are now declared in `std/prelude/interfaces.gruel`.
+        // They register into `self.interfaces` during normal declaration
+        // resolution; the hardcoded behaviors (drop glue, @derive(Copy/Clone)
+        // synthesis, Handle linearity carve-out) still recognize these
+        // interfaces by interned name.
     }
 
     // ========================================================================
