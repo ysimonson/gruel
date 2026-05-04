@@ -39,6 +39,7 @@ const PRELUDE_FILES: &[(&str, &str)] = &[
         "target.gruel",
         include_str!("../../../std/prelude/target.gruel"),
     ),
+    ("cmp.gruel", include_str!("../../../std/prelude/cmp.gruel")),
     (
         "option.gruel",
         include_str!("../../../std/prelude/option.gruel"),
