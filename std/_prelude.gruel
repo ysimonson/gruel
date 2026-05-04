@@ -1,0 +1,10 @@
+// ADR-0078: prelude root.
+//
+// The compiler implicitly loads this file into every compilation. Items
+// declared `pub` here are visible in user files without an explicit
+// `@import`. Today this file is mostly empty — prelude submodules under
+// `prelude/` are pre-staged separately by the compilation driver, so
+// their `pub` items already reach user code. As that machinery evolves,
+// this file becomes the structural manifest that decides what's
+// publicly exposed (matching how `_std.gruel` exposes the rest of the
+// standard library).

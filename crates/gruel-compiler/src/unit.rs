@@ -290,20 +290,25 @@ impl<'src> CompilationUnit<'src> {
         let mut parsed_files = Vec::with_capacity(self.sources.len() + 1);
         let mut interner = ThreadedRodeo::new();
 
-        // ADR-0065 / ADR-0078: load the prelude as an implicit directory
-        // module under `std/prelude/`. Each prelude file is parsed as its
-        // own source unit with a unique FileId so visibility resolution
-        // treats them as siblings in the prelude directory module (per
-        // ADR-0026): same-directory items see each other's private decls,
-        // user code in any other directory sees only `pub` items.
-        //
-        // The on-disk `std/prelude/*.gruel` files are the source of truth;
-        // when not available (binary distributions without a stdlib path),
-        // `prelude_source::resolved_prelude_files()` falls back to embedded
-        // `include_str!` copies under virtual `std/prelude/<name>.gruel`
-        // paths so the directory-module rule still applies.
+        // ADR-0065 / ADR-0078: load the prelude as an implicitly-imported
+        // module rooted at `std/_prelude.gruel`. The root is the only file
+        // the compiler hand-loads — it uses `@import` internally to pull
+        // in `std/prelude/*.gruel` submodules and re-exports their pub
+        // items. Submodules are pre-staged in `file_paths` (and pre-parsed
+        // when their disk copy isn't available) so the @import resolver
+        // finds them whether the host has an on-disk stdlib or not. Only
+        // the root's pub items become globally available; submodule items
+        // accessed only through the root's `pub const` re-exports.
+        let resolved = crate::prelude_source::resolved_prelude();
         let mut prelude_file_id = FileId::PRELUDE.index();
-        for file in crate::prelude_source::resolved_prelude_files() {
+
+        // Stage prelude submodules: register their paths in `file_paths`
+        // so @import resolution finds them, and pre-parse them so they
+        // don't need to hit the disk. `other_std_files` (`_std.gruel`,
+        // `math.gruel`, etc.) are NOT staged here — they get loaded only
+        // when user code explicitly `@import("std")`s them, via the
+        // existing on-disk module resolver.
+        for file in &resolved.prelude_dir {
             let file_id = FileId::new(prelude_file_id);
             self.file_paths.insert(file_id, file.path.clone());
             let lexer = Lexer::with_interner_and_file_id(&file.source, interner, file_id);
@@ -314,13 +319,29 @@ impl<'src> CompilationUnit<'src> {
             let (ast, returned_interner) = parser.parse()?;
             interner = returned_interner;
             parsed_files.push(ParsedFileData {
-                path: file.path,
+                path: file.path.clone(),
                 ast,
             });
-            // Step downward so each prelude file gets a distinct id without
-            // climbing into the user-FileId range.
             prelude_file_id = prelude_file_id.wrapping_sub(1);
         }
+
+        // Parse the prelude root itself (`std/_prelude.gruel`).
+        let root_file_id = FileId::new(prelude_file_id);
+        self.file_paths
+            .insert(root_file_id, resolved.root.path.clone());
+        let root_lexer =
+            Lexer::with_interner_and_file_id(&resolved.root.source, interner, root_file_id);
+        let (root_tokens, returned_interner) =
+            root_lexer.tokenize().map_err(CompileErrors::from)?;
+        interner = returned_interner;
+        let root_parser = Parser::new(root_tokens, interner)
+            .with_preview_features(self.options.preview_features.clone());
+        let (root_ast, returned_interner) = root_parser.parse()?;
+        interner = returned_interner;
+        parsed_files.push(ParsedFileData {
+            path: resolved.root.path,
+            ast: root_ast,
+        });
 
         // ADR-0074 Phase 2: when --preview incremental_compilation is on
         // AND a cache_dir is configured, route user-file parsing through

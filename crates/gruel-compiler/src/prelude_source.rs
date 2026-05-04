@@ -1,123 +1,186 @@
-//! Prelude source assembly (ADR-0078).
+//! Prelude and stdlib source resolution (ADR-0078).
 //!
-//! The Gruel prelude lives on disk under `std/prelude/*.gruel`. Each prelude
-//! file is loaded as its own source unit with a unique path so visibility
-//! resolution treats them as a directory module per ADR-0026 (same-directory
-//! private items are mutually visible; only `pub` items leak out to user
-//! files in other directories).
+//! The Gruel prelude is a regular Gruel module rooted at `std/_prelude.gruel`.
+//! That single file is implicitly `@import`-ed by every compilation: its
+//! `pub` items become available in user files without an explicit import.
+//! Internally, `_prelude.gruel` uses `@import` + `pub const` re-exports to
+//! organize itself across `std/prelude/*.gruel` submodules — exactly like
+//! `_std.gruel` does for the rest of the standard library.
 //!
-//! Resolution order, mirroring `resolve_std_import` in
-//! `crates/gruel-air/src/sema/analysis.rs`:
-//!
-//! 1. `$GRUEL_STD_PATH/prelude/*.gruel` if `GRUEL_STD_PATH` is set
-//! 2. Walk up from the binary's manifest directory looking for
-//!    `std/prelude/*.gruel`
-//! 3. Embedded fallback via `include_str!` — guaranteed to compile and
-//!    distribute in the binary, used when no on-disk stdlib is found.
-//!
-//! The list of prelude files is closed and ordered. To add a new prelude file,
-//! append it to `PRELUDE_FILES`.
+//! The entire `std/` tree is embedded into the binary via `include_dir!` so
+//! the compiler ships with a self-contained stdlib. When `GRUEL_STD_PATH`
+//! is set or the binary runs from inside a checked-out repo, on-disk files
+//! win over the embedded copy so contributors editing prelude code get
+//! their changes without rebuilding the compiler.
 
+use include_dir::{Dir, include_dir};
 use std::path::{Path, PathBuf};
 
-/// One on-disk prelude file with both its embedded fallback content and
-/// its relative path under `std/prelude/`.
-pub struct PreludeFile {
-    /// Filename relative to `std/prelude/` (e.g. `"option.gruel"`).
-    pub filename: &'static str,
-    /// Embedded copy via `include_str!`. Used as a fallback when the on-disk
-    /// stdlib isn't available.
-    pub embedded: &'static str,
-}
+/// Embedded copy of the entire `std/` directory tree.
+static STD_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../std");
 
-/// Embedded copies of every prelude file. Order is the parse order; files
-/// later in the list see all symbols declared earlier (intra-prelude
-/// references at the type-level resolve through global declaration
-/// gathering, not source order, so order is mostly informational).
-const PRELUDE_FILES: &[PreludeFile] = &[
-    PreludeFile {
-        filename: "interfaces.gruel",
-        embedded: include_str!("../../../std/prelude/interfaces.gruel"),
-    },
-    PreludeFile {
-        filename: "target.gruel",
-        embedded: include_str!("../../../std/prelude/target.gruel"),
-    },
-    PreludeFile {
-        filename: "cmp.gruel",
-        embedded: include_str!("../../../std/prelude/cmp.gruel"),
-    },
-    PreludeFile {
-        filename: "option.gruel",
-        embedded: include_str!("../../../std/prelude/option.gruel"),
-    },
-    PreludeFile {
-        filename: "result.gruel",
-        embedded: include_str!("../../../std/prelude/result.gruel"),
-    },
-    PreludeFile {
-        filename: "char.gruel",
-        embedded: include_str!("../../../std/prelude/char.gruel"),
-    },
-    PreludeFile {
-        filename: "string.gruel",
-        embedded: include_str!("../../../std/prelude/string.gruel"),
-    },
+/// Path within `std/` to the prelude root.
+const PRELUDE_ROOT_REL: &str = "_prelude.gruel";
+
+/// Order in which prelude submodules must be loaded.
+///
+/// Today's resolver collects function signatures in source order, so a
+/// function whose return type references `Result(...)` has to follow
+/// `result.gruel` in the merged AST. This list encodes the dependency
+/// order; any unlisted `.gruel` files under `std/prelude/` are loaded
+/// alphabetically after the listed ones.
+const PRELUDE_SUBMODULE_ORDER: &[&str] = &[
+    "prelude/interfaces.gruel",
+    "prelude/target.gruel",
+    "prelude/cmp.gruel",
+    "prelude/option.gruel",
+    "prelude/result.gruel",
+    "prelude/char.gruel",
+    "prelude/string.gruel",
 ];
 
-/// Resolved prelude source: a path and the corresponding source string. The
-/// path is always under `std/prelude/` (real disk path when available,
-/// virtual `std/prelude/<filename>` otherwise) so the visibility resolver
-/// treats prelude files as a single directory module.
+/// One stdlib file with its path and source.
 pub struct ResolvedPreludeFile {
+    /// Path used by the module resolver — disk-absolute when on-disk,
+    /// virtual `std/<rel>` otherwise.
     pub path: String,
+    /// Source content.
     pub source: String,
 }
 
-/// Resolve every prelude file to (path, source) pairs.
+/// Result of locating the prelude.
 ///
-/// Tries the on-disk `std/prelude/` first (via `GRUEL_STD_PATH` or a small
-/// upward search). On miss — or if any file is missing on disk — falls back
-/// to the embedded copies under a virtual `std/prelude/<filename>` path so
-/// the directory-based visibility check still works.
-pub fn resolved_prelude_files() -> Vec<ResolvedPreludeFile> {
-    if let Some(dir) = locate_prelude_dir()
-        && let Some(files) = read_prelude_dir(&dir)
-    {
-        return files;
+/// The compiler stages every entry in `aux_files` into the compilation
+/// unit's `file_paths` so `@import` resolution finds them. `prelude_dir`
+/// lists just the files under `std/prelude/` — the ones referenced by
+/// `_prelude.gruel`'s re-exports — so test fixtures that bypass
+/// `CompilationUnit::parse` can inline their items without dragging in
+/// unrelated stdlib modules (which would have unresolved `@import`
+/// references in a test environment).
+pub struct ResolvedPrelude {
+    /// `_prelude.gruel` itself — the file the compiler implicitly imports.
+    pub root: ResolvedPreludeFile,
+    /// Files under `std/prelude/`, in dependency-aware order.
+    pub prelude_dir: Vec<ResolvedPreludeFile>,
+    /// All other stdlib files (e.g. `_std.gruel`, `math.gruel`). Pre-staged
+    /// for `@import("std")` and friends. Empty in test fixtures.
+    pub other_std_files: Vec<ResolvedPreludeFile>,
+}
+
+impl ResolvedPrelude {
+    /// Every file other than the root, in load order. Used by the
+    /// compilation driver to register all stdlib paths.
+    pub fn aux_files(&self) -> impl Iterator<Item = &ResolvedPreludeFile> {
+        self.prelude_dir.iter().chain(self.other_std_files.iter())
     }
-    embedded_prelude_files()
 }
 
-/// Embedded prelude files (the `include_str!` fallback). The returned paths
-/// are virtual (`std/prelude/<filename>`) but share the directory structure
-/// the visibility check needs.
-pub fn embedded_prelude_files() -> Vec<ResolvedPreludeFile> {
-    PRELUDE_FILES
-        .iter()
-        .map(|f| ResolvedPreludeFile {
-            path: format!("std/prelude/{}", f.filename),
-            source: f.embedded.to_string(),
-        })
-        .collect()
+/// Resolve the prelude.
+///
+/// Tries the on-disk `std/` first (via `GRUEL_STD_PATH` or an upward search
+/// from the binary's manifest dir); falls back to the embedded tree
+/// otherwise.
+pub fn resolved_prelude() -> ResolvedPrelude {
+    if let Some(std_dir) = locate_std_dir()
+        && let Some(resolved) = read_disk_std(&std_dir)
+    {
+        return resolved;
+    }
+    embedded_prelude()
 }
 
-/// Try to locate `std/prelude/` on disk. Returns the directory path on hit.
-fn locate_prelude_dir() -> Option<PathBuf> {
-    if let Ok(gruel_std) = std::env::var("GRUEL_STD_PATH") {
-        let candidate = Path::new(&gruel_std).join("prelude");
-        if candidate.is_dir() {
-            return Some(candidate);
+/// Embedded prelude (the `include_dir!` fallback).
+pub fn embedded_prelude() -> ResolvedPrelude {
+    let mut root: Option<ResolvedPreludeFile> = None;
+    let mut by_rel: std::collections::HashMap<String, ResolvedPreludeFile> =
+        std::collections::HashMap::new();
+
+    for file in walk_dir(&STD_DIR) {
+        let rel = file.path().to_string_lossy().to_string();
+        let source = match file.contents_utf8() {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        let path = format!("std/{}", rel);
+        let entry = ResolvedPreludeFile { path, source };
+        if rel == PRELUDE_ROOT_REL {
+            root = Some(entry);
+        } else if rel.ends_with(".gruel") {
+            by_rel.insert(rel, entry);
         }
     }
 
-    // Walk up from CARGO_MANIFEST_DIR looking for std/prelude/. Stops at the
-    // filesystem root. This works for in-repo builds (`cargo run -p gruel`).
+    split_prelude_dir(by_rel, root.expect("std/_prelude.gruel must exist"))
+}
+
+/// Partition the collected `.gruel` files into prelude-dir submodules
+/// (referenced by `_prelude.gruel`) and other stdlib files.
+fn split_prelude_dir(
+    mut by_rel: std::collections::HashMap<String, ResolvedPreludeFile>,
+    root: ResolvedPreludeFile,
+) -> ResolvedPrelude {
+    let mut prelude_dir = Vec::with_capacity(PRELUDE_SUBMODULE_ORDER.len());
+    for &rel in PRELUDE_SUBMODULE_ORDER {
+        if let Some(entry) = by_rel.remove(rel) {
+            prelude_dir.push(entry);
+        }
+    }
+    // Any leftover prelude/* files (added later, not yet in
+    // PRELUDE_SUBMODULE_ORDER) — append alphabetically.
+    let mut leftover_prelude: Vec<_> = by_rel
+        .keys()
+        .filter(|k| k.starts_with("prelude/"))
+        .cloned()
+        .collect();
+    leftover_prelude.sort();
+    for rel in leftover_prelude {
+        if let Some(entry) = by_rel.remove(&rel) {
+            prelude_dir.push(entry);
+        }
+    }
+    // Everything else is "other std files" — sorted alphabetically.
+    let mut other_std_files: Vec<_> = by_rel.into_values().collect();
+    other_std_files.sort_by(|a, b| a.path.cmp(&b.path));
+    ResolvedPrelude {
+        root,
+        prelude_dir,
+        other_std_files,
+    }
+}
+
+/// Iterate every file (recursive) inside an `include_dir` tree, sorted by
+/// path for deterministic ordering. Order matters for declaration
+/// resolution: a file that references items from another file must follow
+/// the file that defines those items in the merged AST.
+fn walk_dir<'a>(dir: &'a Dir<'a>) -> Vec<&'a include_dir::File<'a>> {
+    let mut out = Vec::new();
+    walk_into(dir, &mut out);
+    out.sort_by_key(|f| f.path().to_path_buf());
+    out
+}
+
+fn walk_into<'a>(dir: &'a Dir<'a>, out: &mut Vec<&'a include_dir::File<'a>>) {
+    for entry in dir.entries() {
+        match entry {
+            include_dir::DirEntry::File(f) => out.push(f),
+            include_dir::DirEntry::Dir(d) => walk_into(d, out),
+        }
+    }
+}
+
+/// Try to locate `std/` on disk.
+fn locate_std_dir() -> Option<PathBuf> {
+    if let Ok(gruel_std) = std::env::var("GRUEL_STD_PATH") {
+        let candidate = PathBuf::from(&gruel_std);
+        if candidate.join(PRELUDE_ROOT_REL).exists() {
+            return Some(candidate);
+        }
+    }
     let manifest = env!("CARGO_MANIFEST_DIR");
     let mut current: PathBuf = PathBuf::from(manifest);
     loop {
-        let candidate = current.join("std").join("prelude");
-        if candidate.is_dir() {
+        let candidate = current.join("std");
+        if candidate.join(PRELUDE_ROOT_REL).exists() {
             return Some(candidate);
         }
         if !current.pop() {
@@ -127,20 +190,52 @@ fn locate_prelude_dir() -> Option<PathBuf> {
     None
 }
 
-/// Read every file listed in `PRELUDE_FILES` from `dir`. Returns `None` if
-/// any file is missing — the caller falls back to embedded copies in that
-/// case so a partial on-disk stdlib doesn't silently shadow the embedded one.
-fn read_prelude_dir(dir: &Path) -> Option<Vec<ResolvedPreludeFile>> {
-    let mut out = Vec::with_capacity(PRELUDE_FILES.len());
-    for f in PRELUDE_FILES {
-        let path = dir.join(f.filename);
-        let source = std::fs::read_to_string(&path).ok()?;
-        out.push(ResolvedPreludeFile {
-            path: path.to_string_lossy().into_owned(),
-            source,
-        });
+/// Read every `.gruel` file under `std_dir` recursively. Returns `None` if
+/// the prelude root is missing — caller falls back to embedded.
+fn read_disk_std(std_dir: &Path) -> Option<ResolvedPrelude> {
+    let root_path = std_dir.join(PRELUDE_ROOT_REL);
+    let root_source = std::fs::read_to_string(&root_path).ok()?;
+    let mut aux_collected = Vec::new();
+    collect_gruel_files(std_dir, std_dir, &mut aux_collected);
+    let root = ResolvedPreludeFile {
+        path: root_path.to_string_lossy().into_owned(),
+        source: root_source,
+    };
+    // Filter the root out, then arrange by relative path against
+    // PRELUDE_SUBMODULE_ORDER for deterministic, dependency-aware order.
+    aux_collected.retain(|f| f.path != root.path);
+    let by_rel: std::collections::HashMap<String, ResolvedPreludeFile> = aux_collected
+        .into_iter()
+        .filter_map(|f| {
+            let rel = std::path::Path::new(&f.path)
+                .strip_prefix(std_dir)
+                .ok()?
+                .to_str()?
+                .to_string();
+            Some((rel, f))
+        })
+        .collect();
+    Some(split_prelude_dir(by_rel, root))
+}
+
+fn collect_gruel_files(base: &Path, dir: &Path, out: &mut Vec<ResolvedPreludeFile>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_gruel_files(base, &path, out);
+        } else if path.extension().and_then(|s| s.to_str()) == Some("gruel")
+            && let Ok(source) = std::fs::read_to_string(&path)
+        {
+            out.push(ResolvedPreludeFile {
+                path: path.to_string_lossy().into_owned(),
+                source,
+            });
+        }
     }
-    Some(out)
 }
 
 #[cfg(test)]
@@ -148,21 +243,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_files_cover_canonical_items() {
-        let files = embedded_prelude_files();
-        let combined: String = files.iter().map(|f| f.source.as_str()).collect();
-        assert!(combined.contains("fn Option(comptime T: type)"));
-        assert!(combined.contains("fn Result(comptime T: type, comptime E: type)"));
-        assert!(combined.contains("fn char__encode_utf8"));
-        assert!(combined.contains("fn String__from_utf8"));
-        assert!(combined.contains("pub interface Eq"));
-        assert!(combined.contains("pub interface Ord"));
+    fn embedded_prelude_root_loadable() {
+        let p = embedded_prelude();
+        // The prelude root is at least valid (possibly-empty) Gruel.
+        assert!(p.root.path.ends_with("_prelude.gruel"));
     }
 
     #[test]
-    fn embedded_paths_are_under_std_prelude() {
-        for f in embedded_prelude_files() {
-            assert!(f.path.starts_with("std/prelude/"), "{}", f.path);
-        }
+    fn embedded_prelude_includes_submodules() {
+        let p = embedded_prelude();
+        assert!(
+            p.prelude_dir
+                .iter()
+                .any(|f| f.path.ends_with("/option.gruel"))
+        );
+        assert!(p.prelude_dir.iter().any(|f| f.path.ends_with("/cmp.gruel")));
+    }
+
+    #[test]
+    fn other_std_files_separate_from_prelude_dir() {
+        let p = embedded_prelude();
+        // Embedded copy includes `_std.gruel` and `math.gruel`; they go in
+        // `other_std_files`, not `prelude_dir`.
+        assert!(
+            p.other_std_files
+                .iter()
+                .any(|f| f.path.ends_with("_std.gruel"))
+        );
     }
 }

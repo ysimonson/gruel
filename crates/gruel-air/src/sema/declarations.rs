@@ -2267,6 +2267,16 @@ impl<'a> Sema<'a> {
         init: InstRef,
         span: Span,
     ) -> CompileResult<()> {
+        // ADR-0078: detect item-level re-exports first. `pub const X = mod.Y`
+        // makes X an alias for `mod.Y`, registering it in the appropriate
+        // name table (functions/structs/enums/interfaces) so call sites
+        // can use X transparently. The fallback path below handles
+        // `pub const X = @import("...")` (whole-module re-export) and
+        // primitive constants.
+        if self.try_collect_reexport(name, is_pub, init, span)? {
+            return Ok(());
+        }
+
         let name_str = self.interner.resolve(&name).to_string();
 
         // Check for duplicate constant names
@@ -2292,8 +2302,6 @@ impl<'a> Sema<'a> {
         }
 
         // Evaluate the initializer at compile time to determine the constant type.
-        // Currently we only handle @import(...) - other constant expressions will
-        // be supported as part of the broader comptime feature (ADR-0025).
         let const_type = self.evaluate_const_init(init, span)?;
 
         self.constants.insert(
@@ -2306,6 +2314,138 @@ impl<'a> Sema<'a> {
             },
         );
 
+        Ok(())
+    }
+
+    /// ADR-0078: Try to handle an item-level re-export of the form
+    /// `pub const X = some_module_const.Y`. Returns `Ok(true)` if the
+    /// constant was recognized as a re-export and registered as an alias;
+    /// `Ok(false)` if this isn't a re-export and the regular const path
+    /// should run; `Err(...)` if it looks like a re-export but the item
+    /// can't be resolved.
+    fn try_collect_reexport(
+        &mut self,
+        name: Spur,
+        is_pub: bool,
+        init: InstRef,
+        span: Span,
+    ) -> CompileResult<bool> {
+        let inst = self.rir.get(init);
+        let InstData::FieldGet { base, field } = &inst.data else {
+            return Ok(false);
+        };
+        let field = *field;
+
+        // The base must be a `VarRef` to a const that holds a module.
+        let base_inst = self.rir.get(*base);
+        let InstData::VarRef { name: base_name } = &base_inst.data else {
+            return Ok(false);
+        };
+        let module_id = match self.constants.get(base_name).and_then(|c| c.ty.as_module()) {
+            Some(id) => id,
+            None => return Ok(false),
+        };
+        let module_file_path = self.module_registry.get_def(module_id).file_path.clone();
+        let same_name = name == field;
+
+        // Look the field up across each item kind, restricted to items
+        // declared in the imported module's file.
+
+        // Function.
+        if let Some(fn_info) = self.functions.get(&field).copied() {
+            let fn_path = self
+                .get_file_path(fn_info.file_id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if fn_path == module_file_path {
+                if !same_name {
+                    self.check_alias_collision(name, span)?;
+                    let alias = FunctionInfo { is_pub, ..fn_info };
+                    self.functions.insert(name, alias);
+                }
+                return Ok(true);
+            }
+        }
+
+        // Struct.
+        if let Some(&struct_id) = self.structs.get(&field) {
+            let s_path = self
+                .get_file_path(self.type_pool.struct_def(struct_id).file_id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if s_path == module_file_path {
+                if !same_name {
+                    self.check_alias_collision(name, span)?;
+                    self.structs.insert(name, struct_id);
+                }
+                return Ok(true);
+            }
+        }
+
+        // Enum.
+        if let Some(&enum_id) = self.enums.get(&field) {
+            let e_path = self
+                .get_file_path(self.type_pool.enum_def(enum_id).file_id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if e_path == module_file_path {
+                if !same_name {
+                    self.check_alias_collision(name, span)?;
+                    self.enums.insert(name, enum_id);
+                }
+                return Ok(true);
+            }
+        }
+
+        // Interface.
+        if let Some(&iface_id) = self.interfaces.get(&field) {
+            let iface_def = &self.interface_defs[iface_id.0 as usize];
+            let i_path = self
+                .get_file_path(iface_def.file_id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if i_path == module_file_path {
+                if !same_name {
+                    self.check_alias_collision(name, span)?;
+                    self.interfaces.insert(name, iface_id);
+                }
+                return Ok(true);
+            }
+        }
+
+        // Field exists in the module's namespace but doesn't resolve to a
+        // re-exportable item. Could be e.g. `mod.NotAnItem` — surface as a
+        // standard "unknown module member" error.
+        let module_def = self.module_registry.get_def(module_id);
+        let module_name = module_def.import_path.clone();
+        let field_str = self.interner.resolve(&field).to_string();
+        Err(CompileError::new(
+            ErrorKind::UnknownModuleMember {
+                module_name,
+                member_name: field_str,
+            },
+            span,
+        ))
+    }
+
+    /// Collision check for a re-export alias. The alias name must not
+    /// shadow an existing function/struct/enum/interface/constant.
+    fn check_alias_collision(&self, name: Spur, span: Span) -> CompileResult<()> {
+        let name_str = self.interner.resolve(&name).to_string();
+        if self.functions.contains_key(&name)
+            || self.structs.contains_key(&name)
+            || self.enums.contains_key(&name)
+            || self.interfaces.contains_key(&name)
+            || self.constants.contains_key(&name)
+        {
+            return Err(CompileError::new(
+                ErrorKind::DuplicateConstant {
+                    name: name_str,
+                    kind: "re-export alias".to_string(),
+                },
+                span,
+            ));
+        }
         Ok(())
     }
 

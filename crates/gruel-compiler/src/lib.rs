@@ -33,7 +33,9 @@ mod parse_cache;
 mod prelude_source;
 mod unit;
 
-pub use prelude_source::{ResolvedPreludeFile, embedded_prelude_files, resolved_prelude_files};
+pub use prelude_source::{
+    ResolvedPrelude, ResolvedPreludeFile, embedded_prelude, resolved_prelude,
+};
 
 pub use parse_cache::{ParseCacheStats, parse_all_files_cached, parse_key};
 
@@ -764,13 +766,18 @@ pub fn prepend_prelude(
 ) -> MultiErrorResult<(Ast, ThreadedRodeo)> {
     use gruel_util::FileId;
 
+    // For tests/callers that bypass `CompilationUnit::parse`, inline the
+    // prelude submodules directly: the @import-based root (`_prelude.gruel`)
+    // would require a working module-resolution path with `file_paths`
+    // populated, which test fixtures generally don't set up. Inlining the
+    // submodule pub items at the top level matches the runtime behavior
+    // (those items end up globally visible regardless). Note we skip
+    // `other_std_files` (like `_std.gruel`) because those have @imports
+    // that won't resolve in a bare-AST test environment.
     let mut all_items = Vec::new();
-    // Use a small range of synthetic FileIds for prelude files so they share
-    // a directory module identity (`std/prelude/`) for visibility purposes.
-    // The exact ids don't matter as long as they don't collide with user
-    // FileIds (which start at 1) or the BUILTIN sentinel.
     let mut prelude_file_id = FileId::PRELUDE.index();
-    for file in prelude_source::embedded_prelude_files() {
+    let resolved = prelude_source::embedded_prelude();
+    for file in &resolved.prelude_dir {
         let lexer =
             Lexer::with_interner_and_file_id(&file.source, interner, FileId::new(prelude_file_id));
         let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
@@ -779,8 +786,6 @@ pub fn prepend_prelude(
         let (parsed, returned_interner) = parser.parse()?;
         interner = returned_interner;
         all_items.extend(parsed.items);
-        // Step downward so the next prelude file gets a distinct id without
-        // climbing into the user-FileId range.
         prelude_file_id = prelude_file_id.wrapping_sub(1);
     }
 
