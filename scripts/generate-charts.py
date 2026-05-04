@@ -299,7 +299,7 @@ def generate_timeline_chart(runs: list[dict], platform: Optional[str] = None, be
 
     # Extract data points
     points = []
-    for run in runs[-20:]:  # Show last 20 commits
+    for run in runs[-100:]:  # Show last 100 commits
         total = get_benchmark_time(run, benchmark_name) if benchmark_name else get_total_time(run)
         commit = short_commit(run.get("commit", ""))
         points.append({"commit": commit, "time": total})
@@ -415,7 +415,7 @@ def generate_hot_vs_cold_chart(
         return generate_empty_chart(TIMELINE_WIDTH, TIMELINE_HEIGHT, "No benchmark data available yet")
 
     points = []
-    for run in runs[-20:]:
+    for run in runs[-100:]:
         if benchmark_name:
             cold = get_benchmark_cold_ms(run, benchmark_name)
             hot = get_benchmark_hot_ms(run, benchmark_name)
@@ -692,7 +692,7 @@ def generate_memory_chart(runs: list[dict], platform: Optional[str] = None, benc
 
     # Extract data points
     points = []
-    for run in runs[-20:]:  # Show last 20 commits
+    for run in runs[-100:]:  # Show last 100 commits
         memory = get_benchmark_memory(run, benchmark_name) if benchmark_name else get_peak_memory(run)
         commit = short_commit(run.get("commit", ""))
         points.append({"commit": commit, "memory": memory})
@@ -806,7 +806,7 @@ def generate_binary_size_chart(runs: list[dict], platform: Optional[str] = None,
 
     # Extract data points
     points = []
-    for run in runs[-20:]:  # Show last 20 commits
+    for run in runs[-100:]:  # Show last 100 commits
         size = get_benchmark_binary_size(run, benchmark_name) if benchmark_name else get_binary_size(run)
         commit = short_commit(run.get("commit", ""))
         points.append({"commit": commit, "size": size})
@@ -927,12 +927,12 @@ def generate_runtime_chart(runs: list[dict], benchmark_names: list[str], platfor
         return generate_empty_chart(RUNTIME_WIDTH, RUNTIME_HEIGHT, "No runtime data in benchmarks")
 
     # Extract data points for each benchmark
-    commits = [short_commit(run.get("commit", "")) for run in runs[-20:]]
+    commits = [short_commit(run.get("commit", "")) for run in runs[-100:]]
     benchmark_data = {}
 
     for name in names_with_runtime:
         points = []
-        for run in runs[-20:]:
+        for run in runs[-100:]:
             runtime = get_benchmark_runtime(run, name)
             points.append(runtime)
         benchmark_data[name] = points
@@ -1071,7 +1071,7 @@ def _generate_comparison_line_chart(
     # Build unified commit timeline
     commit_to_values: dict[str, dict[str, float]] = {}
     for platform, runs in platform_data.items():
-        for run in runs[-20:]:
+        for run in runs[-100:]:
             commit = short_commit(run.get("commit", ""))
             value = metric_fn(run)
             if commit not in commit_to_values:
