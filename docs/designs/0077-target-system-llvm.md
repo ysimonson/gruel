@@ -154,7 +154,7 @@ Os:
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Rewrite `gruel-target` with `target_lexicon`**
+- [x] **Phase 1: Rewrite `gruel-target` with `target_lexicon`**
   - Add `target-lexicon` dependency to `gruel-target/Cargo.toml`
   - Replace `Target` enum with `Target(target_lexicon::Triple)` newtype struct
   - Implement `Target::host()` via `target_lexicon::HOST`

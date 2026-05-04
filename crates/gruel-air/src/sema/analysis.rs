@@ -8774,6 +8774,7 @@ impl<'a> Sema<'a> {
                             let variant_idx = match gruel_target::Target::host().os() {
                                 gruel_target::Os::Linux => 0,
                                 gruel_target::Os::Macos => 1,
+                                _ => 0,
                             };
                             return Ok(ConstValue::EnumVariant {
                                 enum_id,
@@ -8787,6 +8788,7 @@ impl<'a> Sema<'a> {
                             let variant_idx = match gruel_target::Target::host().arch() {
                                 gruel_target::Arch::X86_64 => 0,
                                 gruel_target::Arch::Aarch64 => 1,
+                                _ => 0,
                             };
                             return Ok(ConstValue::EnumVariant {
                                 enum_id,
@@ -11535,6 +11537,7 @@ impl<'a> Sema<'a> {
         let variant_index = match gruel_target::Target::host().arch() {
             Arch::X86_64 => 0,
             Arch::Aarch64 => 1,
+            _ => 0,
         };
 
         let result_type = Type::new_enum(arch_enum_id);
@@ -11580,6 +11583,7 @@ impl<'a> Sema<'a> {
         let variant_index = match gruel_target::Target::host().os() {
             Os::Linux => 0,
             Os::Macos => 1,
+            _ => 0,
         };
 
         let result_type = Type::new_enum(os_enum_id);

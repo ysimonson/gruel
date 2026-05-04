@@ -730,7 +730,7 @@ fn main() {
         None
     };
     let compile_options = CompileOptions {
-        target: options.target,
+        target: options.target.clone(),
         linker: options.linker.clone(),
         opt_level: options.opt_level,
         preview_features: options.preview_features.clone(),
@@ -1206,7 +1206,7 @@ mod tests {
             "x86_64-linux",
             "source.gruel",
         ]));
-        assert_eq!(opts.target, Target::X86_64Linux);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
     }
 
     #[test]
@@ -1216,7 +1216,7 @@ mod tests {
             "aarch64-macos",
             "source.gruel",
         ]));
-        assert_eq!(opts.target, Target::Aarch64Macos);
+        assert_eq!(opts.target, "aarch64-macos".parse::<Target>().unwrap());
     }
 
     #[test]
@@ -1511,7 +1511,7 @@ mod tests {
         ]));
         assert_eq!(opts.source_paths, vec!["source.gruel"]);
         assert_eq!(opts.output_path, "output");
-        assert_eq!(opts.target, Target::X86_64Linux);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
         assert_eq!(opts.linker, LinkerMode::System("clang".to_string()));
         assert_eq!(opts.opt_level, OptLevel::O2);
         assert_eq!(opts.emit_stages, vec![EmitStage::Air]);
@@ -1537,7 +1537,7 @@ mod tests {
         assert_eq!(opts.source_paths, vec!["source.gruel"]);
         assert_eq!(opts.output_path, "output");
         assert_eq!(opts.opt_level, OptLevel::O1);
-        assert_eq!(opts.target, Target::X86_64Linux);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
     }
 
     // ========== Default values tests ==========
@@ -1603,7 +1603,7 @@ mod tests {
         ]));
         assert!(opts.time_passes);
         assert_eq!(opts.opt_level, OptLevel::O2);
-        assert_eq!(opts.target, Target::X86_64Linux);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
     }
 
     // ========== --benchmark-json tests ==========
@@ -1625,7 +1625,7 @@ mod tests {
         ]));
         assert!(opts.benchmark_json);
         assert_eq!(opts.opt_level, OptLevel::O2);
-        assert_eq!(opts.target, Target::X86_64Linux);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
     }
 
     #[test]
@@ -1718,7 +1718,7 @@ mod tests {
         ]));
         assert_eq!(opts.jobs, 4);
         assert_eq!(opts.opt_level, OptLevel::O2);
-        assert_eq!(opts.target, Target::X86_64Linux);
+        assert_eq!(opts.target, "x86_64-linux".parse::<Target>().unwrap());
     }
 
     #[test]

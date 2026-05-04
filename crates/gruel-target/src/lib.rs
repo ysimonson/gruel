@@ -1,195 +1,87 @@
 //! Target architecture and OS definitions for the Gruel compiler.
 //!
-//! This crate provides the `Target` enum and related types that define
-//! compilation targets. It is a leaf crate with no dependencies, designed
-//! to be used by the CLI, compiler, codegen, and linker crates.
+//! Backed by [`target_lexicon::Triple`], so any triple LLVM understands can be
+//! parsed and used. The compiler-internal `Arch` and `Os` enums are derived
+//! from the lexicon's fields rather than hardcoded.
+//!
+//! See ADR-0077 for the design.
 
 use std::fmt;
+use std::str::FromStr;
 
-/// A compilation target consisting of an architecture and operating system.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    strum::EnumString,
-    strum::EnumIter,
-    strum::IntoStaticStr,
-)]
-pub enum Target {
-    /// x86-64 Linux (System V AMD64 ABI)
-    #[strum(
-        to_string = "x86-64-linux",
-        serialize = "x86_64-linux",
-        serialize = "x86_64-unknown-linux-gnu"
-    )]
-    X86_64Linux,
-    /// AArch64 Linux (AAPCS64 ABI)
-    #[strum(
-        to_string = "aarch64-linux",
-        serialize = "arm64-linux",
-        serialize = "aarch64-unknown-linux-gnu"
-    )]
-    Aarch64Linux,
-    /// AArch64 macOS (Apple Silicon, AAPCS64 with Apple extensions)
-    #[strum(
-        to_string = "aarch64-macos",
-        serialize = "arm64-macos",
-        serialize = "aarch64-apple-darwin"
-    )]
-    Aarch64Macos,
+use target_lexicon::{Architecture, BinaryFormat, OperatingSystem, Triple};
+
+/// A compilation target, identified by an LLVM-style triple.
+///
+/// `Target` wraps [`target_lexicon::Triple`] so the parser, validator, and
+/// host-detection logic come "for free" from the upstream crate. Anything
+/// LLVM understands is accepted; only the targets in [`Target::all()`] are
+/// "blessed" (i.e. tested and supported).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Target {
+    triple: Triple,
 }
 
 impl Target {
-    /// Detect the host target at compile time.
-    ///
-    /// Returns the target that matches the current compilation environment.
-    /// This is useful for defaulting to native compilation.
-    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    /// The host machine's target, evaluated at compile time.
     pub fn host() -> Self {
-        Target::X86_64Linux
+        Self {
+            triple: Triple::host(),
+        }
     }
 
-    #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
-    pub fn host() -> Self {
-        Target::Aarch64Linux
+    /// Construct a target from a [`target_lexicon::Triple`].
+    pub fn from_triple(triple: Triple) -> Self {
+        Self { triple }
     }
 
-    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-    pub fn host() -> Self {
-        Target::Aarch64Macos
+    /// The underlying [`target_lexicon::Triple`].
+    pub fn triple(&self) -> &Triple {
+        &self.triple
     }
 
-    #[cfg(not(any(
-        all(target_arch = "x86_64", target_os = "linux"),
-        all(target_arch = "aarch64", target_os = "linux"),
-        all(target_arch = "aarch64", target_os = "macos")
-    )))]
-    pub fn host() -> Self {
-        // For unsupported hosts, default to x86-64 Linux as a reasonable
-        // cross-compilation target. This allows the compiler to be built
-        // and tested on any platform.
-        Target::X86_64Linux
+    /// The triple as a string suitable for passing to LLVM (e.g.
+    /// `"x86_64-unknown-linux-gnu"`).
+    pub fn triple_string(&self) -> String {
+        self.triple.to_string()
     }
 
-    /// Returns the architecture component of this target.
+    /// The CPU architecture component of this target.
     pub fn arch(&self) -> Arch {
-        match self {
-            Target::X86_64Linux => Arch::X86_64,
-            Target::Aarch64Linux | Target::Aarch64Macos => Arch::Aarch64,
-        }
+        Arch::from_lexicon(self.triple.architecture)
     }
 
-    /// Returns the operating system component of this target.
+    /// The operating system component of this target.
     pub fn os(&self) -> Os {
-        match self {
-            Target::X86_64Linux | Target::Aarch64Linux => Os::Linux,
-            Target::Aarch64Macos => Os::Macos,
-        }
+        Os::from_lexicon(self.triple.operating_system)
     }
 
-    /// Returns the ELF e_machine value for this target, if it uses ELF format.
-    ///
-    /// This is used when generating ELF object files and executables.
-    /// Returns `None` for targets that don't use ELF (e.g., macOS uses Mach-O).
-    pub fn elf_machine(&self) -> Option<u16> {
-        if !self.is_elf() {
-            return None;
-        }
-        match self.arch() {
-            Arch::X86_64 => Some(0x3E),  // EM_X86_64
-            Arch::Aarch64 => Some(0xB7), // EM_AARCH64
-        }
-    }
-
-    /// Returns the default page size for this target in bytes.
-    ///
-    /// This is used for executable segment alignment.
-    pub fn page_size(&self) -> u64 {
-        match self {
-            // x86-64 and AArch64 Linux typically use 4KB pages.
-            Target::X86_64Linux | Target::Aarch64Linux => 0x1000, // 4KB
-            // macOS on Apple Silicon uses 16KB pages.
-            Target::Aarch64Macos => 0x4000, // 16KB
-        }
-    }
-
-    /// Returns the default base address for executables on this target.
-    ///
-    /// This is the virtual address where the executable is loaded.
-    pub fn default_base_addr(&self) -> u64 {
-        match self {
-            // Standard Linux load address for both architectures.
-            Target::X86_64Linux | Target::Aarch64Linux => 0x400000,
-            // macOS uses a different address space layout; the dynamic linker
-            // handles placement. We use a conventional address.
-            Target::Aarch64Macos => 0x100000000,
-        }
-    }
-
-    /// Returns the pointer size in bytes for this target.
-    pub fn pointer_size(&self) -> u32 {
-        match self.arch() {
-            Arch::X86_64 | Arch::Aarch64 => 8, // 64-bit architectures
-        }
-    }
-
-    /// Returns the required stack alignment in bytes for this target.
-    ///
-    /// This is the alignment required at function call boundaries.
-    pub fn stack_alignment(&self) -> u32 {
-        match self {
-            // System V AMD64, AAPCS64, and Apple's ABI all require 16-byte alignment.
-            Target::X86_64Linux | Target::Aarch64Linux | Target::Aarch64Macos => 16,
-        }
-    }
-
-    /// Returns the triple string for this target (e.g., "x86_64-unknown-linux-gnu").
-    ///
-    /// This can be useful for invoking external tools like system linkers.
-    pub fn triple(&self) -> &'static str {
-        match self {
-            Target::X86_64Linux => "x86_64-unknown-linux-gnu",
-            Target::Aarch64Linux => "aarch64-unknown-linux-gnu",
-            Target::Aarch64Macos => "aarch64-apple-darwin",
-        }
-    }
-
-    /// Returns whether this target uses Mach-O object format (macOS).
-    pub fn is_macho(&self) -> bool {
-        matches!(self, Target::Aarch64Macos)
-    }
-
-    /// Returns whether this target uses ELF object format (Linux).
+    /// Whether this target uses ELF object format.
     pub fn is_elf(&self) -> bool {
-        matches!(self, Target::X86_64Linux | Target::Aarch64Linux)
+        self.triple.binary_format == BinaryFormat::Elf
     }
 
-    /// Returns the minimum macOS version for this target, encoded for Mach-O.
-    ///
-    /// The version is encoded as `0x00XXYYPP` where XX is major, YY is minor, PP is patch.
-    /// For example, macOS 11.0.0 (Big Sur) is encoded as `0x000B0000`.
-    ///
-    /// Returns `None` for non-macOS targets.
-    ///
-    /// Note: macOS 11.0 (Big Sur) was the first version to support Apple Silicon (ARM64),
-    /// which is why it's the minimum for `Aarch64Macos`.
-    pub fn macos_min_version(&self) -> Option<u32> {
-        match self {
-            Target::Aarch64Macos => Some(0x000B0000), // 11.0.0 (Big Sur)
-            Target::X86_64Linux | Target::Aarch64Linux => None,
-        }
+    /// Whether this target uses Mach-O object format.
+    pub fn is_macho(&self) -> bool {
+        self.triple.binary_format == BinaryFormat::Macho
     }
 
-    /// Returns all supported targets.
+    /// The curated list of "blessed" targets — those Gruel explicitly tests
+    /// and supports. Other LLVM-known triples are accepted (`from_str`
+    /// succeeds) but unblessed.
     pub fn all() -> Vec<Target> {
-        use strum::IntoEnumIterator;
-        Target::iter().collect()
+        BLESSED_TRIPLES
+            .iter()
+            .map(|s| Target::from_str(s).expect("blessed triple must parse"))
+            .collect()
     }
 
-    /// Returns a comma-separated string of all target names for help text.
+    /// Whether the triple is in the blessed list.
+    pub fn is_blessed(&self) -> bool {
+        Self::all().iter().any(|t| t == self)
+    }
+
+    /// Comma-separated string of all blessed target names for help text.
     pub fn all_names() -> String {
         Self::all()
             .iter()
@@ -199,18 +91,57 @@ impl Target {
     }
 }
 
+/// Blessed target triples — fully tested in CI.
+const BLESSED_TRIPLES: &[&str] = &[
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+];
+
+impl FromStr for Target {
+    type Err = TargetParseError;
+
+    /// Parse a target from any LLVM-understood triple. Accepts a few
+    /// short-form aliases (`x86_64-linux`, `aarch64-linux`,
+    /// `aarch64-macos`, `arm64-linux`, `arm64-macos`) used historically by
+    /// the CLI.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let normalized = match s {
+            "x86_64-linux" | "x86-64-linux" => "x86_64-unknown-linux-gnu",
+            "aarch64-linux" | "arm64-linux" => "aarch64-unknown-linux-gnu",
+            "aarch64-macos" | "arm64-macos" => "aarch64-apple-darwin",
+            other => other,
+        };
+        let triple = Triple::from_str(normalized).map_err(|e| TargetParseError {
+            input: s.to_string(),
+            message: e.to_string(),
+        })?;
+        Ok(Target { triple })
+    }
+}
+
+/// Error returned when a target triple fails to parse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetParseError {
+    pub input: String,
+    pub message: String,
+}
+
+impl fmt::Display for TargetParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid target '{}': {}", self.input, self.message)
+    }
+}
+
+impl std::error::Error for TargetParseError {}
+
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s: &'static str = (*self).into();
-        write!(f, "{}", s)
+        write!(f, "{}", self.triple)
     }
 }
 
 impl Default for Target {
-    /// Returns the host target as the default.
-    ///
-    /// This allows code to write `Target::default()` instead of `Target::host()`,
-    /// which is useful for struct initialization with `..Default::default()`.
     fn default() -> Self {
         Self::host()
     }
@@ -219,36 +150,94 @@ impl Default for Target {
 /// The CPU architecture of a target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Arch {
-    /// x86-64 (AMD64)
+    X86,
     X86_64,
-    /// AArch64 (ARM64)
+    Arm,
     Aarch64,
+    Riscv32,
+    Riscv64,
+    Wasm32,
+    Wasm64,
+    /// Any architecture we don't model individually (`target-lexicon` may know
+    /// it, but Gruel hasn't classified it).
+    Unknown,
+}
+
+impl Arch {
+    fn from_lexicon(a: Architecture) -> Self {
+        match a {
+            Architecture::X86_32(_) => Arch::X86,
+            Architecture::X86_64 | Architecture::X86_64h => Arch::X86_64,
+            Architecture::Arm(_) => Arch::Arm,
+            Architecture::Aarch64(_) => Arch::Aarch64,
+            Architecture::Riscv32(_) => Arch::Riscv32,
+            Architecture::Riscv64(_) => Arch::Riscv64,
+            Architecture::Wasm32 => Arch::Wasm32,
+            Architecture::Wasm64 => Arch::Wasm64,
+            _ => Arch::Unknown,
+        }
+    }
 }
 
 impl fmt::Display for Arch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Arch::X86_64 => write!(f, "x86-64"),
-            Arch::Aarch64 => write!(f, "aarch64"),
-        }
+        let s = match self {
+            Arch::X86 => "x86",
+            Arch::X86_64 => "x86-64",
+            Arch::Arm => "arm",
+            Arch::Aarch64 => "aarch64",
+            Arch::Riscv32 => "riscv32",
+            Arch::Riscv64 => "riscv64",
+            Arch::Wasm32 => "wasm32",
+            Arch::Wasm64 => "wasm64",
+            Arch::Unknown => "unknown",
+        };
+        f.write_str(s)
     }
 }
 
 /// The operating system of a target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Os {
-    /// Linux
     Linux,
-    /// macOS (Darwin)
     Macos,
+    Windows,
+    /// No OS — bare metal / freestanding.
+    Freestanding,
+    /// WebAssembly System Interface.
+    Wasi,
+    /// Any OS we don't model individually.
+    Unknown,
+}
+
+impl Os {
+    fn from_lexicon(o: OperatingSystem) -> Self {
+        match o {
+            OperatingSystem::Linux => Os::Linux,
+            OperatingSystem::Darwin(_) | OperatingSystem::MacOSX(_) | OperatingSystem::IOS(_) => {
+                // We treat all Apple OSes as Macos for our intrinsic; iOS/etc.
+                // are unusual targets and currently uninteresting.
+                Os::Macos
+            }
+            OperatingSystem::Windows => Os::Windows,
+            OperatingSystem::Wasi | OperatingSystem::WasiP1 | OperatingSystem::WasiP2 => Os::Wasi,
+            OperatingSystem::None_ | OperatingSystem::Unknown => Os::Freestanding,
+            _ => Os::Unknown,
+        }
+    }
 }
 
 impl fmt::Display for Os {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Os::Linux => write!(f, "linux"),
-            Os::Macos => write!(f, "macos"),
-        }
+        let s = match self {
+            Os::Linux => "linux",
+            Os::Macos => "macos",
+            Os::Windows => "windows",
+            Os::Freestanding => "freestanding",
+            Os::Wasi => "wasi",
+            Os::Unknown => "unknown",
+        };
+        f.write_str(s)
     }
 }
 
@@ -256,139 +245,85 @@ impl fmt::Display for Os {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_target_parsing() {
-        assert_eq!(
-            "x86-64-linux".parse::<Target>().unwrap(),
-            Target::X86_64Linux
-        );
-        assert_eq!(
-            "x86_64-linux".parse::<Target>().unwrap(),
-            Target::X86_64Linux
-        );
-        assert_eq!(
-            "aarch64-linux".parse::<Target>().unwrap(),
-            Target::Aarch64Linux
-        );
-        assert_eq!(
-            "arm64-linux".parse::<Target>().unwrap(),
-            Target::Aarch64Linux
-        );
-        assert_eq!(
-            "aarch64-macos".parse::<Target>().unwrap(),
-            Target::Aarch64Macos
-        );
-        assert_eq!(
-            "arm64-macos".parse::<Target>().unwrap(),
-            Target::Aarch64Macos
-        );
-        assert_eq!(
-            "aarch64-apple-darwin".parse::<Target>().unwrap(),
-            Target::Aarch64Macos
-        );
+    fn t(s: &str) -> Target {
+        s.parse().unwrap()
     }
 
     #[test]
-    fn test_target_display() {
-        assert_eq!(Target::X86_64Linux.to_string(), "x86-64-linux");
-        assert_eq!(Target::Aarch64Linux.to_string(), "aarch64-linux");
-        assert_eq!(Target::Aarch64Macos.to_string(), "aarch64-macos");
+    fn parses_canonical_triples() {
+        assert_eq!(t("x86_64-unknown-linux-gnu").arch(), Arch::X86_64);
+        assert_eq!(t("x86_64-unknown-linux-gnu").os(), Os::Linux);
+        assert_eq!(t("aarch64-unknown-linux-gnu").arch(), Arch::Aarch64);
+        assert_eq!(t("aarch64-unknown-linux-gnu").os(), Os::Linux);
+        assert_eq!(t("aarch64-apple-darwin").arch(), Arch::Aarch64);
+        assert_eq!(t("aarch64-apple-darwin").os(), Os::Macos);
     }
 
     #[test]
-    fn test_invalid_target() {
-        assert!("windows".parse::<Target>().is_err());
-        assert!("riscv64".parse::<Target>().is_err());
+    fn parses_short_aliases() {
+        assert_eq!(t("x86_64-linux"), t("x86_64-unknown-linux-gnu"));
+        assert_eq!(t("x86-64-linux"), t("x86_64-unknown-linux-gnu"));
+        assert_eq!(t("aarch64-linux"), t("aarch64-unknown-linux-gnu"));
+        assert_eq!(t("arm64-linux"), t("aarch64-unknown-linux-gnu"));
+        assert_eq!(t("aarch64-macos"), t("aarch64-apple-darwin"));
+        assert_eq!(t("arm64-macos"), t("aarch64-apple-darwin"));
     }
 
     #[test]
-    fn test_elf_machine() {
-        assert_eq!(Target::X86_64Linux.elf_machine(), Some(0x3E));
-        assert_eq!(Target::Aarch64Linux.elf_machine(), Some(0xB7));
-        // Mach-O targets return None since they don't use ELF format
-        assert_eq!(Target::Aarch64Macos.elf_machine(), None);
+    fn parses_extended_triples() {
+        // These are not "blessed" but must parse.
+        assert_eq!(t("riscv64gc-unknown-linux-gnu").arch(), Arch::Riscv64);
+        assert_eq!(t("riscv32imc-unknown-none-elf").arch(), Arch::Riscv32);
+        assert_eq!(t("wasm32-unknown-unknown").arch(), Arch::Wasm32);
+        assert_eq!(t("x86_64-pc-windows-msvc").os(), Os::Windows);
+        assert_eq!(t("aarch64-unknown-none").os(), Os::Freestanding);
+        assert_eq!(t("wasm32-wasi").os(), Os::Wasi);
     }
 
     #[test]
-    fn test_arch_decomposition() {
-        assert_eq!(Target::X86_64Linux.arch(), Arch::X86_64);
-        assert_eq!(Target::Aarch64Linux.arch(), Arch::Aarch64);
-        assert_eq!(Target::Aarch64Macos.arch(), Arch::Aarch64);
+    fn rejects_garbage() {
+        assert!("not-a-triple-at-all".parse::<Target>().is_err());
     }
 
     #[test]
-    fn test_os_decomposition() {
-        assert_eq!(Target::X86_64Linux.os(), Os::Linux);
-        assert_eq!(Target::Aarch64Linux.os(), Os::Linux);
-        assert_eq!(Target::Aarch64Macos.os(), Os::Macos);
+    fn binary_format() {
+        assert!(t("x86_64-unknown-linux-gnu").is_elf());
+        assert!(t("aarch64-unknown-linux-gnu").is_elf());
+        assert!(!t("aarch64-unknown-linux-gnu").is_macho());
+        assert!(t("aarch64-apple-darwin").is_macho());
+        assert!(!t("aarch64-apple-darwin").is_elf());
     }
 
     #[test]
-    fn test_pointer_size() {
-        assert_eq!(Target::X86_64Linux.pointer_size(), 8);
-        assert_eq!(Target::Aarch64Linux.pointer_size(), 8);
-        assert_eq!(Target::Aarch64Macos.pointer_size(), 8);
-    }
-
-    #[test]
-    fn test_stack_alignment() {
-        assert_eq!(Target::X86_64Linux.stack_alignment(), 16);
-        assert_eq!(Target::Aarch64Linux.stack_alignment(), 16);
-        assert_eq!(Target::Aarch64Macos.stack_alignment(), 16);
-    }
-
-    #[test]
-    fn test_triple() {
-        assert_eq!(Target::X86_64Linux.triple(), "x86_64-unknown-linux-gnu");
-        assert_eq!(Target::Aarch64Linux.triple(), "aarch64-unknown-linux-gnu");
-        assert_eq!(Target::Aarch64Macos.triple(), "aarch64-apple-darwin");
-    }
-
-    #[test]
-    fn test_is_elf_macho() {
-        assert!(Target::X86_64Linux.is_elf());
-        assert!(Target::Aarch64Linux.is_elf());
-        assert!(!Target::Aarch64Macos.is_elf());
-
-        assert!(!Target::X86_64Linux.is_macho());
-        assert!(!Target::Aarch64Linux.is_macho());
-        assert!(Target::Aarch64Macos.is_macho());
-    }
-
-    #[test]
-    fn test_page_size() {
-        assert_eq!(Target::X86_64Linux.page_size(), 0x1000);
-        assert_eq!(Target::Aarch64Linux.page_size(), 0x1000);
-        assert_eq!(Target::Aarch64Macos.page_size(), 0x4000);
-    }
-
-    #[test]
-    fn test_macos_min_version() {
-        // Linux targets return None
-        assert_eq!(Target::X86_64Linux.macos_min_version(), None);
-        assert_eq!(Target::Aarch64Linux.macos_min_version(), None);
-        // macOS returns the encoded version (11.0.0 = 0x000B0000 for Big Sur)
-        assert_eq!(Target::Aarch64Macos.macos_min_version(), Some(0x000B0000));
-    }
-
-    #[test]
-    fn test_default_returns_host() {
+    fn default_is_host() {
         assert_eq!(Target::default(), Target::host());
     }
 
     #[test]
-    fn test_display_from_str_round_trip() {
-        // Verify that Display and FromStr are inverses for all targets
+    fn blessed_targets_round_trip() {
         for target in Target::all() {
-            let displayed = target.to_string();
-            let parsed: Target = displayed
-                .parse()
-                .expect("Display output should be parseable");
-            assert_eq!(
-                target, parsed,
-                "Round-trip failed for {}: displayed as '{}', parsed back as {:?}",
-                target, displayed, parsed
-            );
+            let s = target.to_string();
+            let parsed: Target = s.parse().expect("Display output should re-parse");
+            assert_eq!(target, parsed);
+            assert!(target.is_blessed());
         }
+    }
+
+    #[test]
+    fn unblessed_target_is_not_blessed() {
+        let t = "wasm32-wasi".parse::<Target>().unwrap();
+        assert!(!t.is_blessed());
+    }
+
+    #[test]
+    fn arch_display_matches_legacy() {
+        assert_eq!(Arch::X86_64.to_string(), "x86-64");
+        assert_eq!(Arch::Aarch64.to_string(), "aarch64");
+    }
+
+    #[test]
+    fn os_display_matches_legacy() {
+        assert_eq!(Os::Linux.to_string(), "linux");
+        assert_eq!(Os::Macos.to_string(), "macos");
     }
 }
