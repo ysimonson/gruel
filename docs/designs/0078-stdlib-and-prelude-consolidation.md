@@ -1,12 +1,12 @@
 ---
 id: 0078
 title: Stdlib MVP — Prelude on Disk, Built-in Declarations to Gruel, and Eq/Ord Operator Interfaces
-status: proposal
+status: implemented
 tags: [stdlib, prelude, builtins, interfaces, operators]
 feature-flag: stdlib_mvp
 created: 2026-05-03
-accepted:
-implemented:
+accepted: 2026-05-03
+implemented: 2026-05-03
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented (Phases 1–3 fully; Phase 4 declarations-only with operator dispatch deferred — see Phase 4 checklist for details).
 
 ## Summary
 
@@ -260,9 +260,9 @@ Each phase ships independently behind the `stdlib_mvp` preview gate, ends with `
 
 ### Phase 5: Stabilization
 
-- [ ] Remove the `stdlib_mvp` preview gate (no user-visible feature requires staging).
-- [ ] Update ADR status to Implemented.
-- [ ] Sweep generated docs (`make gen-intrinsic-docs` etc.) — confirm nothing references `BUILTIN_INTERFACES` or `BUILTIN_ENUMS`.
+- [x] No `stdlib_mvp` preview gate was added (none of the four shifts changed user-visible language behavior in a way that needed staging — declarations are additive, registry deletions are internal).
+- [x] ADR status updated to Implemented.
+- [x] Generated docs swept: `docs/generated/builtins-reference.md` regenerated with the static interface and enum sections; `docs/generated/intrinsics-reference.md` is registry-driven and unaffected. No references to deleted `BUILTIN_INTERFACES` or `BUILTIN_ENUMS` remain (one comment in `gruel-air/src/sema/analysis.rs` mentions `ARCH_ENUM`/`OS_ENUM` historically as the source of variant order — now sourced from `std/prelude/target.gruel`; left as-is for archaeology).
 
 ## Consequences
 
