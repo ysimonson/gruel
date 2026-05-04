@@ -30,7 +30,10 @@ mod diagnostic;
 mod drop_glue;
 mod link;
 mod parse_cache;
+mod prelude_source;
 mod unit;
+
+pub use prelude_source::{assemble_prelude_source, embedded_prelude_source};
 
 pub use parse_cache::{ParseCacheStats, parse_all_files_cached, parse_key};
 

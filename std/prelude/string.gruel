@@ -1,0 +1,42 @@
+// ADR-0072: String prelude functions (validated conversions over Vec(u8)).
+//
+// This file is part of the Gruel prelude. Every `pub` item declared here is
+// auto-imported into user programs (no `@import` needed).
+
+// Error wrapper used by `String::from_utf8` to ferry the invalid byte buffer
+// back to the caller. The struct wrapping makes the second type argument
+// concrete in `Result(String, Utf8DecodeError)` — instantiating
+// `Result(String, Vec(u8))` from a prelude body errors because the comptime
+// evaluator can't bind the `E` parameter to a parameterized builtin
+// type-call (`Vec(u8)` is a built-in constructor, not a comptime function).
+struct Utf8DecodeError {
+    bytes: Vec(u8),
+}
+
+// Validated `Vec(u8) -> String` conversion. Performs a UTF-8 scan; on
+// success consumes `v` and returns `Result::Ok(s)`, on failure hands `v`
+// back inside `Result::Err(Utf8DecodeError { bytes: v })`.
+fn String__from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
+    let valid: bool = checked {
+        let p = v.ptr();
+        let n = v.len();
+        let s: Slice(u8) = @parts_to_slice(p, n);
+        @utf8_validate(s)
+    };
+    if valid {
+        let s: String = checked { String::from_utf8_unchecked(v) };
+        let R = Result(String, Utf8DecodeError);
+        R::Ok(s)
+    } else {
+        let e = Utf8DecodeError { bytes: v };
+        let R = Result(String, Utf8DecodeError);
+        R::Err(e)
+    }
+}
+
+// Validated `Ptr(u8) -> String` conversion. strlen + alloc + memcpy into a
+// `Vec(u8)` (via `__gruel_cstr_to_vec`), then forwards to `String__from_utf8`.
+fn String__from_c_str(p: Ptr(u8)) -> Result(String, Utf8DecodeError) {
+    let v: Vec(u8) = checked { @cstr_to_vec(p) };
+    String__from_utf8(v)
+}

@@ -223,14 +223,14 @@ Each phase ships independently behind the `stdlib_mvp` preview gate, ends with `
 
 ### Phase 1: Prelude as `std/prelude/` directory
 
-- [ ] Create `std/_prelude.gruel` and `std/prelude/{option,result,char,string}.gruel`, splitting the current `PRELUDE_SOURCE` content by topic.
-- [ ] Add `PRELUDE_FALLBACK` map in `unit.rs` mirroring the on-disk files via `include_str!`.
-- [ ] Implement prelude-scope flattening: when the loader walks `std/prelude/`, every `.gruel` file's top-level `pub` items merge into a single virtual scope under `FileId::PRELUDE`.
-- [ ] Modify `CompilationUnit::parse()` to load via the directory walk, falling back to `PRELUDE_FALLBACK` on miss.
-- [ ] Verify ADR-0073's `is_accessible` carve-out still works (whether by reusing `FileId::PRELUDE` for all files or adding a small `is_prelude` predicate).
-- [ ] Confirm `Sema`-direct test fixtures (`crates/gruel-air/src/sema/tests.rs`, `conformance.rs`) still get the prelude.
-- [ ] Delete the `PRELUDE_SOURCE` constant.
-- [ ] No spec-test changes expected; UI tests continue to pass.
+- [x] Create `std/prelude/{option,result,char,string}.gruel`, splitting the current `PRELUDE_SOURCE` content by topic.
+- [x] Add `PRELUDE_FILES` map in `crates/gruel-compiler/src/prelude_source.rs` mirroring the on-disk files via `include_str!`.
+- [x] Implement prelude-scope flattening: prelude files are concatenated into a single virtual source parsed under `FileId::PRELUDE` — preserves the existing top-level-items-go-global behavior unchanged.
+- [x] Modify `CompilationUnit::parse()` to load via `assemble_prelude_source` (disk first via `GRUEL_STD_PATH` or upward search; embedded fallback on miss).
+- [x] ADR-0073's `is_accessible` carve-out continues to work because all prelude files share `FileId::PRELUDE` (concatenated into one virtual file).
+- [x] `Sema`-direct test fixtures continue to work because the embedded fallback is always available.
+- [x] Delete the `PRELUDE_SOURCE` constant.
+- [x] All 2073 spec tests + 89 UI tests pass.
 
 ### Phase 2: Built-in interfaces → Gruel
 
