@@ -1,12 +1,11 @@
 ---
 id: 0079
 title: Prelude Split, Lang Items, and Prelude-Driven Derives
-status: proposal
+status: implemented
 tags: [prelude, stdlib, interfaces, derives, comptime, lang-items, refactor]
-feature-flag: lang_items
 created: 2026-05-04
-accepted:
-implemented:
+accepted: 2026-05-04
+implemented: 2026-05-04
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +14,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -335,10 +334,10 @@ This phase is not strictly required by the lang-items goal, but unlocks future p
 
 ### Phase 4: Stabilize
 
-- [ ] Remove the `lang_items` preview gate.
-- [ ] Update ADR status to Implemented.
-- [ ] Update `docs/generated/builtins-reference.md` (regenerate; the interface section now points at `@lang(...)` tags, not BUILTIN_INTERFACE_NAMES).
-- [ ] Sweep for residual `name == "Drop"` / `"Copy"` / `"Clone"` strings; convert any remaining to lang-item lookups.
+- [x] Remove the `lang_items` preview gate (it was always dormant — the privilege boundary is path-based, not preview-gated).
+- [x] Update ADR status to Implemented.
+- [x] Regenerate `docs/generated/builtins-reference.md` — interface section now reflects the prelude declarations.
+- [x] Sweep for residual `name == "Drop"` / `"Copy"` / `"Clone"` strings — only the test-fixture fallbacks remain; everything load-bearing keys off lang-item IDs.
 
 ## Consequences
 

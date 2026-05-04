@@ -341,11 +341,6 @@ pub enum PreviewFeature {
     /// Skips lex/parse/RIR/sema and AIR→bitcode work for files whose
     /// inputs haven't changed since the last build.
     IncrementalCompilation,
-    /// `@lang("name")` attribute and lang-item registry (ADR-0079).
-    /// Lets the prelude bind named compiler behaviors (drop, copy,
-    /// clone, …) to specific interface declarations explicitly,
-    /// replacing name-string matching.
-    LangItems,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -378,7 +373,6 @@ impl PreviewFeature {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
             PreviewFeature::IncrementalCompilation => "ADR-0074",
-            PreviewFeature::LangItems => "ADR-0079",
         }
     }
 
@@ -2043,7 +2037,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra, incremental_compilation, lang_items");
+        assert_eq!(names, "test_infra, incremental_compilation");
     }
 
     // ========================================================================
