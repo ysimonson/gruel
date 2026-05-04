@@ -226,10 +226,15 @@ for i in "${!benchmark_names[@]}"; do
     # any leading "O" so we always pass a numeric value.
     opt_flag="--opt-level=${opt_level#O}"
 
-    # Run multiple iterations and collect timing data
+    # Run multiple iterations and collect timing data.
+    # Iteration 1 is treated as the "cold" run (OS page cache cold for source
+    # files and the gruel binary). Iterations 2..N are "hot" — page cache is
+    # warm. We record both separately so the dashboard can chart hot vs cold.
     iteration_results=()
     iteration_pass_data=()
     iteration_memory=()
+    cold_ms=""
+    hot_ms_samples=()
     binary_size=0
     for ((iter=1; iter<=ITERATIONS; iter++)); do
         output_binary="$TEMP_DIR/bench_output_$$"
@@ -269,6 +274,12 @@ for i in "${!benchmark_names[@]}"; do
         total_ms=$(echo "$timing_json" | grep -o '"total_ms":[0-9.]*' | head -1 | cut -d: -f2)
         if [[ -n "$total_ms" ]]; then
             iteration_results+=("$total_ms")
+            # First successful iteration is the cold sample; the rest are hot.
+            if [[ -z "$cold_ms" ]]; then
+                cold_ms="$total_ms"
+            else
+                hot_ms_samples+=("$total_ms")
+            fi
             # Store full JSON for pass data extraction
             iteration_pass_data+=("$timing_json")
             # Store memory usage
@@ -365,6 +376,30 @@ for i in "${!benchmark_names[@]}"; do
     stddev_raw=$(echo "scale=6; sqrt($variance)" | bc -l)
     stddev=$(printf "%.6f" "$stddev_raw")
 
+    # Calculate hot-iteration mean and stddev (iterations 2..N).
+    # cold_ms is already a single sample from iteration 1.
+    hot_ms=""
+    hot_std_ms=""
+    if [[ ${#hot_ms_samples[@]} -gt 0 ]]; then
+        hot_sum=0
+        for val in "${hot_ms_samples[@]}"; do
+            hot_sum=$(echo "$hot_sum + $val" | bc -l)
+        done
+        hot_count=${#hot_ms_samples[@]}
+        hot_mean_raw=$(echo "scale=3; $hot_sum / $hot_count" | bc -l)
+        hot_ms=$(printf "%.3f" "$hot_mean_raw")
+
+        hot_sum_sq=0
+        for val in "${hot_ms_samples[@]}"; do
+            hot_diff=$(echo "$val - $hot_mean_raw" | bc -l)
+            hot_sq=$(echo "$hot_diff * $hot_diff" | bc -l)
+            hot_sum_sq=$(echo "$hot_sum_sq + $hot_sq" | bc -l)
+        done
+        hot_variance=$(echo "scale=6; $hot_sum_sq / $hot_count" | bc -l)
+        hot_stddev_raw=$(echo "scale=6; sqrt($hot_variance)" | bc -l)
+        hot_std_ms=$(printf "%.6f" "$hot_stddev_raw")
+    fi
+
     # Calculate mean and stddev for memory usage
     mem_mean=0
     mem_stddev=0
@@ -391,7 +426,11 @@ for i in "${!benchmark_names[@]}"; do
     mem_mean_mb=$(echo "scale=2; $mem_mean / 1048576" | bc -l)
     binary_size_kb=$(echo "scale=2; $binary_size / 1024" | bc -l)
 
-    log_info "  $name: compile=${mean}ms (±${stddev}), runtime=${runtime_mean}ms, mem=${mem_mean_mb}MB, binary=${binary_size_kb}KB (n=$count)"
+    if [[ -n "$hot_ms" ]]; then
+        log_info "  $name: cold=${cold_ms}ms, hot=${hot_ms}ms (±${hot_std_ms}, n=${#hot_ms_samples[@]}), runtime=${runtime_mean}ms, mem=${mem_mean_mb}MB, binary=${binary_size_kb}KB"
+    else
+        log_info "  $name: cold=${cold_ms}ms (no hot samples), runtime=${runtime_mean}ms, mem=${mem_mean_mb}MB, binary=${binary_size_kb}KB"
+    fi
 
     # Extract and aggregate per-pass timing data, source metrics, and memory
     # Use Python to parse JSON and compute per-pass means
@@ -443,6 +482,10 @@ print(json.dumps(result))
     # Store result with all data (including memory, binary size, and runtime)
     result_parts=("\"name\":\"$name\"" "\"iterations\":$count" "\"mean_ms\":$mean" "\"std_ms\":$stddev" "\"passes\":$passes_json")
     [[ ${#opt_levels[@]} -gt 1 ]] && result_parts+=("\"opt_level\":\"$opt_level\"")
+    [[ -n "$cold_ms" ]] && result_parts+=("\"cold_ms\":$cold_ms")
+    if [[ -n "$hot_ms" ]]; then
+        result_parts+=("\"hot_ms\":$hot_ms" "\"hot_std_ms\":$hot_std_ms" "\"hot_iterations\":${#hot_ms_samples[@]}")
+    fi
     [[ "$source_metrics_json" != "null" ]] && result_parts+=("\"source_metrics\":$source_metrics_json")
     [[ "$mem_mean" -gt 0 ]] && result_parts+=("\"peak_memory_bytes\":$mem_mean")
     [[ "$binary_size" -gt 0 ]] && result_parts+=("\"binary_size_bytes\":$binary_size")

@@ -223,6 +223,32 @@ def get_benchmark_runtime(run: dict, benchmark_name: str) -> float:
     return 0
 
 
+def get_benchmark_cold_ms(run: dict, benchmark_name: str) -> float:
+    """Cold compile time for a benchmark (iter 1, page caches cold)."""
+    bench = _find_benchmark(run, benchmark_name)
+    if bench:
+        return bench.get("cold_ms", 0) or 0
+    return 0
+
+
+def get_benchmark_hot_ms(run: dict, benchmark_name: str) -> float:
+    """Hot compile time for a benchmark (mean of iters 2..N, caches warm)."""
+    bench = _find_benchmark(run, benchmark_name)
+    if bench:
+        return bench.get("hot_ms", 0) or 0
+    return 0
+
+
+def get_total_cold_ms(run: dict) -> float:
+    """Sum of cold compile times across all benchmarks in a run."""
+    return sum((b.get("cold_ms") or 0) for b in run.get("benchmarks", []))
+
+
+def get_total_hot_ms(run: dict) -> float:
+    """Sum of hot compile times across all benchmarks in a run."""
+    return sum((b.get("hot_ms") or 0) for b in run.get("benchmarks", []))
+
+
 def calculate_delta(current: float, previous: float) -> tuple[float, str]:
     """Calculate delta and format as string with arrow indicator."""
     if previous == 0:
@@ -366,6 +392,127 @@ def generate_timeline_chart(runs: list[dict], platform: Optional[str] = None, be
         svg_parts.append(f'  <circle class="chart-point" cx="{x}" cy="{y}" r="4"/>')
 
         # X-axis label (rotated for readability)
+        label_y = TIMELINE_HEIGHT - margin["bottom"] + 15
+        svg_parts.append(
+            f'  <text class="chart-text" x="{x}" y="{label_y}" text-anchor="end" font-size="10" transform="rotate(-45 {x} {label_y})">{escape_xml(p["commit"])}</text>'
+        )
+
+    svg_parts.append("</svg>")
+    return "\n".join(svg_parts)
+
+
+def generate_hot_vs_cold_chart(
+    runs: list[dict],
+    platform: Optional[str] = None,
+    benchmark_name: Optional[str] = None,
+) -> str:
+    """Time-series SVG charting cold (iter 1) vs hot (mean of iters 2..N) compile time.
+
+    If benchmark_name is set, the chart is for that benchmark only; otherwise it
+    aggregates across all benchmarks in each run.
+    """
+    if not runs:
+        return generate_empty_chart(TIMELINE_WIDTH, TIMELINE_HEIGHT, "No benchmark data available yet")
+
+    points = []
+    for run in runs[-20:]:
+        if benchmark_name:
+            cold = get_benchmark_cold_ms(run, benchmark_name)
+            hot = get_benchmark_hot_ms(run, benchmark_name)
+        else:
+            cold = get_total_cold_ms(run)
+            hot = get_total_hot_ms(run)
+        commit = short_commit(run.get("commit", ""))
+        points.append({"commit": commit, "cold": cold, "hot": hot})
+
+    if not points or all(p["cold"] == 0 and p["hot"] == 0 for p in points):
+        return generate_empty_chart(TIMELINE_WIDTH, TIMELINE_HEIGHT, "No hot/cold timing data yet")
+
+    margin = {"top": 50, "right": 30, "bottom": 60, "left": 70}
+    chart_width = TIMELINE_WIDTH - margin["left"] - margin["right"]
+    chart_height = TIMELINE_HEIGHT - margin["top"] - margin["bottom"]
+
+    max_time = max(max(p["cold"], p["hot"]) for p in points) * 1.1
+    if max_time == 0:
+        max_time = 1
+
+    def scale_x(i: int) -> float:
+        if len(points) == 1:
+            return margin["left"] + chart_width / 2
+        return margin["left"] + (i / (len(points) - 1)) * chart_width
+
+    def scale_y(v: float) -> float:
+        return margin["top"] + chart_height - (v / max_time) * chart_height
+
+    title = "Hot vs Cold Compilation"
+    if benchmark_name:
+        base, _ = parse_benchmark_name(benchmark_name)
+        title = f"Hot vs Cold Compilation - {base}"
+    if platform:
+        platform_name = PLATFORM_INFO.get(platform, {}).get("name", platform)
+        title = f"{title} ({platform_name})"
+
+    svg_parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {TIMELINE_WIDTH} {TIMELINE_HEIGHT}" class="benchmark-chart">',
+        '''  <style>
+    .chart-bg { fill: var(--chart-bg, #ffffff); }
+    .chart-text { fill: var(--chart-text, #6b7280); font-family: system-ui, sans-serif; }
+    .chart-title { fill: var(--chart-title, #1a1a1a); font-family: system-ui, sans-serif; font-weight: 600; }
+    .chart-grid { stroke: var(--chart-grid, #e5e7eb); stroke-width: 1; }
+    .chart-axis { stroke: var(--chart-axis, #9ca3af); stroke-width: 1; }
+    .cold-line { stroke: #ef4444; fill: none; stroke-width: 2; }
+    .cold-point { fill: #ef4444; }
+    .hot-line { stroke: #4f6ddb; fill: none; stroke-width: 2; }
+    .hot-point { fill: #4f6ddb; }
+    @media (prefers-color-scheme: dark) {
+      .chart-bg { fill: #1a1a1a; }
+      .chart-text { fill: #9ca3af; }
+      .chart-title { fill: #f0f0f0; }
+      .chart-grid { stroke: #2e2e2e; }
+      .chart-axis { stroke: #4b5563; }
+    }
+  </style>''',
+        f'  <rect class="chart-bg" width="{TIMELINE_WIDTH}" height="{TIMELINE_HEIGHT}" rx="8"/>',
+        f'  <text class="chart-title" x="{TIMELINE_WIDTH/2}" y="22" text-anchor="middle" font-size="16">{escape_xml(title)}</text>',
+    ]
+
+    legend_y = 40
+    legend_x = margin["left"]
+    svg_parts.append(f'  <rect x="{legend_x}" y="{legend_y - 8}" width="12" height="3" fill="#ef4444"/>')
+    svg_parts.append(f'  <text class="chart-text" x="{legend_x + 18}" y="{legend_y - 4}" font-size="11">Cold (iter 1)</text>')
+    svg_parts.append(f'  <rect x="{legend_x + 110}" y="{legend_y - 8}" width="12" height="3" fill="#4f6ddb"/>')
+    svg_parts.append(f'  <text class="chart-text" x="{legend_x + 128}" y="{legend_y - 4}" font-size="11">Hot (mean of remaining iters)</text>')
+
+    num_grid_lines = 5
+    for i in range(num_grid_lines + 1):
+        y = margin["top"] + (i / num_grid_lines) * chart_height
+        value = max_time * (1 - i / num_grid_lines)
+        svg_parts.append(
+            f'  <line class="chart-grid" x1="{margin["left"]}" y1="{y}" x2="{TIMELINE_WIDTH - margin["right"]}" y2="{y}"/>'
+        )
+        svg_parts.append(
+            f'  <text class="chart-text" x="{margin["left"] - 10}" y="{y + 4}" text-anchor="end" font-size="11">{value:.1f}ms</text>'
+        )
+
+    svg_parts.append(
+        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{margin["top"]}" x2="{margin["left"]}" y2="{TIMELINE_HEIGHT - margin["bottom"]}"/>'
+    )
+    svg_parts.append(
+        f'  <line class="chart-axis" x1="{margin["left"]}" y1="{TIMELINE_HEIGHT - margin["bottom"]}" x2="{TIMELINE_WIDTH - margin["right"]}" y2="{TIMELINE_HEIGHT - margin["bottom"]}"/>'
+    )
+
+    for series, line_class, point_class in (("cold", "cold-line", "cold-point"), ("hot", "hot-line", "hot-point")):
+        visible = [(i, p) for i, p in enumerate(points) if p[series] > 0]
+        if len(visible) > 1:
+            path_d = "M " + " L ".join(f"{scale_x(i)},{scale_y(p[series])}" for i, p in visible)
+            svg_parts.append(f'  <path class="{line_class}" d="{path_d}"/>')
+        for i, p in visible:
+            svg_parts.append(
+                f'  <circle class="{point_class}" cx="{scale_x(i)}" cy="{scale_y(p[series])}" r="3"/>'
+            )
+
+    for i, p in enumerate(points):
+        x = scale_x(i)
         label_y = TIMELINE_HEIGHT - margin["bottom"] + 15
         svg_parts.append(
             f'  <text class="chart-text" x="{x}" y="{label_y}" text-anchor="end" font-size="10" transform="rotate(-45 {x} {label_y})">{escape_xml(p["commit"])}</text>'
@@ -1364,6 +1511,13 @@ def generate_platform_charts(history_path: Path, output_dir: Path, platform: Opt
             f.write(svg)
         print(f"  Generated {path}")
 
+        # Hot vs cold compilation (aggregate)
+        svg = generate_hot_vs_cold_chart(opt_runs, platform)
+        path = output_dir / f"hot_vs_cold_{opt}.svg"
+        with open(path, "w") as f:
+            f.write(svg)
+        print(f"  Generated {path}")
+
         # Per-benchmark charts for all chart types
         # Always use {base_name}@{opt} naming for consistency with HTML loading
         for bench_name in opt_names:
@@ -1398,6 +1552,12 @@ def generate_platform_charts(history_path: Path, output_dir: Path, platform: Opt
             # Runtime (single benchmark)
             svg = generate_runtime_chart(opt_runs, [bench_name], platform)
             path = output_dir / f"runtime_{safe_name}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Hot vs cold (single benchmark)
+            svg = generate_hot_vs_cold_chart(opt_runs, platform, benchmark_name=bench_name)
+            path = output_dir / f"hot_vs_cold_{safe_name}.svg"
             with open(path, "w") as f:
                 f.write(svg)
 
@@ -1568,6 +1728,17 @@ def generate_comparison_charts(history_files: list[Path], output_dir: Path):
                 f.write(svg)
             print(f"    Generated {path}")
 
+        # Hot vs cold (aggregate across platforms): merge runs, sort by timestamp
+        merged_runs = []
+        for runs in filtered_data.values():
+            merged_runs.extend(runs)
+        merged_runs.sort(key=lambda r: r.get("timestamp", ""))
+        svg = generate_hot_vs_cold_chart(merged_runs)
+        path = output_dir / f"hot_vs_cold_{opt}.svg"
+        with open(path, "w") as f:
+            f.write(svg)
+        print(f"    Generated {path}")
+
         # Per-benchmark comparison charts
         for bench_base in benchmark_names:
             bench_full = f"{bench_base}@{opt}"
@@ -1644,6 +1815,16 @@ def generate_comparison_charts(history_files: list[Path], output_dir: Path):
 
             svg = make_bench_breakdown(filtered_data, bench_full)
             path = output_dir / f"breakdown_{bench_full}.svg"
+            with open(path, "w") as f:
+                f.write(svg)
+
+            # Hot vs cold per-benchmark (merged across platforms)
+            merged_bench_runs = []
+            for runs in filtered_data.values():
+                merged_bench_runs.extend(runs)
+            merged_bench_runs.sort(key=lambda r: r.get("timestamp", ""))
+            svg = generate_hot_vs_cold_chart(merged_bench_runs, benchmark_name=bench_full)
+            path = output_dir / f"hot_vs_cold_{bench_full}.svg"
             with open(path, "w") as f:
                 f.write(svg)
 

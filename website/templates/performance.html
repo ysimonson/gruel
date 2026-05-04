@@ -74,6 +74,21 @@
             </div>
         </section>
 
+        <!-- Hot vs Cold Compilation -->
+        <section id="hot-vs-cold-section" class="mb-12">
+            <h2 class="text-xl font-semibold mb-4">Hot vs Cold Compilation</h2>
+            <p class="text-muted mb-4">
+                Each benchmark is compiled multiple times in succession. The first
+                run is "cold" (OS page cache empty for source files and the
+                <code>gruel</code> binary); subsequent runs are "hot" with caches warm.
+                The gap reflects what cache warmth alone is worth today, before any
+                compiler-level incremental work lands.
+            </p>
+            <div id="hot-vs-cold-chart-container" class="benchmark-chart-container bg-surface border border-themed rounded-lg p-4">
+                <p class="text-muted text-center py-8">Loading chart...</p>
+            </div>
+        </section>
+
         <!-- Breakdown Chart -->
         <section id="breakdown-section" class="mb-12">
             <h2 class="text-xl font-semibold mb-4">Time by Compiler Pass</h2>
@@ -136,6 +151,7 @@
             const optLevelSelect = document.getElementById('opt-level-select');
             const benchmarkSelect = document.getElementById('benchmark-select');
             const timelineContainer = document.getElementById('timeline-chart-container');
+            const hotColdContainer = document.getElementById('hot-vs-cold-chart-container');
             const breakdownContainer = document.getElementById('breakdown-chart-container');
             const memoryContainer = document.getElementById('memory-chart-container');
             const binaryContainer = document.getElementById('binary-chart-container');
@@ -284,6 +300,7 @@
                     if (currentBenchmark) {
                         const benchSuffix = `${currentBenchmark}@${opt}`;
                         loadSvg(timelineContainer, `${basePath}/timeline_${benchSuffix}.svg`);
+                        loadSvg(hotColdContainer, `${basePath}/hot_vs_cold_${benchSuffix}.svg`);
                         loadSvg(breakdownContainer, `${basePath}/breakdown_${benchSuffix}.svg`);
                         loadSvg(memoryContainer, `${basePath}/memory_${benchSuffix}.svg`);
                         loadSvg(binaryContainer, `${basePath}/binary_size_${benchSuffix}.svg`);
@@ -291,6 +308,7 @@
                     } else {
                         const suffix = currentOptLevel === 'all' ? '' : `_${currentOptLevel}`;
                         loadSvg(timelineContainer, `${basePath}/timeline${suffix}.svg`);
+                        loadSvg(hotColdContainer, `${basePath}/hot_vs_cold${suffix}.svg`);
                         loadSvg(breakdownContainer, `${basePath}/breakdown${suffix}.svg`);
                         loadSvg(memoryContainer, `${basePath}/memory${suffix}.svg`);
                         loadSvg(binaryContainer, `${basePath}/binary_size${suffix}.svg`);
@@ -308,12 +326,14 @@
                     if (currentBenchmark) {
                         const benchSuffix = `${currentBenchmark}@${opt}`;
                         loadSvg(timelineContainer, `${basePath}/timeline_${benchSuffix}.svg`);
+                        loadSvg(hotColdContainer, `${basePath}/hot_vs_cold_${benchSuffix}.svg`);
                         loadSvg(breakdownContainer, `${basePath}/breakdown_${benchSuffix}.svg`);
                         loadSvg(memoryContainer, `${basePath}/memory_${benchSuffix}.svg`);
                         loadSvg(binaryContainer, `${basePath}/binary_size_${benchSuffix}.svg`);
                         loadSvg(runtimeContainer, `${basePath}/runtime_${benchSuffix}.svg`);
                     } else {
                         loadSvg(timelineContainer, `${basePath}/timeline_${opt}.svg`);
+                        loadSvg(hotColdContainer, `${basePath}/hot_vs_cold_${opt}.svg`);
                         loadSvg(breakdownContainer, `${basePath}/breakdown_${opt}.svg`);
                         loadSvg(memoryContainer, `${basePath}/memory_${opt}.svg`);
                         loadSvg(binaryContainer, `${basePath}/binary_size_${opt}.svg`);
@@ -448,6 +468,7 @@
                     coverageSection.style.display = 'block';
 
                     loadSvg(timelineContainer, '/benchmarks/timeline.svg');
+                    loadSvg(hotColdContainer, '/benchmarks/hot_vs_cold_O0.svg');
                     loadSvg(breakdownContainer, '/benchmarks/breakdown.svg');
                     loadSvg(memoryContainer, '/benchmarks/memory.svg');
                     loadSvg(binaryContainer, '/benchmarks/binary_size.svg');
