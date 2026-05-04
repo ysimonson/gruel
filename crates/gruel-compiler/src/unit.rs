@@ -290,27 +290,37 @@ impl<'src> CompilationUnit<'src> {
         let mut parsed_files = Vec::with_capacity(self.sources.len() + 1);
         let mut interner = ThreadedRodeo::new();
 
-        // ADR-0065 / ADR-0078: prepend the synthetic prelude (canonical
-        // Option(T), Result(T,E), char__*, String__from_utf8, etc.). The
-        // prelude content lives on disk under `std/prelude/*.gruel` and is
-        // assembled into a single virtual source under `FileId::PRELUDE`
-        // (`prelude_source::assemble_prelude_source` falls back to embedded
-        // `include_str!` copies if the on-disk stdlib is unavailable).
-        let prelude_source = crate::prelude_source::assemble_prelude_source();
-        let prelude = SourceFile::new("<prelude>", &prelude_source, FileId::PRELUDE);
-        let prelude_lexer =
-            Lexer::with_interner_and_file_id(prelude.source, interner, prelude.file_id);
-        let (prelude_tokens, returned_interner) =
-            prelude_lexer.tokenize().map_err(CompileErrors::from)?;
-        interner = returned_interner;
-        let prelude_parser = Parser::new(prelude_tokens, interner)
-            .with_preview_features(self.options.preview_features.clone());
-        let (prelude_ast, returned_interner) = prelude_parser.parse()?;
-        interner = returned_interner;
-        parsed_files.push(ParsedFileData {
-            path: prelude.path.to_string(),
-            ast: prelude_ast,
-        });
+        // ADR-0065 / ADR-0078: load the prelude as an implicit directory
+        // module under `std/prelude/`. Each prelude file is parsed as its
+        // own source unit with a unique FileId so visibility resolution
+        // treats them as siblings in the prelude directory module (per
+        // ADR-0026): same-directory items see each other's private decls,
+        // user code in any other directory sees only `pub` items.
+        //
+        // The on-disk `std/prelude/*.gruel` files are the source of truth;
+        // when not available (binary distributions without a stdlib path),
+        // `prelude_source::resolved_prelude_files()` falls back to embedded
+        // `include_str!` copies under virtual `std/prelude/<name>.gruel`
+        // paths so the directory-module rule still applies.
+        let mut prelude_file_id = FileId::PRELUDE.index();
+        for file in crate::prelude_source::resolved_prelude_files() {
+            let file_id = FileId::new(prelude_file_id);
+            self.file_paths.insert(file_id, file.path.clone());
+            let lexer = Lexer::with_interner_and_file_id(&file.source, interner, file_id);
+            let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
+            interner = returned_interner;
+            let parser = Parser::new(tokens, interner)
+                .with_preview_features(self.options.preview_features.clone());
+            let (ast, returned_interner) = parser.parse()?;
+            interner = returned_interner;
+            parsed_files.push(ParsedFileData {
+                path: file.path,
+                ast,
+            });
+            // Step downward so each prelude file gets a distinct id without
+            // climbing into the user-FileId range.
+            prelude_file_id = prelude_file_id.wrapping_sub(1);
+        }
 
         // ADR-0074 Phase 2: when --preview incremental_compilation is on
         // AND a cache_dir is configured, route user-file parsing through

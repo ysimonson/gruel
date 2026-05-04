@@ -33,7 +33,7 @@ mod parse_cache;
 mod prelude_source;
 mod unit;
 
-pub use prelude_source::{assemble_prelude_source, embedded_prelude_source};
+pub use prelude_source::{ResolvedPreludeFile, embedded_prelude_files, resolved_prelude_files};
 
 pub use parse_cache::{ParseCacheStats, parse_all_files_cached, parse_key};
 
@@ -759,20 +759,32 @@ pub struct CompileOutput {
 /// definitions.
 pub fn prepend_prelude(
     ast: Ast,
-    interner: ThreadedRodeo,
+    mut interner: ThreadedRodeo,
     preview_features: &PreviewFeatures,
 ) -> MultiErrorResult<(Ast, ThreadedRodeo)> {
     use gruel_util::FileId;
 
-    let prelude_source = prelude_source::embedded_prelude_source();
-    let prelude_lexer =
-        Lexer::with_interner_and_file_id(&prelude_source, interner, FileId::PRELUDE);
-    let (prelude_tokens, interner) = prelude_lexer.tokenize().map_err(CompileErrors::from)?;
-    let prelude_parser =
-        Parser::new(prelude_tokens, interner).with_preview_features(preview_features.clone());
-    let (prelude_ast, interner) = prelude_parser.parse()?;
+    let mut all_items = Vec::new();
+    // Use a small range of synthetic FileIds for prelude files so they share
+    // a directory module identity (`std/prelude/`) for visibility purposes.
+    // The exact ids don't matter as long as they don't collide with user
+    // FileIds (which start at 1) or the BUILTIN sentinel.
+    let mut prelude_file_id = FileId::PRELUDE.index();
+    for file in prelude_source::embedded_prelude_files() {
+        let lexer =
+            Lexer::with_interner_and_file_id(&file.source, interner, FileId::new(prelude_file_id));
+        let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
+        interner = returned_interner;
+        let parser = Parser::new(tokens, interner).with_preview_features(preview_features.clone());
+        let (parsed, returned_interner) = parser.parse()?;
+        interner = returned_interner;
+        all_items.extend(parsed.items);
+        // Step downward so the next prelude file gets a distinct id without
+        // climbing into the user-FileId range.
+        prelude_file_id = prelude_file_id.wrapping_sub(1);
+    }
 
-    let mut merged = prelude_ast;
+    let mut merged = Ast { items: all_items };
     merged.items.extend(ast.items);
     Ok((merged, interner))
 }

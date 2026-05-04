@@ -1,6 +1,6 @@
 // ADR-0072: String prelude functions (validated conversions over Vec(u8)).
 //
-// This file is part of the Gruel prelude. Every `pub` item declared here is
+// This file is part of the Gruel prelude. `pub` items declared here are
 // auto-imported into user programs (no `@import` needed).
 
 // Error wrapper used by `String::from_utf8` to ferry the invalid byte buffer
@@ -9,6 +9,10 @@
 // `Result(String, Vec(u8))` from a prelude body errors because the comptime
 // evaluator can't bind the `E` parameter to a parameterized builtin
 // type-call (`Vec(u8)` is a built-in constructor, not a comptime function).
+// Non-pub: Utf8DecodeError is a prelude-internal type. User code that needs
+// to inspect the failed bytes can match on the `Result` and read the
+// `bytes` field through the synthesized clone path. (We may make this pub
+// in a follow-up once we have a stable accessor API.)
 struct Utf8DecodeError {
     bytes: Vec(u8),
 }
@@ -16,7 +20,7 @@ struct Utf8DecodeError {
 // Validated `Vec(u8) -> String` conversion. Performs a UTF-8 scan; on
 // success consumes `v` and returns `Result::Ok(s)`, on failure hands `v`
 // back inside `Result::Err(Utf8DecodeError { bytes: v })`.
-fn String__from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
+pub fn String__from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
     let valid: bool = checked {
         let p = v.ptr();
         let n = v.len();
@@ -36,7 +40,7 @@ fn String__from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
 
 // Validated `Ptr(u8) -> String` conversion. strlen + alloc + memcpy into a
 // `Vec(u8)` (via `__gruel_cstr_to_vec`), then forwards to `String__from_utf8`.
-fn String__from_c_str(p: Ptr(u8)) -> Result(String, Utf8DecodeError) {
+pub fn String__from_c_str(p: Ptr(u8)) -> Result(String, Utf8DecodeError) {
     let v: Vec(u8) = checked { @cstr_to_vec(p) };
     String__from_utf8(v)
 }

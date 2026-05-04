@@ -1,10 +1,10 @@
 // ADR-0071: char prelude functions (validated conversions and UTF-8 helpers).
 //
-// This file is part of the Gruel prelude. Every `pub` item declared here is
+// This file is part of the Gruel prelude. `pub` items declared here are
 // auto-imported into user programs (no `@import` needed).
 
 // Validated u32 → char conversion.
-fn char__from_u32(n: u32) -> Result(char, u32) {
+pub fn char__from_u32(n: u32) -> Result(char, u32) {
     let surrogate_lo: u32 = 55296;
     let surrogate_hi: u32 = 57343;
     let max_scalar: u32 = 1114111;
@@ -21,7 +21,7 @@ fn char__from_u32(n: u32) -> Result(char, u32) {
 }
 
 // char.is_ascii() — true iff the codepoint is < 128.
-fn char__is_ascii(c: char) -> bool {
+pub fn char__is_ascii(c: char) -> bool {
     let n: u32 = c.to_u32();
     let limit: u32 = 128;
     n < limit
@@ -29,7 +29,7 @@ fn char__is_ascii(c: char) -> bool {
 
 // char.len_utf8() — number of UTF-8 bytes (1, 2, 3, or 4) needed to encode
 // the codepoint.
-fn char__len_utf8(c: char) -> usize {
+pub fn char__len_utf8(c: char) -> usize {
     let n: u32 = c.to_u32();
     let one_byte: u32 = 128;
     let two_bytes: u32 = 2048;
@@ -47,7 +47,7 @@ fn char__len_utf8(c: char) -> usize {
 
 // char.encode_utf8(buf) — write the canonical UTF-8 encoding of `c` to `buf`
 // and return the byte count (1, 2, 3, or 4).
-fn char__encode_utf8(c: char, buf: MutRef([u8; 4])) -> usize {
+pub fn char__encode_utf8(c: char, buf: MutRef([u8; 4])) -> usize {
     let n: u32 = c.to_u32();
     let one_byte: u32 = 128;
     let two_bytes: u32 = 2048;

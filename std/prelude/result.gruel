@@ -1,56 +1,56 @@
 // ADR-0070: canonical Result(T, E).
 //
-// This file is part of the Gruel prelude. Every `pub` item declared here is
+// This file is part of the Gruel prelude. `pub` items declared here are
 // auto-imported into user programs (no `@import` needed).
 
-fn Result(comptime T: type, comptime E: type) -> type {
+pub fn Result(comptime T: type, comptime E: type) -> type {
     enum {
         Ok(T),
         Err(E),
 
-        fn is_ok(self: Ref(Self)) -> bool {
+        pub fn is_ok(self: Ref(Self)) -> bool {
             match self {
                 Self::Ok(_) => true,
                 Self::Err(_) => false,
             }
         }
 
-        fn is_err(self: Ref(Self)) -> bool {
+        pub fn is_err(self: Ref(Self)) -> bool {
             match self {
                 Self::Ok(_) => false,
                 Self::Err(_) => true,
             }
         }
 
-        fn unwrap(self) -> T {
+        pub fn unwrap(self) -> T {
             match self {
                 Self::Ok(x) => x,
                 Self::Err(_) => @panic("called unwrap on an Err value"),
             }
         }
 
-        fn unwrap_err(self) -> E {
+        pub fn unwrap_err(self) -> E {
             match self {
                 Self::Ok(_) => @panic("called unwrap_err on an Ok value"),
                 Self::Err(e) => e,
             }
         }
 
-        fn unwrap_or(self, default: T) -> T {
+        pub fn unwrap_or(self, default: T) -> T {
             match self {
                 Self::Ok(x) => x,
                 Self::Err(_) => default,
             }
         }
 
-        fn expect(self, msg: String) -> T {
+        pub fn expect(self, msg: String) -> T {
             match self {
                 Self::Ok(x) => x,
                 Self::Err(_) => @panic(msg),
             }
         }
 
-        fn expect_err(self, msg: String) -> E {
+        pub fn expect_err(self, msg: String) -> E {
             match self {
                 Self::Ok(_) => @panic(msg),
                 Self::Err(e) => e,

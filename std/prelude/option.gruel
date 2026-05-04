@@ -1,35 +1,36 @@
 // ADR-0065: canonical Option(T).
 //
-// This file is part of the Gruel prelude. Every `pub` item declared here is
-// auto-imported into user programs (no `@import` needed).
+// This file is part of the Gruel prelude. `pub` items declared here are
+// auto-imported into user programs (no `@import` needed). Non-`pub` items
+// stay private to the prelude directory.
 
-fn Option(comptime T: type) -> type {
+pub fn Option(comptime T: type) -> type {
     enum {
         Some(T),
         None,
 
-        fn is_some(self: Ref(Self)) -> bool {
+        pub fn is_some(self: Ref(Self)) -> bool {
             match self {
                 Self::Some(_) => true,
                 Self::None => false,
             }
         }
 
-        fn is_none(self: Ref(Self)) -> bool {
+        pub fn is_none(self: Ref(Self)) -> bool {
             match self {
                 Self::Some(_) => false,
                 Self::None => true,
             }
         }
 
-        fn unwrap(self) -> T {
+        pub fn unwrap(self) -> T {
             match self {
                 Self::Some(x) => x,
                 Self::None => @panic("called unwrap on a None value"),
             }
         }
 
-        fn unwrap_or(self, default: T) -> T {
+        pub fn unwrap_or(self, default: T) -> T {
             match self {
                 Self::Some(x) => x,
                 Self::None => default,
