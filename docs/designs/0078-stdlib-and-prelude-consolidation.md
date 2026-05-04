@@ -1,9 +1,9 @@
 ---
 id: 0078
-title: Stdlib and Prelude Consolidation — Move Built-in Type Surface to Gruel Source
+title: Stdlib MVP — Prelude on Disk, Built-in Declarations to Gruel, and Eq/Ord Operator Interfaces
 status: proposal
-tags: [stdlib, prelude, builtins, runtime, refactor]
-feature-flag: stdlib_consolidation
+tags: [stdlib, prelude, builtins, interfaces, operators]
+feature-flag: stdlib_mvp
 created: 2026-05-03
 accepted:
 implemented:
@@ -11,7 +11,7 @@ spec-sections: []
 superseded-by:
 ---
 
-# ADR-0078: Stdlib and Prelude Consolidation
+# ADR-0078: Stdlib MVP
 
 ## Status
 
@@ -19,255 +19,305 @@ Proposal
 
 ## Summary
 
-Move as much built-in type machinery as possible out of Rust source and into Gruel source files, in two parallel directions:
+Establish the first non-trivial layer of the Gruel standard library by making four changes that, together, turn `std/` from a four-function math stub into a real home for stdlib code:
 
-1. **Lift the synthetic prelude off a string literal and onto disk.** The current `PRELUDE_SOURCE` constant (`crates/gruel-compiler/src/unit.rs:90-316`, ~225 lines of Gruel embedded as a Rust raw-string) becomes one or more real `.gruel` files under the existing `std/` tree, loaded automatically before user code. ADR-0026 Phase 5 already shipped the on-disk stdlib resolution path; this ADR routes the prelude through the same mechanism.
-2. **Collapse `String` to a Gruel-source newtype over `Vec(u8)`.** ADR-0072 made `String` structurally a `{ bytes: Vec(u8) }` newtype but kept the entire method surface in the Rust registry (`gruel-builtins/src/lib.rs:336-614`, ~280 LOC) backed by 31 `no_mangle` runtime functions in `gruel-runtime/src/string.rs` (751 LOC). Most of that runtime is now redundant — `s.len()` is `self.bytes.len()`, `s.clear()` is `self.bytes.clear()`, etc. This ADR finishes the collapse ADR-0072 anticipated in its summary ("Today's ~490 LOC … shrinks to the genuinely UTF-8-specific surface").
+1. **Prelude as `std/prelude/` directory.** Move the inline `PRELUDE_SOURCE` raw-string constant in `crates/gruel-compiler/src/unit.rs:90-316` (~225 lines of Gruel embedded in Rust) onto disk under `std/prelude/`, with a per-topic file split (`option.gruel`, `result.gruel`, `char.gruel`, `string.gruel`, `interfaces.gruel`, `target.gruel`, `cmp.gruel`). Names declared in any prelude file are auto-imported into user code without an `@import` — a small "prelude scope flattening" mechanism is added to support that.
+2. **Built-in interface declarations move to Gruel.** `Drop`, `Copy`, `Clone`, `Handle` (currently `BuiltinInterfaceDef` records in `gruel-builtins/src/lib.rs:945-1015`) become `pub interface` declarations in `std/prelude/interfaces.gruel`. The compiler keeps its hardcoded behavior (drop glue at scope end, `@derive(Copy)` validation, `@derive(Clone)` synthesis, `Handle` linearity carve-out) keyed off interned names — same pattern as how it recognizes `Option` and `Result` today.
+3. **Built-in enum declarations move to Gruel.** `Arch`, `Os`, `TypeKind`, `Ownership` (in `gruel-builtins/src/lib.rs:657-717`) become `pub enum` declarations in `std/prelude/target.gruel`. The intrinsics that produce values of these types (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) switch from variant-by-index lookup to variant-by-name lookup against the Gruel-defined enum.
+4. **Eq, Ord, and operator desugaring.** Add `pub interface Eq`, `pub interface Ord`, and `pub enum Ordering` to `std/prelude/cmp.gruel`. Sema's binary-operator analyzer gains a fall-through path: when operands are not built-in primitives, look up `Eq` / `Ord` conformance and desugar `==`, `!=`, `<`, `<=`, `>`, `>=` to method calls on `eq` / `cmp`. This is real operator overloading — the language gains it as a side effect of moving stdlib types out of Rust.
 
-Concrete target: **eliminate ~900–1300 Rust LOC** across `gruel-runtime/src/string.rs`, `gruel-builtins/src/lib.rs`, and `crates/gruel-compiler/src/unit.rs`, replacing it with ~150–250 LOC of Gruel stdlib source. The runtime keeps only what is genuinely platform-bound (allocation, libc strlen, UTF-8 validation byte loop) or operator-bound (byte equality/ordering primitives the language can't yet express on `Slice(u8)`).
+**Explicitly deferred to a follow-up ADR.** This ADR does **not** touch `String` or `Vec(T)`. ADR-0072's runtime-collapse target (~750 LOC of `gruel-runtime/src/string.rs` shrinking to a UTF-8-validation core) is real and tracked, but landing it cleanly depends on (a) operator overloading existing for non-built-in types, and (b) the prelude being a directory module rather than a string. This ADR delivers (a) and (b); a sibling ADR consumes them.
 
-This ADR does **not** introduce new language features. It is a relocation of existing Gruel-expressible logic from Rust into Gruel source, with one small infrastructure change (loading prelude files from disk instead of from a string literal).
+**LOC impact.** ~250 Rust LOC removed (~415 deletions, ~165 additions for new operator-dispatch logic and the prelude loader), ~285 Gruel LOC added. The win is modest by line count; the structural value is **the language gains operator overloading and the stdlib gets a real foundation**, both of which unlock the larger `String`/`Vec` collapse later.
 
 ## Context
 
 ### Where things sit today
 
-**Stdlib mechanism (already exists).** ADR-0026 Phase 5 shipped:
+**Stdlib.** `std/_std.gruel` (re-exports `math`) and `std/math.gruel` (`abs`, `min`, `max`, `clamp`) — 30 LOC of Gruel total, plus the resolution machinery in `crates/gruel-air/src/sema/analysis.rs:5620` (`resolve_std_import`). `@import("std")` works; `GRUEL_STD_PATH` and `std/`-relative search are wired.
 
-- `std/_std.gruel` — directory module root re-exporting `pub const math = @import("math.gruel");`
-- `std/math.gruel` — `abs`, `min`, `max`, `clamp` (30 LOC of Gruel)
-- `@import("std")` resolution lives in `crates/gruel-air/src/sema/analysis.rs:5620` (`resolve_std_import`), checking `GRUEL_STD_PATH` then `std/` relative to source
-- Stdlib is **not** implicitly imported (per ADR-0026 §"Standard Library") — users write `const std = @import("std");`
+**Prelude (the inline string).** `crates/gruel-compiler/src/unit.rs:90` defines `const PRELUDE_SOURCE: &str = r#"…"#;` — 225 lines containing `Option(T)`, `Result(T, E)`, `char__from_u32`, `char__is_ascii`, `char__len_utf8`, `char__encode_utf8`, `Utf8DecodeError`, `String__from_utf8`, `String__from_c_str`. Loaded under `FileId::PRELUDE` before user code (`unit.rs:526`); names are visible without `@import`. The mechanism that makes them globally visible is **not** the standard module re-export pattern — `FileId::PRELUDE`'s top-level items go straight into the global resolution table.
 
-**Prelude mechanism (already exists, but as a string).** Distinct from the stdlib:
+**Built-in interfaces.** `gruel-builtins/src/lib.rs:945-1015`, registered into `BUILTIN_INTERFACES`:
 
-- `crates/gruel-compiler/src/unit.rs:90` defines `const PRELUDE_SOURCE: &str = r#"…"#;` — a 225-line embedded Gruel program
-- It contains: `Option(T)` and `Result(T, E)` (ADR-0065 / ADR-0070), `char__from_u32`, `char__is_ascii`, `char__len_utf8`, `char__encode_utf8` (ADR-0071), `Utf8DecodeError`, `String__from_utf8`, `String__from_c_str` (ADR-0072)
-- Loaded under `FileId::PRELUDE` before user files (`unit.rs:526`); names are visible without `@import`
-- Sema dispatches certain method/associated-function calls to prelude-resident free functions (e.g. `String::from_utf8(v)` → call `String__from_utf8(v)`; see `crates/gruel-air/src/sema/analysis.rs:4373-4395` and `:10913`)
+- `Drop` (ADR-0059) — method-presence conformance; `fn drop(self)` makes a type conform.
+- `Copy` (ADR-0059) — `@derive(Copy)` only; compiler emits a bitwise copy; method body is never user-written.
+- `Clone` (ADR-0065) — `@derive(Clone)` synthesizes a recursive clone; rejected on linear types.
+- `Handle` (ADR-0075) — method-presence conformance; permitted on linear types.
 
-**Built-in `String` (synthetic struct).** `gruel-builtins/src/lib.rs:336-614`:
+Sema injects them at `crates/gruel-air/src/sema/builtins.rs:145` (`inject_builtin_interfaces`). The *declarations* are pure data; the compiler's behavior is hardwired by name — `Option` and `Result` follow the same recognize-by-name pattern, but their declarations are already in the prelude, so the precedent for moving the declarations exists.
 
-- One field, `bytes: Vec(u8)` with `is_pub: false` (post-ADR-0072 layout)
-- 6 operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) each routing to `__gruel_str_eq` / `__gruel_str_cmp`
-- 5 associated functions (`new`, `with_capacity`, `from_char`, `from_utf8_unchecked`, `from_c_str_unchecked`)
-- 14 methods (`len`, `capacity`, `is_empty`, `clone`, `contains`, `starts_with`, `ends_with`, `concat`, `push_str`, `push`, `clear`, `reserve`, `bytes_len`, `bytes_capacity`, `into_bytes`, `push_byte`, `terminated_ptr`)
-- Each entry is ~12-18 LOC of registry data; the slice spans ~280 LOC
-- Drop glue: `__gruel_drop_String` declared in codegen at `crates/gruel-codegen-llvm/src/codegen.rs:936`
+**Built-in enums.** `gruel-builtins/src/lib.rs:657-717`, registered into `BUILTIN_ENUMS`:
 
-**Runtime backing.** `gruel-runtime/src/string.rs`:
+- `Arch` (8 unit variants) used by `@target_arch()`
+- `Os` (5 unit variants) used by `@target_os()`
+- `TypeKind` (7 unit variants) used by `@type_info()`
+- `Ownership` (3 unit variants) used by `@ownership(T)`
 
-- 31 `no_mangle` extern functions, 751 LOC
-- Includes: byte equality/comparison (`__gruel_str_eq`, `__gruel_str_cmp`), allocator wrappers (`__gruel_alloc`, `__gruel_free`, `__gruel_realloc`, `__gruel_string_alloc`, `__gruel_string_realloc`), drop (`__gruel_drop_String`), one function per `String__*` method
-- Many of these are pure delegations to byte-buffer ops that `Vec(u8)` already does inline in codegen
+The intrinsics today materialize values by selecting variant by *index* against `BuiltinEnumDef::variants`. Sema stores special IDs (`builtin_arch_id` etc.) on `Sema` for fast lookup.
 
-### What ADR-0072 said but didn't finish
+**Operators on user types.** Currently impossible. There is no `Eq` or `Ord` interface in the language. The only types with overloaded operators are:
 
-ADR-0072 Summary (line 35): "Today's ~490 LOC in `gruel-runtime/src/string.rs` shrinks to the genuinely UTF-8-specific surface: validation (`__gruel_utf8_validate`), `from_c_str` ingest, and `terminated_ptr`'s NUL-write step."
+- Numeric primitives (`i32 + i32`, etc.) — direct sema analysis, no dispatch.
+- `bool == bool` — direct sema analysis.
+- `String` — registry-driven via `BuiltinTypeDef::operators` (`gruel-builtins/src/lib.rs:345-376`), routing to runtime `__gruel_str_eq` / `__gruel_str_cmp`.
 
-The structural change shipped (String *is* `{ bytes: Vec(u8) }`), but the implementation kept the runtime functions intact and bolted them on top of the new layout. The collapse target is still open work.
+A user-defined struct cannot overload `==` today; users must call an explicit method. This is the largest missing piece in the language for ergonomic stdlib types — and the load-bearing reason this ADR exists rather than just relocating registry data.
 
 ### Why now
 
-- The on-disk prelude/stdlib mechanism exists and is stable (ADR-0026 stable since 2026-01-04).
-- `Vec(T)` is generic-monomorphized and inline-codegen'd (ADR-0066), so `String`'s methods can express themselves as compositions over `self.bytes` without a Rust round-trip.
-- `Result(T, E)` (ADR-0070) and `char` (ADR-0071) are in the prelude and stable, removing the last user-visible blockers.
-- The `PRELUDE_SOURCE` string has grown from a few dozen lines to ~225 and is starting to resist edits (no syntax highlighting, no per-file diffs, awkward escaping if anything ever needs a `"`). This is the right moment to move it.
+- The on-disk stdlib mechanism is stable (ADR-0026 stable since 2026-01-04) but underused: `std/math.gruel` is the only customer.
+- `Result(T, E)` (ADR-0070) and `char` (ADR-0071) prove the "Gruel-resident generic types in prelude" pattern works.
+- The inline `PRELUDE_SOURCE` is approaching the size where it resists edits (no syntax highlighting, awkward escaping).
+- Operator overloading has been blocked behind "we'll figure it out when we need it." This ADR needs it for the stdlib types it adds, so we figure it out now — minimally, just `Eq` and `Ord`.
+- The bigger `String`/`Vec` migration (ADR-0072 anticipates ~490 LOC of `string.rs` retiring) is gated on operator overloading existing for non-built-in types. Shipping this ADR clears the path.
 
-### Constraints
+### What this ADR does **not** do
 
-- **Don't add new language features.** Generics, interfaces, drop-glue synthesis, and field-level moves all exist. This is pure relocation.
-- **Don't break existing programs.** All current spec/UI tests must pass at every phase boundary.
-- **Don't regress codegen quality.** A `String::len` call after this ADR should still lower to the same instructions (a load from the `len` slot of the underlying `Vec(u8)`). LLVM inlining handles small Gruel functions across the prelude boundary; the runtime FFI was never giving us optimization wins for these.
-- **Field privacy stays.** The `bytes: Vec(u8)` field is non-pub. Prelude code can read it because the prelude lives under `FileId::PRELUDE` and ADR-0073's visibility check treats prelude/stdlib code as privileged for builtin field access (this is already how the inline prelude reaches `Vec(u8)` to construct a `String`).
+- **Does not move `String` methods to Gruel.** The 31 `no_mangle` extern functions in `gruel-runtime/src/string.rs` (751 LOC) all stay. The `STRING_TYPE` registry entry stays. `String`'s 6 registry-driven operator entries stay (and continue to win over the new Eq/Ord dispatch — see Decision §4).
+- **Does not move `Vec(T)` to Gruel.** `Vec(T)` stays as `BuiltinTypeConstructorKind::Vec` with codegen-inlined methods.
+- **Does not retire `__gruel_str_eq` / `__gruel_str_cmp`.** They keep being called via the existing `BUILTIN_TYPES` operator-routing path.
+- **Does not add `PartialEq`/`PartialOrd`.** Floats keep their primitive comparisons; the Eq/Ord interfaces are for non-float types only (see §4).
+- **Does not add interface bounds on generics.** Gruel's comptime generics are structural/duck-typed; once a method exists, monomorphization picks it up. Adding `T: Ord` syntax is a separate ADR.
+
+These are real follow-ups, not shrugs. The next ADR (call it 0079) will consume what this one ships.
 
 ## Decision
 
-Three independent shifts, executed as separate phases so each lands a measurable Rust-LOC reduction.
+Four shifts, executed as separate phases.
 
-### Shift 1: Prelude on disk
+### Shift 1: Prelude as `std/prelude/` directory module
 
-Replace the inline `PRELUDE_SOURCE` string with one or more on-disk files, loaded automatically when no explicit `@import` brings them in.
+Replace the inline `PRELUDE_SOURCE` string with a real on-disk tree under `std/prelude/`, loaded automatically before user code.
 
-**Layout.** Add a `_prelude.gruel` (and supporting files if it grows) under the stdlib tree. Two viable locations, picking option (a):
+**Layout.**
 
-(a) `std/_prelude.gruel` — colocated with `std/math.gruel`, resolved via the same `GRUEL_STD_PATH`/relative-`std/` logic in `resolve_std_import`. Reuses one resolution mechanism.
-
-(b) Separate `prelude/` tree — clearer separation, but duplicates the resolution code.
-
-**Loading.** `CompilationUnit::parse()` already prepends a synthetic prelude file (`unit.rs:523-541`). Replace the in-memory `SourceFile::new("<prelude>", PRELUDE_SOURCE, FileId::PRELUDE)` with a disk read keyed off the same `resolve_std_import` machinery, scoped to a sentinel filename like `_prelude.gruel`. If the file is absent (e.g. host without an installed stdlib), fall back to a hardcoded empty prelude — no error, because the prelude is purely additive.
-
-**FileId discipline.** Keep `FileId::PRELUDE` as the file id assigned to whatever the loader returns, so all downstream code (visibility checks, span paths, ADR-0073's `is_accessible` privileged-access carve-out) keeps working unchanged.
-
-**Test surface.** Tests that construct a `Sema` directly (e.g. `crates/gruel-air/src/sema/tests.rs:878`) need a way to inject the prelude without disk I/O. Provide a `PRELUDE_FALLBACK: &str` in `unit.rs` containing the same content as the disk file, used when disk lookup fails or in tests; the file on disk is the source of truth, the constant is a small fallback.
-
-### Shift 2: Collapse String methods to Gruel
-
-For each `String` method/assoc-fn whose body is expressible in Gruel today, remove the runtime function and the registry entry, and add a free function in the prelude (or a new `std/string.gruel` if we want the dispatching to feel less ad-hoc).
-
-**Dispatch pattern (already in use).** `crates/gruel-air/src/sema/analysis.rs:4731` — `dispatch_string_prelude_assoc_fn` rewrites a `String::from_utf8(v)` call into a free-function call against a prelude function. Generalize this so additional method/assoc names register themselves into a small dispatch table consulted before falling through to the builtin registry.
-
-**Body sketches.** The pure delegations (10 methods) compile to one-liners:
-
-```gruel
-fn String__len(s: Ref(String)) -> usize        { s.bytes.len() }
-fn String__capacity(s: Ref(String)) -> usize    { s.bytes.capacity() }
-fn String__is_empty(s: Ref(String)) -> bool     { s.bytes.is_empty() }
-fn String__clear(s: MutRef(String))             { s.bytes.clear() }
-fn String__reserve(s: MutRef(String), n: usize) { s.bytes.reserve(n) }
-fn String__push_byte(s: MutRef(String), b: u8)  { checked { s.bytes.push(b) } }
-fn String__into_bytes(s: String) -> Vec(u8)     { s.bytes }   // partial-move; verify ADR-0036 allows it
-fn String__new() -> String                      { String { bytes: Vec(u8)::new() } }
-fn String__with_capacity(n: usize) -> String    { String { bytes: Vec(u8)::with_capacity(n) } }
-fn String__clone(s: Ref(String)) -> String      { String { bytes: s.bytes.clone() } }
+```
+std/
+  _std.gruel              # existing
+  math.gruel              # existing
+  _prelude.gruel          # NEW — manifest listing prelude submodules
+  prelude/
+    option.gruel          # Option(T)
+    result.gruel          # Result(T, E)
+    char.gruel            # char__from_u32, char__is_ascii, char__len_utf8, char__encode_utf8
+    string.gruel          # Utf8DecodeError, String__from_utf8, String__from_c_str
+    interfaces.gruel      # Drop, Copy, Clone, Handle (Shift 2)
+    target.gruel          # Arch, Os, TypeKind, Ownership (Shift 3)
+    cmp.gruel             # Eq, Ord, Ordering (Shift 4)
 ```
 
-The algorithmic methods (4 methods) become small loops or compositions:
+**Auto-import via prelude-scope flattening.** The standard `@import("std")` resolution returns a struct; you'd write `prelude.option.Some`. The prelude needs unqualified names. **This is a new behavior**, not a relocation — the current inline prelude works because all its declarations are top-level under one synthetic `FileId::PRELUDE`.
+
+The cheap way to preserve this: when the loader walks `std/prelude/`, every `.gruel` file there is parsed and its top-level `pub` items are merged into a single virtual prelude scope under `FileId::PRELUDE` (or a small range of prelude-flagged ids). `_prelude.gruel` is a manifest — either a literal list of files (`pub const _ = @include_prelude("option.gruel"); ...`) or implicit (every `.gruel` file in `prelude/` is included). Implicit-by-discovery is simpler; pick that unless ordering issues surface.
+
+**Loading.** `CompilationUnit::parse()` (`crates/gruel-compiler/src/unit.rs:523-541`) currently constructs the prelude as `SourceFile::new("<prelude>", PRELUDE_SOURCE, FileId::PRELUDE)`. Replace with: locate `std/prelude/` via the same `GRUEL_STD_PATH` / relative-`std/` machinery `resolve_std_import` uses, parse each `.gruel` file under it as `FileId::PRELUDE`, and prepend the merged AST to the user files.
+
+**Fallback.** Keep a `PRELUDE_FALLBACK` map in Rust mirroring the on-disk files via `include_str!` for tests, missing-stdlib hosts, and binary distribution. The disk is the source of truth; the embedded copy is a safety net.
+
+**FileId discipline.** Either reuse `FileId::PRELUDE` for every prelude file, or add an `is_prelude(file_id)` predicate. The choice affects ADR-0073's privileged-access carve-out — pick whichever keeps that one-liner unchanged.
+
+### Shift 2: Built-in interface declarations → Gruel
+
+Move `Drop`, `Copy`, `Clone`, `Handle` declarations into `std/prelude/interfaces.gruel`:
 
 ```gruel
-fn String__concat(a: Ref(String), b: Ref(String)) -> String { /* alloc + push_str twice */ }
-fn String__push_str(s: MutRef(String), other: Ref(String)) { /* loop b in other.bytes; s.bytes.push(b) */ }
-fn String__contains(haystack: Ref(String), needle: Ref(String)) -> bool { /* byte search */ }
-fn String__starts_with(s: Ref(String), prefix: Ref(String)) -> bool { /* byte-prefix check */ }
-fn String__ends_with(s: Ref(String), suffix: Ref(String)) -> bool { /* byte-suffix check */ }
-fn String__push(s: MutRef(String), c: char) { /* @encode_utf8 via existing char__encode_utf8 + push_byte loop */ }
-fn String__from_char(c: char) -> String { /* with_capacity(4) + push */ }
+pub interface Drop {
+    fn drop(self);
+}
+
+pub interface Copy {
+    fn copy(borrow self) -> Self;
+}
+
+pub interface Clone {
+    fn clone(borrow self) -> Self;
+}
+
+pub interface Handle {
+    fn handle(borrow self) -> Self;
+}
 ```
 
-**Operators (`==`, `<`, etc.).** These are not method calls — they're operator overloads dispatched in sema before lookup. Two paths:
+(Surface syntax to verify against ADR-0056 during Phase 2; if the keyword is `iface` or the receiver-mode marker differs, adjust verbatim.)
 
-(a) **Stay in Rust** for now. `__gruel_str_eq`/`__gruel_str_cmp` keep their callers; this is ~80 Rust LOC retained. Cheapest path; deferrable.
+**Compiler changes.** Sema looks up the four interfaces by interned name from the prelude scope rather than from `BUILTIN_INTERFACES`. The hardcoded behavior — drop glue at scope end (ADR-0010), `@derive(Copy)` field-by-field validation, `@derive(Clone)` recursive-clone synthesis, `Handle` linearity carve-out (ADR-0075) — stays in Rust, keyed off the interface name.
 
-(b) **Rewrite as `Vec(u8)` operator inheritance.** Once `String`'s ops dispatch to `self.bytes`'s ops (i.e. equality of two `Vec(u8)` values is byte-string equality), the `__gruel_str_*` helpers go away. Requires `Vec(u8)` to grow ordering operators. Defer to a follow-up ADR; not in this scope.
+**Deletions.** `BUILTIN_INTERFACES`, `DROP_INTERFACE`, `COPY_INTERFACE`, `CLONE_INTERFACE`, `HANDLE_INTERFACE`, `BuiltinInterfaceDef`, `BuiltinInterfaceMethod`, `BuiltinIfaceTy`, `BuiltinInterfaceConformance` (~80 LOC), plus `inject_builtin_interfaces` at `crates/gruel-air/src/sema/builtins.rs:145` (~30 LOC).
 
-This ADR picks (a). Operator routing is the last 80 LOC of `string.rs` we don't try to evict.
+### Shift 3: Built-in enum declarations → Gruel
 
-**What stays in `string.rs` after this ADR:**
+Move `Arch`, `Os`, `TypeKind`, `Ownership` into `std/prelude/target.gruel`:
 
-- `__gruel_str_eq`, `__gruel_str_cmp` (~80 LOC)
-- `__gruel_alloc`/`__gruel_free`/`__gruel_realloc` family (~70 LOC) — used by Vec, not String-specific; could move to `heap.rs` but that's a separate cleanup
-- `__gruel_string_alloc`/`__gruel_string_realloc`/`__gruel_string_clone` (~50 LOC) — also Vec-shared byte-buffer helpers; same note
-- `__gruel_utf8_validate` (~30 LOC, called from prelude `String__from_utf8`) — must stay; algorithm is portable Gruel but UTF-8 lookup tables and SIMD futures land here
+```gruel
+pub enum Arch { X86_64, Aarch64, X86, Arm, Riscv32, Riscv64, Wasm32, Wasm64 }
+pub enum Os { Linux, Macos, Windows, Freestanding, Wasi }
+pub enum TypeKind { Struct, Enum, Int, Bool, Unit, Never, Array }
+pub enum Ownership { Copy, Affine, Linear }
+```
 
-Estimate: ~230 LOC retained, **~520 LOC eliminated** from `gruel-runtime/src/string.rs`, plus **~220 LOC eliminated** from `gruel-builtins/src/lib.rs` (the methods and assoc-fns whose entries become unnecessary).
+**Intrinsic adjustment.** `@target_arch`, `@target_os`, `@type_info`, `@ownership` switch from variant-by-index lookup against `BuiltinEnumDef::variants` to variant-by-name lookup against the Gruel-defined enum interned in the prelude. The variant-name → variant-index mapping is computed once at type interning. Side benefit: variants can be reordered in the Gruel source without breaking intrinsic codegen.
 
-### Shift 3: Stretch — eliminate the `STRING_TYPE` synthetic-struct entry entirely
+**Deletions.** `BUILTIN_ENUMS`, `ARCH_ENUM`, `OS_ENUM`, `TYPEKIND_ENUM`, `OWNERSHIP_ENUM`, `BuiltinEnumDef` (~80 LOC), plus the `builtin_arch_id` / `builtin_os_id` / `builtin_typekind_id` / `builtin_ownership_id` fields on `Sema` and the corresponding injection loop.
 
-Once Shift 2 lands, `STRING_TYPE` in `gruel-builtins` is a stub: a name, one `bytes: Vec(u8)` field, a drop-fn pointer, and the operator entries. The path of greatest LOC reduction is to remove the entry entirely:
+### Shift 4: `Eq`, `Ord`, and operator desugaring
 
-- Define `String` as a regular `pub struct String { bytes: Vec(u8) }` in `std/string.gruel` (or in the prelude).
-- The lexer/parser already type string literals as `String` by name lookup (no special-casing — confirm during implementation; if there is special-casing in `gruel-air/src/sema/analysis.rs` or `gruel-rir`, route it through name resolution against the prelude/stdlib instead).
-- Drop glue: ADR-0010's auto-synthesized drop runs the field's destructor. `Vec(u8)`'s drop already exists. `__gruel_drop_String` becomes unnecessary; the codegen call site at `crates/gruel-codegen-llvm/src/codegen.rs:936` becomes a regular drop emission.
-- Field privacy: `bytes` is private (no `pub`); prelude/stdlib code accesses it via the ADR-0073 privileged carve-out (same mechanism that lets the inline prelude touch `Vec(u8)` internals today).
+Add to `std/prelude/cmp.gruel`:
 
-This shift is gated behind Shift 2 because the runtime-FFI layer it depends on must already be Gruel-resident. It is presented here for completeness but split into a final phase that can be deferred if it surfaces hidden coupling.
+```gruel
+pub enum Ordering { Less, Equal, Greater }
 
-If Shift 3 lands, **another ~280 LOC disappears** from `gruel-builtins/src/lib.rs`, the `String__*` ad-hoc dispatch table in `analysis.rs` (~60 LOC) collapses, and the codegen drop branch (~20 LOC) simplifies.
+pub interface Eq {
+    fn eq(borrow self, borrow other: Self) -> bool;
+}
+
+pub interface Ord {
+    fn cmp(borrow self, borrow other: Self) -> Ordering;
+}
+```
+
+**Compiler changes (the load-bearing piece).** The binary-operator analyzer in sema gains a fall-through path:
+
+```
+Given `a OP b` where OP ∈ { ==, !=, <, <=, >, >= }:
+  1. If both operands are built-in numeric primitives:
+       use the existing primitive-op path. (Unchanged.)
+  2. Else if both operands are bool and OP ∈ {==, !=}:
+       use the existing primitive-op path. (Unchanged.)
+  3. Else if `typeof(a)` is in BUILTIN_TYPES and has a registry operator entry:
+       use the registry path. (Unchanged — String keeps working.)
+  4. Else if OP ∈ {==, !=} and typeof(a) conforms to Eq:
+       desugar to `a.eq(other: b)` (and `!` for !=).
+  5. Else if OP ∈ {<, <=, >, >=} and typeof(a) conforms to Ord:
+       desugar to `match a.cmp(other: b) { … }` against Ordering variants.
+  6. Else: type error.
+```
+
+Steps 4–5 are new. Steps 1–3 are the existing analyzer untouched.
+
+`Eq` / `Ord` recognition is by interned name from the prelude — same recognize-by-name pattern as `Drop` / `Copy` / `Clone` / `Handle` / `Option` / `Result`. Conformance is structural per ADR-0056: a type conforms to `Eq` if it has a method `fn eq(borrow self, borrow other: Self) -> bool`.
+
+**Float disposition.** `f32` and `f64` keep primitive `==` / `!=` / `<` / etc. via step 1. They do **not** conform to `Eq` or `Ord` automatically — adding partiality (NaN handling) is `PartialEq` / `PartialOrd` territory and out of scope. If a user wants to put a float in a generic slot that requires `Ord`, they'll get a clear "f64 doesn't implement Ord — use a wrapper or write a partial-comparison function" error.
+
+**Existing `String` operators are unaffected.** Step 3 wins before step 4 ever runs. `String`'s 6 registry-driven operator entries keep routing to `__gruel_str_eq` / `__gruel_str_cmp`. Future ADR can give `String` `eq` / `cmp` methods, drop the registry entries, and let it fall through to step 4.
+
+**Comptime monomorphization.** Gruel's comptime generics are structural — a body like `fn max(comptime T: type, a: T, b: T) -> T { if a < b { b } else { a } }` typechecks at instantiation if `<` resolves for `T`. Once `<` desugars through `Ord::cmp`, `T` needs to provide a `cmp` method. Today this monomorphization ergonomics is unchanged; users gain the option of relying on `Ord` conformance.
+
+**Implementation cost.** ~50–80 Rust LOC of new dispatch in the binop analyzer; ~30 Gruel LOC for the cmp.gruel file.
 
 ### Net Rust-LOC budget
 
 | Phase | Rust LOC removed | Rust LOC added | Gruel LOC added |
 |------|---------|---------|---------|
-| 1. Prelude on disk | ~225 (string literal) | ~30 (loader + fallback) | ~225 (file move) |
-| 2. String methods → Gruel | ~520 (runtime) + ~220 (registry) | ~10 (dispatch) | ~150 |
-| 3. Eliminate `STRING_TYPE` | ~280 (registry) + ~80 (sema/codegen branches) | ~5 | ~30 |
-| **Total** | **~1325** | **~45** | **~405** |
+| 1. Prelude as `std/prelude/` | ~225 (string literal) | ~50 (loader + fallback + flatten) | ~225 (file move) |
+| 2. Interfaces → Gruel | ~110 (registry + injection) | ~5 (name lookup) | ~20 |
+| 3. Built-in enums → Gruel | ~80 (registry + special ids) | ~30 (variant-by-name in intrinsics) | ~10 |
+| 4. Eq/Ord + operator dispatch | — | ~80 (sema dispatch) | ~30 |
+| **Total** | **~415** | **~165** | **~285** |
 
-Rough order of magnitude: **~1.3K Rust LOC removed, ~400 Gruel LOC added**, with no new language features required.
+Net: **~250 Rust LOC out, ~285 Gruel LOC in**, plus operator overloading for non-built-in types as a permanent language win.
 
 ## Implementation Phases
 
-Each phase is independently shippable, ends with `make test` green, and quotes its own LOC delta in the commit message so the running total is auditable.
+Each phase ships independently behind the `stdlib_mvp` preview gate, ends with `make test` green, and quotes its own LOC delta in the commit message.
 
-### Phase 1: Prelude on disk (preview-gated `stdlib_consolidation`)
+### Phase 1: Prelude as `std/prelude/` directory
 
-- [ ] Add `std/_prelude.gruel` containing the current `PRELUDE_SOURCE` content verbatim (modulo whitespace cleanup).
-- [ ] Add `PRELUDE_FALLBACK: &str` constant in `unit.rs` mirroring the file (for tests + missing-stdlib robustness).
-- [ ] Modify `CompilationUnit::parse()` to attempt loading `_prelude.gruel` via the existing stdlib resolution path (`GRUEL_STD_PATH`, then `std/_prelude.gruel` relative to source). On miss, fall back to `PRELUDE_FALLBACK`.
-- [ ] Verify `FileId::PRELUDE` is still assigned regardless of source.
-- [ ] Confirm test fixtures that construct a `Sema` directly (`crates/gruel-air/src/sema/tests.rs`, `crates/gruel-air/src/sema/conformance.rs`) still get the prelude — they currently call `inject_builtin_types` but don't load the prelude string; verify whether they need it and adjust.
-- [ ] Delete the `PRELUDE_SOURCE` constant once the file path is verified working.
-- [ ] No spec-test changes expected. UI tests continue to pass.
+- [ ] Create `std/_prelude.gruel` and `std/prelude/{option,result,char,string}.gruel`, splitting the current `PRELUDE_SOURCE` content by topic.
+- [ ] Add `PRELUDE_FALLBACK` map in `unit.rs` mirroring the on-disk files via `include_str!`.
+- [ ] Implement prelude-scope flattening: when the loader walks `std/prelude/`, every `.gruel` file's top-level `pub` items merge into a single virtual scope under `FileId::PRELUDE`.
+- [ ] Modify `CompilationUnit::parse()` to load via the directory walk, falling back to `PRELUDE_FALLBACK` on miss.
+- [ ] Verify ADR-0073's `is_accessible` carve-out still works (whether by reusing `FileId::PRELUDE` for all files or adding a small `is_prelude` predicate).
+- [ ] Confirm `Sema`-direct test fixtures (`crates/gruel-air/src/sema/tests.rs`, `conformance.rs`) still get the prelude.
+- [ ] Delete the `PRELUDE_SOURCE` constant.
+- [ ] No spec-test changes expected; UI tests continue to pass.
 
-### Phase 2a: Pure-delegation String methods → prelude functions
+### Phase 2: Built-in interfaces → Gruel
 
-- [ ] Generalize `dispatch_string_prelude_assoc_fn` (`analysis.rs:4731`) into a small table mapping `String::name` and `String__name` to prelude function symbols. (The assoc-fn dispatch already exists; extend it to method dispatch.)
-- [ ] Move the 10 pure-delegation methods/assoc-fns (`new`, `with_capacity`, `len`, `capacity`, `is_empty`, `clear`, `reserve`, `push_byte`, `into_bytes`, `clone`, `bytes_len`, `bytes_capacity`) into `std/_prelude.gruel`.
-- [ ] Delete the corresponding entries from `STRING_TYPE` in `gruel-builtins/src/lib.rs`.
-- [ ] Delete the corresponding `String__*` extern functions from `gruel-runtime/src/string.rs`.
-- [ ] Run `make test`. Spec tests for these methods (in `crates/gruel-spec/cases/`) should still pass — the dispatch path is the only thing that changed.
-- [ ] Commit-message LOC delta: target `-300` net Rust LOC.
+- [ ] Verify ADR-0056 surface syntax for `interface` declarations; if absent, this phase blocks until ADR-0056 ships its surface form. Adjust syntax of the four interface declarations accordingly.
+- [ ] Create `std/prelude/interfaces.gruel` with `Drop`, `Copy`, `Clone`, `Handle`.
+- [ ] Replace `inject_builtin_interfaces` with name-lookup against the prelude scope; the four hardcoded behaviors (drop glue, `@derive(Copy)`/`@derive(Clone)`, `Handle` linearity) keep working keyed off interned names.
+- [ ] Delete `BUILTIN_INTERFACES`, the four interface constants, `BuiltinInterfaceDef`/`Method`/`IfaceTy`/`Conformance` types.
+- [ ] Update generated docs that pull from `BUILTIN_INTERFACES` to read from the prelude module.
+- [ ] `make test`.
 
-### Phase 2b: Algorithmic String methods → prelude
+### Phase 3: Built-in enums → Gruel
 
-- [ ] Move `concat`, `push_str`, `contains`, `starts_with`, `ends_with`, `push(c: char)`, `from_char`. Each becomes a small Gruel function operating on `self.bytes`.
-- [ ] `push(c: char)` reuses the existing prelude `char__encode_utf8` — already in the prelude, so the call is in-namespace.
-- [ ] Delete corresponding registry entries and `String__*` extern functions.
-- [ ] Verify codegen quality on `String::len` and `String::push_str` is unchanged (LLVM IR `--emit asm` spot-check: the bytes loaded should be identical to today's, just through one extra inlined function).
-- [ ] Commit-message LOC delta: target `-400` net Rust LOC.
+- [ ] Create `std/prelude/target.gruel` with `Arch`, `Os`, `TypeKind`, `Ownership`.
+- [ ] Replace variant-by-index lookup in `@target_arch`, `@target_os`, `@type_info`, `@ownership` with variant-by-name lookup against the Gruel-defined enum.
+- [ ] Delete `BUILTIN_ENUMS`, the four enum constants, `BuiltinEnumDef`, the `builtin_*_id` `Sema` fields, and the injection loop.
+- [ ] `make test` — exercise via existing `@target_arch` spec tests.
 
-### Phase 3: Eliminate `STRING_TYPE` synthetic struct (stretch)
+### Phase 4: Eq, Ord, and operator desugaring
 
-- [ ] Audit: grep for `is_builtin_string`, `builtin_string_id`, `STRING_TYPE`, `String__` across `crates/`. Map every Rust call site that special-cases `String`.
-- [ ] Define `pub struct String { bytes: Vec(u8) }` in `std/_prelude.gruel` (private field — relies on ADR-0073 privileged-access carve-out for the prelude file).
-- [ ] Route string-literal type assignment through name resolution against the prelude rather than the special `builtin_string_id`.
-- [ ] Remove `STRING_TYPE` from `BUILTIN_TYPES`.
-- [ ] Remove `__gruel_drop_String` declaration in codegen — the auto-synthesized drop pipeline already handles structs with droppable fields.
-- [ ] Delete the special-case operator-routing branch (or leave the registry-based operator overload mechanism intact, attached to the Gruel-defined `String` struct via a small annotation — TBD during implementation).
-- [ ] Run `make test`. This phase is the riskiest — landed last.
-- [ ] If too much hidden coupling surfaces, **stop after 2b** and ship a follow-up ADR. The Rust-LOC win from 1+2 alone is ~720 lines; that is already worth shipping.
+- [ ] Create `std/prelude/cmp.gruel` with `Ordering`, `Eq`, `Ord`.
+- [ ] Add steps 4–5 to the binop analyzer in `crates/gruel-air/src/sema/analysis.rs`. Confirm the dispatch order (primitive → bool → BUILTIN_TYPES registry → Eq/Ord interface → error) keeps existing behavior unchanged.
+- [ ] Add spec tests in `crates/gruel-spec/cases/`:
+  - User struct with `eq` method: `==` and `!=` work.
+  - User struct with `cmp` method: `<`, `<=`, `>`, `>=` work.
+  - User struct with neither: clear error message naming `Eq` / `Ord`.
+  - Float `==`: still primitive, unchanged.
+  - String `==`: still goes through `__gruel_str_eq`, unchanged.
+- [ ] `make test`.
 
-### Phase 4: Stabilization
+### Phase 5: Stabilization
 
-- [ ] Remove the `stdlib_consolidation` preview gate. (No user-visible feature; the gate exists only to avoid changing behavior mid-flight on long-running branches.)
+- [ ] Remove the `stdlib_mvp` preview gate (no user-visible feature requires staging).
 - [ ] Update ADR status to Implemented.
-- [ ] Sweep generated docs (`make gen-intrinsic-docs` or equivalent) — confirm nothing references the deleted `String__*` runtime symbols.
+- [ ] Sweep generated docs (`make gen-intrinsic-docs` etc.) — confirm nothing references `BUILTIN_INTERFACES` or `BUILTIN_ENUMS`.
 
 ## Consequences
 
 ### Positive
 
-- **~1.3K Rust LOC removed**, replaced by ~400 LOC of Gruel that's easier to read and modify.
-- **Prelude becomes editable as a normal source file** — syntax highlighting, line-level diffs, no escaping.
-- **String/Vec consistency by composition.** ADR-0072's structural promise becomes load-bearing: a change to `Vec(u8)` automatically reaches `String`, instead of requiring twin updates.
-- **Stdlib gains its first non-trivial citizen.** `std/string.gruel` (or the prelude file) demonstrates that the on-disk stdlib is a real place to add code, not just a stub for `math`.
-- **Lower contributor barrier.** Adding a String method becomes "edit a Gruel file" instead of "edit three Rust files and hope the symbol naming convention is right."
+- **Operator overloading lands in the language.** Every user-defined and stdlib-defined struct can now do `==` and `<`. Permanent ergonomic win.
+- **Prelude becomes a normal source file tree.** Syntax highlighting, line-level diffs, per-topic files. Adding to it stops requiring escaping.
+- **Stdlib gains substance.** `std/prelude/` houses 7 Gruel files of declarations the compiler used to embed in Rust. Future stdlib growth (`std/io`, `std/collections`) follows the same path.
+- **Reorderable enum variants.** Once `Arch`/`Os`/`TypeKind`/`Ownership` are name-resolved, contributors can reorder for readability without touching intrinsic codegen.
+- **Structural `String`/`Vec` collapse becomes feasible.** The next ADR can assume operator overloading exists and the prelude is a directory; the eventual collapse stops needing special-case operator routing.
+- **Lower contributor barrier for declaration changes.** Adding an interface, a target-platform variant, or a prelude function becomes "edit a Gruel file" instead of "edit a Rust registry, a sema injector, and the generated docs."
 
 ### Negative
 
-- **One indirection at codegen.** `String::len` becomes an inlined call into a Gruel free function. LLVM eliminates this in optimized builds, but `--release`-without-LTO and debug builds may show a single extra call frame in stack traces. Acceptable; matches every other Gruel-defined method.
-- **Privileged-access carve-out gets more load-bearing.** ADR-0073's "prelude/stdlib can read non-pub builtin fields" mechanism now governs more code paths. If the carve-out has bugs, more things break. Mitigated by Phase 1 landing first and exercising the mechanism with the same content currently inlined.
-- **Prelude file must always be findable.** `GRUEL_STD_PATH` and the `std/`-relative search must be resilient. The `PRELUDE_FALLBACK` constant + tests guard this; a future installer/distribution story is on the wishlist either way.
+- **Prelude-scope flattening is new behavior.** It's a small mechanism (~30 LOC of file-discovery + per-file parse + scope merge), but it's new — not a relocation. If it has bugs, every program is affected. Mitigated by Phase 1 carrying the same content currently inlined; the loaded behavior should match exactly.
+- **Operator desugaring adds an analysis path.** Steps 4–5 of the binop analyzer can fail in new ways (e.g. one operand `Eq`-conforming, the other not). Error messages need to name `Eq` / `Ord` clearly. ~80 Rust LOC of new sema is small but warrants UI tests.
+- **`Ordering` is now a load-bearing prelude type.** A user shadowing `Ordering` would break operator desugaring. Same risk profile as `Option` / `Result` today; not a new class of problem.
 
 ### Neutral
 
-- **Runtime `__gruel_str_eq`/`__gruel_str_cmp` survive.** Operator routing is left for a future ADR; this one is about deletion volume, not perfection.
-- **No spec changes.** `String`'s observable surface is unchanged.
-- **No new feature flags surface to users** — `stdlib_consolidation` exists only for internal staging.
+- **`String` keeps its registry operators.** Step 3 of the binop dispatch wins before step 4 ever runs. `__gruel_str_eq` / `__gruel_str_cmp` keep being called.
+- **`String`/`Vec` runtime untouched.** All 31 functions in `gruel-runtime/src/string.rs` and the codegen-inlined Vec methods stay. The follow-up ADR consumes this ADR's deliverables.
+- **No spec changes for existing surfaces.** `Option`'s, `Result`'s, `String`'s, `Vec`'s, and the four interfaces' observable behavior is unchanged.
+- **No new feature flags surface to users.** `stdlib_mvp` exists only for internal staging.
 
 ## Open Questions
 
-1. **Should `_prelude.gruel` live under `std/` or a sibling `prelude/`?** This ADR picks `std/` for resolution-path reuse. Alternative: keep prelude resolution distinct so a user replacing `std/` for a freestanding target doesn't accidentally lose the prelude. Resolve during Phase 1 implementation.
-2. **`String__into_bytes` consuming method.** ADR-0036 banned partial moves out of structs. Verify whether `s.bytes` (where `s: String` is consumed) is still expressible — if not, the prelude version needs a different formulation (e.g. `Vec(u8)::from_string(s)` that does the move via a privileged intrinsic). Not a blocker; surface during Phase 2a.
-3. **Algorithmic `contains`/`starts_with`/`ends_with` on `Vec(u8)`.** If `Vec(u8)` doesn't yet expose byte-search methods, the prelude versions iterate manually. Cleaner: add `Vec(u8)::contains(needle: Slice(u8))` and friends in a sibling cleanup. Out of scope here; either path works.
-4. **Test fixtures that bypass `CompilationUnit`.** Several `Sema`-direct tests in `gruel-air` may not currently load the prelude. Phase 1 has to verify this and either route them through the same loader or document why they don't need the prelude.
+1. **`std/prelude/` vs sibling `prelude/`?** This ADR picks `std/prelude/` for resolution-path reuse. Alternative: keep prelude resolution distinct so a user replacing `std/` for a freestanding target doesn't lose the prelude. Resolve during Phase 1; the directory shape is the same either way.
+2. **Manifest vs implicit discovery.** Does `_prelude.gruel` list the files in `prelude/` explicitly, or is every `.gruel` file under `prelude/` implicitly part of the prelude? Implicit is simpler; explicit gives a single point of truth. Tilt toward implicit unless ordering issues surface.
+3. **Variant-by-name lookup at intrinsic codegen.** Phase 3 hinges on the compiler being able to look up an enum's variant by interned name. Verify this is supported (it is for `Option::Some` etc.); if not, Phase 3 needs a small helper.
+4. **Conformance check ordering.** Step 4 of the binop dispatch (Eq fallback) only runs if step 3 (BUILTIN_TYPES registry) misses. Verify that the registry check is cheap (a hashmap lookup) so the new path doesn't slow down existing programs that hit step 1 or step 2.
+5. **`PartialEq` / `PartialOrd` for floats.** This ADR ducks the question. If a downstream user wants generic code that includes floats, they'll need something. Probably a follow-up ADR adding `PartialEq`/`PartialOrd` and either re-routing primitive float comparisons through them or keeping the dual track. Not blocking.
 
 ## Future Work
 
-- **Move `Vec(T)` registry entries to Gruel.** Same playbook: `Vec(T)` has a ~100 LOC codegen-method-lowering pass plus a registry stub. If `Vec`'s methods can be expressed as inline Gruel calling raw-pointer + alloc intrinsics, another ~150 Rust LOC goes.
-- **Operator routing for stdlib types.** Once string equality is `bytes_eq` over `Vec(u8)`, the `__gruel_str_*` helpers retire. Requires a small operator-on-stdlib-type mechanism; potentially uses the existing built-in interface infrastructure.
-- **`std/io`, `std/process`, `std/env`.** With the stdlib mechanism warm, the obvious next surfaces are I/O and process — both currently exist as raw intrinsics in `gruel-runtime` with no nice wrapper.
-- **`std/collections`.** `Vec` and a future `HashMap`/`BTreeMap` belong here.
+- **`String` / `Vec` runtime collapse (next ADR).** Move the 30+ String runtime functions into Gruel as `self.bytes.method()` compositions; eventually drop `STRING_TYPE` from `BUILTIN_TYPES`. Reformulate `Vec(T)` as a comptime-generic struct calling `@alloc`/`@realloc`/`@free`. The win that ADR-0072 anticipated (~490 LOC of `string.rs` retiring) plus ~300 LOC of Vec codegen-method-lowering. Now feasible because operator overloading exists for non-built-in types and the prelude is a directory.
+- **Operator desugaring for `String` via Eq/Ord.** Once the next ADR gives `String` `eq` / `cmp` methods, the BUILTIN_TYPES operator entries retire and step 3 of the binop dispatch goes away. ~80 more Rust LOC out.
+- **`PartialEq` / `PartialOrd` for floats.** Land separately if needed.
+- **Interface bounds on generics.** Currently structural / duck-typed at comptime. Adding `T: Ord` syntax with explicit checking is a separate ADR.
+- **`std/io`, `std/process`, `std/env`.** With the stdlib mechanism warm, these are the next obvious surfaces.
+- **`std/collections`.** Once `Vec(T)` is Gruel-defined, `HashMap`/`BTreeMap` belong here.
 
 ## References
 
-- [ADR-0010: Destructors](0010-destructors.md) — Auto-synthesized drop glue (relied on for Phase 3)
-- [ADR-0020: Built-in Types as Synthetic Structs](0020-builtin-types-as-structs.md) — Original synthetic-struct mechanism this ADR partly retreats from
-- [ADR-0026: Module System](0026-module-system.md) — Stdlib resolution mechanism (`@import("std")`, `_foo.gruel` directory modules)
-- [ADR-0036: Destructuring and Partial-Move Ban](0036-destructuring-and-partial-move-ban.md) — Constrains the `into_bytes` formulation
+- [ADR-0010: Destructors](0010-destructors.md) — Drop-glue auto-synthesis (relied on for Shift 2)
+- [ADR-0020: Built-in Types as Synthetic Structs](0020-builtin-types-as-structs.md) — Synthetic-struct mechanism that this ADR partially retreats from for interfaces and enums
+- [ADR-0026: Module System](0026-module-system.md) — Stdlib resolution mechanism reused by Shift 1
 - [ADR-0050: Centralized Intrinsics Registry](0050-intrinsics-crate.md) — Pattern model: hardcoded enum + registry, drop entries to relocate behavior
-- [ADR-0065: Clone and Option](0065-clone-and-option.md) — Established the "Gruel-resident generic enum" prelude pattern
+- [ADR-0056: Structural Interfaces](0056-structural-interfaces.md) — Interface surface syntax for Shifts 2 and 4
+- [ADR-0059: Drop and Copy Interfaces](0059-drop-and-copy-interfaces.md) — Interface behaviors that stay hardwired by name
+- [ADR-0065: Clone and Option](0065-clone-and-option.md) — "Gruel-resident generic enum in prelude" pattern
 - [ADR-0070: Result Type](0070-result-type.md) — Same pattern, expanded
-- [ADR-0071: char Type](0071-char-type.md) — Established the "prelude functions for built-in scalar methods" pattern (`char__encode_utf8`)
-- [ADR-0072: String as Vec(u8) Newtype](0072-string-vec-u8-relationship.md) — Direct precursor; this ADR finishes the runtime collapse it summarized but did not complete
+- [ADR-0071: char Type](0071-char-type.md) — "Prelude functions for built-in scalar methods" pattern
+- [ADR-0072: String as Vec(u8) Newtype](0072-string-vec-u8-relationship.md) — Direct precursor; the runtime collapse it anticipated is the follow-up ADR enabled by this one
 - [ADR-0073: Field/Method Visibility](0073-field-method-visibility.md) — Privileged-access carve-out for prelude/stdlib code
+- [ADR-0075: Handle Interface](0075-handle-interface.md) — `Handle` declaration moves in Shift 2
