@@ -24,6 +24,42 @@ use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirDirective, RirParamMode, RirPattern,
 };
 use gruel_target::{Arch, Os};
+
+/// Maps a target [`Arch`] to its variant index in `ARCH_ENUM` from
+/// `gruel-builtins`. The order is the historical compatibility order:
+/// existing programs depend on `X86_64 = 0`, `Aarch64 = 1`, with new
+/// variants appended.
+fn arch_variant_index(arch: Arch) -> u32 {
+    match arch {
+        Arch::X86_64 => 0,
+        Arch::Aarch64 => 1,
+        Arch::X86 => 2,
+        Arch::Arm => 3,
+        Arch::Riscv32 => 4,
+        Arch::Riscv64 => 5,
+        Arch::Wasm32 => 6,
+        Arch::Wasm64 => 7,
+        // Unknown architectures fall back to X86_64 so a stray triple
+        // doesn't ICE; users targeting an unrecognized arch should
+        // notice via the unblessed-target warning.
+        Arch::Unknown => 0,
+    }
+}
+
+/// Maps a target [`Os`] to its variant index in `OS_ENUM` from
+/// `gruel-builtins`. The order is the historical compatibility order:
+/// existing programs depend on `Linux = 0`, `Macos = 1`, with new
+/// variants appended.
+fn os_variant_index(os: Os) -> u32 {
+    match os {
+        Os::Linux => 0,
+        Os::Macos => 1,
+        Os::Windows => 2,
+        Os::Freestanding => 3,
+        Os::Wasi => 4,
+        Os::Unknown => 0,
+    }
+}
 use gruel_util::{BinOp, Span, UnaryOp};
 use gruel_util::{
     CompileError, CompileErrors, CompileResult, CompileWarning, ErrorKind,
@@ -8771,11 +8807,7 @@ impl<'a> Sema<'a> {
                             let enum_id = self
                                 .builtin_os_id
                                 .expect("Os enum not injected - internal compiler error");
-                            let variant_idx = match gruel_target::Target::host().os() {
-                                gruel_target::Os::Linux => 0,
-                                gruel_target::Os::Macos => 1,
-                                _ => 0,
-                            };
+                            let variant_idx = os_variant_index(self.target.os());
                             return Ok(ConstValue::EnumVariant {
                                 enum_id,
                                 variant_idx,
@@ -8785,11 +8817,7 @@ impl<'a> Sema<'a> {
                             let enum_id = self
                                 .builtin_arch_id
                                 .expect("Arch enum not injected - internal compiler error");
-                            let variant_idx = match gruel_target::Target::host().arch() {
-                                gruel_target::Arch::X86_64 => 0,
-                                gruel_target::Arch::Aarch64 => 1,
-                                _ => 0,
-                            };
+                            let variant_idx = arch_variant_index(self.target.arch());
                             return Ok(ConstValue::EnumVariant {
                                 enum_id,
                                 variant_idx,
@@ -11532,13 +11560,10 @@ impl<'a> Sema<'a> {
             .builtin_arch_id
             .expect("Arch enum not injected - internal compiler error");
 
-        // Determine variant index based on host architecture (compile-time evaluation)
-        // Currently we always compile for the host architecture
-        let variant_index = match gruel_target::Target::host().arch() {
-            Arch::X86_64 => 0,
-            Arch::Aarch64 => 1,
-            _ => 0,
-        };
+        // Determine variant index based on the *compile* target's
+        // architecture (ADR-0077). Cross-compilation reflects here, not
+        // the host.
+        let variant_index = arch_variant_index(self.target.arch());
 
         let result_type = Type::new_enum(arch_enum_id);
         let air_ref = air.add_inst(AirInst {
@@ -11578,13 +11603,9 @@ impl<'a> Sema<'a> {
             .builtin_os_id
             .expect("Os enum not injected - internal compiler error");
 
-        // Determine variant index based on host OS (compile-time evaluation)
-        // Currently we always compile for the host OS
-        let variant_index = match gruel_target::Target::host().os() {
-            Os::Linux => 0,
-            Os::Macos => 1,
-            _ => 0,
-        };
+        // Determine variant index based on the *compile* target's OS
+        // (ADR-0077). Cross-compilation reflects here, not the host.
+        let variant_index = os_variant_index(self.target.os());
 
         let result_type = Type::new_enum(os_enum_id);
         let air_ref = air.add_inst(AirInst {

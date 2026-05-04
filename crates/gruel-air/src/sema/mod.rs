@@ -204,6 +204,11 @@ pub struct Sema<'a> {
     /// expression. `None` means `Self` is not in scope; using it is an
     /// error.
     pub(crate) current_self: Option<Type>,
+    /// The compilation target. Read by `@target_arch()` / `@target_os()`
+    /// so conditional code reflects the *compile* target, not the host.
+    /// Defaults to the host target; the driver overrides via
+    /// [`Sema::set_target`] when a different `--target` is requested.
+    pub(crate) target: gruel_target::Target,
 }
 
 impl<'a> Sema<'a> {
@@ -256,7 +261,14 @@ impl<'a> Sema<'a> {
             comptime_log_output: Vec::new(),
             suppress_comptime_dbg_print: false,
             current_self: None,
+            target: gruel_target::Target::host(),
         }
+    }
+
+    /// Override the compile target read by `@target_arch()` and
+    /// `@target_os()`. Defaults to [`gruel_target::Target::host()`].
+    pub fn set_target(&mut self, target: gruel_target::Target) {
+        self.target = target;
     }
 
     /// Configure whether comptime `@dbg` prints to stderr on-the-fly.

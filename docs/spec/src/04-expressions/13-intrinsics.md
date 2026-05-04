@@ -755,9 +755,18 @@ The return type of `@target_arch` is `Arch`.
 
 {{ rule(id="4.13:69", cat="normative") }}
 
-The `Arch` enum is a built-in enum with the following variants:
-- `Arch::X86_64` - x86-64 architecture
-- `Arch::Aarch64` - ARM64/AArch64 architecture
+The `Arch` enum is a built-in enum with the following variants, in order:
+- `Arch::X86_64` - x86-64 / AMD64
+- `Arch::Aarch64` - ARM64 / AArch64
+- `Arch::X86` - 32-bit x86
+- `Arch::Arm` - 32-bit ARM
+- `Arch::Riscv32` - 32-bit RISC-V
+- `Arch::Riscv64` - 64-bit RISC-V
+- `Arch::Wasm32` - 32-bit WebAssembly
+- `Arch::Wasm64` - 64-bit WebAssembly
+
+Variant indices are stable: existing variants keep their position and new
+variants are appended.
 
 {{ rule(id="4.13:70", cat="normative") }}
 
@@ -770,6 +779,7 @@ fn main() -> i32 {
     match @target_arch() {
         Arch::X86_64 => 1,
         Arch::Aarch64 => 2,
+        _ => 0,
     }
 }
 ```
@@ -790,9 +800,15 @@ The return type of `@target_os` is `Os`.
 
 {{ rule(id="4.13:75", cat="normative") }}
 
-The `Os` enum is a built-in enum with the following variants:
-- `Os::Linux` - Linux operating system
-- `Os::Macos` - macOS operating system
+The `Os` enum is a built-in enum with the following variants, in order:
+- `Os::Linux` - Linux
+- `Os::Macos` - macOS / Darwin
+- `Os::Windows` - Microsoft Windows
+- `Os::Freestanding` - no operating system (bare metal)
+- `Os::Wasi` - WebAssembly System Interface
+
+Variant indices are stable: existing variants keep their position and new
+variants are appended.
 
 {{ rule(id="4.13:76", cat="normative") }}
 
@@ -805,6 +821,7 @@ fn main() -> i32 {
     match @target_os() {
         Os::Linux => 1,
         Os::Macos => 2,
+        _ => 0,
     }
 }
 ```
@@ -820,14 +837,17 @@ fn main() -> i32 {
             match @target_os() {
                 Os::Linux => 99,
                 Os::Macos => 88,
+                _ => 0,
             }
         },
         Arch::Aarch64 => {
             match @target_os() {
                 Os::Linux => 77,
                 Os::Macos => 66,
+                _ => 0,
             }
         },
+        _ => 0,
     }
 }
 ```

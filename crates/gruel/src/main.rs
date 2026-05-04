@@ -17,8 +17,8 @@ use gruel_cache::{CacheKind, CacheStore};
 use gruel_compiler::{
     CompileOptions, FileId, Lexer, LinkerMode, MultiFileFormatter, OptLevel, ParsedProgram,
     PreviewFeature, PreviewFeatures, SourceFile, SourceInfo,
-    compile_frontend_from_ast_with_options, compile_multi_file_with_options, generate_llvm_ir,
-    merge_symbols,
+    compile_frontend_from_ast_with_options_full_target, compile_multi_file_with_options,
+    generate_llvm_ir, merge_symbols,
 };
 use gruel_rir::RirPrinter;
 use gruel_target::Target;
@@ -913,10 +913,12 @@ fn handle_emit_multi_file(
             }
         };
 
-        let state = match compile_frontend_from_ast_with_options(
+        let state = match compile_frontend_from_ast_with_options_full_target(
             merged.ast,
             merged.interner,
             &options.preview_features,
+            options.capture_comptime_dbg,
+            &options.target,
         ) {
             Ok(state) => state,
             Err(errors) => {

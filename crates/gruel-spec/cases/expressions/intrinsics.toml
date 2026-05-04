@@ -1106,6 +1106,7 @@ fn main() -> i32 {
     match arch {
         Arch::X86_64 => 1,
         Arch::Aarch64 => 2,
+        _ => 0,
     }
 }
 """
@@ -1122,6 +1123,7 @@ fn main() -> i32 {
     match arch {
         Arch::X86_64 => 1,
         Arch::Aarch64 => 2,
+        _ => 0,
     }
 }
 """
@@ -1161,6 +1163,7 @@ fn main() -> i32 {
     match @target_arch() {
         Arch::X86_64 => 42,
         Arch::Aarch64 => 43,
+        _ => 0,
     }
 }
 """
@@ -1176,6 +1179,7 @@ fn main() -> i32 {
     match @target_arch() {
         Arch::X86_64 => 42,
         Arch::Aarch64 => 43,
+        _ => 0,
     }
 }
 """
@@ -1190,6 +1194,7 @@ fn main() -> i32 {
     match @target_arch() {
         Arch::X86_64 => 100,
         Arch::Aarch64 => 200,
+        _ => 0,
     }
 }
 """
@@ -1204,6 +1209,7 @@ fn main() -> i32 {
     match @target_arch() {
         Arch::X86_64 => 100,
         Arch::Aarch64 => 200,
+        _ => 0,
     }
 }
 """
@@ -1224,6 +1230,7 @@ fn main() -> i32 {
     match os {
         Os::Linux => 1,
         Os::Macos => 2,
+        _ => 0,
     }
 }
 """
@@ -1240,6 +1247,7 @@ fn main() -> i32 {
     match os {
         Os::Linux => 1,
         Os::Macos => 2,
+        _ => 0,
     }
 }
 """
@@ -1278,6 +1286,7 @@ fn main() -> i32 {
     match @target_os() {
         Os::Linux => 10,
         Os::Macos => 20,
+        _ => 0,
     }
 }
 """
@@ -1292,6 +1301,7 @@ fn main() -> i32 {
     match @target_os() {
         Os::Linux => 10,
         Os::Macos => 20,
+        _ => 0,
     }
 }
 """
@@ -1313,14 +1323,17 @@ fn main() -> i32 {
             match @target_os() {
                 Os::Linux => 99,
                 Os::Macos => 88,
+                _ => 0,
             }
         },
         Arch::Aarch64 => {
             match @target_os() {
                 Os::Linux => 77,
                 Os::Macos => 66,
+                _ => 0,
             }
         },
+        _ => 0,
     }
 }
 """
@@ -1338,14 +1351,17 @@ fn main() -> i32 {
             match @target_os() {
                 Os::Linux => 99,
                 Os::Macos => 88,
+                _ => 0,
             }
         },
         Arch::Aarch64 => {
             match @target_os() {
                 Os::Linux => 77,
                 Os::Macos => 66,
+                _ => 0,
             }
         },
+        _ => 0,
     }
 }
 """
@@ -1363,14 +1379,17 @@ fn main() -> i32 {
             match @target_os() {
                 Os::Linux => 99,
                 Os::Macos => 88,
+                _ => 0,
             }
         },
         Arch::Aarch64 => {
             match @target_os() {
                 Os::Linux => 77,
                 Os::Macos => 66,
+                _ => 0,
             }
         },
+        _ => 0,
     }
 }
 """
@@ -1388,14 +1407,17 @@ fn main() -> i32 {
             match @target_os() {
                 Os::Linux => 99,
                 Os::Macos => 88,
+                _ => 0,
             }
         },
         Arch::Aarch64 => {
             match @target_os() {
                 Os::Linux => 77,
                 Os::Macos => 66,
+                _ => 0,
             }
         },
+        _ => 0,
     }
 }
 """
@@ -1411,6 +1433,7 @@ fn main() -> i32 {
     match @target_arch() {
         Arch::X86_64 => 1,
         Arch::Aarch64 => 2,
+        _ => 0,
     }
 }
 """
@@ -1426,6 +1449,7 @@ fn main() -> i32 {
     match @target_arch() {
         Arch::X86_64 => 1,
         Arch::Aarch64 => 2,
+        _ => 0,
     }
 }
 """
@@ -1441,6 +1465,7 @@ fn main() -> i32 {
     match @target_os() {
         Os::Linux => 1,
         Os::Macos => 2,
+        _ => 0,
     }
 }
 """
@@ -1456,6 +1481,7 @@ fn main() -> i32 {
     match @target_os() {
         Os::Linux => 1,
         Os::Macos => 2,
+        _ => 0,
     }
 }
 """
@@ -1472,6 +1498,7 @@ fn main() -> i32 {
     match os {
         Os::Linux => 10,
         Os::Macos => 20,
+        _ => 0,
     }
 }
 """
@@ -1488,10 +1515,109 @@ fn main() -> i32 {
     match os {
         Os::Linux => 10,
         Os::Macos => 20,
+        _ => 0,
     }
 }
 """
 exit_code = 20
+
+# =============================================================================
+# Expanded Arch / Os variants (ADR-0077)
+#
+# The Arch and Os enums grew to cover the full set of practically relevant
+# LLVM targets; existing variants keep their indices and new ones are
+# appended. Match all new variants to verify they are reachable by name in
+# user code.
+# =============================================================================
+
+[[case]]
+name = "arch_enum_full_variant_set_x86_64"
+spec = ["4.13:69"]
+only_on = ["x86-64-linux", "x86-64-macos"]
+source = """
+// Reference every Arch variant so the compiler verifies they exist by
+// name. Existing variants keep their indices; new variants are
+// appended (ADR-0077).
+fn classify(a: Arch) -> i32 {
+    match a {
+        Arch::X86_64 => 1,
+        Arch::Aarch64 => 2,
+        Arch::X86 => 3,
+        Arch::Arm => 4,
+        Arch::Riscv32 => 5,
+        Arch::Riscv64 => 6,
+        Arch::Wasm32 => 7,
+        Arch::Wasm64 => 8,
+    }
+}
+fn main() -> i32 {
+    classify(@target_arch())
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "arch_enum_full_variant_set_aarch64"
+spec = ["4.13:69"]
+only_on = ["aarch64-linux", "aarch64-macos"]
+source = """
+fn classify(a: Arch) -> i32 {
+    match a {
+        Arch::X86_64 => 1,
+        Arch::Aarch64 => 2,
+        Arch::X86 => 3,
+        Arch::Arm => 4,
+        Arch::Riscv32 => 5,
+        Arch::Riscv64 => 6,
+        Arch::Wasm32 => 7,
+        Arch::Wasm64 => 8,
+    }
+}
+fn main() -> i32 {
+    classify(@target_arch())
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "os_enum_full_variant_set_linux"
+spec = ["4.13:75"]
+only_on = ["x86-64-linux", "aarch64-linux"]
+source = """
+fn classify(o: Os) -> i32 {
+    match o {
+        Os::Linux => 1,
+        Os::Macos => 2,
+        Os::Windows => 3,
+        Os::Freestanding => 4,
+        Os::Wasi => 5,
+    }
+}
+fn main() -> i32 {
+    classify(@target_os())
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "os_enum_full_variant_set_macos"
+spec = ["4.13:75"]
+only_on = ["x86-64-macos", "aarch64-macos"]
+source = """
+fn classify(o: Os) -> i32 {
+    match o {
+        Os::Linux => 1,
+        Os::Macos => 2,
+        Os::Windows => 3,
+        Os::Freestanding => 4,
+        Os::Wasi => 5,
+    }
+}
+fn main() -> i32 {
+    classify(@target_os())
+}
+"""
+exit_code = 2
 
 # =============================================================================
 # @ownership Intrinsic

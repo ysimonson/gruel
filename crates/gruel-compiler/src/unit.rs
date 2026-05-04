@@ -58,6 +58,7 @@ fn run_sema(
     let mut sema = Sema::new(rir, interner, options.preview_features.clone());
     sema.set_file_paths(file_paths);
     sema.set_suppress_comptime_dbg_print(options.capture_comptime_dbg);
+    sema.set_target(options.target.clone());
     let output = sema.analyze_all()?;
     info!(
         function_count = output.functions.len(),

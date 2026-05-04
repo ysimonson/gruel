@@ -28,8 +28,8 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 
 | Name | Variants |
 |---|---|
-| `Arch` | `X86_64`, `Aarch64` |
-| `Os` | `Linux`, `Macos` |
+| `Arch` | `X86_64`, `Aarch64`, `X86`, `Arm`, `Riscv32`, `Riscv64`, `Wasm32`, `Wasm64` |
+| `Os` | `Linux`, `Macos`, `Windows`, `Freestanding`, `Wasi` |
 | `TypeKind` | `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array` |
 | `Ownership` | `Copy`, `Affine`, `Linear` |
 
@@ -135,6 +135,12 @@ Built-in enums are injected as synthetic enum types. They are used by reflection
 |---|---|
 | 0 | `Arch::X86_64` |
 | 1 | `Arch::Aarch64` |
+| 2 | `Arch::X86` |
+| 3 | `Arch::Arm` |
+| 4 | `Arch::Riscv32` |
+| 5 | `Arch::Riscv64` |
+| 6 | `Arch::Wasm32` |
+| 7 | `Arch::Wasm64` |
 
 ### `Os`
 
@@ -142,6 +148,9 @@ Built-in enums are injected as synthetic enum types. They are used by reflection
 |---|---|
 | 0 | `Os::Linux` |
 | 1 | `Os::Macos` |
+| 2 | `Os::Windows` |
+| 3 | `Os::Freestanding` |
+| 4 | `Os::Wasi` |
 
 ### `TypeKind`
 

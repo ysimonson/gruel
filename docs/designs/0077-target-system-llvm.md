@@ -1,11 +1,11 @@
 ---
 id: 0077
 title: LLVM-backed target system
-status: proposal
+status: implemented
 tags: [codegen, target, cross-compilation]
 created: 2026-05-02
-accepted:
-implemented:
+accepted: 2026-05-03
+implemented: 2026-05-03
 spec-sections: []
 superseded-by:
 ---
@@ -14,7 +14,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented (2026-05-03).
 
 ## Summary
 
@@ -181,7 +181,7 @@ Os:
   - Add integration test: compile to a non-host target and verify the object file
     header matches the expected machine type (via `readelf`/`otool`)
 
-- [ ] **Phase 4: Expand Gruel-language `Arch`/`Os` and fix intrinsics**
+- [x] **Phase 4: Expand Gruel-language `Arch`/`Os` and fix intrinsics**
   - Expand `ARCH_ENUM.variants` and `OS_ENUM.variants` in `gruel-builtins`
   - Update the variant-index match arms in `analyze_target_arch_intrinsic` /
     `analyze_target_os_intrinsic` to use `self.options.target` (not `Target::host()`)

@@ -846,6 +846,26 @@ pub fn compile_frontend_from_ast_with_options_full(
     preview_features: &PreviewFeatures,
     suppress_comptime_dbg_print: bool,
 ) -> MultiErrorResult<CompileState> {
+    compile_frontend_from_ast_with_options_full_target(
+        ast,
+        interner,
+        preview_features,
+        suppress_comptime_dbg_print,
+        &Target::host(),
+    )
+}
+
+/// Like [`compile_frontend_from_ast_with_options_full`], but additionally
+/// accepts the compile target so `@target_arch()` / `@target_os()` reflect
+/// it (ADR-0077). Use this from `--emit` paths that already have a target
+/// in hand. The non-`_target` variants default to the host.
+pub fn compile_frontend_from_ast_with_options_full_target(
+    ast: Ast,
+    interner: ThreadedRodeo,
+    preview_features: &PreviewFeatures,
+    suppress_comptime_dbg_print: bool,
+    target: &Target,
+) -> MultiErrorResult<CompileState> {
     // AST to RIR (untyped IR)
     let (rir, interner) = {
         let _span = info_span!("astgen").entered();
@@ -860,6 +880,7 @@ pub fn compile_frontend_from_ast_with_options_full(
         let _span = info_span!("sema").entered();
         let mut sema = Sema::new(&rir, &interner, preview_features.clone());
         sema.set_suppress_comptime_dbg_print(suppress_comptime_dbg_print);
+        sema.set_target(target.clone());
         let output = sema.analyze_all()?;
         info!(
             function_count = output.functions.len(),
@@ -1350,6 +1371,64 @@ mod tests {
     fn test_compile_no_main() {
         let result = compile("fn foo() -> i32 { 42 }");
         assert!(result.is_err());
+    }
+
+    /// ADR-0077 Phase 4: `@target_arch()` reflects the *compile* target
+    /// rather than the host. We compile a program that exits with a
+    /// distinct value per arch, set the target to a non-host triple
+    /// (X86_64 vs Aarch64), and verify sema folded the intrinsic to the
+    /// requested arch's variant index. We assert via the LLVM IR (the
+    /// `ret i32 N` for `main`) so the test doesn't need a working
+    /// cross-target backend at object-emit time.
+    #[test]
+    fn test_target_arch_intrinsic_uses_compile_target() {
+        let source = r#"
+            fn classify(a: Arch) -> i32 {
+                match a {
+                    Arch::X86_64 => 1,
+                    Arch::Aarch64 => 2,
+                    Arch::X86 => 3,
+                    Arch::Arm => 4,
+                    Arch::Riscv32 => 5,
+                    Arch::Riscv64 => 6,
+                    Arch::Wasm32 => 7,
+                    Arch::Wasm64 => 8,
+                }
+            }
+            fn main() -> i32 { classify(@target_arch()) }
+        "#;
+        let lexer = Lexer::new(source);
+        let (tokens, interner) = lexer.tokenize().unwrap();
+        let parser = Parser::new(tokens, interner);
+        let (ast, interner) = parser.parse().unwrap();
+
+        let aarch64: Target = "aarch64-unknown-linux-gnu".parse().unwrap();
+        let state = compile_frontend_from_ast_with_options_full_target(
+            ast,
+            interner,
+            &PreviewFeatures::default(),
+            false,
+            &aarch64,
+        )
+        .unwrap();
+        let inputs = BackendInputs {
+            functions: &state.functions,
+            type_pool: &state.type_pool,
+            strings: &state.strings,
+            bytes: &state.bytes,
+            interner: &state.interner,
+            interface_defs: &state.interface_defs,
+            interface_vtables: &state.interface_vtables,
+            target: &aarch64,
+        };
+        let ir = generate_llvm_ir(&inputs, OptLevel::O3).unwrap();
+        // After full optimization, main folds to a single `ret i32 2`
+        // (Aarch64's variant index).
+        assert!(
+            ir.contains("ret i32 2"),
+            "expected `ret i32 2` (Aarch64 = 2) in IR, got:\n{}",
+            ir,
+        );
     }
 
     /// ADR-0077 Phase 3: the wired-in target reaches LLVM, so the emitted

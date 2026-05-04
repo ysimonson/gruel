@@ -642,26 +642,39 @@ pub struct BuiltinEnumDef {
 
 /// The built-in Arch enum for CPU architecture detection.
 ///
-/// Variants:
+/// Variants are appended over time so existing programs keep matching the
+/// same variant indices. The current order is:
 /// - `X86_64` (index 0): x86-64 / AMD64
 /// - `Aarch64` (index 1): ARM64 / AArch64
+/// - `X86` (index 2): 32-bit x86
+/// - `Arm` (index 3): 32-bit ARM
+/// - `Riscv32` (index 4): 32-bit RISC-V
+/// - `Riscv64` (index 5): 64-bit RISC-V
+/// - `Wasm32` (index 6): 32-bit WebAssembly
+/// - `Wasm64` (index 7): 64-bit WebAssembly
 ///
 /// Used with `@target_arch()` intrinsic for platform-specific code.
 pub static ARCH_ENUM: BuiltinEnumDef = BuiltinEnumDef {
     name: "Arch",
-    variants: &["X86_64", "Aarch64"],
+    variants: &[
+        "X86_64", "Aarch64", "X86", "Arm", "Riscv32", "Riscv64", "Wasm32", "Wasm64",
+    ],
 };
 
 /// The built-in Os enum for operating system detection.
 ///
-/// Variants:
+/// Variants are appended over time so existing programs keep matching the
+/// same variant indices. The current order is:
 /// - `Linux` (index 0): Linux
 /// - `Macos` (index 1): macOS / Darwin
+/// - `Windows` (index 2): Microsoft Windows
+/// - `Freestanding` (index 3): no operating system (bare metal)
+/// - `Wasi` (index 4): WebAssembly System Interface
 ///
 /// Used with `@target_os()` intrinsic for platform-specific code.
 pub static OS_ENUM: BuiltinEnumDef = BuiltinEnumDef {
     name: "Os",
-    variants: &["Linux", "Macos"],
+    variants: &["Linux", "Macos", "Windows", "Freestanding", "Wasi"],
 };
 
 /// The built-in TypeKind enum for compile-time type reflection.
@@ -1511,17 +1524,28 @@ mod tests {
     #[test]
     fn test_arch_enum() {
         assert_eq!(ARCH_ENUM.name, "Arch");
-        assert_eq!(ARCH_ENUM.variants.len(), 2);
+        // Indices are stable: existing programs depend on X86_64=0,
+        // Aarch64=1. New variants are appended.
         assert_eq!(ARCH_ENUM.variants[0], "X86_64");
         assert_eq!(ARCH_ENUM.variants[1], "Aarch64");
+        assert_eq!(ARCH_ENUM.variants[2], "X86");
+        assert_eq!(ARCH_ENUM.variants[3], "Arm");
+        assert_eq!(ARCH_ENUM.variants[4], "Riscv32");
+        assert_eq!(ARCH_ENUM.variants[5], "Riscv64");
+        assert_eq!(ARCH_ENUM.variants[6], "Wasm32");
+        assert_eq!(ARCH_ENUM.variants[7], "Wasm64");
     }
 
     #[test]
     fn test_os_enum() {
         assert_eq!(OS_ENUM.name, "Os");
-        assert_eq!(OS_ENUM.variants.len(), 2);
+        // Indices are stable: existing programs depend on Linux=0,
+        // Macos=1. New variants are appended.
         assert_eq!(OS_ENUM.variants[0], "Linux");
         assert_eq!(OS_ENUM.variants[1], "Macos");
+        assert_eq!(OS_ENUM.variants[2], "Windows");
+        assert_eq!(OS_ENUM.variants[3], "Freestanding");
+        assert_eq!(OS_ENUM.variants[4], "Wasi");
     }
 
     #[test]
