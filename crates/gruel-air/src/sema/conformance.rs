@@ -55,19 +55,18 @@ impl<'a> Sema<'a> {
         interface_id: InterfaceId,
         use_span: Span,
     ) -> CompileResult<ConformanceWitness> {
-        // ADR-0059: `Copy` and `Drop` are compiler-recognized. Rather than
-        // synthesizing per-type method tables for primitives, pointers,
-        // arrays, etc., consult the existing ownership predicates and short
-        // -circuit. Built-in conformance never needs a real method witness:
+        // ADR-0059 / ADR-0079: `Copy` and `Drop` are compiler-recognized
+        // via lang-items, not by the literal interface name. Short-circuit
+        // through the existing ownership predicates so primitives,
+        // pointers, arrays, etc. don't need synthetic method tables —
         // codegen handles built-in copy/drop natively.
-        let iface_def = &self.interface_defs[interface_id.0 as usize];
-        if iface_def.name == "Copy" {
+        if Some(interface_id) == self.lang_items.copy() {
             return self.check_copy_conformance(candidate, interface_id, use_span);
         }
-        if iface_def.name == "Drop" {
+        if Some(interface_id) == self.lang_items.drop() {
             return self.check_drop_conformance(candidate, interface_id, use_span);
         }
-        if iface_def.name == "Clone"
+        if Some(interface_id) == self.lang_items.clone()
             && let Some(witness) = self.check_clone_short_circuit(candidate, interface_id, use_span)
         {
             return witness;

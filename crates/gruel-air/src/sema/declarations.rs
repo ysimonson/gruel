@@ -154,31 +154,53 @@ impl<'a> Sema<'a> {
             enum_method_sigs,
         }
     }
-    /// Check if a directive list contains `@derive(Copy)` (ADR-0059).
+    /// Check if a directive list contains `@derive(<copy lang-item>)` (ADR-0059 / ADR-0079).
+    ///
+    /// Resolves each `@derive(...)` arg through `self.interfaces` and
+    /// compares the resulting `InterfaceId` to `lang_items.copy()`.
+    /// Falls back to a literal `"Copy"` symbol match when the prelude
+    /// hasn't been loaded (test fixtures); both paths converge on real
+    /// compilations.
     pub(crate) fn has_copy_directive(&self, directives: &[RirDirective]) -> bool {
         let derive_sym = self.interner.get("derive");
-        let copy_iface_sym = self.interner.get("Copy");
+        let copy_iface_id = self.lang_items.copy();
+        let copy_name_sym = self.interner.get("Copy");
         for directive in directives {
-            if Some(directive.name) == derive_sym
-                && let Some(copy_iface) = copy_iface_sym
-                && directive.args.contains(&copy_iface)
-            {
-                return true;
+            if Some(directive.name) != derive_sym {
+                continue;
+            }
+            for arg in &directive.args {
+                if let Some(&id) = self.interfaces.get(arg)
+                    && Some(id) == copy_iface_id
+                {
+                    return true;
+                }
+                if Some(*arg) == copy_name_sym && copy_iface_id.is_none() {
+                    return true;
+                }
             }
         }
         false
     }
 
-    /// Check if a directive list contains `@derive(Clone)` (ADR-0065).
+    /// Check if a directive list contains `@derive(<clone lang-item>)` (ADR-0065 / ADR-0079).
     pub(crate) fn has_clone_directive(&self, directives: &[RirDirective]) -> bool {
         let derive_sym = self.interner.get("derive");
-        let clone_iface_sym = self.interner.get("Clone");
+        let clone_iface_id = self.lang_items.clone();
+        let clone_name_sym = self.interner.get("Clone");
         for directive in directives {
-            if Some(directive.name) == derive_sym
-                && let Some(clone_iface) = clone_iface_sym
-                && directive.args.contains(&clone_iface)
-            {
-                return true;
+            if Some(directive.name) != derive_sym {
+                continue;
+            }
+            for arg in &directive.args {
+                if let Some(&id) = self.interfaces.get(arg)
+                    && Some(id) == clone_iface_id
+                {
+                    return true;
+                }
+                if Some(*arg) == clone_name_sym && clone_iface_id.is_none() {
+                    return true;
+                }
             }
         }
         false
@@ -1067,14 +1089,24 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Returns `true` if `name` is a compiler-recognized derive that does
-    /// not have a corresponding `derive` item in user code (ADR-0059). At
-    /// the moment only `Copy` qualifies — the `is_copy` cache is populated
-    /// elsewhere and there are no methods to splice.
+    /// Returns `true` if `name` resolves to a compiler-recognized derive
+    /// that doesn't have a corresponding `derive` item in user code
+    /// (ADR-0059 / ADR-0079). The Copy and Clone lang items qualify —
+    /// `is_copy` / clone synthesis is populated elsewhere and there are
+    /// no methods to splice.
+    ///
+    /// Resolves through `self.interfaces` plus `lang_items` first; falls
+    /// back to a literal `"Copy"` / `"Clone"` name match for compilations
+    /// that bypass the prelude (test fixtures that build a Sema without
+    /// `prepend_prelude`).
     fn is_compiler_derive(&self, name: Spur) -> bool {
-        let copy_iface_sym = self.interner.get("Copy");
-        let clone_iface_sym = self.interner.get("Clone");
-        Some(name) == copy_iface_sym || Some(name) == clone_iface_sym
+        if let Some(&id) = self.interfaces.get(&name)
+            && (Some(id) == self.lang_items.copy() || Some(id) == self.lang_items.clone())
+        {
+            return true;
+        }
+        let name_str = self.interner.resolve(&name);
+        name_str == "Copy" || name_str == "Clone"
     }
 
     /// ADR-0058 phases 1 + 2: gate `derive` items behind the

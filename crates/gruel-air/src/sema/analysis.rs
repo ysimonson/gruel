@@ -6291,11 +6291,33 @@ impl<'a> Sema<'a> {
             && lhs_type != Type::UNIT
             && !self.is_builtin_string(lhs_type)
         {
-            let method_name = if matches!(op, BinOp::Eq | BinOp::Ne) {
-                "eq"
+            // ADR-0079: read the method name out of the lang-item
+            // interface declaration when available. The prelude-tagged
+            // `Eq` / `Ord` interfaces each declare exactly one method,
+            // so the first slot's name is the dispatch target. Falls
+            // back to the historical hardcoded `"eq"` / `"cmp"` when
+            // the lang item isn't bound (e.g. test fixtures that bypass
+            // the prelude).
+            let lang_iface_id = if matches!(op, BinOp::Eq | BinOp::Ne) {
+                self.lang_items.op_eq()
             } else {
-                "cmp"
+                self.lang_items.op_cmp()
             };
+            let method_name_owned: String = lang_iface_id
+                .and_then(|id| {
+                    self.interface_defs[id.0 as usize]
+                        .methods
+                        .first()
+                        .map(|m| m.name.clone())
+                })
+                .unwrap_or_else(|| {
+                    if matches!(op, BinOp::Eq | BinOp::Ne) {
+                        "eq".to_string()
+                    } else {
+                        "cmp".to_string()
+                    }
+                });
+            let method_name: &str = &method_name_owned;
             let method_sym = self.interner.get(method_name);
             if let Some(method_sym) = method_sym
                 && let Some(method_info) = self.lookup_user_method(lhs_type, method_sym)
@@ -6493,14 +6515,21 @@ impl<'a> Sema<'a> {
                 Ok(AnalysisResult::new(result, Type::BOOL))
             }
             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                let ordering_id = self.builtin_ordering_id.ok_or_else(|| {
-                    CompileError::new(
-                        ErrorKind::InternalError(
-                            "Ordering enum not found (prelude not loaded?)".into(),
-                        ),
-                        span,
-                    )
-                })?;
+                // ADR-0079: prefer the lang-item binding; fall back to
+                // the legacy name cache for compilations that bypass
+                // the prelude entirely.
+                let ordering_id = self
+                    .lang_items
+                    .ordering()
+                    .or(self.builtin_ordering_id)
+                    .ok_or_else(|| {
+                        CompileError::new(
+                            ErrorKind::InternalError(
+                                "Ordering enum not found (prelude not loaded?)".into(),
+                            ),
+                            span,
+                        )
+                    })?;
                 let expected_ty = Type::new_enum(ordering_id);
                 if return_type != expected_ty {
                     return Err(CompileError::type_mismatch(
