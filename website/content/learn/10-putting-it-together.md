@@ -24,8 +24,7 @@ fn partition(arr: MutRef([i32; 5]), lo: usize, hi: usize) -> usize {
     let mut j = lo;
 
     while j < hi {
-        let v = arr[j];
-        if v <= pivot {
+        if arr[j] <= pivot {
             // Swap arr[i] and arr[j]
             let tmp = arr[i];
             arr[i] = arr[j];
