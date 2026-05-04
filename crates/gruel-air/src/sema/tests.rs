@@ -992,15 +992,18 @@ mod tests {
 
         let stats = sema.type_pool.stats();
 
-        // 3 structs: String (builtin) + A + B
+        // 3 structs: String (builtin synthetic) + A + B from user source.
+        // ADR-0078 Phase 3: the prelude is not loaded by this test helper,
+        // so the four prelude-resident built-in enums (Arch, Os, TypeKind,
+        // Ownership) are absent from the pool.
         assert_eq!(stats.struct_count, 3);
-        // 5 enums: Arch (builtin) + Os (builtin) + TypeKind (builtin) + Ownership (builtin) + E
-        assert_eq!(stats.enum_count, 5);
+        // 1 enum: just E from user source.
+        assert_eq!(stats.enum_count, 1);
         // No arrays in Phase 1
         assert_eq!(stats.array_count, 0);
-        // Total: 9 composite types — adds Vec(u8) interned by String's
-        // synthetic `bytes` field per ADR-0072.
-        assert_eq!(stats.total, 9);
+        // Total: 5 composite types (struct_count + enum_count + array_count
+        // + Vec(u8) interned by String's `bytes` field per ADR-0072).
+        assert_eq!(stats.total, 5);
     }
 
     #[test]

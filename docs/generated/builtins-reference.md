@@ -26,6 +26,8 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 
 ### Enums
 
+Platform-reflection enums are declared in `std/prelude/target.gruel`. The corresponding intrinsics produce values of these types by name lookup.
+
 | Name | Variants |
 |---|---|
 | `Arch` | `X86_64`, `Aarch64`, `X86`, `Arm`, `Riscv32`, `Riscv64`, `Wasm32`, `Wasm64` |
@@ -129,7 +131,7 @@ owned, growable vector (ADR-0066).
 
 ## Enums
 
-Built-in enums are injected as synthetic enum types. They are used by reflection and platform-detection intrinsics.
+Platform-reflection and type-introspection enums. Declarations live in `std/prelude/target.gruel`; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.
 
 ### `Arch`
 

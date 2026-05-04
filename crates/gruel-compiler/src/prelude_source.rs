@@ -36,6 +36,10 @@ const PRELUDE_FILES: &[(&str, &str)] = &[
         include_str!("../../../std/prelude/interfaces.gruel"),
     ),
     (
+        "target.gruel",
+        include_str!("../../../std/prelude/target.gruel"),
+    ),
+    (
         "option.gruel",
         include_str!("../../../std/prelude/option.gruel"),
     ),

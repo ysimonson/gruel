@@ -627,104 +627,18 @@ pub static BUILTIN_TYPES: &[&BuiltinTypeDef] = &[&STRING_TYPE];
 // Built-in Enums (Target Platform)
 // ============================================================================
 
-/// Definition of a built-in enum type.
-///
-/// These are synthetic enums injected by the compiler before processing user code.
-/// They are used for compile-time platform detection via intrinsics like
-/// `@target_arch()` and `@target_os()`.
-#[derive(Debug, Clone)]
-pub struct BuiltinEnumDef {
-    /// Enum name as it appears in source code (e.g., "Arch")
-    pub name: &'static str,
-    /// Variant names in order (index matches variant_index in EnumVariant)
-    pub variants: &'static [&'static str],
-}
+// ADR-0078 Phase 3: the platform-reflection enums (`Arch`, `Os`, `TypeKind`,
+// `Ownership`) live in `std/prelude/target.gruel`. The intrinsics that
+// produce values of those types (`@target_arch`, `@target_os`, `@type_info`,
+// `@ownership`) cache their `EnumId`s after declaration resolution via
+// `Sema::cache_builtin_enum_ids`. Variant order in the prelude file matches
+// the order returned by the compiler-side `arch_variant_index` /
+// `os_variant_index` mappers; see `crates/gruel-air/src/sema/analysis.rs`.
 
-/// The built-in Arch enum for CPU architecture detection.
-///
-/// Variants are appended over time so existing programs keep matching the
-/// same variant indices. The current order is:
-/// - `X86_64` (index 0): x86-64 / AMD64
-/// - `Aarch64` (index 1): ARM64 / AArch64
-/// - `X86` (index 2): 32-bit x86
-/// - `Arm` (index 3): 32-bit ARM
-/// - `Riscv32` (index 4): 32-bit RISC-V
-/// - `Riscv64` (index 5): 64-bit RISC-V
-/// - `Wasm32` (index 6): 32-bit WebAssembly
-/// - `Wasm64` (index 7): 64-bit WebAssembly
-///
-/// Used with `@target_arch()` intrinsic for platform-specific code.
-pub static ARCH_ENUM: BuiltinEnumDef = BuiltinEnumDef {
-    name: "Arch",
-    variants: &[
-        "X86_64", "Aarch64", "X86", "Arm", "Riscv32", "Riscv64", "Wasm32", "Wasm64",
-    ],
-};
-
-/// The built-in Os enum for operating system detection.
-///
-/// Variants are appended over time so existing programs keep matching the
-/// same variant indices. The current order is:
-/// - `Linux` (index 0): Linux
-/// - `Macos` (index 1): macOS / Darwin
-/// - `Windows` (index 2): Microsoft Windows
-/// - `Freestanding` (index 3): no operating system (bare metal)
-/// - `Wasi` (index 4): WebAssembly System Interface
-///
-/// Used with `@target_os()` intrinsic for platform-specific code.
-pub static OS_ENUM: BuiltinEnumDef = BuiltinEnumDef {
-    name: "Os",
-    variants: &["Linux", "Macos", "Windows", "Freestanding", "Wasi"],
-};
-
-/// The built-in TypeKind enum for compile-time type reflection.
-///
-/// Variants represent different type classifications, used by `@type_info`.
-///
-/// Variants:
-/// - `Struct` (index 0): Struct types
-/// - `Enum` (index 1): Enum types
-/// - `Int` (index 2): Integer types (i8..i64, u8..u64)
-/// - `Bool` (index 3): Boolean type
-/// - `Unit` (index 4): Unit type
-/// - `Never` (index 5): Never type
-/// - `Array` (index 6): Fixed-size array types
-pub static TYPEKIND_ENUM: BuiltinEnumDef = BuiltinEnumDef {
-    name: "TypeKind",
-    variants: &["Struct", "Enum", "Int", "Bool", "Unit", "Never", "Array"],
-};
-
-/// The built-in `Ownership` enum classifying a type's ownership posture.
-///
-/// Variants (per ADR-0008):
-/// - `Copy` (index 0): values may be implicitly duplicated by bitwise copy
-/// - `Affine` (index 1): values may be used at most once and are implicitly
-///   dropped if not consumed (the default for user-defined structs)
-/// - `Linear` (index 2): values must be explicitly consumed; implicit drop is
-///   a compile-time error
-///
-/// Returned by the `@ownership(T)` intrinsic.
-pub static OWNERSHIP_ENUM: BuiltinEnumDef = BuiltinEnumDef {
-    name: "Ownership",
-    variants: &["Copy", "Affine", "Linear"],
-};
-
-/// All built-in enums.
-///
-/// The compiler iterates over this to inject synthetic enums before
-/// processing user code.
-pub static BUILTIN_ENUMS: &[&BuiltinEnumDef] =
-    &[&ARCH_ENUM, &OS_ENUM, &TYPEKIND_ENUM, &OWNERSHIP_ENUM];
-
-/// Look up a built-in enum by name.
-pub fn get_builtin_enum(name: &str) -> Option<&'static BuiltinEnumDef> {
-    BUILTIN_ENUMS.iter().find(|e| e.name == name).copied()
-}
-
-/// Check if a name is reserved for a built-in enum.
-pub fn is_reserved_enum_name(name: &str) -> bool {
-    BUILTIN_ENUMS.iter().any(|e| e.name == name)
-}
+/// Names of the four prelude-resident built-in enums. Kept here only so
+/// other crates have a single source of truth when they need to refer to
+/// the names (e.g. for documentation generation).
+pub static BUILTIN_ENUM_NAMES: &[&str] = &["Arch", "Os", "TypeKind", "Ownership"];
 
 /// Look up a built-in type by name.
 pub fn get_builtin_type(name: &str) -> Option<&'static BuiltinTypeDef> {
@@ -1093,17 +1007,13 @@ pub fn render_reference_markdown() -> String {
     out.push('\n');
 
     out.push_str("### Enums\n\n");
+    out.push_str("Platform-reflection enums are declared in `std/prelude/target.gruel`. The corresponding intrinsics produce values of these types by name lookup.\n\n");
     out.push_str("| Name | Variants |\n");
     out.push_str("|---|---|\n");
-    for e in BUILTIN_ENUMS {
-        let variants = e
-            .variants
-            .iter()
-            .map(|v| format!("`{}`", v))
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push_str(&format!("| `{}` | {} |\n", e.name, variants));
-    }
+    out.push_str("| `Arch` | `X86_64`, `Aarch64`, `X86`, `Arm`, `Riscv32`, `Riscv64`, `Wasm32`, `Wasm64` |\n");
+    out.push_str("| `Os` | `Linux`, `Macos`, `Windows`, `Freestanding`, `Wasi` |\n");
+    out.push_str("| `TypeKind` | `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array` |\n");
+    out.push_str("| `Ownership` | `Copy`, `Affine`, `Linear` |\n");
     out.push('\n');
 
     out.push_str("### Interfaces\n\n");
@@ -1203,14 +1113,34 @@ pub fn render_reference_markdown() -> String {
     }
 
     // ---- Enums in detail ----
+    //
+    // ADR-0078 Phase 3: declarations live in `std/prelude/target.gruel`.
+    // Variant order in this section matches the prelude file.
     out.push_str("## Enums\n\n");
-    out.push_str("Built-in enums are injected as synthetic enum types. They are used by reflection and platform-detection intrinsics.\n\n");
-    for e in BUILTIN_ENUMS {
-        out.push_str(&format!("### `{}`\n\n", e.name));
+    out.push_str("Platform-reflection and type-introspection enums. Declarations live in `std/prelude/target.gruel`; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.\n\n");
+
+    for (name, variants) in [
+        (
+            "Arch",
+            &[
+                "X86_64", "Aarch64", "X86", "Arm", "Riscv32", "Riscv64", "Wasm32", "Wasm64",
+            ][..],
+        ),
+        (
+            "Os",
+            &["Linux", "Macos", "Windows", "Freestanding", "Wasi"][..],
+        ),
+        (
+            "TypeKind",
+            &["Struct", "Enum", "Int", "Bool", "Unit", "Never", "Array"][..],
+        ),
+        ("Ownership", &["Copy", "Affine", "Linear"][..]),
+    ] {
+        out.push_str(&format!("### `{}`\n\n", name));
         out.push_str("| Index | Variant |\n");
         out.push_str("|---|---|\n");
-        for (i, v) in e.variants.iter().enumerate() {
-            out.push_str(&format!("| {} | `{}::{}` |\n", i, e.name, v));
+        for (i, v) in variants.iter().enumerate() {
+            out.push_str(&format!("| {} | `{}::{}` |\n", i, name, v));
         }
         out.push('\n');
     }
@@ -1347,56 +1277,15 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // Built-in Enum Tests
-    // ========================================================================
-
+    // ADR-0078 Phase 3: built-in enum declarations now live in
+    // `std/prelude/target.gruel`. The compiler-side `arch_variant_index` /
+    // `os_variant_index` mappers (in `gruel-air/src/sema/analysis.rs`)
+    // encode the variant order; their unit tests in that crate cover the
+    // mapping. The breadcrumb static below lets other crates reference
+    // the names without re-typing them.
     #[test]
-    fn test_arch_enum() {
-        assert_eq!(ARCH_ENUM.name, "Arch");
-        // Indices are stable: existing programs depend on X86_64=0,
-        // Aarch64=1. New variants are appended.
-        assert_eq!(ARCH_ENUM.variants[0], "X86_64");
-        assert_eq!(ARCH_ENUM.variants[1], "Aarch64");
-        assert_eq!(ARCH_ENUM.variants[2], "X86");
-        assert_eq!(ARCH_ENUM.variants[3], "Arm");
-        assert_eq!(ARCH_ENUM.variants[4], "Riscv32");
-        assert_eq!(ARCH_ENUM.variants[5], "Riscv64");
-        assert_eq!(ARCH_ENUM.variants[6], "Wasm32");
-        assert_eq!(ARCH_ENUM.variants[7], "Wasm64");
-    }
-
-    #[test]
-    fn test_os_enum() {
-        assert_eq!(OS_ENUM.name, "Os");
-        // Indices are stable: existing programs depend on Linux=0,
-        // Macos=1. New variants are appended.
-        assert_eq!(OS_ENUM.variants[0], "Linux");
-        assert_eq!(OS_ENUM.variants[1], "Macos");
-        assert_eq!(OS_ENUM.variants[2], "Windows");
-        assert_eq!(OS_ENUM.variants[3], "Freestanding");
-        assert_eq!(OS_ENUM.variants[4], "Wasi");
-    }
-
-    #[test]
-    fn test_get_builtin_enum() {
-        assert!(get_builtin_enum("Arch").is_some());
-        assert!(get_builtin_enum("Os").is_some());
-        assert!(get_builtin_enum("Target").is_none());
-    }
-
-    #[test]
-    fn test_is_reserved_enum_name() {
-        assert!(is_reserved_enum_name("Arch"));
-        assert!(is_reserved_enum_name("Os"));
-        assert!(is_reserved_enum_name("TypeKind"));
-        assert!(is_reserved_enum_name("Ownership"));
-        assert!(!is_reserved_enum_name("MyEnum"));
-    }
-
-    #[test]
-    fn test_builtin_enums_count() {
-        assert_eq!(BUILTIN_ENUMS.len(), 4);
+    fn test_builtin_enum_names() {
+        assert_eq!(BUILTIN_ENUM_NAMES, &["Arch", "Os", "TypeKind", "Ownership"]);
     }
 
     // ========================================================================

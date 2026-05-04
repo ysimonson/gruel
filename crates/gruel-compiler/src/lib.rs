@@ -745,6 +745,38 @@ pub struct CompileOutput {
     pub warnings: Vec<CompileWarning>,
 }
 
+/// ADR-0078 Phase 1: lex+parse the embedded prelude using `interner` and
+/// prepend its top-level items to `ast`. Useful for callers that bypass
+/// `CompilationUnit::parse` (lib tests, `--emit`-only flows that already
+/// have a parsed AST in hand) but still want the prelude-resident
+/// declarations (`Option`, `Result`, `Arch`, `Os`, `Drop`/`Copy`/`Clone`,
+/// etc.) to be visible during sema.
+///
+/// The frontend entry points (`compile_frontend_from_ast_*`) deliberately
+/// do *not* call this — the multi-file driver merges the prelude with all
+/// other parsed files via `merge_symbols` before invoking the frontend.
+/// Calling this twice on an already-merged AST would produce duplicate
+/// definitions.
+pub fn prepend_prelude(
+    ast: Ast,
+    interner: ThreadedRodeo,
+    preview_features: &PreviewFeatures,
+) -> MultiErrorResult<(Ast, ThreadedRodeo)> {
+    use gruel_util::FileId;
+
+    let prelude_source = prelude_source::embedded_prelude_source();
+    let prelude_lexer =
+        Lexer::with_interner_and_file_id(&prelude_source, interner, FileId::PRELUDE);
+    let (prelude_tokens, interner) = prelude_lexer.tokenize().map_err(CompileErrors::from)?;
+    let prelude_parser =
+        Parser::new(prelude_tokens, interner).with_preview_features(preview_features.clone());
+    let (prelude_ast, interner) = prelude_parser.parse()?;
+
+    let mut merged = prelude_ast;
+    merged.items.extend(ast.items);
+    Ok((merged, interner))
+}
+
 /// Compile source code through all frontend phases (up to but not including codegen).
 ///
 /// This runs: lexing → parsing → AST to RIR → semantic analysis → CFG construction.
@@ -1405,13 +1437,15 @@ mod tests {
         let parser = Parser::new(tokens, interner);
         let (ast, interner) = parser.parse().unwrap();
 
+        // ADR-0078 Phase 3: `Arch` lives in the prelude, so this test (which
+        // bypasses `CompilationUnit::parse`) has to prepend the prelude
+        // explicitly.
+        let prev = PreviewFeatures::default();
+        let (ast, interner) = prepend_prelude(ast, interner, &prev).unwrap();
+
         let aarch64: Target = "aarch64-unknown-linux-gnu".parse().unwrap();
         let state = compile_frontend_from_ast_with_options_full_target(
-            ast,
-            interner,
-            &PreviewFeatures::default(),
-            false,
-            &aarch64,
+            ast, interner, &prev, false, &aarch64,
         )
         .unwrap();
         let inputs = BackendInputs {

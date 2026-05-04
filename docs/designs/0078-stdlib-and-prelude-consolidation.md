@@ -243,10 +243,13 @@ Each phase ships independently behind the `stdlib_mvp` preview gate, ends with `
 
 ### Phase 3: Built-in enums → Gruel
 
-- [ ] Create `std/prelude/target.gruel` with `Arch`, `Os`, `TypeKind`, `Ownership`.
-- [ ] Replace variant-by-index lookup in `@target_arch`, `@target_os`, `@type_info`, `@ownership` with variant-by-name lookup against the Gruel-defined enum.
-- [ ] Delete `BUILTIN_ENUMS`, the four enum constants, `BuiltinEnumDef`, the `builtin_*_id` `Sema` fields, and the injection loop.
-- [ ] `make test` — exercise via existing `@target_arch` spec tests.
+- [x] Created `std/prelude/target.gruel` with `Arch`, `Os`, `TypeKind`, `Ownership`. Variant order preserved to match the existing compiler-side mappers (`arch_variant_index`, `os_variant_index`).
+- [x] Kept the index-based mappers — they encode an ordering invariant the prelude file matches; intrinsics build `EnumVariant { enum_id, variant_index }` directly. The `EnumId`s come from a new `cache_builtin_enum_ids` step run after `resolve_declarations` (so the prelude's enum decls have been registered).
+- [x] Deleted `BUILTIN_ENUMS`, `ARCH_ENUM`, `OS_ENUM`, `TYPEKIND_ENUM`, `OWNERSHIP_ENUM`, `BuiltinEnumDef`, `get_builtin_enum`, `is_reserved_enum_name` from `gruel-builtins/src/lib.rs` (~80 LOC). Kept `BUILTIN_ENUM_NAMES` for breadcrumbs.
+- [x] Removed the BUILTIN_ENUMS injection loop from `inject_builtin_types`; kept the `builtin_*_id` cache fields, populated in `cache_builtin_enum_ids`.
+- [x] Added `pub prepend_prelude(ast, interner, preview_features)` helper for tests/callers that bypass `CompilationUnit::parse`.
+- [x] Updated the doc generator to use static text instead of iterating over the deleted registry.
+- [x] All 2073 spec tests + 89 UI tests pass; `test_target_arch_intrinsic_uses_compile_target` updated to call `prepend_prelude`.
 
 ### Phase 4: Eq, Ord, and operator desugaring
 

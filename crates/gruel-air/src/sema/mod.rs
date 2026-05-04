@@ -293,6 +293,12 @@ impl<'a> Sema<'a> {
         self.register_type_names().map_err(CompileErrors::from)?;
         self.resolve_declarations().map_err(CompileErrors::from)?;
 
+        // ADR-0078 Phase 3: cache EnumIds for the prelude-resident builtin
+        // enums (Arch, Os, TypeKind, Ownership) now that the prelude has
+        // been resolved. Intrinsics that produce values of these types
+        // read `builtin_arch_id` etc. directly.
+        self.cache_builtin_enum_ids();
+
         // Phase 2.5: Evaluate const initializers (e.g., const x = @import(...))
         self.evaluate_const_initializers()
             .map_err(CompileErrors::from)?;
