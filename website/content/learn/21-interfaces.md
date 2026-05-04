@@ -103,7 +103,7 @@ Two built-in interfaces describe ownership posture:
 
 ```gruel
 interface Drop { fn drop(self); }
-interface Copy { fn copy(borrow self) -> Self; }
+interface Copy { fn copy(self: Ref(Self)) -> Self; }
 ```
 
 Every struct or enum has exactly one of three postures, determined by which interface it conforms to:

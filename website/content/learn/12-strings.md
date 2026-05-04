@@ -81,7 +81,7 @@ If you need raw byte-level access — for example to construct a string out of p
 
 ## Querying a String
 
-Query methods take `&self`, so they don't consume the string:
+Query methods take `self: Ref(Self)`, so they don't consume the string:
 
 ```gruel
 fn main() -> i32 {

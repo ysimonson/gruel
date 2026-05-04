@@ -18,13 +18,14 @@ Quicksort is a classic divide-and-conquer sorting algorithm:
 ## The Implementation
 
 ```gruel
-fn partition(inout arr: [i32; 5], lo: usize, hi: usize) -> usize {
+fn partition(arr: MutRef([i32; 5]), lo: usize, hi: usize) -> usize {
     let pivot = arr[hi];
     let mut i = lo;
     let mut j = lo;
 
     while j < hi {
-        if arr[j] <= pivot {
+        let v = arr[j];
+        if v <= pivot {
             // Swap arr[i] and arr[j]
             let tmp = arr[i];
             arr[i] = arr[j];
@@ -41,13 +42,13 @@ fn partition(inout arr: [i32; 5], lo: usize, hi: usize) -> usize {
     i
 }
 
-fn quicksort(inout arr: [i32; 5], lo: usize, hi: usize) {
+fn quicksort(arr: MutRef([i32; 5]), lo: usize, hi: usize) {
     if lo < hi {
-        let p = partition(inout arr, lo, hi);
+        let p = partition(arr, lo, hi);
         if p > lo {
-            quicksort(inout arr, lo, p - 1);
+            quicksort(arr, lo, p - 1);
         }
-        quicksort(inout arr, p + 1, hi);
+        quicksort(arr, p + 1, hi);
     }
 }
 
@@ -61,7 +62,7 @@ fn main() -> i32 {
     @dbg(nums[3]);
     @dbg(nums[4]);
 
-    quicksort(inout nums, 0, 4);
+    quicksort(&mut nums, 0, 4);
 
     // Print after sorting
     @dbg(0);  // separator
@@ -83,7 +84,7 @@ This example uses almost everything from the tutorial:
 - **Variables**: Both mutable (`let mut`) and immutable (`let`)
 - **Control flow**: `if` conditions and `while` loops
 - **Arrays**: Fixed-size arrays with indexing
-- **Inout parameters**: Modifying the array in place
+- **Mutable references**: `MutRef(...)` to modify the array in place
 - **Recursion**: `quicksort` calls itself
 
 ## Running It
