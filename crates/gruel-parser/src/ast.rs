@@ -59,6 +59,9 @@ pub struct Directive {
 pub enum DirectiveArg {
     /// An identifier argument (e.g., `unused_variable` in `@allow(unused_variable)`)
     Ident(Ident),
+    /// A string-literal argument (e.g., `"drop"` in `@lang("drop")`).
+    /// ADR-0079.
+    String(StringLit),
 }
 
 /// A top-level item in a source file.
@@ -168,6 +171,8 @@ pub struct FieldDecl {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnumDecl {
+    /// Directives applied to this enum (e.g., `@derive(...)`, `@lang("ordering")`).
+    pub directives: Directives,
     /// Visibility of this enum
     pub visibility: Visibility,
     /// Enum name
@@ -228,6 +233,8 @@ pub struct EnumVariantField {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceDecl {
+    /// Directives applied to this interface (e.g., `@lang("drop")`).
+    pub directives: Directives,
     /// Visibility (currently always private; module-system support is future
     /// work).
     pub visibility: Visibility,

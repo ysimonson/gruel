@@ -563,6 +563,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     variants_len,
                     methods_start,
                     methods_len,
+                    directives_start: _,
+                    directives_len: _,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(name);
@@ -711,6 +713,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     name,
                     methods_start,
                     methods_len,
+                    directives_start: _,
+                    directives_len: _,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(name);

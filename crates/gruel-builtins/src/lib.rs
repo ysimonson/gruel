@@ -796,6 +796,125 @@ pub fn is_reserved_type_constructor_name(name: &str) -> bool {
 pub static BUILTIN_INTERFACE_NAMES: &[&str] = &["Drop", "Copy", "Clone", "Handle"];
 
 // ============================================================================
+// Lang items (ADR-0079)
+// ============================================================================
+//
+// `@lang("name")` directives in the prelude bind the compiler's built-in
+// behaviors (drop glue, copy/clone synthesis, operator desugaring, …) to
+// specific interface or enum declarations. The closed list here is the
+// only set of names the compiler recognizes — unknown lang-item names
+// produce a compile error at the directive site. Stdlib renames the
+// underlying type freely (e.g. `Clone` → `Dup`) so long as the renamed
+// declaration carries the matching `@lang(...)` tag.
+
+/// Lang-item name applied to an interface declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LangInterfaceItem {
+    /// `Drop` — values may carry custom destructors.
+    Drop,
+    /// `Copy` — values are bitwise-copyable at use sites.
+    Copy,
+    /// `Clone` — values support a `clone(self)` method producing an
+    /// owned duplicate.
+    Clone,
+    /// `Handle` — wraps a non-copyable resource that's still allowed to
+    /// move out of `let` bindings (linear-type carve-out).
+    Handle,
+    /// `Eq` — drives `==` operator desugaring.
+    OpEq,
+    /// `Ord` — drives `<`/`<=`/`>`/`>=` operator desugaring.
+    OpCmp,
+}
+
+/// Lang-item name applied to an enum declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LangEnumItem {
+    /// `Ordering` — return type of `Ord::cmp`; variants drive ordering
+    /// operator desugaring.
+    Ordering,
+}
+
+impl LangInterfaceItem {
+    /// The string the prelude uses inside `@lang("…")` for this item.
+    pub fn name(self) -> &'static str {
+        match self {
+            LangInterfaceItem::Drop => "drop",
+            LangInterfaceItem::Copy => "copy",
+            LangInterfaceItem::Clone => "clone",
+            LangInterfaceItem::Handle => "handle",
+            LangInterfaceItem::OpEq => "op_eq",
+            LangInterfaceItem::OpCmp => "op_cmp",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "drop" => LangInterfaceItem::Drop,
+            "copy" => LangInterfaceItem::Copy,
+            "clone" => LangInterfaceItem::Clone,
+            "handle" => LangInterfaceItem::Handle,
+            "op_eq" => LangInterfaceItem::OpEq,
+            "op_cmp" => LangInterfaceItem::OpCmp,
+            _ => return None,
+        })
+    }
+
+    pub fn all() -> &'static [LangInterfaceItem] {
+        use LangInterfaceItem::*;
+        &[Drop, Copy, Clone, Handle, OpEq, OpCmp]
+    }
+}
+
+impl LangEnumItem {
+    pub fn name(self) -> &'static str {
+        match self {
+            LangEnumItem::Ordering => "ordering",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "ordering" => LangEnumItem::Ordering,
+            _ => return None,
+        })
+    }
+
+    pub fn all() -> &'static [LangEnumItem] {
+        &[LangEnumItem::Ordering]
+    }
+}
+
+/// Classification of a lang-item name string. Returns `None` for
+/// unrecognized strings.
+pub enum LangItemKind {
+    Interface(LangInterfaceItem),
+    Enum(LangEnumItem),
+}
+
+impl LangItemKind {
+    pub fn from_str(s: &str) -> Option<Self> {
+        if let Some(i) = LangInterfaceItem::from_str(s) {
+            Some(LangItemKind::Interface(i))
+        } else {
+            LangEnumItem::from_str(s).map(LangItemKind::Enum)
+        }
+    }
+}
+
+/// Closed list of lang-item names recognized by the compiler. Driving
+/// data for diagnostics — the actual lookup goes through
+/// `LangInterfaceItem::from_str` / `LangEnumItem::from_str`.
+pub fn all_lang_item_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = LangInterfaceItem::all()
+        .iter()
+        .map(|i| i.name())
+        .chain(LangEnumItem::all().iter().map(|e| e.name()))
+        .collect();
+    names.sort();
+    names
+}
+
+// ============================================================================
 // Helper methods
 // ============================================================================
 

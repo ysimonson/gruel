@@ -1880,11 +1880,19 @@ impl Rir {
                 name,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             } => InstData::InterfaceDecl {
                 is_pub: *is_pub,
                 name: *name,
                 methods_start: *methods_start + extra_offset,
                 methods_len: *methods_len,
+                directives_start: if *directives_len == 0 {
+                    *directives_start
+                } else {
+                    *directives_start + extra_offset
+                },
+                directives_len: *directives_len,
             },
             InstData::InterfaceMethodSig {
                 name,
@@ -1908,6 +1916,8 @@ impl Rir {
                 variants_len,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             } => InstData::EnumDecl {
                 is_pub: *is_pub,
                 name: *name,
@@ -1915,6 +1925,12 @@ impl Rir {
                 variants_len: *variants_len,
                 methods_start: *methods_start + extra_offset,
                 methods_len: *methods_len,
+                directives_start: if *directives_len == 0 {
+                    *directives_start
+                } else {
+                    *directives_start + extra_offset
+                },
+                directives_len: *directives_len,
             },
 
             // Array operations
@@ -2630,6 +2646,10 @@ pub enum InstData {
         methods_start: u32,
         /// Number of methods
         methods_len: u32,
+        /// Index into extra data where directives start (ADR-0079).
+        directives_start: u32,
+        /// Number of directives.
+        directives_len: u32,
     },
 
     /// Enum variant: creates a value of an enum type
@@ -2727,6 +2747,10 @@ pub enum InstData {
         methods_start: u32,
         /// Number of method signatures.
         methods_len: u32,
+        /// Start of directives in extra data (ADR-0079).
+        directives_start: u32,
+        /// Number of directives.
+        directives_len: u32,
     },
 
     /// A single method signature inside an `InterfaceDecl`.
@@ -3924,6 +3948,8 @@ mod tests {
                 variants_len,
                 methods_start: 0,
                 methods_len: 0,
+                directives_start: 0,
+                directives_len: 0,
             },
             span: Span::new(0, 35),
         });
@@ -3952,6 +3978,8 @@ mod tests {
                 variants_len,
                 methods_start: 0,
                 methods_len: 0,
+                directives_start: 0,
+                directives_len: 0,
             },
             span: Span::new(0, 35),
         });

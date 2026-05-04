@@ -278,13 +278,15 @@ Each phase ships behind the `lang_items` preview gate, ends with `make test` gre
 
 ### Phase 1: `@lang("...")` parsing and `LangItems` registry
 
-- [ ] Add `lang_items` to `PreviewFeature` in `gruel-error`.
-- [ ] Recognize `@lang("string")` attribute on `interface`, `enum`, `struct` declarations in the parser (`gruel-parser/src/chumsky_parser.rs`). Already-existing `@derive`-style attribute machinery is the pattern to follow.
-- [ ] Add a closed list of recognized lang-item names in `gruel-builtins/src/lib.rs`: `LANG_ITEMS = ["drop", "copy", "clone", "handle", "op_eq", "op_cmp", "ordering"]`. Unknown names → compile error at the `@lang(...)` site.
-- [ ] Add `LangItems` struct to `Sema` and populate during `resolve_declarations` from the parsed attributes. Duplicate claims (two interfaces both `@lang("drop")`) → compile error with both spans.
-- [ ] Add `Sema::lang_items()` accessor; wire into `SemaContext` and the lazy/eager analyze paths.
-- [ ] No behavior change yet — registry exists in parallel with name-matching.
-- [ ] Spec test: parse `@lang("drop")` on an interface; assert `Sema::lang_items().drop` resolves to that interface.
+- [x] Add `lang_items` to `PreviewFeature` in `gruel-util`.
+- [x] Recognize `@lang("string")` attribute on `interface`, `enum`, `struct` declarations in the parser (`gruel-parser/src/chumsky_parser.rs`). Extended `DirectiveArg` to accept string literals; threaded `directives` through `EnumDecl` / `InterfaceDecl` AST and the matching RIR `InstData` variants.
+- [x] Add a closed list of recognized lang-item names in `gruel-builtins/src/lib.rs`: `LangInterfaceItem` + `LangEnumItem` enums and an `all_lang_item_names()` helper. Unknown names → `InvalidLangItem` compile error at the `@lang(...)` site.
+- [x] Add `LangItems` struct to `Sema` (`crates/gruel-air/src/sema/lang_items.rs`) and populate during `resolve_declarations::populate_lang_items` from the parsed directives. Duplicate claims (two interfaces both `@lang("drop")`) → compile error.
+- [x] Add `Sema::lang_items()` accessor (lives on the `lang_items` module, available wherever `Sema` is).
+- [x] Path-based privilege gate: `@lang(...)` directives outside `prelude/` are rejected with a clear error. Used the host inst span (RIR storage drops the directive's file_id, but the inst span retains it).
+- [x] No behavior change yet — registry exists in parallel with name-matching.
+- [x] UI tests: `@lang(...)` on a user interface and on a user enum both produce the privilege error.
+- [x] Tagged the prelude declarations: `@lang("drop")`/`copy`/`clone`/`handle` on `prelude/interfaces.gruel`, `@lang("op_eq")`/`op_cmp`/`ordering` on `prelude/cmp.gruel`. The prelude registry resolves on every compilation.
 
 ### Phase 2a: Migrate compiler name-matches to lang-item lookups
 

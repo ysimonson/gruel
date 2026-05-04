@@ -109,6 +109,7 @@ impl<'a> GatherOutput<'a> {
             builtin_typekind_id: self.builtin_typekind_id,
             builtin_ownership_id: self.builtin_ownership_id,
             builtin_ordering_id: self.builtin_ordering_id,
+            lang_items: super::LangItems::default(),
             known: KnownSymbols::new(self.interner),
             type_pool: self.type_pool,
             module_registry: crate::sema_context::ModuleRegistry::new(),

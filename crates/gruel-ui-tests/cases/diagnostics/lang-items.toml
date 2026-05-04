@@ -1,0 +1,33 @@
+[section]
+id = "diagnostics.lang-items"
+name = "Lang-item Diagnostics"
+description = "Diagnostics for the ADR-0079 `@lang(\"...\")` directive — the privilege check (only valid in the prelude) is the user-facing failure mode; unknown lang names and shape errors only fire on prelude-internal mistakes."
+
+# =============================================================================
+# `@lang(...)` is only valid in the prelude. User code that tries to claim a
+# lang-item binding should be rejected with a clear privilege message.
+# =============================================================================
+
+[[case]]
+name = "lang_directive_outside_prelude"
+source = """
+@lang("drop")
+pub interface MyDrop {
+    fn drop(self);
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["@lang", "only valid in the prelude"]
+
+[[case]]
+name = "lang_on_enum_outside_prelude"
+source = """
+@lang("ordering")
+pub enum Foo { A, B, C }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["@lang", "only valid in the prelude"]

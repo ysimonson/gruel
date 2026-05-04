@@ -197,6 +197,11 @@ impl ErrorCode {
     pub const COMPTIME_USER_ERROR: Self = Self(1202);
 
     // ========================================================================
+    // Lang items (E1300-E1399) - ADR-0079
+    // ========================================================================
+    pub const INVALID_LANG_ITEM: Self = Self(1300);
+
+    // ========================================================================
     // Internal compiler errors (E9000-E9999)
     // ========================================================================
     pub const INTERNAL_ERROR: Self = Self(9000);
@@ -336,6 +341,11 @@ pub enum PreviewFeature {
     /// Skips lex/parse/RIR/sema and AIR→bitcode work for files whose
     /// inputs haven't changed since the last build.
     IncrementalCompilation,
+    /// `@lang("name")` attribute and lang-item registry (ADR-0079).
+    /// Lets the prelude bind named compiler behaviors (drop, copy,
+    /// clone, …) to specific interface declarations explicitly,
+    /// replacing name-string matching.
+    LangItems,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -368,6 +378,7 @@ impl PreviewFeature {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
             PreviewFeature::IncrementalCompilation => "ADR-0074",
+            PreviewFeature::LangItems => "ADR-0079",
         }
     }
 
@@ -1186,6 +1197,11 @@ pub enum ErrorKind {
     #[error("{0}")]
     ComptimeUserError(String),
 
+    /// `@lang(...)` problem (ADR-0079): unknown lang-item name, wrong
+    /// argument shape, duplicate binding, or use outside the prelude.
+    #[error("invalid `@lang` directive: {reason}")]
+    InvalidLangItem { reason: String },
+
     // Internal compiler errors (bugs in the compiler itself)
     #[error("internal compiler error: {0}")]
     InternalError(String),
@@ -1329,6 +1345,7 @@ impl ErrorKind {
             ErrorKind::ComptimeEvaluationFailed { .. } => ErrorCode::COMPTIME_EVALUATION_FAILED,
             ErrorKind::ComptimeArgNotConst { .. } => ErrorCode::COMPTIME_ARG_NOT_CONST,
             ErrorKind::ComptimeUserError(_) => ErrorCode::COMPTIME_USER_ERROR,
+            ErrorKind::InvalidLangItem { .. } => ErrorCode::INVALID_LANG_ITEM,
 
             // Internal compiler errors (E9000-E9999)
             ErrorKind::InternalError(_) => ErrorCode::INTERNAL_ERROR,
@@ -2026,7 +2043,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra, incremental_compilation");
+        assert_eq!(names, "test_infra, incremental_compilation, lang_items");
     }
 
     // ========================================================================

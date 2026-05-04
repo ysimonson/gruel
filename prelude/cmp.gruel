@@ -17,6 +17,7 @@
 
 // Comparison result. `Less`, `Equal`, `Greater` are bitwise small integers
 // so the compiler can emit them as cheap enum variants.
+@lang("ordering")
 pub enum Ordering {
     Less,
     Equal,
@@ -26,6 +27,7 @@ pub enum Ordering {
 // Types that may be compared for equality via `==` and `!=`. Structural
 // conformance: any type with `fn eq(self: Ref(Self), other: Self) -> bool`
 // satisfies `Eq`.
+@lang("op_eq")
 pub interface Eq {
     fn eq(self: Ref(Self), other: Self) -> bool;
 }
@@ -34,6 +36,7 @@ pub interface Eq {
 // any type with `fn cmp(self: Ref(Self), other: Self) -> Ordering`
 // satisfies `Ord`. Note: `Eq` is not a prerequisite — types that only need
 // equality can implement just `Eq`.
+@lang("op_cmp")
 pub interface Ord {
     fn cmp(self: Ref(Self), other: Self) -> Ordering;
 }

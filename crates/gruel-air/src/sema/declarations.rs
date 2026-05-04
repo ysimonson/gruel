@@ -228,7 +228,7 @@ impl<'a> Sema<'a> {
             }
             for directive in self.rir.get_directives(start, len) {
                 let name = self.interner.resolve(&directive.name).to_string();
-                if name == "allow" || name == "derive" {
+                if name == "allow" || name == "derive" || name == "lang" {
                     continue;
                 }
                 let note = directive_diagnosis_note(&name);
@@ -281,6 +281,8 @@ impl<'a> Sema<'a> {
                 name,
                 methods_start,
                 methods_len,
+                directives_start: _,
+                directives_len: _,
             } = &inst.data
             {
                 let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
@@ -584,6 +586,12 @@ impl<'a> Sema<'a> {
         //     functions and methods are gathered
         //   - `borrow t: SomeInterface` parameter types resolve correctly
         self.validate_interface_decls()?;
+        // ADR-0079: bind `@lang("…")` directives in the prelude to
+        // interface/enum IDs. Must run after interfaces are registered
+        // and before any sema pass that consults `lang_items`. Enum
+        // bindings only resolve once `register_type_names` has populated
+        // `self.enums`, which already happened in Phase 1.
+        self.populate_lang_items()?;
         self.resolve_struct_fields()?;
         self.resolve_enum_variant_fields()?;
         // ADR-0058 sub-phase: resolve every `@derive(D)` directive on a

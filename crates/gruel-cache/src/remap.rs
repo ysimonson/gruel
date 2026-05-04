@@ -153,6 +153,7 @@ impl RemapSpurs for DirectiveArg {
     fn remap_spurs(&mut self, table: &[Spur]) {
         match self {
             DirectiveArg::Ident(i) => i.remap_spurs(table),
+            DirectiveArg::String(s) => s.remap_spurs(table),
         }
     }
 }

@@ -355,6 +355,9 @@ impl<'a> AstGen<'a> {
             .collect();
         let (methods_start, methods_len) = self.rir.add_inst_refs(&methods);
 
+        let directives = self.convert_directives(&enum_decl.directives);
+        let (directives_start, directives_len) = self.rir.add_directives(&directives);
+
         self.rir.add_inst(Inst {
             data: InstData::EnumDecl {
                 is_pub: enum_decl.visibility == Visibility::Public,
@@ -363,6 +366,8 @@ impl<'a> AstGen<'a> {
                 variants_len,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             },
             span: enum_decl.span,
         })
@@ -413,12 +418,17 @@ impl<'a> AstGen<'a> {
             .collect();
         let (methods_start, methods_len) = self.rir.add_inst_refs(&method_refs);
 
+        let directives = self.convert_directives(&iface.directives);
+        let (directives_start, directives_len) = self.rir.add_directives(&directives);
+
         self.rir.add_inst(Inst {
             data: InstData::InterfaceDecl {
                 is_pub: iface.visibility == Visibility::Public,
                 name: iface.name.name,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             },
             span: iface.span,
         })
@@ -558,6 +568,10 @@ impl<'a> AstGen<'a> {
                     .iter()
                     .map(|arg| match arg {
                         DirectiveArg::Ident(ident) => ident.name, // Already a Spur
+                        // Strings (ADR-0079: @lang("drop")) flatten to a
+                        // Spur for the same downstream handling as
+                        // identifier args.
+                        DirectiveArg::String(s) => s.value,
                     })
                     .collect(),
                 span: d.span,

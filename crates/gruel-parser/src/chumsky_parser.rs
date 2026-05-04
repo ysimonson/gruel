@@ -591,11 +591,22 @@ where
     ))
     .boxed();
 
+    let directive_arg = choice((
+        select! {
+            TokenKind::String(s) = e => DirectiveArg::String(StringLit {
+                value: s,
+                span: span_from_extra(e),
+            }),
+        }
+        .boxed(),
+        ident_parser().map(DirectiveArg::Ident).boxed(),
+    ))
+    .boxed();
+
     just(TokenKind::At)
         .ignore_then(directive_name)
         .then(
-            ident_parser()
-                .map(DirectiveArg::Ident)
+            directive_arg
                 .separated_by(just(TokenKind::Comma))
                 .allow_trailing()
                 .collect::<Vec<_>>()
@@ -2989,16 +3000,20 @@ where
         .then(method_parser().repeated().collect::<Vec<_>>())
         .boxed();
 
-    visibility
+    directives_parser()
+        .then(visibility)
         .then(just(TokenKind::Enum).ignore_then(ident_parser()))
         .then(enum_body.delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)))
-        .map_with(|((visibility, name), (variants, methods)), e| EnumDecl {
-            visibility,
-            name,
-            variants,
-            methods,
-            span: span_from_extra(e),
-        })
+        .map_with(
+            |(((directives, visibility), name), (variants, methods)), e| EnumDecl {
+                directives,
+                visibility,
+                name,
+                variants,
+                methods,
+                span: span_from_extra(e),
+            },
+        )
         .boxed()
 }
 
@@ -3312,15 +3327,19 @@ where
         .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace))
         .boxed();
 
-    visibility
+    directives_parser()
+        .then(visibility)
         .then(just(TokenKind::Interface).ignore_then(ident_parser()))
         .then(body)
-        .map_with(|((visibility, name), methods), e| InterfaceDecl {
-            visibility,
-            name,
-            methods,
-            span: span_from_extra(e),
-        })
+        .map_with(
+            |(((directives, visibility), name), methods), e| InterfaceDecl {
+                directives,
+                visibility,
+                name,
+                methods,
+                span: span_from_extra(e),
+            },
+        )
         .boxed()
 }
 
