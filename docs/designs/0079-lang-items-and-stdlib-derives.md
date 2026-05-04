@@ -266,15 +266,15 @@ Each phase ships behind the `lang_items` preview gate, ends with `make test` gre
 
 ### Phase 0: Split prelude out from `std/`
 
-- [ ] Move `std/_prelude.gruel` → `prelude/_prelude.gruel`.
-- [ ] Move `std/prelude/*.gruel` → `prelude/*.gruel`. Update each `@import("prelude/X.gruel")` in `_prelude.gruel` to `@import("X.gruel")` (now sibling, not child).
-- [ ] Update `crates/gruel-compiler/src/prelude_source.rs`: change the `include_dir!` target from `std/` to two separate trees (or one tree that branches). Cleanest split: `static PRELUDE_DIR: Dir = include_dir!(".../prelude");` and `static STD_DIR: Dir = include_dir!(".../std");`. `resolved_prelude()` no longer mixes the two — it returns prelude files only.
-- [ ] Update `CompilationUnit::parse` and the `prepend_prelude` test helper: load only `prelude/` files into the auto-prepended set. `std/` files become reachable via `@import("std")` through the existing `resolve_std_import` path (which now points at `std/` only).
-- [ ] Update `is_prelude_path` (`crates/gruel-air/src/sema/file_paths.rs`) to check for the top-level `prelude/` directory rather than `std/prelude/`.
-- [ ] Add a parser/sema check: `@lang(...)` directives in files outside the prelude produce a compile error. The check uses the same path-based predicate. Error message: "`@lang(\"…\")` is only valid in the prelude (under `prelude/`)".
-- [ ] Add a smoke test: a user file with `@lang("drop")` errors with the expected message.
-- [ ] All 2073 spec tests + 89 UI tests pass; the move is purely structural.
-- [ ] No `@lang(...)` parsing yet (that's Phase 1) — but the path-based gate is in place so when Phase 1 lands, only prelude files can use it.
+- [x] Move `std/_prelude.gruel` → `prelude/_prelude.gruel`.
+- [x] Move `std/prelude/*.gruel` → `prelude/*.gruel`. Update each `@import("prelude/X.gruel")` in `_prelude.gruel` to `@import("X.gruel")` (now sibling, not child).
+- [x] Update `crates/gruel-compiler/src/prelude_source.rs`: two separate `include_dir!` trees (`PRELUDE_DIR` rooted at `prelude/`, `STD_DIR` rooted at `std/`). `resolved_prelude()` collects prelude files from `PRELUDE_DIR` and stdlib files from `STD_DIR` separately.
+- [x] `CompilationUnit::parse` and `prepend_prelude` already iterate `resolved.prelude_dir` (they don't load `other_std_files` into the implicitly-imported set), so no change needed beyond the resolver split — stdlib only loads via `@import`.
+- [x] Update `is_prelude_path` (`crates/gruel-air/src/sema/file_paths.rs`) to check for the top-level `prelude/` directory and exported it for Phase 1 to reuse for the `@lang(...)` privilege check.
+- [ ] (Deferred to Phase 1, where `@lang(...)` parsing lands) Parser/sema check: `@lang(...)` in non-prelude files errors. The path predicate is exported and ready.
+- [ ] (Deferred to Phase 1) Smoke test for the `@lang(...)`-only-in-prelude error.
+- [x] All 2073 spec tests + 89 UI tests pass; the move is purely structural.
+- [x] No `@lang(...)` parsing yet (that's Phase 1) — but the path-based gate is exported and in place.
 
 ### Phase 1: `@lang("...")` parsing and `LangItems` registry
 

@@ -26,7 +26,7 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 
 ### Enums
 
-Platform-reflection enums are declared in `std/prelude/target.gruel`. The corresponding intrinsics produce values of these types by name lookup.
+Platform-reflection enums are declared in `prelude/target.gruel`. The corresponding intrinsics produce values of these types by name lookup.
 
 | Name | Variants |
 |---|---|
@@ -37,7 +37,7 @@ Platform-reflection enums are declared in `std/prelude/target.gruel`. The corres
 
 ### Interfaces
 
-Compiler-recognized interfaces are declared in `std/prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Copy)` / `@derive(Clone)` synthesis, `Handle` linearity carve-out).
+Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Copy)` / `@derive(Clone)` synthesis, `Handle` linearity carve-out).
 
 | Name | Method | Conformance |
 |---|---|---|
@@ -131,7 +131,7 @@ owned, growable vector (ADR-0066).
 
 ## Enums
 
-Platform-reflection and type-introspection enums. Declarations live in `std/prelude/target.gruel`; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.
+Platform-reflection and type-introspection enums. Declarations live in `prelude/target.gruel`; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.
 
 ### `Arch`
 
@@ -178,7 +178,7 @@ Platform-reflection and type-introspection enums. Declarations live in `std/prel
 
 ## Interfaces
 
-Compiler-recognized interfaces. Declarations live in `std/prelude/interfaces.gruel`; the compiler keys off the interface names for hardcoded behaviors. Conformance is structural — a type satisfies the interface when it provides matching methods.
+Compiler-recognized interfaces. Declarations live in `prelude/interfaces.gruel`; the compiler keys off the interface names for hardcoded behaviors. Conformance is structural — a type satisfies the interface when it provides matching methods.
 
 ### `Drop`
 

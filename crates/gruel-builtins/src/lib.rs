@@ -628,7 +628,7 @@ pub static BUILTIN_TYPES: &[&BuiltinTypeDef] = &[&STRING_TYPE];
 // ============================================================================
 
 // ADR-0078 Phase 3: the platform-reflection enums (`Arch`, `Os`, `TypeKind`,
-// `Ownership`) live in `std/prelude/target.gruel`. The intrinsics that
+// `Ownership`) live in `prelude/target.gruel`. The intrinsics that
 // produce values of those types (`@target_arch`, `@target_os`, `@type_info`,
 // `@ownership`) cache their `EnumId`s after declaration resolution via
 // `Sema::cache_builtin_enum_ids`. Variant order in the prelude file matches
@@ -785,12 +785,12 @@ pub fn is_reserved_type_constructor_name(name: &str) -> bool {
 // ============================================================================
 //
 // ADR-0078 Phase 2: the interface declarations live in
-// `std/prelude/interfaces.gruel`. The compiler still recognizes them by
+// `prelude/interfaces.gruel`. The compiler still recognizes them by
 // interned name (the hardcoded behaviors — drop glue, @derive(Copy/Clone)
 // synthesis, Handle linearity carve-out — key off these names).
 
 /// Names of the four compiler-recognized built-in interfaces. Kept here only
-/// so the doc generator can point at `std/prelude/interfaces.gruel` for
+/// so the doc generator can point at `prelude/interfaces.gruel` for
 /// canonical declarations. Do not use this for anything load-bearing — the
 /// compiler resolves these names through the prelude scope.
 pub static BUILTIN_INTERFACE_NAMES: &[&str] = &["Drop", "Copy", "Clone", "Handle"];
@@ -1007,7 +1007,7 @@ pub fn render_reference_markdown() -> String {
     out.push('\n');
 
     out.push_str("### Enums\n\n");
-    out.push_str("Platform-reflection enums are declared in `std/prelude/target.gruel`. The corresponding intrinsics produce values of these types by name lookup.\n\n");
+    out.push_str("Platform-reflection enums are declared in `prelude/target.gruel`. The corresponding intrinsics produce values of these types by name lookup.\n\n");
     out.push_str("| Name | Variants |\n");
     out.push_str("|---|---|\n");
     out.push_str("| `Arch` | `X86_64`, `Aarch64`, `X86`, `Arm`, `Riscv32`, `Riscv64`, `Wasm32`, `Wasm64` |\n");
@@ -1017,7 +1017,7 @@ pub fn render_reference_markdown() -> String {
     out.push('\n');
 
     out.push_str("### Interfaces\n\n");
-    out.push_str("Compiler-recognized interfaces are declared in `std/prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Copy)` / `@derive(Clone)` synthesis, `Handle` linearity carve-out).\n\n");
+    out.push_str("Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Copy)` / `@derive(Clone)` synthesis, `Handle` linearity carve-out).\n\n");
     out.push_str("| Name | Method | Conformance |\n");
     out.push_str("|---|---|---|\n");
     out.push_str("| `Drop` | `fn drop(self)` | method presence |\n");
@@ -1114,10 +1114,10 @@ pub fn render_reference_markdown() -> String {
 
     // ---- Enums in detail ----
     //
-    // ADR-0078 Phase 3: declarations live in `std/prelude/target.gruel`.
+    // ADR-0078 Phase 3: declarations live in `prelude/target.gruel`.
     // Variant order in this section matches the prelude file.
     out.push_str("## Enums\n\n");
-    out.push_str("Platform-reflection and type-introspection enums. Declarations live in `std/prelude/target.gruel`; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.\n\n");
+    out.push_str("Platform-reflection and type-introspection enums. Declarations live in `prelude/target.gruel`; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.\n\n");
 
     for (name, variants) in [
         (
@@ -1147,11 +1147,11 @@ pub fn render_reference_markdown() -> String {
 
     // ---- Interfaces in detail ----
     //
-    // ADR-0078 Phase 2: declarations live in `std/prelude/interfaces.gruel`.
+    // ADR-0078 Phase 2: declarations live in `prelude/interfaces.gruel`.
     // Names listed here as a directory; canonical signatures and method
     // bodies are in the prelude file.
     out.push_str("## Interfaces\n\n");
-    out.push_str("Compiler-recognized interfaces. Declarations live in `std/prelude/interfaces.gruel`; the compiler keys off the interface names for hardcoded behaviors. Conformance is structural — a type satisfies the interface when it provides matching methods.\n\n");
+    out.push_str("Compiler-recognized interfaces. Declarations live in `prelude/interfaces.gruel`; the compiler keys off the interface names for hardcoded behaviors. Conformance is structural — a type satisfies the interface when it provides matching methods.\n\n");
 
     out.push_str("### `Drop`\n\n");
     out.push_str("Types with custom cleanup logic that runs when the value goes out of scope (ADR-0059).\n\n");
@@ -1278,7 +1278,7 @@ mod tests {
     }
 
     // ADR-0078 Phase 3: built-in enum declarations now live in
-    // `std/prelude/target.gruel`. The compiler-side `arch_variant_index` /
+    // `prelude/target.gruel`. The compiler-side `arch_variant_index` /
     // `os_variant_index` mappers (in `gruel-air/src/sema/analysis.rs`)
     // encode the variant order; their unit tests in that crate cover the
     // mapping. The breadcrumb static below lets other crates reference

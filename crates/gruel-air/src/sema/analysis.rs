@@ -6281,7 +6281,7 @@ impl<'a> Sema<'a> {
         //   3. User struct or enum with an `eq` (for `==` / `!=`) or `cmp`
         //      (for `<` / `<=` / `>` / `>=`) method — desugar to a method
         //      call. The conformer's signature must match `Eq::eq` /
-        //      `Ord::cmp` from `std/prelude/cmp.gruel`.
+        //      `Ord::cmp` from `prelude/cmp.gruel`.
         //
         // This is the load-bearing piece of ADR-0078 Phase 4 — it's what
         // makes the `Eq` / `Ord` interfaces useful as overloading hooks.
@@ -6513,7 +6513,7 @@ impl<'a> Sema<'a> {
                         method_name
                     )));
                 }
-                // Variant indices match `std/prelude/cmp.gruel`:
+                // Variant indices match `prelude/cmp.gruel`:
                 // Less = 0, Equal = 1, Greater = 2.
                 let (variant_index, cmp_op) = match op {
                     BinOp::Lt => (0u32, BinOp::Eq), // result == Less

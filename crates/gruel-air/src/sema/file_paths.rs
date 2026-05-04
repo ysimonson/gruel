@@ -36,11 +36,12 @@ impl<'a> Sema<'a> {
     /// functions reachable from main(). For single-file compilation,
     /// eager analysis is used for backwards compatibility.
     ///
-    /// ADR-0078: prelude files (under `std/prelude/`) using `@import`
-    /// shouldn't switch the user's compilation into lazy mode — that's a
-    /// behavioral change visible to user code that has nothing to do
-    /// with whether *they* used `@import`. Filter the registry to count
-    /// only modules whose files live outside `std/prelude/`.
+    /// ADR-0079: prelude files (under top-level `prelude/`) using
+    /// `@import` shouldn't switch the user's compilation into lazy mode
+    /// — that's a behavioral change visible to user code that has
+    /// nothing to do with whether *they* used `@import`. Filter the
+    /// registry to count only modules whose files live outside the
+    /// prelude.
     pub(crate) fn has_imports(&self) -> bool {
         for def in self.module_registry.all_defs() {
             if !is_prelude_path(&def.file_path) {
@@ -51,9 +52,21 @@ impl<'a> Sema<'a> {
     }
 }
 
-/// Path-based predicate: the file lives inside the prelude directory
-/// (`std/prelude/...`). Used by `has_imports` to ignore prelude-internal
-/// `@import`s when deciding lazy vs. eager analysis.
-fn is_prelude_path(path: &str) -> bool {
-    path.contains("std/prelude/") || path.contains("std\\prelude\\")
+/// Path-based predicate: the file lives inside the top-level `prelude/`
+/// directory. Used by `has_imports` to ignore prelude-internal
+/// `@import`s when deciding lazy vs. eager analysis, and (in Phase 1+)
+/// by the `@lang(...)` privilege check.
+pub fn is_prelude_path(path: &str) -> bool {
+    // Match either the embedded virtual prefix `prelude/` (no leading
+    // path component) or any path with a `/prelude/` segment (on-disk
+    // workspace paths). Reject paths whose prelude segment sits under
+    // `std/prelude/` — that layout was retired in ADR-0079, and a
+    // residual `std/prelude/` directory is not the privileged one.
+    if path.contains("std/prelude/") || path.contains("std\\prelude\\") {
+        return false;
+    }
+    path.starts_with("prelude/")
+        || path.starts_with("prelude\\")
+        || path.contains("/prelude/")
+        || path.contains("\\prelude\\")
 }

@@ -78,7 +78,7 @@ fn clone_type_pool(pool: &gruel_air::TypeInternPool) -> gruel_air::TypeInternPoo
     pool.clone_snapshot()
 }
 
-// ADR-0078: the prelude content has moved to `std/prelude/*.gruel`. The
+// ADR-0078: the prelude content has moved to `prelude/*.gruel`. The
 // concatenated source is built at parse time via
 // `prelude_source::assemble_prelude_source`, which prefers the on-disk files
 // but falls back to embedded copies (`include_str!`). The virtual prelude
@@ -293,7 +293,7 @@ impl<'src> CompilationUnit<'src> {
         // ADR-0065 / ADR-0078: load the prelude as an implicitly-imported
         // module rooted at `std/_prelude.gruel`. The root is the only file
         // the compiler hand-loads — it uses `@import` internally to pull
-        // in `std/prelude/*.gruel` submodules and re-exports their pub
+        // in `prelude/*.gruel` submodules and re-exports their pub
         // items. Submodules are pre-staged in `file_paths` (and pre-parsed
         // when their disk copy isn't available) so the @import resolver
         // finds them whether the host has an on-disk stdlib or not. Only
