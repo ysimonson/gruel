@@ -10,6 +10,7 @@ use gruel_cfg::{
     BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator, drop_names,
 };
 use gruel_intrinsics::{IntrinsicId, lookup_by_name};
+use gruel_target::{Arch, Target};
 use gruel_util::{BinOp, CompileError, CompileResult, ErrorKind, UnaryOp};
 use inkwell::FloatPredicate;
 use inkwell::IntPredicate;
@@ -22,6 +23,7 @@ use inkwell::module::Module;
 use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target as LlvmTarget, TargetMachine,
+    TargetTriple,
 };
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::BasicMetadataValueEnum;
@@ -36,6 +38,53 @@ use crate::types::{gruel_type_to_llvm, gruel_type_to_llvm_param};
 /// Convert an LLVM-related error string into a [`CompileError`].
 fn llvm_error(msg: impl Into<String>) -> CompileError {
     CompileError::without_span(ErrorKind::InternalError(msg.into()))
+}
+
+/// Whether `target` differs from the host machine. Determines whether we
+/// initialize only the native LLVM backend or every backend LLVM was built
+/// with (so cross-compilation triples have a registered backend).
+fn is_cross_compile(target: &Target) -> bool {
+    target != &Target::host()
+}
+
+/// Initialize LLVM target backends. Native-only when compiling for the host,
+/// all-backends otherwise so cross-compilation can find its backend.
+fn init_llvm_targets(target: &Target) -> CompileResult<()> {
+    let cfg = InitializationConfig::default();
+    if is_cross_compile(target) {
+        LlvmTarget::initialize_all(&cfg);
+        Ok(())
+    } else {
+        LlvmTarget::initialize_native(&cfg)
+            .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))
+    }
+}
+
+/// Create a `TargetMachine` for `target` at the requested optimization level.
+fn make_target_machine(target: &Target, opt_level: OptLevel) -> CompileResult<TargetMachine> {
+    let triple_str = target.triple_string();
+    let target_triple = TargetTriple::create(&triple_str);
+    let llvm_target = LlvmTarget::from_triple(&target_triple).map_err(|e| {
+        llvm_error(format!(
+            "no LLVM backend for target '{}': {} (LLVM was likely built without this backend)",
+            triple_str, e
+        ))
+    })?;
+    llvm_target
+        .create_target_machine(
+            &target_triple,
+            "generic",
+            "",
+            to_llvm_opt_level(opt_level),
+            RelocMode::PIC,
+            CodeModel::Default,
+        )
+        .ok_or_else(|| {
+            llvm_error(format!(
+                "failed to create LLVM TargetMachine for '{}'",
+                triple_str
+            ))
+        })
 }
 
 /// Module-level state shared across every function being codegen'd.
@@ -55,6 +104,7 @@ struct ModuleCtx<'ctx, 'a> {
     fn_map: &'a HashMap<&'a str, FunctionValue<'ctx>>,
     vtable_map: &'a HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
     interface_defs: &'a [gruel_air::InterfaceDef],
+    target: &'a Target,
 }
 
 /// Build an LLVM module from a set of function CFGs.
@@ -73,6 +123,7 @@ fn build_module<'ctx>(
         interner,
         interface_defs,
         interface_vtables,
+        target,
     } = *inputs;
     let module = context.create_module("gruel_module");
     let builder = context.create_builder();
@@ -193,6 +244,7 @@ fn build_module<'ctx>(
         fn_map: &fn_map,
         vtable_map: &vtable_map,
         interface_defs,
+        target,
     };
 
     // Define each function body.
@@ -256,9 +308,12 @@ pub fn generate_bitcode(inputs: &CodegenInputs<'_>) -> CompileResult<Vec<u8>> {
 /// The bitcode is parsed into a fresh module, optimized at `opt_level`,
 /// and emitted as object bytes. Cache hits skip [`generate_bitcode`]
 /// entirely and call this directly.
-pub fn compile_bitcode_to_object(bitcode: &[u8], opt_level: OptLevel) -> CompileResult<Vec<u8>> {
-    LlvmTarget::initialize_native(&InitializationConfig::default())
-        .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
+pub fn compile_bitcode_to_object(
+    bitcode: &[u8],
+    opt_level: OptLevel,
+    target: &Target,
+) -> CompileResult<Vec<u8>> {
+    init_llvm_targets(target)?;
 
     let context = Context::create();
     let buffer =
@@ -266,19 +321,9 @@ pub fn compile_bitcode_to_object(bitcode: &[u8], opt_level: OptLevel) -> Compile
     let module = inkwell::module::Module::parse_bitcode_from_buffer(&buffer, &context)
         .map_err(|e| llvm_error(format!("failed to parse cached bitcode: {}", e)))?;
 
-    let target_triple = TargetMachine::get_default_triple();
-    let llvm_target = LlvmTarget::from_triple(&target_triple)
-        .map_err(|e| llvm_error(format!("failed to get LLVM target: {}", e)))?;
-    let target_machine = llvm_target
-        .create_target_machine(
-            &target_triple,
-            "generic",
-            "",
-            to_llvm_opt_level(opt_level),
-            RelocMode::PIC,
-            CodeModel::Default,
-        )
-        .ok_or_else(|| llvm_error("failed to create LLVM TargetMachine"))?;
+    let target_machine = make_target_machine(target, opt_level)?;
+    module.set_triple(&target_machine.get_triple());
+    module.set_data_layout(&target_machine.get_target_data().get_data_layout());
 
     run_llvm_passes(&module, &target_machine, opt_level)?;
 
@@ -295,24 +340,13 @@ pub fn compile_bitcode_to_object(bitcode: &[u8], opt_level: OptLevel) -> Compile
 /// compiled to an in-memory object file buffer by the host machine's LLVM
 /// code generator.
 pub fn generate(inputs: &CodegenInputs<'_>, opt_level: OptLevel) -> CompileResult<Vec<u8>> {
-    LlvmTarget::initialize_native(&InitializationConfig::default())
-        .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
+    init_llvm_targets(inputs.target)?;
 
     let context = Context::create();
     let module = build_module(&context, inputs)?;
-    let target_triple = TargetMachine::get_default_triple();
-    let llvm_target = LlvmTarget::from_triple(&target_triple)
-        .map_err(|e| llvm_error(format!("failed to get LLVM target: {}", e)))?;
-    let target_machine = llvm_target
-        .create_target_machine(
-            &target_triple,
-            "generic",
-            "",
-            to_llvm_opt_level(opt_level),
-            RelocMode::PIC,
-            CodeModel::Default,
-        )
-        .ok_or_else(|| llvm_error("failed to create LLVM TargetMachine"))?;
+    let target_machine = make_target_machine(inputs.target, opt_level)?;
+    module.set_triple(&target_machine.get_triple());
+    module.set_data_layout(&target_machine.get_target_data().get_data_layout());
 
     // Run the mid-end optimization pipeline (no-op at O0).
     run_llvm_passes(&module, &target_machine, opt_level)?;
@@ -334,23 +368,11 @@ pub fn generate_ir(inputs: &CodegenInputs<'_>, opt_level: OptLevel) -> CompileRe
     let module = build_module(&context, inputs)?;
 
     if opt_level != OptLevel::O0 {
-        // generate_ir needs a TargetMachine to run passes. We do a lightweight
-        // native-target init just for this purpose.
-        LlvmTarget::initialize_native(&InitializationConfig::default())
-            .map_err(|e| llvm_error(format!("LLVM target initialization failed: {}", e)))?;
-        let target_triple = TargetMachine::get_default_triple();
-        let llvm_target = LlvmTarget::from_triple(&target_triple)
-            .map_err(|e| llvm_error(format!("failed to get LLVM target: {}", e)))?;
-        let target_machine = llvm_target
-            .create_target_machine(
-                &target_triple,
-                "generic",
-                "",
-                to_llvm_opt_level(opt_level),
-                RelocMode::PIC,
-                CodeModel::Default,
-            )
-            .ok_or_else(|| llvm_error("failed to create LLVM TargetMachine"))?;
+        // generate_ir needs a TargetMachine to run passes.
+        init_llvm_targets(inputs.target)?;
+        let target_machine = make_target_machine(inputs.target, opt_level)?;
+        module.set_triple(&target_machine.get_triple());
+        module.set_data_layout(&target_machine.get_target_data().get_data_layout());
         run_llvm_passes(&module, &target_machine, opt_level)?;
     }
 
@@ -559,6 +581,9 @@ struct FnCodegen<'ctx, 'a> {
     vtable_map: &'a HashMap<(gruel_air::StructId, gruel_air::InterfaceId), GlobalValue<'ctx>>,
     /// Interface definitions for vtable layout (slot count per interface).
     interface_defs: &'a [gruel_air::InterfaceDef],
+    /// Compilation target — selects per-arch inline-asm sequences (e.g. for
+    /// the `@syscall` intrinsic).
+    target: &'a Target,
 }
 
 impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
@@ -601,6 +626,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             slot_to_llvm_param,
             vtable_map: mod_ctx.vtable_map,
             interface_defs: mod_ctx.interface_defs,
+            target: mod_ctx.target,
         }
     }
 
@@ -3824,10 +3850,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     .collect();
                 let num_args = arg_vals.len(); // 1..=7 (syscall_num + up to 6 args)
 
-                let triple = TargetMachine::get_default_triple();
-                let triple_str = triple.as_str().to_string_lossy();
-                let is_aarch64 =
-                    triple_str.starts_with("aarch64") || triple_str.starts_with("arm64");
+                let is_aarch64 = self.target.arch() == Arch::Aarch64;
 
                 let (asm_str, constraints) = if is_aarch64 {
                     // aarch64 syscall convention:

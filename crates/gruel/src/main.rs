@@ -991,6 +991,7 @@ fn handle_emit_multi_file(
                         interner: &state.interner,
                         interface_defs: &state.interface_defs,
                         interface_vtables: &state.interface_vtables,
+                        target: &options.target,
                     };
                     match generate_llvm_ir(&inputs, options.opt_level) {
                         Ok(ir) => print!("{}", ir),

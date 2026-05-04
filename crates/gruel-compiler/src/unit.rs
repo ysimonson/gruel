@@ -1000,6 +1000,7 @@ impl<'src> CompilationUnit<'src> {
             interner,
             interface_defs,
             interface_vtables,
+            target: &self.options.target,
         };
 
         // ADR-0074 Phase 5: bitcode cache. If the AIR cache is configured
@@ -1043,8 +1044,12 @@ impl<'src> CompilationUnit<'src> {
         let object_bytes = match store.get(gruel_cache::CacheKind::LlvmIr, air_key) {
             Ok(Some(bitcode)) => {
                 info!("bitcode cache hit");
-                gruel_codegen_llvm::compile_bitcode_to_object(&bitcode, self.options.opt_level)
-                    .map_err(CompileErrors::from)?
+                gruel_codegen_llvm::compile_bitcode_to_object(
+                    &bitcode,
+                    self.options.opt_level,
+                    &self.options.target,
+                )
+                .map_err(CompileErrors::from)?
             }
             _ => {
                 info!("bitcode cache miss");
@@ -1053,8 +1058,12 @@ impl<'src> CompilationUnit<'src> {
                 if let Err(e) = store.put(gruel_cache::CacheKind::LlvmIr, air_key, &bitcode) {
                     tracing::warn!(error = %e, "bitcode cache write failed");
                 }
-                gruel_codegen_llvm::compile_bitcode_to_object(&bitcode, self.options.opt_level)
-                    .map_err(CompileErrors::from)?
+                gruel_codegen_llvm::compile_bitcode_to_object(
+                    &bitcode,
+                    self.options.opt_level,
+                    &self.options.target,
+                )
+                .map_err(CompileErrors::from)?
             }
         };
 

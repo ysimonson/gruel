@@ -166,12 +166,14 @@ Os:
   - Update call sites that relied on `Target: Copy` to use `Clone` / `&Target`
   - All existing tests must pass; add tests for new triples
 
-- [ ] **Phase 2: Remove dead custom-backend methods**
+- [x] **Phase 2: Remove dead custom-backend methods**
   - Delete `elf_machine`, `default_base_addr`, `macos_min_version`, `page_size`,
     `stack_alignment`, `pointer_size` from `Target`
   - Delete their tests
+  - (Already accomplished as part of the Phase 1 rewrite — the new module
+    omits these methods and their tests.)
 
-- [ ] **Phase 3: Wire target into inkwell**
+- [x] **Phase 3: Wire target into inkwell**
   - Add `target: Target` field to `CodegenInputs` and `compile_bitcode_to_object`
   - Update `gruel-compiler` to populate the field from `options.target`
   - Replace `get_default_triple()` at all three sites in `codegen.rs`

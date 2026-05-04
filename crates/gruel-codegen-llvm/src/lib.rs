@@ -22,6 +22,7 @@ mod types;
 
 use gruel_air::TypeInternPool;
 use gruel_cfg::{Cfg, OptLevel};
+use gruel_target::Target;
 use gruel_util::CompileResult;
 use lasso::ThreadedRodeo;
 
@@ -37,6 +38,9 @@ pub struct CodegenInputs<'a> {
     pub interner: &'a ThreadedRodeo,
     pub interface_defs: &'a [gruel_air::InterfaceDef],
     pub interface_vtables: &'a gruel_air::InterfaceVtables,
+    /// The compilation target — controls the LLVM target triple and
+    /// platform-conditional codegen (e.g. inline-asm syscall layout).
+    pub target: &'a Target,
 }
 
 /// Generate a native object file from a collection of function CFGs using LLVM.
@@ -83,6 +87,10 @@ pub fn generate_bitcode(inputs: &CodegenInputs<'_>) -> CompileResult<Vec<u8>> {
 /// ADR-0074's bitcode cache to consume the output of either
 /// [`generate_bitcode`] (cache miss) or a previously cached `.bc` blob
 /// (cache hit).
-pub fn compile_bitcode_to_object(bitcode: &[u8], opt_level: OptLevel) -> CompileResult<Vec<u8>> {
-    codegen::compile_bitcode_to_object(bitcode, opt_level)
+pub fn compile_bitcode_to_object(
+    bitcode: &[u8],
+    opt_level: OptLevel,
+    target: &Target,
+) -> CompileResult<Vec<u8>> {
+    codegen::compile_bitcode_to_object(bitcode, opt_level, target)
 }

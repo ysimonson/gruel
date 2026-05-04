@@ -679,6 +679,7 @@ pub struct BackendInputs<'a> {
     pub interner: &'a ThreadedRodeo,
     pub interface_defs: &'a [gruel_air::InterfaceDef],
     pub interface_vtables: &'a gruel_air::InterfaceVtables,
+    pub target: &'a Target,
 }
 
 impl<'a> BackendInputs<'a> {
@@ -693,6 +694,7 @@ impl<'a> BackendInputs<'a> {
             interner: self.interner,
             interface_defs: self.interface_defs,
             interface_vtables: self.interface_vtables,
+            target: self.target,
         }
     }
 }
@@ -1348,6 +1350,35 @@ mod tests {
     fn test_compile_no_main() {
         let result = compile("fn foo() -> i32 { 42 }");
         assert!(result.is_err());
+    }
+
+    /// ADR-0077 Phase 3: the wired-in target reaches LLVM, so the emitted
+    /// LLVM IR carries the requested triple. We assert against the IR
+    /// rather than a real cross-compiled object so the test passes even on
+    /// hosts whose LLVM build doesn't include a non-host backend (the IR
+    /// step doesn't need a backend at -O0).
+    #[test]
+    fn test_target_threads_into_llvm_ir() {
+        let state = compile_to_cfg("fn main() -> i32 { 0 }").unwrap();
+        let target: Target = "aarch64-unknown-linux-gnu".parse().unwrap();
+        let inputs = BackendInputs {
+            functions: &state.functions,
+            type_pool: &state.type_pool,
+            strings: &state.strings,
+            bytes: &state.bytes,
+            interner: &state.interner,
+            interface_defs: &state.interface_defs,
+            interface_vtables: &state.interface_vtables,
+            target: &target,
+        };
+        // -O1 forces a TargetMachine to be created (the only path that
+        // applies the triple to the module's metadata via set_triple).
+        let ir = generate_llvm_ir(&inputs, OptLevel::O1).unwrap();
+        assert!(
+            ir.contains("aarch64"),
+            "expected aarch64 triple in IR, got:\n{}",
+            ir.lines().take(5).collect::<Vec<_>>().join("\n")
+        );
     }
 
     #[test]
