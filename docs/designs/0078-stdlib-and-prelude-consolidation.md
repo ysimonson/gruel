@@ -253,15 +253,10 @@ Each phase ships independently behind the `stdlib_mvp` preview gate, ends with `
 
 ### Phase 4: Eq, Ord, and operator desugaring
 
-- [ ] Create `std/prelude/cmp.gruel` with `Ordering`, `Eq`, `Ord`.
-- [ ] Add steps 4–5 to the binop analyzer in `crates/gruel-air/src/sema/analysis.rs`. Confirm the dispatch order (primitive → bool → BUILTIN_TYPES registry → Eq/Ord interface → error) keeps existing behavior unchanged.
-- [ ] Add spec tests in `crates/gruel-spec/cases/`:
-  - User struct with `eq` method: `==` and `!=` work.
-  - User struct with `cmp` method: `<`, `<=`, `>`, `>=` work.
-  - User struct with neither: clear error message naming `Eq` / `Ord`.
-  - Float `==`: still primitive, unchanged.
-  - String `==`: still goes through `__gruel_str_eq`, unchanged.
-- [ ] `make test`.
+- [x] Created `std/prelude/cmp.gruel` with `pub enum Ordering { Less, Equal, Greater }`, `pub interface Eq`, `pub interface Ord`. Receiver/parameter shape: `fn eq(self: Ref(Self), other: Self) -> bool;` / `fn cmp(self: Ref(Self), other: Self) -> Ordering;`. (`Self` in nested type position like `Ref(Self)` for non-receiver params is not currently accepted — `other: Self` is the workable shape.)
+- [x] Verified the declarations parse and integrate: a scratch program using `match` against `Ordering` variants, `comptime T: Eq` bounds, and `Ordering::Less` literals all compile cleanly.
+- [x] All 2073 spec tests + 89 UI tests pass.
+- [ ] **Deferred to follow-up ADR**: the binop dispatch fall-through (steps 4–5 of the dispatch table) that desugars `==`/`!=` to `Eq::eq` and `<`/`<=`/`>`/`>=` to `Ord::cmp`. The hooks for this would live in `analyze_comparison` in `crates/gruel-air/src/sema/analysis.rs:5715`, calling into the existing `analyze_method_call_impl` machinery. The declarations land in this ADR; consuming them as desugaring targets is a non-trivial sema feature better scoped on its own. Today, user struct `==` continues to lower via `build_value_eq` (bitwise field-by-field equality); user struct `<` continues to be rejected. Once the desugaring lands, the rejection path becomes "type X does not conform to Ord" and `==` can be overridden by an `eq` method.
 
 ### Phase 5: Stabilization
 
