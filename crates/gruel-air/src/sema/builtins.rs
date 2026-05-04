@@ -111,6 +111,15 @@ impl<'a> Sema<'a> {
         {
             self.builtin_ownership_id = Some(id);
         }
+        // ADR-0078 Phase 4: cache `Ordering` for the binop dispatch in
+        // `analyze_comparison`, which constructs `Ordering::Less` /
+        // `Ordering::Greater` enum-variant AIR refs to compare against the
+        // `cmp(self, other)` return value.
+        if let Some(spur) = self.interner.get("Ordering")
+            && let Some(&id) = self.enums.get(&spur)
+        {
+            self.builtin_ordering_id = Some(id);
+        }
     }
 
     // ========================================================================

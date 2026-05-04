@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Implemented (Phases 1–3 fully; Phase 4 declarations-only with operator dispatch deferred — see Phase 4 checklist for details).
+Implemented.
 
 ## Summary
 
@@ -253,10 +253,17 @@ Each phase ships independently behind the `stdlib_mvp` preview gate, ends with `
 
 ### Phase 4: Eq, Ord, and operator desugaring
 
-- [x] Created `std/prelude/cmp.gruel` with `pub enum Ordering { Less, Equal, Greater }`, `pub interface Eq`, `pub interface Ord`. Receiver/parameter shape: `fn eq(self: Ref(Self), other: Self) -> bool;` / `fn cmp(self: Ref(Self), other: Self) -> Ordering;`. (`Self` in nested type position like `Ref(Self)` for non-receiver params is not currently accepted — `other: Self` is the workable shape.)
-- [x] Verified the declarations parse and integrate: a scratch program using `match` against `Ordering` variants, `comptime T: Eq` bounds, and `Ordering::Less` literals all compile cleanly.
-- [x] All 2073 spec tests + 89 UI tests pass.
-- [ ] **Deferred to follow-up ADR**: the binop dispatch fall-through (steps 4–5 of the dispatch table) that desugars `==`/`!=` to `Eq::eq` and `<`/`<=`/`>`/`>=` to `Ord::cmp`. The hooks for this would live in `analyze_comparison` in `crates/gruel-air/src/sema/analysis.rs:5715`, calling into the existing `analyze_method_call_impl` machinery. The declarations land in this ADR; consuming them as desugaring targets is a non-trivial sema feature better scoped on its own. Today, user struct `==` continues to lower via `build_value_eq` (bitwise field-by-field equality); user struct `<` continues to be rejected. Once the desugaring lands, the rejection path becomes "type X does not conform to Ord" and `==` can be overridden by an `eq` method.
+- [x] Created `std/prelude/cmp.gruel` with `pub enum Ordering { Less, Equal, Greater }`, `pub interface Eq`, `pub interface Ord`. Receiver/parameter shape: `fn eq(self: Ref(Self), other: Self) -> bool;` / `fn cmp(self: Ref(Self), other: Self) -> Ordering;`. (`Self` in nested type position like `Ref(Self)` for non-receiver params isn't currently accepted by the resolver — `other: Self` is the workable shape, by-value.)
+- [x] Cached `builtin_ordering_id` via the existing `cache_builtin_enum_ids` step so `Ord` desugaring can construct `Ordering::Less` / `Ordering::Greater` enum-variant AIR refs without paying a name-lookup at every `<`/`>` call site.
+- [x] Implemented binop dispatch fall-through in `analyze_comparison` (`crates/gruel-air/src/sema/analysis.rs`):
+    1. Numeric / bool / char / unit primitives → existing `Bin` path (unchanged).
+    2. Built-in `String` → existing `Bin` path (registry routes via `__gruel_str_eq` / `__gruel_str_cmp`, unchanged).
+    3. **NEW**: User struct or enum with `eq` method → desugar `==` / `!=` to a method call returning `bool`. `!=` wraps in `Bin(Ne, call, true)`.
+    4. **NEW**: User struct or enum with `cmp` method → desugar `<` / `<=` / `>` / `>=` to a method call returning `Ordering`, then compare against `Ordering::Less` / `Ordering::Greater`. Mappings: `<` → `cmp == Less`, `>=` → `cmp != Less`, `>` → `cmp == Greater`, `<=` → `cmp != Greater`.
+    5. User struct without `cmp` method on ordering ops → clear "does not conform to `Ord`" error naming the missing method. (Without the dispatch this path was a generic type mismatch.)
+    6. User struct without `eq` method on `==` / `!=` → existing `build_value_eq` (bitwise field-by-field) path, preserving backward compatibility. Defining an `eq` method opts the type into custom equality.
+- [x] End-to-end verification: a scratch program with a `Point` struct exercising all six operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) returned the expected exit code (each operator added a distinct power-of-two contribution; final = 63 confirms all six dispatched correctly). Primitive operators still work (no regression). All 2073 spec tests + 89 UI tests pass.
+- [x] Helpers: `Sema::lookup_user_method(ty, method_sym)` for struct/enum method lookup; `Sema::finish_operator_dispatch(...)` for shared post-call comparison construction.
 
 ### Phase 5: Stabilization
 

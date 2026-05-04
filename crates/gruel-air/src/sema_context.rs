@@ -213,6 +213,9 @@ pub struct SemaContext<'a> {
     pub builtin_typekind_id: Option<EnumId>,
     /// EnumId of the synthetic Ownership enum (for @ownership intrinsic).
     pub builtin_ownership_id: Option<EnumId>,
+    /// EnumId of the prelude `Ordering` enum (ADR-0078 Phase 4: target of
+    /// `Ord::cmp`).
+    pub builtin_ordering_id: Option<EnumId>,
     /// Compilation target (architecture + OS).
     pub target: gruel_target::Target,
     /// Pre-computed inference context for HM type inference.

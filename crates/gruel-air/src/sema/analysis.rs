@@ -5732,11 +5732,13 @@ impl<'a> Sema<'a> {
         // Comparisons read values without consuming them (like projections).
         // This matches Rust's PartialEq trait which takes references.
         let lhs_result = self.analyze_inst_for_projection(air, lhs, ctx)?;
-        let rhs_result = self.analyze_inst_for_projection(air, rhs, ctx)?;
         let lhs_type = lhs_result.ty;
 
-        // Propagate Never/Error without additional type errors
+        // Propagate Never/Error without additional type errors. Analyze rhs
+        // as projection too and emit the regular `Bin` path; downstream
+        // type checking is suppressed by the never/error propagation.
         if lhs_type.is_never() || lhs_type.is_error() {
+            let rhs_result = self.analyze_inst_for_projection(air, rhs, ctx)?;
             let air_ref = air.add_inst(AirInst {
                 data: AirInstData::Bin(op, lhs_result.air_ref, rhs_result.air_ref),
                 ty: Type::BOOL,
@@ -5744,6 +5746,125 @@ impl<'a> Sema<'a> {
             });
             return Ok(AnalysisResult::new(air_ref, Type::BOOL));
         }
+
+        // ADR-0078 Phase 4: operator desugaring for non-primitive types.
+        //
+        // Dispatch order:
+        //   1. Numeric / bool / char / unit primitives — fall through to the
+        //      regular `Bin` path (existing behavior).
+        //   2. Built-in `String` — fall through; codegen routes via the
+        //      registry-driven `__gruel_str_eq` / `__gruel_str_cmp` helpers.
+        //   3. User struct or enum with an `eq` (for `==` / `!=`) or `cmp`
+        //      (for `<` / `<=` / `>` / `>=`) method — desugar to a method
+        //      call. The conformer's signature must match `Eq::eq` /
+        //      `Ord::cmp` from `std/prelude/cmp.gruel`.
+        //
+        // This is the load-bearing piece of ADR-0078 Phase 4 — it's what
+        // makes the `Eq` / `Ord` interfaces useful as overloading hooks.
+        if !lhs_type.is_numeric()
+            && lhs_type != Type::BOOL
+            && lhs_type != Type::CHAR
+            && lhs_type != Type::UNIT
+            && !self.is_builtin_string(lhs_type)
+        {
+            let method_name = if matches!(op, BinOp::Eq | BinOp::Ne) {
+                "eq"
+            } else {
+                "cmp"
+            };
+            let method_sym = self.interner.get(method_name);
+            if let Some(method_sym) = method_sym
+                && let Some(method_info) = self.lookup_user_method(lhs_type, method_sym)
+            {
+                let recv_pass_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => AirArgMode::Normal,
+                    crate::types::ReceiverMode::Borrow => AirArgMode::Borrow,
+                    crate::types::ReceiverMode::Inout => AirArgMode::Inout,
+                };
+                let return_type = method_info.return_type;
+                let type_name = self.format_type_name(lhs_type);
+
+                // Analyze rhs through the regular call-arg path so it gets
+                // proper move tracking against the method's `other: Self`
+                // parameter. Borrow-on-projection of lhs above stays as-is.
+                let rhs_args = self.analyze_call_args(
+                    air,
+                    &[RirCallArg {
+                        value: rhs,
+                        mode: RirArgMode::Normal,
+                    }],
+                    ctx,
+                )?;
+                let rhs_air_ref = rhs_args[0].value;
+                let rhs_type = air.get(rhs_air_ref).ty;
+                if rhs_type != lhs_type && !rhs_type.is_never() && !rhs_type.is_error() {
+                    return Err(CompileError::type_mismatch(
+                        type_name.clone(),
+                        rhs_type.name().to_string(),
+                        self.rir.get(rhs).span,
+                    ));
+                }
+
+                let mut air_args = vec![AirCallArg {
+                    value: lhs_result.air_ref,
+                    mode: recv_pass_mode,
+                }];
+                air_args.extend(rhs_args);
+
+                let call_name_str = format!("{}.{}", type_name, method_name);
+                let call_name_sym = self.interner.get_or_intern(&call_name_str);
+
+                let mut extra_data = Vec::with_capacity(air_args.len() * 2);
+                for arg in &air_args {
+                    extra_data.push(arg.value.as_u32());
+                    extra_data.push(arg.mode.as_u32());
+                }
+                let args_start = air.add_extra(&extra_data);
+
+                let call_air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Call {
+                        name: call_name_sym,
+                        args_start,
+                        args_len: air_args.len() as u32,
+                    },
+                    ty: return_type,
+                    span,
+                });
+
+                return self.finish_operator_dispatch(
+                    air,
+                    op,
+                    method_name,
+                    call_air_ref,
+                    return_type,
+                    span,
+                );
+            }
+            // No `eq` / `cmp` method on this type. For ordering ops, emit a
+            // helpful error naming `Ord`. For equality, fall through to the
+            // existing path: structs get bitwise equality via
+            // `build_value_eq`; types that aren't structs get rejected by
+            // the type-validation check below.
+            if !allow_bool {
+                let type_name = self.format_type_name(lhs_type);
+                return Err(CompileError::new(
+                    ErrorKind::TypeMismatch {
+                        expected:
+                            "a type that conforms to `Ord` (with `fn cmp(self: Ref(Self), other: Self) -> Ordering`)"
+                                .to_string(),
+                        found: type_name,
+                    },
+                    self.rir.get(lhs).span,
+                )
+                .with_help(format!(
+                    "implement `fn cmp(self: Ref(Self), other: Self) -> Ordering` on the type to enable `{}`",
+                    op.symbol()
+                )));
+            }
+        }
+
+        // Fall-through: analyze rhs and emit the regular `Bin` instruction.
+        let rhs_result = self.analyze_inst_for_projection(air, rhs, ctx)?;
 
         // Validate the type is appropriate for this comparison
         if allow_bool {
@@ -5781,6 +5902,119 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, Type::BOOL))
+    }
+
+    /// ADR-0078 Phase 4: look up a user-defined method by name on a struct
+    /// or enum type. Returns the method info if found, regardless of
+    /// signature — the caller's responsibility to validate the shape.
+    fn lookup_user_method(&self, ty: Type, method_sym: Spur) -> Option<MethodInfo> {
+        match ty.kind() {
+            TypeKind::Struct(struct_id) => self.methods.get(&(struct_id, method_sym)).cloned(),
+            TypeKind::Enum(enum_id) => self.enum_methods.get(&(enum_id, method_sym)).cloned(),
+            _ => None,
+        }
+    }
+
+    /// ADR-0078 Phase 4: finish operator-dispatch lowering after the
+    /// dispatched method call has been emitted. For `==` / `!=`, the call
+    /// returned a `bool`; `!=` wraps in `Bin(Ne, call, true)`. For
+    /// `<` / `<=` / `>` / `>=`, the call returned an `Ordering`; build a
+    /// comparison against `Ordering::Less` or `Ordering::Greater`.
+    fn finish_operator_dispatch(
+        &mut self,
+        air: &mut Air,
+        op: BinOp,
+        method_name: &str,
+        call_air_ref: AirRef,
+        return_type: Type,
+        span: Span,
+    ) -> CompileResult<AnalysisResult> {
+        match op {
+            BinOp::Eq => {
+                if return_type != Type::BOOL {
+                    return Err(CompileError::type_mismatch(
+                        "bool".to_string(),
+                        return_type.name().to_string(),
+                        span,
+                    )
+                    .with_help(format!(
+                        "`fn {}(...) -> bool` is required for `Eq` conformance",
+                        method_name
+                    )));
+                }
+                Ok(AnalysisResult::new(call_air_ref, Type::BOOL))
+            }
+            BinOp::Ne => {
+                if return_type != Type::BOOL {
+                    return Err(CompileError::type_mismatch(
+                        "bool".to_string(),
+                        return_type.name().to_string(),
+                        span,
+                    )
+                    .with_help(format!(
+                        "`fn {}(...) -> bool` is required for `Eq` conformance",
+                        method_name
+                    )));
+                }
+                let true_ref = air.add_inst(AirInst {
+                    data: AirInstData::BoolConst(true),
+                    ty: Type::BOOL,
+                    span,
+                });
+                let result = air.add_inst(AirInst {
+                    data: AirInstData::Bin(BinOp::Ne, call_air_ref, true_ref),
+                    ty: Type::BOOL,
+                    span,
+                });
+                Ok(AnalysisResult::new(result, Type::BOOL))
+            }
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                let ordering_id = self.builtin_ordering_id.ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::InternalError(
+                            "Ordering enum not found (prelude not loaded?)".into(),
+                        ),
+                        span,
+                    )
+                })?;
+                let expected_ty = Type::new_enum(ordering_id);
+                if return_type != expected_ty {
+                    return Err(CompileError::type_mismatch(
+                        "Ordering".to_string(),
+                        return_type.name().to_string(),
+                        span,
+                    )
+                    .with_help(format!(
+                        "`fn {}(...) -> Ordering` is required for `Ord` conformance",
+                        method_name
+                    )));
+                }
+                // Variant indices match `std/prelude/cmp.gruel`:
+                // Less = 0, Equal = 1, Greater = 2.
+                let (variant_index, cmp_op) = match op {
+                    BinOp::Lt => (0u32, BinOp::Eq), // result == Less
+                    BinOp::Ge => (0u32, BinOp::Ne), // result != Less
+                    BinOp::Gt => (2u32, BinOp::Eq), // result == Greater
+                    BinOp::Le => (2u32, BinOp::Ne), // result != Greater
+                    _ => unreachable!(),
+                };
+                let variant_air = air.add_inst(AirInst {
+                    data: AirInstData::EnumVariant {
+                        enum_id: ordering_id,
+                        variant_index,
+                    },
+                    ty: expected_ty,
+                    span,
+                });
+                let result = air.add_inst(AirInst {
+                    data: AirInstData::Bin(cmp_op, call_air_ref, variant_air),
+                    ty: Type::BOOL,
+                    span,
+                });
+                Ok(AnalysisResult::new(result, Type::BOOL))
+            }
+            _ => unreachable!("operator dispatch only handles comparison ops"),
+        }
     }
 
     /// Try to evaluate an RIR expression as a compile-time constant.
