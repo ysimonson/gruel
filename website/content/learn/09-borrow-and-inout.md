@@ -177,25 +177,6 @@ fn main() -> i32 {
 
 These rules prevent the data races and aliasing bugs that show up in unrestricted-mutation languages, without requiring a garbage collector.
 
-## Legacy `borrow` and `inout` Keywords
-
-Gruel also accepts an older keyword form, where the parameter is annotated with `borrow` or `inout` and the call site repeats the keyword:
-
-```gruel
-fn sum_array(borrow arr: [i32; 5]) -> i32 { /* ... */ }
-fn double_all(inout arr: [i32; 3]) { /* ... */ }
-
-fn main() -> i32 {
-    let xs = [1, 2, 3, 4, 5];
-    let s = sum_array(borrow xs);
-    let mut ys = [10, 20, 30];
-    double_all(inout ys);
-    s
-}
-```
-
-The two forms are equivalent and produce identical code. New code should prefer `Ref(T)` / `MutRef(T)` and `&` / `&mut` for consistency with the rest of the type system, but you'll still see the keyword form in older code and tests (see [ADR-0062](@/learn/references/adrs/0062-reference-types.md)).
-
 ## Methods
 
-Method receivers use a shorthand: `&self` is sugar for `self: Ref(Self)` and `&mut self` is sugar for `self: MutRef(Self)`. See [Methods](@/learn/11-methods.md) for the full picture.
+Method receivers use the same syntax as any other parameter: `self: Ref(Self)` for read-only access and `self: MutRef(Self)` for mutable access. See [Methods](@/learn/11-methods.md) for the full picture.

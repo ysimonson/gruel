@@ -346,3 +346,41 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "borrow"
+
+# =============================================================================
+# Through-read in projection contexts (ADR-0076)
+#
+# `arr[i]` and `r.field` must auto-deref through `Ref(T)` / `MutRef(T)` in
+# every expression context, not just as a binding RHS. The comparison-operand
+# path (`arr[i] <= v`) used to take a separate `analyze_inst_for_projection`
+# branch that skipped the auto-deref.
+# =============================================================================
+
+[[case]]
+name = "mut_ref_array_index_in_comparison"
+spec = ["6.1:34"]
+description = "Indexing through a MutRef([T; N]) parameter works inside a comparison"
+source = """
+fn lo(arr: MutRef([i32; 3])) -> bool {
+    arr[0] <= 5
+}
+fn main() -> i32 {
+    let mut a = [1, 2, 3];
+    if lo(&mut a) { 1 } else { 0 }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "ref_struct_field_in_comparison"
+spec = ["6.1:34"]
+description = "Field access through a Ref(Struct) parameter works inside a comparison"
+source = """
+struct P { x: i32, y: i32 }
+fn ordered(p: Ref(P)) -> bool { p.x <= p.y }
+fn main() -> i32 {
+    let pp = P { x: 3, y: 7 };
+    if ordered(&pp) { 1 } else { 0 }
+}
+"""
+exit_code = 1

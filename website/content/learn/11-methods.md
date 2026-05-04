@@ -39,25 +39,25 @@ The `self` parameter has three forms, mirroring how arguments work in regular fu
 | Receiver | Meaning | Use when |
 |----------|---------|----------|
 | `self` | The method takes ownership of the value | The method consumes or transforms the value |
-| `&self` | Read-only reference (sugar for `self: Ref(Self)`) | The method only reads from the value |
-| `&mut self` | Mutable reference (sugar for `self: MutRef(Self)`) | The method modifies the value in place |
+| `self: Ref(Self)` | Read-only reference | The method only reads from the value |
+| `self: MutRef(Self)` | Mutable reference | The method modifies the value in place |
 
-The `&self` / `&mut self` shorthand is the same idea as the `&` and `&mut` operators introduced in [References](@/learn/09-borrow-and-inout.md), just applied to the receiver.
+`Ref` and `MutRef` here are the same reference types introduced in [References](@/learn/09-borrow-and-inout.md), just applied to the receiver. `Self` refers to the enclosing type — inside `struct Counter { ... }`, writing `Self` is the same as writing `Counter`.
 
-### Read-Only Methods (`&self`)
+### Read-Only Methods (`self: Ref(Self)`)
 
-Use `&self` when a method only needs to read. The caller's value remains usable after the call:
+Use `Ref(Self)` when a method only needs to read. The caller's value remains usable after the call:
 
 ```gruel
 struct Rectangle {
     width: i32,
     height: i32,
 
-    fn area(&self) -> i32 {
+    fn area(self: Ref(Self)) -> i32 {
         self.width * self.height
     }
 
-    fn perimeter(&self) -> i32 {
+    fn perimeter(self: Ref(Self)) -> i32 {
         2 * (self.width + self.height)
     }
 }
@@ -68,24 +68,24 @@ fn main() -> i32 {
     @dbg(r.area());       // prints: 24
     @dbg(r.perimeter());  // prints: 20
 
-    // r is still usable — &self didn't consume it
+    // r is still usable — Ref(Self) didn't consume it
     r.area()
 }
 ```
 
-### Mutating Methods (`&mut self`)
+### Mutating Methods (`self: MutRef(Self)`)
 
-Use `&mut self` when a method modifies the struct. Unlike free functions (where the caller writes `&mut` at the call site), method receivers are implicit — call the method on a `let mut` binding:
+Use `MutRef(Self)` when a method modifies the struct. Unlike free functions (where the caller writes `&mut` at the call site), method receivers are implicit — call the method on a `let mut` binding:
 
 ```gruel
 struct Counter {
     value: i32,
 
-    fn increment(&mut self) {
+    fn increment(self: MutRef(Self)) {
         self.value = self.value + 1;
     }
 
-    fn reset(&mut self) {
+    fn reset(self: MutRef(Self)) {
         self.value = 0;
     }
 }
@@ -197,7 +197,7 @@ enum Shape {
     Circle(i32),
     Square(i32),
 
-    fn area(&self) -> i32 {
+    fn area(self: Ref(Self)) -> i32 {
         match self {
             Shape::Circle(r) => 3 * r * r,   // close enough
             Shape::Square(s) => s * s,
@@ -213,4 +213,4 @@ fn main() -> i32 {
 
 ## Summary
 
-Methods live inline in struct or enum bodies. The receiver is one of `self` / `&self` / `&mut self`, depending on whether the method consumes, reads, or mutates the value. Functions without a `self` parameter become associated functions, called with `Type::name()`.
+Methods live inline in struct or enum bodies. The receiver is one of `self`, `self: Ref(Self)`, or `self: MutRef(Self)`, depending on whether the method consumes, reads, or mutates the value. Functions without a `self` parameter become associated functions, called with `Type::name()`.

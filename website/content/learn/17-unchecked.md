@@ -42,7 +42,7 @@ MutPtr(T)   // read-write pointer to T
 
 ## Getting a Pointer from a Value
 
-Construct a pointer from a reference using the type's `from` associated function. Combine it with the `&` and `&mut` operators from [Borrow and Inout](@/learn/09-borrow-and-inout.md):
+Construct a pointer from a reference using the type's `from` associated function. Combine it with the `&` and `&mut` operators from [References](@/learn/09-borrow-and-inout.md):
 
 ```gruel
 fn main() -> i32 {

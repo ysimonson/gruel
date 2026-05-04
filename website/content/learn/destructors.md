@@ -227,4 +227,4 @@ fn main() -> i32 {
 }  // d is NOT dropped here
 ```
 
-Borrow and inout parameters are not owned by the callee and are never dropped there.
+`Ref` and `MutRef` parameters are not owned by the callee and are never dropped there.

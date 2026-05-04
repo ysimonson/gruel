@@ -2321,7 +2321,10 @@ impl<'a> Sema<'a> {
         // For nested field access (e.g., a.b.c), recursively use projection mode
         if let InstData::FieldGet { base, field } = &inst.data {
             let base_result = self.analyze_inst_for_projection(air, *base, ctx)?;
-            let base_type = base_result.ty;
+            // ADR-0076: auto-deref through `Ref(T)` / `MutRef(T)` so that
+            // `r.field` works in projection contexts (e.g., comparison
+            // operands) the same way it does in expression position.
+            let base_type = crate::sema::analyze_ops::unwrap_ref_for_place(self, base_result.ty);
 
             let struct_id = match base_type.kind() {
                 TypeKind::Struct(id) => id,
@@ -2384,7 +2387,12 @@ impl<'a> Sema<'a> {
         if let InstData::IndexGet { base, index } = &inst.data {
             // Recursively analyze the base in projection mode
             let base_result = self.analyze_inst_for_projection(air, *base, ctx)?;
-            let base_type = base_result.ty;
+            // ADR-0076: auto-deref through `Ref(T)` / `MutRef(T)` so that
+            // `arr[i]` works in projection contexts (e.g., comparison
+            // operands) when `arr` is a reference parameter. The base's
+            // air_ref still points at the param load (the pointer), and
+            // codegen treats by-ref params as the base pointer for GEP.
+            let base_type = crate::sema::analyze_ops::unwrap_ref_for_place(self, base_result.ty);
 
             let array_type_id = match base_type.kind() {
                 TypeKind::Array(id) => id,

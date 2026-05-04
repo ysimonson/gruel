@@ -117,13 +117,13 @@ linear struct Bad { value: i32 }
 
 ## Explicit Duplication with `Handle`
 
-Sometimes you legitimately need two handles to the same logical resource — for example, forking a value for two code paths. The compiler-recognized `Handle` interface enables this with explicit syntax. A type conforms to `Handle` by defining a method with the exact shape `fn handle(borrow self) -> Self`:
+Sometimes you legitimately need two handles to the same logical resource — for example, forking a value for two code paths. The compiler-recognized `Handle` interface enables this with explicit syntax. A type conforms to `Handle` by defining a method with the exact shape `fn handle(self: Ref(Self)) -> Self`:
 
 ```gruel
 struct Counter {
     count: i32,
 
-    fn handle(borrow self) -> Counter {
+    fn handle(self: Ref(Self)) -> Counter {
         Counter { count: self.count }
     }
 }
@@ -131,7 +131,7 @@ struct Counter {
 fn main() -> i32 {
     let a = Counter { count: 42 };
     let b = a.handle();  // explicit duplication — cost is visible
-    a.count + b.count    // a is still valid; .handle() borrows
+    a.count + b.count    // a is still valid; .handle() reads through Ref
 }
 ```
 
@@ -145,7 +145,7 @@ There is no `@derive(Handle)` directive — conformance is structural. If a type
 linear struct Task {
     id: i32,
 
-    fn handle(borrow self) -> Task {
+    fn handle(self: Ref(Self)) -> Task {
         Task { id: self.id }
     }
 }

@@ -151,7 +151,7 @@ pub(crate) struct PlaceTrace {
 /// indices on `T`. The binding's storage IS the pointer (params are
 /// by-pointer at the LLVM ABI level for ref types), so the GEP starts
 /// at the same base pointer — no extra dereference is added at codegen.
-fn unwrap_ref_for_place<'a>(sema: &super::Sema<'a>, ty: Type) -> Type {
+pub(crate) fn unwrap_ref_for_place<'a>(sema: &super::Sema<'a>, ty: Type) -> Type {
     match ty.kind() {
         crate::types::TypeKind::Ref(id) => sema.type_pool.ref_def(id),
         crate::types::TypeKind::MutRef(id) => sema.type_pool.mut_ref_def(id),
