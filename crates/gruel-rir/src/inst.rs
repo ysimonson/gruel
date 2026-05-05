@@ -1722,10 +1722,12 @@ impl Rir {
             InstData::TypeInterfaceIntrinsic {
                 name,
                 type_arg,
+                type_inst,
                 interface_arg,
             } => InstData::TypeInterfaceIntrinsic {
                 name: *name,
                 type_arg: *type_arg,
+                type_inst: type_inst.map(renumber),
                 interface_arg: *interface_arg,
             },
 
@@ -2575,11 +2577,20 @@ pub enum InstData {
 
     /// Intrinsic call with a type argument and an interface argument
     /// (e.g., `@implements(T, Drop)`).
+    ///
+    /// `type_arg` is the interned name when the source has a bare
+    /// type name or type expression. `type_inst`, when `Some`, is an
+    /// arbitrary expression that comptime-evaluates to a `Type`
+    /// value (e.g. `f.field_type` projecting out of `@type_info`).
+    /// Sema prefers `type_inst` when set.
     TypeInterfaceIntrinsic {
         /// Intrinsic name (without @)
         name: Spur,
         /// Type argument (interned name).
         type_arg: Spur,
+        /// Optional comptime-evaluable type expression. When set,
+        /// supersedes `type_arg`.
+        type_inst: Option<InstRef>,
         /// Interface argument (interned name).
         interface_arg: Spur,
     },

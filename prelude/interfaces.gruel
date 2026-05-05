@@ -39,46 +39,40 @@ pub interface Handle {
 
 // ADR-0079 Phase 2d: prelude-implemented `derive Copy`.
 //
-// For a struct host: walk `@type_info(Self).fields` and write each
-// field through `@field_set` — no `.clone()` calls. Reading a
-// non-Copy field through `Ref(Self)` type-fails (cannot move out of
-// a borrow), so the body's analysis gives the "every field must be
-// Copy" validation for free.
-//
-// For an enum host: dispatch on the variant via the match-arm
-// `comptime_unroll for v in @type_info(Self).variants` form, then
-// rebuild the chosen variant payload field-by-field with
-// `@variant_uninit` + `@field_set` + `@variant_field`.
-//
-// `comptime if` evaluates `@type_info(Self).kind` at sema time and
-// emits *only* the matching branch — the discarded branch never has
-// to type-check against the host's actual shape, so `@uninit(Self)`
-// in the struct branch and `@variant_uninit(...)` in the enum branch
-// can coexist in one body without a per-shape derive split.
+// The body is the field-Copy contract expressed in Gruel: every
+// field (or every variant payload field) of `Self` must itself
+// implement `Copy`. `comptime if` + `@compile_error` enforce that at
+// splice time — when sema analyzes the spliced body for a host that
+// has a non-Copy field, the unrolled assertion fires and the compile
+// error points at the directive site. Once the field-Copy invariant
+// holds, `self` (a `Ref(Self)`) auto-derefs into a typed copy of
+// `Self` — which lowers to LLVM `load`, i.e. exactly the same
+// memcpy that implicit-copy sites use.
 //
 // `is_copy` on the host's `StructDef` stays as a codegen cache so
-// implicit copies at use sites lower to memcpy without dispatching
-// through this spliced body — the body is the explicit `.copy()`
-// path.
+// implicit copies at use sites still lower to memcpy without
+// dispatching through this method — the spliced body is only here
+// to make the field-Copy validation expressible in Gruel and to
+// make `.copy()` explicit calls behave consistently with implicit
+// copy.
 derive Copy {
     fn copy(self: Ref(Self)) -> Self {
         comptime if (@type_info(Self).kind == TypeKind::Enum) {
-            match self {
-                comptime_unroll for v in (@type_info(Self).variants) {
-                    let mut h = @variant_uninit(Self, v.name);
-                    comptime_unroll for f in v.fields {
-                        @field_set(h, f.name, @variant_field(self, v.name, f.name));
+            comptime_unroll for v in (@type_info(Self).variants) {
+                comptime_unroll for f in v.fields {
+                    comptime if (!@implements(f.field_type, Copy)) {
+                        @compile_error("@derive(Copy) field has a non-Copy type");
                     }
-                    @finalize(h)
                 }
             }
         } else {
-            let mut out = @uninit(Self);
             comptime_unroll for f in (@type_info(Self).fields) {
-                @field_set(out, f.name, @field(self, f.name));
+                comptime if (!@implements(f.field_type, Copy)) {
+                    @compile_error("@derive(Copy) field has a non-Copy type");
+                }
             }
-            @finalize(out)
         }
+        self
     }
 }
 

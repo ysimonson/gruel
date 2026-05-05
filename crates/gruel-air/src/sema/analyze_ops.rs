@@ -7852,13 +7852,16 @@ impl<'a> Sema<'a> {
             InstData::TypeInterfaceIntrinsic {
                 name,
                 type_arg,
+                type_inst,
                 interface_arg,
             } => self.analyze_type_interface_intrinsic(
                 air,
                 *name,
                 *type_arg,
+                *type_inst,
                 *interface_arg,
                 inst.span,
+                ctx,
             ),
 
             _ => Err(CompileError::new(
@@ -7938,13 +7941,21 @@ impl<'a> Sema<'a> {
     }
 
     /// Analyze a type+interface intrinsic (`@implements(T, I)`).
+    /// `type_inst`, when set, supersedes `type_arg` — sema
+    /// comptime-evaluates it to a `ConstValue::Type`. Otherwise
+    /// `type_arg` is treated as a type-name (or comptime-bound type
+    /// alias) and resolved through `resolve_type` /
+    /// `comptime_type_vars`.
+    #[allow(clippy::too_many_arguments)]
     fn analyze_type_interface_intrinsic(
         &mut self,
         air: &mut Air,
         name: Spur,
         type_arg: Spur,
+        type_inst: Option<InstRef>,
         interface_arg: Spur,
         span: Span,
+        ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
         let intrinsic_name = self.interner.resolve(&name);
 
@@ -7960,7 +7971,34 @@ impl<'a> Sema<'a> {
 
         match id {
             IntrinsicId::Implements => {
-                let ty = self.resolve_type(type_arg, span)?;
+                let ty = if let Some(t_inst) = type_inst {
+                    // ADR-0079: comptime-evaluate the type
+                    // expression. Use the heap-preserving evaluator
+                    // so callers nested inside `comptime_unroll for`
+                    // keep their loop binding intact.
+                    use crate::sema::context::ConstValue;
+                    let prev_steps = self.comptime_steps_used;
+                    self.comptime_steps_used = 0;
+                    let mut locals = ctx.comptime_value_vars.clone();
+                    let val = self.evaluate_comptime_inst(t_inst, &mut locals, ctx, span)?;
+                    self.comptime_steps_used = prev_steps;
+                    match val {
+                        ConstValue::Type(t) => t,
+                        other => {
+                            return Err(CompileError::new(
+                                ErrorKind::ComptimeEvaluationFailed {
+                                    reason: format!(
+                                        "@implements: type argument must comptime-evaluate to a type, got {:?}",
+                                        other
+                                    ),
+                                },
+                                span,
+                            ));
+                        }
+                    }
+                } else {
+                    self.resolve_type(type_arg, span)?
+                };
                 let interface_id = match self.interfaces.get(&interface_arg).copied() {
                     Some(id) => id,
                     None => {

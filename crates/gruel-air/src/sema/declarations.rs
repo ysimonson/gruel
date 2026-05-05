@@ -14,7 +14,7 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use gruel_builtins::{is_reserved_type_constructor_name, is_reserved_type_name};
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
+use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
 use lasso::Spur;
 
 use super::anon_interfaces::decode_receiver_mode;
@@ -1481,18 +1481,15 @@ impl<'a> Sema<'a> {
                     methods_len,
                     ..
                 } => {
-                    self.validate_copy_struct(
-                        *directives_start,
-                        *directives_len,
-                        *name,
-                        inst.span,
-                    )?;
-                    // ADR-0079: `validate_clone_struct` retired —
-                    // the prelude `derive Clone` body emits per-field
-                    // `.clone()` calls that fail naturally when a
-                    // field type doesn't implement Clone, and
-                    // linearity is enforced by the structural Clone
-                    // conformance check.
+                    // ADR-0079: `validate_copy_struct` and
+                    // `validate_clone_struct` are both retired. The
+                    // prelude `derive Copy` / `derive Clone` bodies
+                    // express the field-Copy / field-Clone
+                    // invariants in Gruel via
+                    // `comptime_unroll for f in @type_info(Self).fields`
+                    // + `comptime if (!@implements(f.field_type, …))`
+                    // + `@compile_error`. Linearity is enforced by
+                    // the structural Copy/Clone conformance checks.
                     let _ = (*directives_start, *directives_len);
                     // Collect methods defined inline in the struct
                     self.collect_struct_methods(*name, *methods_start, *methods_len, inst.span)?;
@@ -1557,73 +1554,6 @@ impl<'a> Sema<'a> {
             }
         }
 
-        Ok(())
-    }
-
-    /// Validate that a @derive(Copy) struct only contains Copy type fields.
-    fn validate_copy_struct(
-        &self,
-        directives_start: u32,
-        directives_len: u32,
-        name: Spur,
-        span: Span,
-    ) -> CompileResult<()> {
-        let directives = self.rir.get_directives(directives_start, directives_len);
-        if !self.has_copy_directive(&directives) {
-            return Ok(());
-        }
-
-        let struct_name = self.interner.resolve(&name).to_string();
-        // Verify struct exists in our lookup
-        if !self.structs.contains_key(&name) {
-            return Err(CompileError::new(
-                ErrorKind::InternalError(
-                    ice!(
-                        "struct not found during @derive(Copy) validation",
-                        phase: "sema/declarations",
-                        details: {
-                            "struct_name" => struct_name.clone()
-                        }
-                    )
-                    .to_string(),
-                ),
-                span,
-            ));
-        }
-
-        // Get the struct ID from the lookup table
-        let struct_id = *self.structs.get(&name).ok_or_else(|| {
-            CompileError::new(
-                ErrorKind::InternalError(
-                    ice!(
-                        "struct not found during @derive(Copy) validation",
-                        phase: "sema/declarations",
-                        details: {
-                            "struct_name" => struct_name.clone()
-                        }
-                    )
-                    .to_string(),
-                ),
-                span,
-            )
-        })?;
-
-        // Get struct definition from the pool
-        let struct_def = self.type_pool.struct_def(struct_id);
-
-        for field in &struct_def.fields {
-            if !self.is_type_copy(field.ty) {
-                let field_type_name = self.format_type_name(field.ty);
-                return Err(CompileError::new(
-                    ErrorKind::CopyStructNonCopyField(Box::new(CopyStructNonCopyFieldError {
-                        struct_name,
-                        field_name: field.name.clone(),
-                        field_type: field_type_name,
-                    })),
-                    span,
-                ));
-            }
-        }
         Ok(())
     }
 

@@ -959,26 +959,38 @@ impl<'a> AstGen<'a> {
                 }
 
                 // Two-argument type+interface intrinsics like
-                // `@implements(T, Iface)`. Both arguments must be type-name-shaped
-                // (an explicit type expr or a bare identifier) — anything else
-                // falls through to the generic expression intrinsic path so
-                // sema can produce the usual diagnostic.
+                // `@implements(T, Iface)`. The interface argument
+                // must be type-name-shaped (a bare identifier or
+                // type expression). The type argument can also be a
+                // comptime-evaluable expression (e.g.
+                // `f.field_type` for a `f` from
+                // `@type_info(Self).fields`); in that case we
+                // gen_expr it and store the resulting `InstRef` on
+                // `type_inst`, leaving `type_arg` as a placeholder
+                // sentinel that sema ignores.
                 if kind == Some(IntrinsicKind::TypeInterface) && intrinsic.args.len() == 2 {
-                    let type_arg = match &intrinsic.args[0] {
-                        IntrinsicArg::Type(ty) => Some(self.intern_type(ty)),
-                        IntrinsicArg::Expr(Expr::Ident(ident)) => Some(ident.name),
-                        _ => None,
-                    };
                     let interface_arg = match &intrinsic.args[1] {
                         IntrinsicArg::Type(ty) => Some(self.intern_type(ty)),
                         IntrinsicArg::Expr(Expr::Ident(ident)) => Some(ident.name),
                         _ => None,
                     };
-                    if let (Some(type_arg), Some(interface_arg)) = (type_arg, interface_arg) {
+                    if let Some(interface_arg) = interface_arg {
+                        let (type_arg, type_inst) = match &intrinsic.args[0] {
+                            IntrinsicArg::Type(ty) => (self.intern_type(ty), None),
+                            IntrinsicArg::Expr(Expr::Ident(ident)) => (ident.name, None),
+                            IntrinsicArg::Expr(expr) => {
+                                let inst = self.gen_expr(expr);
+                                // Sentinel name; sema prefers
+                                // type_inst when set so the value
+                                // is unused.
+                                (self.interner.get_or_intern_static("__expr__"), Some(inst))
+                            }
+                        };
                         return self.rir.add_inst(Inst {
                             data: InstData::TypeInterfaceIntrinsic {
                                 name,
                                 type_arg,
+                                type_inst,
                                 interface_arg,
                             },
                             span: intrinsic.span,

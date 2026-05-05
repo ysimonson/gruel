@@ -401,17 +401,29 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::TypeInterfaceIntrinsic {
                     name,
                     type_arg,
+                    type_inst,
                     interface_arg,
                 } => {
                     let name_str = self.interner.resolve(name);
-                    let type_str = self.interner.resolve(type_arg);
                     let iface_str = self.interner.resolve(interface_arg);
-                    writeln!(
-                        out,
-                        "type_intrinsic @{}({}, {})",
-                        name_str, type_str, iface_str
-                    )
-                    .unwrap();
+                    if let Some(t) = type_inst {
+                        writeln!(
+                            out,
+                            "type_intrinsic @{}(%{}, {})",
+                            name_str,
+                            t.as_u32(),
+                            iface_str
+                        )
+                        .unwrap();
+                    } else {
+                        let type_str = self.interner.resolve(type_arg);
+                        writeln!(
+                            out,
+                            "type_intrinsic @{}({}, {})",
+                            name_str, type_str, iface_str
+                        )
+                        .unwrap();
+                    }
                 }
                 InstData::ParamRef { index, name } => {
                     writeln!(out, "param {} ({})", index, self.interner.resolve(name)).unwrap();

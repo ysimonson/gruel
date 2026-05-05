@@ -5680,7 +5680,7 @@ impl<'a> Sema<'a> {
     /// The actual error emission happens in the comptime interpreter.
     fn analyze_compile_error_intrinsic(
         &mut self,
-        air: &mut Air,
+        _air: &mut Air,
         args: &[RirCallArg],
         span: Span,
     ) -> CompileResult<AnalysisResult> {
@@ -5695,24 +5695,24 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        // Verify the argument is a string literal
+        // Pull the message out of the string-literal argument. Reaching
+        // `@compile_error` at sema time means the user wrote it
+        // someplace the compiler analyzed (e.g. the `then` branch of a
+        // `comptime if` whose `cond` evaluated to true at comptime).
+        // Surface the user-supplied message as a `ComptimeUserError`.
         let arg_inst = self.rir.get(args[0].value);
-        if !matches!(&arg_inst.data, gruel_rir::InstData::StringConst(_)) {
-            return Err(CompileError::new(
-                ErrorKind::ComptimeEvaluationFailed {
-                    reason: "@compile_error requires a string literal argument".into(),
-                },
-                arg_inst.span,
-            ));
-        }
-
-        // Type is `!` (never) — @compile_error always terminates compilation
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::UnitConst,
-            ty: Type::NEVER,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, Type::NEVER))
+        let msg = match &arg_inst.data {
+            gruel_rir::InstData::StringConst(spur) => self.interner.resolve(spur).to_string(),
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "@compile_error requires a string literal argument".into(),
+                    },
+                    arg_inst.span,
+                ));
+            }
+        };
+        Err(CompileError::new(ErrorKind::ComptimeUserError(msg), span))
     }
 
     /// Analyze @field(value, field_name) intrinsic.
@@ -9763,12 +9763,26 @@ impl<'a> Sema<'a> {
             InstData::TypeInterfaceIntrinsic {
                 name,
                 type_arg,
+                type_inst,
                 interface_arg,
             } => {
-                let ty = if let Some(&override_ty) = self.comptime_type_overrides.get(&type_arg) {
+                let ty = if let Some(t_inst) = type_inst {
+                    // ADR-0079: arg[0] is an arbitrary expression
+                    // (e.g. `f.field_type`); evaluate it recursively
+                    // inside the same comptime evaluation so the
+                    // outer heap stays intact.
+                    match self.evaluate_comptime_inst(t_inst, locals, ctx, outer_span)? {
+                        ConstValue::Type(t) => t,
+                        _ => return Err(not_const(inst_span)),
+                    }
+                } else if let Some(&override_ty) = self.comptime_type_overrides.get(&type_arg) {
                     override_ty
                 } else if let Some(&ctx_ty) = ctx.comptime_type_vars.get(&type_arg) {
                     ctx_ty
+                } else if let Some(&val) = locals.get(&type_arg)
+                    && let ConstValue::Type(t) = val
+                {
+                    t
                 } else {
                     self.resolve_type(type_arg, inst_span)
                         .map_err(|_| not_const(inst_span))?
