@@ -29,6 +29,10 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@field` | expr | Compile-time Reflection | — | — | Access a field by comptime-known name. |
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
 | `@embed_file` | expr | Compile-time Reflection | — | — | Embed a file's contents at compile time as `Slice(u8)`. |
+| `@uninit` | type | Compile-time Reflection | — | — | Allocate a partially-initialized value of a given type (ADR-0079). |
+| `@finalize` | expr | Compile-time Reflection | — | — | Consume an `Uninit(T)` handle and return a real `T` (ADR-0079). |
+| `@variant_uninit` | expr | Compile-time Reflection | — | — | Allocate an `Uninit(Self)` pre-tagged for a specific enum variant (ADR-0079). |
+| `@variant_field` | expr | Compile-time Reflection | — | — | Read a payload field of a known enum variant (ADR-0079). |
 | `@target_arch` | expr | Target Platform | — | — | Compile target CPU architecture. |
 | `@target_os` | expr | Target Platform | — | — | Compile target operating system. |
 | `@range` | expr | Iteration | — | — | Iterable range for `for`-loops. |
@@ -340,6 +344,70 @@ match @ownership(T) { Ownership::Copy => ..., Ownership::Affine => ..., Ownershi
 
 ```gruel
 let data: Slice(u8) = @embed_file("asset.bin");
+```
+
+### `@uninit`
+
+`@uninit(T) -> Uninit(T)` returns a handle to T-sized storage. The compiler does not run drop on the slot until `@finalize` consumes it. Sema tracks per-field initialization through CFG analysis; reads, returns, or escapes of the handle are blocked until every field has been written via `@field(handle, name) = expr`.
+
+
+**Examples:**
+
+```gruel
+let mut h = @uninit(Point);
+```
+
+```gruel
+@field(h, "x") = 1;
+```
+
+```gruel
+@field(h, "y") = 2;
+```
+
+```gruel
+let p: Point = @finalize(h);
+```
+
+### `@finalize`
+
+`@finalize(handle: Uninit(T)) -> T` takes an `Uninit(T)` handle whose every field has been written and produces a fully-initialized `T`. From this point on, the value drops normally. Compile error if any field is uninitialized along any path that reaches the call.
+
+
+**Examples:**
+
+```gruel
+@finalize(h)
+```
+
+### `@variant_uninit`
+
+`@variant_uninit(Self, comptime tag) -> Uninit(Self)` is the variant-shaped counterpart to `@uninit(T)`. Subsequent `@field(out, name) = expr` writes target the named variant's payload fields; `@finalize(out)` produces a `Self` of the correct variant. `tag` must be comptime-known.
+
+
+**Examples:**
+
+```gruel
+let mut out = @variant_uninit(Self, v.tag);
+```
+
+```gruel
+@field(out, f.name) = ...;
+```
+
+```gruel
+let result: Self = @finalize(out);
+```
+
+### `@variant_field`
+
+`@variant_field(self, comptime tag, name)` reads the named payload field of variant `tag` from `self`. Only valid when `self`'s runtime variant is known to be `tag` — typically inside an arm dispatched by `comptime_unroll for v in @type_info(Self).variants`. `tag` and `name` are both comptime.
+
+
+**Examples:**
+
+```gruel
+@variant_field(self, v.tag, f.name)
 ```
 
 ## Target Platform

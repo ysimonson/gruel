@@ -5185,7 +5185,15 @@ impl<'a> Sema<'a> {
             | IntrinsicId::VecPtrMut
             | IntrinsicId::VecTerminatedPtr
             | IntrinsicId::VecClone
-            | IntrinsicId::VecDispose => Err(CompileError::new(
+            | IntrinsicId::VecDispose
+            // ADR-0079 Phase 2b/3: registered but sema not implemented
+            // yet. Reaching this arm means user code used the
+            // intrinsic before the implementation lands; surface as a
+            // standard "unknown" so the failure is clear.
+            | IntrinsicId::Uninit
+            | IntrinsicId::Finalize
+            | IntrinsicId::VariantUninit
+            | IntrinsicId::VariantField => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),
