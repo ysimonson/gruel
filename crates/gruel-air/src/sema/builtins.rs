@@ -75,12 +75,13 @@ impl<'a> Sema<'a> {
 
         // ADR-0078 Phase 2: the compiler-recognized interfaces (Drop, Copy,
         // Clone, Handle) are now declared in `prelude/interfaces.gruel`.
-        // ADR-0078 Phase 3: the platform-reflection enums (Arch, Os, TypeKind,
-        // Ownership) are now declared in `prelude/target.gruel`. Both
-        // categories register into the standard `self.interfaces` /
-        // `self.enums` maps during `resolve_declarations`; the hardcoded
-        // behaviors that key off the names continue to find them via
-        // `cache_builtin_enum_ids` (called after declaration resolution).
+        // ADR-0078 Phase 3: the platform-reflection enums (Arch, Os) live
+        // in `prelude/target.gruel`; the type-reflection enums (TypeKind,
+        // Ownership) live in `prelude/type_info.gruel`. All four register
+        // into the standard `self.interfaces` / `self.enums` maps during
+        // `resolve_declarations`; the hardcoded behaviors that key off
+        // the names continue to find them via `cache_builtin_enum_ids`
+        // (called after declaration resolution).
     }
 
     /// Cache `EnumId`s for the four prelude-resident built-in enums (`Arch`,

@@ -627,13 +627,15 @@ pub static BUILTIN_TYPES: &[&BuiltinTypeDef] = &[&STRING_TYPE];
 // Built-in Enums (Target Platform)
 // ============================================================================
 
-// ADR-0078 Phase 3: the platform-reflection enums (`Arch`, `Os`, `TypeKind`,
-// `Ownership`) live in `prelude/target.gruel`. The intrinsics that
-// produce values of those types (`@target_arch`, `@target_os`, `@type_info`,
-// `@ownership`) cache their `EnumId`s after declaration resolution via
-// `Sema::cache_builtin_enum_ids`. Variant order in the prelude file matches
-// the order returned by the compiler-side `arch_variant_index` /
-// `os_variant_index` mappers; see `crates/gruel-air/src/sema/analysis.rs`.
+// ADR-0078 Phase 3: the platform-reflection enums (`Arch`, `Os`) live
+// in `prelude/target.gruel`; the type-reflection enums (`TypeKind`,
+// `Ownership`) live in `prelude/type_info.gruel`. The intrinsics that
+// produce values of those types (`@target_arch`, `@target_os`,
+// `@type_info`, `@ownership`) cache their `EnumId`s after declaration
+// resolution via `Sema::cache_builtin_enum_ids`. Variant order in the
+// prelude files matches the order returned by the compiler-side
+// `arch_variant_index` / `os_variant_index` mappers; see
+// `crates/gruel-air/src/sema/analysis.rs`.
 
 /// Names of the four prelude-resident built-in enums. Kept here only so
 /// other crates have a single source of truth when they need to refer to
@@ -1126,7 +1128,7 @@ pub fn render_reference_markdown() -> String {
     out.push('\n');
 
     out.push_str("### Enums\n\n");
-    out.push_str("Platform-reflection enums are declared in `prelude/target.gruel`. The corresponding intrinsics produce values of these types by name lookup.\n\n");
+    out.push_str("Platform-reflection enums (`Arch`, `Os`) live in `prelude/target.gruel`; type-reflection enums (`TypeKind`, `Ownership`) live in `prelude/type_info.gruel`. The corresponding intrinsics produce values of these types by name lookup.\n\n");
     out.push_str("| Name | Variants |\n");
     out.push_str("|---|---|\n");
     out.push_str("| `Arch` | `X86_64`, `Aarch64`, `X86`, `Arm`, `Riscv32`, `Riscv64`, `Wasm32`, `Wasm64` |\n");
@@ -1233,10 +1235,11 @@ pub fn render_reference_markdown() -> String {
 
     // ---- Enums in detail ----
     //
-    // ADR-0078 Phase 3: declarations live in `prelude/target.gruel`.
-    // Variant order in this section matches the prelude file.
+    // ADR-0078 Phase 3: `Arch`/`Os` live in `prelude/target.gruel`,
+    // `TypeKind`/`Ownership` in `prelude/type_info.gruel`. Variant
+    // order in this section matches the prelude files.
     out.push_str("## Enums\n\n");
-    out.push_str("Platform-reflection and type-introspection enums. Declarations live in `prelude/target.gruel`; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.\n\n");
+    out.push_str("Platform-reflection (`Arch`, `Os`) and type-reflection (`TypeKind`, `Ownership`) enums. Declarations live in `prelude/target.gruel` and `prelude/type_info.gruel` respectively; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.\n\n");
 
     for (name, variants) in [
         (
@@ -1397,11 +1400,12 @@ mod tests {
     }
 
     // ADR-0078 Phase 3: built-in enum declarations now live in
-    // `prelude/target.gruel`. The compiler-side `arch_variant_index` /
-    // `os_variant_index` mappers (in `gruel-air/src/sema/analysis.rs`)
-    // encode the variant order; their unit tests in that crate cover the
-    // mapping. The breadcrumb static below lets other crates reference
-    // the names without re-typing them.
+    // `prelude/target.gruel` (`Arch`, `Os`) and `prelude/type_info.gruel`
+    // (`TypeKind`, `Ownership`). The compiler-side `arch_variant_index`
+    // / `os_variant_index` mappers (in `gruel-air/src/sema/analysis.rs`)
+    // encode the variant order; their unit tests in that crate cover
+    // the mapping. The breadcrumb static below lets other crates
+    // reference the names without re-typing them.
     #[test]
     fn test_builtin_enum_names() {
         assert_eq!(BUILTIN_ENUM_NAMES, &["Arch", "Os", "TypeKind", "Ownership"]);

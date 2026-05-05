@@ -26,7 +26,7 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 
 ### Enums
 
-Platform-reflection enums are declared in `prelude/target.gruel`. The corresponding intrinsics produce values of these types by name lookup.
+Platform-reflection enums (`Arch`, `Os`) live in `prelude/target.gruel`; type-reflection enums (`TypeKind`, `Ownership`) live in `prelude/type_info.gruel`. The corresponding intrinsics produce values of these types by name lookup.
 
 | Name | Variants |
 |---|---|
@@ -131,7 +131,7 @@ owned, growable vector (ADR-0066).
 
 ## Enums
 
-Platform-reflection and type-introspection enums. Declarations live in `prelude/target.gruel`; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.
+Platform-reflection (`Arch`, `Os`) and type-reflection (`TypeKind`, `Ownership`) enums. Declarations live in `prelude/target.gruel` and `prelude/type_info.gruel` respectively; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.
 
 ### `Arch`
 

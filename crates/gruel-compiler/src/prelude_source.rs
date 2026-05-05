@@ -41,6 +41,7 @@ const PRELUDE_ROOT_REL: &str = "_prelude.gruel";
 const PRELUDE_SUBMODULE_ORDER: &[&str] = &[
     "interfaces.gruel",
     "target.gruel",
+    "type_info.gruel",
     "cmp.gruel",
     "option.gruel",
     "result.gruel",

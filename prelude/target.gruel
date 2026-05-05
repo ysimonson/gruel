@@ -1,14 +1,15 @@
-// ADR-0078 Phase 3: built-in enum declarations for target reflection.
+// ADR-0078 Phase 3: built-in enum declarations for compilation-target
+// reflection. `TypeKind` and `Ownership` were split out into
+// `type_info.gruel` since they describe types in the user's program
+// rather than the platform we're compiling for.
 //
-// `Arch`, `Os`, `TypeKind`, `Ownership` are produced by compile-time
-// intrinsics:
+// Both enums are produced by compile-time intrinsics:
 //   - `@target_arch()` → `Arch`
 //   - `@target_os()` → `Os`
-//   - `@type_info(T)` → struct containing `TypeKind`
-//   - `@ownership(T)` → `Ownership`
 //
-// The intrinsics select variants by name lookup against these declarations,
-// so variant order is *display* order — reordering for readability is safe.
+// The intrinsics select variants by name lookup against these
+// declarations, so variant order is *display* order — reordering for
+// readability is safe.
 
 // Architecture (`@target_arch()`).
 pub enum Arch {
@@ -29,22 +30,4 @@ pub enum Os {
     Windows,
     Freestanding,
     Wasi,
-}
-
-// Type kind classifier (`@type_info(T).kind`).
-pub enum TypeKind {
-    Struct,
-    Enum,
-    Int,
-    Bool,
-    Unit,
-    Never,
-    Array,
-}
-
-// Ownership posture (`@ownership(T)`) — see ADR-0008.
-pub enum Ownership {
-    Copy,
-    Affine,
-    Linear,
 }
