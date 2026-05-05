@@ -1063,11 +1063,18 @@ impl<'a> ConstraintGenerator<'a> {
                 last_ty
             }
 
-            // Branch (if/else)
+            // Branch (if/else). ADR-0079 follow-up: HM walks both
+            // branches even for `comptime if`, since we don't yet
+            // know the comptime-cond value here. Branches in our
+            // use case (struct vs enum derive bodies) are
+            // HM-permissive (uninit/finalize/field_set return fresh
+            // vars), so this doesn't constrain. Sema does the
+            // actual branch elision when it has the resolved type.
             InstData::Branch {
                 cond,
                 then_block,
                 else_block,
+                is_comptime: _,
             } => {
                 let cond_info = self.generate(*cond, ctx);
                 self.add_constraint(Constraint::equal(
@@ -2568,6 +2575,7 @@ mod tests {
                 cond,
                 then_block: then_val,
                 else_block: Some(else_val),
+                is_comptime: false,
             },
             span: Span::new(0, 25),
         });

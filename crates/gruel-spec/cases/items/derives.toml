@@ -450,3 +450,93 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# ADR-0079: the prelude `derive Clone` body uses `comptime if` to
+# dispatch on `@type_info(Self).kind`, so a single derive splices
+# correctly onto both struct and enum hosts. Verifies the enum branch
+# is selected and the struct branch (which would type-fail on enum
+# Self) is fully elided.
+[[case]]
+name = "derive_clone_enum_via_comptime_if"
+spec = ["4.14:104"]
+description = "@derive(Clone) on an enum dispatches through the prelude derive's comptime if"
+source = """
+@derive(Clone)
+enum Foo {
+    A,
+    B(i32),
+}
+
+fn main() -> i32 {
+    let f = Foo::B(42);
+    let g = f.clone();
+    match g {
+        Foo::A => 0,
+        Foo::B(n) => n,
+    }
+}
+"""
+exit_code = 42
+
+# Same dispatch for `@derive(Copy)` on an enum.
+[[case]]
+name = "derive_copy_enum_via_comptime_if"
+spec = ["4.14:104"]
+description = "@derive(Copy) on an enum dispatches through the prelude derive's comptime if"
+source = """
+@derive(Copy)
+enum Foo {
+    A,
+    B(i32),
+}
+
+fn main() -> i32 {
+    let f = Foo::B(42);
+    let g = f.copy();
+    match g {
+        Foo::A => 0,
+        Foo::B(n) => n,
+    }
+}
+"""
+exit_code = 42
+
+# `comptime if` standalone: the discarded branch can reference shapes
+# that don't apply to the surrounding type. Here the false branch
+# uses `@variant_uninit(B, "A")` against an enum, but cond is
+# statically true, so the branch is never analyzed.
+[[case]]
+name = "comptime_if_elides_discarded_branch"
+spec = ["4.6:1"]
+description = "`comptime if` evaluates cond at sema time and elides the discarded branch"
+source = """
+struct A { x: i32 }
+
+fn make_a() -> A {
+    comptime if (true) {
+        A { x: 7 }
+    } else {
+        A { x: 9 }
+    }
+}
+
+fn main() -> i32 {
+    let a = make_a();
+    a.x
+}
+"""
+exit_code = 7
+
+# `comptime if` rejects a non-comptime condition with a clear error.
+[[case]]
+name = "comptime_if_rejects_runtime_cond"
+spec = ["4.6:1"]
+description = "`comptime if` rejects a condition that isn't comptime-evaluable"
+source = """
+fn main() -> i32 {
+    let n: i32 = 7;
+    comptime if (n == 0) { 1 } else { 2 }
+}
+"""
+compile_fail = true
+error_contains = "comptime"

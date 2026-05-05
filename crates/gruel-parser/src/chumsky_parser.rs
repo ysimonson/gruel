@@ -1363,11 +1363,15 @@ where
             })
         });
 
-    // If expression - defined with recursive reference to allow `else if` chains
+    // If expression - defined with recursive reference to allow `else if` chains.
+    // ADR-0079 follow-up: an optional leading `comptime` keyword marks the
+    // branch as a comptime-evaluated dispatch (see `IfExpr::is_comptime`).
     let if_expr: GruelParser<'src, I, Expr> = recursive(
         |if_expr_rec: Recursive<Direct<'src, 'src, I, Expr, ParserExtras<'src>>>| {
-            just(TokenKind::If)
-                .ignore_then(expr.clone())
+            just(TokenKind::Comptime)
+                .or_not()
+                .then_ignore(just(TokenKind::If))
+                .then(expr.clone())
                 .then(maybe_unit_block_parser(expr.clone()))
                 .then(
                     just(TokenKind::Else)
@@ -1388,12 +1392,13 @@ where
                         )))
                         .or_not(),
                 )
-                .map_with(|((cond, then_block), else_block), e| {
+                .map_with(|(((comptime_kw, cond), then_block), else_block), e| {
                     Expr::If(IfExpr {
                         cond: Box::new(cond),
                         then_block,
                         else_block,
                         span: span_from_extra(e),
+                        is_comptime: comptime_kw.is_some(),
                     })
                 })
                 .boxed()

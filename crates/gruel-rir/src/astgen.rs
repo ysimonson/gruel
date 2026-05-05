@@ -773,6 +773,7 @@ impl<'a> AstGen<'a> {
                         cond,
                         then_block,
                         else_block,
+                        is_comptime: if_expr.is_comptime,
                     },
                     span: if_expr.span,
                 })

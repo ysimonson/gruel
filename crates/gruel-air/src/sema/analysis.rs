@@ -8576,6 +8576,7 @@ impl<'a> Sema<'a> {
                 cond,
                 then_block,
                 else_block,
+                is_comptime: _,
             } => {
                 let cond_val = self.evaluate_comptime_inst(cond, locals, ctx, outer_span)?;
                 match cond_val {

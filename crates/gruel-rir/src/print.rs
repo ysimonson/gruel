@@ -254,11 +254,17 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     cond,
                     then_block,
                     else_block,
+                    is_comptime,
                 } => {
-                    if let Some(else_b) = else_block {
-                        writeln!(out, "branch {}, {}, {}", cond, then_block, else_b).unwrap();
+                    let kw = if *is_comptime {
+                        "comptime_branch"
                     } else {
-                        writeln!(out, "branch {}, {}", cond, then_block).unwrap();
+                        "branch"
+                    };
+                    if let Some(else_b) = else_block {
+                        writeln!(out, "{} {}, {}, {}", kw, cond, then_block, else_b).unwrap();
+                    } else {
+                        writeln!(out, "{} {}, {}", kw, cond, then_block).unwrap();
                     }
                 }
                 InstData::Loop { cond, body } => writeln!(out, "loop {}, {}", cond, body).unwrap(),

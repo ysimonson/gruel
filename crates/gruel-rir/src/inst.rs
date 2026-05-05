@@ -1760,10 +1760,12 @@ impl Rir {
                 cond,
                 then_block,
                 else_block,
+                is_comptime,
             } => InstData::Branch {
                 cond: renumber(*cond),
                 then_block: renumber(*then_block),
                 else_block: renumber_opt(*else_block),
+                is_comptime: *is_comptime,
             },
             InstData::Loop { cond, body } => InstData::Loop {
                 cond: renumber(*cond),
@@ -2450,6 +2452,13 @@ pub enum InstData {
         cond: InstRef,
         then_block: InstRef,
         else_block: Option<InstRef>,
+        /// ADR-0079 follow-up: when set, sema evaluates `cond` at
+        /// comptime and emits *only* the chosen branch — the
+        /// discarded branch is never analyzed (so it's free to
+        /// reference shapes that don't apply to the surrounding
+        /// type, e.g. `@uninit(Self)` inside a struct-only branch
+        /// when `Self` is enum). Source form: `comptime if cond { … }`.
+        is_comptime: bool,
     },
 
     /// While loop: while cond { body }
@@ -3313,6 +3322,7 @@ mod tests {
                 cond,
                 then_block,
                 else_block: Some(else_block),
+                is_comptime: false,
             },
             span: Span::new(0, 20),
         });
@@ -3339,6 +3349,7 @@ mod tests {
                 cond,
                 then_block,
                 else_block: None,
+                is_comptime: false,
             },
             span: Span::new(0, 15),
         });

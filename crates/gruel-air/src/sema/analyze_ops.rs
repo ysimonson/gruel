@@ -1017,7 +1017,16 @@ impl<'a> Sema<'a> {
                 cond,
                 then_block,
                 else_block,
-            } => self.analyze_branch(air, *cond, *then_block, *else_block, inst.span, ctx),
+                is_comptime,
+            } => self.analyze_branch(
+                air,
+                *cond,
+                *then_block,
+                *else_block,
+                *is_comptime,
+                inst.span,
+                ctx,
+            ),
 
             InstData::Loop { cond, body } => {
                 self.analyze_while_loop(air, *cond, *body, inst.span, ctx)
@@ -1106,8 +1115,13 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Analyze a branch (if-else) expression.
-    fn analyze_branch(
+    /// ADR-0079 follow-up: analyze a `comptime if cond { … } else { … }`
+    /// by evaluating `cond` at comptime and emitting only the chosen
+    /// branch's runtime AIR. The discarded branch is never analyzed,
+    /// so it can reference shapes that don't apply to the surrounding
+    /// type (e.g. `@uninit(Self)` in the struct branch when `Self` is
+    /// an enum). The condition itself contributes no runtime AIR.
+    fn analyze_comptime_branch(
         &mut self,
         air: &mut Air,
         cond: InstRef,
@@ -1116,6 +1130,75 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        // Evaluate the condition at comptime. We use the
+        // heap-preserving evaluator so callers nested inside an outer
+        // `comptime_unroll for` keep their loop binding intact.
+        let cond_val = {
+            let prev_steps = self.comptime_steps_used;
+            self.comptime_steps_used = 0;
+            let mut locals = ctx.comptime_value_vars.clone();
+            let v = self.evaluate_comptime_inst(cond, &mut locals, ctx, span)?;
+            self.comptime_steps_used = prev_steps;
+            v
+        };
+        let chosen = match cond_val {
+            crate::sema::context::ConstValue::Bool(true) => Some(then_block),
+            crate::sema::context::ConstValue::Bool(false) => else_block,
+            other => {
+                return Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: format!(
+                            "`comptime if` condition must evaluate to a bool at compile time, got {:?}",
+                            other
+                        ),
+                    },
+                    span,
+                ));
+            }
+        };
+        match chosen {
+            Some(branch) => {
+                ctx.push_scope();
+                let result = self.analyze_inst(air, branch, ctx)?;
+                ctx.pop_scope();
+                Ok(result)
+            }
+            None => {
+                // `comptime if cond {…}` (no else) where cond is false
+                // produces unit, just like a runtime if without else.
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::UnitConst,
+                    ty: Type::UNIT,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, Type::UNIT))
+            }
+        }
+    }
+
+    /// Analyze a branch (if-else) expression.
+    #[allow(clippy::too_many_arguments)]
+    fn analyze_branch(
+        &mut self,
+        air: &mut Air,
+        cond: InstRef,
+        then_block: InstRef,
+        else_block: Option<InstRef>,
+        is_comptime: bool,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // ADR-0079 follow-up: `comptime if cond { … } else { … }` —
+        // evaluate `cond` at comptime and emit *only* the chosen
+        // branch's runtime AIR. The discarded branch never gets
+        // analyzed (so it can reference shapes that don't apply to
+        // the surrounding type — e.g. `@uninit(Self)` inside the
+        // struct-only branch when `Self` is enum). The condition
+        // itself contributes no runtime AIR.
+        if is_comptime {
+            return self.analyze_comptime_branch(air, cond, then_block, else_block, span, ctx);
+        }
+
         // Condition must be bool
         let cond_result = self.analyze_inst(air, cond, ctx)?;
 

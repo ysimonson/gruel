@@ -809,6 +809,13 @@ pub struct IfExpr {
     /// Optional else branch
     pub else_block: Option<BlockExpr>,
     pub span: Span,
+    /// ADR-0079 follow-up: `comptime if cond { … } else { … }` — sema
+    /// evaluates `cond` at comptime and emits *only* the chosen
+    /// branch's runtime AIR, never analyzing the discarded one.
+    /// Lets the prelude `derive Clone` / `derive Copy` dispatch on
+    /// `@type_info(Self).kind` without forcing the unused branch to
+    /// type-check against the host type.
+    pub is_comptime: bool,
 }
 
 /// A match expression.
