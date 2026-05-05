@@ -25,6 +25,21 @@ impl Sema<'_> {
     /// - Facade files for the directory (e.g., `_utils.gruel` is in `utils` module)
     ///
     /// Returns true if the item is accessible.
+    /// ADR-0079: is this file part of the privileged prelude?
+    /// Mirrors the predicate in `lang_items::is_directive_in_prelude`
+    /// — the reserved-id band catches submodules loaded by
+    /// `prepend_prelude` before file_paths registration, plus any
+    /// path that satisfies `is_prelude_path`.
+    pub(crate) fn is_prelude_file(&self, file_id: FileId) -> bool {
+        if file_id.index() >= 0xFFFF_F000 {
+            return true;
+        }
+        match self.get_file_path(file_id) {
+            Some(path) => super::file_paths::is_prelude_path(path),
+            None => false,
+        }
+    }
+
     pub(crate) fn is_accessible(
         &self,
         accessing_file_id: FileId,
@@ -43,6 +58,16 @@ impl Sema<'_> {
         // short-circuit explicitly.
         if target_file_id == FileId::BUILTIN && accessing_file_id != FileId::BUILTIN {
             return false;
+        }
+
+        // ADR-0079: prelude code is privileged — it can read non-pub
+        // fields and call non-pub methods on user types. The
+        // prelude-implemented `derive Clone` (and future similar
+        // derives) need this so their spliced bodies can construct
+        // `Self { … }` against the host type even when its fields
+        // aren't `pub`.
+        if self.is_prelude_file(accessing_file_id) {
+            return true;
         }
 
         // Get paths for both files

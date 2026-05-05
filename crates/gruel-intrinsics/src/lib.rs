@@ -118,15 +118,19 @@ pub enum IntrinsicId {
     /// `@uninit(T) -> Uninit(T)`: handle to T-sized storage. Drop is
     /// suppressed on the slot until `@finalize` consumes it.
     Uninit,
-    /// `@finalize(handle: Uninit(T)) -> T`: consume the handle and
-    /// hand back a real `T`. Sema verifies all fields written.
+    /// `@finalize(handle) -> T`: consume the handle and hand back a
+    /// real `T`. Sema verifies all fields written.
     Finalize,
+    /// `@field_set(handle, name, value)`: write a field of an
+    /// in-progress `@uninit` / `@variant_uninit` handle. The
+    /// write-side counterpart to read-side `@field`.
+    FieldSet,
     /// `@variant_uninit(Self, comptime tag) -> Uninit(Self)`:
     /// variant-shaped counterpart to `@uninit`.
     VariantUninit,
     /// `@variant_field(self, comptime tag, name)`: read the named
     /// field of variant `tag` from `self`. Symmetric counterpart to
-    /// `@variant_uninit + @field`.
+    /// `@variant_uninit + @field_set`.
     VariantField,
 
     // ---- Preview / test infra ----
@@ -1086,6 +1090,18 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &["@finalize(h)"],
     },
     IntrinsicDef {
+        id: IntrinsicId::FieldSet,
+        name: "field_set",
+        kind: IntrinsicKind::Expr,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Write a field of an in-progress `@uninit`/`@variant_uninit` handle (ADR-0079).",
+        description: "`@field_set(handle, name, value)` writes the named field of an in-progress construction handle. Used inside derive bodies to populate the result one field at a time; sema records each write and `@finalize` verifies all fields are present.",
+        examples: &["@field_set(out, f.name, @field(self, f.name).clone())"],
+    },
+    IntrinsicDef {
         id: IntrinsicId::VariantUninit,
         name: "variant_uninit",
         kind: IntrinsicKind::Expr,
@@ -1691,6 +1707,7 @@ mod tests {
                 | IntrinsicId::CStrToVec
                 | IntrinsicId::Uninit
                 | IntrinsicId::Finalize
+                | IntrinsicId::FieldSet
                 | IntrinsicId::VariantUninit
                 | IntrinsicId::VariantField => {}
             }

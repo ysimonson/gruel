@@ -40,3 +40,26 @@ pub interface Eq {
 pub interface Ord {
     fn cmp(self: Ref(Self), other: Self) -> Ordering;
 }
+
+// ADR-0079 Phase 2c: prelude-implemented `derive Clone` for structs.
+// Builds a fresh `Self` field-by-field using `@uninit` + writable
+// `@field_set` + `@finalize`. Each field's `.clone()` dispatches
+// through the regular method resolver: Copy fields fall through the
+// lang-item-driven shortcut in `analyze_method_call` (so
+// `42.clone() == 42`); types with neither `Copy` nor `clone`
+// produce the standard "no method `clone` for type T" error
+// pointing at the offending field.
+//
+// Drop safety: `Uninit(Self)` is a separate type the compiler does
+// *not* run drop on, so a partially-built `Self` can never leak.
+// `@finalize` consumes the handle once every field has been
+// written; the resulting `Self` drops normally.
+derive Clone {
+    fn clone(self: Ref(Self)) -> Self {
+        let mut out = @uninit(Self);
+        comptime_unroll for f in (@type_info(Self).fields) {
+            @field_set(out, f.name, @field(self, f.name).clone());
+        }
+        @finalize(out)
+    }
+}

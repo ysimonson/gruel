@@ -1226,20 +1226,43 @@ where
     .boxed()
 }
 
-/// Parser for a single match arm: pattern => expr
+/// Parser for a single match arm: pattern => expr  OR
+/// `comptime_unroll for ident in expr { body }` (ADR-0079 Phase 3),
+/// which the compiler expands at sema time into one regular arm
+/// per element of the iterable.
 fn match_arm_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, MatchArm>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    pattern_parser()
+    let regular_arm = pattern_parser()
         .then_ignore(just(TokenKind::FatArrow))
-        .then(expr)
+        .then(expr.clone())
         .map_with(|(pattern, body), e| MatchArm {
             pattern,
             body: Box::new(body),
             span: span_from_extra(e),
-        })
-        .boxed()
+        });
+
+    let unroll_arm = just(TokenKind::ComptimeUnroll)
+        .ignore_then(just(TokenKind::For))
+        .ignore_then(ident_parser())
+        .then_ignore(just(TokenKind::In))
+        .then(expr.clone())
+        .then(maybe_unit_block_parser(expr))
+        .map_with(|((binding, iterable), body), e| {
+            let span = span_from_extra(e);
+            MatchArm {
+                pattern: Pattern::ComptimeUnrollArm {
+                    binding,
+                    iterable: Box::new(iterable),
+                    span,
+                },
+                body: Box::new(Expr::Block(body)),
+                span,
+            }
+        });
+
+    choice((unroll_arm, regular_arm)).boxed()
 }
 
 /// Parser for literal expressions: integers, strings, booleans, and unit
@@ -2031,11 +2054,24 @@ where
         // Primitive type keywords (these can't be variable names)
         let primitive_type = primitive_type_parser().map(IntrinsicArg::Type);
 
+        // ADR-0079: `Self` as a type argument (e.g.
+        // `@type_info(Self)` inside a `derive` body). The bare
+        // keyword can't appear as a value, so it's unambiguous in
+        // this slot.
+        let self_type_arg = just(TokenKind::SelfType).map_with(|_, e| {
+            let span = span_from_extra(e);
+            IntrinsicArg::Type(TypeExpr::Named(Ident {
+                name: e.state().syms.self_type,
+                span,
+            }))
+        });
+
         choice((
             unit_type.boxed(),
             never_type.boxed(),
             array_type.boxed(),
             primitive_type.boxed(),
+            self_type_arg.boxed(),
         ))
         .boxed()
     };
@@ -3652,6 +3688,9 @@ fn is_refutable(pat: &Pattern) -> bool {
             TupleElemPattern::Pattern(p) => is_refutable(p),
             TupleElemPattern::Rest(_) => false,
         }),
+        // ADR-0079 Phase 3: an unroll-arm template's expanded pattern
+        // is variant-shaped, hence refutable.
+        Pattern::ComptimeUnrollArm { .. } => true,
     }
 }
 
@@ -3864,6 +3903,7 @@ fn refutable_focus_span(pat: &Pattern) -> Span {
             .map(refutable_focus_span)
             .unwrap_or(pat.span()),
         Pattern::Wildcard(_) | Pattern::Ident { .. } => pat.span(),
+        Pattern::ComptimeUnrollArm { span, .. } => *span,
     }
 }
 

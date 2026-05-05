@@ -185,6 +185,15 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     parts.join(", ")
                 )
             }
+            RirPattern::ComptimeUnrollArm {
+                binding, iterable, ..
+            } => {
+                format!(
+                    "comptime_unroll for {} in %{}",
+                    self.interner.resolve(binding),
+                    iterable.as_u32()
+                )
+            }
         }
     }
 

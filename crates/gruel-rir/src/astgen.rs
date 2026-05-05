@@ -985,13 +985,61 @@ impl<'a> AstGen<'a> {
                     }
                 }
 
-                // Otherwise, treat as an expression intrinsic
+                // Otherwise, treat as an expression intrinsic.
+                // ADR-0079 Phase 3: `@variant_uninit(T, tag)` and
+                // `@variant_field(self, tag, name)` carry a `T` /
+                // tag mix. For just those intrinsics, convert each
+                // `IntrinsicArg::Type(...)` into a `TypeConst` inst
+                // so it survives as a regular RIR arg (sema then
+                // resolves it back to a type via
+                // `resolve_intrinsic_type_arg`). The unambiguous-type
+                // parser only matches primitive shapes (`i32`, `[T;N]`,
+                // `Self`, etc.); a bare named-type identifier like
+                // `Foo` parses as `IntrinsicArg::Expr(Expr::Ident)`,
+                // so for these intrinsics we also promote a leading
+                // bare identifier to `TypeConst` to keep the
+                // type/value disambiguation at the call site rather
+                // than forcing users to write `(Foo)` or similar.
+                //
+                // For every other expression intrinsic, dropping
+                // `Type` args matches legacy behavior — the
+                // surrounding HM inference resolves the target type
+                // from context (e.g., `@cast(x, i32)`'s `i32` is
+                // recovered via the resolved type at the call site).
+                let preserve_type_args =
+                    matches!(intrinsic_name_str, "variant_uninit" | "variant_field");
+                // Only `@variant_uninit(T, tag)` puts the type in arg
+                // position 0; `@variant_field(self, tag, name)`'s
+                // first arg is a value, not a type.
+                let promote_leading_ident_as_type = intrinsic_name_str == "variant_uninit";
                 let args: Vec<_> = intrinsic
                     .args
                     .iter()
-                    .filter_map(|a| match a {
+                    .enumerate()
+                    .filter_map(|(idx, a)| match a {
+                        IntrinsicArg::Type(ty) if preserve_type_args => {
+                            let type_name = self.intern_type(ty);
+                            Some(self.rir.add_inst(Inst {
+                                data: InstData::TypeConst { type_name },
+                                span: intrinsic.span,
+                            }))
+                        }
+                        IntrinsicArg::Type(_) => None,
+                        // Promote a leading bare-identifier to TypeConst
+                        // for the type-carrying intrinsics so user code
+                        // can write `@variant_uninit(Foo, "A")` without
+                        // resorting to a type-expression dodge.
+                        IntrinsicArg::Expr(Expr::Ident(ident))
+                            if promote_leading_ident_as_type && idx == 0 =>
+                        {
+                            Some(self.rir.add_inst(Inst {
+                                data: InstData::TypeConst {
+                                    type_name: ident.name,
+                                },
+                                span: intrinsic.span,
+                            }))
+                        }
                         IntrinsicArg::Expr(expr) => Some(self.gen_expr(expr)),
-                        IntrinsicArg::Type(_) => None, // This shouldn't happen for expr intrinsics
                     })
                     .collect();
                 let (args_start, args_len) = self.rir.add_inst_refs(&args);
@@ -1651,6 +1699,19 @@ impl<'a> AstGen<'a> {
                     span: *span,
                 }
             }
+            Pattern::ComptimeUnrollArm {
+                binding,
+                iterable,
+                span,
+            } => {
+                let _ = nested;
+                let iterable_ref = self.gen_expr(iterable);
+                RirPattern::ComptimeUnrollArm {
+                    binding: binding.name,
+                    iterable: iterable_ref,
+                    span: *span,
+                }
+            }
         }
     }
 
@@ -2117,6 +2178,9 @@ fn is_irrefutable_destructure(pat: &Pattern) -> bool {
             TupleElemPattern::Pattern(p) => is_irrefutable_destructure(p),
             TupleElemPattern::Rest(_) => true,
         }),
+        // ADR-0079 Phase 3: an unroll-arm template stands in for
+        // refutable variant patterns once expanded.
+        Pattern::ComptimeUnrollArm { .. } => false,
     }
 }
 

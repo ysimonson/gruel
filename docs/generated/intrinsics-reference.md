@@ -31,6 +31,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@embed_file` | expr | Compile-time Reflection | — | — | Embed a file's contents at compile time as `Slice(u8)`. |
 | `@uninit` | type | Compile-time Reflection | — | — | Allocate a partially-initialized value of a given type (ADR-0079). |
 | `@finalize` | expr | Compile-time Reflection | — | — | Consume an `Uninit(T)` handle and return a real `T` (ADR-0079). |
+| `@field_set` | expr | Compile-time Reflection | — | — | Write a field of an in-progress `@uninit`/`@variant_uninit` handle (ADR-0079). |
 | `@variant_uninit` | expr | Compile-time Reflection | — | — | Allocate an `Uninit(Self)` pre-tagged for a specific enum variant (ADR-0079). |
 | `@variant_field` | expr | Compile-time Reflection | — | — | Read a payload field of a known enum variant (ADR-0079). |
 | `@target_arch` | expr | Target Platform | — | — | Compile target CPU architecture. |
@@ -378,6 +379,17 @@ let p: Point = @finalize(h);
 
 ```gruel
 @finalize(h)
+```
+
+### `@field_set`
+
+`@field_set(handle, name, value)` writes the named field of an in-progress construction handle. Used inside derive bodies to populate the result one field at a time; sema records each write and `@finalize` verifies all fields are present.
+
+
+**Examples:**
+
+```gruel
+@field_set(out, f.name, @field(self, f.name).clone())
 ```
 
 ### `@variant_uninit`

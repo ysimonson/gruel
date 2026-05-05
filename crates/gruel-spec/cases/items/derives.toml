@@ -410,3 +410,43 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "expected a `derive`"
+
+# ADR-0079 Phase 3: hand-written user derive that uses
+# `comptime_unroll for v in @type_info(Self).variants` as a match arm
+# to clone each variant of an enum, exercising @variant_uninit /
+# @variant_field / match-arm unroll together.
+[[case]]
+name = "derive_user_enum_match_unroll_clone"
+spec = ["4.14:104"]
+description = "user-defined derive uses comptime_unroll for in match-arm to clone enum variants"
+source = """
+derive MyDup {
+    fn dup(self: Ref(Self)) -> Self {
+        match self {
+            comptime_unroll for v in (@type_info(Self).variants) {
+                let mut h = @variant_uninit(Self, v.name);
+                comptime_unroll for f in v.fields {
+                    @field_set(h, f.name, @variant_field(self, v.name, f.name));
+                }
+                @finalize(h)
+            }
+        }
+    }
+}
+
+@derive(MyDup)
+enum Foo {
+    A,
+    B(i32),
+}
+
+fn main() -> i32 {
+    let f = Foo::B(42);
+    let g = f.dup();
+    match g {
+        Foo::A => 0,
+        Foo::B(n) => n,
+    }
+}
+"""
+exit_code = 42

@@ -36,3 +36,24 @@ pub interface Clone {
 pub interface Handle {
     fn handle(self: Ref(Self)) -> Self;
 }
+
+// ADR-0079 Phase 2d: prelude-implemented `derive Copy` for structs.
+// Builds a fresh `Self` field-by-field by reading each field through
+// `@field(self, ...)` and writing it through `@field_set` — no
+// `.clone()` calls. Reading a non-Copy field through `Ref(Self)`
+// type-fails (cannot move out of a borrow), so the body's analysis
+// gives the "every field must be Copy" validation for free.
+//
+// `is_copy` on the host's `StructDef` stays as a codegen cache so
+// implicit copies at use sites lower to memcpy without dispatching
+// through this spliced body — the body is the explicit `.copy()`
+// path.
+derive Copy {
+    fn copy(self: Ref(Self)) -> Self {
+        let mut out = @uninit(Self);
+        comptime_unroll for f in (@type_info(Self).fields) {
+            @field_set(out, f.name, @field(self, f.name));
+        }
+        @finalize(out)
+    }
+}

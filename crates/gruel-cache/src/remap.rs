@@ -493,6 +493,12 @@ impl RemapSpurs for Pattern {
                 fields.remap_spurs(table);
             }
             Pattern::Tuple { elems, .. } => elems.remap_spurs(table),
+            Pattern::ComptimeUnrollArm {
+                binding, iterable, ..
+            } => {
+                binding.remap_spurs(table);
+                iterable.remap_spurs(table);
+            }
         }
     }
 }

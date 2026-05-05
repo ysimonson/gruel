@@ -181,6 +181,15 @@ pub enum RirPattern {
         has_rest: bool,
         span: Span,
     },
+    /// ADR-0079 Phase 3: a `comptime_unroll for` arm template. Sema
+    /// evaluates `iterable` at comptime, synthesizes one regular arm
+    /// per element, and substitutes `binding` as a comptime value in
+    /// the arm body. Only valid at the top level of a match arm.
+    ComptimeUnrollArm {
+        binding: Spur,
+        iterable: InstRef,
+        span: Span,
+    },
 }
 
 /// A binding in a data variant pattern.
@@ -235,6 +244,7 @@ impl RirPattern {
             RirPattern::Ident { span, .. } => *span,
             RirPattern::Tuple { span, .. } => *span,
             RirPattern::Struct { span, .. } => *span,
+            RirPattern::ComptimeUnrollArm { span, .. } => *span,
         }
     }
 }
@@ -421,6 +431,22 @@ fn encode_pattern_tree(pattern: &RirPattern, out: &mut Vec<u32>) {
                 encode_pattern_tree(&f.pattern, out);
             }
         }
+        // ADR-0079 Phase 3: an unroll-arm template only ever
+        // appears at the top level of a match (sema rejects it
+        // elsewhere), but we still need a tree encoding for the
+        // shared encode dispatch — emit a stable shape and let
+        // the decoder round-trip it identically.
+        RirPattern::ComptimeUnrollArm {
+            binding,
+            iterable,
+            span,
+        } => {
+            out.push(PatternKind::ComptimeUnrollArm as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(binding.into_usize() as u32);
+            out.push(iterable.as_u32());
+        }
     }
 }
 
@@ -578,6 +604,18 @@ fn decode_pattern_tree(data: &[u32]) -> (RirPattern, usize) {
             },
             offset,
         )
+    } else if kind == PatternKind::ComptimeUnrollArm as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let binding = Spur::try_from_usize(data[3] as usize).unwrap();
+        let iterable = InstRef::from_raw(data[4]);
+        (
+            RirPattern::ComptimeUnrollArm {
+                binding,
+                iterable,
+                span,
+            },
+            5,
+        )
     } else {
         panic!("Unknown pattern tree tag: {}", kind);
     }
@@ -623,6 +661,8 @@ pub enum PatternKind {
     /// ADR-0051 Struct pattern: [kind, span_start, span_len, body, module_raw, type_name, has_rest, fields_len,
     ///                           (field_name, ...recursive_tree) * fields_len]
     Struct = 8,
+    /// ADR-0079 Phase 3 unroll arm template: [kind, span_start, span_len, body, binding, iterable]
+    ComptimeUnrollArm = 9,
 }
 
 /// Size of each pattern kind in the extra array (including body InstRef)
@@ -1129,6 +1169,18 @@ impl Rir {
                         encode_pattern_tree(&field.pattern, &mut self.extra);
                     }
                 }
+                RirPattern::ComptimeUnrollArm {
+                    binding,
+                    iterable,
+                    span,
+                } => {
+                    self.extra.push(PatternKind::ComptimeUnrollArm as u32);
+                    self.extra.push(span.start());
+                    self.extra.push(span.len());
+                    self.extra.push(body.as_u32());
+                    self.extra.push(binding.into_usize() as u32);
+                    self.extra.push(iterable.as_u32());
+                }
             }
         }
         (start, arms.len() as u32)
@@ -1338,6 +1390,23 @@ impl Rir {
                         body,
                     ));
                     pos += offset;
+                }
+                k if k == PatternKind::ComptimeUnrollArm as u32 => {
+                    let span_start = self.extra[pos + 1];
+                    let span_len = self.extra[pos + 2];
+                    let span = Span::new(span_start, span_start + span_len);
+                    let body = InstRef::from_raw(self.extra[pos + 3]);
+                    let binding = Spur::try_from_usize(self.extra[pos + 4] as usize).unwrap();
+                    let iterable = InstRef::from_raw(self.extra[pos + 5]);
+                    arms.push((
+                        RirPattern::ComptimeUnrollArm {
+                            binding,
+                            iterable,
+                            span,
+                        },
+                        body,
+                    ));
+                    pos += 6;
                 }
                 _ => panic!("Unknown pattern kind: {}", kind),
             }

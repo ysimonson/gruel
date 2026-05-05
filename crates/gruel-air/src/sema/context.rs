@@ -208,6 +208,46 @@ pub(crate) struct AnalysisContext<'a> {
     /// `Borrow`-mode parameter reads is suppressed for this binding —
     /// passing a borrow on is not a move.
     pub borrow_arg_skip_move: Option<Spur>,
+    /// ADR-0079 Phase 2b: maps a let-binding name to an in-progress
+    /// `@uninit(T)` construction. Subsequent `@field_set(name, …, …)`
+    /// calls record the field write here; `@finalize(name)` reads the
+    /// accumulated map, emits a `StructInit`, and removes the entry.
+    pub uninit_handles: HashMap<Spur, UninitHandle>,
+    /// ADR-0079 Phase 3: per-arm comptime binding for arms expanded
+    /// from a `comptime_unroll for` template. Keyed by the expanded
+    /// arm's index in the post-expansion arm list. The match-arm
+    /// body analyzer pushes the binding into `comptime_value_vars`
+    /// before recursing and pops afterwards.
+    pub unroll_arm_bindings: HashMap<usize, UnrollArmBinding>,
+}
+
+/// ADR-0079 Phase 3: comptime binding to install while analyzing
+/// the body of an arm expanded from `comptime_unroll for v in …`.
+#[derive(Debug, Clone)]
+pub struct UnrollArmBinding {
+    /// The loop variable name (e.g. `v`).
+    pub binding: Spur,
+    /// The variant value bound for this iteration (a `VariantInfo`-
+    /// shaped struct from `@type_info(Self).variants`).
+    pub value: ConstValue,
+}
+
+/// ADR-0079: state of an in-progress `@uninit(T)` construction.
+#[derive(Debug, Clone)]
+pub struct UninitHandle {
+    /// Struct being constructed (or, for variant-uninit, the enum's struct-shaped payload).
+    pub target: UninitTarget,
+    /// Field-name → analyzed value. Populated by `@field_set`.
+    pub fields: HashMap<Spur, crate::AirRef>,
+}
+
+/// What is being built up by an in-progress uninit handle.
+#[derive(Debug, Clone, Copy)]
+pub enum UninitTarget {
+    /// `@uninit(T)` for a plain struct.
+    Struct(StructId),
+    /// `@variant_uninit(T, tag)` for an enum variant.
+    EnumVariant { enum_id: EnumId, variant_idx: u32 },
 }
 
 // Import InstRef for use in resolved_types

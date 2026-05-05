@@ -2405,6 +2405,8 @@ impl<'a> Sema<'a> {
             referenced_functions: HashSet::default(),
             referenced_methods: HashSet::default(),
             borrow_arg_skip_move: None,
+            uninit_handles: HashMap::default(),
+            unroll_arm_bindings: HashMap::default(),
         };
 
         // ======================================================================
@@ -3232,8 +3234,21 @@ impl<'a> Sema<'a> {
                 let body = *body;
 
                 // Step 1: Evaluate the iterable expression at comptime.
-                // We use evaluate_comptime_block which clears and rebuilds the heap.
-                let iterable_val = self.evaluate_comptime_block(iterable, ctx, span)?;
+                // ADR-0079 Phase 3: don't clear the heap — a nested
+                // `comptime_unroll for` (e.g. one that iterates
+                // `v.fields` inside an outer arm-template iteration
+                // over `variants`) would otherwise invalidate the
+                // outer loop's comptime binding (a `Struct(heap_idx)`
+                // pointing at the now-cleared heap). Use the
+                // heap-preserving evaluator instead.
+                let iterable_val = {
+                    let prev_steps = self.comptime_steps_used;
+                    self.comptime_steps_used = 0;
+                    let mut locals = ctx.comptime_value_vars.clone();
+                    let v = self.evaluate_comptime_inst(iterable, &mut locals, ctx, span)?;
+                    self.comptime_steps_used = prev_steps;
+                    v
+                };
 
                 // Step 2: Extract array elements from the comptime heap.
                 // We clone the elements AND preserve the heap so that composite
@@ -3813,6 +3828,22 @@ impl<'a> Sema<'a> {
         // Handle module member access: module.function() becomes a direct function call
         if receiver_type.is_module() {
             return self.analyze_module_member_call_impl(air, method, args, span, ctx);
+        }
+
+        // ADR-0079: `.clone()` on a Copy type is a bitwise copy. The
+        // method dispatch falls through to "no method named clone"
+        // for primitives like i32, but Copy types structurally
+        // conform to `Clone` (lang-item-driven short-circuit), so a
+        // `.clone()` call on them must succeed and just hand back the
+        // receiver value. Used by the prelude `derive Clone` body to
+        // clone Copy fields without requiring per-primitive method
+        // declarations.
+        if method_name_str == "clone"
+            && args.is_empty()
+            && self.is_type_copy(receiver_type)
+            && self.lang_items.clone().is_some()
+        {
+            return Ok(AnalysisResult::new(receiver_result.air_ref, receiver_type));
         }
 
         // Check that receiver is a struct or enum type
@@ -5185,18 +5216,36 @@ impl<'a> Sema<'a> {
             | IntrinsicId::VecPtrMut
             | IntrinsicId::VecTerminatedPtr
             | IntrinsicId::VecClone
-            | IntrinsicId::VecDispose
-            // ADR-0079 Phase 2b/3: registered but sema not implemented
-            // yet. Reaching this arm means user code used the
-            // intrinsic before the implementation lands; surface as a
-            // standard "unknown" so the failure is clear.
-            | IntrinsicId::Uninit
-            | IntrinsicId::Finalize
-            | IntrinsicId::VariantUninit
-            | IntrinsicId::VariantField => Err(CompileError::new(
+            | IntrinsicId::VecDispose => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),
+            // ADR-0079 Phase 2b: `@uninit(T)` is recognized by
+            // `analyze_alloc` when it appears as a let-init. Reaching
+            // this arm means it was used in some other position
+            // (returned, passed to a non-`@field_set`/@finalize call,
+            // etc.) — that's a misuse.
+            IntrinsicId::Uninit => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "@uninit(T) is only valid as the initializer of a `let` binding".into(),
+                },
+                span,
+            )),
+            // `@variant_uninit(T, tag)` is similar — only valid as a
+            // let-init.
+            IntrinsicId::VariantUninit => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason:
+                        "@variant_uninit(T, tag) is only valid as the initializer of a `let` binding"
+                            .into(),
+                },
+                span,
+            )),
+            IntrinsicId::FieldSet => self.analyze_field_set_intrinsic(air, &args, span, ctx),
+            IntrinsicId::Finalize => self.analyze_finalize_intrinsic(air, &args, span, ctx),
+            IntrinsicId::VariantField => {
+                self.analyze_variant_field_intrinsic(air, &args, span, ctx)
+            }
 
             // ADR-0064: build a slice from a raw pointer and a length.
             IntrinsicId::PartsToSlice => {
@@ -8105,7 +8154,7 @@ impl<'a> Sema<'a> {
     /// Seeds the local scope from `ctx.comptime_value_vars` (captured comptime
     /// parameters, e.g. `N` in `FixedBuffer(comptime N: i32)`), then delegates
     /// to `evaluate_comptime_inst`.
-    fn evaluate_comptime_block(
+    pub(crate) fn evaluate_comptime_block(
         &mut self,
         inst_ref: InstRef,
         ctx: &AnalysisContext,
@@ -8172,6 +8221,8 @@ impl<'a> Sema<'a> {
             referenced_functions: HashSet::default(),
             referenced_methods: HashSet::default(),
             borrow_arg_skip_move: None,
+            uninit_handles: HashMap::default(),
+            unroll_arm_bindings: HashMap::default(),
         };
         self.evaluate_comptime_block(inst_ref, &stub, span)
     }
@@ -8213,7 +8264,7 @@ impl<'a> Sema<'a> {
     /// `locals` holds variables declared within the current comptime block.
     /// Returns the evaluated `ConstValue`, or a `CompileError` if the
     /// instruction is not compile-time evaluable.
-    fn evaluate_comptime_inst(
+    pub(crate) fn evaluate_comptime_inst(
         &mut self,
         inst_ref: InstRef,
         locals: &mut HashMap<Spur, ConstValue>,
@@ -9273,6 +9324,22 @@ impl<'a> Sema<'a> {
                                 "RirPattern::Ident/Tuple/Struct are not produced by astgen in \
                                  ADR-0051 Phase 4a"
                             )
+                        }
+                        // ADR-0079 Phase 3: an unroll-arm template
+                        // shouldn't reach the comptime evaluator —
+                        // sema's `expand_unroll_arms` runs before
+                        // any analysis sees it. If we hit it here,
+                        // something pre-analysis comptime-evaluated
+                        // the match.
+                        RirPattern::ComptimeUnrollArm { .. } => {
+                            return Err(CompileError::new(
+                                ErrorKind::ComptimeEvaluationFailed {
+                                    reason:
+                                        "comptime_unroll for arm cannot be evaluated at comptime"
+                                            .into(),
+                                },
+                                outer_span,
+                            ));
                         }
                     }
                 }

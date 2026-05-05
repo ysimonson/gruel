@@ -890,6 +890,17 @@ pub enum Pattern {
         elems: Vec<TupleElemPattern>,
         span: Span,
     },
+    /// ADR-0079 Phase 3: a `comptime_unroll for` arm template. Only
+    /// valid at the top level of a match arm — sema rejects it
+    /// elsewhere. The arm fires once per element of `iterable`; the
+    /// compiler synthesizes a variant-specific concrete pattern per
+    /// iteration and substitutes `binding` as a comptime value in
+    /// the arm body.
+    ComptimeUnrollArm {
+        binding: Ident,
+        iterable: Box<Expr>,
+        span: Span,
+    },
 }
 
 /// One position in a tuple-like sequence (tuple pattern or data-variant fields):
@@ -962,6 +973,7 @@ impl Pattern {
             Pattern::StructVariant { span, .. } => *span,
             Pattern::Struct { span, .. } => *span,
             Pattern::Tuple { span, .. } => *span,
+            Pattern::ComptimeUnrollArm { span, .. } => *span,
         }
     }
 }
@@ -1944,6 +1956,9 @@ fn fmt_pattern(f: &mut fmt::Formatter<'_>, pat: &Pattern) -> fmt::Result {
                 write!(f, ",")?;
             }
             write!(f, " )")
+        }
+        Pattern::ComptimeUnrollArm { binding, .. } => {
+            write!(f, " comptime_unroll for sym:{}", binding.name.into_usize())
         }
     }
 }
