@@ -1,11 +1,11 @@
 ---
 id: 0079
 title: Prelude Split, Lang Items, and Prelude-Driven Derives
-status: implemented
+status: in-progress
 tags: [prelude, stdlib, interfaces, derives, comptime, lang-items, refactor]
 created: 2026-05-04
 accepted: 2026-05-04
-implemented: 2026-05-04
+implemented:
 spec-sections: []
 superseded-by:
 ---
@@ -14,7 +14,7 @@ superseded-by:
 
 ## Status
 
-Implemented
+In Progress (Phases 0/1/2a/4 shipped; 2b/2c/2d/3 redesigned mid-flight)
 
 ## Summary
 
@@ -297,47 +297,108 @@ Each phase ships behind the `lang_items` preview gate, ends with `make test` gre
 - [x] All 2073 spec tests + 91 UI tests pass.
 - [ ] Smoke test: rename `Clone` → `Dup` in the prelude — deferred (mechanical follow-up; the lang-item indirection is exercised by the existing tests).
 
-### Phase 2b: Struct-literal grammar extensions
+### Phase 2b: General-purpose construction primitives
 
-Two minimal additions, both consuming primitives the language already has.
+> **Design iteration note.** A first attempt at Phase 2b grew specialized in-construction syntax — `comptime_unroll for` blocks and `(expr): value` computed names *inside* struct literals (commits `e6250c66` … `553282ca`). That version shipped, was used by Phases 2c/2d, then was rolled back in favor of the design below: the in-construction syntax was specialized in a way that didn't compose (Phase 3 needed a parallel `MatchArmExtra` carrier), and Zig demonstrates that the same expressivity is reachable with smaller, general-purpose primitives. The earlier ADR text on this phase is preserved in commit history for reference.
 
-- [ ] **`comptime_unroll for … in … { … }` accepted as a struct-literal entry.** Parser change in `crates/gruel-parser/src/chumsky_parser.rs`: extend the struct-initializer rule to alternate between regular `IDENT: expr` entries and a `comptime_unroll for` block. After parse, RIR generation lowers each iteration of the unroll into N field-initializer entries inline.
-- [ ] **Computed field name: `(expr): value`** where the parenthesized expression evaluates at comptime to a string. Parser change: in struct-initializer position, accept `(Expr) : Expr` as well as `IDENT : Expr`. Sema validates that the parenthesized expression's type is `comptime_str` and resolves the resulting string against the type's field set at expansion time. Outside `comptime_unroll for` this is permitted (a contributor *could* write `("a"): 42`) but uncommon; inside the unroll it's the natural way to spell `(f.name)`.
-- [ ] Exhaustiveness: after expansion, the regular struct-literal exhaustiveness check fires — every field of the type must be initialized exactly once. Missing field, duplicate field, and unknown field all produce existing diagnostics with spans pointing at the unrolled iteration where applicable.
-- [ ] Spec tests: hand-written struct literal with `comptime_unroll for` over `@type_info(T).fields` produces the same AIR as the literal-form `T { a: …, b: …, … }`. Tests for missing/duplicate/extra field after expansion (each surfacing a useful diagnostic). Tests for nested types where field types differ (heterogeneous values across iterations type-check independently).
+The replacement: three orthogonal comptime primitives that compose into struct *and* enum derives without specialized construction grammar.
 
-### Phase 2c: Prelude-implemented `derive Clone`
+- [ ] **`@uninit(T) -> Uninit(T)`**. Handle to T-sized storage. Layout-identical to `T` but a *separate type* the compiler does *not* run drop on. Allowed for any `T` (including `T: Drop`) — there's no live `T` in the slot, so dropping it would be wrong.
+- [ ] **`@finalize(handle: Uninit(T)) -> T`**. Consumes the handle and returns a real `T`. The bytes are no longer `Uninit(T)`; from this point on, the value drops normally. Compile error if any field is uninitialized along any path that reaches the `@finalize`.
+- [ ] **`@field(target, name) = expr`** (lvalue form). Writes the named field; flips that field's "written" bit on `Uninit(T)` handles. Already a read primitive for `Self::field` access through borrows.
+- [ ] **Per-field initialization tracking.** Sema extends move-tracking from value-level to field-level for `Uninit(T)` values. CFG analysis maintains a per-field bitset; `@finalize` requires all fields written on every path. The unroll over `@type_info(Self).fields` proves completeness statically — every field is written exactly once per loop body specialization.
+- [ ] Astgen + RIR encoding for the three intrinsics; sema gates `Uninit(T)` against escape (no return, no drop, no value-position read until `@finalize`).
+- [ ] Spec test: `let mut h = @uninit(T); @field(h, "x") = …; … @finalize(h)` compiles to the same AIR as a literal `T { x: …, y: … }`. Spec test for the failure mode: missing field write at `@finalize` produces a clear "field `y` may be uninitialized" error.
 
-- [ ] Replace `crates/gruel-compiler/src/clone_glue.rs` with a prelude `derive Clone { … }` declaration in `prelude/cmp.gruel`. Body uses the new struct-literal `comptime_unroll for` form + `@field(self, name).clone()`.
-- [ ] Delete `clone_glue.rs` and its callers; the synthesis path now flows through normal `@derive(Clone)` machinery (ADR-0058).
-- [ ] Verify spec tests for clone (existing in `crates/gruel-spec/cases/types/clone.toml`) all still pass. **Note**: tests that rely on the v1 "all-Copy-fields only" rejection may need to flip — under the new derive, structs with non-Copy-but-Clone-implementing fields *should* be accepted (and their fields cloned via dispatch). Tests that reject "non-Clone field" stay rejecting; tests that reject "non-Copy field" become accepting.
-- [ ] Add a spec test covering nested clone: `struct Inner { … }` with `@derive(Clone)`, `struct Outer { i: Inner }` with `@derive(Clone)` — `outer.clone()` produces a deep clone via per-field `.clone()` dispatch.
-- [ ] Add a spec test for the failure mode: `@derive(Clone)` on a struct whose field type has no `clone` method must produce a clear "no method `clone` for type `T`" error pointing at the field.
-- [ ] Verify the compiler short-circuit "Copy types auto-conform to Clone" still works — keyed off `lang_items.copy()` / `lang_items.clone()`, not name strings.
+These primitives carry weight beyond derives — anywhere user code wants to build a value field-by-field, they're the right primitives.
+
+### Phase 2c: Prelude-implemented `derive Clone` (struct case)
+
+```gruel
+derive Clone {
+    fn clone(self: Ref(Self)) -> Self {
+        let mut out = @uninit(Self);
+        comptime_unroll for f in @type_info(Self).fields {
+            @field(out, f.name) = @field(self, f.name).clone();
+        }
+        @finalize(out)
+    }
+}
+```
+
+- [ ] Replace `crates/gruel-compiler/src/clone_glue.rs` (~123 LOC) with the prelude derive above.
+- [ ] Drop `Clone` from `is_compiler_derive` so `@derive(Clone)` flows through the standard derive-expansion path (ADR-0058).
+- [ ] `.clone()`-on-Copy-types short-circuit stays in `analyze_method_call_impl` (already shipped) so primitive-field `.clone()` resolves.
+- [ ] Privileged-access carve-out for prelude code (already shipped) so the spliced body can read non-`pub` fields of user structs.
+- [ ] Allow `Self` as a type argument in unambiguous-type slots (already shipped) so `@type_info(Self)` parses inside derive bodies.
+- [ ] Spec tests: `@derive(Clone) struct Outer { s: String }` compiles and clones deeply. `@derive(Clone)` on a struct with a non-Clone field produces "no method `clone` for type T" pointing at the field. Linear types still rejected via the structural Clone-conformance check.
 
 ### Phase 2d: Prelude-implemented `derive Copy`
 
-- [ ] Add `derive Copy { … }` to `prelude/interfaces.gruel`. Body validates all fields are Copy via `@type_info` + `@ownership` + `@compile_error`.
-- [ ] Remove the compiler-side `@derive(Copy)` validation logic (it was triggered by name match in `gruel-air/src/sema/declarations.rs`).
-- [ ] The "tag the type as Copy" step is replaced by structural conformance: codegen at use sites queries "does T conform to `lang_items.copy()`?" instead of reading `StructDef.is_copy`. Eventually `is_copy` field on `StructDef` is removable (or stays as a cache).
-- [ ] All move-semantics spec tests (`crates/gruel-spec/cases/types/move-semantics.toml`) pass.
+```gruel
+derive Copy {
+    fn copy(self: Ref(Self)) -> Self {
+        let mut out = @uninit(Self);
+        comptime_unroll for f in @type_info(Self).fields {
+            @field(out, f.name) = @field(self, f.name);
+        }
+        @finalize(out)
+    }
+}
+```
 
-### Phase 3: Optional — extend derive capabilities for enums
+- [ ] Replace the compiler-side `validate_copy_struct` with the prelude derive above. Reading a non-Copy field through `Ref(Self)` type-fails at the body's analysis, giving the validation for free.
+- [ ] Drop `Copy` from `is_compiler_derive` so `@derive(Copy)` flows through user-derive expansion the same way `@derive(Clone)` does. The literal-name fallback stays for compilations that bypass the prelude.
+- [ ] `is_copy` flag on `StructDef` stays — it's a codegen cache so use sites can lower to memcpy without dispatching through the spliced `copy` method. The flag is set in `register_type_names` based on the `@derive(Copy)` directive (unchanged).
+- [ ] Spec tests: existing `move-semantics.toml` tests pass; the bespoke `CopyStructNonCopyField` error gets replaced by the type-mismatch the body's analysis emits.
 
-This phase is not strictly required by the lang-items goal, but unlocks future prelude derives (Eq/Ord for enums, Debug, Hash, etc.). It can ship later or split off.
+### Phase 3: extend derive capabilities for enums
 
-- [ ] Allow `comptime_unroll for v in @type_info(Self).variants { … }` inside a `match` expression to generate variant arms — the same shape as the struct-literal extension in Phase 2b, but for match arms.
-- [ ] Each iteration emits one `match` arm. Computed variant name via `(expr) =>` for parity with `(expr): value` in struct literals. Payload binding (when the variant has fields) handled by the same per-field unroll machinery.
-- [ ] Validate exhaustiveness at expansion time (every variant covered).
-- [ ] Spec test: hand-implement `derive Clone` for an enum using the new match-arm unroll form.
-- [ ] Defer this phase to a follow-up if scope creep threatens — the lang-items + struct-derives win is independent.
+> **Design iteration note.** A first attempt at Phase 3 added a `MatchArmExtra` carrier paralleling Phase 2b's struct-lit extras, plus a `Pattern::ComputedVariant` AST shape (commit `146625d5`). Like Phase 2b's first attempt, it specialized in a way that didn't compose, and is rolled back. The replacement uses general-purpose primitives that mirror Phase 2b's structural ones but for enum variants.
+
+Three new pieces:
+
+- [ ] **`comptime_unroll for v in @type_info(Self).variants { … }` accepted as a match-arm.** The arm fires once per variant of `Self`; the compiler synthesizes one regular match arm per iteration. The arm's pattern is the variant's bare pattern (`Self::A`, `Self::B(..)`, `Self::C { .. }`); user code reads payload fields via `@variant_field(self, v.tag, name)` and constructs the result via `@variant_uninit + @field + @finalize`. No `payload` value with a synthesized type — there's just `self` and field-by-field reads.
+- [ ] **`@variant_uninit(Self, comptime tag) -> Uninit(Self)`**. Like `@uninit(Self)` but pre-tagged for the comptime-known variant. Subsequent `@field(out, name)` writes target the variant's payload fields; `@finalize(out)` produces a `Self` of the correct variant.
+- [ ] **`@variant_field(self, comptime tag, name)` (read)**. Read the named field of variant `tag` from `self`. Symmetric counterpart to `@variant_uninit + @field`. Only valid when `self`'s variant is known to be `tag` — inside an arm dispatched by `comptime_unroll for v in variants` the compiler enforces this.
+
+Prelude derive Clone extends to handle enums:
+
+```gruel
+derive Clone {
+    fn clone(self: Ref(Self)) -> Self {
+        comptime if @type_info(Self).kind == TypeKind::Enum {
+            match self {
+                comptime_unroll for v in @type_info(Self).variants {
+                    let mut out = @variant_uninit(Self, v.tag);
+                    comptime_unroll for f in v.fields {
+                        @field(out, f.name) = @variant_field(self, v.tag, f.name).clone();
+                    }
+                    @finalize(out)
+                }
+            }
+        } else {
+            let mut out = @uninit(Self);
+            comptime_unroll for f in @type_info(Self).fields {
+                @field(out, f.name) = @field(self, f.name).clone();
+            }
+            @finalize(out)
+        }
+    }
+}
+```
+
+For `enum Foo { A, B(u32), C { inner: u64 } }` the unroll over variants generates three arms — one per variant — each reading and reconstructing only that variant's payload fields. Unit variants iterate zero fields; tuple variants iterate one (positional name `"0"`, `"1"`, …); struct variants iterate their named fields. `@variant_uninit` + `@finalize` per arm is exhaustively initialized by construction, so per-field tracking proves completeness.
+
+- [ ] Astgen + RIR encoding for the new arm form, `@variant_uninit`, and `@variant_field`. The arm form lowers to one `RirPattern` per variant; sema expansion happens at `analyze_match` time using the existing comptime heap discipline (clear once, evaluate variant list, splice arms).
+- [ ] Sema-time check that `comptime_unroll for v in variants` arms use `v.tag` consistently — `@variant_uninit(Self, v.tag)` and `@variant_field(self, v.tag, …)` must reference the *same* `v` so the body is statically variant-correct.
+- [ ] Spec test: hand-written `derive Clone` for `enum Foo { A, B(u32), C { inner: u64 } }` clones each variant correctly. Spec test for a payload type that doesn't impl Clone — the field's `.clone()` call fails to resolve with the standard "no method `clone` for type T" error.
 
 ### Phase 4: Stabilize
 
-- [x] Remove the `lang_items` preview gate (it was always dormant — the privilege boundary is path-based, not preview-gated).
-- [x] Update ADR status to Implemented.
-- [x] Regenerate `docs/generated/builtins-reference.md` — interface section now reflects the prelude declarations.
-- [x] Sweep for residual `name == "Drop"` / `"Copy"` / `"Clone"` strings — only the test-fixture fallbacks remain; everything load-bearing keys off lang-item IDs.
+- [x] Remove the `lang_items` preview gate (Phase 4 first pass — done; the gate was always dormant, the privilege boundary is path-based).
+- [x] Sweep for residual `name == "Drop"` / `"Copy"` / `"Clone"` strings (Phase 4 first pass — done; everything load-bearing keys off lang-item IDs).
+- [ ] After 2b/2c/2d/3 redesign lands, regenerate `docs/generated/builtins-reference.md` and update ADR status to Implemented.
 
 ## Consequences
 
@@ -371,7 +432,7 @@ This phase is not strictly required by the lang-items goal, but unlocks future p
 4. **Coexistence of compiler-side and prelude-side derives during migration.** Phases 2c and 2d each replace one compiler-side derive with a prelude one. The cutover has to be atomic per derive (no half-state where both fire). Plan: each phase removes compiler hardcoding in the same commit that adds the prelude derive.
 5. **`@lang(...)` privilege boundary.** Phase 0 adds the path-based check ("only files under `prelude/` can claim `@lang(...)`"). The exact predicate (does it allow nested directories under `prelude/`? what about a `prelude/_macros/` subdirectory?) needs a clear rule. Decision: any file whose path resolves under the top-level `prelude/` directory may use `@lang(...)`. Resolve in Phase 0.
 6. **Error UX when lang-item is missing.** If the prelude accidentally drops `@lang("clone")`, every `.clone()` call fails to find the interface. The error needs to be: "lang-item `clone` is not bound — the prelude should declare an interface tagged `@lang(\"clone\")`". Implement in Phase 1's registry.
-7. **Match-arm unroll design.** Phase 3 is sketched but not detailed. The right shape (per-variant binding, exhaustiveness, payload destructuring) deserves its own mini-design. Defer until Phase 3 starts.
+7. **Match-arm unroll design.** Phase 3 lands the AST shape and the match-body parser change; the computed-variant pattern parser and the RIR/sema wiring stayed in scope but ran into a parser-construction recursion (`pattern_parser` ↔ `expr_parser`) that requires hoisting `pattern_parser` to take `expr` as a parameter. The remaining sub-tasks — computed-variant patterns/constructors at the surface, RIR `MatchUnrollArms`, sema-time pattern materialization, enum `derive Clone` spec test — are listed in Phase 3 above and pick up directly from where this ADR stops.
 
 ## Future Work
 
