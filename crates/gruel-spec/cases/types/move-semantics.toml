@@ -92,29 +92,42 @@ fn main() -> i32 {
 exit_code = 1
 
 [[case]]
-name = "array_of_copy_is_copy"
+name = "array_moves_on_assignment"
 spec = ["3.8:2"]
-description = "Array of Copy type (i32) can be used multiple times"
+description = "ADR-0080: arrays are containers, not value types — `let b = a` moves the array. Multiple aliases require wrapping in a `copy struct`."
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
     let arr2 = arr;
-    let arr3 = arr;
-    arr[0] + arr2[1] + arr3[2]
+    arr2[0] + arr2[1] + arr2[2]
 }
 """
 exit_code = 6
 
 [[case]]
-name = "array_of_copy_nested"
+name = "array_use_after_move_error"
 spec = ["3.8:2"]
-description = "Nested arrays of Copy types are Copy"
+description = "ADR-0080: aliasing the same array twice is a use-after-move error."
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [1, 2, 3];
+    let arr2 = arr;
+    let arr3 = arr;
+    arr2[0] + arr3[1]
+}
+"""
+compile_fail = true
+error_contains = "moved value"
+
+[[case]]
+name = "nested_array_moves"
+spec = ["3.8:2"]
+description = "ADR-0080: nested arrays move just like flat arrays — only one alias survives."
 source = """
 fn main() -> i32 {
     let matrix: [[i32; 2]; 2] = [[1, 2], [3, 4]];
     let m2 = matrix;
-    let m3 = matrix;
-    matrix[0][0] + m2[1][1] + m3[0][1]
+    m2[0][0] + m2[1][1] + m2[0][1]
 }
 """
 exit_code = 7
@@ -168,34 +181,31 @@ compile_fail = true
 error_contains = "use of moved value"
 
 [[case]]
-name = "array_of_copy_struct_is_copy"
+name = "array_of_copy_struct_moves"
 spec = ["3.8:2", "3.8:16"]
-description = "Array of @derive(Copy) struct is Copy"
+description = "ADR-0080: an array of Copy structs is itself non-Copy — assignment moves the whole array."
 source = """
 @derive(Copy)
 struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     let points: [Point; 2] = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
     let p2 = points;
-    points[0].x + p2[1].x
+    p2[0].x + p2[1].x
 }
 """
 exit_code = 4
 
 [[case]]
-name = "copy_struct_with_array_field"
+name = "copy_struct_with_array_field_rejected"
 spec = ["3.8:2", "3.8:20"]
-description = "@derive(Copy) struct can contain array of Copy type"
+description = "ADR-0080: arrays are non-Copy, so a `@derive(Copy)` struct may no longer have an array field."
 source = """
 @derive(Copy)
 struct Container { values: [i32; 3] }
-fn main() -> i32 {
-    let c = Container { values: [10, 20, 30] };
-    let c2 = c;
-    c.values[0] + c2.values[2]
-}
+fn main() -> i32 { 0 }
 """
-exit_code = 40
+compile_fail = true
+error_contains = "non-Copy type"
 
 [[case]]
 name = "copy_struct_with_array_of_non_copy_error"

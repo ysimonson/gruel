@@ -195,25 +195,34 @@ LOC delta in the commit message.
 
 ### Phase 2: RIR + AIR threading
 
-- [ ] Thread `is_copy` / `is_linear` through RIR `StructDecl` / `EnumDecl`
-      and into `StructDef` / `EnumDef`.
-- [ ] Set `is_copy` / `is_linear` from the keyword in
-      `register_type_names` and (for `EnumDef.is_copy`) in
-      `resolve_enum_variant_fields`.
-- [ ] `is_type_copy` for enums reads the explicit flag (still falls back
-      to the legacy "no linear payload" heuristic for now to keep
-      pre-migration tests green).
-- [ ] `is_type_copy` for arrays returns `false` unconditionally; for
-      `Vec` likewise. Tuples keep the existing "Copy iff every element
-      is Copy" structural inference.
-- [ ] `is_type_linear` for enums reads the explicit `EnumDef.is_linear`
-      flag; the propagation path stays as a transitional fallback.
-- [ ] `is_type_linear` for arrays / `Vec` keeps propagation from element
-      type (no change).
-- [ ] Both keyword and `@derive(Copy)` set `StructDef.is_copy` (parallel
-      paths during migration).
-- [ ] Spec tests: `copy struct` and `copy enum` produce Copy types;
-      `linear enum` produces a linear enum.
+- [x] Thread `is_copy` / `is_linear` through RIR `StructDecl` / `EnumDecl`
+      and into `StructDef` / `EnumDef`. (Mostly landed in Phase 1's
+      commit; `EnumDef.is_copy` / `EnumDef.is_linear` filled in
+      `register_type_names`.)
+- [x] Set `is_copy` / `is_linear` from the keyword in
+      `register_type_names`. `resolve_enum_variant_fields` preserves the
+      flags via the existing read-modify-write of `EnumDef`, so no
+      extra wiring is needed there.
+- [x] `is_type_copy` for enums reads `EnumDef.is_copy` first, then
+      `EnumDef.is_linear`, then falls back to the legacy "no linear
+      payload" heuristic for the in-flight corpus (Phase 5 retires
+      the heuristic).
+- [x] `is_type_copy` for arrays returns `false` unconditionally; `Vec`
+      already did. Tuples unchanged. The flip surfaced a latent bug in
+      `dispatch_char_method_call` where `&mut buf` arguments left the
+      buffer marked moved — fixed by routing through
+      `analyze_call_args` like every other call site.
+- [x] `is_type_linear` for enums reads `EnumDef.is_linear` first, then
+      falls back to the existing payload-propagation path.
+- [x] `is_type_linear` for arrays / `Vec` keeps propagation from
+      element type (unchanged).
+- [x] Both keyword and `@derive(Copy)` set `StructDef.is_copy`
+      (parallel paths during migration).
+- [x] Spec tests in `cases/items/copy-keyword.toml`: `copy struct` and
+      `copy enum` are Copy by assignment; `linear enum` errors when
+      dropped, succeeds when consumed; arrays move on assignment.
+      Migrated `cases/types/move-semantics.toml` "array of Copy is
+      Copy" suite to the new move-on-assignment semantics.
 
 ### Phase 3: Posture-consistency validator
 

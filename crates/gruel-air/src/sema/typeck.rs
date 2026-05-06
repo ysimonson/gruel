@@ -72,11 +72,10 @@ impl<'a> Sema<'a> {
                 struct_def.is_copy
             }
             // Note: String is now handled via TypeKind::Struct with is_builtin
-            // Arrays are Copy if their element type is Copy
-            TypeKind::Array(array_id) => {
-                let (element_type, _length) = self.type_pool.array_def(array_id);
-                self.is_type_copy(element_type)
-            }
+            // ADR-0080: arrays are never Copy — they're containers, not
+            // value types. To get Copy-by-assignment for a fixed-size
+            // bag of Copy values, wrap the array in a `copy struct`.
+            TypeKind::Array(_) => false,
             // Module types are Copy (they're just compile-time namespace references)
             TypeKind::Module(_) => true,
             // ComptimeType and ComptimeStr are Copy (only exist at comptime anyway)

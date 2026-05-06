@@ -159,3 +159,116 @@ copy linear struct Bad { x: i32 }
 fn main() -> i32 { 0 }
 """
 compile_fail = true
+
+# =============================================================================
+# Phase 2 semantics: declared posture flows into is_type_copy / is_type_linear
+# =============================================================================
+
+[[case]]
+name = "copy_struct_is_copy_by_assignment"
+spec = ["3.8:14", "3.8:16"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 2: a `copy struct` is implicitly duplicated on `let b = a`."
+source = """
+copy struct Point { x: i32, y: i32 }
+fn main() -> i32 {
+    let p = Point { x: 1, y: 2 };
+    let q = p;
+    p.x + p.y + q.x + q.y
+}
+"""
+exit_code = 6
+
+[[case]]
+name = "copy_enum_is_copy_by_assignment"
+spec = ["3.8:14", "3.8:16"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 2: a `copy enum` is implicitly duplicated on `let b = a`, even with no payloads."
+source = """
+copy enum Color { Red, Green, Blue }
+fn main() -> i32 {
+    let c = Color::Red;
+    let d = c;
+    match c {
+        Color::Red => 1,
+        Color::Green => 2,
+        Color::Blue => 3,
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "linear_enum_dropped_without_consume_error"
+spec = ["3.8:30", "3.8:32"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 2: a `linear enum` value must be explicitly consumed."
+source = """
+linear enum Resource { Open, Closed }
+fn main() -> i32 {
+    let r = Resource::Open;
+    0
+}
+"""
+compile_fail = true
+error_contains = "linear value"
+
+[[case]]
+name = "linear_enum_consumed_by_function"
+spec = ["3.8:30", "3.8:33"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 2: a `linear enum` is consumed by passing to a function."
+source = """
+linear enum Resource { Open, Closed }
+fn consume(r: Resource) -> i32 {
+    match r {
+        Resource::Open => 1,
+        Resource::Closed => 0,
+    }
+}
+fn main() -> i32 {
+    let r = Resource::Open;
+    consume(r)
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "array_is_not_copy"
+spec = ["3.8:2"]
+description = "ADR-0080 Phase 2: arrays are non-Copy regardless of element type — `[i32; 3]` cannot be aliased."
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [1, 2, 3];
+    let arr2 = arr;
+    let arr3 = arr;
+    arr2[0] + arr3[1]
+}
+"""
+compile_fail = true
+error_contains = "moved value"
+
+[[case]]
+name = "copy_struct_with_copy_fields_ok"
+spec = ["3.8:14"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 2: a `copy struct` whose fields are all Copy is itself Copy and may be aliased."
+source = """
+copy struct Pair { x: i32, y: i32 }
+copy struct Rect { tl: Pair, br: Pair }
+fn main() -> i32 {
+    let r = Rect { tl: Pair { x: 1, y: 2 }, br: Pair { x: 10, y: 20 } };
+    let r2 = r;
+    r.tl.x + r.br.y + r2.tl.y + r2.br.x
+}
+"""
+exit_code = 33
+
+# The `copy struct` field-Copy invariant — and the parallel `linear`
+# propagation rule — are checked by the posture-consistency walker
+# introduced in Phase 3 (`copy_struct Bad { s: String }` etc.).

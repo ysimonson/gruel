@@ -11817,10 +11817,14 @@ impl<'a> Sema<'a> {
                     receiver_result.air_ref.as_u32(),
                     AirArgMode::Normal.as_u32(),
                 ];
-                for arg in args {
-                    let arg_result = self.analyze_inst(air, arg.value, ctx)?;
-                    extra.push(arg_result.air_ref.as_u32());
-                    extra.push(AirArgMode::Normal.as_u32());
+                // Use the standard call-args helper so `&x` / `&mut x`
+                // arguments un-move their underlying variable after
+                // analysis (ADR-0080 made arrays non-Copy, surfacing the
+                // gap that the previous direct `analyze_inst` loop left).
+                let air_args = self.analyze_call_args(air, args, ctx)?;
+                for air_arg in air_args {
+                    extra.push(air_arg.value.as_u32());
+                    extra.push(air_arg.mode.as_u32());
                 }
                 let args_len = (args.len() + 1) as u32;
                 let args_start = air.add_extra(&extra);
