@@ -18,7 +18,7 @@ Theme: Build upon Rue's bones, keeping a lot of the broad ideas but making break
 - Vectors (ADR-0066)
 - Anonymous functions (ADR-0055)
 - Go-like structurally typed interfaces (ADR-0056, ADR-0057, ADR-0060)
-- Rust-like `@derive` for structs and enums (ADR-0058)
+- Rust-like `@derive` for structs and enums that takes advantage of comptime capacities (ADR-0058)
 - Reworked pointers and references to a less keyword-driven syntax to accomodate the growing number of variants (ADR-0061, ADR-0062, ADR-0063)
 - Stabilized anonymous struct methods (ADR-0029)
 - Improved safety and simultaneously simplified `String` (ADR-0072)
@@ -29,6 +29,10 @@ Theme: Build upon Rue's bones, keeping a lot of the broad ideas but making break
 - Significantly expanded comptime capabilities (ADR-0040, ADR-0042, ADR-0045)
 - Significantly expanded pattern matching and destructuring capabilities (ADR-0049, ADR-0051, ADR-0052)
 - Fixed handling of containers with linear types (ADR-0067)
+- More pervasive availability of `pub` keyword (ADR-0073)
+- Replace `@handle` with an interface + derive (ADR-0075)
+- Rust-like `Self` within structs and enums (ADR-0076)
+- Added a prelude (ADR-0078, ADR-0079)
 
 ### Language Tooling
 
