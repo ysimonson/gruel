@@ -1,14 +1,16 @@
 // Structs - custom data types with named fields
 //
-// Gruel supports structs with value semantics, meaning they're
-// copied when assigned or passed to functions.
+// Gruel structs are affine (moved) by default. The `copy` keyword
+// opts a struct into value semantics: it is copied on assignment and
+// pass-by-value, which is the right default for small POD-like
+// composites like geometric primitives.
 
-struct Point {
+copy struct Point {
     x: i32,
     y: i32,
 }
 
-struct Rectangle {
+copy struct Rectangle {
     origin: Point,
     width: i32,
     height: i32,

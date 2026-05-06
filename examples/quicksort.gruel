@@ -5,11 +5,12 @@
 // 2. Partition the array so elements <= pivot are on the left
 // 3. Recursively sort the left and right partitions
 //
-// Demonstrates: recursion, inout parameters, array mutation, borrow parameters
+// Demonstrates: recursion, mutable references, array mutation,
+// shared references.
 
 // Partition the array segment [low..high] around a pivot.
 // Returns the final index of the pivot element.
-fn partition(inout arr: [i32; 10], low: u64, high: u64) -> u64 {
+fn partition(arr: MutRef([i32; 10]), low: usize, high: usize) -> usize {
     let pivot = arr[high];
     let mut i = low;  // Boundary for elements <= pivot
 
@@ -34,23 +35,23 @@ fn partition(inout arr: [i32; 10], low: u64, high: u64) -> u64 {
 }
 
 // Sort the array segment [low..high] in place.
-fn quicksort_impl(inout arr: [i32; 10], low: u64, high: u64) {
+fn quicksort_impl(arr: MutRef([i32; 10]), low: usize, high: usize) {
     if low < high {
-        let pivot_idx = partition(inout arr, low, high);
+        let pivot_idx = partition(&mut arr, low, high);
 
         // Sort left partition (guard against underflow when pivot is at low)
         if pivot_idx > low {
-            quicksort_impl(inout arr, low, pivot_idx - 1);
+            quicksort_impl(&mut arr, low, pivot_idx - 1);
         }
 
         // Sort right partition
-        quicksort_impl(inout arr, pivot_idx + 1, high);
+        quicksort_impl(&mut arr, pivot_idx + 1, high);
     }
 }
 
 // Helper to print all elements of the array.
-fn print_array(borrow arr: [i32; 10]) {
-    let mut i: u64 = 0;
+fn print_array(arr: Ref([i32; 10])) {
+    let mut i: usize = 0;
     while i < 10 {
         @dbg(arr[i]);
         i = i + 1;
@@ -61,12 +62,12 @@ fn main() -> i32 {
     let mut arr = [64, 34, 25, 12, 22, 11, 90, 42, 15, 77];
 
     @dbg(0);  // Before sorting
-    print_array(borrow arr);
+    print_array(&arr);
 
-    quicksort_impl(inout arr, 0, 9);
+    quicksort_impl(&mut arr, 0, 9);
 
     @dbg(1);  // After sorting
-    print_array(borrow arr);
+    print_array(&arr);
 
     // Return smallest element as exit code (should be 11)
     arr[0]
