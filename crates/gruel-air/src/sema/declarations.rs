@@ -25,6 +25,82 @@ use crate::types::{
     StructDef, StructField, StructId, Type,
 };
 
+/// Posture declared by the user on a type definition (ADR-0080).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeclaredPosture {
+    Copy,
+    Affine,
+    Linear,
+}
+
+impl DeclaredPosture {
+    fn as_str(self) -> &'static str {
+        match self {
+            DeclaredPosture::Copy => "copy",
+            DeclaredPosture::Affine => "affine",
+            DeclaredPosture::Linear => "linear",
+        }
+    }
+}
+
+/// Posture observed on a member's type (ADR-0080).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemberPosture {
+    Copy,
+    Affine,
+    Linear,
+}
+
+impl MemberPosture {
+    fn as_str(self) -> &'static str {
+        match self {
+            MemberPosture::Copy => "Copy",
+            MemberPosture::Affine => "affine",
+            MemberPosture::Linear => "linear",
+        }
+    }
+}
+
+/// ADR-0080: compare a member's posture against the host's declared
+/// posture and produce a `PostureMismatch` error if the rule is violated.
+///
+/// Rules (with `Linear` short-circuited by the caller, since linear hosts
+/// accept anything):
+///
+/// - `Copy` host: every member must be Copy.
+/// - `Affine` host: no member may be Linear.
+fn check_posture_against_declared(
+    host_kind: &'static str,
+    host_name: &str,
+    declared: DeclaredPosture,
+    member_kind: &'static str,
+    member_name: &str,
+    member_type: &str,
+    member_posture: MemberPosture,
+    span: Span,
+) -> Option<CompileError> {
+    let violates = match (declared, member_posture) {
+        (DeclaredPosture::Copy, MemberPosture::Affine | MemberPosture::Linear) => true,
+        (DeclaredPosture::Affine, MemberPosture::Linear) => true,
+        _ => false,
+    };
+    if !violates {
+        return None;
+    }
+    Some(CompileError::new(
+        ErrorKind::PostureMismatch(Box::new(gruel_util::PostureMismatchError {
+            host_kind,
+            host_name: host_name.to_string(),
+            declared_posture: declared.as_str(),
+            member_kind,
+            member_name: member_name.to_string(),
+            member_type: member_type.to_string(),
+            member_posture: member_posture.as_str(),
+        })),
+        span,
+    ))
+}
+
 /// Signature data for a `drop` method, bundled for inline-drop registration.
 struct DropSignature {
     has_self: bool,
@@ -417,6 +493,17 @@ impl<'a> Sema<'a> {
                         )?;
                     }
 
+                    // ADR-0080 belt-and-braces: parser already rejects
+                    // `copy linear` / `linear copy` syntactically; this catches
+                    // the path where one is a keyword and the other arrives
+                    // via `@derive(Copy)`.
+                    if *is_copy && *is_linear {
+                        return Err(CompileError::new(
+                            ErrorKind::LinearStructCopy(enum_name.clone()),
+                            inst.span,
+                        ));
+                    }
+
                     // Check for collision with built-in type names or built-in
                     // type constructors (e.g. Ptr, MutPtr — see ADR-0061).
                     if is_reserved_type_name(&enum_name)
@@ -627,6 +714,13 @@ impl<'a> Sema<'a> {
         self.populate_lang_items()?;
         self.resolve_struct_fields()?;
         self.resolve_enum_variant_fields()?;
+        // ADR-0080 Phase 3: validate that each named declaration's
+        // declared posture (`copy` / unmarked / `linear`) is consistent
+        // with the postures of its fields/variants. Runs after field
+        // resolution so member types are populated. Anonymous types are
+        // checked at construction time (see `find_or_create_anon_struct`
+        // / `find_or_create_anon_enum`).
+        self.validate_posture_consistency()?;
         // ADR-0058 sub-phase: resolve every `@derive(D)` directive on a
         // named struct or enum into a binding for the upcoming expansion
         // step. Runs after field-type resolution so the host type is
@@ -1369,6 +1463,122 @@ impl<'a> Sema<'a> {
         }
         Ok(())
     }
+
+    /// ADR-0080 Phase 3: posture-consistency walker.
+    ///
+    /// Runs after `resolve_struct_fields` and `resolve_enum_variant_fields`
+    /// have populated every field/variant `Type`, but before the rest of
+    /// `resolve_remaining_declarations`. For every named struct or enum
+    /// declaration, it classifies each member's posture (Copy / Affine /
+    /// Linear) and folds the result into the propagated posture, then
+    /// compares against the declared posture from the keyword:
+    ///
+    /// | Declared    | Rule                                   |
+    /// |-------------|----------------------------------------|
+    /// | `copy`      | every member must be Copy              |
+    /// | (unmarked)  | no member may be Linear                |
+    /// | `linear`    | (no constraint — linear holds anything)|
+    ///
+    /// On mismatch the error span is the host declaration's span and the
+    /// message names the offending member's type and posture (richer
+    /// per-field spans land when struct/enum field positions become
+    /// addressable from `StructDef` / `EnumDef`).
+    ///
+    /// The walker is one function rather than a struct-validator + enum-
+    /// validator pair because the only difference between the two cases is
+    /// how members are enumerated; the posture-folding logic is identical.
+    pub(crate) fn validate_posture_consistency(&self) -> CompileResult<()> {
+        for (_, inst) in self.rir.iter() {
+            match &inst.data {
+                InstData::StructDecl { name, .. } => {
+                    let Some(&struct_id) = self.structs.get(name) else {
+                        continue;
+                    };
+                    let def = self.type_pool.struct_def(struct_id);
+                    let declared = if def.is_copy {
+                        DeclaredPosture::Copy
+                    } else if def.is_linear {
+                        DeclaredPosture::Linear
+                    } else {
+                        DeclaredPosture::Affine
+                    };
+                    if declared == DeclaredPosture::Linear {
+                        continue;
+                    }
+                    let host_name = def.name.clone();
+                    for field in &def.fields {
+                        let posture = self.classify_posture(field.ty);
+                        if let Some(err) = check_posture_against_declared(
+                            "struct",
+                            host_name.as_str(),
+                            declared,
+                            "field",
+                            &field.name,
+                            self.format_type_name(field.ty).as_str(),
+                            posture,
+                            inst.span,
+                        ) {
+                            return Err(err);
+                        }
+                    }
+                }
+                InstData::EnumDecl { name, .. } => {
+                    let Some(&enum_id) = self.enums.get(name) else {
+                        continue;
+                    };
+                    let def = self.type_pool.enum_def(enum_id);
+                    let declared = if def.is_copy {
+                        DeclaredPosture::Copy
+                    } else if def.is_linear {
+                        DeclaredPosture::Linear
+                    } else {
+                        DeclaredPosture::Affine
+                    };
+                    if declared == DeclaredPosture::Linear {
+                        continue;
+                    }
+                    let host_name = def.name.clone();
+                    for variant in &def.variants {
+                        for (i, field_ty) in variant.fields.iter().enumerate() {
+                            let member_name = if let Some(name) = variant.field_names.get(i) {
+                                format!("{}::{}.{}", host_name, variant.name, name)
+                            } else {
+                                format!("{}::{}.{}", host_name, variant.name, i)
+                            };
+                            let posture = self.classify_posture(*field_ty);
+                            if let Some(err) = check_posture_against_declared(
+                                "enum",
+                                host_name.as_str(),
+                                declared,
+                                "variant field",
+                                &member_name,
+                                self.format_type_name(*field_ty).as_str(),
+                                posture,
+                                inst.span,
+                            ) {
+                                return Err(err);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Classify a type's ownership posture (ADR-0080).
+    fn classify_posture(&self, ty: crate::types::Type) -> MemberPosture {
+        if self.is_type_linear(ty) {
+            MemberPosture::Linear
+        } else if self.is_type_copy(ty) {
+            MemberPosture::Copy
+        } else {
+            MemberPosture::Affine
+        }
+    }
+
+    // ADR-0080 helper end.
 
     /// Resolve struct field types. Must run before @derive(Copy) validation.
     pub(crate) fn resolve_struct_fields(&mut self) -> CompileResult<()> {

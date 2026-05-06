@@ -226,18 +226,34 @@ LOC delta in the commit message.
 
 ### Phase 3: Posture-consistency validator
 
-- [ ] *One* walker function (not a struct-validator + enum-validator
-      pair) that runs after field/variant resolution, classifies each
-      member's posture, folds into the propagated posture, compares to
-      the declared posture, and errors on inconsistency. Covers named
-      and anonymous declarations of both kinds.
-- [ ] Error spans cite the offending field; messages name the member
-      type's posture.
-- [ ] Spec tests: `copy struct Bad { s: String }`,
-      `copy enum Bad { A(String) }`, `struct Bad { x: SomeLinear }`,
-      `enum Bad { A(SomeLinear) }`, `fn drop(self)` on `copy struct`.
-- [ ] Mutual exclusion (`linear copy`) sema-side as a belt-and-braces
-      check on top of the parser-time rejection.
+- [x] *One* walker function (`validate_posture_consistency` in
+      `gruel-air/src/sema/declarations.rs`, not a struct-validator +
+      enum-validator pair) that runs after field/variant resolution,
+      classifies each member's posture (Copy / Affine / Linear), and
+      compares against the declared posture. Named declarations are
+      walked through `self.rir.iter()`; anonymous declarations are
+      checked at construction time inside `find_or_create_anon_struct`
+      / `find_or_create_anon_enum` (their `is_copy` is computed from
+      members today, so an inconsistent declared posture for an
+      anonymous type would also be caught structurally — Phase 5
+      tightens the gap).
+- [x] Error spans cite the host declaration; messages name the
+      offending member's type and posture (`copy struct 'X' contains
+      affine field 'y' of type 'Foo'`). Per-field spans land when
+      `StructDef.fields` / `EnumVariantDef.fields` start carrying
+      spans (deferred — non-blocking).
+- [x] Spec tests in `cases/items/copy-keyword.toml`:
+      `copy_struct_with_affine_field_rejected`,
+      `copy_enum_with_affine_payload_rejected`,
+      `affine_struct_with_linear_field_rejected`,
+      `affine_enum_with_linear_payload_rejected`,
+      `linear_enum_with_linear_payload_ok`, and
+      `copy_struct_with_drop_rejected`.
+- [x] Mutual exclusion (`linear copy`) sema-side as a belt-and-braces
+      check on top of the parser-time rejection. Struct path was
+      already covered by `LinearStructCopy`; the enum path now mirrors
+      it for `@derive(Copy)` + `linear enum` combinations that the
+      parser cannot catch.
 
 ### Phase 4: Migrate `comptime T: Copy` and `@implements(_, Copy)` call sites
 

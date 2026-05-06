@@ -205,7 +205,7 @@ struct Container { values: [i32; 3] }
 fn main() -> i32 { 0 }
 """
 compile_fail = true
-error_contains = "non-Copy type"
+error_contains = "affine"
 
 [[case]]
 name = "copy_struct_with_array_of_non_copy_error"
@@ -220,7 +220,7 @@ struct Container { items: [Data; 2] }
 fn main() -> i32 { 0 }
 """
 compile_fail = true
-error_contains = "non-Copy type"
+error_contains = "affine"
 
 # =============================================================================
 # Move Types (Structs)
@@ -649,7 +649,7 @@ struct Outer { inner: Inner }
 fn main() -> i32 { 0 }
 """
 compile_fail = true
-error_contains = "non-Copy type"
+error_contains = "affine"
 
 [[case]]
 name = "copy_struct_enum_field"

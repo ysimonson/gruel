@@ -282,6 +282,26 @@ pub struct CloneStructNonCopyFieldError {
     pub field_type: String,
 }
 
+/// Payload for `ErrorKind::PostureMismatch` (ADR-0080).
+///
+/// Reports that the declared posture (`copy` / unmarked / `linear`) of a
+/// type is inconsistent with one of its members' posture. `host_kind` is
+/// `"struct"` or `"enum"`; `host_name` is the type name (or
+/// `"<anonymous>"` for an anonymous literal). `member_kind` is `"field"`
+/// for structs or `"variant"`/`"variant field"` for enums. `member_name`
+/// names the offending member; `member_type` names its type;
+/// `member_posture` is the offending posture (`"affine"` / `"linear"`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostureMismatchError {
+    pub host_kind: &'static str,
+    pub host_name: String,
+    pub declared_posture: &'static str,
+    pub member_kind: &'static str,
+    pub member_name: String,
+    pub member_type: String,
+    pub member_posture: &'static str,
+}
+
 /// Payload for `ErrorKind::IntrinsicTypeMismatch`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntrinsicTypeMismatchError {
@@ -926,6 +946,18 @@ pub enum ErrorKind {
     /// @derive(Clone) v1 limitation: every field must be Copy.
     #[error("@derive(Clone) on struct '{struct_name}' requires every field to be Copy in v1; field '{field_name}' has type '{field_type}' which is not Copy. Hand-write `fn clone(self: Ref(Self)) -> Self` instead.", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
     CloneStructNonCopyField(Box<CloneStructNonCopyFieldError>),
+    /// Declared posture is inconsistent with members' postures (ADR-0080).
+    #[error(
+        "{declared_posture} {host_kind} '{host_name}' contains {member_posture} {member_kind} '{member_name}' of type '{member_type}'",
+        declared_posture = .0.declared_posture,
+        host_kind = .0.host_kind,
+        host_name = .0.host_name,
+        member_posture = .0.member_posture,
+        member_kind = .0.member_kind,
+        member_name = .0.member_name,
+        member_type = .0.member_type,
+    )]
+    PostureMismatch(Box<PostureMismatchError>),
     /// A directive name that is not in the recognized set (ADR-0075).
     /// `note` carries either a near-match suggestion or a retirement
     /// pointer (for `@handle` and `@copy`).
@@ -1249,6 +1281,7 @@ impl ErrorKind {
             ErrorKind::LinearStructCopy(_) => ErrorCode::LINEAR_STRUCT_COPY,
             ErrorKind::LinearStructClone(_) => ErrorCode::LINEAR_STRUCT_COPY,
             ErrorKind::CloneStructNonCopyField { .. } => ErrorCode::COPY_STRUCT_NON_COPY_FIELD,
+            ErrorKind::PostureMismatch { .. } => ErrorCode::COPY_STRUCT_NON_COPY_FIELD,
             ErrorKind::UnknownDirective { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
             ErrorKind::DuplicateMethod { .. } => ErrorCode::DUPLICATE_METHOD,
             ErrorKind::DeriveDirectFieldAccess { .. } => ErrorCode::DERIVE_DIRECT_FIELD_ACCESS,

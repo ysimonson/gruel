@@ -272,3 +272,101 @@ exit_code = 33
 # The `copy struct` field-Copy invariant — and the parallel `linear`
 # propagation rule — are checked by the posture-consistency walker
 # introduced in Phase 3 (`copy_struct Bad { s: String }` etc.).
+
+# =============================================================================
+# Phase 3 posture-consistency walker
+# =============================================================================
+
+[[case]]
+name = "copy_struct_with_affine_field_rejected"
+spec = ["3.8:18"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 3: a `copy struct` may not contain a non-Copy field."
+source = """
+copy struct Bad { s: String }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "affine"
+
+[[case]]
+name = "copy_enum_with_affine_payload_rejected"
+spec = ["3.8:18"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 3: a `copy enum` may not have a non-Copy payload."
+source = """
+copy enum Bad { A(String) }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "affine"
+
+[[case]]
+name = "affine_struct_with_linear_field_rejected"
+spec = ["3.8:30"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 3: an unmarked struct may not contain a linear field — linear must propagate explicitly."
+source = """
+linear struct Resource { value: i32 }
+struct Bad { r: Resource }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "linear"
+
+[[case]]
+name = "affine_enum_with_linear_payload_rejected"
+spec = ["3.8:30"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 3: an unmarked enum may not have a linear payload."
+source = """
+linear struct Resource { value: i32 }
+enum Bad { Empty, Held(Resource) }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "linear"
+
+[[case]]
+name = "linear_enum_with_linear_payload_ok"
+spec = ["3.8:30"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 3: a `linear enum` accepts linear payloads (linear absorbs)."
+source = """
+linear struct Resource { value: i32 }
+linear enum Maybe { Empty, Held(Resource) }
+fn drain(m: Maybe) -> i32 {
+    match m {
+        Maybe::Empty => 0,
+        Maybe::Held(r) => r.value,
+    }
+}
+fn main() -> i32 {
+    let m = Maybe::Held(Resource { value: 7 });
+    drain(m)
+}
+"""
+exit_code = 7
+
+[[case]]
+name = "copy_struct_with_drop_rejected"
+spec = ["3.8:62"]
+preview = "copy_keyword"
+preview_should_pass = true
+description = "ADR-0080 Phase 3: `copy` and `Drop` remain mutually exclusive."
+source = """
+copy struct Bad {
+    value: i32,
+
+    fn drop(self) {
+        @ignore_unused(self);
+    }
+}
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
