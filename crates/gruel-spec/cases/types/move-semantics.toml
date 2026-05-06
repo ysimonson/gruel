@@ -1141,13 +1141,18 @@ exit_code = 3
 # Drop and Copy as Interfaces (ADR-0059)
 # =============================================================================
 
-# A `comptime T: Copy` bound accepts a Copy primitive.
+# ADR-0080: the Copy posture is no longer queried via a `comptime T: Copy`
+# bound or `@implements(T, Copy)`; users branch on `@ownership(T)` instead.
+
 [[case]]
-name = "copy_interface_accepts_primitive"
+name = "copy_posture_accepts_primitive"
 spec = ["3.8:60", "3.8:61"]
-description = "comptime T: Copy accepts i32"
+description = "ADR-0080: a Copy guard via @ownership accepts i32."
 source = """
-fn use_copy(comptime T: Copy, t: T) -> i32 {
+fn use_copy(comptime T: type, t: T) -> i32 {
+    comptime if @ownership(T) != Ownership::Copy {
+        @compile_error("use_copy requires a Copy type");
+    }
     0
 }
 
@@ -1157,16 +1162,18 @@ fn main() -> i32 {
 """
 exit_code = 0
 
-# A `comptime T: Copy` bound accepts a struct with @derive(Copy).
 [[case]]
-name = "copy_interface_accepts_derive_copy_struct"
+name = "copy_posture_accepts_derive_copy_struct"
 spec = ["3.8:60", "3.8:61"]
-description = "comptime T: Copy accepts a @derive(Copy) struct"
+description = "ADR-0080: an @ownership Copy guard accepts a `@derive(Copy)` struct."
 source = """
 @derive(Copy)
 struct Pair { x: i32, y: i32 }
 
-fn use_copy(comptime T: Copy, t: T) -> i32 {
+fn use_copy(comptime T: type, t: T) -> i32 {
+    comptime if @ownership(T) != Ownership::Copy {
+        @compile_error("use_copy requires a Copy type");
+    }
     0
 }
 
@@ -1176,13 +1183,15 @@ fn main() -> i32 {
 """
 exit_code = 0
 
-# A `comptime T: Copy` bound rejects an affine type (String).
 [[case]]
-name = "copy_interface_rejects_affine"
+name = "copy_posture_rejects_affine"
 spec = ["3.8:60", "3.8:61", "3.8:62"]
-description = "comptime T: Copy rejects affine String"
+description = "ADR-0080: an @ownership Copy guard rejects affine String at the call site."
 source = """
-fn use_copy(comptime T: Copy, t: T) {
+fn use_copy(comptime T: type, t: T) {
+    comptime if @ownership(T) != Ownership::Copy {
+        @compile_error("use_copy requires a Copy type");
+    }
 }
 
 fn main() -> i32 {
@@ -1191,7 +1200,7 @@ fn main() -> i32 {
 }
 """
 compile_fail = true
-error_contains = "does not conform to interface `Copy`"
+error_contains = "use_copy requires a Copy type"
 
 # ADR-0067: linearity propagates through compound types.
 [[case]]

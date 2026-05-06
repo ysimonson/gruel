@@ -1800,21 +1800,31 @@ fn main() -> i32 {
 exit_code = 0
 
 [[case]]
-name = "implements_primitive_is_copy"
+name = "ownership_primitive_is_copy_via_match"
 spec = ["4.13:118"]
+description = "ADR-0080: Copy posture is queried via @ownership rather than @implements(_, Copy)."
 source = """
 fn main() -> i32 {
-    if @implements(i32, Copy) { 1 } else { 0 }
+    match @ownership(i32) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 0,
+        Ownership::Linear => 0,
+    }
 }
 """
 exit_code = 1
 
 [[case]]
-name = "implements_string_is_not_copy"
+name = "ownership_string_is_affine_via_match"
 spec = ["4.13:118"]
+description = "ADR-0080: String is affine, not Copy."
 source = """
 fn main() -> i32 {
-    if @implements(String, Copy) { 1 } else { 0 }
+    match @ownership(String) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 0,
+        Ownership::Linear => 0,
+    }
 }
 """
 exit_code = 0
@@ -1848,17 +1858,17 @@ fn classify(b: bool) -> i32 {
 }
 
 fn main() -> i32 {
-    classify(@implements(i32, Copy))
+    classify(@implements(i32, Drop))
 }
 """
-exit_code = 7
+exit_code = 13
 
 [[case]]
 name = "implements_compile_time_constant"
 spec = ["4.13:120"]
 source = """
 fn main() -> i32 {
-    let c: bool = @implements(i32, Copy);
+    let c: bool = @implements(String, Drop);
     if c { 42 } else { 0 }
 }
 """
@@ -1898,14 +1908,19 @@ fn main() -> i32 {
 exit_code = 0
 
 [[case]]
-name = "implements_derive_copy_struct_is_copy"
+name = "ownership_derive_copy_struct_is_copy"
 spec = ["4.13:118"]
+description = "ADR-0080: a `@derive(Copy)` struct reports `Ownership::Copy`."
 source = """
 @derive(Copy)
 struct Pair { x: i32, y: i32 }
 
 fn main() -> i32 {
-    if @implements(Pair, Copy) { 1 } else { 0 }
+    match @ownership(Pair) {
+        Ownership::Copy => 1,
+        Ownership::Affine => 0,
+        Ownership::Linear => 0,
+    }
 }
 """
 exit_code = 1

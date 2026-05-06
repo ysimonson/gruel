@@ -257,13 +257,24 @@ LOC delta in the commit message.
 
 ### Phase 4: Migrate `comptime T: Copy` and `@implements(_, Copy)` call sites
 
-- [ ] Migrate spec tests off both surfaces ahead of Phase 5's removal:
-      `comptime T: Copy` → `comptime T` + a `comptime if @ownership(T)
-      != Ownership::Copy { @compile_error(...) }` guard;
-      `@implements(T, Copy)` → `@ownership(T) == Ownership::Copy`.
-- [ ] No new compiler code — once Phase 5 retires `interface Copy`,
-      remaining uses fall through the existing "unknown interface"
-      error path.
+- [x] Migrated `cases/types/move-semantics.toml`'s `copy_interface_*`
+      trio (`copy_posture_accepts_primitive`,
+      `copy_posture_accepts_derive_copy_struct`,
+      `copy_posture_rejects_affine`) from `comptime T: Copy` to
+      `comptime T: type` + a `comptime if @ownership(T) !=
+      Ownership::Copy { @compile_error(...) }` guard.
+- [x] Migrated `cases/expressions/intrinsics.toml`'s
+      `implements_*_copy` cases off `@implements(_, Copy)`:
+      `ownership_primitive_is_copy_via_match`,
+      `ownership_string_is_affine_via_match`,
+      `ownership_derive_copy_struct_is_copy`. The two cases that only
+      needed *some* interface to flex the compile-time bool path
+      (`implements_returns_bool_type`,
+      `implements_compile_time_constant`) keep `@implements` but
+      switched to `Drop`, which keeps working after Phase 5.
+- [x] No new compiler code — once Phase 5 retires `interface Copy`,
+      any remaining `@implements(T, Copy)` falls through the existing
+      "unknown interface" error path.
 
 ### Phase 5: Retire the interface and directive
 
