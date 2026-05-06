@@ -627,104 +627,20 @@ pub static BUILTIN_TYPES: &[&BuiltinTypeDef] = &[&STRING_TYPE];
 // Built-in Enums (Target Platform)
 // ============================================================================
 
-/// Definition of a built-in enum type.
-///
-/// These are synthetic enums injected by the compiler before processing user code.
-/// They are used for compile-time platform detection via intrinsics like
-/// `@target_arch()` and `@target_os()`.
-#[derive(Debug, Clone)]
-pub struct BuiltinEnumDef {
-    /// Enum name as it appears in source code (e.g., "Arch")
-    pub name: &'static str,
-    /// Variant names in order (index matches variant_index in EnumVariant)
-    pub variants: &'static [&'static str],
-}
+// ADR-0078 Phase 3: the platform-reflection enums (`Arch`, `Os`) live
+// in `prelude/target.gruel`; the type-reflection enums (`TypeKind`,
+// `Ownership`) live in `prelude/type_info.gruel`. The intrinsics that
+// produce values of those types (`@target_arch`, `@target_os`,
+// `@type_info`, `@ownership`) cache their `EnumId`s after declaration
+// resolution via `Sema::cache_builtin_enum_ids`. Variant order in the
+// prelude files matches the order returned by the compiler-side
+// `arch_variant_index` / `os_variant_index` mappers; see
+// `crates/gruel-air/src/sema/analysis.rs`.
 
-/// The built-in Arch enum for CPU architecture detection.
-///
-/// Variants are appended over time so existing programs keep matching the
-/// same variant indices. The current order is:
-/// - `X86_64` (index 0): x86-64 / AMD64
-/// - `Aarch64` (index 1): ARM64 / AArch64
-/// - `X86` (index 2): 32-bit x86
-/// - `Arm` (index 3): 32-bit ARM
-/// - `Riscv32` (index 4): 32-bit RISC-V
-/// - `Riscv64` (index 5): 64-bit RISC-V
-/// - `Wasm32` (index 6): 32-bit WebAssembly
-/// - `Wasm64` (index 7): 64-bit WebAssembly
-///
-/// Used with `@target_arch()` intrinsic for platform-specific code.
-pub static ARCH_ENUM: BuiltinEnumDef = BuiltinEnumDef {
-    name: "Arch",
-    variants: &[
-        "X86_64", "Aarch64", "X86", "Arm", "Riscv32", "Riscv64", "Wasm32", "Wasm64",
-    ],
-};
-
-/// The built-in Os enum for operating system detection.
-///
-/// Variants are appended over time so existing programs keep matching the
-/// same variant indices. The current order is:
-/// - `Linux` (index 0): Linux
-/// - `Macos` (index 1): macOS / Darwin
-/// - `Windows` (index 2): Microsoft Windows
-/// - `Freestanding` (index 3): no operating system (bare metal)
-/// - `Wasi` (index 4): WebAssembly System Interface
-///
-/// Used with `@target_os()` intrinsic for platform-specific code.
-pub static OS_ENUM: BuiltinEnumDef = BuiltinEnumDef {
-    name: "Os",
-    variants: &["Linux", "Macos", "Windows", "Freestanding", "Wasi"],
-};
-
-/// The built-in TypeKind enum for compile-time type reflection.
-///
-/// Variants represent different type classifications, used by `@type_info`.
-///
-/// Variants:
-/// - `Struct` (index 0): Struct types
-/// - `Enum` (index 1): Enum types
-/// - `Int` (index 2): Integer types (i8..i64, u8..u64)
-/// - `Bool` (index 3): Boolean type
-/// - `Unit` (index 4): Unit type
-/// - `Never` (index 5): Never type
-/// - `Array` (index 6): Fixed-size array types
-pub static TYPEKIND_ENUM: BuiltinEnumDef = BuiltinEnumDef {
-    name: "TypeKind",
-    variants: &["Struct", "Enum", "Int", "Bool", "Unit", "Never", "Array"],
-};
-
-/// The built-in `Ownership` enum classifying a type's ownership posture.
-///
-/// Variants (per ADR-0008):
-/// - `Copy` (index 0): values may be implicitly duplicated by bitwise copy
-/// - `Affine` (index 1): values may be used at most once and are implicitly
-///   dropped if not consumed (the default for user-defined structs)
-/// - `Linear` (index 2): values must be explicitly consumed; implicit drop is
-///   a compile-time error
-///
-/// Returned by the `@ownership(T)` intrinsic.
-pub static OWNERSHIP_ENUM: BuiltinEnumDef = BuiltinEnumDef {
-    name: "Ownership",
-    variants: &["Copy", "Affine", "Linear"],
-};
-
-/// All built-in enums.
-///
-/// The compiler iterates over this to inject synthetic enums before
-/// processing user code.
-pub static BUILTIN_ENUMS: &[&BuiltinEnumDef] =
-    &[&ARCH_ENUM, &OS_ENUM, &TYPEKIND_ENUM, &OWNERSHIP_ENUM];
-
-/// Look up a built-in enum by name.
-pub fn get_builtin_enum(name: &str) -> Option<&'static BuiltinEnumDef> {
-    BUILTIN_ENUMS.iter().find(|e| e.name == name).copied()
-}
-
-/// Check if a name is reserved for a built-in enum.
-pub fn is_reserved_enum_name(name: &str) -> bool {
-    BUILTIN_ENUMS.iter().any(|e| e.name == name)
-}
+/// Names of the four prelude-resident built-in enums. Kept here only so
+/// other crates have a single source of truth when they need to refer to
+/// the names (e.g. for documentation generation).
+pub static BUILTIN_ENUM_NAMES: &[&str] = &["Arch", "Os", "TypeKind", "Ownership"];
 
 /// Look up a built-in type by name.
 pub fn get_builtin_type(name: &str) -> Option<&'static BuiltinTypeDef> {
@@ -867,161 +783,137 @@ pub fn is_reserved_type_constructor_name(name: &str) -> bool {
 }
 
 // ============================================================================
-// Built-in Interfaces (compiler-recognized)
+// Built-in Interfaces (Drop, Copy, Clone, Handle)
 // ============================================================================
+//
+// ADR-0078 Phase 2: the interface declarations live in
+// `prelude/interfaces.gruel`. The compiler still recognizes them by
+// interned name (the hardcoded behaviors — drop glue, @derive(Copy/Clone)
+// synthesis, Handle linearity carve-out — key off these names).
 
-/// A type slot inside a built-in interface method signature.
-///
-/// Mirrors the air-side `IfaceTy`, but stays free of any dependency on the
-/// type system so this crate can describe the signatures declaratively. Sema
-/// translates these into `IfaceTy` when injecting the interfaces.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltinIfaceTy {
-    /// `Self` — substituted with the candidate type at conformance time.
-    SelfType,
-    /// Unit type `()`.
-    Unit,
+/// Names of the four compiler-recognized built-in interfaces. Kept here only
+/// so the doc generator can point at `prelude/interfaces.gruel` for
+/// canonical declarations. Do not use this for anything load-bearing — the
+/// compiler resolves these names through the prelude scope.
+pub static BUILTIN_INTERFACE_NAMES: &[&str] = &["Drop", "Copy", "Clone", "Handle"];
+
+// ============================================================================
+// Lang items (ADR-0079)
+// ============================================================================
+//
+// `@lang("name")` directives in the prelude bind the compiler's built-in
+// behaviors (drop glue, copy/clone synthesis, operator desugaring, …) to
+// specific interface or enum declarations. The closed list here is the
+// only set of names the compiler recognizes — unknown lang-item names
+// produce a compile error at the directive site. Stdlib renames the
+// underlying type freely (e.g. `Clone` → `Dup`) so long as the renamed
+// declaration carries the matching `@lang(...)` tag.
+
+/// Lang-item name applied to an interface declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LangInterfaceItem {
+    /// `Drop` — values may carry custom destructors.
+    Drop,
+    /// `Copy` — values are bitwise-copyable at use sites.
+    Copy,
+    /// `Clone` — values support a `clone(self)` method producing an
+    /// owned duplicate.
+    Clone,
+    /// `Handle` — wraps a non-copyable resource that's still allowed to
+    /// move out of `let` bindings (linear-type carve-out).
+    Handle,
+    /// `Eq` — drives `==` operator desugaring.
+    OpEq,
+    /// `Ord` — drives `<`/`<=`/`>`/`>=` operator desugaring.
+    OpCmp,
 }
 
-impl BuiltinIfaceTy {
-    fn name(self, self_ty: &str) -> String {
+/// Lang-item name applied to an enum declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LangEnumItem {
+    /// `Ordering` — return type of `Ord::cmp`; variants drive ordering
+    /// operator desugaring.
+    Ordering,
+}
+
+impl LangInterfaceItem {
+    /// The string the prelude uses inside `@lang("…")` for this item.
+    pub fn name(self) -> &'static str {
         match self {
-            BuiltinIfaceTy::SelfType => self_ty.to_string(),
-            BuiltinIfaceTy::Unit => "()".to_string(),
+            LangInterfaceItem::Drop => "drop",
+            LangInterfaceItem::Copy => "copy",
+            LangInterfaceItem::Clone => "clone",
+            LangInterfaceItem::Handle => "handle",
+            LangInterfaceItem::OpEq => "op_eq",
+            LangInterfaceItem::OpCmp => "op_cmp",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "drop" => LangInterfaceItem::Drop,
+            "copy" => LangInterfaceItem::Copy,
+            "clone" => LangInterfaceItem::Clone,
+            "handle" => LangInterfaceItem::Handle,
+            "op_eq" => LangInterfaceItem::OpEq,
+            "op_cmp" => LangInterfaceItem::OpCmp,
+            _ => return None,
+        })
+    }
+
+    pub fn all() -> &'static [LangInterfaceItem] {
+        use LangInterfaceItem::*;
+        &[Drop, Copy, Clone, Handle, OpEq, OpCmp]
+    }
+}
+
+impl LangEnumItem {
+    pub fn name(self) -> &'static str {
+        match self {
+            LangEnumItem::Ordering => "ordering",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "ordering" => LangEnumItem::Ordering,
+            _ => return None,
+        })
+    }
+
+    pub fn all() -> &'static [LangEnumItem] {
+        &[LangEnumItem::Ordering]
+    }
+}
+
+/// Classification of a lang-item name string. Returns `None` for
+/// unrecognized strings.
+pub enum LangItemKind {
+    Interface(LangInterfaceItem),
+    Enum(LangEnumItem),
+}
+
+impl LangItemKind {
+    pub fn from_str(s: &str) -> Option<Self> {
+        if let Some(i) = LangInterfaceItem::from_str(s) {
+            Some(LangItemKind::Interface(i))
+        } else {
+            LangEnumItem::from_str(s).map(LangItemKind::Enum)
         }
     }
 }
 
-/// A required method signature inside a built-in interface.
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinInterfaceMethod {
-    /// Method name (e.g., "drop").
-    pub name: &'static str,
-    /// How the receiver is passed.
-    pub receiver_mode: ReceiverMode,
-    /// Parameter slots after the receiver.
-    pub param_types: &'static [BuiltinIfaceTy],
-    /// Return slot.
-    pub return_type: BuiltinIfaceTy,
-}
-
-/// Definition of a compiler-recognized interface (e.g., `Drop`, `Copy`).
-///
-/// These interfaces are injected before user code is processed so their names
-/// are always resolvable. Conformance is checked structurally — a type
-/// satisfies the interface when it provides matching methods.
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinInterfaceDef {
-    /// Interface name as it appears in source code (e.g., "Drop").
-    pub name: &'static str,
-    /// Required method signatures, in declaration order.
-    pub methods: &'static [BuiltinInterfaceMethod],
-    /// One-line description for the generated reference page.
-    pub description: &'static str,
-    /// How a type opts in to this interface. Surfaced in the generated
-    /// reference so the interface and its conformance shortcut stay
-    /// documented together.
-    pub conformance: BuiltinInterfaceConformance,
-}
-
-/// How a type comes to satisfy a built-in interface.
-#[derive(Debug, Clone, Copy)]
-pub enum BuiltinInterfaceConformance {
-    /// Conformance is triggered by the presence of a method matching the
-    /// interface signature. No `@derive` directive is recognized.
-    /// The string is a human-readable summary (e.g., "defining `fn drop(self)`").
-    MethodPresence(&'static str),
-    /// Conformance is requested via a compiler-recognized
-    /// `@derive(Name)` directive that the compiler short-circuits
-    /// (no user `derive` declaration required). The string describes
-    /// what the directive does (e.g., "validates all fields are `Copy`").
-    CompilerDerive {
-        directive: &'static str,
-        synthesis: &'static str,
-    },
-}
-
-/// `Drop` — types with cleanup logic. ADR-0059.
-pub static DROP_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
-    name: "Drop",
-    methods: &[BuiltinInterfaceMethod {
-        name: "drop",
-        receiver_mode: ReceiverMode::ByValue,
-        param_types: &[],
-        return_type: BuiltinIfaceTy::Unit,
-    }],
-    description: "Types with custom cleanup logic that runs when the value goes out of scope (ADR-0059).",
-    conformance: BuiltinInterfaceConformance::MethodPresence(
-        "Defining `fn drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.",
-    ),
-};
-
-/// `Copy` — types that may be implicitly duplicated. ADR-0059.
-pub static COPY_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
-    name: "Copy",
-    methods: &[BuiltinInterfaceMethod {
-        name: "copy",
-        receiver_mode: ReceiverMode::ByRef,
-        param_types: &[],
-        return_type: BuiltinIfaceTy::SelfType,
-    }],
-    description: "Types that may be implicitly duplicated by bitwise copy on use (ADR-0059).",
-    conformance: BuiltinInterfaceConformance::CompilerDerive {
-        directive: "@derive(Copy)",
-        synthesis: "Validates that every field is `Copy` and tags the type as Copy. The `copy` method itself is never user-written; the compiler emits a bitwise copy. Mutually exclusive with `Drop`.",
-    },
-};
-
-/// `Clone` — types that may be explicitly duplicated. ADR-0065.
-pub static CLONE_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
-    name: "Clone",
-    methods: &[BuiltinInterfaceMethod {
-        name: "clone",
-        receiver_mode: ReceiverMode::ByRef,
-        param_types: &[],
-        return_type: BuiltinIfaceTy::SelfType,
-    }],
-    description: "Types that may be explicitly duplicated via `.clone()`. All `Copy` types auto-conform (ADR-0065).",
-    conformance: BuiltinInterfaceConformance::CompilerDerive {
-        directive: "@derive(Clone)",
-        synthesis: "Synthesizes a `clone` method that recursively calls `clone` on every field (struct) or variant payload (enum). Synthesis fails if any field is not `Clone`. Rejected on `linear` types.",
-    },
-};
-
-/// `Handle` — types that may be explicitly duplicated by call. ADR-0075.
-pub static HANDLE_INTERFACE: BuiltinInterfaceDef = BuiltinInterfaceDef {
-    name: "Handle",
-    methods: &[BuiltinInterfaceMethod {
-        name: "handle",
-        receiver_mode: ReceiverMode::ByRef,
-        param_types: &[],
-        return_type: BuiltinIfaceTy::SelfType,
-    }],
-    description: "Types that may be explicitly duplicated via `.handle()`, typically because the duplication has visible cost (refcount bumps, transaction forks). Unlike `Clone`, `Handle` is permitted on `linear` types (ADR-0075).",
-    conformance: BuiltinInterfaceConformance::MethodPresence(
-        "Defining `fn handle(borrow self) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.",
-    ),
-};
-
-/// All compiler-recognized interfaces.
-///
-/// `gruel-air` iterates over this slice in `inject_builtin_interfaces` to
-/// register the names before user code is parsed.
-pub static BUILTIN_INTERFACES: &[&BuiltinInterfaceDef] = &[
-    &DROP_INTERFACE,
-    &COPY_INTERFACE,
-    &CLONE_INTERFACE,
-    &HANDLE_INTERFACE,
-];
-
-/// Look up a built-in interface by name.
-pub fn get_builtin_interface(name: &str) -> Option<&'static BuiltinInterfaceDef> {
-    BUILTIN_INTERFACES.iter().find(|i| i.name == name).copied()
-}
-
-/// Check if a name is reserved for a built-in interface.
-pub fn is_reserved_interface_name(name: &str) -> bool {
-    BUILTIN_INTERFACES.iter().any(|i| i.name == name)
+/// Closed list of lang-item names recognized by the compiler. Driving
+/// data for diagnostics — the actual lookup goes through
+/// `LangInterfaceItem::from_str` / `LangEnumItem::from_str`.
+pub fn all_lang_item_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = LangInterfaceItem::all()
+        .iter()
+        .map(|i| i.name())
+        .chain(LangEnumItem::all().iter().map(|e| e.name()))
+        .collect();
+    names.sort();
+    names
 }
 
 // ============================================================================
@@ -1236,40 +1128,23 @@ pub fn render_reference_markdown() -> String {
     out.push('\n');
 
     out.push_str("### Enums\n\n");
+    out.push_str("Platform-reflection enums (`Arch`, `Os`) live in `prelude/target.gruel`; type-reflection enums (`TypeKind`, `Ownership`) live in `prelude/type_info.gruel`. The corresponding intrinsics produce values of these types by name lookup.\n\n");
     out.push_str("| Name | Variants |\n");
     out.push_str("|---|---|\n");
-    for e in BUILTIN_ENUMS {
-        let variants = e
-            .variants
-            .iter()
-            .map(|v| format!("`{}`", v))
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push_str(&format!("| `{}` | {} |\n", e.name, variants));
-    }
+    out.push_str("| `Arch` | `X86_64`, `Aarch64`, `X86`, `Arm`, `Riscv32`, `Riscv64`, `Wasm32`, `Wasm64` |\n");
+    out.push_str("| `Os` | `Linux`, `Macos`, `Windows`, `Freestanding`, `Wasi` |\n");
+    out.push_str("| `TypeKind` | `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array` |\n");
+    out.push_str("| `Ownership` | `Copy`, `Affine`, `Linear` |\n");
     out.push('\n');
 
     out.push_str("### Interfaces\n\n");
-    out.push_str("| Name | Methods | Conformance |\n");
+    out.push_str("Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Copy)` / `@derive(Clone)` synthesis, `Handle` linearity carve-out).\n\n");
+    out.push_str("| Name | Method | Conformance |\n");
     out.push_str("|---|---|---|\n");
-    for i in BUILTIN_INTERFACES {
-        let methods = i
-            .methods
-            .iter()
-            .map(|m| format!("`{}`", m.name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let conformance = match i.conformance {
-            BuiltinInterfaceConformance::MethodPresence(_) => "method presence".to_string(),
-            BuiltinInterfaceConformance::CompilerDerive { directive, .. } => {
-                format!("`{}`", directive)
-            }
-        };
-        out.push_str(&format!(
-            "| `{}` | {} | {} |\n",
-            i.name, methods, conformance
-        ));
-    }
+    out.push_str("| `Drop` | `fn drop(self)` | method presence |\n");
+    out.push_str("| `Copy` | `fn copy(self: Ref(Self)) -> Self` | `@derive(Copy)` |\n");
+    out.push_str("| `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |\n");
+    out.push_str("| `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |\n");
     out.push('\n');
 
     // ---- Types in detail ----
@@ -1359,65 +1234,72 @@ pub fn render_reference_markdown() -> String {
     }
 
     // ---- Enums in detail ----
+    //
+    // ADR-0078 Phase 3: `Arch`/`Os` live in `prelude/target.gruel`,
+    // `TypeKind`/`Ownership` in `prelude/type_info.gruel`. Variant
+    // order in this section matches the prelude files.
     out.push_str("## Enums\n\n");
-    out.push_str("Built-in enums are injected as synthetic enum types. They are used by reflection and platform-detection intrinsics.\n\n");
-    for e in BUILTIN_ENUMS {
-        out.push_str(&format!("### `{}`\n\n", e.name));
+    out.push_str("Platform-reflection (`Arch`, `Os`) and type-reflection (`TypeKind`, `Ownership`) enums. Declarations live in `prelude/target.gruel` and `prelude/type_info.gruel` respectively; the corresponding intrinsics (`@target_arch`, `@target_os`, `@type_info`, `@ownership`) materialize values of these types.\n\n");
+
+    for (name, variants) in [
+        (
+            "Arch",
+            &[
+                "X86_64", "Aarch64", "X86", "Arm", "Riscv32", "Riscv64", "Wasm32", "Wasm64",
+            ][..],
+        ),
+        (
+            "Os",
+            &["Linux", "Macos", "Windows", "Freestanding", "Wasi"][..],
+        ),
+        (
+            "TypeKind",
+            &["Struct", "Enum", "Int", "Bool", "Unit", "Never", "Array"][..],
+        ),
+        ("Ownership", &["Copy", "Affine", "Linear"][..]),
+    ] {
+        out.push_str(&format!("### `{}`\n\n", name));
         out.push_str("| Index | Variant |\n");
         out.push_str("|---|---|\n");
-        for (i, v) in e.variants.iter().enumerate() {
-            out.push_str(&format!("| {} | `{}::{}` |\n", i, e.name, v));
+        for (i, v) in variants.iter().enumerate() {
+            out.push_str(&format!("| {} | `{}::{}` |\n", i, name, v));
         }
         out.push('\n');
     }
 
     // ---- Interfaces in detail ----
+    //
+    // ADR-0078 Phase 2: declarations live in `prelude/interfaces.gruel`.
+    // Names listed here as a directory; canonical signatures and method
+    // bodies are in the prelude file.
     out.push_str("## Interfaces\n\n");
-    out.push_str("Built-in interfaces are injected before user code is processed so their names are always resolvable. Conformance is structural — a type satisfies the interface when it provides matching methods.\n\n");
-    for i in BUILTIN_INTERFACES {
-        out.push_str(&format!("### `{}`\n\n", i.name));
-        out.push_str(&format!("{}\n\n", i.description));
-        out.push_str("**Required methods:**\n\n");
-        for m in i.methods {
-            out.push_str(&format!("- `{}`\n", interface_method_signature(m, "Self")));
-        }
-        out.push('\n');
-        match i.conformance {
-            BuiltinInterfaceConformance::MethodPresence(notes) => {
-                out.push_str("**Conformance:** structural (no derive). ");
-                out.push_str(notes);
-                out.push_str("\n\n");
-            }
-            BuiltinInterfaceConformance::CompilerDerive {
-                directive,
-                synthesis,
-            } => {
-                out.push_str(&format!("**Conformance derive:** `{}` ", directive));
-                out.push_str("(compiler-recognized; no user `derive` declaration required). ");
-                out.push_str(synthesis);
-                out.push_str("\n\n");
-            }
-        }
-    }
+    out.push_str("Compiler-recognized interfaces. Declarations live in `prelude/interfaces.gruel`; the compiler keys off the interface names for hardcoded behaviors. Conformance is structural — a type satisfies the interface when it provides matching methods.\n\n");
+
+    out.push_str("### `Drop`\n\n");
+    out.push_str("Types with custom cleanup logic that runs when the value goes out of scope (ADR-0059).\n\n");
+    out.push_str("**Required methods:**\n\n");
+    out.push_str("- `fn drop(self)`\n\n");
+    out.push_str("**Conformance:** structural (no derive). Defining `fn drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.\n\n");
+
+    out.push_str("### `Copy`\n\n");
+    out.push_str("Types that may be implicitly duplicated by bitwise copy on use (ADR-0059).\n\n");
+    out.push_str("**Required methods:**\n\n");
+    out.push_str("- `fn copy(self: Ref(Self)) -> Self`\n\n");
+    out.push_str("**Conformance derive:** `@derive(Copy)` (compiler-recognized; no user `derive` declaration required). Validates that every field is `Copy` and tags the type as Copy. The `copy` method itself is never user-written; the compiler emits a bitwise copy. Mutually exclusive with `Drop`.\n\n");
+
+    out.push_str("### `Clone`\n\n");
+    out.push_str("Types that may be explicitly duplicated via `.clone()`. All `Copy` types auto-conform (ADR-0065).\n\n");
+    out.push_str("**Required methods:**\n\n");
+    out.push_str("- `fn clone(self: Ref(Self)) -> Self`\n\n");
+    out.push_str("**Conformance derive:** `@derive(Clone)` (compiler-recognized; no user `derive` declaration required). Synthesizes a `clone` method that recursively calls `clone` on every field (struct) or variant payload (enum). Synthesis fails if any field is not `Clone`. Rejected on `linear` types.\n\n");
+
+    out.push_str("### `Handle`\n\n");
+    out.push_str("Types that may be explicitly duplicated via `.handle()`, typically because the duplication has visible cost (refcount bumps, transaction forks). Unlike `Clone`, `Handle` is permitted on `linear` types (ADR-0075).\n\n");
+    out.push_str("**Required methods:**\n\n");
+    out.push_str("- `fn handle(self: Ref(Self)) -> Self`\n\n");
+    out.push_str("**Conformance:** structural (no derive). Defining `fn handle(self: Ref(Self)) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.\n\n");
 
     out
-}
-
-fn interface_method_signature(m: &BuiltinInterfaceMethod, self_ty: &str) -> String {
-    let mut s = String::from("fn ");
-    s.push_str(m.name);
-    s.push('(');
-    s.push_str(m.receiver_mode.signature());
-    for (i, p) in m.param_types.iter().enumerate() {
-        s.push_str(", ");
-        s.push_str(&format!("arg{}: {}", i, p.name(self_ty)));
-    }
-    s.push(')');
-    if !matches!(m.return_type, BuiltinIfaceTy::Unit) {
-        s.push_str(" -> ");
-        s.push_str(&m.return_type.name(self_ty));
-    }
-    s
 }
 
 #[cfg(test)]
@@ -1517,56 +1399,16 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // Built-in Enum Tests
-    // ========================================================================
-
+    // ADR-0078 Phase 3: built-in enum declarations now live in
+    // `prelude/target.gruel` (`Arch`, `Os`) and `prelude/type_info.gruel`
+    // (`TypeKind`, `Ownership`). The compiler-side `arch_variant_index`
+    // / `os_variant_index` mappers (in `gruel-air/src/sema/analysis.rs`)
+    // encode the variant order; their unit tests in that crate cover
+    // the mapping. The breadcrumb static below lets other crates
+    // reference the names without re-typing them.
     #[test]
-    fn test_arch_enum() {
-        assert_eq!(ARCH_ENUM.name, "Arch");
-        // Indices are stable: existing programs depend on X86_64=0,
-        // Aarch64=1. New variants are appended.
-        assert_eq!(ARCH_ENUM.variants[0], "X86_64");
-        assert_eq!(ARCH_ENUM.variants[1], "Aarch64");
-        assert_eq!(ARCH_ENUM.variants[2], "X86");
-        assert_eq!(ARCH_ENUM.variants[3], "Arm");
-        assert_eq!(ARCH_ENUM.variants[4], "Riscv32");
-        assert_eq!(ARCH_ENUM.variants[5], "Riscv64");
-        assert_eq!(ARCH_ENUM.variants[6], "Wasm32");
-        assert_eq!(ARCH_ENUM.variants[7], "Wasm64");
-    }
-
-    #[test]
-    fn test_os_enum() {
-        assert_eq!(OS_ENUM.name, "Os");
-        // Indices are stable: existing programs depend on Linux=0,
-        // Macos=1. New variants are appended.
-        assert_eq!(OS_ENUM.variants[0], "Linux");
-        assert_eq!(OS_ENUM.variants[1], "Macos");
-        assert_eq!(OS_ENUM.variants[2], "Windows");
-        assert_eq!(OS_ENUM.variants[3], "Freestanding");
-        assert_eq!(OS_ENUM.variants[4], "Wasi");
-    }
-
-    #[test]
-    fn test_get_builtin_enum() {
-        assert!(get_builtin_enum("Arch").is_some());
-        assert!(get_builtin_enum("Os").is_some());
-        assert!(get_builtin_enum("Target").is_none());
-    }
-
-    #[test]
-    fn test_is_reserved_enum_name() {
-        assert!(is_reserved_enum_name("Arch"));
-        assert!(is_reserved_enum_name("Os"));
-        assert!(is_reserved_enum_name("TypeKind"));
-        assert!(is_reserved_enum_name("Ownership"));
-        assert!(!is_reserved_enum_name("MyEnum"));
-    }
-
-    #[test]
-    fn test_builtin_enums_count() {
-        assert_eq!(BUILTIN_ENUMS.len(), 4);
+    fn test_builtin_enum_names() {
+        assert_eq!(BUILTIN_ENUM_NAMES, &["Arch", "Os", "TypeKind", "Ownership"]);
     }
 
     // ========================================================================

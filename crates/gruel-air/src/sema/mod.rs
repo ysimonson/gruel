@@ -45,6 +45,7 @@ mod imports;
 mod inference_ctx;
 mod info;
 mod known_symbols;
+mod lang_items;
 mod module_path;
 mod output;
 mod sema_ctx_builder;
@@ -59,6 +60,7 @@ pub use gather::GatherOutput;
 pub use inference_ctx::InferenceContext;
 pub use info::{AnonMethodSig, ConstInfo, DeriveBinding, DeriveInfo, FunctionInfo, MethodInfo};
 pub use known_symbols::KnownSymbols;
+pub use lang_items::LangItems;
 pub use output::{AnalyzedFunction, InterfaceVtables, SemaOutput};
 
 use rustc_hash::FxHashMap as HashMap;
@@ -133,6 +135,15 @@ pub struct Sema<'a> {
     pub(crate) builtin_typekind_id: Option<EnumId>,
     /// EnumId of the synthetic Ownership enum (for @ownership intrinsic).
     pub(crate) builtin_ownership_id: Option<EnumId>,
+    /// EnumId of the prelude `Ordering` enum (ADR-0078 Phase 4: target of
+    /// `Ord::cmp`; analyzed at every `<`/`<=`/`>`/`>=` desugaring on a
+    /// type that conforms to `Ord`).
+    pub(crate) builtin_ordering_id: Option<EnumId>,
+    /// ADR-0079: lang-item registry. Populated from `@lang("…")`
+    /// directives on prelude declarations; the compiler keys
+    /// drop/copy/clone/handle/Eq/Ord/Ordering behaviors off these IDs
+    /// instead of the historical name-string match.
+    pub(crate) lang_items: LangItems,
     /// Pre-interned known symbols for fast comparison.
     pub(crate) known: KnownSymbols,
     /// Type intern pool for unified type representation (ADR-0024 Phase 1).
@@ -241,6 +252,8 @@ impl<'a> Sema<'a> {
             builtin_os_id: None,
             builtin_typekind_id: None,
             builtin_ownership_id: None,
+            builtin_ordering_id: None,
+            lang_items: LangItems::default(),
             known: KnownSymbols::new(interner),
             type_pool,
             module_registry: crate::sema_context::ModuleRegistry::new(),
@@ -292,6 +305,12 @@ impl<'a> Sema<'a> {
         // gathering — ADR-0056).
         self.register_type_names().map_err(CompileErrors::from)?;
         self.resolve_declarations().map_err(CompileErrors::from)?;
+
+        // ADR-0078 Phase 3: cache EnumIds for the prelude-resident builtin
+        // enums (Arch, Os, TypeKind, Ownership) now that the prelude has
+        // been resolved. Intrinsics that produce values of these types
+        // read `builtin_arch_id` etc. directly.
+        self.cache_builtin_enum_ids();
 
         // Phase 2.5: Evaluate const initializers (e.g., const x = @import(...))
         self.evaluate_const_initializers()

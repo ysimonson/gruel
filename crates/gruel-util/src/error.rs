@@ -197,6 +197,11 @@ impl ErrorCode {
     pub const COMPTIME_USER_ERROR: Self = Self(1202);
 
     // ========================================================================
+    // Lang items (E1300-E1399) - ADR-0079
+    // ========================================================================
+    pub const INVALID_LANG_ITEM: Self = Self(1300);
+
+    // ========================================================================
     // Internal compiler errors (E9000-E9999)
     // ========================================================================
     pub const INTERNAL_ERROR: Self = Self(9000);
@@ -253,10 +258,12 @@ impl fmt::Display for ErrorCode {
 //
 // ## Current Status
 //
-// As of 2026-01-11:
+// As of 2026-05-05 (post-ADR-0079):
 // - ErrorKind size: 56 bytes
-// - Boxed variants: 4 (MissingFields, CopyStructNonCopyField,
-//   IntrinsicTypeMismatch, FieldWrongOrder)
+// - Boxed variants: 3 (MissingFields, IntrinsicTypeMismatch,
+//   FieldWrongOrder). The previous `CopyStructNonCopyField` was
+//   retired when the field-Copy check moved into the prelude
+//   `derive Copy` body via `comptime if` + `@compile_error`.
 // - All boxed variants contain 3+ Strings or String + Vec
 // - Policy is consistently applied
 
@@ -265,14 +272,6 @@ impl fmt::Display for ErrorCode {
 pub struct MissingFieldsError {
     pub struct_name: String,
     pub missing_fields: Vec<String>,
-}
-
-/// Payload for `ErrorKind::CopyStructNonCopyField`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CopyStructNonCopyFieldError {
-    pub struct_name: String,
-    pub field_name: String,
-    pub field_type: String,
 }
 
 /// Payload for `ErrorKind::CloneStructNonCopyField` (ADR-0065).
@@ -905,9 +904,6 @@ pub enum ErrorKind {
     /// Anonymous enum with no variants is not allowed
     #[error("anonymous enum must have at least one variant")]
     EmptyAnonEnum,
-    /// @derive(Copy) struct contains a field with non-Copy type
-    #[error("@derive(Copy) struct '{struct_name}' has field '{field_name}' with non-Copy type '{field_type}'", struct_name = .0.struct_name, field_name = .0.field_name, field_type = .0.field_type)]
-    CopyStructNonCopyField(Box<CopyStructNonCopyFieldError>),
     /// User-defined type collides with a built-in type name
     #[error("cannot define type `{type_name}`: name is reserved for built-in type")]
     ReservedTypeName { type_name: String },
@@ -1186,6 +1182,11 @@ pub enum ErrorKind {
     #[error("{0}")]
     ComptimeUserError(String),
 
+    /// `@lang(...)` problem (ADR-0079): unknown lang-item name, wrong
+    /// argument shape, duplicate binding, or use outside the prelude.
+    #[error("invalid `@lang` directive: {reason}")]
+    InvalidLangItem { reason: String },
+
     // Internal compiler errors (bugs in the compiler itself)
     #[error("internal compiler error: {0}")]
     InternalError(String),
@@ -1238,7 +1239,6 @@ impl ErrorKind {
             ErrorKind::DuplicateField { .. } => ErrorCode::DUPLICATE_FIELD,
             ErrorKind::EmptyStruct => ErrorCode::EMPTY_STRUCT,
             ErrorKind::EmptyAnonEnum => ErrorCode::EMPTY_STRUCT, // reuse code
-            ErrorKind::CopyStructNonCopyField(_) => ErrorCode::COPY_STRUCT_NON_COPY_FIELD,
             ErrorKind::ReservedTypeName { .. } => ErrorCode::RESERVED_TYPE_NAME,
             ErrorKind::DuplicateTypeDefinition { .. } => ErrorCode::DUPLICATE_TYPE_DEFINITION,
             ErrorKind::LinearValueNotConsumed(_) => ErrorCode::LINEAR_VALUE_NOT_CONSUMED,
@@ -1329,6 +1329,7 @@ impl ErrorKind {
             ErrorKind::ComptimeEvaluationFailed { .. } => ErrorCode::COMPTIME_EVALUATION_FAILED,
             ErrorKind::ComptimeArgNotConst { .. } => ErrorCode::COMPTIME_ARG_NOT_CONST,
             ErrorKind::ComptimeUserError(_) => ErrorCode::COMPTIME_USER_ERROR,
+            ErrorKind::InvalidLangItem { .. } => ErrorCode::INVALID_LANG_ITEM,
 
             // Internal compiler errors (E9000-E9999)
             ErrorKind::InternalError(_) => ErrorCode::INTERNAL_ERROR,
@@ -2375,10 +2376,6 @@ mod tests {
         println!(
             "MissingFieldsError: {} bytes",
             size_of::<MissingFieldsError>()
-        );
-        println!(
-            "CopyStructNonCopyFieldError: {} bytes",
-            size_of::<CopyStructNonCopyFieldError>()
         );
         println!(
             "IntrinsicTypeMismatchError: {} bytes",

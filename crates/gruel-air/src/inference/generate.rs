@@ -970,6 +970,30 @@ impl<'a> ConstraintGenerator<'a> {
                         let vec_id = self.type_pool.intern_vec_from_type(Type::U8);
                         InferType::Concrete(Type::new_vec(vec_id))
                     }
+                    // ADR-0079 Phase 2b: `@field_set` is a unit-yielding side
+                    // effect on an uninit handle. `@finalize` returns the
+                    // host type — but at HM time we don't yet know the
+                    // handle's target type, so a fresh var lets sema
+                    // resolve it from the side-table. `@variant_field`
+                    // similarly resolves only with the handle's variant.
+                    Some(IntrinsicId::FieldSet) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::UNIT)
+                    }
+                    Some(IntrinsicId::Finalize) | Some(IntrinsicId::VariantField) => {
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
+                    // `@variant_uninit(T, tag)` and `@uninit(T)` only
+                    // appear in `let h = …` position, where sema captures
+                    // them via the side-table; the `Alloc` itself yields
+                    // unit. Use a fresh var so escapes (currently
+                    // diagnosed in sema) don't get a phantom unit
+                    // constraint that confuses error messages.
+                    Some(IntrinsicId::VariantUninit) => {
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
                     // Other intrinsics (@dbg, @assert, @test_preview_gate, @import)
                     // and any unknown name return Unit. Sema handles the unknown case
                     // with a proper diagnostic; we just pick a coherent type here.
@@ -1006,6 +1030,11 @@ impl<'a> ConstraintGenerator<'a> {
                             InferType::Concrete(Type::ERROR)
                         }
                     }
+                    // ADR-0079 Phase 2b: `@uninit(T)` only appears in
+                    // `let h = …` position, where sema captures it via the
+                    // side-table. Use a fresh var so the alloc's
+                    // surrounding context resolves coherently.
+                    Some(IntrinsicId::Uninit) => InferType::Var(self.fresh_var()),
                     // Fallback for unknown names.
                     _ => InferType::Concrete(Type::I32),
                 }
@@ -1034,11 +1063,18 @@ impl<'a> ConstraintGenerator<'a> {
                 last_ty
             }
 
-            // Branch (if/else)
+            // Branch (if/else). ADR-0079 follow-up: HM walks both
+            // branches even for `comptime if`, since we don't yet
+            // know the comptime-cond value here. Branches in our
+            // use case (struct vs enum derive bodies) are
+            // HM-permissive (uninit/finalize/field_set return fresh
+            // vars), so this doesn't constrain. Sema does the
+            // actual branch elision when it has the resolved type.
             InstData::Branch {
                 cond,
                 then_block,
                 else_block,
+                is_comptime: _,
             } => {
                 let cond_info = self.generate(*cond, ctx);
                 self.add_constraint(Constraint::equal(
@@ -2077,6 +2113,13 @@ impl<'a> ConstraintGenerator<'a> {
                 let var = self.fresh_var();
                 InferType::Var(var)
             }
+            // ADR-0079 Phase 3: an unroll-arm template constrains
+            // the scrutinee to whatever type the post-expansion
+            // arms imply; inference treats it as a fresh var here.
+            gruel_rir::RirPattern::ComptimeUnrollArm { .. } => {
+                let var = self.fresh_var();
+                InferType::Var(var)
+            }
         }
     }
 
@@ -2532,6 +2575,7 @@ mod tests {
                 cond,
                 then_block: then_val,
                 else_block: Some(else_val),
+                is_comptime: false,
             },
             span: Span::new(0, 25),
         });

@@ -906,6 +906,23 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
 
     all_warnings.sort_by_key(|w| w.span().map(|s| s.start));
 
+    eprintln!(
+        "DEBUG: pre-specialize functions ({} items):",
+        functions.len()
+    );
+    for f in &functions {
+        eprintln!("  - {}", f.name);
+    }
+    eprintln!("DEBUG: sema.methods has {} entries", sema.methods.len());
+    for ((sid, m), info) in sema.methods.iter() {
+        let sname = sema.type_pool.struct_def(*sid).name.clone();
+        let mname = sema.interner.resolve(m).to_string();
+        eprintln!(
+            "  - method ({}.{}) is_generic={} body={:?}",
+            sname, mname, info.is_generic, info.body
+        );
+    }
+
     let mut output = SemaOutput {
         functions,
         strings: global_strings,
@@ -921,6 +938,13 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     // and create specialized function bodies
     if let Err(e) = crate::specialize::specialize(&mut output, sema, &infer_ctx, sema.interner) {
         errors.push(e);
+    }
+    eprintln!(
+        "DEBUG: post-specialize functions ({} items):",
+        output.functions.len()
+    );
+    for f in &output.functions {
+        eprintln!("  - {}", f.name);
     }
 
     // Surface any errors raised during anonymous-host derive expansion
@@ -1072,20 +1096,36 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
             }
             analyzed_methods.insert((struct_id, method_name));
 
-            // Look up the method info
-            let method_info = match sema.methods.get(&(struct_id, method_name)) {
-                Some(info) => *info,
-                None => continue,
-            };
+            // Look up the method info — first in struct methods, then in
+            // enum methods. Enum methods are recorded with the same
+            // `(StructId, Spur)` key shape (StructId reusing the EnumId's
+            // raw u32) so the work queue can dispatch them uniformly.
+            let (method_info, is_enum_method) =
+                if let Some(info) = sema.methods.get(&(struct_id, method_name)) {
+                    (*info, false)
+                } else if let Some(info) = sema
+                    .enum_methods
+                    .get(&(crate::types::EnumId(struct_id.0), method_name))
+                {
+                    (*info, true)
+                } else {
+                    continue;
+                };
 
             // Method-level generic: defer body analysis to specialization.
             if method_info.is_generic {
                 continue;
             }
 
-            // Get the struct definition to find its name for impl block lookup
-            let struct_def = sema.type_pool.struct_def(struct_id);
-            let type_name_str = struct_def.name.clone();
+            // Get the type definition to find its name for impl block lookup
+            let type_name_str = if is_enum_method {
+                sema.type_pool
+                    .enum_def(crate::types::EnumId(struct_id.0))
+                    .name
+                    .clone()
+            } else {
+                sema.type_pool.struct_def(struct_id).name.clone()
+            };
             let type_name_sym = sema.interner.get_or_intern(&type_name_str);
             let method_name_str = sema.interner.resolve(&method_name).to_string();
 
@@ -1180,6 +1220,89 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 continue;
             }
 
+            // ADR-0078: enum methods (named enums declared in source — not
+            // anonymous, those are handled by the fixed-point loop below).
+            // Find the matching `fn` inside the enum's declaration and
+            // analyze its body, mirroring the struct branch below.
+            if is_enum_method {
+                for (_, inst) in sema.rir.iter() {
+                    if let InstData::EnumDecl {
+                        name: enum_name,
+                        methods_start,
+                        methods_len,
+                        ..
+                    } = &inst.data
+                        && *enum_name == type_name_sym
+                    {
+                        let methods = sema.rir.get_inst_refs(*methods_start, *methods_len);
+                        for method_ref in methods {
+                            let method_inst = sema.rir.get(method_ref);
+                            if let InstData::FnDecl {
+                                name: m_name,
+                                params_start,
+                                params_len,
+                                return_type,
+                                body,
+                                has_self,
+                                receiver_mode,
+                                ..
+                            } = &method_inst.data
+                                && *m_name == method_name
+                            {
+                                let params = sema.rir.get_params(*params_start, *params_len);
+                                let full_name = if *has_self {
+                                    format!("{}.{}", type_name_str, method_name_str)
+                                } else {
+                                    format!("{}::{}", type_name_str, method_name_str)
+                                };
+
+                                match sema.analyze_method_function(
+                                    &infer_ctx,
+                                    &full_name,
+                                    MethodBodySpec {
+                                        return_type: *return_type,
+                                        params: &params,
+                                        body: *body,
+                                        host_type: Some(method_info.struct_type),
+                                        has_self: *has_self,
+                                        self_mode: *receiver_mode,
+                                    },
+                                    method_inst.span,
+                                ) {
+                                    Ok((
+                                        analyzed,
+                                        warnings,
+                                        local_strings,
+                                        local_bytes,
+                                        referenced_fns,
+                                        referenced_meths,
+                                    )) => {
+                                        functions_with_strings.push((
+                                            analyzed,
+                                            local_strings,
+                                            local_bytes,
+                                        ));
+                                        all_warnings.extend(warnings);
+                                        for ref_fn in referenced_fns {
+                                            if !analyzed_functions.contains(&ref_fn) {
+                                                pending_functions.push(ref_fn);
+                                            }
+                                        }
+                                        for ref_meth in referenced_meths {
+                                            if !analyzed_methods.contains(&ref_meth) {
+                                                pending_methods.push(ref_meth);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => errors.push(e),
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+
             // Find the method in struct declarations (for named structs)
             for (_, inst) in sema.rir.iter() {
                 if let InstData::StructDecl {
@@ -1262,6 +1385,110 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // ADR-0078: catch-all for anonymous struct methods registered after the
+    // work queue drained. Specialization (for `comptime F: type` parameters
+    // bound to anonymous-struct callable types) and other late-registration
+    // paths can leave `__call` methods unanalyzed if their references
+    // weren't tracked through `ctx.referenced_methods`. The fixed-point
+    // loop here mirrors the anonymous-enum fixed-point loop just below.
+    let mut analyzed_anon_struct_methods: HashSet<(StructId, Spur)> = HashSet::default();
+    // Pre-seed with the methods the work queue already analyzed so we don't
+    // double-emit.
+    for (struct_id, method_name) in &analyzed_methods {
+        analyzed_anon_struct_methods.insert((*struct_id, *method_name));
+    }
+    loop {
+        let pending_anon_struct_methods: Vec<(StructId, Spur, MethodInfo)> = sema
+            .methods
+            .iter()
+            .filter_map(|((struct_id, method_name), method_info)| {
+                let struct_def = sema.type_pool.struct_def(*struct_id);
+                if struct_def.name.starts_with("__anon_struct_")
+                    && !analyzed_anon_struct_methods.contains(&(*struct_id, *method_name))
+                    && !method_info.is_generic
+                {
+                    Some((*struct_id, *method_name, *method_info))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if pending_anon_struct_methods.is_empty() {
+            break;
+        }
+        for (struct_id, method_name, method_info) in pending_anon_struct_methods {
+            analyzed_anon_struct_methods.insert((struct_id, method_name));
+            let struct_def = sema.type_pool.struct_def(struct_id);
+            let type_name_str = struct_def.name.clone();
+            let method_name_str = sema.interner.resolve(&method_name).to_string();
+            let full_name = if method_info.has_self {
+                format!("{}.{}", type_name_str, method_name_str)
+            } else {
+                format!("{}::{}", type_name_str, method_name_str)
+            };
+
+            let param_names = sema.param_arena.names(method_info.params);
+            let param_types = sema.param_arena.types(method_info.params);
+            let param_modes = sema.param_arena.modes(method_info.params);
+            let mut param_info: Vec<(Spur, Type, RirParamMode)> = Vec::new();
+            if method_info.has_self {
+                let self_sym = sema.interner.get_or_intern("self");
+                let self_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
+                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
+                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                };
+                param_info.push((self_sym, method_info.struct_type, self_mode));
+            }
+            for i in 0..param_names.len() {
+                param_info.push((param_names[i], param_types[i], param_modes[i]));
+            }
+            let struct_id = method_info
+                .struct_type
+                .as_struct()
+                .expect("method must belong to struct");
+            let captured_values = sema
+                .anon_struct_captured_values
+                .get(&struct_id)
+                .cloned()
+                .unwrap_or_else(HashMap::default);
+            match sema.analyze_method_body(
+                &infer_ctx,
+                method_info.return_type,
+                &param_info,
+                method_info.body,
+                method_info.struct_type,
+                &captured_values,
+            ) {
+                Ok((
+                    air,
+                    num_locals,
+                    num_param_slots,
+                    param_modes_result,
+                    param_slot_types,
+                    warnings,
+                    local_strings,
+                    local_bytes,
+                    _ref_fns,
+                    _ref_meths,
+                )) => {
+                    let analyzed = AnalyzedFunction {
+                        name: full_name,
+                        air,
+                        num_locals,
+                        num_param_slots,
+                        param_modes: param_modes_result,
+                        param_slot_types,
+                        is_destructor: false,
+                    };
+                    functions_with_strings.push((analyzed, local_strings, local_bytes));
+                    all_warnings.extend(warnings);
+                }
+                Err(e) => errors.push(e),
             }
         }
     }
@@ -1391,6 +1618,292 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 }
                 Err(e) => errors.push(e),
             }
+        }
+    }
+
+    // ADR-0056 vtable population: every (struct, interface) pair recorded
+    // in `interface_vtables_needed` references the conformer's slot
+    // methods. Codegen emits the vtable, so those methods must be in the
+    // analyzed functions list. Queue them for analysis if the work loop
+    // didn't already pick them up.
+    let vtable_methods: Vec<(StructId, Spur)> = sema
+        .interface_vtables_needed
+        .values()
+        .flat_map(|witness| witness.iter().copied())
+        .collect();
+    for (struct_id, method_name) in vtable_methods {
+        if !analyzed_methods.contains(&(struct_id, method_name)) {
+            pending_methods.push((struct_id, method_name));
+        }
+    }
+    // Drain again now that vtable methods may have been queued.
+    while !pending_methods.is_empty() {
+        let queue = std::mem::take(&mut pending_methods);
+        let mut local_pending = queue;
+        while let Some((struct_id, method_name)) = local_pending.pop() {
+            if analyzed_methods.contains(&(struct_id, method_name)) {
+                continue;
+            }
+            analyzed_methods.insert((struct_id, method_name));
+
+            let (method_info, is_enum_method) =
+                if let Some(info) = sema.methods.get(&(struct_id, method_name)) {
+                    (*info, false)
+                } else if let Some(info) = sema
+                    .enum_methods
+                    .get(&(crate::types::EnumId(struct_id.0), method_name))
+                {
+                    (*info, true)
+                } else {
+                    continue;
+                };
+            if method_info.is_generic {
+                continue;
+            }
+
+            let type_name_str = if is_enum_method {
+                sema.type_pool
+                    .enum_def(crate::types::EnumId(struct_id.0))
+                    .name
+                    .clone()
+            } else {
+                sema.type_pool.struct_def(struct_id).name.clone()
+            };
+            let type_name_sym = sema.interner.get_or_intern(&type_name_str);
+            let method_name_str = sema.interner.resolve(&method_name).to_string();
+
+            // Find the FnDecl in either struct or enum declarations and
+            // analyze its body. (Anon types are handled by the fixed-point
+            // loops below.)
+            let decl_iter: Vec<_> = sema.rir.iter().collect();
+            let mut handled = false;
+            for (_, inst) in decl_iter {
+                let (decl_name, methods_start, methods_len) = match &inst.data {
+                    InstData::StructDecl {
+                        name,
+                        methods_start,
+                        methods_len,
+                        ..
+                    } if !is_enum_method => (*name, *methods_start, *methods_len),
+                    InstData::EnumDecl {
+                        name,
+                        methods_start,
+                        methods_len,
+                        ..
+                    } if is_enum_method => (*name, *methods_start, *methods_len),
+                    _ => continue,
+                };
+                if decl_name != type_name_sym {
+                    continue;
+                }
+                let methods = sema.rir.get_inst_refs(methods_start, methods_len);
+                for method_ref in methods {
+                    let method_inst = sema.rir.get(method_ref);
+                    let InstData::FnDecl {
+                        name: m_name,
+                        params_start,
+                        params_len,
+                        return_type,
+                        body,
+                        has_self,
+                        receiver_mode,
+                        ..
+                    } = &method_inst.data
+                    else {
+                        continue;
+                    };
+                    if *m_name != method_name {
+                        continue;
+                    }
+                    let params = sema.rir.get_params(*params_start, *params_len);
+                    let full_name = if *has_self {
+                        format!("{}.{}", type_name_str, method_name_str)
+                    } else {
+                        format!("{}::{}", type_name_str, method_name_str)
+                    };
+                    match sema.analyze_method_function(
+                        &infer_ctx,
+                        &full_name,
+                        MethodBodySpec {
+                            return_type: *return_type,
+                            params: &params,
+                            body: *body,
+                            host_type: Some(method_info.struct_type),
+                            has_self: *has_self,
+                            self_mode: *receiver_mode,
+                        },
+                        method_inst.span,
+                    ) {
+                        Ok((analyzed, warnings, local_strings, local_bytes, _, _)) => {
+                            functions_with_strings.push((analyzed, local_strings, local_bytes));
+                            all_warnings.extend(warnings);
+                        }
+                        Err(e) => errors.push(e),
+                    }
+                    handled = true;
+                    break;
+                }
+                if handled {
+                    break;
+                }
+            }
+        }
+    }
+
+    // ADR-0058: derive-bound methods spliced onto host types via
+    // `@derive(...)` directives. Same as the sequential path; the work
+    // queue doesn't reach these because they aren't discovered through
+    // direct call lookup.
+    let derive_jobs: Vec<(Spur, Spur, bool, super::DeriveBinding)> = sema
+        .derive_bindings
+        .iter()
+        .map(|b| (b.derive_name, b.host_name, b.host_is_enum, *b))
+        .collect();
+    for (derive_name, host_name, host_is_enum, _binding) in derive_jobs {
+        let dmethods: Vec<crate::sema::info::DeriveMethod> = match sema.derives.get(&derive_name) {
+            Some(info) => info.methods.clone(),
+            None => continue,
+        };
+        if host_is_enum {
+            let enum_id = match sema.enums.get(&host_name).copied() {
+                Some(id) => id,
+                None => continue,
+            };
+            let enum_type = Type::new_enum(enum_id);
+            let host_str = sema.type_pool.enum_def(enum_id).name.clone();
+            for dm in dmethods {
+                let m = sema.rir.get(dm.method_ref);
+                let InstData::FnDecl {
+                    name: method_name,
+                    params_start,
+                    params_len,
+                    return_type,
+                    body,
+                    has_self,
+                    receiver_mode,
+                    ..
+                } = &m.data
+                else {
+                    continue;
+                };
+                let method_str = sema.interner.resolve(method_name).to_string();
+                let params = sema.rir.get_params(*params_start, *params_len);
+                let full_name = if *has_self {
+                    format!("{}.{}", host_str, method_str)
+                } else {
+                    format!("{}::{}", host_str, method_str)
+                };
+                match sema.analyze_method_function(
+                    &infer_ctx,
+                    &full_name,
+                    MethodBodySpec {
+                        return_type: *return_type,
+                        params: &params,
+                        body: *body,
+                        host_type: Some(enum_type),
+                        has_self: *has_self,
+                        self_mode: *receiver_mode,
+                    },
+                    m.span,
+                ) {
+                    Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                        functions_with_strings.push((analyzed, local_strings, local_bytes));
+                        all_warnings.extend(warnings);
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+        } else {
+            let struct_id = match sema.structs.get(&host_name).copied() {
+                Some(id) => id,
+                None => continue,
+            };
+            let struct_type = Type::new_struct(struct_id);
+            let host_str = sema.type_pool.struct_def(struct_id).name.clone();
+            for dm in dmethods {
+                let m = sema.rir.get(dm.method_ref);
+                let InstData::FnDecl {
+                    name: method_name,
+                    params_start,
+                    params_len,
+                    return_type,
+                    body,
+                    has_self,
+                    receiver_mode,
+                    ..
+                } = &m.data
+                else {
+                    continue;
+                };
+                let method_str = sema.interner.resolve(method_name).to_string();
+                let params = sema.rir.get_params(*params_start, *params_len);
+                let full_name = if *has_self {
+                    format!("{}.{}", host_str, method_str)
+                } else {
+                    format!("{}::{}", host_str, method_str)
+                };
+                match sema.analyze_method_function(
+                    &infer_ctx,
+                    &full_name,
+                    MethodBodySpec {
+                        return_type: *return_type,
+                        params: &params,
+                        body: *body,
+                        host_type: Some(struct_type),
+                        has_self: *has_self,
+                        self_mode: *receiver_mode,
+                    },
+                    m.span,
+                ) {
+                    Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                        functions_with_strings.push((analyzed, local_strings, local_bytes));
+                        all_warnings.extend(warnings);
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+        }
+    }
+
+    // ADR-0053 phase 3 / 3b: also analyze inline `fn drop(self)` destructors
+    // (struct- or enum-body declared) — same as the sequential path. The
+    // lazy work queue doesn't reach these because the methods aren't
+    // discovered through call dispatch.
+    let inline_struct_drops: Vec<(StructId, InstRef, Span)> = sema
+        .inline_struct_drops
+        .iter()
+        .map(|(sid, (body, span))| (*sid, *body, *span))
+        .collect();
+    for (struct_id, body, drop_span) in inline_struct_drops {
+        let struct_def = sema.type_pool.struct_def(struct_id);
+        let type_name_str = struct_def.name.clone();
+        let full_name = format!("{}.__drop", type_name_str);
+        let struct_type = Type::new_struct(struct_id);
+        match sema.analyze_destructor_function(&infer_ctx, &full_name, body, drop_span, struct_type)
+        {
+            Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                functions_with_strings.push((analyzed, local_strings, local_bytes));
+                all_warnings.extend(warnings);
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+    let inline_enum_drops_vec: Vec<(EnumId, InstRef, Span)> = sema
+        .inline_enum_drops
+        .iter()
+        .map(|(eid, (body, span))| (*eid, *body, *span))
+        .collect();
+    for (enum_id, body, drop_span) in inline_enum_drops_vec {
+        let enum_def = sema.type_pool.enum_def(enum_id);
+        let type_name_str = enum_def.name.clone();
+        let full_name = format!("{}.__drop", type_name_str);
+        let enum_type = Type::new_enum(enum_id);
+        match sema.analyze_destructor_function(&infer_ctx, &full_name, body, drop_span, enum_type) {
+            Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                functions_with_strings.push((analyzed, local_strings, local_bytes));
+                all_warnings.extend(warnings);
+            }
+            Err(e) => errors.push(e),
         }
     }
 
@@ -1892,6 +2405,8 @@ impl<'a> Sema<'a> {
             referenced_functions: HashSet::default(),
             referenced_methods: HashSet::default(),
             borrow_arg_skip_move: None,
+            uninit_handles: HashMap::default(),
+            unroll_arm_bindings: HashMap::default(),
         };
 
         // ======================================================================
@@ -2719,8 +3234,21 @@ impl<'a> Sema<'a> {
                 let body = *body;
 
                 // Step 1: Evaluate the iterable expression at comptime.
-                // We use evaluate_comptime_block which clears and rebuilds the heap.
-                let iterable_val = self.evaluate_comptime_block(iterable, ctx, span)?;
+                // ADR-0079 Phase 3: don't clear the heap — a nested
+                // `comptime_unroll for` (e.g. one that iterates
+                // `v.fields` inside an outer arm-template iteration
+                // over `variants`) would otherwise invalidate the
+                // outer loop's comptime binding (a `Struct(heap_idx)`
+                // pointing at the now-cleared heap). Use the
+                // heap-preserving evaluator instead.
+                let iterable_val = {
+                    let prev_steps = self.comptime_steps_used;
+                    self.comptime_steps_used = 0;
+                    let mut locals = ctx.comptime_value_vars.clone();
+                    let v = self.evaluate_comptime_inst(iterable, &mut locals, ctx, span)?;
+                    self.comptime_steps_used = prev_steps;
+                    v
+                };
 
                 // Step 2: Extract array elements from the comptime heap.
                 // We clone the elements AND preserve the heap so that composite
@@ -3302,6 +3830,22 @@ impl<'a> Sema<'a> {
             return self.analyze_module_member_call_impl(air, method, args, span, ctx);
         }
 
+        // ADR-0079: `.clone()` on a Copy type is a bitwise copy. The
+        // method dispatch falls through to "no method named clone"
+        // for primitives like i32, but Copy types structurally
+        // conform to `Clone` (lang-item-driven short-circuit), so a
+        // `.clone()` call on them must succeed and just hand back the
+        // receiver value. Used by the prelude `derive Clone` body to
+        // clone Copy fields without requiring per-primitive method
+        // declarations.
+        if method_name_str == "clone"
+            && args.is_empty()
+            && self.is_type_copy(receiver_type)
+            && self.lang_items.clone().is_some()
+        {
+            return Ok(AnalysisResult::new(receiver_result.air_ref, receiver_type));
+        }
+
         // Check that receiver is a struct or enum type
         // For enum methods, dispatch through enum_methods table
         if let TypeKind::Enum(enum_id) = receiver_type.kind() {
@@ -3316,6 +3860,10 @@ impl<'a> Sema<'a> {
                 },
                 span,
             )?;
+            // ADR-0026 lazy analysis: track this enum method as referenced
+            // so its body is analyzed by the work queue. The same fix as
+            // the struct-method path above.
+            ctx.referenced_methods.insert((StructId(enum_id.0), method));
 
             if !method_info.has_self {
                 return Err(CompileError::new(
@@ -3628,6 +4176,13 @@ impl<'a> Sema<'a> {
             },
             span,
         )?;
+        // ADR-0026 lazy analysis (and ADR-0078 prelude module loading):
+        // record the dispatched method as referenced so the lazy work
+        // queue analyzes its body. Without this, anonymous-struct
+        // `__call` methods (and any other dispatched-by-method-call
+        // method) are registered but their bodies never get codegen,
+        // causing link errors.
+        ctx.referenced_methods.insert(method_key);
         let method_info = &method_info;
 
         // Check that this is a method (has self), not an associated function
@@ -4665,6 +5220,32 @@ impl<'a> Sema<'a> {
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),
+            // ADR-0079 Phase 2b: `@uninit(T)` is recognized by
+            // `analyze_alloc` when it appears as a let-init. Reaching
+            // this arm means it was used in some other position
+            // (returned, passed to a non-`@field_set`/@finalize call,
+            // etc.) — that's a misuse.
+            IntrinsicId::Uninit => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "@uninit(T) is only valid as the initializer of a `let` binding".into(),
+                },
+                span,
+            )),
+            // `@variant_uninit(T, tag)` is similar — only valid as a
+            // let-init.
+            IntrinsicId::VariantUninit => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason:
+                        "@variant_uninit(T, tag) is only valid as the initializer of a `let` binding"
+                            .into(),
+                },
+                span,
+            )),
+            IntrinsicId::FieldSet => self.analyze_field_set_intrinsic(air, &args, span, ctx),
+            IntrinsicId::Finalize => self.analyze_finalize_intrinsic(air, &args, span, ctx),
+            IntrinsicId::VariantField => {
+                self.analyze_variant_field_intrinsic(air, &args, span, ctx)
+            }
 
             // ADR-0064: build a slice from a raw pointer and a length.
             IntrinsicId::PartsToSlice => {
@@ -5099,7 +5680,7 @@ impl<'a> Sema<'a> {
     /// The actual error emission happens in the comptime interpreter.
     fn analyze_compile_error_intrinsic(
         &mut self,
-        air: &mut Air,
+        _air: &mut Air,
         args: &[RirCallArg],
         span: Span,
     ) -> CompileResult<AnalysisResult> {
@@ -5114,24 +5695,24 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        // Verify the argument is a string literal
+        // Pull the message out of the string-literal argument. Reaching
+        // `@compile_error` at sema time means the user wrote it
+        // someplace the compiler analyzed (e.g. the `then` branch of a
+        // `comptime if` whose `cond` evaluated to true at comptime).
+        // Surface the user-supplied message as a `ComptimeUserError`.
         let arg_inst = self.rir.get(args[0].value);
-        if !matches!(&arg_inst.data, gruel_rir::InstData::StringConst(_)) {
-            return Err(CompileError::new(
-                ErrorKind::ComptimeEvaluationFailed {
-                    reason: "@compile_error requires a string literal argument".into(),
-                },
-                arg_inst.span,
-            ));
-        }
-
-        // Type is `!` (never) — @compile_error always terminates compilation
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::UnitConst,
-            ty: Type::NEVER,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, Type::NEVER))
+        let msg = match &arg_inst.data {
+            gruel_rir::InstData::StringConst(spur) => self.interner.resolve(spur).to_string(),
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "@compile_error requires a string literal argument".into(),
+                    },
+                    arg_inst.span,
+                ));
+            }
+        };
+        Err(CompileError::new(ErrorKind::ComptimeUserError(msg), span))
     }
 
     /// Analyze @field(value, field_name) intrinsic.
@@ -5732,11 +6313,13 @@ impl<'a> Sema<'a> {
         // Comparisons read values without consuming them (like projections).
         // This matches Rust's PartialEq trait which takes references.
         let lhs_result = self.analyze_inst_for_projection(air, lhs, ctx)?;
-        let rhs_result = self.analyze_inst_for_projection(air, rhs, ctx)?;
         let lhs_type = lhs_result.ty;
 
-        // Propagate Never/Error without additional type errors
+        // Propagate Never/Error without additional type errors. Analyze rhs
+        // as projection too and emit the regular `Bin` path; downstream
+        // type checking is suppressed by the never/error propagation.
         if lhs_type.is_never() || lhs_type.is_error() {
+            let rhs_result = self.analyze_inst_for_projection(air, rhs, ctx)?;
             let air_ref = air.add_inst(AirInst {
                 data: AirInstData::Bin(op, lhs_result.air_ref, rhs_result.air_ref),
                 ty: Type::BOOL,
@@ -5744,6 +6327,147 @@ impl<'a> Sema<'a> {
             });
             return Ok(AnalysisResult::new(air_ref, Type::BOOL));
         }
+
+        // ADR-0078 Phase 4: operator desugaring for non-primitive types.
+        //
+        // Dispatch order:
+        //   1. Numeric / bool / char / unit primitives — fall through to the
+        //      regular `Bin` path (existing behavior).
+        //   2. Built-in `String` — fall through; codegen routes via the
+        //      registry-driven `__gruel_str_eq` / `__gruel_str_cmp` helpers.
+        //   3. User struct or enum with an `eq` (for `==` / `!=`) or `cmp`
+        //      (for `<` / `<=` / `>` / `>=`) method — desugar to a method
+        //      call. The conformer's signature must match `Eq::eq` /
+        //      `Ord::cmp` from `prelude/cmp.gruel`.
+        //
+        // This is the load-bearing piece of ADR-0078 Phase 4 — it's what
+        // makes the `Eq` / `Ord` interfaces useful as overloading hooks.
+        if !lhs_type.is_numeric()
+            && lhs_type != Type::BOOL
+            && lhs_type != Type::CHAR
+            && lhs_type != Type::UNIT
+            && !self.is_builtin_string(lhs_type)
+        {
+            // ADR-0079: read the method name out of the lang-item
+            // interface declaration when available. The prelude-tagged
+            // `Eq` / `Ord` interfaces each declare exactly one method,
+            // so the first slot's name is the dispatch target. Falls
+            // back to the historical hardcoded `"eq"` / `"cmp"` when
+            // the lang item isn't bound (e.g. test fixtures that bypass
+            // the prelude).
+            let lang_iface_id = if matches!(op, BinOp::Eq | BinOp::Ne) {
+                self.lang_items.op_eq()
+            } else {
+                self.lang_items.op_cmp()
+            };
+            let method_name_owned: String = lang_iface_id
+                .and_then(|id| {
+                    self.interface_defs[id.0 as usize]
+                        .methods
+                        .first()
+                        .map(|m| m.name.clone())
+                })
+                .unwrap_or_else(|| {
+                    if matches!(op, BinOp::Eq | BinOp::Ne) {
+                        "eq".to_string()
+                    } else {
+                        "cmp".to_string()
+                    }
+                });
+            let method_name: &str = &method_name_owned;
+            let method_sym = self.interner.get(method_name);
+            if let Some(method_sym) = method_sym
+                && let Some(method_info) = self.lookup_user_method(lhs_type, method_sym)
+            {
+                let recv_pass_mode = match method_info.receiver {
+                    crate::types::ReceiverMode::ByValue => AirArgMode::Normal,
+                    crate::types::ReceiverMode::Borrow => AirArgMode::Borrow,
+                    crate::types::ReceiverMode::Inout => AirArgMode::Inout,
+                };
+                let return_type = method_info.return_type;
+                let type_name = self.format_type_name(lhs_type);
+
+                // Analyze rhs through the regular call-arg path so it gets
+                // proper move tracking against the method's `other: Self`
+                // parameter. Borrow-on-projection of lhs above stays as-is.
+                let rhs_args = self.analyze_call_args(
+                    air,
+                    &[RirCallArg {
+                        value: rhs,
+                        mode: RirArgMode::Normal,
+                    }],
+                    ctx,
+                )?;
+                let rhs_air_ref = rhs_args[0].value;
+                let rhs_type = air.get(rhs_air_ref).ty;
+                if rhs_type != lhs_type && !rhs_type.is_never() && !rhs_type.is_error() {
+                    return Err(CompileError::type_mismatch(
+                        type_name.clone(),
+                        rhs_type.name().to_string(),
+                        self.rir.get(rhs).span,
+                    ));
+                }
+
+                let mut air_args = vec![AirCallArg {
+                    value: lhs_result.air_ref,
+                    mode: recv_pass_mode,
+                }];
+                air_args.extend(rhs_args);
+
+                let call_name_str = format!("{}.{}", type_name, method_name);
+                let call_name_sym = self.interner.get_or_intern(&call_name_str);
+
+                let mut extra_data = Vec::with_capacity(air_args.len() * 2);
+                for arg in &air_args {
+                    extra_data.push(arg.value.as_u32());
+                    extra_data.push(arg.mode.as_u32());
+                }
+                let args_start = air.add_extra(&extra_data);
+
+                let call_air_ref = air.add_inst(AirInst {
+                    data: AirInstData::Call {
+                        name: call_name_sym,
+                        args_start,
+                        args_len: air_args.len() as u32,
+                    },
+                    ty: return_type,
+                    span,
+                });
+
+                return self.finish_operator_dispatch(
+                    air,
+                    op,
+                    method_name,
+                    call_air_ref,
+                    return_type,
+                    span,
+                );
+            }
+            // No `eq` / `cmp` method on this type. For ordering ops, emit a
+            // helpful error naming `Ord`. For equality, fall through to the
+            // existing path: structs get bitwise equality via
+            // `build_value_eq`; types that aren't structs get rejected by
+            // the type-validation check below.
+            if !allow_bool {
+                let type_name = self.format_type_name(lhs_type);
+                return Err(CompileError::new(
+                    ErrorKind::TypeMismatch {
+                        expected:
+                            "a type that conforms to `Ord` (with `fn cmp(self: Ref(Self), other: Self) -> Ordering`)"
+                                .to_string(),
+                        found: type_name,
+                    },
+                    self.rir.get(lhs).span,
+                )
+                .with_help(format!(
+                    "implement `fn cmp(self: Ref(Self), other: Self) -> Ordering` on the type to enable `{}`",
+                    op.symbol()
+                )));
+            }
+        }
+
+        // Fall-through: analyze rhs and emit the regular `Bin` instruction.
+        let rhs_result = self.analyze_inst_for_projection(air, rhs, ctx)?;
 
         // Validate the type is appropriate for this comparison
         if allow_bool {
@@ -5781,6 +6505,126 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, Type::BOOL))
+    }
+
+    /// ADR-0078 Phase 4: look up a user-defined method by name on a struct
+    /// or enum type. Returns the method info if found, regardless of
+    /// signature — the caller's responsibility to validate the shape.
+    fn lookup_user_method(&self, ty: Type, method_sym: Spur) -> Option<MethodInfo> {
+        match ty.kind() {
+            TypeKind::Struct(struct_id) => self.methods.get(&(struct_id, method_sym)).cloned(),
+            TypeKind::Enum(enum_id) => self.enum_methods.get(&(enum_id, method_sym)).cloned(),
+            _ => None,
+        }
+    }
+
+    /// ADR-0078 Phase 4: finish operator-dispatch lowering after the
+    /// dispatched method call has been emitted. For `==` / `!=`, the call
+    /// returned a `bool`; `!=` wraps in `Bin(Ne, call, true)`. For
+    /// `<` / `<=` / `>` / `>=`, the call returned an `Ordering`; build a
+    /// comparison against `Ordering::Less` or `Ordering::Greater`.
+    fn finish_operator_dispatch(
+        &mut self,
+        air: &mut Air,
+        op: BinOp,
+        method_name: &str,
+        call_air_ref: AirRef,
+        return_type: Type,
+        span: Span,
+    ) -> CompileResult<AnalysisResult> {
+        match op {
+            BinOp::Eq => {
+                if return_type != Type::BOOL {
+                    return Err(CompileError::type_mismatch(
+                        "bool".to_string(),
+                        return_type.name().to_string(),
+                        span,
+                    )
+                    .with_help(format!(
+                        "`fn {}(...) -> bool` is required for `Eq` conformance",
+                        method_name
+                    )));
+                }
+                Ok(AnalysisResult::new(call_air_ref, Type::BOOL))
+            }
+            BinOp::Ne => {
+                if return_type != Type::BOOL {
+                    return Err(CompileError::type_mismatch(
+                        "bool".to_string(),
+                        return_type.name().to_string(),
+                        span,
+                    )
+                    .with_help(format!(
+                        "`fn {}(...) -> bool` is required for `Eq` conformance",
+                        method_name
+                    )));
+                }
+                let true_ref = air.add_inst(AirInst {
+                    data: AirInstData::BoolConst(true),
+                    ty: Type::BOOL,
+                    span,
+                });
+                let result = air.add_inst(AirInst {
+                    data: AirInstData::Bin(BinOp::Ne, call_air_ref, true_ref),
+                    ty: Type::BOOL,
+                    span,
+                });
+                Ok(AnalysisResult::new(result, Type::BOOL))
+            }
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                // ADR-0079: prefer the lang-item binding; fall back to
+                // the legacy name cache for compilations that bypass
+                // the prelude entirely.
+                let ordering_id = self
+                    .lang_items
+                    .ordering()
+                    .or(self.builtin_ordering_id)
+                    .ok_or_else(|| {
+                        CompileError::new(
+                            ErrorKind::InternalError(
+                                "Ordering enum not found (prelude not loaded?)".into(),
+                            ),
+                            span,
+                        )
+                    })?;
+                let expected_ty = Type::new_enum(ordering_id);
+                if return_type != expected_ty {
+                    return Err(CompileError::type_mismatch(
+                        "Ordering".to_string(),
+                        return_type.name().to_string(),
+                        span,
+                    )
+                    .with_help(format!(
+                        "`fn {}(...) -> Ordering` is required for `Ord` conformance",
+                        method_name
+                    )));
+                }
+                // Variant indices match `prelude/cmp.gruel`:
+                // Less = 0, Equal = 1, Greater = 2.
+                let (variant_index, cmp_op) = match op {
+                    BinOp::Lt => (0u32, BinOp::Eq), // result == Less
+                    BinOp::Ge => (0u32, BinOp::Ne), // result != Less
+                    BinOp::Gt => (2u32, BinOp::Eq), // result == Greater
+                    BinOp::Le => (2u32, BinOp::Ne), // result != Greater
+                    _ => unreachable!(),
+                };
+                let variant_air = air.add_inst(AirInst {
+                    data: AirInstData::EnumVariant {
+                        enum_id: ordering_id,
+                        variant_index,
+                    },
+                    ty: expected_ty,
+                    span,
+                });
+                let result = air.add_inst(AirInst {
+                    data: AirInstData::Bin(cmp_op, call_air_ref, variant_air),
+                    ty: Type::BOOL,
+                    span,
+                });
+                Ok(AnalysisResult::new(result, Type::BOOL))
+            }
+            _ => unreachable!("operator dispatch only handles comparison ops"),
+        }
     }
 
     /// Try to evaluate an RIR expression as a compile-time constant.
@@ -7310,7 +8154,7 @@ impl<'a> Sema<'a> {
     /// Seeds the local scope from `ctx.comptime_value_vars` (captured comptime
     /// parameters, e.g. `N` in `FixedBuffer(comptime N: i32)`), then delegates
     /// to `evaluate_comptime_inst`.
-    fn evaluate_comptime_block(
+    pub(crate) fn evaluate_comptime_block(
         &mut self,
         inst_ref: InstRef,
         ctx: &AnalysisContext,
@@ -7377,6 +8221,8 @@ impl<'a> Sema<'a> {
             referenced_functions: HashSet::default(),
             referenced_methods: HashSet::default(),
             borrow_arg_skip_move: None,
+            uninit_handles: HashMap::default(),
+            unroll_arm_bindings: HashMap::default(),
         };
         self.evaluate_comptime_block(inst_ref, &stub, span)
     }
@@ -7418,7 +8264,7 @@ impl<'a> Sema<'a> {
     /// `locals` holds variables declared within the current comptime block.
     /// Returns the evaluated `ConstValue`, or a `CompileError` if the
     /// instruction is not compile-time evaluable.
-    fn evaluate_comptime_inst(
+    pub(crate) fn evaluate_comptime_inst(
         &mut self,
         inst_ref: InstRef,
         locals: &mut HashMap<Spur, ConstValue>,
@@ -7730,6 +8576,7 @@ impl<'a> Sema<'a> {
                 cond,
                 then_block,
                 else_block,
+                is_comptime: _,
             } => {
                 let cond_val = self.evaluate_comptime_inst(cond, locals, ctx, outer_span)?;
                 match cond_val {
@@ -8479,6 +9326,22 @@ impl<'a> Sema<'a> {
                                  ADR-0051 Phase 4a"
                             )
                         }
+                        // ADR-0079 Phase 3: an unroll-arm template
+                        // shouldn't reach the comptime evaluator —
+                        // sema's `expand_unroll_arms` runs before
+                        // any analysis sees it. If we hit it here,
+                        // something pre-analysis comptime-evaluated
+                        // the match.
+                        RirPattern::ComptimeUnrollArm { .. } => {
+                            return Err(CompileError::new(
+                                ErrorKind::ComptimeEvaluationFailed {
+                                    reason:
+                                        "comptime_unroll for arm cannot be evaluated at comptime"
+                                            .into(),
+                                },
+                                outer_span,
+                            ));
+                        }
                     }
                 }
 
@@ -8900,12 +9763,26 @@ impl<'a> Sema<'a> {
             InstData::TypeInterfaceIntrinsic {
                 name,
                 type_arg,
+                type_inst,
                 interface_arg,
             } => {
-                let ty = if let Some(&override_ty) = self.comptime_type_overrides.get(&type_arg) {
+                let ty = if let Some(t_inst) = type_inst {
+                    // ADR-0079: arg[0] is an arbitrary expression
+                    // (e.g. `f.field_type`); evaluate it recursively
+                    // inside the same comptime evaluation so the
+                    // outer heap stays intact.
+                    match self.evaluate_comptime_inst(t_inst, locals, ctx, outer_span)? {
+                        ConstValue::Type(t) => t,
+                        _ => return Err(not_const(inst_span)),
+                    }
+                } else if let Some(&override_ty) = self.comptime_type_overrides.get(&type_arg) {
                     override_ty
                 } else if let Some(&ctx_ty) = ctx.comptime_type_vars.get(&type_arg) {
                     ctx_ty
+                } else if let Some(&val) = locals.get(&type_arg)
+                    && let ConstValue::Type(t) = val
+                {
+                    t
                 } else {
                     self.resolve_type(type_arg, inst_span)
                         .map_err(|_| not_const(inst_span))?

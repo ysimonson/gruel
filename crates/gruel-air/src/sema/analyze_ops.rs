@@ -20,7 +20,7 @@
 //! - `analyze_comparison` - Eq, Ne, Lt, Gt, Le, Ge
 //! - Logical And/Or are simple enough to remain inline
 
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_intrinsics::IntrinsicId;
 use gruel_rir::{
@@ -260,6 +260,29 @@ fn expanded_tuple_pattern(
         elems: new_elems,
         rest_position: None,
         span: *span,
+    }
+}
+
+/// ADR-0079 Phase 3: resolve a logical field name on an enum variant.
+/// Struct variants store names directly; tuple variants address fields
+/// positionally as `"0"`, `"1"`, …; unit variants have no fields.
+fn variant_field_index(variant: &crate::types::EnumVariantDef, name: &str) -> Option<usize> {
+    if variant.is_struct_variant() {
+        variant.field_names.iter().position(|n| n == name)
+    } else {
+        // Tuple/unit variant: positional. Match digit strings.
+        name.parse::<usize>()
+            .ok()
+            .filter(|&i| i < variant.fields.len())
+    }
+}
+
+/// Render the canonical field name for the i'th position of a variant.
+fn variant_field_name(variant: &crate::types::EnumVariantDef, i: usize) -> String {
+    if variant.is_struct_variant() {
+        variant.field_names[i].clone()
+    } else {
+        format!("{}", i)
     }
 }
 
@@ -994,7 +1017,16 @@ impl<'a> Sema<'a> {
                 cond,
                 then_block,
                 else_block,
-            } => self.analyze_branch(air, *cond, *then_block, *else_block, inst.span, ctx),
+                is_comptime,
+            } => self.analyze_branch(
+                air,
+                *cond,
+                *then_block,
+                *else_block,
+                *is_comptime,
+                inst.span,
+                ctx,
+            ),
 
             InstData::Loop { cond, body } => {
                 self.analyze_while_loop(air, *cond, *body, inst.span, ctx)
@@ -1083,8 +1115,13 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Analyze a branch (if-else) expression.
-    fn analyze_branch(
+    /// ADR-0079 follow-up: analyze a `comptime if cond { … } else { … }`
+    /// by evaluating `cond` at comptime and emitting only the chosen
+    /// branch's runtime AIR. The discarded branch is never analyzed,
+    /// so it can reference shapes that don't apply to the surrounding
+    /// type (e.g. `@uninit(Self)` in the struct branch when `Self` is
+    /// an enum). The condition itself contributes no runtime AIR.
+    fn analyze_comptime_branch(
         &mut self,
         air: &mut Air,
         cond: InstRef,
@@ -1093,6 +1130,75 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        // Evaluate the condition at comptime. We use the
+        // heap-preserving evaluator so callers nested inside an outer
+        // `comptime_unroll for` keep their loop binding intact.
+        let cond_val = {
+            let prev_steps = self.comptime_steps_used;
+            self.comptime_steps_used = 0;
+            let mut locals = ctx.comptime_value_vars.clone();
+            let v = self.evaluate_comptime_inst(cond, &mut locals, ctx, span)?;
+            self.comptime_steps_used = prev_steps;
+            v
+        };
+        let chosen = match cond_val {
+            crate::sema::context::ConstValue::Bool(true) => Some(then_block),
+            crate::sema::context::ConstValue::Bool(false) => else_block,
+            other => {
+                return Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: format!(
+                            "`comptime if` condition must evaluate to a bool at compile time, got {:?}",
+                            other
+                        ),
+                    },
+                    span,
+                ));
+            }
+        };
+        match chosen {
+            Some(branch) => {
+                ctx.push_scope();
+                let result = self.analyze_inst(air, branch, ctx)?;
+                ctx.pop_scope();
+                Ok(result)
+            }
+            None => {
+                // `comptime if cond {…}` (no else) where cond is false
+                // produces unit, just like a runtime if without else.
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::UnitConst,
+                    ty: Type::UNIT,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, Type::UNIT))
+            }
+        }
+    }
+
+    /// Analyze a branch (if-else) expression.
+    #[allow(clippy::too_many_arguments)]
+    fn analyze_branch(
+        &mut self,
+        air: &mut Air,
+        cond: InstRef,
+        then_block: InstRef,
+        else_block: Option<InstRef>,
+        is_comptime: bool,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // ADR-0079 follow-up: `comptime if cond { … } else { … }` —
+        // evaluate `cond` at comptime and emit *only* the chosen
+        // branch's runtime AIR. The discarded branch never gets
+        // analyzed (so it can reference shapes that don't apply to
+        // the surrounding type — e.g. `@uninit(Self)` inside the
+        // struct-only branch when `Self` is enum). The condition
+        // itself contributes no runtime AIR.
+        if is_comptime {
+            return self.analyze_comptime_branch(air, cond, then_block, else_block, span, ctx);
+        }
+
         // Condition must be bool
         let cond_result = self.analyze_inst(air, cond, ctx)?;
 
@@ -2089,6 +2195,264 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, Type::NEVER))
     }
 
+    /// ADR-0079 Phase 3: analyze a match-arm body with the
+    /// per-iteration comptime binding installed, if this arm came
+    /// from `comptime_unroll for v in …` expansion. Otherwise just
+    /// delegates to `analyze_inst`.
+    fn analyze_arm_body(
+        &mut self,
+        air: &mut Air,
+        body: gruel_rir::InstRef,
+        arm_idx: usize,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        let binding = ctx.unroll_arm_bindings.get(&arm_idx).cloned();
+        let Some(b) = binding else {
+            return self.analyze_inst(air, body, ctx);
+        };
+        let prev = ctx.comptime_value_vars.insert(b.binding, b.value);
+        let res = self.analyze_inst(air, body, ctx);
+        match prev {
+            Some(v) => {
+                ctx.comptime_value_vars.insert(b.binding, v);
+            }
+            None => {
+                ctx.comptime_value_vars.remove(&b.binding);
+            }
+        }
+        res
+    }
+
+    /// ADR-0079 Phase 3: expand any `comptime_unroll for v in ...`
+    /// arm templates into one regular arm per element of the iterable.
+    /// Non-template arms pass through unchanged.
+    ///
+    /// The expansion looks at `@type_info(Self).variants`-shaped
+    /// comptime arrays — each element is a `VariantInfo` struct with
+    /// at least a `name` field. For each element, we look up the
+    /// matching enum variant on `scrutinee_type` and synthesize a
+    /// catch-all variant pattern (`Self::A`, `Self::B(_)`, or
+    /// `Self::C { .. }` depending on shape) plus the body. The
+    /// per-iteration comptime binding (`v` in the user's source) is
+    /// recorded into `ctx.unroll_arm_bindings` keyed by output arm
+    /// index; the match-arm body analyzer reads it back to push the
+    /// binding into `ctx.comptime_value_vars` before recursing.
+    fn expand_unroll_arms(
+        &mut self,
+        raw: Vec<(RirPattern, InstRef)>,
+        scrutinee_type: Type,
+        ctx: &mut AnalysisContext,
+        span: Span,
+    ) -> CompileResult<Vec<(RirPattern, InstRef)>> {
+        use crate::sema::context::{ComptimeHeapItem, ConstValue, UnrollArmBinding};
+
+        // Quick check: if no arm is an unroll template, return raw unchanged.
+        let has_unroll = raw
+            .iter()
+            .any(|(p, _)| matches!(p, RirPattern::ComptimeUnrollArm { .. }));
+        if !has_unroll {
+            return Ok(raw);
+        }
+
+        let enum_id = scrutinee_type.as_enum().ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "`comptime_unroll for v in ...` arm requires an enum scrutinee".into(),
+                },
+                span,
+            )
+        })?;
+
+        let mut expanded: Vec<(RirPattern, InstRef)> = Vec::with_capacity(raw.len());
+        for (pattern, body) in raw {
+            let RirPattern::ComptimeUnrollArm {
+                binding,
+                iterable,
+                span: arm_span,
+            } = pattern
+            else {
+                expanded.push((pattern, body));
+                continue;
+            };
+
+            // Evaluate the iterable at comptime.
+            let iter_val = self.evaluate_comptime_block(iterable, ctx, arm_span)?;
+            let elements = match iter_val {
+                ConstValue::Array(heap_idx) => match &self.comptime_heap[heap_idx as usize] {
+                    ComptimeHeapItem::Array(elems) => elems.clone(),
+                    _ => return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason:
+                                "`comptime_unroll for` iterable did not resolve to a comptime array"
+                                    .into(),
+                        },
+                        arm_span,
+                    )),
+                },
+                _ => {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason:
+                                "`comptime_unroll for` iterable did not resolve to a comptime array"
+                                    .into(),
+                        },
+                        arm_span,
+                    ));
+                }
+            };
+
+            for el in elements {
+                let variant_name = self.extract_variant_info_name(el, arm_span)?;
+                let variant_idx = self
+                    .type_pool
+                    .enum_def(enum_id)
+                    .variants
+                    .iter()
+                    .position(|v| v.name == variant_name)
+                    .ok_or_else(|| {
+                        CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: format!(
+                                    "comptime_unroll for: variant `{}` not found on enum `{}`",
+                                    variant_name,
+                                    self.type_pool.enum_def(enum_id).name
+                                ),
+                            },
+                            arm_span,
+                        )
+                    })? as u32;
+
+                let synthesized = self.synthesize_variant_pattern(enum_id, variant_idx, arm_span);
+
+                let arm_index = expanded.len();
+                ctx.unroll_arm_bindings
+                    .insert(arm_index, UnrollArmBinding { binding, value: el });
+                expanded.push((synthesized, body));
+            }
+        }
+        Ok(expanded)
+    }
+
+    /// Pull the `name` field out of a comptime `VariantInfo` value
+    /// (an array element of `@type_info(Self).variants`). Errors if
+    /// the value is not a struct or has no string `name` field.
+    fn extract_variant_info_name(
+        &self,
+        val: crate::sema::context::ConstValue,
+        span: Span,
+    ) -> CompileResult<String> {
+        use crate::sema::context::{ComptimeHeapItem, ConstValue};
+        let ConstValue::Struct(heap_idx) = val else {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "comptime_unroll for: iterable element is not a struct".into(),
+                },
+                span,
+            ));
+        };
+        let (struct_id, fields) = match &self.comptime_heap[heap_idx as usize] {
+            ComptimeHeapItem::Struct { struct_id, fields } => (*struct_id, fields.clone()),
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "comptime_unroll for: iterable element is not a struct".into(),
+                    },
+                    span,
+                ));
+            }
+        };
+        let struct_def = self.type_pool.struct_def(struct_id);
+        let name_idx = struct_def
+            .fields
+            .iter()
+            .position(|f| f.name == "name")
+            .ok_or_else(|| {
+                CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "comptime_unroll for: iterable element has no `name` field".into(),
+                    },
+                    span,
+                )
+            })?;
+        let name_val = fields[name_idx];
+        let ConstValue::ComptimeStr(name_idx) = name_val else {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "comptime_unroll for: variant `name` is not a comptime string".into(),
+                },
+                span,
+            ));
+        };
+        match &self.comptime_heap[name_idx as usize] {
+            ComptimeHeapItem::String(s) => Ok(s.clone()),
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "comptime_unroll for: variant `name` is not a string".into(),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Synthesize a catch-all variant pattern for the given variant.
+    /// Unit variants → `Path`; tuple variants → `DataVariant` with
+    /// all-wildcard bindings; struct variants → `StructVariant` with
+    /// rest sentinel.
+    fn synthesize_variant_pattern(
+        &mut self,
+        enum_id: crate::types::EnumId,
+        variant_idx: u32,
+        span: Span,
+    ) -> RirPattern {
+        let enum_def = self.type_pool.enum_def(enum_id);
+        let enum_name = self.interner.get_or_intern(&enum_def.name);
+        let variant = &enum_def.variants[variant_idx as usize];
+        let variant_name = self.interner.get_or_intern(&variant.name);
+        if variant.fields.is_empty() {
+            return RirPattern::Path {
+                module: None,
+                type_name: enum_name,
+                variant: variant_name,
+                span,
+            };
+        }
+        if variant.is_struct_variant() {
+            // `..` rest binding: name == "..".
+            let rest_marker = self.interner.get_or_intern_static("..");
+            return RirPattern::StructVariant {
+                module: None,
+                type_name: enum_name,
+                variant: variant_name,
+                field_bindings: vec![gruel_rir::RirStructPatternBinding {
+                    field_name: rest_marker,
+                    binding: gruel_rir::RirPatternBinding {
+                        is_wildcard: true,
+                        is_mut: false,
+                        name: Some(rest_marker),
+                        sub_pattern: None,
+                    },
+                }],
+                span,
+            };
+        }
+        // Tuple variant: emit a wildcard for each field.
+        let bindings = (0..variant.fields.len())
+            .map(|_| gruel_rir::RirPatternBinding {
+                is_wildcard: true,
+                is_mut: false,
+                name: None,
+                sub_pattern: None,
+            })
+            .collect();
+        RirPattern::DataVariant {
+            module: None,
+            type_name: enum_name,
+            variant: variant_name,
+            bindings,
+            span,
+        }
+    }
+
     /// Analyze a match expression.
     fn analyze_match(
         &mut self,
@@ -2121,7 +2485,15 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        let arms = self.rir.get_match_arms(arms_start, arms_len);
+        let raw_arms = self.rir.get_match_arms(arms_start, arms_len);
+        // ADR-0079 Phase 3: expand any `comptime_unroll for v in ...`
+        // arm templates into one regular arm per element of the
+        // iterable. The expansion is sema-side because we need the
+        // comptime evaluator and the scrutinee's enum metadata; the
+        // expanded arms then flow through the regular validation /
+        // reachability machinery below as if the user had written
+        // them by hand.
+        let arms = self.expand_unroll_arms(raw_arms, scrutinee_type, ctx, span)?;
         if arms.is_empty() {
             // ADR-0052 Phase 5: a zero-arm match is vacuously exhaustive
             // when the scrutinee is uninhabited — either `!` directly or
@@ -2153,7 +2525,7 @@ impl<'a> Sema<'a> {
         let mut air_arms = Vec::new();
         let mut result_type: Option<Type> = None;
 
-        for (pattern, body) in arms.iter() {
+        for (arm_idx, (pattern, body)) in arms.iter().enumerate() {
             let pattern_span = pattern.span();
 
             // Cached resolution for enum patterns (set during validation, reused
@@ -2501,6 +2873,17 @@ impl<'a> Sema<'a> {
                         ));
                     }
                 }
+                // ADR-0079 Phase 3: unroll-arm templates are
+                // expanded by `expand_unroll_arms` *before* this
+                // loop runs, so an unexpanded one here is an ICE.
+                RirPattern::ComptimeUnrollArm { .. } => {
+                    return Err(CompileError::new(
+                        ErrorKind::InternalError(
+                            "comptime_unroll for arm not expanded before validation".into(),
+                        ),
+                        pattern_span,
+                    ));
+                }
             }
 
             // Each arm gets its own scope
@@ -2711,7 +3094,7 @@ impl<'a> Sema<'a> {
                 }
 
                 // Analyze the arm body (can reference the bound variables)
-                let inner_result = self.analyze_inst(air, *body, ctx)?;
+                let inner_result = self.analyze_arm_body(air, *body, arm_idx, ctx)?;
                 let body_type = inner_result.ty;
 
                 // Wrap storage_lives + allocs + body in a Block
@@ -2794,7 +3177,7 @@ impl<'a> Sema<'a> {
                     &mut out,
                 );
 
-                let inner_result = self.analyze_inst(air, *body, ctx)?;
+                let inner_result = self.analyze_arm_body(air, *body, arm_idx, ctx)?;
                 let body_type = inner_result.ty;
 
                 let unit = air.add_inst(AirInst {
@@ -2845,7 +3228,7 @@ impl<'a> Sema<'a> {
                 AnalysisResult::new(combined, body_type)
             } else {
                 // Non-data/struct variant: analyze body normally
-                self.analyze_inst(air, *body, ctx)?
+                self.analyze_arm_body(air, *body, arm_idx, ctx)?
             };
 
             let body_type = body_result.ty;
@@ -3335,6 +3718,9 @@ impl<'a> Sema<'a> {
                     None => AirPattern::Wildcard,
                 }
             }
+            // ADR-0079 Phase 3: should have been expanded earlier;
+            // arriving here is an ICE.
+            RirPattern::ComptimeUnrollArm { .. } => AirPattern::Wildcard,
         }
     }
 
@@ -3540,6 +3926,44 @@ impl<'a> Sema<'a> {
             _ => unreachable!("analyze_alloc called with non-Alloc instruction"),
         };
 
+        // ADR-0079 Phase 2b: detect `let mut h = @uninit(T)` and
+        // `let mut h = @variant_uninit(T, tag)` patterns. Instead of
+        // analyzing the init normally, we register `h` as an
+        // in-progress construction handle and skip allocation. Later
+        // `@field_set(h, ...)` calls record field writes; `@finalize(h)`
+        // emits the actual `StructInit`.
+        if let Some(name) = name
+            && let Some(handle) = self.try_capture_uninit_init(init, span, ctx)?
+        {
+            // Stash the handle keyed by binding name; subsequent
+            // uses (`@field_set`, `@finalize`, errors-on-escape)
+            // resolve it from `ctx.uninit_handles`.
+            ctx.uninit_handles.insert(name, handle);
+            // Also record an empty entry in `ctx.locals` so name
+            // resolution finds the binding (we need this so a stray
+            // VarRef produces a "uninit handle escaped" diagnostic
+            // rather than "undefined variable"). Use the special
+            // sentinel slot `u32::MAX` to mark uninit-handle locals.
+            ctx.insert_local(
+                name,
+                LocalVar {
+                    slot: u32::MAX,
+                    ty: Type::UNIT, // sentinel; never read for codegen
+                    is_mut,
+                    span,
+                    allow_unused: false,
+                },
+            );
+            // Producer is the unit-valued `Alloc`; emit it as a
+            // unit so the surrounding statement composes normally.
+            let unit_ref = air.add_inst(AirInst {
+                data: AirInstData::UnitConst,
+                ty: Type::UNIT,
+                span,
+            });
+            return Ok(AnalysisResult::new(unit_ref, Type::UNIT));
+        }
+
         // Analyze the initializer
         let init_result = self.analyze_inst(air, init, ctx)?;
         let var_type = init_result.ty;
@@ -3630,6 +4054,711 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(block_ref, Type::UNIT))
+    }
+
+    /// ADR-0079 Phase 2b: peek at a let-binding's init RIR; if it's
+    /// `@uninit(T)` or `@variant_uninit(T, tag)`, return a fresh
+    /// `UninitHandle` describing the pending construction. Returns
+    /// `Ok(None)` for any other init shape — the caller falls
+    /// through to normal alloc analysis.
+    fn try_capture_uninit_init(
+        &mut self,
+        init: InstRef,
+        _span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<Option<crate::sema::context::UninitHandle>> {
+        use crate::sema::context::{UninitHandle, UninitTarget};
+
+        let init_inst = self.rir.get(init);
+        match init_inst.data {
+            // `@uninit(T)` — TypeIntrinsic with name="uninit".
+            InstData::TypeIntrinsic { name, type_arg } => {
+                let intrinsic_name = self.interner.resolve(&name);
+                if intrinsic_name != "uninit" {
+                    return Ok(None);
+                }
+                let ty = self.resolve_type(type_arg, init_inst.span)?;
+                let struct_id = ty.as_struct().ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "@uninit(T) requires T to be a struct type, got {}",
+                                ty.name()
+                            ),
+                        },
+                        init_inst.span,
+                    )
+                })?;
+                Ok(Some(UninitHandle {
+                    target: UninitTarget::Struct(struct_id),
+                    fields: HashMap::default(),
+                }))
+            }
+            // `@variant_uninit(T, tag)` — Intrinsic with name="variant_uninit",
+            // expression args. First arg is the type (parsed as
+            // IntrinsicArg::Type), second arg is a comptime variant
+            // value.
+            InstData::Intrinsic {
+                name,
+                args_start,
+                args_len,
+            } => {
+                let intrinsic_name = self.interner.resolve(&name);
+                if intrinsic_name != "variant_uninit" {
+                    return Ok(None);
+                }
+                if args_len != 2 {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "@variant_uninit(T, tag) takes 2 args, got {}",
+                                args_len
+                            ),
+                        },
+                        init_inst.span,
+                    ));
+                }
+                let arg_refs = self.rir.get_inst_refs(args_start, args_len);
+                // First arg: type expression. Second arg: comptime tag.
+                let ty_ref = arg_refs[0];
+                let tag_ref = arg_refs[1];
+                let ty = self.resolve_intrinsic_type_arg(ty_ref, ctx)?;
+                let enum_id = ty.as_enum().ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "@variant_uninit(T, _) requires T to be an enum type, got {}",
+                                ty.name()
+                            ),
+                        },
+                        init_inst.span,
+                    )
+                })?;
+                let variant_idx =
+                    self.evaluate_variant_tag_arg(tag_ref, enum_id, ctx, init_inst.span)?;
+                Ok(Some(UninitHandle {
+                    target: UninitTarget::EnumVariant {
+                        enum_id,
+                        variant_idx,
+                    },
+                    fields: HashMap::default(),
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Resolve an intrinsic's first type-position argument. Most type
+    /// intrinsics route through `TypeIntrinsic`, but `@variant_uninit`
+    /// is a mixed-arg intrinsic (`Intrinsic`) so we have to peek at
+    /// the first arg and handle both `TypeConst`-like literals and
+    /// already-resolved comptime type values.
+    fn resolve_intrinsic_type_arg(
+        &mut self,
+        type_ref: InstRef,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<Type> {
+        use crate::sema::context::ConstValue;
+        let type_inst = self.rir.get(type_ref);
+        let span = type_inst.span;
+        if let InstData::TypeConst { type_name } = type_inst.data {
+            return self.resolve_type(type_name, span);
+        }
+        // Fall back to comptime evaluation; expects a `ConstValue::Type`.
+        let val = self.evaluate_comptime_block(type_ref, ctx, span)?;
+        match val {
+            ConstValue::Type(t) => Ok(t),
+            other => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("expected a type argument, got comptime value {:?}", other),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Evaluate a comptime variant-tag expression and resolve to a
+    /// variant index of the given enum. Used by `@variant_uninit`
+    /// and `@variant_field` to convert a comptime `VariantInfo` /
+    /// enum-variant value to a concrete index.
+    fn evaluate_variant_tag_arg(
+        &mut self,
+        tag_ref: InstRef,
+        enum_id: crate::types::EnumId,
+        ctx: &mut AnalysisContext,
+        span: Span,
+    ) -> CompileResult<u32> {
+        use crate::sema::context::{ComptimeHeapItem, ConstValue};
+        // ADR-0079 Phase 3: callers can come from comptime_unroll for
+        // bodies where the surrounding heap holds the loop variable
+        // (e.g. a `VariantInfo` struct whose `name` field is the tag
+        // string). `evaluate_comptime_block` would clear that heap
+        // and invalidate the value, so use the heap-preserving
+        // evaluator.
+        let prev_steps = self.comptime_steps_used;
+        self.comptime_steps_used = 0;
+        let mut locals = ctx.comptime_value_vars.clone();
+        let val = self.evaluate_comptime_inst(tag_ref, &mut locals, ctx, span)?;
+        self.comptime_steps_used = prev_steps;
+        match val {
+            ConstValue::EnumVariant {
+                enum_id: e,
+                variant_idx,
+            } if e == enum_id => Ok(variant_idx),
+            ConstValue::EnumData {
+                enum_id: e,
+                variant_idx,
+                ..
+            } if e == enum_id => Ok(variant_idx),
+            // Accept a comptime variant *name* string (e.g.
+            // `v.name` from `@type_info(Self).variants`); look it
+            // up in the enum's variant list.
+            ConstValue::ComptimeStr(idx) => {
+                let name =
+                    match &self.comptime_heap[idx as usize] {
+                        ComptimeHeapItem::String(s) => s.clone(),
+                        _ => return Err(CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason:
+                                    "expected a comptime variant tag (variant value or name string)"
+                                        .into(),
+                            },
+                            span,
+                        )),
+                    };
+                let enum_def = self.type_pool.enum_def(enum_id);
+                enum_def
+                    .variants
+                    .iter()
+                    .position(|v| v.name == name)
+                    .map(|i| i as u32)
+                    .ok_or_else(|| {
+                        CompileError::new(
+                            ErrorKind::ComptimeEvaluationFailed {
+                                reason: format!(
+                                    "no variant named `{}` on enum `{}`",
+                                    name, enum_def.name
+                                ),
+                            },
+                            span,
+                        )
+                    })
+            }
+            _ => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: "expected a comptime variant tag of the matching enum".into(),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// ADR-0079 Phase 2b: analyze `@field_set(handle, name, value)`.
+    /// Looks up the named binding's uninit handle in the analysis
+    /// context, records the field's analyzed value, and returns
+    /// unit. Errors if `handle` isn't a known uninit handle, the
+    /// field doesn't exist on the target type, or the field is
+    /// already written.
+    pub(crate) fn analyze_field_set_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if args.len() != 3 {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("@field_set takes 3 args, got {}", args.len()),
+                },
+                span,
+            ));
+        }
+        let handle_ref = args[0].value;
+        let name_ref = args[1].value;
+        let value_ref = args[2].value;
+
+        // The first arg must be a VarRef to an uninit-handle binding.
+        let handle_inst = self.rir.get(handle_ref);
+        let handle_name = match handle_inst.data {
+            InstData::VarRef { name } => name,
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "@field_set's first argument must be an uninit-handle binding"
+                            .into(),
+                    },
+                    span,
+                ));
+            }
+        };
+        if !ctx.uninit_handles.contains_key(&handle_name) {
+            let name_str = self.interner.resolve(&handle_name).to_string();
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "`{}` is not an uninit handle (must be bound by @uninit or @variant_uninit)",
+                        name_str
+                    ),
+                },
+                span,
+            ));
+        }
+
+        // Evaluate the field name at comptime.
+        let field_name = self.evaluate_comptime_str(name_ref, ctx, span)?;
+        let field_spur = self.interner.get_or_intern(&field_name);
+
+        // Determine the expected field type from the handle's target.
+        let handle_target = ctx.uninit_handles[&handle_name].target;
+        let expected_ty = self.uninit_handle_field_type(handle_target, &field_name, span)?;
+
+        // Analyze the value with the expected type (so int literals
+        // coerce correctly).
+        let value_result = self.analyze_inst(air, value_ref, ctx)?;
+        if value_result.ty != expected_ty
+            && !value_result.ty.is_never()
+            && !value_result.ty.is_error()
+        {
+            return Err(CompileError::type_mismatch(
+                expected_ty.name().to_string(),
+                value_result.ty.name().to_string(),
+                span,
+            ));
+        }
+
+        // Record the write. Reject duplicates.
+        let handle = ctx.uninit_handles.get_mut(&handle_name).unwrap();
+        if handle.fields.contains_key(&field_spur) {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "@field_set wrote field `{}` twice on the same uninit handle",
+                        field_name
+                    ),
+                },
+                span,
+            ));
+        }
+        handle.fields.insert(field_spur, value_result.air_ref);
+
+        // @field_set yields unit.
+        let unit_ref = air.add_inst(AirInst {
+            data: AirInstData::UnitConst,
+            ty: Type::UNIT,
+            span,
+        });
+        Ok(AnalysisResult::new(unit_ref, Type::UNIT))
+    }
+
+    /// ADR-0079 Phase 2b: analyze `@finalize(handle)`. Consumes the
+    /// uninit handle, verifies all fields written, and emits a
+    /// regular `StructInit` (or enum-variant construction).
+    pub(crate) fn analyze_finalize_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("@finalize takes 1 arg, got {}", args.len()),
+                },
+                span,
+            ));
+        }
+        let handle_ref = args[0].value;
+        let handle_inst = self.rir.get(handle_ref);
+        let handle_name = match handle_inst.data {
+            InstData::VarRef { name } => name,
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "@finalize's argument must be an uninit-handle binding".into(),
+                    },
+                    span,
+                ));
+            }
+        };
+        let handle = ctx.uninit_handles.remove(&handle_name).ok_or_else(|| {
+            let name_str = self.interner.resolve(&handle_name).to_string();
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "`{}` is not an uninit handle (or has already been @finalize'd)",
+                        name_str
+                    ),
+                },
+                span,
+            )
+        })?;
+        // Also remove the local sentinel so subsequent stray uses
+        // produce a clean "undefined" diagnostic.
+        ctx.locals.remove(&handle_name);
+
+        match handle.target {
+            crate::sema::context::UninitTarget::Struct(struct_id) => {
+                self.emit_uninit_struct_finalize(air, struct_id, &handle.fields, span)
+            }
+            crate::sema::context::UninitTarget::EnumVariant {
+                enum_id,
+                variant_idx,
+            } => self.emit_uninit_variant_finalize(air, enum_id, variant_idx, &handle.fields, span),
+        }
+    }
+
+    /// ADR-0079 Phase 3: analyze `@variant_field(self, comptime tag, name)`.
+    /// Reads the named field of variant `tag` from `self`. The `tag` is
+    /// a comptime variant value (e.g. an element of
+    /// `@type_info(Self).variants`), `name` is a comptime string. The
+    /// surrounding context is responsible for ensuring `self` is of
+    /// variant `tag` — typically that's a `comptime_unroll for`-driven
+    /// match-arm, but a stray call still type-checks against the
+    /// declared field type.
+    pub(crate) fn analyze_variant_field_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if args.len() != 3 {
+            return Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "@variant_field takes 3 args (self, tag, name), got {}",
+                        args.len()
+                    ),
+                },
+                span,
+            ));
+        }
+
+        // Analyze the receiver to get its type.
+        let recv = self.analyze_inst(air, args[0].value, ctx)?;
+        let recv_ty = recv.ty;
+        let enum_ty = match recv_ty.kind() {
+            crate::types::TypeKind::Ref(id) => self.type_pool.ref_def(id),
+            crate::types::TypeKind::MutRef(id) => self.type_pool.mut_ref_def(id),
+            _ => recv_ty,
+        };
+        let enum_id = enum_ty.as_enum().ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "@variant_field expects an enum receiver, got {}",
+                        recv_ty.name()
+                    ),
+                },
+                span,
+            )
+        })?;
+
+        // Resolve the tag (a comptime variant value) to a variant index.
+        let variant_idx = self.evaluate_variant_tag_arg(args[1].value, enum_id, ctx, span)?;
+
+        // Resolve the field name.
+        let field_name = self.evaluate_comptime_str(args[2].value, ctx, span)?;
+
+        // Look up the field's type and index in the variant.
+        let enum_def = self.type_pool.enum_def(enum_id);
+        let variant = enum_def.variants.get(variant_idx as usize).ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "variant index {} out of range for enum `{}`",
+                        variant_idx, enum_def.name
+                    ),
+                },
+                span,
+            )
+        })?;
+        let field_idx = variant_field_index(variant, &field_name).ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "variant `{}::{}` has no field named `{}`",
+                        enum_def.name, variant.name, field_name
+                    ),
+                },
+                span,
+            )
+        })? as u32;
+        let field_ty = variant.fields[field_idx as usize];
+
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::EnumPayloadGet {
+                base: recv.air_ref,
+                variant_index: variant_idx,
+                field_index: field_idx,
+            },
+            ty: field_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, field_ty))
+    }
+
+    /// Build an `AirInstData::StructInit` from a fully-written
+    /// uninit handle's field map.
+    fn emit_uninit_struct_finalize(
+        &mut self,
+        air: &mut Air,
+        struct_id: crate::types::StructId,
+        fields_written: &HashMap<Spur, AirRef>,
+        span: Span,
+    ) -> CompileResult<AnalysisResult> {
+        let struct_def = self.type_pool.struct_def(struct_id);
+        let struct_name = struct_def.name.clone();
+
+        // Verify completeness.
+        let mut missing = Vec::new();
+        for f in &struct_def.fields {
+            let f_spur = self.interner.get_or_intern(&f.name);
+            if !fields_written.contains_key(&f_spur) {
+                missing.push(f.name.clone());
+            }
+        }
+        if !missing.is_empty() {
+            return Err(CompileError::new(
+                ErrorKind::MissingFields(Box::new(MissingFieldsError {
+                    struct_name,
+                    missing_fields: missing,
+                })),
+                span,
+            ));
+        }
+
+        // Reject extra fields.
+        let known_names: HashSet<&str> =
+            struct_def.fields.iter().map(|f| f.name.as_str()).collect();
+        for &spur in fields_written.keys() {
+            let name_str = self.interner.resolve(&spur);
+            if !known_names.contains(name_str) {
+                return Err(CompileError::new(
+                    ErrorKind::UnknownField {
+                        struct_name: struct_def.name.clone(),
+                        field_name: name_str.to_string(),
+                    },
+                    span,
+                ));
+            }
+        }
+
+        // Emit StructInit in declared field order.
+        let mut field_air_refs: Vec<u32> = Vec::with_capacity(struct_def.fields.len());
+        let mut source_order: Vec<u32> = Vec::with_capacity(struct_def.fields.len());
+        for (idx, f) in struct_def.fields.iter().enumerate() {
+            let f_spur = self.interner.get_or_intern(&f.name);
+            let value_ref = fields_written[&f_spur];
+            field_air_refs.push(value_ref.as_u32());
+            source_order.push(idx as u32);
+        }
+        let fields_start = air.add_extra(&field_air_refs);
+        let source_order_start = air.add_extra(&source_order);
+        let struct_ty = Type::new_struct(struct_id);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::StructInit {
+                struct_id,
+                fields_start,
+                fields_len: struct_def.fields.len() as u32,
+                source_order_start,
+            },
+            ty: struct_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, struct_ty))
+    }
+
+    /// Build a variant-construction AIR from a fully-written
+    /// uninit-variant handle's field map.
+    fn emit_uninit_variant_finalize(
+        &mut self,
+        air: &mut Air,
+        enum_id: crate::types::EnumId,
+        variant_idx: u32,
+        fields_written: &HashMap<Spur, AirRef>,
+        span: Span,
+    ) -> CompileResult<AnalysisResult> {
+        let result_ty = Type::new_enum(enum_id);
+        let enum_def = self.type_pool.enum_def(enum_id);
+        let variant = enum_def.variants.get(variant_idx as usize).ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "variant index {} out of range for enum `{}`",
+                        variant_idx, enum_def.name
+                    ),
+                },
+                span,
+            )
+        })?;
+
+        // Unit variant: no payload, emit a plain EnumVariant.
+        if variant.fields.is_empty() {
+            let air_ref = air.add_inst(AirInst {
+                data: AirInstData::EnumVariant {
+                    enum_id,
+                    variant_index: variant_idx,
+                },
+                ty: result_ty,
+                span,
+            });
+            return Ok(AnalysisResult::new(air_ref, result_ty));
+        }
+
+        // Data/struct variant: verify completeness, then emit
+        // EnumCreate in declared field order. For tuple variants the
+        // fields are addressed positionally as `"0"`, `"1"`, etc.
+        let n_fields = variant.fields.len();
+        let mut missing = Vec::new();
+        for i in 0..n_fields {
+            let fname = variant_field_name(variant, i);
+            let f_spur = self.interner.get_or_intern(&fname);
+            if !fields_written.contains_key(&f_spur) {
+                missing.push(fname);
+            }
+        }
+        if !missing.is_empty() {
+            return Err(CompileError::new(
+                ErrorKind::MissingFields(Box::new(MissingFieldsError {
+                    struct_name: format!("{}::{}", enum_def.name, variant.name),
+                    missing_fields: missing,
+                })),
+                span,
+            ));
+        }
+        let known: HashSet<String> = (0..n_fields)
+            .map(|i| variant_field_name(variant, i))
+            .collect();
+        for &spur in fields_written.keys() {
+            let n = self.interner.resolve(&spur).to_string();
+            if !known.contains(&n) {
+                return Err(CompileError::new(
+                    ErrorKind::UnknownField {
+                        struct_name: format!("{}::{}", enum_def.name, variant.name),
+                        field_name: n,
+                    },
+                    span,
+                ));
+            }
+        }
+        let mut field_air_refs: Vec<u32> = Vec::with_capacity(n_fields);
+        for i in 0..n_fields {
+            let fname = variant_field_name(variant, i);
+            let f_spur = self.interner.get_or_intern(&fname);
+            field_air_refs.push(fields_written[&f_spur].as_u32());
+        }
+        let fields_start = air.add_extra(&field_air_refs);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::EnumCreate {
+                enum_id,
+                variant_index: variant_idx,
+                fields_start,
+                fields_len: n_fields as u32,
+            },
+            ty: result_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, result_ty))
+    }
+
+    /// Look up the expected type of a named field on an uninit
+    /// handle's target (struct or enum variant).
+    fn uninit_handle_field_type(
+        &self,
+        target: crate::sema::context::UninitTarget,
+        field_name: &str,
+        span: Span,
+    ) -> CompileResult<Type> {
+        use crate::sema::context::UninitTarget;
+        match target {
+            UninitTarget::Struct(struct_id) => {
+                let struct_def = self.type_pool.struct_def(struct_id);
+                struct_def
+                    .fields
+                    .iter()
+                    .find(|f| f.name == field_name)
+                    .map(|f| f.ty)
+                    .ok_or_else(|| {
+                        CompileError::new(
+                            ErrorKind::UnknownField {
+                                struct_name: struct_def.name.clone(),
+                                field_name: field_name.to_string(),
+                            },
+                            span,
+                        )
+                    })
+            }
+            UninitTarget::EnumVariant {
+                enum_id,
+                variant_idx,
+            } => {
+                let enum_def = self.type_pool.enum_def(enum_id);
+                let variant = enum_def.variants.get(variant_idx as usize).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "variant index {} out of range for enum `{}`",
+                                variant_idx, enum_def.name
+                            ),
+                        },
+                        span,
+                    )
+                })?;
+                let idx = variant_field_index(variant, field_name).ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: format!(
+                                "variant `{}::{}` has no field named `{}`",
+                                enum_def.name, variant.name, field_name
+                            ),
+                        },
+                        span,
+                    )
+                })?;
+                Ok(variant.fields[idx])
+            }
+        }
+    }
+
+    /// Evaluate a comptime expression to a string. Used by
+    /// `@field_set(handle, name, value)` to resolve the field name.
+    fn evaluate_comptime_str(
+        &mut self,
+        inst_ref: InstRef,
+        ctx: &mut AnalysisContext,
+        span: Span,
+    ) -> CompileResult<String> {
+        use crate::sema::context::{ComptimeHeapItem, ConstValue};
+        // ADR-0079 Phase 2b: callers reach here from inside
+        // `comptime_unroll for` bodies where the surrounding heap holds
+        // the loop variable's struct value. `evaluate_comptime_block`
+        // would clear the heap and invalidate that handle, so we use
+        // the heap-preserving evaluator instead.
+        let prev_steps = self.comptime_steps_used;
+        self.comptime_steps_used = 0;
+        let mut locals = ctx.comptime_value_vars.clone();
+        let result = self.evaluate_comptime_inst(inst_ref, &mut locals, ctx, span)?;
+        self.comptime_steps_used = prev_steps;
+        match result {
+            ConstValue::ComptimeStr(idx) => match &self.comptime_heap[idx as usize] {
+                ComptimeHeapItem::String(s) => Ok(s.clone()),
+                _ => Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "expected a comptime string, got non-string heap value".into(),
+                    },
+                    span,
+                )),
+            },
+            other => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!("expected a comptime string, got {:?}", other),
+                },
+                span,
+            )),
+        }
     }
 
     /// Analyze a struct destructuring pattern.
@@ -4960,6 +6089,12 @@ impl<'a> Sema<'a> {
         let is_unchecked = method_info.is_unchecked;
         let has_self = method_info.has_self;
 
+        // ADR-0026 lazy analysis: track this `__call` method as referenced
+        // so its body is analyzed by the work queue. Otherwise the
+        // anonymous-struct method ends up registered in `self.methods`
+        // but never analyzed, producing a link error at codegen time.
+        ctx.referenced_methods.insert((struct_id, call_sym));
+
         // `__call` must be a method (has self) — we enforce it in astgen, but
         // defensive check keeps the failure mode clear for user-defined
         // callable types.
@@ -6249,6 +7384,13 @@ impl<'a> Sema<'a> {
             ));
         }
 
+        // ADR-0078: if this entry is an item-level re-export alias
+        // (`pub const X = mod.Y`), use the original symbol name `Y` from
+        // here on so the emitted `Call` targets the actual function
+        // definition, and so the lazy work queue tracks the right
+        // identifier.
+        let name = fn_info.canonical_name.unwrap_or(name);
+
         // Track this function as referenced (for lazy analysis)
         ctx.referenced_functions.insert(name);
 
@@ -6710,13 +7852,16 @@ impl<'a> Sema<'a> {
             InstData::TypeInterfaceIntrinsic {
                 name,
                 type_arg,
+                type_inst,
                 interface_arg,
             } => self.analyze_type_interface_intrinsic(
                 air,
                 *name,
                 *type_arg,
+                *type_inst,
                 *interface_arg,
                 inst.span,
+                ctx,
             ),
 
             _ => Err(CompileError::new(
@@ -6796,13 +7941,21 @@ impl<'a> Sema<'a> {
     }
 
     /// Analyze a type+interface intrinsic (`@implements(T, I)`).
+    /// `type_inst`, when set, supersedes `type_arg` — sema
+    /// comptime-evaluates it to a `ConstValue::Type`. Otherwise
+    /// `type_arg` is treated as a type-name (or comptime-bound type
+    /// alias) and resolved through `resolve_type` /
+    /// `comptime_type_vars`.
+    #[allow(clippy::too_many_arguments)]
     fn analyze_type_interface_intrinsic(
         &mut self,
         air: &mut Air,
         name: Spur,
         type_arg: Spur,
+        type_inst: Option<InstRef>,
         interface_arg: Spur,
         span: Span,
+        ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
         let intrinsic_name = self.interner.resolve(&name);
 
@@ -6818,7 +7971,34 @@ impl<'a> Sema<'a> {
 
         match id {
             IntrinsicId::Implements => {
-                let ty = self.resolve_type(type_arg, span)?;
+                let ty = if let Some(t_inst) = type_inst {
+                    // ADR-0079: comptime-evaluate the type
+                    // expression. Use the heap-preserving evaluator
+                    // so callers nested inside `comptime_unroll for`
+                    // keep their loop binding intact.
+                    use crate::sema::context::ConstValue;
+                    let prev_steps = self.comptime_steps_used;
+                    self.comptime_steps_used = 0;
+                    let mut locals = ctx.comptime_value_vars.clone();
+                    let val = self.evaluate_comptime_inst(t_inst, &mut locals, ctx, span)?;
+                    self.comptime_steps_used = prev_steps;
+                    match val {
+                        ConstValue::Type(t) => t,
+                        other => {
+                            return Err(CompileError::new(
+                                ErrorKind::ComptimeEvaluationFailed {
+                                    reason: format!(
+                                        "@implements: type argument must comptime-evaluate to a type, got {:?}",
+                                        other
+                                    ),
+                                },
+                                span,
+                            ));
+                        }
+                    }
+                } else {
+                    self.resolve_type(type_arg, span)?
+                };
                 let interface_id = match self.interfaces.get(&interface_arg).copied() {
                     Some(id) => id,
                     None => {

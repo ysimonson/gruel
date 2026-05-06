@@ -1,0 +1,57 @@
+// ADR-0070: canonical Result(T, E).
+
+pub fn Result(comptime T: type, comptime E: type) -> type {
+    enum {
+        Ok(T),
+        Err(E),
+
+        pub fn is_ok(self: Ref(Self)) -> bool {
+            match self {
+                Self::Ok(_) => true,
+                Self::Err(_) => false,
+            }
+        }
+
+        pub fn is_err(self: Ref(Self)) -> bool {
+            match self {
+                Self::Ok(_) => false,
+                Self::Err(_) => true,
+            }
+        }
+
+        pub fn unwrap(self) -> T {
+            match self {
+                Self::Ok(x) => x,
+                Self::Err(_) => @panic("called unwrap on an Err value"),
+            }
+        }
+
+        pub fn unwrap_err(self) -> E {
+            match self {
+                Self::Ok(_) => @panic("called unwrap_err on an Ok value"),
+                Self::Err(e) => e,
+            }
+        }
+
+        pub fn unwrap_or(self, default: T) -> T {
+            match self {
+                Self::Ok(x) => x,
+                Self::Err(_) => default,
+            }
+        }
+
+        pub fn expect(self, msg: String) -> T {
+            match self {
+                Self::Ok(x) => x,
+                Self::Err(_) => @panic(msg),
+            }
+        }
+
+        pub fn expect_err(self, msg: String) -> E {
+            match self {
+                Self::Ok(_) => @panic(msg),
+                Self::Err(e) => e,
+            }
+        }
+    }
+}

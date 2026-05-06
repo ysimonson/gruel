@@ -181,6 +181,15 @@ pub enum RirPattern {
         has_rest: bool,
         span: Span,
     },
+    /// ADR-0079 Phase 3: a `comptime_unroll for` arm template. Sema
+    /// evaluates `iterable` at comptime, synthesizes one regular arm
+    /// per element, and substitutes `binding` as a comptime value in
+    /// the arm body. Only valid at the top level of a match arm.
+    ComptimeUnrollArm {
+        binding: Spur,
+        iterable: InstRef,
+        span: Span,
+    },
 }
 
 /// A binding in a data variant pattern.
@@ -235,6 +244,7 @@ impl RirPattern {
             RirPattern::Ident { span, .. } => *span,
             RirPattern::Tuple { span, .. } => *span,
             RirPattern::Struct { span, .. } => *span,
+            RirPattern::ComptimeUnrollArm { span, .. } => *span,
         }
     }
 }
@@ -421,6 +431,22 @@ fn encode_pattern_tree(pattern: &RirPattern, out: &mut Vec<u32>) {
                 encode_pattern_tree(&f.pattern, out);
             }
         }
+        // ADR-0079 Phase 3: an unroll-arm template only ever
+        // appears at the top level of a match (sema rejects it
+        // elsewhere), but we still need a tree encoding for the
+        // shared encode dispatch — emit a stable shape and let
+        // the decoder round-trip it identically.
+        RirPattern::ComptimeUnrollArm {
+            binding,
+            iterable,
+            span,
+        } => {
+            out.push(PatternKind::ComptimeUnrollArm as u32);
+            out.push(span.start());
+            out.push(span.len());
+            out.push(binding.into_usize() as u32);
+            out.push(iterable.as_u32());
+        }
     }
 }
 
@@ -578,6 +604,18 @@ fn decode_pattern_tree(data: &[u32]) -> (RirPattern, usize) {
             },
             offset,
         )
+    } else if kind == PatternKind::ComptimeUnrollArm as u32 {
+        let span = Span::new(data[1], data[1] + data[2]);
+        let binding = Spur::try_from_usize(data[3] as usize).unwrap();
+        let iterable = InstRef::from_raw(data[4]);
+        (
+            RirPattern::ComptimeUnrollArm {
+                binding,
+                iterable,
+                span,
+            },
+            5,
+        )
     } else {
         panic!("Unknown pattern tree tag: {}", kind);
     }
@@ -623,6 +661,8 @@ pub enum PatternKind {
     /// ADR-0051 Struct pattern: [kind, span_start, span_len, body, module_raw, type_name, has_rest, fields_len,
     ///                           (field_name, ...recursive_tree) * fields_len]
     Struct = 8,
+    /// ADR-0079 Phase 3 unroll arm template: [kind, span_start, span_len, body, binding, iterable]
+    ComptimeUnrollArm = 9,
 }
 
 /// Size of each pattern kind in the extra array (including body InstRef)
@@ -1129,6 +1169,18 @@ impl Rir {
                         encode_pattern_tree(&field.pattern, &mut self.extra);
                     }
                 }
+                RirPattern::ComptimeUnrollArm {
+                    binding,
+                    iterable,
+                    span,
+                } => {
+                    self.extra.push(PatternKind::ComptimeUnrollArm as u32);
+                    self.extra.push(span.start());
+                    self.extra.push(span.len());
+                    self.extra.push(body.as_u32());
+                    self.extra.push(binding.into_usize() as u32);
+                    self.extra.push(iterable.as_u32());
+                }
             }
         }
         (start, arms.len() as u32)
@@ -1338,6 +1390,23 @@ impl Rir {
                         body,
                     ));
                     pos += offset;
+                }
+                k if k == PatternKind::ComptimeUnrollArm as u32 => {
+                    let span_start = self.extra[pos + 1];
+                    let span_len = self.extra[pos + 2];
+                    let span = Span::new(span_start, span_start + span_len);
+                    let body = InstRef::from_raw(self.extra[pos + 3]);
+                    let binding = Spur::try_from_usize(self.extra[pos + 4] as usize).unwrap();
+                    let iterable = InstRef::from_raw(self.extra[pos + 5]);
+                    arms.push((
+                        RirPattern::ComptimeUnrollArm {
+                            binding,
+                            iterable,
+                            span,
+                        },
+                        body,
+                    ));
+                    pos += 6;
                 }
                 _ => panic!("Unknown pattern kind: {}", kind),
             }
@@ -1653,10 +1722,12 @@ impl Rir {
             InstData::TypeInterfaceIntrinsic {
                 name,
                 type_arg,
+                type_inst,
                 interface_arg,
             } => InstData::TypeInterfaceIntrinsic {
                 name: *name,
                 type_arg: *type_arg,
+                type_inst: type_inst.map(renumber),
                 interface_arg: *interface_arg,
             },
 
@@ -1691,10 +1762,12 @@ impl Rir {
                 cond,
                 then_block,
                 else_block,
+                is_comptime,
             } => InstData::Branch {
                 cond: renumber(*cond),
                 then_block: renumber(*then_block),
                 else_block: renumber_opt(*else_block),
+                is_comptime: *is_comptime,
             },
             InstData::Loop { cond, body } => InstData::Loop {
                 cond: renumber(*cond),
@@ -1880,11 +1953,19 @@ impl Rir {
                 name,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             } => InstData::InterfaceDecl {
                 is_pub: *is_pub,
                 name: *name,
                 methods_start: *methods_start + extra_offset,
                 methods_len: *methods_len,
+                directives_start: if *directives_len == 0 {
+                    *directives_start
+                } else {
+                    *directives_start + extra_offset
+                },
+                directives_len: *directives_len,
             },
             InstData::InterfaceMethodSig {
                 name,
@@ -1908,6 +1989,8 @@ impl Rir {
                 variants_len,
                 methods_start,
                 methods_len,
+                directives_start,
+                directives_len,
             } => InstData::EnumDecl {
                 is_pub: *is_pub,
                 name: *name,
@@ -1915,6 +1998,12 @@ impl Rir {
                 variants_len: *variants_len,
                 methods_start: *methods_start + extra_offset,
                 methods_len: *methods_len,
+                directives_start: if *directives_len == 0 {
+                    *directives_start
+                } else {
+                    *directives_start + extra_offset
+                },
+                directives_len: *directives_len,
             },
 
             // Array operations
@@ -2365,6 +2454,13 @@ pub enum InstData {
         cond: InstRef,
         then_block: InstRef,
         else_block: Option<InstRef>,
+        /// ADR-0079 follow-up: when set, sema evaluates `cond` at
+        /// comptime and emits *only* the chosen branch — the
+        /// discarded branch is never analyzed (so it's free to
+        /// reference shapes that don't apply to the surrounding
+        /// type, e.g. `@uninit(Self)` inside a struct-only branch
+        /// when `Self` is enum). Source form: `comptime if cond { … }`.
+        is_comptime: bool,
     },
 
     /// While loop: while cond { body }
@@ -2481,11 +2577,20 @@ pub enum InstData {
 
     /// Intrinsic call with a type argument and an interface argument
     /// (e.g., `@implements(T, Drop)`).
+    ///
+    /// `type_arg` is the interned name when the source has a bare
+    /// type name or type expression. `type_inst`, when `Some`, is an
+    /// arbitrary expression that comptime-evaluates to a `Type`
+    /// value (e.g. `f.field_type` projecting out of `@type_info`).
+    /// Sema prefers `type_inst` when set.
     TypeInterfaceIntrinsic {
         /// Intrinsic name (without @)
         name: Spur,
         /// Type argument (interned name).
         type_arg: Spur,
+        /// Optional comptime-evaluable type expression. When set,
+        /// supersedes `type_arg`.
+        type_inst: Option<InstRef>,
         /// Interface argument (interned name).
         interface_arg: Spur,
     },
@@ -2630,6 +2735,10 @@ pub enum InstData {
         methods_start: u32,
         /// Number of methods
         methods_len: u32,
+        /// Index into extra data where directives start (ADR-0079).
+        directives_start: u32,
+        /// Number of directives.
+        directives_len: u32,
     },
 
     /// Enum variant: creates a value of an enum type
@@ -2727,6 +2836,10 @@ pub enum InstData {
         methods_start: u32,
         /// Number of method signatures.
         methods_len: u32,
+        /// Start of directives in extra data (ADR-0079).
+        directives_start: u32,
+        /// Number of directives.
+        directives_len: u32,
     },
 
     /// A single method signature inside an `InterfaceDecl`.
@@ -3220,6 +3333,7 @@ mod tests {
                 cond,
                 then_block,
                 else_block: Some(else_block),
+                is_comptime: false,
             },
             span: Span::new(0, 20),
         });
@@ -3246,6 +3360,7 @@ mod tests {
                 cond,
                 then_block,
                 else_block: None,
+                is_comptime: false,
             },
             span: Span::new(0, 15),
         });
@@ -3924,6 +4039,8 @@ mod tests {
                 variants_len,
                 methods_start: 0,
                 methods_len: 0,
+                directives_start: 0,
+                directives_len: 0,
             },
             span: Span::new(0, 35),
         });
@@ -3952,6 +4069,8 @@ mod tests {
                 variants_len,
                 methods_start: 0,
                 methods_len: 0,
+                directives_start: 0,
+                directives_len: 0,
             },
             span: Span::new(0, 35),
         });

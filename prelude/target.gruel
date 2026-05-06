@@ -1,0 +1,33 @@
+// ADR-0078 Phase 3: built-in enum declarations for compilation-target
+// reflection. `TypeKind` and `Ownership` were split out into
+// `type_info.gruel` since they describe types in the user's program
+// rather than the platform we're compiling for.
+//
+// Both enums are produced by compile-time intrinsics:
+//   - `@target_arch()` → `Arch`
+//   - `@target_os()` → `Os`
+//
+// The intrinsics select variants by name lookup against these
+// declarations, so variant order is *display* order — reordering for
+// readability is safe.
+
+// Architecture (`@target_arch()`).
+pub enum Arch {
+    X86_64,
+    Aarch64,
+    X86,
+    Arm,
+    Riscv32,
+    Riscv64,
+    Wasm32,
+    Wasm64,
+}
+
+// Operating system (`@target_os()`).
+pub enum Os {
+    Linux,
+    Macos,
+    Windows,
+    Freestanding,
+    Wasi,
+}

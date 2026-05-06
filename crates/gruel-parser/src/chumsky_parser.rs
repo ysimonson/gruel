@@ -591,11 +591,22 @@ where
     ))
     .boxed();
 
+    let directive_arg = choice((
+        select! {
+            TokenKind::String(s) = e => DirectiveArg::String(StringLit {
+                value: s,
+                span: span_from_extra(e),
+            }),
+        }
+        .boxed(),
+        ident_parser().map(DirectiveArg::Ident).boxed(),
+    ))
+    .boxed();
+
     just(TokenKind::At)
         .ignore_then(directive_name)
         .then(
-            ident_parser()
-                .map(DirectiveArg::Ident)
+            directive_arg
                 .separated_by(just(TokenKind::Comma))
                 .allow_trailing()
                 .collect::<Vec<_>>()
@@ -1215,20 +1226,43 @@ where
     .boxed()
 }
 
-/// Parser for a single match arm: pattern => expr
+/// Parser for a single match arm: pattern => expr  OR
+/// `comptime_unroll for ident in expr { body }` (ADR-0079 Phase 3),
+/// which the compiler expands at sema time into one regular arm
+/// per element of the iterable.
 fn match_arm_parser<'src, I>(expr: GruelParser<'src, I, Expr>) -> GruelParser<'src, I, MatchArm>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    pattern_parser()
+    let regular_arm = pattern_parser()
         .then_ignore(just(TokenKind::FatArrow))
-        .then(expr)
+        .then(expr.clone())
         .map_with(|(pattern, body), e| MatchArm {
             pattern,
             body: Box::new(body),
             span: span_from_extra(e),
-        })
-        .boxed()
+        });
+
+    let unroll_arm = just(TokenKind::ComptimeUnroll)
+        .ignore_then(just(TokenKind::For))
+        .ignore_then(ident_parser())
+        .then_ignore(just(TokenKind::In))
+        .then(expr.clone())
+        .then(maybe_unit_block_parser(expr))
+        .map_with(|((binding, iterable), body), e| {
+            let span = span_from_extra(e);
+            MatchArm {
+                pattern: Pattern::ComptimeUnrollArm {
+                    binding,
+                    iterable: Box::new(iterable),
+                    span,
+                },
+                body: Box::new(Expr::Block(body)),
+                span,
+            }
+        });
+
+    choice((unroll_arm, regular_arm)).boxed()
 }
 
 /// Parser for literal expressions: integers, strings, booleans, and unit
@@ -1329,11 +1363,15 @@ where
             })
         });
 
-    // If expression - defined with recursive reference to allow `else if` chains
+    // If expression - defined with recursive reference to allow `else if` chains.
+    // ADR-0079 follow-up: an optional leading `comptime` keyword marks the
+    // branch as a comptime-evaluated dispatch (see `IfExpr::is_comptime`).
     let if_expr: GruelParser<'src, I, Expr> = recursive(
         |if_expr_rec: Recursive<Direct<'src, 'src, I, Expr, ParserExtras<'src>>>| {
-            just(TokenKind::If)
-                .ignore_then(expr.clone())
+            just(TokenKind::Comptime)
+                .or_not()
+                .then_ignore(just(TokenKind::If))
+                .then(expr.clone())
                 .then(maybe_unit_block_parser(expr.clone()))
                 .then(
                     just(TokenKind::Else)
@@ -1354,12 +1392,13 @@ where
                         )))
                         .or_not(),
                 )
-                .map_with(|((cond, then_block), else_block), e| {
+                .map_with(|(((comptime_kw, cond), then_block), else_block), e| {
                     Expr::If(IfExpr {
                         cond: Box::new(cond),
                         then_block,
                         else_block,
                         span: span_from_extra(e),
+                        is_comptime: comptime_kw.is_some(),
                     })
                 })
                 .boxed()
@@ -2020,11 +2059,24 @@ where
         // Primitive type keywords (these can't be variable names)
         let primitive_type = primitive_type_parser().map(IntrinsicArg::Type);
 
+        // ADR-0079: `Self` as a type argument (e.g.
+        // `@type_info(Self)` inside a `derive` body). The bare
+        // keyword can't appear as a value, so it's unambiguous in
+        // this slot.
+        let self_type_arg = just(TokenKind::SelfType).map_with(|_, e| {
+            let span = span_from_extra(e);
+            IntrinsicArg::Type(TypeExpr::Named(Ident {
+                name: e.state().syms.self_type,
+                span,
+            }))
+        });
+
         choice((
             unit_type.boxed(),
             never_type.boxed(),
             array_type.boxed(),
             primitive_type.boxed(),
+            self_type_arg.boxed(),
         ))
         .boxed()
     };
@@ -2989,16 +3041,20 @@ where
         .then(method_parser().repeated().collect::<Vec<_>>())
         .boxed();
 
-    visibility
+    directives_parser()
+        .then(visibility)
         .then(just(TokenKind::Enum).ignore_then(ident_parser()))
         .then(enum_body.delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)))
-        .map_with(|((visibility, name), (variants, methods)), e| EnumDecl {
-            visibility,
-            name,
-            variants,
-            methods,
-            span: span_from_extra(e),
-        })
+        .map_with(
+            |(((directives, visibility), name), (variants, methods)), e| EnumDecl {
+                directives,
+                visibility,
+                name,
+                variants,
+                methods,
+                span: span_from_extra(e),
+            },
+        )
         .boxed()
 }
 
@@ -3312,15 +3368,19 @@ where
         .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace))
         .boxed();
 
-    visibility
+    directives_parser()
+        .then(visibility)
         .then(just(TokenKind::Interface).ignore_then(ident_parser()))
         .then(body)
-        .map_with(|((visibility, name), methods), e| InterfaceDecl {
-            visibility,
-            name,
-            methods,
-            span: span_from_extra(e),
-        })
+        .map_with(
+            |(((directives, visibility), name), methods), e| InterfaceDecl {
+                directives,
+                visibility,
+                name,
+                methods,
+                span: span_from_extra(e),
+            },
+        )
         .boxed()
 }
 
@@ -3633,6 +3693,9 @@ fn is_refutable(pat: &Pattern) -> bool {
             TupleElemPattern::Pattern(p) => is_refutable(p),
             TupleElemPattern::Rest(_) => false,
         }),
+        // ADR-0079 Phase 3: an unroll-arm template's expanded pattern
+        // is variant-shaped, hence refutable.
+        Pattern::ComptimeUnrollArm { .. } => true,
     }
 }
 
@@ -3845,6 +3908,7 @@ fn refutable_focus_span(pat: &Pattern) -> Span {
             .map(refutable_focus_span)
             .unwrap_or(pat.span()),
         Pattern::Wildcard(_) | Pattern::Ident { .. } => pat.span(),
+        Pattern::ComptimeUnrollArm { span, .. } => *span,
     }
 }
 

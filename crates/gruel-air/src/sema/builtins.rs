@@ -5,31 +5,10 @@
 //! Built-in types are registered before user code is processed,
 //! enabling collision detection and proper type resolution.
 
-use gruel_builtins::{
-    BUILTIN_ENUMS, BUILTIN_INTERFACES, BUILTIN_TYPES, BuiltinFieldType, BuiltinIfaceTy,
-    BuiltinTypeDef, ReceiverMode as BuiltinReceiverMode,
-};
+use gruel_builtins::{BUILTIN_TYPES, BuiltinFieldType, BuiltinTypeDef};
 
 use super::Sema;
-use crate::types::{
-    EnumDef, EnumVariantDef, IfaceTy, InterfaceDef, InterfaceId, InterfaceMethodReq, ReceiverMode,
-    StructDef, StructField, StructId, Type, TypeKind,
-};
-
-fn convert_receiver_mode(mode: BuiltinReceiverMode) -> ReceiverMode {
-    match mode {
-        BuiltinReceiverMode::ByValue => ReceiverMode::ByValue,
-        BuiltinReceiverMode::ByRef => ReceiverMode::Borrow,
-        BuiltinReceiverMode::ByMutRef => ReceiverMode::Inout,
-    }
-}
-
-fn convert_iface_ty(ty: BuiltinIfaceTy) -> IfaceTy {
-    match ty {
-        BuiltinIfaceTy::SelfType => IfaceTy::SelfType,
-        BuiltinIfaceTy::Unit => IfaceTy::Concrete(Type::UNIT),
-    }
-}
+use crate::types::{StructDef, StructField, StructId, Type, TypeKind};
 
 impl<'a> Sema<'a> {
     /// Phase 0: Inject built-in types as synthetic structs and enums.
@@ -94,78 +73,53 @@ impl<'a> Sema<'a> {
             // when analyzing method calls on builtin types.
         }
 
-        // Inject built-in enum types (Arch, Os)
-        for builtin_enum in BUILTIN_ENUMS {
-            // Built-in enums only have unit variants (no associated data).
-            let variants: Vec<EnumVariantDef> = builtin_enum
-                .variants
-                .iter()
-                .map(|v| EnumVariantDef::unit(*v))
-                .collect();
-
-            // Create the synthetic enum definition
-            let enum_def = EnumDef {
-                name: builtin_enum.name.to_string(),
-                variants,
-                is_pub: true,                        // Built-in enums are always public
-                file_id: gruel_util::FileId::new(0), // Synthetic, no source file
-                destructor: None,
-            };
-
-            // Register in type pool and get pool-based EnumId
-            let name_spur = self.interner.get_or_intern(builtin_enum.name);
-            let (enum_id, _) = self.type_pool.register_enum(name_spur, enum_def);
-
-            // Register in enum lookup
-            self.enums.insert(name_spur, enum_id);
-
-            // Store special IDs for quick access
-            if builtin_enum.name == "Arch" {
-                self.builtin_arch_id = Some(enum_id);
-            } else if builtin_enum.name == "Os" {
-                self.builtin_os_id = Some(enum_id);
-            } else if builtin_enum.name == "TypeKind" {
-                self.builtin_typekind_id = Some(enum_id);
-            } else if builtin_enum.name == "Ownership" {
-                self.builtin_ownership_id = Some(enum_id);
-            }
-        }
-
-        // Inject the compiler-recognized `Drop` and `Copy` interfaces
-        // (ADR-0059). Drop has `fn drop(self)`; Copy has
-        // `fn copy(borrow self) -> Self`. The shapes are referenced by the
-        // ownership trichotomy and by `@derive(Copy)` validation.
-        self.inject_builtin_interfaces();
+        // ADR-0078 Phase 2: the compiler-recognized interfaces (Drop, Copy,
+        // Clone, Handle) are now declared in `prelude/interfaces.gruel`.
+        // ADR-0078 Phase 3: the platform-reflection enums (Arch, Os) live
+        // in `prelude/target.gruel`; the type-reflection enums (TypeKind,
+        // Ownership) live in `prelude/type_info.gruel`. All four register
+        // into the standard `self.interfaces` / `self.enums` maps during
+        // `resolve_declarations`; the hardcoded behaviors that key off
+        // the names continue to find them via `cache_builtin_enum_ids`
+        // (called after declaration resolution).
     }
 
-    /// Register the compiler-recognized interfaces (`Drop`, `Copy`, `Clone`)
-    /// from the [`BUILTIN_INTERFACES`] registry. Called from
-    /// `inject_builtin_types` so the names are already resolvable when user
-    /// code is parsed.
-    fn inject_builtin_interfaces(&mut self) {
-        for builtin in BUILTIN_INTERFACES {
-            let name_spur = self.interner.get_or_intern_static(builtin.name);
-            if self.interfaces.contains_key(&name_spur) {
-                continue;
-            }
-            let methods = builtin
-                .methods
-                .iter()
-                .map(|m| InterfaceMethodReq {
-                    name: m.name.to_string(),
-                    receiver: convert_receiver_mode(m.receiver_mode),
-                    param_types: m.param_types.iter().map(|t| convert_iface_ty(*t)).collect(),
-                    return_type: convert_iface_ty(m.return_type),
-                })
-                .collect();
-            let id = InterfaceId(self.interface_defs.len() as u32);
-            self.interface_defs.push(InterfaceDef {
-                name: builtin.name.to_string(),
-                methods,
-                is_pub: true,
-                file_id: gruel_util::FileId::new(0),
-            });
-            self.interfaces.insert(name_spur, id);
+    /// Cache `EnumId`s for the four prelude-resident built-in enums (`Arch`,
+    /// `Os`, `TypeKind`, `Ownership`) so the intrinsics that produce values
+    /// of those types can build `Type::new_enum(id)` without doing a name
+    /// lookup at every call site.
+    ///
+    /// Called once after `resolve_declarations` has run — by which time the
+    /// prelude's enum declarations have been registered into `self.enums`.
+    pub(crate) fn cache_builtin_enum_ids(&mut self) {
+        if let Some(spur) = self.interner.get("Arch")
+            && let Some(&id) = self.enums.get(&spur)
+        {
+            self.builtin_arch_id = Some(id);
+        }
+        if let Some(spur) = self.interner.get("Os")
+            && let Some(&id) = self.enums.get(&spur)
+        {
+            self.builtin_os_id = Some(id);
+        }
+        if let Some(spur) = self.interner.get("TypeKind")
+            && let Some(&id) = self.enums.get(&spur)
+        {
+            self.builtin_typekind_id = Some(id);
+        }
+        if let Some(spur) = self.interner.get("Ownership")
+            && let Some(&id) = self.enums.get(&spur)
+        {
+            self.builtin_ownership_id = Some(id);
+        }
+        // ADR-0078 Phase 4: cache `Ordering` for the binop dispatch in
+        // `analyze_comparison`, which constructs `Ordering::Less` /
+        // `Ordering::Greater` enum-variant AIR refs to compare against the
+        // `cmp(self, other)` return value.
+        if let Some(spur) = self.interner.get("Ordering")
+            && let Some(&id) = self.enums.get(&spur)
+        {
+            self.builtin_ordering_id = Some(id);
         }
     }
 

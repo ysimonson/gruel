@@ -153,6 +153,7 @@ impl RemapSpurs for DirectiveArg {
     fn remap_spurs(&mut self, table: &[Spur]) {
         match self {
             DirectiveArg::Ident(i) => i.remap_spurs(table),
+            DirectiveArg::String(s) => s.remap_spurs(table),
         }
     }
 }
@@ -492,6 +493,12 @@ impl RemapSpurs for Pattern {
                 fields.remap_spurs(table);
             }
             Pattern::Tuple { elems, .. } => elems.remap_spurs(table),
+            Pattern::ComptimeUnrollArm {
+                binding, iterable, ..
+            } => {
+                binding.remap_spurs(table);
+                iterable.remap_spurs(table);
+            }
         }
     }
 }

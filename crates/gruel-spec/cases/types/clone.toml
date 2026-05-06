@@ -194,21 +194,25 @@ fn main() -> i32 {
 """
 exit_code = 42
 
-# @derive(Clone) on a struct with non-Copy fields is rejected (v1 limitation).
+# @derive(Clone) on a struct with non-Copy fields works as long as every
+# field type is itself Clone — the prelude derive recurses field-by-field
+# (ADR-0079).
 [[case]]
-name = "derive_clone_struct_non_copy_field_rejected"
+name = "derive_clone_struct_non_copy_field"
 spec = ["3.8:71"]
-description = "@derive(Clone) v1 rejects non-Copy fields"
+description = "@derive(Clone) recurses through Clone fields (e.g. String)"
 source = """
 @derive(Clone)
 struct Holder { s: String }
 
 fn main() -> i32 {
+    let s: String = "hi";
+    let h = Holder { s: s };
+    let _g = h.clone();
     0
 }
 """
-compile_fail = true
-error_contains = "every field to be Copy"
+exit_code = 0
 
 # @derive(Clone) on a linear struct is rejected.
 [[case]]

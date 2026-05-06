@@ -78,242 +78,12 @@ fn clone_type_pool(pool: &gruel_air::TypeInternPool) -> gruel_air::TypeInternPoo
     pool.clone_snapshot()
 }
 
-/// ADR-0065 / ADR-0070: the synthetic compiler prelude.
-///
-/// Contains canonical type definitions injected into every compilation:
-/// - `Option(T)` (ADR-0065): the canonical optional type.
-/// - `Result(T, E)` (ADR-0070): the canonical fallible-with-context type.
-///
-/// This is parsed as a regular Gruel source file with `FileId::PRELUDE` and
-/// runs through the standard pipeline. Adding more types here is just adding
-/// more declarations to the string.
-const PRELUDE_SOURCE: &str = r#"
-fn Option(comptime T: type) -> type {
-    enum {
-        Some(T),
-        None,
-
-        fn is_some(self: Ref(Self)) -> bool {
-            match self {
-                Self::Some(_) => true,
-                Self::None => false,
-            }
-        }
-
-        fn is_none(self: Ref(Self)) -> bool {
-            match self {
-                Self::Some(_) => false,
-                Self::None => true,
-            }
-        }
-
-        fn unwrap(self) -> T {
-            match self {
-                Self::Some(x) => x,
-                Self::None => @panic("called unwrap on a None value"),
-            }
-        }
-
-        fn unwrap_or(self, default: T) -> T {
-            match self {
-                Self::Some(x) => x,
-                Self::None => default,
-            }
-        }
-    }
-}
-
-fn Result(comptime T: type, comptime E: type) -> type {
-    enum {
-        Ok(T),
-        Err(E),
-
-        fn is_ok(self: Ref(Self)) -> bool {
-            match self {
-                Self::Ok(_) => true,
-                Self::Err(_) => false,
-            }
-        }
-
-        fn is_err(self: Ref(Self)) -> bool {
-            match self {
-                Self::Ok(_) => false,
-                Self::Err(_) => true,
-            }
-        }
-
-        fn unwrap(self) -> T {
-            match self {
-                Self::Ok(x) => x,
-                Self::Err(_) => @panic("called unwrap on an Err value"),
-            }
-        }
-
-        fn unwrap_err(self) -> E {
-            match self {
-                Self::Ok(_) => @panic("called unwrap_err on an Ok value"),
-                Self::Err(e) => e,
-            }
-        }
-
-        fn unwrap_or(self, default: T) -> T {
-            match self {
-                Self::Ok(x) => x,
-                Self::Err(_) => default,
-            }
-        }
-
-        fn expect(self, msg: String) -> T {
-            match self {
-                Self::Ok(x) => x,
-                Self::Err(_) => @panic(msg),
-            }
-        }
-
-        fn expect_err(self, msg: String) -> E {
-            match self {
-                Self::Ok(_) => @panic(msg),
-                Self::Err(e) => e,
-            }
-        }
-    }
-}
-
-// ADR-0071: validated u32 → char conversion.
-fn char__from_u32(n: u32) -> Result(char, u32) {
-    let surrogate_lo: u32 = 55296;
-    let surrogate_hi: u32 = 57343;
-    let max_scalar: u32 = 1114111;
-    if (n >= surrogate_lo && n <= surrogate_hi) || n > max_scalar {
-        let R = Result(char, u32);
-        R::Err(n)
-    } else {
-        checked {
-            let c: char = char::from_u32_unchecked(n);
-            let R = Result(char, u32);
-            R::Ok(c)
-        }
-    }
-}
-
-// ADR-0071: char.is_ascii() — true iff the codepoint is < 128.
-fn char__is_ascii(c: char) -> bool {
-    let n: u32 = c.to_u32();
-    let limit: u32 = 128;
-    n < limit
-}
-
-// ADR-0071: char.len_utf8() — number of UTF-8 bytes (1, 2, 3, or 4)
-// needed to encode the codepoint.
-fn char__len_utf8(c: char) -> usize {
-    let n: u32 = c.to_u32();
-    let one_byte: u32 = 128;
-    let two_bytes: u32 = 2048;
-    let three_bytes: u32 = 65536;
-    if n < one_byte {
-        1
-    } else if n < two_bytes {
-        2
-    } else if n < three_bytes {
-        3
-    } else {
-        4
-    }
-}
-
-// ADR-0071: char.encode_utf8(buf) — write the canonical UTF-8 encoding of `c`
-// to `buf` and return the byte count (1, 2, 3, or 4).
-fn char__encode_utf8(c: char, buf: MutRef([u8; 4])) -> usize {
-    let n: u32 = c.to_u32();
-    let one_byte: u32 = 128;
-    let two_bytes: u32 = 2048;
-    let three_bytes: u32 = 65536;
-    let cont_mask: u32 = 63;
-    let cont_high: u32 = 128;
-    let lead2: u32 = 192;
-    let lead3: u32 = 224;
-    let lead4: u32 = 240;
-    if n < one_byte {
-        let b0: u8 = @cast(n);
-        buf[0] = b0;
-        1
-    } else if n < two_bytes {
-        let b0u: u32 = (n >> 6) | lead2;
-        let b1u: u32 = (n & cont_mask) | cont_high;
-        let b0: u8 = @cast(b0u);
-        let b1: u8 = @cast(b1u);
-        buf[0] = b0;
-        buf[1] = b1;
-        2
-    } else if n < three_bytes {
-        let b0u: u32 = (n >> 12) | lead3;
-        let b1u: u32 = ((n >> 6) & cont_mask) | cont_high;
-        let b2u: u32 = (n & cont_mask) | cont_high;
-        let b0: u8 = @cast(b0u);
-        let b1: u8 = @cast(b1u);
-        let b2: u8 = @cast(b2u);
-        buf[0] = b0;
-        buf[1] = b1;
-        buf[2] = b2;
-        3
-    } else {
-        let b0u: u32 = (n >> 18) | lead4;
-        let b1u: u32 = ((n >> 12) & cont_mask) | cont_high;
-        let b2u: u32 = ((n >> 6) & cont_mask) | cont_high;
-        let b3u: u32 = (n & cont_mask) | cont_high;
-        let b0: u8 = @cast(b0u);
-        let b1: u8 = @cast(b1u);
-        let b2: u8 = @cast(b2u);
-        let b3: u8 = @cast(b3u);
-        buf[0] = b0;
-        buf[1] = b1;
-        buf[2] = b2;
-        buf[3] = b3;
-        4
-    }
-}
-
-// ADR-0072: error wrapper used by `String::from_utf8` to ferry the
-// invalid byte buffer back to the caller. The struct wrapping makes the
-// second type argument concrete in `Result(String, Utf8DecodeError)` —
-// instantiating `Result(String, Vec(u8))` from a prelude body errors
-// because the comptime evaluator can't bind the `E` parameter to a
-// parameterized builtin type-call (`Vec(u8)` is a built-in constructor,
-// not a comptime function). The wrapper structurally pins the buffer
-// without burdening the caller with type-binding ceremony.
-struct Utf8DecodeError {
-    bytes: Vec(u8),
-}
-
-// ADR-0072: validated `Vec(u8) -> String` conversion. Performs a UTF-8
-// scan; on success consumes `v` and returns `Result::Ok(s)`, on failure
-// hands `v` back inside `Result::Err(Utf8DecodeError { bytes: v })`.
-fn String__from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
-    let valid: bool = checked {
-        let p = v.ptr();
-        let n = v.len();
-        let s: Slice(u8) = @parts_to_slice(p, n);
-        @utf8_validate(s)
-    };
-    if valid {
-        let s: String = checked { String::from_utf8_unchecked(v) };
-        let R = Result(String, Utf8DecodeError);
-        R::Ok(s)
-    } else {
-        let e = Utf8DecodeError { bytes: v };
-        let R = Result(String, Utf8DecodeError);
-        R::Err(e)
-    }
-}
-
-// ADR-0072: validated `Ptr(u8) -> String` conversion. strlen + alloc +
-// memcpy into a `Vec(u8)` (via `__gruel_cstr_to_vec`), then forwards
-// to `String__from_utf8`.
-fn String__from_c_str(p: Ptr(u8)) -> Result(String, Utf8DecodeError) {
-    let v: Vec(u8) = checked { @cstr_to_vec(p) };
-    String__from_utf8(v)
-}
-"#;
+// ADR-0078: the prelude content has moved to `prelude/*.gruel`. The
+// concatenated source is built at parse time via
+// `prelude_source::assemble_prelude_source`, which prefers the on-disk files
+// but falls back to embedded copies (`include_str!`). The virtual prelude
+// source still parses under `FileId::PRELUDE`, so all downstream code
+// (visibility carve-outs, span paths) is unchanged.
 
 /// Result of parsing a single file within a compilation unit.
 #[derive(Debug)]
@@ -520,22 +290,57 @@ impl<'src> CompilationUnit<'src> {
         let mut parsed_files = Vec::with_capacity(self.sources.len() + 1);
         let mut interner = ThreadedRodeo::new();
 
-        // ADR-0065: prepend the synthetic prelude (canonical Option(T), etc.).
-        // The prelude is always parsed first under FileId::PRELUDE so user
-        // files retain their original FileIds for diagnostics.
-        let prelude = SourceFile::new("<prelude>", PRELUDE_SOURCE, FileId::PRELUDE);
-        let prelude_lexer =
-            Lexer::with_interner_and_file_id(prelude.source, interner, prelude.file_id);
-        let (prelude_tokens, returned_interner) =
-            prelude_lexer.tokenize().map_err(CompileErrors::from)?;
+        // ADR-0065 / ADR-0078: load the prelude as an implicitly-imported
+        // module rooted at `std/_prelude.gruel`. The root is the only file
+        // the compiler hand-loads — it uses `@import` internally to pull
+        // in `prelude/*.gruel` submodules and re-exports their pub
+        // items. Submodules are pre-staged in `file_paths` (and pre-parsed
+        // when their disk copy isn't available) so the @import resolver
+        // finds them whether the host has an on-disk stdlib or not. Only
+        // the root's pub items become globally available; submodule items
+        // accessed only through the root's `pub const` re-exports.
+        let resolved = crate::prelude_source::resolved_prelude();
+        let mut prelude_file_id = FileId::PRELUDE.index();
+
+        // Stage prelude submodules: register their paths in `file_paths`
+        // so @import resolution finds them, and pre-parse them so they
+        // don't need to hit the disk. `other_std_files` (`_std.gruel`,
+        // `math.gruel`, etc.) are NOT staged here — they get loaded only
+        // when user code explicitly `@import("std")`s them, via the
+        // existing on-disk module resolver.
+        for file in &resolved.prelude_dir {
+            let file_id = FileId::new(prelude_file_id);
+            self.file_paths.insert(file_id, file.path.clone());
+            let lexer = Lexer::with_interner_and_file_id(&file.source, interner, file_id);
+            let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
+            interner = returned_interner;
+            let parser = Parser::new(tokens, interner)
+                .with_preview_features(self.options.preview_features.clone());
+            let (ast, returned_interner) = parser.parse()?;
+            interner = returned_interner;
+            parsed_files.push(ParsedFileData {
+                path: file.path.clone(),
+                ast,
+            });
+            prelude_file_id = prelude_file_id.wrapping_sub(1);
+        }
+
+        // Parse the prelude root itself (`std/_prelude.gruel`).
+        let root_file_id = FileId::new(prelude_file_id);
+        self.file_paths
+            .insert(root_file_id, resolved.root.path.clone());
+        let root_lexer =
+            Lexer::with_interner_and_file_id(&resolved.root.source, interner, root_file_id);
+        let (root_tokens, returned_interner) =
+            root_lexer.tokenize().map_err(CompileErrors::from)?;
         interner = returned_interner;
-        let prelude_parser = Parser::new(prelude_tokens, interner)
+        let root_parser = Parser::new(root_tokens, interner)
             .with_preview_features(self.options.preview_features.clone());
-        let (prelude_ast, returned_interner) = prelude_parser.parse()?;
+        let (root_ast, returned_interner) = root_parser.parse()?;
         interner = returned_interner;
         parsed_files.push(ParsedFileData {
-            path: prelude.path.to_string(),
-            ast: prelude_ast,
+            path: resolved.root.path,
+            ast: root_ast,
         });
 
         // ADR-0074 Phase 2: when --preview incremental_compilation is on
@@ -896,8 +701,8 @@ impl<'src> CompilationUnit<'src> {
         // Synthesize drop glue functions
         let drop_glue_functions =
             crate::drop_glue::synthesize_drop_glue(&sema_output.type_pool, interner);
-        // ADR-0065: synthesize clone glue for `@derive(Clone)` structs.
-        let clone_glue_functions = crate::clone_glue::synthesize_clone_glue(&sema_output.type_pool);
+        // ADR-0079: clone glue retired — prelude `derive Clone` emits
+        // the clone method via the standard derive-expansion path.
 
         // Combine user functions with drop glue, filtering out comptime-only functions
         let all_functions: Vec<_> = sema_output
@@ -905,7 +710,6 @@ impl<'src> CompilationUnit<'src> {
             .into_iter()
             .filter(|f| f.air.return_type() != Type::COMPTIME_TYPE)
             .chain(drop_glue_functions)
-            .chain(clone_glue_functions)
             .collect();
 
         // Build CFGs in parallel

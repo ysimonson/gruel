@@ -533,22 +533,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_copy_struct_with_non_copy_field_rejected() {
-        // @derive(Copy) struct with non-copy field should error
-        let result = compile_to_air(
-            "struct NonCopy { x: i32 }
-             @derive(Copy) struct Wrapper { inner: NonCopy }
-             fn main() -> i32 { 0 }",
-        );
-
-        assert!(result.is_err());
-        let errors = result.unwrap_err();
-        assert!(matches!(
-            errors.iter().next().unwrap().kind,
-            ErrorKind::CopyStructNonCopyField(_)
-        ));
-    }
+    // ADR-0079: the field-Copy invariant for `@derive(Copy)` is now
+    // enforced by the prelude `derive Copy` body via `comptime if`
+    // + `@implements` + `@compile_error`. The unit-test path
+    // (`compile_to_air`) intentionally skips the prelude, so this
+    // path no longer catches the violation here. The spec suite's
+    // `types.move-semantics::copy_struct_non_copy_field_error`
+    // covers the prelude-loaded path end-to-end.
 
     #[test]
     fn test_recursive_struct_via_array() {
@@ -992,15 +983,18 @@ mod tests {
 
         let stats = sema.type_pool.stats();
 
-        // 3 structs: String (builtin) + A + B
+        // 3 structs: String (builtin synthetic) + A + B from user source.
+        // ADR-0078 Phase 3: the prelude is not loaded by this test helper,
+        // so the four prelude-resident built-in enums (Arch, Os, TypeKind,
+        // Ownership) are absent from the pool.
         assert_eq!(stats.struct_count, 3);
-        // 5 enums: Arch (builtin) + Os (builtin) + TypeKind (builtin) + Ownership (builtin) + E
-        assert_eq!(stats.enum_count, 5);
+        // 1 enum: just E from user source.
+        assert_eq!(stats.enum_count, 1);
         // No arrays in Phase 1
         assert_eq!(stats.array_count, 0);
-        // Total: 9 composite types — adds Vec(u8) interned by String's
-        // synthetic `bytes` field per ADR-0072.
-        assert_eq!(stats.total, 9);
+        // Total: 5 composite types (struct_count + enum_count + array_count
+        // + Vec(u8) interned by String's `bytes` field per ADR-0072).
+        assert_eq!(stats.total, 5);
     }
 
     #[test]

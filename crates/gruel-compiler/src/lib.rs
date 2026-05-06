@@ -25,12 +25,16 @@
 //! This crate is instrumented with `tracing` spans for performance analysis.
 //! Use `--log-level info` or `--time-passes` to see timing information.
 
-mod clone_glue;
 mod diagnostic;
 mod drop_glue;
 mod link;
 mod parse_cache;
+mod prelude_source;
 mod unit;
+
+pub use prelude_source::{
+    ResolvedPrelude, ResolvedPreludeFile, embedded_prelude, resolved_prelude,
+};
 
 pub use parse_cache::{ParseCacheStats, parse_all_files_cached, parse_key};
 
@@ -742,6 +746,53 @@ pub struct CompileOutput {
     pub warnings: Vec<CompileWarning>,
 }
 
+/// ADR-0078 Phase 1: lex+parse the embedded prelude using `interner` and
+/// prepend its top-level items to `ast`. Useful for callers that bypass
+/// `CompilationUnit::parse` (lib tests, `--emit`-only flows that already
+/// have a parsed AST in hand) but still want the prelude-resident
+/// declarations (`Option`, `Result`, `Arch`, `Os`, `Drop`/`Copy`/`Clone`,
+/// etc.) to be visible during sema.
+///
+/// The frontend entry points (`compile_frontend_from_ast_*`) deliberately
+/// do *not* call this — the multi-file driver merges the prelude with all
+/// other parsed files via `merge_symbols` before invoking the frontend.
+/// Calling this twice on an already-merged AST would produce duplicate
+/// definitions.
+pub fn prepend_prelude(
+    ast: Ast,
+    mut interner: ThreadedRodeo,
+    preview_features: &PreviewFeatures,
+) -> MultiErrorResult<(Ast, ThreadedRodeo)> {
+    use gruel_util::FileId;
+
+    // For tests/callers that bypass `CompilationUnit::parse`, inline the
+    // prelude submodules directly: the @import-based root (`_prelude.gruel`)
+    // would require a working module-resolution path with `file_paths`
+    // populated, which test fixtures generally don't set up. Inlining the
+    // submodule pub items at the top level matches the runtime behavior
+    // (those items end up globally visible regardless). Note we skip
+    // `other_std_files` (like `_std.gruel`) because those have @imports
+    // that won't resolve in a bare-AST test environment.
+    let mut all_items = Vec::new();
+    let mut prelude_file_id = FileId::PRELUDE.index();
+    let resolved = prelude_source::embedded_prelude();
+    for file in &resolved.prelude_dir {
+        let lexer =
+            Lexer::with_interner_and_file_id(&file.source, interner, FileId::new(prelude_file_id));
+        let (tokens, returned_interner) = lexer.tokenize().map_err(CompileErrors::from)?;
+        interner = returned_interner;
+        let parser = Parser::new(tokens, interner).with_preview_features(preview_features.clone());
+        let (parsed, returned_interner) = parser.parse()?;
+        interner = returned_interner;
+        all_items.extend(parsed.items);
+        prelude_file_id = prelude_file_id.wrapping_sub(1);
+    }
+
+    let mut merged = Ast { items: all_items };
+    merged.items.extend(ast.items);
+    Ok((merged, interner))
+}
+
 /// Compile source code through all frontend phases (up to but not including codegen).
 ///
 /// This runs: lexing → parsing → AST to RIR → semantic analysis → CFG construction.
@@ -892,8 +943,8 @@ pub fn compile_frontend_from_ast_with_options_full_target(
 
     // Synthesize drop glue functions for structs that need them
     let drop_glue_functions = drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
-    // ADR-0065: synthesize clone glue for `@derive(Clone)` structs.
-    let clone_glue_functions = clone_glue::synthesize_clone_glue(&sema_output.type_pool);
+    // ADR-0079 retired clone glue: the prelude `derive Clone` body
+    // emits the clone method via the standard derive-expansion path.
 
     // Combine user functions with synthesized drop glue functions
     // Filter out comptime-only functions (those returning `type`) as they don't generate runtime code
@@ -902,7 +953,6 @@ pub fn compile_frontend_from_ast_with_options_full_target(
         .into_iter()
         .filter(|f| f.air.return_type() != Type::COMPTIME_TYPE)
         .chain(drop_glue_functions)
-        .chain(clone_glue_functions)
         .collect();
 
     // Build CFGs from AIR (one per function) in parallel, collecting warnings
@@ -1010,8 +1060,8 @@ pub fn compile_frontend_from_rir_with_file_paths(
 
     // Synthesize drop glue functions for structs that need them
     let drop_glue_functions = drop_glue::synthesize_drop_glue(&sema_output.type_pool, &interner);
-    // ADR-0065: synthesize clone glue for `@derive(Clone)` structs.
-    let clone_glue_functions = clone_glue::synthesize_clone_glue(&sema_output.type_pool);
+    // ADR-0079 retired clone glue: the prelude `derive Clone` body
+    // emits the clone method via the standard derive-expansion path.
 
     // Combine user functions with synthesized drop glue functions
     // Filter out comptime-only functions (those returning `type`) as they don't generate runtime code
@@ -1020,7 +1070,6 @@ pub fn compile_frontend_from_rir_with_file_paths(
         .into_iter()
         .filter(|f| f.air.return_type() != Type::COMPTIME_TYPE)
         .chain(drop_glue_functions)
-        .chain(clone_glue_functions)
         .collect();
 
     // Build CFGs from AIR (one per function) in parallel, collecting warnings
@@ -1402,13 +1451,15 @@ mod tests {
         let parser = Parser::new(tokens, interner);
         let (ast, interner) = parser.parse().unwrap();
 
+        // ADR-0078 Phase 3: `Arch` lives in the prelude, so this test (which
+        // bypasses `CompilationUnit::parse`) has to prepend the prelude
+        // explicitly.
+        let prev = PreviewFeatures::default();
+        let (ast, interner) = prepend_prelude(ast, interner, &prev).unwrap();
+
         let aarch64: Target = "aarch64-unknown-linux-gnu".parse().unwrap();
         let state = compile_frontend_from_ast_with_options_full_target(
-            ast,
-            interner,
-            &PreviewFeatures::default(),
-            false,
-            &aarch64,
+            ast, interner, &prev, false, &aarch64,
         )
         .unwrap();
         let inputs = BackendInputs {

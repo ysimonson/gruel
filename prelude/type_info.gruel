@@ -1,0 +1,30 @@
+// ADR-0078 Phase 3 (split out from `target.gruel` post-ADR-0079):
+// built-in enum declarations for type-level reflection. These describe
+// shapes and ownership postures of types in the user's program — not
+// the platform we're compiling for (which lives in `target.gruel`).
+//
+// Both enums are produced by compile-time intrinsics:
+//   - `@type_info(T).kind` → `TypeKind`
+//   - `@ownership(T)` → `Ownership`
+//
+// The intrinsics select variants by name lookup against these
+// declarations, so variant order is *display* order — reordering for
+// readability is safe.
+
+// Type kind classifier (`@type_info(T).kind`).
+pub enum TypeKind {
+    Struct,
+    Enum,
+    Int,
+    Bool,
+    Unit,
+    Never,
+    Array,
+}
+
+// Ownership posture (`@ownership(T)`) — see ADR-0008.
+pub enum Ownership {
+    Copy,
+    Affine,
+    Linear,
+}

@@ -130,6 +130,16 @@ impl ModuleRegistry {
         self.len() == 0
     }
 
+    /// Snapshot every module definition in registration order. Used by
+    /// `Sema::has_imports` to filter out prelude-internal `@import`s when
+    /// deciding lazy vs. eager analysis.
+    pub fn all_defs(&self) -> Vec<ModuleDef> {
+        self.defs
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// Extract the module definitions (consumes the registry).
     pub fn into_defs(self) -> Vec<ModuleDef> {
         self.defs
@@ -213,6 +223,9 @@ pub struct SemaContext<'a> {
     pub builtin_typekind_id: Option<EnumId>,
     /// EnumId of the synthetic Ownership enum (for @ownership intrinsic).
     pub builtin_ownership_id: Option<EnumId>,
+    /// EnumId of the prelude `Ordering` enum (ADR-0078 Phase 4: target of
+    /// `Ord::cmp`).
+    pub builtin_ordering_id: Option<EnumId>,
     /// Compilation target (architecture + OS).
     pub target: gruel_target::Target,
     /// Pre-computed inference context for HM type inference.

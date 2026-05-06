@@ -14,7 +14,7 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use gruel_builtins::{is_reserved_type_constructor_name, is_reserved_type_name};
 use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, CopyStructNonCopyFieldError, ErrorKind, ice};
+use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
 use lasso::Spur;
 
 use super::anon_interfaces::decode_receiver_mode;
@@ -154,31 +154,30 @@ impl<'a> Sema<'a> {
             enum_method_sigs,
         }
     }
-    /// Check if a directive list contains `@derive(Copy)` (ADR-0059).
+    /// Check if a directive list contains `@derive(<copy lang-item>)` (ADR-0059 / ADR-0079).
+    ///
+    /// Resolves each `@derive(...)` arg through `self.interfaces` and
+    /// compares the resulting `InterfaceId` to `lang_items.copy()`.
+    /// Falls back to a literal `"Copy"` symbol match when the prelude
+    /// hasn't been loaded (test fixtures); both paths converge on real
+    /// compilations.
     pub(crate) fn has_copy_directive(&self, directives: &[RirDirective]) -> bool {
         let derive_sym = self.interner.get("derive");
-        let copy_iface_sym = self.interner.get("Copy");
+        let copy_iface_id = self.lang_items.copy();
+        let copy_name_sym = self.interner.get("Copy");
         for directive in directives {
-            if Some(directive.name) == derive_sym
-                && let Some(copy_iface) = copy_iface_sym
-                && directive.args.contains(&copy_iface)
-            {
-                return true;
+            if Some(directive.name) != derive_sym {
+                continue;
             }
-        }
-        false
-    }
-
-    /// Check if a directive list contains `@derive(Clone)` (ADR-0065).
-    pub(crate) fn has_clone_directive(&self, directives: &[RirDirective]) -> bool {
-        let derive_sym = self.interner.get("derive");
-        let clone_iface_sym = self.interner.get("Clone");
-        for directive in directives {
-            if Some(directive.name) == derive_sym
-                && let Some(clone_iface) = clone_iface_sym
-                && directive.args.contains(&clone_iface)
-            {
-                return true;
+            for arg in &directive.args {
+                if let Some(&id) = self.interfaces.get(arg)
+                    && Some(id) == copy_iface_id
+                {
+                    return true;
+                }
+                if Some(*arg) == copy_name_sym && copy_iface_id.is_none() {
+                    return true;
+                }
             }
         }
         false
@@ -228,7 +227,7 @@ impl<'a> Sema<'a> {
             }
             for directive in self.rir.get_directives(start, len) {
                 let name = self.interner.resolve(&directive.name).to_string();
-                if name == "allow" || name == "derive" {
+                if name == "allow" || name == "derive" || name == "lang" {
                     continue;
                 }
                 let note = directive_diagnosis_note(&name);
@@ -281,6 +280,8 @@ impl<'a> Sema<'a> {
                 name,
                 methods_start,
                 methods_len,
+                directives_start: _,
+                directives_len: _,
             } = &inst.data
             {
                 let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
@@ -584,6 +585,12 @@ impl<'a> Sema<'a> {
         //     functions and methods are gathered
         //   - `borrow t: SomeInterface` parameter types resolve correctly
         self.validate_interface_decls()?;
+        // ADR-0079: bind `@lang("…")` directives in the prelude to
+        // interface/enum IDs. Must run after interfaces are registered
+        // and before any sema pass that consults `lang_items`. Enum
+        // bindings only resolve once `register_type_names` has populated
+        // `self.enums`, which already happened in Phase 1.
+        self.populate_lang_items()?;
         self.resolve_struct_fields()?;
         self.resolve_enum_variant_fields()?;
         // ADR-0058 sub-phase: resolve every `@derive(D)` directive on a
@@ -766,6 +773,24 @@ impl<'a> Sema<'a> {
             None => return Ok(()),
         };
         let host_type = Type::new_struct(host_id);
+
+        // ADR-0079: linear types must not pick up a Clone impl. The
+        // prelude `derive Clone` synthesizes a fresh `Self` field-by-
+        // field, which would silently duplicate a linear value. Catch
+        // this at splice time so the diagnostic points at the
+        // `@derive(Clone)` directive rather than at the synthesized
+        // body's first @field_set.
+        let derive_iface = self.interfaces.get(&derive_name).copied();
+        if derive_iface.is_some()
+            && derive_iface == self.lang_items.clone()
+            && self.type_pool.struct_def(host_id).is_linear
+        {
+            let host_str = self.type_pool.struct_def(host_id).name.clone();
+            return Err(CompileError::new(
+                ErrorKind::LinearStructClone(host_str),
+                directive_span,
+            ));
+        }
 
         // ADR-0076: bind `Self` to the host struct while resolving derived
         // method signatures.
@@ -971,42 +996,50 @@ impl<'a> Sema<'a> {
         let mut raw: Vec<RawAttach> = Vec::new();
 
         for (_, inst) in self.rir.iter() {
-            // Only `StructDecl` carries directives in RIR today; `EnumDecl`
-            // does not yet (the parser does not collect directives for
-            // enums). When that lands, the same logic applies — the new
-            // arm will read `directives_start` / `directives_len` off the
-            // enum decl. For now we only walk structs.
-            if let InstData::StructDecl {
-                directives_start,
-                directives_len,
-                name,
-                ..
-            } = &inst.data
-            {
-                let directives = self.rir.get_directives(*directives_start, *directives_len);
-                let mut attached = Vec::new();
-                for d in &directives {
-                    if d.name == derive_dir_sym {
-                        if d.args.len() != 1 {
-                            return Err(CompileError::new(
-                                ErrorKind::DeriveNotADerive {
-                                    name: "<wrong arg count>".to_string(),
-                                    found: format!("{} arguments", d.args.len()),
-                                },
-                                d.span,
-                            ));
-                        }
-                        attached.push((d.args[0], d.span));
+            // ADR-0079 Phase 1 routed directives through both
+            // `StructDecl` and `EnumDecl`; collect from both so
+            // `@derive(...)` works on enums too.
+            let (directives_start, directives_len, name, host_is_enum) = match &inst.data {
+                InstData::StructDecl {
+                    directives_start,
+                    directives_len,
+                    name,
+                    ..
+                } => (*directives_start, *directives_len, *name, false),
+                InstData::EnumDecl {
+                    directives_start,
+                    directives_len,
+                    name,
+                    ..
+                } => (*directives_start, *directives_len, *name, true),
+                _ => continue,
+            };
+            if directives_len == 0 {
+                continue;
+            }
+            let directives = self.rir.get_directives(directives_start, directives_len);
+            let mut attached = Vec::new();
+            for d in &directives {
+                if d.name == derive_dir_sym {
+                    if d.args.len() != 1 {
+                        return Err(CompileError::new(
+                            ErrorKind::DeriveNotADerive {
+                                name: "<wrong arg count>".to_string(),
+                                found: format!("{} arguments", d.args.len()),
+                            },
+                            d.span,
+                        ));
                     }
+                    attached.push((d.args[0], d.span));
                 }
-                if !attached.is_empty() {
-                    raw.push(RawAttach {
-                        host_name: *name,
-                        host_is_enum: false,
-                        host_span: inst.span,
-                        derive_names: attached,
-                    });
-                }
+            }
+            if !attached.is_empty() {
+                raw.push(RawAttach {
+                    host_name: name,
+                    host_is_enum,
+                    host_span: inst.span,
+                    derive_names: attached,
+                });
             }
         }
 
@@ -1059,14 +1092,35 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Returns `true` if `name` is a compiler-recognized derive that does
-    /// not have a corresponding `derive` item in user code (ADR-0059). At
-    /// the moment only `Copy` qualifies — the `is_copy` cache is populated
-    /// elsewhere and there are no methods to splice.
+    /// Returns `true` if `name` resolves to a compiler-recognized derive
+    /// that doesn't have a corresponding `derive` item in user code
+    /// (ADR-0059). After ADR-0079, `Clone` flows through the standard
+    /// derive-expansion path (the prelude ships a `derive Clone { … }`
+    /// block whose body is spliced via the regular machinery). `Copy`
+    /// remains compiler-handled for now — the prelude derive Copy is
+    /// the next step.
+    ///
+    /// Resolves through `self.interfaces` plus `lang_items` first;
+    /// falls back to literal `"Copy"` / `"Clone"` name match for
+    /// compilations that bypass the prelude (test fixtures that
+    /// build a Sema without `prepend_prelude`).
     fn is_compiler_derive(&self, name: Spur) -> bool {
-        let copy_iface_sym = self.interner.get("Copy");
-        let clone_iface_sym = self.interner.get("Clone");
-        Some(name) == copy_iface_sym || Some(name) == clone_iface_sym
+        // ADR-0079 Phase 2c/2d: when the prelude is present, both
+        // `Copy` and `Clone` flow through the standard
+        // derive-expansion path (the prelude ships `derive Copy { … }`
+        // and `derive Clone { … }` blocks). When the prelude is
+        // absent (test fixtures, single-file inline compilations),
+        // `@derive(Copy)` still has to be recognized as a
+        // compiler-handled directive — there is no derive item to
+        // resolve against, but `is_copy` still flips and codegen
+        // emits a memcpy. Falling back to the literal name match
+        // preserves that path. `@derive(Clone)` without a prelude
+        // is a hard error today (was a hard error pre-ADR too).
+        if self.lang_items.copy().is_some() || self.lang_items.clone().is_some() {
+            return false;
+        }
+        let name_str = self.interner.resolve(&name);
+        name_str == "Copy"
     }
 
     /// ADR-0058 phases 1 + 2: gate `derive` items behind the
@@ -1110,10 +1164,14 @@ impl<'a> Sema<'a> {
         for d in raw {
             let name_str = self.interner.resolve(&d.name).to_string();
 
+            // ADR-0079: a derive may share its name with an interface so the
+            // prelude can ship `derive Clone {...}` alongside
+            // `interface Clone {...}` — the derive provides an implementation
+            // for that interface. Other collisions (struct, enum, another
+            // derive) remain rejected.
             if self.derives.contains_key(&d.name)
                 || self.structs.contains_key(&d.name)
                 || self.enums.contains_key(&d.name)
-                || self.interfaces.contains_key(&d.name)
             {
                 return Err(CompileError::new(
                     ErrorKind::DuplicateTypeDefinition {
@@ -1423,18 +1481,16 @@ impl<'a> Sema<'a> {
                     methods_len,
                     ..
                 } => {
-                    self.validate_copy_struct(
-                        *directives_start,
-                        *directives_len,
-                        *name,
-                        inst.span,
-                    )?;
-                    self.validate_clone_struct(
-                        *directives_start,
-                        *directives_len,
-                        *name,
-                        inst.span,
-                    )?;
+                    // ADR-0079: `validate_copy_struct` and
+                    // `validate_clone_struct` are both retired. The
+                    // prelude `derive Copy` / `derive Clone` bodies
+                    // express the field-Copy / field-Clone
+                    // invariants in Gruel via
+                    // `comptime_unroll for f in @type_info(Self).fields`
+                    // + `comptime if (!@implements(f.field_type, …))`
+                    // + `@compile_error`. Linearity is enforced by
+                    // the structural Copy/Clone conformance checks.
+                    let _ = (*directives_start, *directives_len);
                     // Collect methods defined inline in the struct
                     self.collect_struct_methods(*name, *methods_start, *methods_len, inst.span)?;
                 }
@@ -1498,143 +1554,6 @@ impl<'a> Sema<'a> {
             }
         }
 
-        Ok(())
-    }
-
-    /// Validate that a @derive(Copy) struct only contains Copy type fields.
-    fn validate_copy_struct(
-        &self,
-        directives_start: u32,
-        directives_len: u32,
-        name: Spur,
-        span: Span,
-    ) -> CompileResult<()> {
-        let directives = self.rir.get_directives(directives_start, directives_len);
-        if !self.has_copy_directive(&directives) {
-            return Ok(());
-        }
-
-        let struct_name = self.interner.resolve(&name).to_string();
-        // Verify struct exists in our lookup
-        if !self.structs.contains_key(&name) {
-            return Err(CompileError::new(
-                ErrorKind::InternalError(
-                    ice!(
-                        "struct not found during @derive(Copy) validation",
-                        phase: "sema/declarations",
-                        details: {
-                            "struct_name" => struct_name.clone()
-                        }
-                    )
-                    .to_string(),
-                ),
-                span,
-            ));
-        }
-
-        // Get the struct ID from the lookup table
-        let struct_id = *self.structs.get(&name).ok_or_else(|| {
-            CompileError::new(
-                ErrorKind::InternalError(
-                    ice!(
-                        "struct not found during @derive(Copy) validation",
-                        phase: "sema/declarations",
-                        details: {
-                            "struct_name" => struct_name.clone()
-                        }
-                    )
-                    .to_string(),
-                ),
-                span,
-            )
-        })?;
-
-        // Get struct definition from the pool
-        let struct_def = self.type_pool.struct_def(struct_id);
-
-        for field in &struct_def.fields {
-            if !self.is_type_copy(field.ty) {
-                let field_type_name = self.format_type_name(field.ty);
-                return Err(CompileError::new(
-                    ErrorKind::CopyStructNonCopyField(Box::new(CopyStructNonCopyFieldError {
-                        struct_name,
-                        field_name: field.name.clone(),
-                        field_type: field_type_name,
-                    })),
-                    span,
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    /// Validate `@derive(Clone)` and set the `is_clone` flag (ADR-0065).
-    ///
-    /// Runs after `resolve_struct_fields`, so the struct's field types are
-    /// known. v1 only supports `@derive(Clone)` on structs whose every field
-    /// is `Copy`; non-Copy fields require dispatching to each field's clone
-    /// method, which the v1 synthesis path doesn't do (deferred). For the
-    /// "all-Copy" case the synthesized clone is just per-field reads + a
-    /// struct literal; that's what `clone_glue::synthesize_clone_glue` emits.
-    fn validate_clone_struct(
-        &mut self,
-        directives_start: u32,
-        directives_len: u32,
-        name: Spur,
-        span: Span,
-    ) -> CompileResult<()> {
-        let directives = self.rir.get_directives(directives_start, directives_len);
-        if !self.has_clone_directive(&directives) {
-            return Ok(());
-        }
-
-        let struct_name = self.interner.resolve(&name).to_string();
-        let struct_id = *self.structs.get(&name).ok_or_else(|| {
-            CompileError::new(
-                ErrorKind::InternalError(
-                    ice!(
-                        "struct not found during @derive(Clone) validation",
-                        phase: "sema/declarations",
-                        details: { "struct_name" => struct_name.clone() }
-                    )
-                    .to_string(),
-                ),
-                span,
-            )
-        })?;
-
-        // Linear types cannot be Clone.
-        let struct_def = self.type_pool.struct_def(struct_id);
-        if struct_def.is_linear {
-            return Err(CompileError::new(
-                ErrorKind::LinearStructClone(struct_name.clone()),
-                span,
-            ));
-        }
-
-        // v1 limitation: every field must be Copy. Affine fields require
-        // recursive clone-dispatch in the synthesized body, which is deferred.
-        let fields_snapshot = struct_def.fields.clone();
-        for field in &fields_snapshot {
-            if !self.is_type_copy(field.ty) {
-                let field_type_name = self.format_type_name(field.ty);
-                return Err(CompileError::new(
-                    ErrorKind::CloneStructNonCopyField(Box::new(
-                        gruel_util::CloneStructNonCopyFieldError {
-                            struct_name: struct_name.clone(),
-                            field_name: field.name.clone(),
-                            field_type: field_type_name,
-                        },
-                    )),
-                    span,
-                ));
-            }
-        }
-
-        // Set is_clone on the StructDef.
-        let mut updated = self.type_pool.struct_def(struct_id);
-        updated.is_clone = true;
-        self.type_pool.update_struct_def(struct_id, updated);
         Ok(())
     }
 
@@ -1784,6 +1703,7 @@ impl<'a> Sema<'a> {
                 is_pub,
                 is_unchecked,
                 file_id: span.file_id,
+                canonical_name: None,
             },
         );
         Ok(())
@@ -2267,6 +2187,16 @@ impl<'a> Sema<'a> {
         init: InstRef,
         span: Span,
     ) -> CompileResult<()> {
+        // ADR-0078: detect item-level re-exports first. `pub const X = mod.Y`
+        // makes X an alias for `mod.Y`, registering it in the appropriate
+        // name table (functions/structs/enums/interfaces) so call sites
+        // can use X transparently. The fallback path below handles
+        // `pub const X = @import("...")` (whole-module re-export) and
+        // primitive constants.
+        if self.try_collect_reexport(name, is_pub, init, span)? {
+            return Ok(());
+        }
+
         let name_str = self.interner.resolve(&name).to_string();
 
         // Check for duplicate constant names
@@ -2292,8 +2222,6 @@ impl<'a> Sema<'a> {
         }
 
         // Evaluate the initializer at compile time to determine the constant type.
-        // Currently we only handle @import(...) - other constant expressions will
-        // be supported as part of the broader comptime feature (ADR-0025).
         let const_type = self.evaluate_const_init(init, span)?;
 
         self.constants.insert(
@@ -2306,6 +2234,145 @@ impl<'a> Sema<'a> {
             },
         );
 
+        Ok(())
+    }
+
+    /// ADR-0078: Try to handle an item-level re-export of the form
+    /// `pub const X = some_module_const.Y`. Returns `Ok(true)` if the
+    /// constant was recognized as a re-export and registered as an alias;
+    /// `Ok(false)` if this isn't a re-export and the regular const path
+    /// should run; `Err(...)` if it looks like a re-export but the item
+    /// can't be resolved.
+    fn try_collect_reexport(
+        &mut self,
+        name: Spur,
+        is_pub: bool,
+        init: InstRef,
+        span: Span,
+    ) -> CompileResult<bool> {
+        let inst = self.rir.get(init);
+        let InstData::FieldGet { base, field } = &inst.data else {
+            return Ok(false);
+        };
+        let field = *field;
+
+        // The base must be a `VarRef` to a const that holds a module.
+        let base_inst = self.rir.get(*base);
+        let InstData::VarRef { name: base_name } = &base_inst.data else {
+            return Ok(false);
+        };
+        let module_id = match self.constants.get(base_name).and_then(|c| c.ty.as_module()) {
+            Some(id) => id,
+            None => return Ok(false),
+        };
+        let module_file_path = self.module_registry.get_def(module_id).file_path.clone();
+        let same_name = name == field;
+
+        // Look the field up across each item kind, restricted to items
+        // declared in the imported module's file.
+
+        // Function.
+        if let Some(fn_info) = self.functions.get(&field).copied() {
+            let fn_path = self
+                .get_file_path(fn_info.file_id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if fn_path == module_file_path {
+                if !same_name {
+                    self.check_alias_collision(name, span)?;
+                    // Resolve to the canonical (non-aliased) name so chains
+                    // of re-exports collapse to the original function symbol.
+                    let canonical = fn_info.canonical_name.unwrap_or(field);
+                    let alias = FunctionInfo {
+                        is_pub,
+                        canonical_name: Some(canonical),
+                        ..fn_info
+                    };
+                    self.functions.insert(name, alias);
+                }
+                return Ok(true);
+            }
+        }
+
+        // Struct.
+        if let Some(&struct_id) = self.structs.get(&field) {
+            let s_path = self
+                .get_file_path(self.type_pool.struct_def(struct_id).file_id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if s_path == module_file_path {
+                if !same_name {
+                    self.check_alias_collision(name, span)?;
+                    self.structs.insert(name, struct_id);
+                }
+                return Ok(true);
+            }
+        }
+
+        // Enum.
+        if let Some(&enum_id) = self.enums.get(&field) {
+            let e_path = self
+                .get_file_path(self.type_pool.enum_def(enum_id).file_id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if e_path == module_file_path {
+                if !same_name {
+                    self.check_alias_collision(name, span)?;
+                    self.enums.insert(name, enum_id);
+                }
+                return Ok(true);
+            }
+        }
+
+        // Interface.
+        if let Some(&iface_id) = self.interfaces.get(&field) {
+            let iface_def = &self.interface_defs[iface_id.0 as usize];
+            let i_path = self
+                .get_file_path(iface_def.file_id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if i_path == module_file_path {
+                if !same_name {
+                    self.check_alias_collision(name, span)?;
+                    self.interfaces.insert(name, iface_id);
+                }
+                return Ok(true);
+            }
+        }
+
+        // Field exists in the module's namespace but doesn't resolve to a
+        // re-exportable item. Could be e.g. `mod.NotAnItem` — surface as a
+        // standard "unknown module member" error.
+        let module_def = self.module_registry.get_def(module_id);
+        let module_name = module_def.import_path.clone();
+        let field_str = self.interner.resolve(&field).to_string();
+        Err(CompileError::new(
+            ErrorKind::UnknownModuleMember {
+                module_name,
+                member_name: field_str,
+            },
+            span,
+        ))
+    }
+
+    /// Collision check for a re-export alias. The alias name must not
+    /// shadow an existing function/struct/enum/interface/constant.
+    fn check_alias_collision(&self, name: Spur, span: Span) -> CompileResult<()> {
+        let name_str = self.interner.resolve(&name).to_string();
+        if self.functions.contains_key(&name)
+            || self.structs.contains_key(&name)
+            || self.enums.contains_key(&name)
+            || self.interfaces.contains_key(&name)
+            || self.constants.contains_key(&name)
+        {
+            return Err(CompileError::new(
+                ErrorKind::DuplicateConstant {
+                    name: name_str,
+                    kind: "re-export alias".to_string(),
+                },
+                span,
+            ));
+        }
         Ok(())
     }
 

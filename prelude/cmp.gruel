@@ -1,0 +1,42 @@
+// ADR-0078 Phase 4: comparison interfaces.
+//
+// `Eq` and `Ord` are compiler-recognized structural interfaces. The
+// binary-operator analyzer in sema desugars `==` / `!=` to `Eq::eq` and
+// `<` / `<=` / `>` / `>=` to `Ord::cmp` for any non-primitive type that
+// conforms — see `analyze_comparison` in `gruel-air/src/sema/analysis.rs`.
+//
+// Primitive numeric, bool, char, and unit operators are unaffected — they
+// continue to lower directly to LLVM int/float compares. The new dispatch
+// only kicks in for non-primitive types (structs, enums) where the compiler
+// previously had no way to express comparison.
+//
+// `String`'s registry-driven operators (`__gruel_str_eq`, `__gruel_str_cmp`)
+// continue to win over Eq/Ord dispatch — see ADR-0078 §"Built-in operators
+// on stdlib types". A future ADR retires those by giving `String` `eq`/`cmp`
+// methods.
+
+// Comparison result. `Less`, `Equal`, `Greater` are bitwise small integers
+// so the compiler can emit them as cheap enum variants.
+@lang("ordering")
+pub enum Ordering {
+    Less,
+    Equal,
+    Greater,
+}
+
+// Types that may be compared for equality via `==` and `!=`. Structural
+// conformance: any type with `fn eq(self: Ref(Self), other: Self) -> bool`
+// satisfies `Eq`.
+@lang("op_eq")
+pub interface Eq {
+    fn eq(self: Ref(Self), other: Self) -> bool;
+}
+
+// Types that may be ordered via `<`, `<=`, `>`, `>=`. Structural conformance:
+// any type with `fn cmp(self: Ref(Self), other: Self) -> Ordering`
+// satisfies `Ord`. Note: `Eq` is not a prerequisite — types that only need
+// equality can implement just `Eq`.
+@lang("op_cmp")
+pub interface Ord {
+    fn cmp(self: Ref(Self), other: Self) -> Ordering;
+}

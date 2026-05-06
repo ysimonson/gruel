@@ -185,6 +185,15 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     parts.join(", ")
                 )
             }
+            RirPattern::ComptimeUnrollArm {
+                binding, iterable, ..
+            } => {
+                format!(
+                    "comptime_unroll for {} in %{}",
+                    self.interner.resolve(binding),
+                    iterable.as_u32()
+                )
+            }
         }
     }
 
@@ -245,11 +254,17 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     cond,
                     then_block,
                     else_block,
+                    is_comptime,
                 } => {
-                    if let Some(else_b) = else_block {
-                        writeln!(out, "branch {}, {}, {}", cond, then_block, else_b).unwrap();
+                    let kw = if *is_comptime {
+                        "comptime_branch"
                     } else {
-                        writeln!(out, "branch {}, {}", cond, then_block).unwrap();
+                        "branch"
+                    };
+                    if let Some(else_b) = else_block {
+                        writeln!(out, "{} {}, {}, {}", kw, cond, then_block, else_b).unwrap();
+                    } else {
+                        writeln!(out, "{} {}, {}", kw, cond, then_block).unwrap();
                     }
                 }
                 InstData::Loop { cond, body } => writeln!(out, "loop {}, {}", cond, body).unwrap(),
@@ -386,17 +401,29 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 InstData::TypeInterfaceIntrinsic {
                     name,
                     type_arg,
+                    type_inst,
                     interface_arg,
                 } => {
                     let name_str = self.interner.resolve(name);
-                    let type_str = self.interner.resolve(type_arg);
                     let iface_str = self.interner.resolve(interface_arg);
-                    writeln!(
-                        out,
-                        "type_intrinsic @{}({}, {})",
-                        name_str, type_str, iface_str
-                    )
-                    .unwrap();
+                    if let Some(t) = type_inst {
+                        writeln!(
+                            out,
+                            "type_intrinsic @{}(%{}, {})",
+                            name_str,
+                            t.as_u32(),
+                            iface_str
+                        )
+                        .unwrap();
+                    } else {
+                        let type_str = self.interner.resolve(type_arg);
+                        writeln!(
+                            out,
+                            "type_intrinsic @{}({}, {})",
+                            name_str, type_str, iface_str
+                        )
+                        .unwrap();
+                    }
                 }
                 InstData::ParamRef { index, name } => {
                     writeln!(out, "param {} ({})", index, self.interner.resolve(name)).unwrap();
@@ -563,6 +590,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     variants_len,
                     methods_start,
                     methods_len,
+                    directives_start: _,
+                    directives_len: _,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(name);
@@ -711,6 +740,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     name,
                     methods_start,
                     methods_len,
+                    directives_start: _,
+                    directives_len: _,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let name_str = self.interner.resolve(name);

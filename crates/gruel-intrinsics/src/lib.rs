@@ -114,6 +114,25 @@ pub enum IntrinsicId {
     Utf8Validate,
     CStrToVec,
 
+    // ---- ADR-0079 Phase 2b: derive-construction primitives ----
+    /// `@uninit(T) -> Uninit(T)`: handle to T-sized storage. Drop is
+    /// suppressed on the slot until `@finalize` consumes it.
+    Uninit,
+    /// `@finalize(handle) -> T`: consume the handle and hand back a
+    /// real `T`. Sema verifies all fields written.
+    Finalize,
+    /// `@field_set(handle, name, value)`: write a field of an
+    /// in-progress `@uninit` / `@variant_uninit` handle. The
+    /// write-side counterpart to read-side `@field`.
+    FieldSet,
+    /// `@variant_uninit(Self, comptime tag) -> Uninit(Self)`:
+    /// variant-shaped counterpart to `@uninit`.
+    VariantUninit,
+    /// `@variant_field(self, comptime tag, name)`: read the named
+    /// field of variant `tag` from `self`. Symmetric counterpart to
+    /// `@variant_uninit + @field_set`.
+    VariantField,
+
     // ---- Preview / test infra ----
     TestPreviewGate,
 }
@@ -1042,6 +1061,75 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &[],
     },
     IntrinsicDef {
+        id: IntrinsicId::Uninit,
+        name: "uninit",
+        kind: IntrinsicKind::Type,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Allocate a partially-initialized value of a given type (ADR-0079).",
+        description: "`@uninit(T) -> Uninit(T)` returns a handle to T-sized storage. The compiler does not run drop on the slot until `@finalize` consumes it. Sema tracks per-field initialization through CFG analysis; reads, returns, or escapes of the handle are blocked until every field has been written via `@field(handle, name) = expr`.",
+        examples: &[
+            "let mut h = @uninit(Point);",
+            "@field(h, \"x\") = 1;",
+            "@field(h, \"y\") = 2;",
+            "let p: Point = @finalize(h);",
+        ],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::Finalize,
+        name: "finalize",
+        kind: IntrinsicKind::Expr,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Consume an `Uninit(T)` handle and return a real `T` (ADR-0079).",
+        description: "`@finalize(handle: Uninit(T)) -> T` takes an `Uninit(T)` handle whose every field has been written and produces a fully-initialized `T`. From this point on, the value drops normally. Compile error if any field is uninitialized along any path that reaches the call.",
+        examples: &["@finalize(h)"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::FieldSet,
+        name: "field_set",
+        kind: IntrinsicKind::Expr,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Write a field of an in-progress `@uninit`/`@variant_uninit` handle (ADR-0079).",
+        description: "`@field_set(handle, name, value)` writes the named field of an in-progress construction handle. Used inside derive bodies to populate the result one field at a time; sema records each write and `@finalize` verifies all fields are present.",
+        examples: &["@field_set(out, f.name, @field(self, f.name).clone())"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VariantUninit,
+        name: "variant_uninit",
+        kind: IntrinsicKind::Expr,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Allocate an `Uninit(Self)` pre-tagged for a specific enum variant (ADR-0079).",
+        description: "`@variant_uninit(Self, comptime tag) -> Uninit(Self)` is the variant-shaped counterpart to `@uninit(T)`. Subsequent `@field(out, name) = expr` writes target the named variant's payload fields; `@finalize(out)` produces a `Self` of the correct variant. `tag` must be comptime-known.",
+        examples: &[
+            "let mut out = @variant_uninit(Self, v.tag);",
+            "@field(out, f.name) = ...;",
+            "let result: Self = @finalize(out);",
+        ],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VariantField,
+        name: "variant_field",
+        kind: IntrinsicKind::Expr,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Read a payload field of a known enum variant (ADR-0079).",
+        description: "`@variant_field(self, comptime tag, name)` reads the named payload field of variant `tag` from `self`. Only valid when `self`'s runtime variant is known to be `tag` — typically inside an arm dispatched by `comptime_unroll for v in @type_info(Self).variants`. `tag` and `name` are both comptime.",
+        examples: &["@variant_field(self, v.tag, f.name)"],
+    },
+    IntrinsicDef {
         id: IntrinsicId::CStrToVec,
         name: "cstr_to_vec",
         kind: IntrinsicKind::Expr,
@@ -1616,7 +1704,12 @@ mod tests {
                 | IntrinsicId::PartsToVec
                 | IntrinsicId::TestPreviewGate
                 | IntrinsicId::Utf8Validate
-                | IntrinsicId::CStrToVec => {}
+                | IntrinsicId::CStrToVec
+                | IntrinsicId::Uninit
+                | IntrinsicId::Finalize
+                | IntrinsicId::FieldSet
+                | IntrinsicId::VariantUninit
+                | IntrinsicId::VariantField => {}
             }
         }
     }
@@ -1641,16 +1734,23 @@ mod tests {
     fn type_intrinsics_match_legacy_list() {
         // The legacy TYPE_INTRINSICS constant in gruel-rir/astgen.rs lists:
         // size_of, align_of, type_name, type_info, ownership.
+        // ADR-0079 Phase 2b adds @uninit(T) as a type intrinsic.
         // The registry must match exactly.
         let from_registry: HashSet<&'static str> = INTRINSICS
             .iter()
             .filter(|d| d.kind == IntrinsicKind::Type)
             .map(|d| d.name)
             .collect();
-        let expected: HashSet<&'static str> =
-            ["size_of", "align_of", "type_name", "type_info", "ownership"]
-                .into_iter()
-                .collect();
+        let expected: HashSet<&'static str> = [
+            "size_of",
+            "align_of",
+            "type_name",
+            "type_info",
+            "ownership",
+            "uninit",
+        ]
+        .into_iter()
+        .collect();
         assert_eq!(from_registry, expected);
     }
 
