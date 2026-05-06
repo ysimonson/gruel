@@ -1293,9 +1293,14 @@ impl TypeInternPool {
                 let element_type = self.vec_def(vec_id);
                 self.is_type_linear(element_type)
             }
-            // ADR-0080: enums declared `linear` are linear directly. The
-            // propagation path stays as a transitional fallback until
-            // Phase 5 retires the legacy heuristic.
+            // ADR-0080: enums declared `linear` are linear directly.
+            // For anonymous enums with no keyword (Option / Result and
+            // similar generic helpers), `find_or_create_anon_enum`
+            // infers `is_linear` from members; this method then sees
+            // it set. The propagation fallback below covers
+            // pre-specialization paths where method bodies are
+            // type-checked before the host enum has been constructed
+            // through that codepath.
             TypeKind::Enum(enum_id) => {
                 let def = self.enum_def(enum_id);
                 def.is_linear

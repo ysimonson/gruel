@@ -45,22 +45,24 @@ impl<'a> Sema<'a> {
             | TypeKind::Bool
             | TypeKind::Char
             | TypeKind::Unit => true,
-            // ADR-0080: enums declared `copy` are Copy directly.
-            // Otherwise, fall back to the legacy "no linear payload" rule
-            // until the corpus migrates off bare `enum X` for Copy semantics.
-            // Once Phase 5 retires the legacy heuristic this collapses to
-            // `def.is_copy`.
+            // ADR-0080: enums are Copy iff `EnumDef.is_copy` is set,
+            // which is filled either by the `copy enum` keyword or by
+            // the structural inference inside `find_or_create_anon_enum`
+            // for anonymous literals (parallel to tuples).
             TypeKind::Enum(enum_id) => {
                 let def = self.type_pool.enum_def(enum_id);
                 if def.is_copy {
-                    true
-                } else if def.is_linear {
-                    false
-                } else {
-                    !def.variants
-                        .iter()
-                        .any(|v| v.fields.iter().any(|f| self.is_type_linear(*f)))
+                    return true;
                 }
+                if def.is_linear {
+                    return false;
+                }
+                // Transitional fallback for tests/snippets that build
+                // enums via test fixtures without going through
+                // `find_or_create_anon_enum`.
+                !def.variants
+                    .iter()
+                    .any(|v| v.fields.iter().any(|f| self.is_type_linear(*f)))
             }
             // ComptimeInt is Copy (like ComptimeStr)
             TypeKind::ComptimeInt => true,

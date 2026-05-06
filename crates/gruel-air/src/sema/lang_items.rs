@@ -1,12 +1,15 @@
 //! Lang-item registry (ADR-0079).
 //!
 //! Stores the resolved interface/enum IDs for the compiler-recognized
-//! lang items (`drop`, `copy`, `clone`, `handle`, `op_eq`, `op_cmp`,
+//! lang items (`drop`, `clone`, `handle`, `op_eq`, `op_cmp`,
 //! `ordering`). Populated from `@lang("…")` directives on prelude
 //! declarations during `resolve_declarations`. Every compiler-side
 //! behavior that historically matched on a hardcoded type name (the
-//! `Drop`/`Copy`/`Clone`/`Eq`/`Ord` strings) consults this registry
-//! instead.
+//! `Drop`/`Clone`/`Eq`/`Ord` strings) consults this registry instead.
+//!
+//! ADR-0080 retired the `copy` lang item: posture is declared on the
+//! type (`copy struct`/`copy enum`) and queried via `@ownership(T)`,
+//! never dispatched, so it no longer needs an interface binding.
 
 use gruel_builtins::{LangEnumItem, LangInterfaceItem, LangItemKind};
 use gruel_rir::InstData;
@@ -24,7 +27,6 @@ use crate::types::{EnumId, InterfaceId};
 #[derive(Debug, Default, Clone)]
 pub struct LangItems {
     pub(crate) drop: Option<InterfaceId>,
-    pub(crate) copy: Option<InterfaceId>,
     pub(crate) clone: Option<InterfaceId>,
     pub(crate) handle: Option<InterfaceId>,
     pub(crate) op_eq: Option<InterfaceId>,
@@ -35,9 +37,6 @@ pub struct LangItems {
 impl LangItems {
     pub fn drop(&self) -> Option<InterfaceId> {
         self.drop
-    }
-    pub fn copy(&self) -> Option<InterfaceId> {
-        self.copy
     }
     pub fn clone(&self) -> Option<InterfaceId> {
         self.clone
@@ -212,7 +211,6 @@ impl<'a> Sema<'a> {
                 PendingKind::Interface(item, id) => {
                     let slot: &mut Option<InterfaceId> = match item {
                         LangInterfaceItem::Drop => &mut self.lang_items.drop,
-                        LangInterfaceItem::Copy => &mut self.lang_items.copy,
                         LangInterfaceItem::Clone => &mut self.lang_items.clone,
                         LangInterfaceItem::Handle => &mut self.lang_items.handle,
                         LangInterfaceItem::OpEq => &mut self.lang_items.op_eq,

@@ -795,7 +795,10 @@ pub fn is_reserved_type_constructor_name(name: &str) -> bool {
 /// so the doc generator can point at `prelude/interfaces.gruel` for
 /// canonical declarations. Do not use this for anything load-bearing — the
 /// compiler resolves these names through the prelude scope.
-pub static BUILTIN_INTERFACE_NAMES: &[&str] = &["Drop", "Copy", "Clone", "Handle"];
+/// ADR-0080 retired `Copy` from the interface set: posture is declared
+/// on the type and queried via `@ownership(T)`, not via interface
+/// conformance.
+pub static BUILTIN_INTERFACE_NAMES: &[&str] = &["Drop", "Clone", "Handle"];
 
 // ============================================================================
 // Lang items (ADR-0079)
@@ -810,12 +813,14 @@ pub static BUILTIN_INTERFACE_NAMES: &[&str] = &["Drop", "Copy", "Clone", "Handle
 // declaration carries the matching `@lang(...)` tag.
 
 /// Lang-item name applied to an interface declaration.
+///
+/// ADR-0080 retired `Copy` from this enum: posture is declared on the
+/// type with the `copy` keyword, queried via `@ownership(T)`, and never
+/// dispatched, so it is no longer an interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LangInterfaceItem {
     /// `Drop` — values may carry custom destructors.
     Drop,
-    /// `Copy` — values are bitwise-copyable at use sites.
-    Copy,
     /// `Clone` — values support a `clone(self)` method producing an
     /// owned duplicate.
     Clone,
@@ -841,7 +846,6 @@ impl LangInterfaceItem {
     pub fn name(self) -> &'static str {
         match self {
             LangInterfaceItem::Drop => "drop",
-            LangInterfaceItem::Copy => "copy",
             LangInterfaceItem::Clone => "clone",
             LangInterfaceItem::Handle => "handle",
             LangInterfaceItem::OpEq => "op_eq",
@@ -852,7 +856,6 @@ impl LangInterfaceItem {
     pub fn from_str(s: &str) -> Option<Self> {
         Some(match s {
             "drop" => LangInterfaceItem::Drop,
-            "copy" => LangInterfaceItem::Copy,
             "clone" => LangInterfaceItem::Clone,
             "handle" => LangInterfaceItem::Handle,
             "op_eq" => LangInterfaceItem::OpEq,
@@ -863,7 +866,7 @@ impl LangInterfaceItem {
 
     pub fn all() -> &'static [LangInterfaceItem] {
         use LangInterfaceItem::*;
-        &[Drop, Copy, Clone, Handle, OpEq, OpCmp]
+        &[Drop, Clone, Handle, OpEq, OpCmp]
     }
 }
 
@@ -1138,11 +1141,10 @@ pub fn render_reference_markdown() -> String {
     out.push('\n');
 
     out.push_str("### Interfaces\n\n");
-    out.push_str("Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Copy)` / `@derive(Clone)` synthesis, `Handle` linearity carve-out).\n\n");
+    out.push_str("Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Clone)` synthesis, `Handle` linearity carve-out). ADR-0080 retired `Copy` from this set: posture is declared on the type with the `copy` keyword and queried via `@ownership(T)`.\n\n");
     out.push_str("| Name | Method | Conformance |\n");
     out.push_str("|---|---|---|\n");
     out.push_str("| `Drop` | `fn drop(self)` | method presence |\n");
-    out.push_str("| `Copy` | `fn copy(self: Ref(Self)) -> Self` | `@derive(Copy)` |\n");
     out.push_str("| `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |\n");
     out.push_str("| `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |\n");
     out.push('\n');
@@ -1280,12 +1282,6 @@ pub fn render_reference_markdown() -> String {
     out.push_str("**Required methods:**\n\n");
     out.push_str("- `fn drop(self)`\n\n");
     out.push_str("**Conformance:** structural (no derive). Defining `fn drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.\n\n");
-
-    out.push_str("### `Copy`\n\n");
-    out.push_str("Types that may be implicitly duplicated by bitwise copy on use (ADR-0059).\n\n");
-    out.push_str("**Required methods:**\n\n");
-    out.push_str("- `fn copy(self: Ref(Self)) -> Self`\n\n");
-    out.push_str("**Conformance derive:** `@derive(Copy)` (compiler-recognized; no user `derive` declaration required). Validates that every field is `Copy` and tags the type as Copy. The `copy` method itself is never user-written; the compiler emits a bitwise copy. Mutually exclusive with `Drop`.\n\n");
 
     out.push_str("### `Clone`\n\n");
     out.push_str("Types that may be explicitly duplicated via `.clone()`. All `Copy` types auto-conform (ADR-0065).\n\n");

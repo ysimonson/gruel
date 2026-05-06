@@ -271,9 +271,8 @@ derive Counter {
     fn three(self) -> i32 { 3 }
 }
 
-@derive(Copy)
 @derive(Counter)
-struct Box {
+copy struct Box {
     inner: i32,
 }
 
@@ -478,28 +477,10 @@ fn main() -> i32 {
 """
 exit_code = 42
 
-# Same dispatch for `@derive(Copy)` on an enum.
-[[case]]
-name = "derive_copy_enum_via_comptime_if"
-spec = ["4.14:104"]
-description = "@derive(Copy) on an enum dispatches through the prelude derive's comptime if"
-source = """
-@derive(Copy)
-enum Foo {
-    A,
-    B(i32),
-}
-
-fn main() -> i32 {
-    let f = Foo::B(42);
-    let g = f.copy();
-    match g {
-        Foo::A => 0,
-        Foo::B(n) => n,
-    }
-}
-"""
-exit_code = 42
+# ADR-0080 retired the prelude `derive Copy` body, so the
+# `derive_copy_enum_via_comptime_if` test that exercised its enum-vs-struct
+# `comptime if` dispatch is obsolete — `copy enum` is now a posture
+# keyword on the declaration, not a synthesized method body.
 
 # `comptime if` standalone: the discarded branch can reference shapes
 # that don't apply to the surrounding type. Here the false branch

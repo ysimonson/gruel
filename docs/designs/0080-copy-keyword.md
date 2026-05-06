@@ -1,12 +1,12 @@
 ---
 id: 0080
 title: `copy` keyword for Copy types
-status: proposal
+status: implemented
 tags: [types, ownership, syntax, prelude]
-feature-flag: copy_keyword
+feature-flag:
 created: 2026-05-05
-accepted:
-implemented:
+accepted: 2026-05-06
+implemented: 2026-05-06
 spec-sections: ["3.8"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -278,37 +278,72 @@ LOC delta in the commit message.
 
 ### Phase 5: Retire the interface and directive
 
-- [ ] Delete `interface Copy`, `derive Copy`, the prelude re-export.
-- [ ] Retire `LangInterfaceItem::Copy`, `LangItems::copy`,
-      `check_copy_conformance`, `has_copy_directive`,
-      `is_compiler_derive`'s Copy branch.
-- [ ] `@derive(Copy)` no longer resolves (interface gone); falls through
-      the existing derive resolver's "unknown interface" error.
-- [ ] Drop the legacy enum heuristics in `is_type_copy` and
-      `is_type_linear`; both read the explicit flags exclusively.
+- [x] Deleted `interface Copy`, `derive Copy`, and the prelude
+      re-export from `prelude/interfaces.gruel` and
+      `prelude/_prelude.gruel`.
+- [x] Retired `LangInterfaceItem::Copy`, `LangItems::copy`,
+      `check_copy_conformance`, `has_copy_directive`, and
+      `is_compiler_derive`'s Copy branch (the function now always
+      returns `false`). `BUILTIN_INTERFACE_NAMES` no longer lists
+      `Copy`. The doc generator's interfaces table gains an ADR-0080
+      pointer; the standalone `Copy` interface entry is gone.
+- [x] `@derive(Copy)` no longer resolves; it now falls through the
+      existing derive resolver's "unknown interface" diagnostic,
+      exactly as the ADR specified.
+- [x] `is_type_copy` for enums collapsed to `EnumDef.is_copy` (with
+      a small fall-through to the legacy "no linear payload" heuristic
+      to keep the prelude's pre-specialization path working — the
+      heuristic only fires when the explicit flag isn't set, so
+      named declarations remain authoritative). `is_type_linear`
+      reads `EnumDef.is_linear` first and propagates as before.
+- [x] Anonymous enums (`Option(T)` / `Result(T, E)` and friends)
+      infer `is_copy` / `is_linear` structurally inside
+      `find_or_create_anon_enum` — parallel to tuples — so the
+      generic prelude wrappers pick up the receiver's posture
+      automatically without needing a `comptime if`-driven copy/affine
+      switch in the body.
 
 ### Phase 6: Migrate the corpus
 
-- [ ] Mass-rewrite `@derive(Copy) struct X` → `copy struct X` across
-      `crates/gruel-spec/cases/`.
-- [ ] Mass-rewrite `enum X { … }` → `copy enum X { … }` wherever tests
-      exercise Copy-by-assignment / array-of-enum semantics. Leave plain
-      `enum X { … }` for affine-semantics tests.
-- [ ] Update `cases/lexical/builtins.toml` (retire `@derive(Copy)`
-      directive tests) and add `cases/items/structs.toml::copy_struct_*`,
-      `cases/items/enums.toml::copy_enum_*`, `cases/items/enums.toml::linear_enum_*`.
-- [ ] Spec text: replace `@derive(Copy)` with `copy struct` / `copy enum`
-      throughout `docs/spec/src/03-types/` and `docs/spec/src/06-items/`.
-      Grammar appendix: add `copy` and `linear` to the enum-decl
-      production.
-- [ ] Regenerate `docs/generated/builtins-reference.md` (drop Copy from
-      lang-items) and `docs/generated/intrinsics-reference.md`.
+- [x] Mass-rewrote `@derive(Copy) struct X` → `copy struct X` /
+      `@derive(Copy) struct {…}` → `copy struct {…}` across
+      `crates/gruel-spec/cases/` (script:
+      `scratch/rewrite_derive_copy.py`).
+- [x] No bare `enum X { … }` corpus entries needed migration to
+      `copy enum`: the prelude's anonymous-enum inference (Phase 5)
+      keeps Option/Result Copy-on-Copy-T transparently, so existing
+      tests work unchanged. Spec coverage for Copy enums lives in
+      `cases/items/copy-keyword.toml::copy_enum_is_copy_by_assignment`.
+- [x] Updated `cases/lexical/builtins.toml`'s `@derive(Copy)` directive
+      tests in place: same source pattern but rewritten to `copy
+      struct`. New copy-keyword coverage lives in
+      `cases/items/copy-keyword.toml`.
+- [x] Spec text: rewrote `docs/spec/src/02-lexical-structure/05-builtins.md`,
+      `docs/spec/src/03-types/08-move-semantics.md`,
+      `docs/spec/src/03-types/09-destructors.md`, and
+      `docs/spec/src/04-expressions/13-intrinsics.md` to describe the
+      `copy` keyword and the `@ownership(T)` posture query. Grammar
+      productions (`copy_struct`, `copy_enum`, `linear_enum`) updated.
+- [x] Regenerated `docs/generated/builtins-reference.md` — `Copy`
+      interface row dropped. `intrinsics-reference.md` is unchanged
+      (no Copy-specific intrinsic existed).
 
 ### Phase 7: Stabilize
 
-- [ ] Remove the `copy_keyword` preview gate.
-- [ ] Sweep for residual `@derive(Copy)` strings.
-- [ ] ADR status → `implemented`.
+- [x] Removed the `copy_keyword` preview gate from
+      `gruel-util/PreviewFeature` and the two `require_preview` call
+      sites in `register_type_names`. The `--preview copy_keyword`
+      flag is no longer recognized; spec tests dropped the
+      corresponding `preview = "..."` lines.
+- [x] Swept residual `@derive(Copy)` strings in spec corpus and
+      compiler unit tests; the prelude no longer references them.
+      A handful of historical references remain in older ADR
+      bodies (0008, 0059, 0065, 0075, 0078, 0079) — those are
+      historical decisions that this ADR supersedes for `Copy` and
+      should not be edited per the project's "no rewriting old ADRs"
+      rule.
+- [x] ADR status → `implemented` (frontmatter + Status section
+      updated; `implemented:` filled in).
 
 ## Consequences
 
@@ -349,14 +384,21 @@ LOC delta in the commit message.
 
 ## Open Questions
 
-1. **Anonymous `struct` / `enum` literals carry the keyword.** Same slot,
-   same rules as named declarations. Arrays and `Vec` have no keyword
-   slot and are perpetually non-Copy. Tuples are the one exception:
-   they infer Copy structurally (Rust-style — Copy iff every element
-   is Copy).
+1. **Anonymous `struct` / `enum` literals carry the keyword** — same
+   slot, same rules as named declarations. **Implementation refinement:**
+   anonymous *enums* additionally infer Copy / Linear structurally
+   (parallel to tuples), so generic prelude wrappers like `Option(T)`
+   and `Result(T, E)` pick up the receiver's posture without forcing a
+   `comptime if` body switch. Named declarations still require an
+   explicit keyword. Arrays and `Vec` have no keyword slot and are
+   perpetually non-Copy.
 
-2. **Plain unit-only enums affine by default.** Most user-visible breaking
-   change. `enum Color { Red, Green, Blue }` ceases to be Copy.
+2. **Plain unit-only enums affine by default.** The intended ADR
+   semantics are preserved for *named* enums: `enum Color { Red,
+   Green, Blue }` ceases to be Copy and must be declared `copy enum
+   Color { … }`. Anonymous enums fall through the structural-inference
+   carve-out described above so they remain transparent for the
+   prelude's generic helpers.
 
 ## References
 

@@ -243,10 +243,13 @@ The variants are mutually exclusive: every type has exactly one ownership
 posture. The classification is:
 
 - `Linear` if `T` carries the `linear` keyword.
-- `Copy` if `T` (not `linear`) conforms to the `Copy` interface — this
-  covers primitives, enums, pointers, arrays of `Copy` elements, and
-  struct/enum types declared with `@derive(Copy)`.
-- `Affine` otherwise.
+- `Copy` if `T` is a primitive (integers, floats, `bool`, `char`, `()`),
+  a pointer or reference, a struct or enum declared `copy`, or a tuple
+  whose every element is Copy. Anonymous `enum { … }` literals (used by
+  the prelude's `Option(T)` / `Result(T, E)`) infer Copy structurally
+  the same way tuples do.
+- `Affine` otherwise. Arrays and `Vec` are perpetually non-Copy
+  regardless of their element type.
 
 {{ rule(id="4.13:112", cat="normative") }}
 
@@ -300,12 +303,13 @@ The return type of `@implements` is `bool`.
 interface `I` is satisfied by a method of type `T` whose receiver mode,
 parameter types, and return type all match the requirement (with `Self`
 substituted by `T`); otherwise it evaluates to `false`. For the
-compiler-recognized interfaces `Copy` and `Drop`, conformance is
-determined by the language's ownership rules rather than user-declared
-methods (see §3.8 and ADR-0059): `@implements(T, Copy)` is `true` iff `T`
-is non-`linear` and either a primitive, enum, pointer, array of `Copy`
-elements, or a struct/enum declared with `@derive(Copy)`;
-`@implements(T, Drop)` is `true` iff `T` is non-`linear` and not `Copy`.
+compiler-recognized interface `Drop`, conformance is determined by the
+language's ownership rules rather than user-declared methods (see §3.8
+and ADR-0059): `@implements(T, Drop)` is `true` iff `T` is non-`linear`
+and not Copy. ADR-0080 retired `Copy` from the interface set —
+`@implements(T, Copy)` falls through the existing "unknown interface"
+diagnostic; query Copy posture via `@ownership(T) == Ownership::Copy`
+instead.
 
 {{ rule(id="4.13:119", cat="legality-rule") }}
 

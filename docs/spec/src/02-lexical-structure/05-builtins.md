@@ -35,7 +35,7 @@ There are two kinds of builtins, distinguished by their syntactic position:
 | Kind | Position | Purpose | Examples |
 |------|----------|---------|----------|
 | Intrinsic | Expression | Produces a value | `@dbg`, `@size_of`, `@align_of` |
-| Directive | Before item/statement | Modifies compiler behavior | `@allow`, `@derive(Copy)` |
+| Directive | Before item/statement | Modifies compiler behavior | `@allow`, `@derive(...)` |
 
 {{ rule(id="2.5:6", cat="normative") }}
 
@@ -192,26 +192,29 @@ fn main() -> i32 {
 }
 ```
 
-## `@derive(Copy)`
+## The `copy` Keyword
 
 {{ rule(id="2.5:27", cat="normative") }}
 
-The `@derive(Copy)` directive marks a struct type as conforming to the
-compiler-recognized `Copy` interface (ADR-0059).
+The `copy` keyword in front of a `struct` or `enum` declaration marks
+the type as Copy (ADR-0080). The previous `@derive(Copy)` directive is
+retired; `Copy` is no longer an interface.
 
 {{ rule(id="2.5:28", cat="normative") }}
 
-`@derive(Copy)` **MUST** appear immediately before a struct definition.
+`copy` is a contextual keyword: it is recognized only at the posture
+slot in a `struct` / `enum` declaration head. It remains a valid
+identifier elsewhere (function names, locals, fields).
 
 {{ rule(id="2.5:29", cat="normative") }}
 
-`@derive(Copy)` takes a single argument, the interface name `Copy`.
+`copy` and `linear` are mutually exclusive at the posture slot. The
+parser rejects `copy linear` and `linear copy`.
 
 {{ rule(id="2.5:30") }}
 
 ```gruel
-@derive(Copy)
-struct Point { x: i32, y: i32 }
+copy struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };
@@ -222,8 +225,8 @@ fn main() -> i32 {
 
 {{ rule(id="2.5:31", cat="informative") }}
 
-See [Move Semantics](@/03-types/08-move-semantics.md#the-derive-copy-directive)
-for the full semantics of `@derive(Copy)` structs.
+See [Move Semantics](@/03-types/08-move-semantics.md#the-copy-keyword)
+for the full semantics of `copy` types.
 
 ## Unrecognized Directives
 

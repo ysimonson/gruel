@@ -1671,8 +1671,7 @@ exit_code = 2
 name = "ownership_copy_struct_is_copy"
 spec = ["4.13:111"]
 source = """
-@derive(Copy)
-struct Pair { x: i32, y: i32 }
+copy struct Pair { x: i32, y: i32 }
 
 fn main() -> i32 {
     match @ownership(Pair) {
@@ -1912,8 +1911,7 @@ name = "ownership_derive_copy_struct_is_copy"
 spec = ["4.13:118"]
 description = "ADR-0080: a `@derive(Copy)` struct reports `Ownership::Copy`."
 source = """
-@derive(Copy)
-struct Pair { x: i32, y: i32 }
+copy struct Pair { x: i32, y: i32 }
 
 fn main() -> i32 {
     match @ownership(Pair) {

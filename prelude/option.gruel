@@ -1,4 +1,7 @@
 // ADR-0065: canonical Option(T).
+// ADR-0080: anonymous enums infer Copy structurally (parallel to
+// tuples), so `Option(T)` is Copy when `T` is Copy and affine
+// otherwise — no syntactic switch needed in the prelude.
 
 pub fn Option(comptime T: type) -> type {
     enum {

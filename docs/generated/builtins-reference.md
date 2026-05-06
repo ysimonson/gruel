@@ -37,12 +37,11 @@ Platform-reflection enums (`Arch`, `Os`) live in `prelude/target.gruel`; type-re
 
 ### Interfaces
 
-Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Copy)` / `@derive(Clone)` synthesis, `Handle` linearity carve-out).
+Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Clone)` synthesis, `Handle` linearity carve-out). ADR-0080 retired `Copy` from this set: posture is declared on the type with the `copy` keyword and queried via `@ownership(T)`.
 
 | Name | Method | Conformance |
 |---|---|---|
 | `Drop` | `fn drop(self)` | method presence |
-| `Copy` | `fn copy(self: Ref(Self)) -> Self` | `@derive(Copy)` |
 | `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |
 | `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |
 
@@ -189,16 +188,6 @@ Types with custom cleanup logic that runs when the value goes out of scope (ADR-
 - `fn drop(self)`
 
 **Conformance:** structural (no derive). Defining `fn drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.
-
-### `Copy`
-
-Types that may be implicitly duplicated by bitwise copy on use (ADR-0059).
-
-**Required methods:**
-
-- `fn copy(self: Ref(Self)) -> Self`
-
-**Conformance derive:** `@derive(Copy)` (compiler-recognized; no user `derive` declaration required). Validates that every field is `Copy` and tags the type as Copy. The `copy` method itself is never user-written; the compiler emits a bitwise copy. Mutually exclusive with `Drop`.
 
 ### `Clone`
 

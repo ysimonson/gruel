@@ -105,11 +105,24 @@ impl Sema<'_> {
         let name = format!("__anon_enum_{}", self.type_pool.all_enum_ids().len());
         let name_spur = self.interner.get_or_intern(&name);
 
+        // ADR-0080: anonymous enums (no syntactic name to attach a
+        // posture keyword to at most call sites) infer Copy / Linear
+        // structurally — parallel to tuples and the prelude's Option /
+        // Result. Named enum declarations require an explicit `copy`
+        // / `linear` keyword; anonymous literals fall through this
+        // structural carve-out so generic helpers like `Option(T)` /
+        // `Result(T, E)` automatically pick up the receiver's posture.
+        let any_linear = variants
+            .iter()
+            .any(|v| v.fields.iter().any(|f| self.type_pool.is_type_linear(*f)));
+        let all_copy = variants
+            .iter()
+            .all(|v| v.fields.iter().all(|f| self.is_type_copy(*f)));
         let enum_def = EnumDef {
             name,
             variants: variants.to_vec(),
-            is_copy: false,
-            is_linear: false,
+            is_copy: !any_linear && all_copy,
+            is_linear: any_linear,
             is_pub: false,
             file_id: gruel_util::FileId::new(0),
             destructor: None,

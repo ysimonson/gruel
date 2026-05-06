@@ -55,14 +55,12 @@ impl<'a> Sema<'a> {
         interface_id: InterfaceId,
         use_span: Span,
     ) -> CompileResult<ConformanceWitness> {
-        // ADR-0059 / ADR-0079: `Copy` and `Drop` are compiler-recognized
-        // via lang-items, not by the literal interface name. Short-circuit
-        // through the existing ownership predicates so primitives,
-        // pointers, arrays, etc. don't need synthetic method tables —
-        // codegen handles built-in copy/drop natively.
-        if Some(interface_id) == self.lang_items.copy() {
-            return self.check_copy_conformance(candidate, interface_id, use_span);
-        }
+        // ADR-0079: `Drop` is compiler-recognized via lang-items, not by
+        // the literal interface name. Short-circuit through the existing
+        // ownership predicates so primitives, pointers, arrays, etc.
+        // don't need synthetic method tables — codegen handles built-in
+        // drop natively. (ADR-0080 retired the `copy` lang-item: posture
+        // is declared on the type and queried via `@ownership(T)`.)
         if Some(interface_id) == self.lang_items.drop() {
             return self.check_drop_conformance(candidate, interface_id, use_span);
         }
@@ -195,29 +193,6 @@ impl<'a> Sema<'a> {
         }
 
         Ok(ConformanceWitness { slot_methods })
-    }
-
-    /// Built-in conformance for the `Copy` interface (ADR-0059).
-    ///
-    /// Linear types never conform; otherwise `is_type_copy` is the source of
-    /// truth. The witness has no real slot — the compiler dispatches Copy
-    /// for built-ins natively, and `@derive(Copy)` user types reach the
-    /// regular method-set path on later phases.
-    fn check_copy_conformance(
-        &self,
-        candidate: Type,
-        interface_id: InterfaceId,
-        use_span: Span,
-    ) -> CompileResult<ConformanceWitness> {
-        if self.is_type_linear(candidate) {
-            return Err(self.iface_method_missing(candidate, interface_id, "copy", use_span));
-        }
-        if self.is_type_copy(candidate) {
-            return Ok(ConformanceWitness {
-                slot_methods: Vec::new(),
-            });
-        }
-        Err(self.iface_method_missing(candidate, interface_id, "copy", use_span))
     }
 
     /// Built-in short-circuit for the `Clone` interface (ADR-0065).

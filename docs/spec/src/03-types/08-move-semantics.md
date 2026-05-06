@@ -41,31 +41,30 @@ fn main() -> i32 {
 }
 ```
 
-## The `@derive(Copy)` Directive
+## The `copy` Keyword
 
 {{ rule(id="3.8:14", cat="normative") }}
 
-A struct type **MAY** be declared as a Copy type using the `@derive(Copy)`
-directive before the struct definition (ADR-0059). `Copy` is a
-compiler-recognized structural interface (see §6.5) whose method shape is
-`fn copy(self: Ref(Self)) -> Self`.
+A struct or enum type **MAY** be declared as a Copy type using the `copy`
+keyword before the `struct` or `enum` token (ADR-0080). The keyword is the
+sole way to opt a nominal type into Copy.
 
 {{ rule(id="3.8:15", cat="syntax") }}
 
 ```ebnf
-copy_struct = "@derive(Copy)" struct_def ;
+copy_struct = "copy" "struct" IDENT "{" [ struct_fields ] "}" ;
+copy_enum   = "copy" "enum"   IDENT "{" [ enum_variants ] "}" ;
 ```
 
 {{ rule(id="3.8:16", cat="normative") }}
 
-A struct that conforms to `Copy` is a Copy type. Using a Copy struct value
-does not consume it; the value is implicitly duplicated.
+A struct or enum declared `copy` is a Copy type. Using a Copy value does
+not consume it; the value is implicitly duplicated.
 
 {{ rule(id="3.8:17", cat="example") }}
 
 ```gruel
-@derive(Copy)
-struct Point { x: i32, y: i32 }
+copy struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };
@@ -77,33 +76,31 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:18", cat="legality-rule") }}
 
-A struct marked with `@derive(Copy)` **MUST** contain only fields that are
-themselves Copy types. It is a compile-time error if any field has a type
-that does not conform to `Copy`.
+A type marked `copy` **MUST** contain only members (fields, variant
+payloads) that are themselves Copy types. It is a compile-time error if
+any member has a type that is affine or linear.
 
 {{ rule(id="3.8:19", cat="example") }}
 
 ```gruel
-struct Inner { value: i32 }  // move type (no @derive(Copy))
+struct Inner { value: i32 }  // affine (no `copy` keyword)
 
-@derive(Copy)
-struct Outer { inner: Inner }  // ERROR: field 'inner' has non-Copy type 'Inner'
+copy struct Outer { inner: Inner }  // ERROR: field 'inner' is affine
 ```
 
 {{ rule(id="3.8:20", cat="normative") }}
 
-A `@derive(Copy)` struct **MAY** contain fields of primitive Copy types
-(integers, booleans, unit), enum types, arrays of Copy types, or other
-`@derive(Copy)` struct types.
+A `copy` struct or enum **MAY** contain members of primitive Copy types
+(integers, booleans, unit), other `copy` struct or enum types, or tuples
+of Copy elements. Arrays and `Vec` are perpetually non-Copy regardless of
+their element type — they are containers, not value types.
 
 {{ rule(id="3.8:21", cat="example") }}
 
 ```gruel
-@derive(Copy)
-struct Point { x: i32, y: i32 }
+copy struct Point { x: i32, y: i32 }
 
-@derive(Copy)
-struct Rect { top_left: Point, bottom_right: Point }  // OK: Point is Copy
+copy struct Rect { top_left: Point, bottom_right: Point }  // OK: Point is Copy
 
 fn main() -> i32 {
     let r = Rect {
@@ -119,12 +116,13 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:30", cat="normative") }}
 
-A struct type **MAY** be declared as a linear type using the `linear` keyword before the struct definition.
+A struct or enum type **MAY** be declared as a linear type using the `linear` keyword before the `struct` or `enum` token.
 
 {{ rule(id="3.8:31", cat="syntax") }}
 
 ```ebnf
 linear_struct = "linear" "struct" IDENT "{" [ struct_fields ] "}" ;
+linear_enum   = "linear" "enum"   IDENT "{" [ enum_variants ] "}" ;
 ```
 
 {{ rule(id="3.8:32", cat="normative") }}
@@ -169,13 +167,14 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:37", cat="legality-rule") }}
 
-A linear struct **MUST NOT** be marked with `@derive(Copy)`. Linear types cannot be implicitly copied.
+A linear struct or enum **MUST NOT** also be marked `copy`. The keyword
+combinations `copy linear` and `linear copy` are syntactically rejected
+by the parser.
 
 {{ rule(id="3.8:38", cat="example") }}
 
 ```gruel
-@derive(Copy)
-linear struct Invalid { value: i32 }  // ERROR: linear struct cannot be marked `@derive(Copy)`
+copy linear struct Invalid { value: i32 }  // ERROR: parser rejects `copy linear`
 ```
 
 {{ rule(id="3.8:39", cat="informative") }}
@@ -393,40 +392,52 @@ fn main() -> i32 {
 }
 ```
 
-## `Drop` and `Copy` as Interfaces (ADR-0059)
+## Posture and `Drop` (ADR-0059, ADR-0080)
 
 {{ rule(id="3.8:60", cat="normative") }}
 
-Gruel's three ownership postures are mediated by two compiler-recognized
-structural interfaces: `Copy` (`fn copy(self: Ref(Self)) -> Self`) and `Drop`
-(`fn drop(self)`). Conformance to these interfaces is computed by the
-compiler — built-in types acquire conformance through synthetic rules,
-user types via `@derive(Copy)` or by defining the corresponding inline
-method.
+Gruel's three ownership postures (Copy, Affine, Linear) interact with
+the `Drop` interface (`fn drop(self)`). Conformance to `Drop` is computed
+by the compiler — built-in types acquire conformance through synthetic
+rules, user types by defining the corresponding inline method.
 
 {{ rule(id="3.8:61", cat="normative") }}
 
 For every struct or enum `T`:
 
-- `T` conforms to `Copy` iff `T` is not `linear` and every constituent
-  field is itself `Copy`.
-- `T` conforms to `Drop` iff `T` is not `linear` and `T` does not conform
-  to `Copy`. Affine types always conform to `Drop`; their drop body is
-  either user-written via `fn drop(self)` (ADR-0053) or the compiler's
+- `T` is Copy iff its declaration carries the `copy` keyword (or, for
+  anonymous literals, every member is itself Copy). Every member of a
+  Copy type **MUST** be Copy.
+- `T` conforms to `Drop` iff `T` is not `linear` and `T` is not Copy.
+  Affine types always conform to `Drop`; their drop body is either
+  user-written via `fn drop(self)` (ADR-0053) or the compiler's
   recursive field-drop synthesis.
 
 {{ rule(id="3.8:62", cat="legality-rule") }}
 
-`Copy` and `Drop` are mutually exclusive: a single type **MUST NOT**
-conform to both. `@derive(Copy)` on a struct that declares `fn drop(self)`
-is rejected at the declaration site. Linear types conform to neither.
+Copy and Drop are mutually exclusive: a single type **MUST NOT** be both.
+A `copy` declaration that also defines `fn drop(self)` is rejected at the
+declaration site. Linear types are neither Copy nor Drop.
 
 {{ rule(id="3.8:63", cat="informative") }}
 
-Generic code may constrain on these interfaces directly:
-`fn process(comptime T: Copy, t: T)` accepts any `Copy` type and rejects
-non-conforming types at the call site. This is the same conformance
-machinery as user-defined interfaces (§6.5).
+Generic code branches on posture via the `@ownership(T)` reflection
+intrinsic, typically combined with a `comptime if` guard:
+
+```gruel
+fn use_copy(comptime T: type, t: T) -> i32 {
+    comptime if @ownership(T) != Ownership::Copy {
+        @compile_error("use_copy requires a Copy type");
+    }
+    // …
+}
+```
+
+`@implements(T, Iface)` continues to drive interface conformance for
+real interfaces (`Drop`, `Clone`, `Handle`, `Eq`, `Ord`, user
+interfaces); ADR-0080 retired `Copy` from the interface set, so a
+`Copy` argument to `@implements` falls through the existing "unknown
+interface" diagnostic.
 
 ## `Clone` Interface (ADR-0065)
 

@@ -12,7 +12,7 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_builtins::{is_reserved_type_constructor_name, is_reserved_type_name};
-use gruel_rir::{InstData, InstRef, RirDirective, RirParamMode};
+use gruel_rir::{InstData, InstRef, RirParamMode};
 use gruel_util::Span;
 use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
 use lasso::Spur;
@@ -230,34 +230,9 @@ impl<'a> Sema<'a> {
             enum_method_sigs,
         }
     }
-    /// Check if a directive list contains `@derive(<copy lang-item>)` (ADR-0059 / ADR-0079).
-    ///
-    /// Resolves each `@derive(...)` arg through `self.interfaces` and
-    /// compares the resulting `InterfaceId` to `lang_items.copy()`.
-    /// Falls back to a literal `"Copy"` symbol match when the prelude
-    /// hasn't been loaded (test fixtures); both paths converge on real
-    /// compilations.
-    pub(crate) fn has_copy_directive(&self, directives: &[RirDirective]) -> bool {
-        let derive_sym = self.interner.get("derive");
-        let copy_iface_id = self.lang_items.copy();
-        let copy_name_sym = self.interner.get("Copy");
-        for directive in directives {
-            if Some(directive.name) != derive_sym {
-                continue;
-            }
-            for arg in &directive.args {
-                if let Some(&id) = self.interfaces.get(arg)
-                    && Some(id) == copy_iface_id
-                {
-                    return true;
-                }
-                if Some(*arg) == copy_name_sym && copy_iface_id.is_none() {
-                    return true;
-                }
-            }
-        }
-        false
-    }
+    // ADR-0080 retired `has_copy_directive`: `@derive(Copy)` no longer
+    // resolves to a known interface, so the directive falls through the
+    // existing "unknown interface" derive resolver path.
 
     /// ADR-0075: walk every directive collected during parsing and reject any
     /// whose name isn't in the recognized set (`@allow`, `@derive`). Retired
@@ -476,23 +451,6 @@ impl<'a> Sema<'a> {
                 } => {
                     let enum_name = self.interner.resolve(name).to_string();
 
-                    // ADR-0080: gate `copy enum` and `linear enum` keyword
-                    // syntax on the `copy_keyword` preview feature.
-                    if *is_copy {
-                        self.require_preview(
-                            gruel_util::PreviewFeature::CopyKeyword,
-                            "the `copy` keyword on enum declarations",
-                            inst.span,
-                        )?;
-                    }
-                    if *is_linear {
-                        self.require_preview(
-                            gruel_util::PreviewFeature::CopyKeyword,
-                            "the `linear` keyword on enum declarations",
-                            inst.span,
-                        )?;
-                    }
-
                     // ADR-0080 belt-and-braces: parser already rejects
                     // `copy linear` / `linear copy` syntactically; this catches
                     // the path where one is a keyword and the other arrives
@@ -606,15 +564,6 @@ impl<'a> Sema<'a> {
                 } => {
                     let struct_name = self.interner.resolve(name).to_string();
 
-                    // ADR-0080: gate the `copy` keyword on struct declarations.
-                    if *kw_is_copy {
-                        self.require_preview(
-                            gruel_util::PreviewFeature::CopyKeyword,
-                            "the `copy` keyword on struct declarations",
-                            inst.span,
-                        )?;
-                    }
-
                     // Check for collision with built-in type names or built-in
                     // type constructors (e.g. Ptr, MutPtr — see ADR-0061).
                     if is_reserved_type_name(&struct_name)
@@ -638,11 +587,12 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    let directives = self.rir.get_directives(*directives_start, *directives_len);
-                    // ADR-0080: a struct is Copy if either the `copy` keyword
-                    // is set OR `@derive(Copy)` is present (legacy directive
-                    // path, retained until Phase 5 retires the interface).
-                    let is_copy = *kw_is_copy || self.has_copy_directive(&directives);
+                    let _ = *directives_start;
+                    let _ = *directives_len;
+                    // ADR-0080 Phase 5: `@derive(Copy)` is retired; the
+                    // `copy` keyword is now the sole source of truth for
+                    // `StructDef.is_copy`.
+                    let is_copy = *kw_is_copy;
 
                     // Linear types cannot be @derive(Copy)
                     if *is_linear && is_copy {
@@ -1220,35 +1170,15 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Returns `true` if `name` resolves to a compiler-recognized derive
-    /// that doesn't have a corresponding `derive` item in user code
-    /// (ADR-0059). After ADR-0079, `Clone` flows through the standard
-    /// derive-expansion path (the prelude ships a `derive Clone { … }`
-    /// block whose body is spliced via the regular machinery). `Copy`
-    /// remains compiler-handled for now — the prelude derive Copy is
-    /// the next step.
-    ///
-    /// Resolves through `self.interfaces` plus `lang_items` first;
-    /// falls back to literal `"Copy"` / `"Clone"` name match for
-    /// compilations that bypass the prelude (test fixtures that
-    /// build a Sema without `prepend_prelude`).
-    fn is_compiler_derive(&self, name: Spur) -> bool {
-        // ADR-0079 Phase 2c/2d: when the prelude is present, both
-        // `Copy` and `Clone` flow through the standard
-        // derive-expansion path (the prelude ships `derive Copy { … }`
-        // and `derive Clone { … }` blocks). When the prelude is
-        // absent (test fixtures, single-file inline compilations),
-        // `@derive(Copy)` still has to be recognized as a
-        // compiler-handled directive — there is no derive item to
-        // resolve against, but `is_copy` still flips and codegen
-        // emits a memcpy. Falling back to the literal name match
-        // preserves that path. `@derive(Clone)` without a prelude
-        // is a hard error today (was a hard error pre-ADR too).
-        if self.lang_items.copy().is_some() || self.lang_items.clone().is_some() {
-            return false;
-        }
-        let name_str = self.interner.resolve(&name);
-        name_str == "Copy"
+    /// ADR-0059 / ADR-0079: a name was previously recognized as a
+    /// compiler-handled derive (`Copy` was the only such name).
+    /// ADR-0080 retired `Copy` from the interface registry, so this
+    /// hook always returns `false` and `@derive(...)` resolution
+    /// flows entirely through the standard derive-resolution path —
+    /// `@derive(Copy)` falls through the existing "unknown interface"
+    /// diagnostic, exactly as the ADR specified.
+    fn is_compiler_derive(&self, _name: Spur) -> bool {
+        false
     }
 
     /// ADR-0058 phases 1 + 2: gate `derive` items behind the
