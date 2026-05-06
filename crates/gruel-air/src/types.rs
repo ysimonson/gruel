@@ -790,6 +790,12 @@ pub struct EnumDef {
     pub name: String,
     /// Variants in declaration order
     pub variants: Vec<EnumVariantDef>,
+    /// Whether this enum is declared `copy` (ADR-0080). When `true`,
+    /// `is_type_copy` returns `true` for this enum directly.
+    pub is_copy: bool,
+    /// Whether this enum is declared `linear` (ADR-0080). When `true`,
+    /// `is_type_linear` returns `true` for this enum directly.
+    pub is_linear: bool,
     /// Whether this enum is public (visible outside its directory)
     pub is_pub: bool,
     /// File ID this enum was declared in (for visibility checking)
@@ -2213,6 +2219,8 @@ mod tests {
         let empty = EnumDef {
             name: "Empty".to_string(),
             variants: vec![],
+            is_copy: false,
+            is_linear: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2226,6 +2234,8 @@ mod tests {
                 EnumVariantDef::unit("Green"),
                 EnumVariantDef::unit("Blue"),
             ],
+            is_copy: false,
+            is_linear: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2242,6 +2252,8 @@ mod tests {
                 EnumVariantDef::unit("Green"),
                 EnumVariantDef::unit("Blue"),
             ],
+            is_copy: false,
+            is_linear: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2258,6 +2270,8 @@ mod tests {
         let empty = EnumDef {
             name: "Empty".to_string(),
             variants: vec![],
+            is_copy: false,
+            is_linear: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2271,6 +2285,8 @@ mod tests {
         let small = EnumDef {
             name: "Small".to_string(),
             variants: vec![EnumVariantDef::unit("A")],
+            is_copy: false,
+            is_linear: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2282,6 +2298,8 @@ mod tests {
             variants: (0..256)
                 .map(|i| EnumVariantDef::unit(format!("V{}", i)))
                 .collect(),
+            is_copy: false,
+            is_linear: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2297,6 +2315,8 @@ mod tests {
             variants: (0..257)
                 .map(|i| EnumVariantDef::unit(format!("V{}", i)))
                 .collect(),
+            is_copy: false,
+            is_linear: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,

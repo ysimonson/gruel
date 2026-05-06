@@ -1,0 +1,161 @@
+# ADR-0080: `copy` keyword for Copy types
+#
+# Phase 1 parse-only tests. The `copy` and `linear` keywords on struct/enum
+# declaration heads are gated by the `copy_keyword` preview feature until
+# the ADR ships.
+
+[section]
+id = "items.copy_keyword"
+spec_chapter = "3.8"
+name = "`copy` keyword (ADR-0080)"
+description = "Posture keywords on struct and enum declarations: `copy struct`, `copy enum`, `linear enum`."
+
+# =============================================================================
+# Preview gating
+# =============================================================================
+
+[[case]]
+name = "copy_struct_requires_preview"
+spec = ["3.8:14"]
+source = """
+copy struct Point { x: i32, y: i32 }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "copy_keyword"
+
+[[case]]
+name = "copy_enum_requires_preview"
+spec = ["3.8:14"]
+source = """
+copy enum Color { Red, Green, Blue }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "copy_keyword"
+
+[[case]]
+name = "linear_enum_requires_preview"
+spec = ["3.8:30"]
+source = """
+linear enum Resource { Open, Closed }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "copy_keyword"
+
+# =============================================================================
+# Parse-only with preview enabled
+# =============================================================================
+
+[[case]]
+name = "copy_struct_parses"
+spec = ["3.8:14"]
+preview = "copy_keyword"
+preview_should_pass = true
+source = """
+copy struct Point { x: i32, y: i32 }
+fn main() -> i32 {
+    let p = Point { x: 1, y: 2 };
+    p.x + p.y
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "copy_enum_parses"
+spec = ["3.8:14"]
+preview = "copy_keyword"
+preview_should_pass = true
+source = """
+copy enum Color { Red, Green, Blue }
+fn main() -> i32 {
+    let c = Color::Red;
+    match c {
+        Color::Red => 1,
+        Color::Green => 2,
+        Color::Blue => 3,
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "linear_enum_parses"
+spec = ["3.8:30"]
+preview = "copy_keyword"
+preview_should_pass = true
+source = """
+linear enum Resource { Open, Closed }
+fn consume(r: Resource) -> i32 {
+    match r {
+        Resource::Open => 1,
+        Resource::Closed => 0,
+    }
+}
+fn main() -> i32 {
+    let r = Resource::Open;
+    consume(r)
+}
+"""
+exit_code = 1
+
+# =============================================================================
+# `copy` remains a valid identifier
+# =============================================================================
+
+[[case]]
+name = "copy_method_name_still_works"
+spec = ["3.8:14"]
+source = """
+struct Counter {
+    value: i32,
+
+    fn copy(self: Ref(Self)) -> Counter {
+        Counter { value: self.value }
+    }
+}
+fn main() -> i32 {
+    let c = Counter { value: 42 };
+    let d = c.copy();
+    d.value
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "copy_local_variable_still_works"
+spec = ["3.8:14"]
+source = """
+fn main() -> i32 {
+    let copy = 42;
+    copy
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Mutual exclusion with `linear`
+# =============================================================================
+
+[[case]]
+name = "linear_copy_struct_rejected"
+spec = ["3.8:62"]
+preview = "copy_keyword"
+preview_should_pass = true
+source = """
+linear copy struct Bad { x: i32 }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+
+[[case]]
+name = "copy_linear_struct_rejected"
+spec = ["3.8:62"]
+preview = "copy_keyword"
+preview_should_pass = true
+source = """
+copy linear struct Bad { x: i32 }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true

@@ -38,7 +38,7 @@ pub enum TokenKind {
     Enum,
     Interface,
     Drop,
-    Linear,         // linear struct modifier
+    Linear,         // linear struct/enum modifier
     SelfValue,      // self (value, not type)
     SelfType,       // Self (type, not value) - used in methods to refer to the struct type
     Comptime,       // comptime (compile-time evaluation)

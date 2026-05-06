@@ -391,12 +391,31 @@ impl<'a> Sema<'a> {
             match &inst.data {
                 InstData::EnumDecl {
                     is_pub,
+                    is_copy,
+                    is_linear,
                     name,
                     variants_start,
                     variants_len,
                     ..
                 } => {
                     let enum_name = self.interner.resolve(name).to_string();
+
+                    // ADR-0080: gate `copy enum` and `linear enum` keyword
+                    // syntax on the `copy_keyword` preview feature.
+                    if *is_copy {
+                        self.require_preview(
+                            gruel_util::PreviewFeature::CopyKeyword,
+                            "the `copy` keyword on enum declarations",
+                            inst.span,
+                        )?;
+                    }
+                    if *is_linear {
+                        self.require_preview(
+                            gruel_util::PreviewFeature::CopyKeyword,
+                            "the `linear` keyword on enum declarations",
+                            inst.span,
+                        )?;
+                    }
 
                     // Check for collision with built-in type names or built-in
                     // type constructors (e.g. Ptr, MutPtr — see ADR-0061).
@@ -476,6 +495,8 @@ impl<'a> Sema<'a> {
                     let enum_def = EnumDef {
                         name: enum_name,
                         variants,
+                        is_copy: *is_copy,
+                        is_linear: *is_linear,
                         is_pub: *is_pub,
                         file_id: inst.span.file_id,
                         destructor: None,
@@ -491,11 +512,21 @@ impl<'a> Sema<'a> {
                     directives_start,
                     directives_len,
                     is_pub,
+                    is_copy: kw_is_copy,
                     is_linear,
                     name,
                     ..
                 } => {
                     let struct_name = self.interner.resolve(name).to_string();
+
+                    // ADR-0080: gate the `copy` keyword on struct declarations.
+                    if *kw_is_copy {
+                        self.require_preview(
+                            gruel_util::PreviewFeature::CopyKeyword,
+                            "the `copy` keyword on struct declarations",
+                            inst.span,
+                        )?;
+                    }
 
                     // Check for collision with built-in type names or built-in
                     // type constructors (e.g. Ptr, MutPtr — see ADR-0061).
@@ -521,7 +552,10 @@ impl<'a> Sema<'a> {
                     }
 
                     let directives = self.rir.get_directives(*directives_start, *directives_len);
-                    let is_copy = self.has_copy_directive(&directives);
+                    // ADR-0080: a struct is Copy if either the `copy` keyword
+                    // is set OR `@derive(Copy)` is present (legacy directive
+                    // path, retained until Phase 5 retires the interface).
+                    let is_copy = *kw_is_copy || self.has_copy_directive(&directives);
 
                     // Linear types cannot be @derive(Copy)
                     if *is_linear && is_copy {

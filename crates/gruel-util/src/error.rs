@@ -335,6 +335,9 @@ pub enum PreviewFeature {
     /// Skips lex/parse/RIR/sema and AIR→bitcode work for files whose
     /// inputs haven't changed since the last build.
     IncrementalCompilation,
+    /// `copy` keyword for Copy types (ADR-0080).
+    /// Replaces `@derive(Copy)` with `copy struct` / `copy enum` declaration syntax.
+    CopyKeyword,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -367,6 +370,7 @@ impl PreviewFeature {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
             PreviewFeature::IncrementalCompilation => "ADR-0074",
+            PreviewFeature::CopyKeyword => "ADR-0080",
         }
     }
 
@@ -2027,7 +2031,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra, incremental_compilation");
+        assert_eq!(names, "test_infra, incremental_compilation, copy_keyword");
     }
 
     // ========================================================================

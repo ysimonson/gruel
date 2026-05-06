@@ -1909,6 +1909,7 @@ impl Rir {
                 directives_start,
                 directives_len,
                 is_pub,
+                is_copy,
                 is_linear,
                 name,
                 fields_start,
@@ -1919,6 +1920,7 @@ impl Rir {
                 directives_start: *directives_start + extra_offset,
                 directives_len: *directives_len,
                 is_pub: *is_pub,
+                is_copy: *is_copy,
                 is_linear: *is_linear,
                 name: *name,
                 fields_start: *fields_start + extra_offset,
@@ -1984,6 +1986,8 @@ impl Rir {
             // Enum operations
             InstData::EnumDecl {
                 is_pub,
+                is_copy,
+                is_linear,
                 name,
                 variants_start,
                 variants_len,
@@ -1993,6 +1997,8 @@ impl Rir {
                 directives_len,
             } => InstData::EnumDecl {
                 is_pub: *is_pub,
+                is_copy: *is_copy,
+                is_linear: *is_linear,
                 name: *name,
                 variants_start: *variants_start + extra_offset,
                 variants_len: *variants_len,
@@ -2672,6 +2678,8 @@ pub enum InstData {
         directives_len: u32,
         /// Whether this struct is public (requires --preview modules)
         is_pub: bool,
+        /// Whether this struct is declared `copy` (ADR-0080)
+        is_copy: bool,
         /// Whether this struct is a linear type (must be consumed)
         is_linear: bool,
         /// Struct name
@@ -2725,6 +2733,10 @@ pub enum InstData {
     EnumDecl {
         /// Whether this enum is public (requires --preview modules)
         is_pub: bool,
+        /// Whether this enum is declared `copy` (ADR-0080)
+        is_copy: bool,
+        /// Whether this enum is declared `linear` (ADR-0080)
+        is_linear: bool,
         /// Enum name
         name: Spur,
         /// Index into extra data where variants start
@@ -3888,6 +3900,7 @@ mod tests {
                 directives_start,
                 directives_len,
                 is_pub: false,
+                is_copy: false,
                 is_linear: false,
                 name,
                 fields_start,
@@ -3924,6 +3937,7 @@ mod tests {
                 directives_start,
                 directives_len,
                 is_pub: false,
+                is_copy: false,
                 is_linear: false,
                 name,
                 fields_start,
@@ -4034,6 +4048,8 @@ mod tests {
         rir.add_inst(Inst {
             data: InstData::EnumDecl {
                 is_pub: false,
+                is_copy: false,
+                is_linear: false,
                 name,
                 variants_start,
                 variants_len,
@@ -4064,6 +4080,8 @@ mod tests {
         rir.add_inst(Inst {
             data: InstData::EnumDecl {
                 is_pub: false,
+                is_copy: false,
+                is_linear: false,
                 name,
                 variants_start,
                 variants_len,
@@ -4224,6 +4242,7 @@ mod tests {
                 directives_start,
                 directives_len,
                 is_pub: false,
+                is_copy: false,
                 is_linear: false,
                 name: struct_name,
                 fields_start,

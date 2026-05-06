@@ -493,6 +493,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     directives_start,
                     directives_len,
                     is_pub,
+                    is_copy,
                     is_linear,
                     name,
                     fields_start,
@@ -514,6 +515,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         })
                         .collect();
                     let directives = self.rir.get_directives(*directives_start, *directives_len);
+                    let copy_str = if *is_copy { "copy " } else { "" };
                     let linear_str = if *is_linear { "linear " } else { "" };
                     let directives_str = if directives.is_empty() {
                         String::new()
@@ -534,9 +536,10 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     };
                     writeln!(
                         out,
-                        "{}{}{}struct {} {{ {} }}{}",
+                        "{}{}{}{}struct {} {{ {} }}{}",
                         directives_str,
                         pub_str,
+                        copy_str,
                         linear_str,
                         name_str,
                         fields_str.join(", "),
@@ -585,6 +588,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 // Enums
                 InstData::EnumDecl {
                     is_pub,
+                    is_copy,
+                    is_linear,
                     name,
                     variants_start,
                     variants_len,
@@ -594,6 +599,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     directives_len: _,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
+                    let copy_str = if *is_copy { "copy " } else { "" };
+                    let linear_str = if *is_linear { "linear " } else { "" };
                     let name_str = self.interner.resolve(name);
                     let variants = self
                         .rir
@@ -637,8 +644,10 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         .collect();
                     writeln!(
                         out,
-                        "{}enum {} {{ {} }}",
+                        "{}{}{}enum {} {{ {} }}",
                         pub_str,
+                        copy_str,
+                        linear_str,
                         name_str,
                         body_parts.join(", ")
                     )

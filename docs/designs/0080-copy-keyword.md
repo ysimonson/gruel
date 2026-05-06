@@ -168,16 +168,30 @@ LOC delta in the commit message.
 
 ### Phase 1: Lexer + parser surface
 
-- [ ] `Copy` token (mirrors `Linear`); `#[token("copy")]` in `logos_lexer`.
-- [ ] Struct head: accept `[copy]` after visibility; reject
-      `linear copy` / `copy linear` at parse time.
-- [ ] Enum head: accept both `[copy]` and `[linear]` (linear is new).
-- [ ] Anonymous `struct` / `enum` literal heads: same keyword slot, same
+- [x] `Copy` token (mirrors `Linear`); ~~`#[token("copy")]` in `logos_lexer`.~~
+      Implemented as a contextual identifier instead — `copy` stays an
+      `Ident` so the prelude's `fn copy(self: Ref(Self)) -> Self` (and any
+      user method/local named `copy`) keeps working. Recognised at the
+      posture slot via a `posture_parser` that filters `Ident("copy")`.
+- [x] Struct head: accept `[copy]` after visibility; reject
+      `linear copy` / `copy linear` at parse time. Mutual exclusion
+      falls out of the grammar: the `posture_parser` matches one keyword
+      and the trailing `struct` / `enum` matcher rejects the other.
+- [x] Enum head: accept both `[copy]` and `[linear]` (linear is new).
+- [x] Anonymous `struct` / `enum` literal heads: same keyword slot, same
       mutual-exclusion rule.
-- [ ] AST: `is_copy: bool` on `StructDecl`; `is_copy: bool` + `is_linear: bool`
+- [x] AST: `is_copy: bool` on `StructDecl`; `is_copy: bool` + `is_linear: bool`
       on `EnumDecl`; same flags on the AST nodes for anonymous literals.
-- [ ] `copy_keyword` preview gate.
-- [ ] Spec tests: parse-only (`copy struct`, `copy enum`, `linear enum`).
+      Threaded into RIR `InstData::StructDecl` / `EnumDecl` so sema can
+      inspect them (Phase 2's `StructDef` / `EnumDef` propagation
+      builds on this).
+- [x] `copy_keyword` preview gate. Fires in `register_type_names` when
+      either `is_copy` or `is_linear` is set on a struct or enum decl
+      from the keyword path.
+- [x] Spec tests: parse-only (`copy struct`, `copy enum`, `linear enum`)
+      under `cases/items/copy-keyword.toml`. Includes preview-gating
+      tests, `copy` as an identifier (method name + local), and
+      mutual-exclusion rejection.
 
 ### Phase 2: RIR + AIR threading
 

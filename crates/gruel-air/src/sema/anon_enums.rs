@@ -108,6 +108,8 @@ impl Sema<'_> {
         let enum_def = EnumDef {
             name,
             variants: variants.to_vec(),
+            is_copy: false,
+            is_linear: false,
             is_pub: false,
             file_id: gruel_util::FileId::new(0),
             destructor: None,
