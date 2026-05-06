@@ -1,6 +1,7 @@
 .PHONY: test quick-test doctest fmt fmt-check check bench crate-docs \
         check-intrinsic-docs gen-intrinsic-docs \
         check-builtins-docs gen-builtins-docs \
+        check-spec-builtins \
         website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler \
         fuzz-structured-compiler fuzz-structured-invalid \
@@ -44,11 +45,19 @@ fmt:
 	cargo fmt --all
 
 # Check formatting without making changes (for CI).
-check: check-intrinsic-docs check-builtins-docs
+check: check-intrinsic-docs check-builtins-docs check-spec-builtins
 	cargo check --workspace --all-targets --exclude gruel-runtime
 	cargo check --manifest-path fuzz/Cargo.toml --all-targets
 	cargo clippy --workspace --all-targets --exclude gruel-runtime
 	cargo fmt --all -- --check
+
+# Fail if the human-written spec mentions an `@<name>` token that is not a
+# real intrinsic, a recognized directive, or in the per-file allowlist for
+# documented retired/typo names. Catches prose drift that traceability and
+# spec tests do not see (test bodies and paragraph IDs may be in sync while
+# the surrounding text references a removed builtin).
+check-spec-builtins:
+	@cargo run -q -p gruel-intrinsics --bin gruel-check-spec
 
 # Regenerate docs/generated/intrinsics-reference.md from the gruel-intrinsics
 # registry. Run this after editing IntrinsicDef entries.

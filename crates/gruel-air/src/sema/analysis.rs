@@ -906,23 +906,6 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
 
     all_warnings.sort_by_key(|w| w.span().map(|s| s.start));
 
-    eprintln!(
-        "DEBUG: pre-specialize functions ({} items):",
-        functions.len()
-    );
-    for f in &functions {
-        eprintln!("  - {}", f.name);
-    }
-    eprintln!("DEBUG: sema.methods has {} entries", sema.methods.len());
-    for ((sid, m), info) in sema.methods.iter() {
-        let sname = sema.type_pool.struct_def(*sid).name.clone();
-        let mname = sema.interner.resolve(m).to_string();
-        eprintln!(
-            "  - method ({}.{}) is_generic={} body={:?}",
-            sname, mname, info.is_generic, info.body
-        );
-    }
-
     let mut output = SemaOutput {
         functions,
         strings: global_strings,
@@ -938,13 +921,6 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
     // and create specialized function bodies
     if let Err(e) = crate::specialize::specialize(&mut output, sema, &infer_ctx, sema.interner) {
         errors.push(e);
-    }
-    eprintln!(
-        "DEBUG: post-specialize functions ({} items):",
-        output.functions.len()
-    );
-    for f in &output.functions {
-        eprintln!("  - {}", f.name);
     }
 
     // Surface any errors raised during anonymous-host derive expansion

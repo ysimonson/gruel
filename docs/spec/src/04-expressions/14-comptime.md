@@ -750,11 +750,11 @@ fn main() -> i32 {
 
 {{ rule(id="4.14:45", cat="normative") }}
 
-A comptime block can use `@intCast` and `@cast` intrinsics. Since all comptime integer values are stored as `i64`, integer casts are pass-through operations that preserve the value.
+A comptime block can use the `@cast` intrinsic. Since all comptime integer values are stored as `i64`, integer casts are pass-through operations that preserve the value.
 
 ```gruel
 fn cast_to_i32(x: i64) -> i32 {
-    @intCast(x)
+    @cast(x)
 }
 
 fn main() -> i32 {
@@ -800,22 +800,22 @@ fn main() -> i32 {
 
 {{ rule(id="4.14:48", cat="normative") }}
 
-The `@compileError` intrinsic emits a user-defined compile error during comptime evaluation. It takes a single string literal or `comptime_str` argument and has type `!` (never), terminating compilation of the current comptime block.
+The `@compile_error` intrinsic emits a user-defined compile error during comptime evaluation. It takes a single string literal or `comptime_str` argument and has type `!` (never), terminating compilation of the current comptime block.
 
 {{ rule(id="4.14:49", cat="legality-rule") }}
 
-It is a compile-time error if `@compileError` is called with an argument that is not a string literal or `comptime_str` value, or with a number of arguments other than one.
+It is a compile-time error if `@compile_error` is called with an argument that is not a string literal or `comptime_str` value, or with a number of arguments other than one.
 
 {{ rule(id="4.14:50", cat="normative") }}
 
-Unreachable `@compileError` calls are never evaluated. Only `@compileError` calls on taken branches produce errors.
+Unreachable `@compile_error` calls are never evaluated. Only `@compile_error` calls on taken branches produce errors.
 
 {{ rule(id="4.14:51") }}
 
 ```gruel
 fn Matrix(comptime rows: i32, comptime cols: i32) -> type {
     if rows <= 0 {
-        @compileError("Matrix rows must be positive");
+        @compile_error("Matrix rows must be positive");
     }
     struct { data: [i32; rows * cols] }
 }
@@ -856,7 +856,7 @@ When a `comptime { }` block evaluates to a `comptime_str` value, the compiler au
 
 ```gruel
 fn describe(comptime T: type) -> String {
-    comptime { @typeName(T) }   // comptime_str materialized as runtime String
+    comptime { @type_name(T) }   // comptime_str materialized as runtime String
 }
 ```
 
@@ -873,7 +873,7 @@ The `comptime_str` type provides the following methods: `len() -> i32` returns t
 ```gruel
 fn check_name(comptime name: comptime_str) -> i32 {
     if name.len() == 0 {
-        @compileError("name must not be empty");
+        @compile_error("name must not be empty");
     }
     name.len()
 }
@@ -903,7 +903,7 @@ It is a compile-time error if a `comptime_int` value does not fit in the target 
 fn main() -> i32 {
     let x: u64 = comptime { 100 };   // comptime_int coerces to u64
     let y: i32 = comptime { 42 };    // comptime_int coerces to i32
-    @intCast(x) + y
+    @cast(x) + y
 }
 ```
 
@@ -915,45 +915,45 @@ Captured comptime integer parameters (e.g., `comptime N: i32`) are represented a
 
 {{ rule(id="4.14:60", cat="normative") }}
 
-The `@typeName(T)` intrinsic accepts a type argument and returns a `comptime_str` containing the type's name. For primitive types, this is the type keyword (e.g., `"i32"`, `"bool"`). For struct and enum types, this is the declared name.
+The `@type_name(T)` intrinsic accepts a type argument and returns a `comptime_str` containing the type's name. For primitive types, this is the type keyword (e.g., `"i32"`, `"bool"`). For struct and enum types, this is the declared name.
 
 {{ rule(id="4.14:61", cat="legality-rule") }}
 
-`@typeName` requires the `comptime_meta` preview feature. It **MUST** be called with exactly one type argument using the `@typeName(T)` syntax.
+`@type_name` requires the `comptime_meta` preview feature. It **MUST** be called with exactly one type argument using the `@type_name(T)` syntax.
 
 {{ rule(id="4.14:62", cat="normative") }}
 
-The `@typeInfo(T)` intrinsic accepts a type argument and returns a comptime struct describing the type's structure. The returned struct always contains a `kind` field of type `TypeKind` and a `name` field of type `comptime_str`.
+The `@type_info(T)` intrinsic accepts a type argument and returns a comptime struct describing the type's structure. The returned struct always contains a `kind` field of type `TypeKind` and a `name` field of type `comptime_str`.
 
 {{ rule(id="4.14:63", cat="legality-rule") }}
 
-`@typeInfo` requires the `comptime_meta` preview feature. It **MUST** be called with exactly one type argument using the `@typeInfo(T)` syntax.
+`@type_info` requires the `comptime_meta` preview feature. It **MUST** be called with exactly one type argument using the `@type_info(T)` syntax.
 
 {{ rule(id="4.14:64", cat="normative") }}
 
-The `TypeKind` enum is a built-in enum with the following variants: `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array`. It is used to discriminate type kinds in `@typeInfo` results.
+The `TypeKind` enum is a built-in enum with the following variants: `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array`. It is used to discriminate type kinds in `@type_info` results.
 
 {{ rule(id="4.14:65", cat="normative") }}
 
-For struct types, `@typeInfo` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Struct`), `name: comptime_str`, `field_count: i32`, and `fields: [FieldInfo; N]` where N is the number of fields. Each `FieldInfo` is a struct with fields `name: comptime_str` and `field_type: type`.
+For struct types, `@type_info` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Struct`), `name: comptime_str`, `field_count: i32`, and `fields: [FieldInfo; N]` where N is the number of fields. Each `FieldInfo` is a struct with fields `name: comptime_str` and `field_type: type`.
 
 {{ rule(id="4.14:66", cat="normative") }}
 
-For enum types, `@typeInfo` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Enum`), `name: comptime_str`, `variant_count: i32`, and `variants: [VariantInfo; N]` where N is the number of variants. Each `VariantInfo` is a struct with fields `name: comptime_str` and `fields: [FieldInfo; M]` where M is the number of fields for that variant (0 for unit variants).
+For enum types, `@type_info` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Enum`), `name: comptime_str`, `variant_count: i32`, and `variants: [VariantInfo; N]` where N is the number of variants. Each `VariantInfo` is a struct with fields `name: comptime_str` and `fields: [FieldInfo; M]` where M is the number of fields for that variant (0 for unit variants).
 
 {{ rule(id="4.14:67", cat="normative") }}
 
-For integer types, `@typeInfo` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Int`), `name: comptime_str`, `bits: i32` (the bit width), and `is_signed: bool`.
+For integer types, `@type_info` returns a struct with fields: `kind: TypeKind` (always `TypeKind::Int`), `name: comptime_str`, `bits: i32` (the bit width), and `is_signed: bool`.
 
 {{ rule(id="4.14:68", cat="normative") }}
 
-For other primitive types (`bool`, `unit`, `!`), `@typeInfo` returns a struct with fields: `kind: TypeKind` and `name: comptime_str`.
+For other primitive types (`bool`, `unit`, `!`), `@type_info` returns a struct with fields: `kind: TypeKind` and `name: comptime_str`.
 
 {{ rule(id="4.14:69") }}
 
 ```gruel
 fn describe(comptime T: type) -> i32 {
-    let info = @typeInfo(T);
+    let info = @type_info(T);
     match info.kind {
         TypeKind::Struct => info.field_count,
         TypeKind::Int => info.bits,
@@ -1021,7 +1021,7 @@ struct Point { x: i32, y: i32 }
 
 fn sum_fields(comptime T: type, val: T) -> i32 {
     let mut total: i32 = 0;
-    comptime_unroll for field in comptime { @typeInfo(T).fields } {
+    comptime_unroll for field in comptime { @type_info(T).fields } {
         total = total + @field(val, field.name);
     }
     total

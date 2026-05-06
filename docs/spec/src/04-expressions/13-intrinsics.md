@@ -44,7 +44,6 @@ The following table provides a quick reference to all available intrinsics:
 | `@dbg` | Print debug output | 0+ expressions (phase-dependent types) | `()` |
 | `@size_of` | Get type size in bytes | 1 type | `usize` |
 | `@align_of` | Get type alignment in bytes | 1 type | `usize` |
-| `@intCast` | Convert between integer types | 1 expression (integer) | inferred integer type |
 | `@cast` | Convert between numeric types | 1 expression (numeric) | inferred numeric type |
 | `@read_line` | Read line from stdin | none | `String` |
 | `@parse_i32` | Parse string to i32 | 1 expression (`String`) | `i32` |
@@ -345,77 +344,11 @@ fn main() -> i32 {
 }
 ```
 
-## `@intCast`
-
-{{ rule(id="4.13:24", cat="normative") }}
-
-The `@intCast` intrinsic converts an integer value from one integer type to another.
-
-{{ rule(id="4.13:25", cat="normative") }}
-
-`@intCast` accepts exactly one argument, which **MUST** be an integer type (any of `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`).
-
-{{ rule(id="4.13:26", cat="normative") }}
-
-The target type of the conversion is inferred from the context where `@intCast` is used.
-
-{{ rule(id="4.13:27", cat="legality-rule") }}
-
-It is a compile-time error if the target type cannot be inferred or is not an integer type.
-
-{{ rule(id="4.13:28", cat="dynamic-semantics") }}
-
-If the source value cannot be exactly represented in the target type, a runtime panic occurs.
-
-{{ rule(id="4.13:29") }}
-
-```gruel
-fn main() -> i32 {
-    let x: i32 = 100;
-    let y: u8 = @intCast(x);  // OK: 100 fits in u8
-    @intCast(y)               // Convert back to i32
-}
-```
-
-{{ rule(id="4.13:30") }}
-
-```gruel
-fn takes_u8(x: u8) -> u8 { x }
-
-fn main() -> i32 {
-    let x: i32 = 50;
-    takes_u8(@intCast(x));    // Target type inferred from parameter
-    0
-}
-```
-
-{{ rule(id="4.13:31") }}
-
-```gruel
-// This panics at runtime: 256 doesn't fit in u8
-fn main() -> i32 {
-    let x: i32 = 256;
-    let y: u8 = @intCast(x);  // panic: integer cast overflow
-    0
-}
-```
-
-{{ rule(id="4.13:32") }}
-
-```gruel
-// This panics at runtime: negative values don't fit in unsigned types
-fn main() -> i32 {
-    let x: i32 = -1;
-    let y: u32 = @intCast(x); // panic: integer cast overflow
-    0
-}
-```
-
 ## `@cast`
 
 {{ rule(id="4.13:95", cat="normative") }}
 
-The `@cast` intrinsic converts a numeric value from one numeric type to another. It is a superset of `@intCast` that additionally supports floating-point types.
+The `@cast` intrinsic converts a numeric value from one numeric type to another, covering both integer-to-integer conversions and conversions involving floating-point types.
 
 {{ rule(id="4.13:96", cat="normative") }}
 
@@ -431,7 +364,7 @@ It is a compile-time error if the target type cannot be inferred or is not a num
 
 {{ rule(id="4.13:99", cat="dynamic-semantics") }}
 
-For integer-to-integer conversions, `@cast` behaves identically to `@intCast`: if the source value cannot be exactly represented in the target type, a runtime panic occurs.
+For integer-to-integer conversions, if the source value cannot be exactly represented in the target type, a runtime panic occurs.
 
 {{ rule(id="4.13:100", cat="dynamic-semantics") }}
 
@@ -491,13 +424,11 @@ fn main() -> i32 {
 
 {{ rule(id="4.13:107") }}
 
-`@cast` subsumes `@intCast` for integer conversions:
-
 ```gruel
 fn main() -> i32 {
     let x: i32 = 100;
-    let y: u8 = @cast(x);       // Same as @intCast(x)
-    @cast(y)                     // Convert back to i32
+    let y: u8 = @cast(x);       // Integer narrowing
+    @cast(y)                     // Integer widening
 }
 ```
 
@@ -654,7 +585,7 @@ fn main() -> i32 {
 fn main() -> i32 {
     let s = "-17";
     let n: u32 = @parse_u32(s);  // panic: negative value for unsigned type
-    @intCast(n)
+    @cast(n)
 }
 ```
 
@@ -715,7 +646,7 @@ fn main() -> i32 {
         }
     }
 
-    @intCast(guesses)
+    @cast(guesses)
 }
 ```
 

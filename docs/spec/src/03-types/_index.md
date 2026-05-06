@@ -55,6 +55,6 @@ result for a type may shrink under such optimizations.
 The only portable observables of a value are: pattern matching, equality
 (`==` / `!=`), field access on structs, payload-binding pattern matches on
 enums, indexing on arrays, and the `@size_of` / `@align_of` intrinsics.
-Programs that interpret the raw bytes of a value (for example, via
-`@transmute`) depend on the implementation-defined representation and are
-not guaranteed to be portable across compiler versions.
+Programs that interpret the raw bytes of a value depend on the
+implementation-defined representation and are not guaranteed to be
+portable across compiler versions.
