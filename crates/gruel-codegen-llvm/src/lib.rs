@@ -18,10 +18,13 @@
 //! ```
 
 mod codegen;
+mod opt_level;
 mod types;
 
+pub use opt_level::OptLevel;
+
 use gruel_air::TypeInternPool;
-use gruel_cfg::{Cfg, OptLevel};
+use gruel_cfg::Cfg;
 use gruel_target::Target;
 use gruel_util::CompileResult;
 use lasso::ThreadedRodeo;

@@ -19,7 +19,6 @@
 mod build;
 pub mod drop_names;
 mod inst;
-pub mod opt;
 
 use gruel_util::CompileWarning;
 
@@ -28,7 +27,6 @@ pub use inst::{
     BasicBlock, BlockId, Cfg, CfgArgMode, CfgCallArg, CfgInst, CfgInstData, CfgValue,
     MakeSliceData, Place, PlaceBase, Projection, Terminator,
 };
-pub use opt::OptLevel;
 
 // Re-export types from gruel-air that we use
 pub use gruel_air::{StructDef, StructId, Type, TypeKind};

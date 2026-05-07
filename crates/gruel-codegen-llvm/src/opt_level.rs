@@ -1,17 +1,15 @@
-//! Optimization level configuration for the Gruel compiler.
+//! Optimization level configuration.
 //!
-//! CFG-level optimization passes were removed in ADR-0034. Optimization is now
-//! handled entirely by LLVM's mid-end pipeline (`default<OX>`), which is invoked
-//! when generating object code or LLVM IR at `-O1` and above.
-//!
-//! This module retains the `OptLevel` enum so that the CLI and `CompileOptions`
-//! continue to express the user's requested optimization level.
+//! Per ADR-0034, optimization is handled entirely by LLVM's mid-end pipeline
+//! (`default<OX>`), invoked when generating object code or LLVM IR at `-O1` and
+//! above. `OptLevel` is the user-facing knob that controls which pipeline (if
+//! any) runs.
 
 /// Optimization level, following standard compiler conventions.
 ///
-/// Controls the LLVM mid-end optimization pipeline invoked during code
-/// generation. At `-O0` no LLVM passes are run; at `-O1+` the full
-/// `default<OX>` pipeline runs (InstCombine, GVN, SCCP, ADCE, SimplifyCFG, …).
+/// Maps to `inkwell::OptimizationLevel` when building the `TargetMachine` and
+/// selects the `default<OX>` pass pipeline run before emission. At `-O0` no
+/// LLVM passes are run.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, strum::Display, strum::EnumString, strum::EnumIter,
 )]

@@ -52,7 +52,8 @@ use link::link_system_with_warnings;
 
 // Re-export commonly used types
 pub use gruel_air::{Air, AnalyzedFunction, Sema, SemaOutput, StructDef, Type, TypeInternPool};
-pub use gruel_cfg::{Cfg, CfgBuilder, CfgOutput, OptLevel};
+pub use gruel_cfg::{Cfg, CfgBuilder, CfgOutput};
+pub use gruel_codegen_llvm::OptLevel;
 pub use gruel_lexer::{Lexer, Token, TokenKind};
 pub use gruel_parser::{Ast, Expr, Function, Item, Parser};
 pub use gruel_rir::{AstGen, Rir, RirPrinter};

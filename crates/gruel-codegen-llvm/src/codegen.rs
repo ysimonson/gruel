@@ -7,11 +7,13 @@ use rustc_hash::FxHashMap as HashMap;
 use gruel_air::layout::{DiscriminantStrategy, layout_of};
 use gruel_air::{StructId, Type, TypeInternPool, TypeKind};
 use gruel_cfg::{
-    BlockId, Cfg, CfgInstData, CfgValue, OptLevel, PlaceBase, Projection, Terminator, drop_names,
+    BlockId, Cfg, CfgInstData, CfgValue, PlaceBase, Projection, Terminator, drop_names,
 };
 use gruel_intrinsics::{IntrinsicId, lookup_by_name};
 use gruel_target::{Arch, Target};
 use gruel_util::{BinOp, CompileError, CompileResult, ErrorKind, UnaryOp};
+
+use crate::OptLevel;
 use inkwell::FloatPredicate;
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
