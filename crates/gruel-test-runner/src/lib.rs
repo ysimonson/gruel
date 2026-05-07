@@ -846,9 +846,14 @@ fn run_test_case_inner(case: &Case, gruel_binary: &Path) -> TestResult {
         aux_paths.push(aux_path);
     }
 
-    // Build base command with target, preview, and optimization flags if needed
+    // Build base command with target, preview, and optimization flags if needed.
+    //
+    // ADR-0074: spec/UI tests run in fresh tempdirs and would pay the
+    // cache-write overhead without ever warming up. Pass `--no-cache`
+    // unconditionally so the per-test invocation skips the cache layer.
     let build_command = |binary: &Path| -> Command {
         let mut cmd = Command::new(binary);
+        cmd.arg("--no-cache");
         if let Some(ref target) = case.target {
             cmd.arg("--target").arg(target);
         }

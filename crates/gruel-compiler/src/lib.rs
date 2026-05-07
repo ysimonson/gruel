@@ -638,10 +638,10 @@ pub struct CompileOptions {
     /// output. The output is still collected on `SemaOutput.comptime_dbg_output`
     /// and a warning is still emitted for each call. Used by fuzz harnesses.
     pub capture_comptime_dbg: bool,
-    /// Optional path to the on-disk cache directory (ADR-0074). When `Some`
-    /// AND `PreviewFeature::IncrementalCompilation` is enabled, the
-    /// per-file parse cache lives here. When `None` or the preview is
-    /// off, no cache is consulted or written.
+    /// Optional path to the on-disk cache directory (ADR-0074). When
+    /// `Some`, the parse / AIR / LLVM-IR caches live here. When `None`,
+    /// no cache is consulted or written. The CLI driver populates this
+    /// to a workspace-relative default unless `--no-cache` is given.
     pub cache_dir: Option<std::path::PathBuf>,
 }
 

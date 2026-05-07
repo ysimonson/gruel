@@ -246,19 +246,26 @@ struct Cli {
     benchmark_json: bool,
 
     /// Cache directory for incremental compilation (ADR-0074).
-    /// Requires --preview incremental_compilation.
     /// Defaults to `target/gruel-cache/` next to the first source file.
-    /// Also overridable via `GRUEL_CACHE_DIR` env var.
+    /// Also overridable via `GRUEL_CACHE_DIR` env var. Ignored when
+    /// `--no-cache` is set.
     #[arg(long, value_name = "PATH", env = "GRUEL_CACHE_DIR")]
     cache_dir: Option<String>,
 
+    /// Disable the incremental-compilation cache for this build
+    /// (ADR-0074). Overrides `--cache-dir` and `GRUEL_CACHE_DIR`.
+    #[arg(long, conflicts_with_all = ["cache_stats", "cache_clean"])]
+    no_cache: bool,
+
     /// Print incremental-compilation cache statistics and exit
-    /// (ADR-0074). Requires --cache-dir or GRUEL_CACHE_DIR.
+    /// (ADR-0074). Defaults to `./target/gruel-cache/` when neither
+    /// `--cache-dir` nor `GRUEL_CACHE_DIR` is set.
     #[arg(long, conflicts_with = "cache_clean")]
     cache_stats: bool,
 
     /// Wipe the incremental-compilation cache directory and exit
-    /// (ADR-0074). Requires --cache-dir or GRUEL_CACHE_DIR.
+    /// (ADR-0074). Defaults to `./target/gruel-cache/` when neither
+    /// `--cache-dir` nor `GRUEL_CACHE_DIR` is set.
     #[arg(long, conflicts_with = "cache_stats")]
     cache_clean: bool,
 }
@@ -281,15 +288,16 @@ struct Options {
     jobs: usize,
     /// When true, suppress stderr printing of comptime `@dbg` output.
     capture_comptime_dbg: bool,
-    /// Optional explicit cache directory (ADR-0074). When `None` and
-    /// `incremental_compilation` is enabled, the driver uses
-    /// `target/gruel-cache/` next to the first source file.
-    /// Phase 2 wires this into the compilation pipeline; Phase 1 only
-    /// plumbs the field and validates the preview-feature gate.
+    /// Optional explicit cache directory (ADR-0074). When `None`, the
+    /// driver defaults to `target/gruel-cache/` next to the first
+    /// source file. Ignored when `no_cache` is true.
     cache_dir: Option<String>,
-    /// Phase 6 cache subcommands (ADR-0074): when set, the driver
-    /// performs the requested cache action and exits before any
-    /// compilation work. At most one may be set; clap enforces.
+    /// Disable the incremental-compilation cache for this build
+    /// (ADR-0074). Overrides `cache_dir` / `GRUEL_CACHE_DIR`.
+    no_cache: bool,
+    /// Cache subcommands (ADR-0074): when set, the driver performs the
+    /// requested cache action and exits before any compilation work. At
+    /// most one may be set; clap enforces.
     cache_stats: bool,
     cache_clean: bool,
 }
@@ -324,15 +332,16 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
     // Cache subcommands don't need source files. Synthesize empty
     // source_paths/output_path so the rest of cli_to_options can ignore
     // the special case. Compute preview_features locally because the
-    // existing flow does that further down.
+    // existing flow does that further down. When neither --cache-dir
+    // nor GRUEL_CACHE_DIR is set, fall back to ./target/gruel-cache/ so
+    // `gruel --cache-stats` / `--cache-clean` work without arguments
+    // from a workspace root.
     if cli.cache_stats || cli.cache_clean {
         let preview_features: PreviewFeatures = cli.preview.clone().into_iter().collect();
-        if cli.cache_dir.is_none() {
-            return Err(
-                "--cache-stats and --cache-clean require --cache-dir (or GRUEL_CACHE_DIR)"
-                    .to_string(),
-            );
-        }
+        let cache_dir = Some(
+            cli.cache_dir
+                .unwrap_or_else(|| "target/gruel-cache".to_string()),
+        );
         return Ok(Options {
             source_paths: Vec::new(),
             output_path: String::new(),
@@ -347,7 +356,8 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
             benchmark_json: cli.benchmark_json,
             jobs: cli.jobs,
             capture_comptime_dbg: cli.capture_comptime_dbg,
-            cache_dir: cli.cache_dir,
+            cache_dir,
+            no_cache: cli.no_cache,
             cache_stats: cli.cache_stats,
             cache_clean: cli.cache_clean,
         });
@@ -385,28 +395,6 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
 
     let preview_features: PreviewFeatures = cli.preview.into_iter().collect();
 
-    // ADR-0074: --cache-dir is meaningful only when the incremental cache
-    // is enabled. Reject explicit --cache-dir without the preview gate
-    // rather than silently ignoring it.
-    //
-    // Cache subcommands (--cache-stats / --cache-clean) are exempt — they
-    // operate on the cache directory directly and don't need the cache
-    // to be active for a build.
-    if cli.cache_dir.is_some()
-        && !preview_features.contains(&PreviewFeature::IncrementalCompilation)
-        && !cli.cache_stats
-        && !cli.cache_clean
-    {
-        return Err(
-            "--cache-dir requires --preview incremental_compilation (ADR-0074)".to_string(),
-        );
-    }
-    if (cli.cache_stats || cli.cache_clean) && cli.cache_dir.is_none() {
-        return Err(
-            "--cache-stats and --cache-clean require --cache-dir (or GRUEL_CACHE_DIR)".to_string(),
-        );
-    }
-
     Ok(Options {
         source_paths,
         output_path,
@@ -422,6 +410,7 @@ fn cli_to_options(cli: Cli) -> Result<Options, String> {
         jobs: cli.jobs,
         capture_comptime_dbg: cli.capture_comptime_dbg,
         cache_dir: cli.cache_dir,
+        no_cache: cli.no_cache,
         cache_stats: cli.cache_stats,
         cache_clean: cli.cache_clean,
     })
@@ -707,14 +696,13 @@ fn main() {
 
     // Normal compilation - uses multi-file compilation for all source files.
     //
-    // ADR-0074: when --preview incremental_compilation is enabled, route
-    // parsing through the on-disk cache. cache_dir defaults to
-    // `target/gruel-cache/` next to the first source file when not
-    // explicitly provided.
-    let resolved_cache_dir = if options
-        .preview_features
-        .contains(&PreviewFeature::IncrementalCompilation)
-    {
+    // ADR-0074: incremental compilation cache is enabled by default and
+    // routed through `cache_dir`. `--no-cache` disables it for a single
+    // build. When no explicit cache_dir / GRUEL_CACHE_DIR is provided,
+    // fall back to `target/gruel-cache/` next to the first source file.
+    let resolved_cache_dir = if options.no_cache {
+        None
+    } else {
         Some(match &options.cache_dir {
             Some(p) => std::path::PathBuf::from(p),
             None => {
@@ -726,8 +714,6 @@ fn main() {
                     .join("gruel-cache")
             }
         })
-    } else {
-        None
     };
     let compile_options = CompileOptions {
         target: options.target.clone(),
@@ -1336,48 +1322,58 @@ mod tests {
         ])));
     }
 
-    // ========== --cache-dir tests (ADR-0074) ==========
+    // ========== --cache-dir / --no-cache tests (ADR-0074) ==========
 
     #[test]
-    fn cache_dir_requires_preview_feature() {
-        // Without --preview incremental_compilation, --cache-dir is rejected.
-        assert!(is_error(&parse_args_from(&[
-            "--cache-dir",
-            "/tmp/foo",
-            "source.gruel",
-        ])));
-    }
-
-    #[test]
-    fn cache_dir_accepted_with_preview() {
+    fn cache_dir_accepted_without_preview() {
+        // After stabilization, --cache-dir works without any preview gate.
         let opts = unwrap_options(parse_args_from(&[
-            "--preview",
-            "incremental_compilation",
             "--cache-dir",
             "/tmp/foo",
             "source.gruel",
         ]));
         assert_eq!(opts.cache_dir.as_deref(), Some("/tmp/foo"));
-        assert!(
-            opts.preview_features
-                .contains(&PreviewFeature::IncrementalCompilation)
-        );
+        assert!(!opts.no_cache);
     }
 
     #[test]
-    fn cache_dir_optional_with_preview() {
-        // The preview can be enabled without --cache-dir; the driver will
-        // fall back to a default location.
-        let opts = unwrap_options(parse_args_from(&[
-            "--preview",
-            "incremental_compilation",
-            "source.gruel",
-        ]));
+    fn cache_dir_default_when_omitted() {
+        // No --cache-dir, no --no-cache: cache_dir is None at parse time
+        // (the driver fills in the workspace-relative default later).
+        let opts = unwrap_options(parse_args_from(&["source.gruel"]));
         assert!(opts.cache_dir.is_none());
-        assert!(
-            opts.preview_features
-                .contains(&PreviewFeature::IncrementalCompilation)
-        );
+        assert!(!opts.no_cache);
+    }
+
+    #[test]
+    fn no_cache_flag_sets_field() {
+        let opts = unwrap_options(parse_args_from(&["--no-cache", "source.gruel"]));
+        assert!(opts.no_cache);
+    }
+
+    #[test]
+    fn no_cache_conflicts_with_cache_stats() {
+        assert!(is_error(&parse_args_from(&[
+            "--no-cache",
+            "--cache-stats",
+            "source.gruel",
+        ])));
+    }
+
+    #[test]
+    fn cache_stats_defaults_cache_dir() {
+        // --cache-stats works without --cache-dir; the driver falls back
+        // to ./target/gruel-cache/ relative to CWD.
+        let opts = unwrap_options(parse_args_from(&["--cache-stats"]));
+        assert!(opts.cache_stats);
+        assert_eq!(opts.cache_dir.as_deref(), Some("target/gruel-cache"));
+    }
+
+    #[test]
+    fn cache_clean_defaults_cache_dir() {
+        let opts = unwrap_options(parse_args_from(&["--cache-clean"]));
+        assert!(opts.cache_clean);
+        assert_eq!(opts.cache_dir.as_deref(), Some("target/gruel-cache"));
     }
 
     // ========== --log-level tests ==========

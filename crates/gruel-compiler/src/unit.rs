@@ -34,7 +34,7 @@ use crate::{
     Parser, Rir, Sema, SourceFile, Type, TypeInternPool, compile_backend,
 };
 use gruel_cache::{CacheKey, CacheStore, Hasher, compiler_fingerprint};
-use gruel_util::{FileId, PreviewFeature};
+use gruel_util::FileId;
 
 fn opt_level_to_u32(o: OptLevel) -> u32 {
     match o {
@@ -210,19 +210,12 @@ impl<'src> CompilationUnit<'src> {
         Some((store, h.finalize()))
     }
 
-    /// Open the parse cache when `--preview incremental_compilation` is
-    /// enabled and `cache_dir` is configured. Returns `None` if either
-    /// requirement is missing, or if opening the store / hashing the
-    /// compiler binary fails (in which case the build silently
-    /// continues uncached — correctness is preserved).
+    /// Open the parse cache when `cache_dir` is configured. Returns
+    /// `None` if no cache directory is set (e.g. `--no-cache`), or if
+    /// opening the store / hashing the compiler binary fails (in which
+    /// case the build silently continues uncached — correctness is
+    /// preserved).
     fn open_parse_cache(&self) -> Option<(CacheStore, CacheKey)> {
-        if !self
-            .options
-            .preview_features
-            .contains(&PreviewFeature::IncrementalCompilation)
-        {
-            return None;
-        }
         let dir = self.options.cache_dir.as_ref()?;
 
         let store = match CacheStore::open(dir) {
@@ -343,12 +336,11 @@ impl<'src> CompilationUnit<'src> {
             ast: root_ast,
         });
 
-        // ADR-0074 Phase 2: when --preview incremental_compilation is on
-        // AND a cache_dir is configured, route user-file parsing through
-        // the on-disk cache. The prelude (above) is always parsed
-        // uncached because its source is a constant in the binary; its
-        // Spurs are already in `interner`, which the cache wiring then
-        // reuses as the build-shared interner.
+        // ADR-0074: when a cache_dir is configured, route user-file
+        // parsing through the on-disk cache. The prelude (above) is
+        // always parsed uncached because its source is a constant in
+        // the binary; its Spurs are already in `interner`, which the
+        // cache wiring then reuses as the build-shared interner.
         let cache_handle = self.open_parse_cache();
         if let Some((store, build_fp)) = cache_handle {
             let (cached_files, stats) = crate::parse_cache::parse_files_into(

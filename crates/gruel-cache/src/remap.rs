@@ -19,8 +19,9 @@
 //!   depends on which inst-data variant owns each region. A correct
 //!   walker requires per-region typed access via Rir's existing
 //!   `get_call_args`/`get_directives`/etc. accessors, threaded through
-//!   each inst variant. That's its own implementation pass and is
-//!   gated behind the same `--preview incremental_compilation` flag.
+//!   each inst variant. The current pipeline never invokes this walker
+//!   because RIR is regenerated from the cached AST rather than
+//!   serialized; the stub remains as a guard against accidental use.
 
 use lasso::{Key, Spur};
 use smallvec::SmallVec;
@@ -796,8 +797,9 @@ impl RemapSpurs for Rir {
         debug_assert!(
             false,
             "RemapSpurs::Rir not yet implemented — Phase 2b stub. \
-             Cache pipeline integration is gated behind \
-             --preview incremental_compilation and must not call this."
+             Cache pipeline currently regenerates RIR from cached AST \
+             rather than serializing RIR, so this walker should not \
+             be reached."
         );
     }
 }

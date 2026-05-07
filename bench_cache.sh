@@ -101,7 +101,7 @@ run_cold_no_cache() {
     local times=()
     for ((i = 0; i < ITERATIONS; i++)); do
         local t
-        t=$(time_one "$GRUEL" "$prog" "$cache_dir/.benchout")
+        t=$(time_one "$GRUEL" --no-cache "$prog" "$cache_dir/.benchout")
         times+=( "$t" )
     done
     median "${times[@]}"
@@ -115,7 +115,7 @@ for prog in "$BENCH_DIR"/*.gruel; do
     # Warm up OS file cache + dynamic loader to remove first-invocation
     # bias. Without this, the first scenario's first iteration is
     # systematically slower than subsequent ones.
-    "$GRUEL" "$prog" "$cache_dir/.warmup" >/dev/null 2>&1 || true
+    "$GRUEL" --no-cache "$prog" "$cache_dir/.warmup" >/dev/null 2>&1 || true
 
     # Scenario 1: cold no cache.
     rm -rf "$cache_dir"; mkdir -p "$cache_dir"
@@ -128,8 +128,8 @@ for prog in "$BENCH_DIR"/*.gruel; do
         ts=()
         for ((i = 0; i < ITERATIONS; i++)); do
             rm -rf "$cache_dir"; mkdir -p "$cache_dir"
-            t=$(time_one "$GRUEL" --preview incremental_compilation \
-                --cache-dir "$cache_dir" "$prog" "$cache_dir/.out")
+            t=$(time_one "$GRUEL" --cache-dir "$cache_dir" \
+                "$prog" "$cache_dir/.out")
             ts+=( "$t" )
         done
         median "${ts[@]}"
@@ -137,13 +137,13 @@ for prog in "$BENCH_DIR"/*.gruel; do
 
     # Scenario 3: warm cache on. First populate, then time the next runs.
     rm -rf "$cache_dir"; mkdir -p "$cache_dir"
-    "$GRUEL" --preview incremental_compilation --cache-dir "$cache_dir" \
-        "$prog" "$cache_dir/.out" >/dev/null 2>&1
+    "$GRUEL" --cache-dir "$cache_dir" "$prog" "$cache_dir/.out" \
+        >/dev/null 2>&1
     warm_cache_on=$(
         ts=()
         for ((i = 0; i < ITERATIONS; i++)); do
-            t=$(time_one "$GRUEL" --preview incremental_compilation \
-                --cache-dir "$cache_dir" "$prog" "$cache_dir/.out")
+            t=$(time_one "$GRUEL" --cache-dir "$cache_dir" \
+                "$prog" "$cache_dir/.out")
             ts+=( "$t" )
         done
         median "${ts[@]}"

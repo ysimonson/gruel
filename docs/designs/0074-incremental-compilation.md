@@ -1,12 +1,12 @@
 ---
 id: 0074
 title: Incremental Compilation with File-Level Caching
-status: proposal
+status: implemented
 tags: [architecture, compiler, performance, build-system]
-feature-flag: incremental_compilation
+feature-flag:
 created: 2026-05-02
-accepted:
-implemented:
+accepted: 2026-05-07
+implemented: 2026-05-07
 spec-sections: []
 superseded-by:
 ---
@@ -15,11 +15,13 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented. Caching is enabled by default; `--no-cache` disables it
+for a single build. The `--preview incremental_compilation` gate has
+been removed and the corresponding `PreviewFeature` variant deleted.
 
 ## Summary
 
-Add a persistent on-disk cache that lets the compiler skip the entire frontend (lex, parse, RIR, sema, comptime evaluation, generic monomorphization) and the per-function AIR→bitcode translation when inputs haven't changed since the last build. The cache is keyed by content hashes plus a stable "signature hash" of each file's `pub` exports, so editing a function body invalidates only that file's pipeline up to bitcode, while editing a `pub` signature invalidates downstream importers. The LLVM optimizer and back-end always run on the assembled whole-program module — they are not cached. The biggest user-visible speedup is on comptime-heavy code, where the cached frontend captures the dominant cost. Caching is opt-in via a `--preview incremental_compilation` flag during stabilization, and lives entirely on the local filesystem (no shared/CI cache in this ADR).
+Add a persistent on-disk cache that lets the compiler skip the entire frontend (lex, parse, RIR, sema, comptime evaluation, generic monomorphization) and the per-function AIR→bitcode translation when inputs haven't changed since the last build. The cache is keyed by content hashes plus a stable "signature hash" of each file's `pub` exports, so editing a function body invalidates only that file's pipeline up to bitcode, while editing a `pub` signature invalidates downstream importers. The LLVM optimizer and back-end always run on the assembled whole-program module — they are not cached. The biggest user-visible speedup is on comptime-heavy code, where the cached frontend captures the dominant cost. Caching is enabled by default with `--no-cache` to opt out, and lives entirely on the local filesystem (no shared/CI cache in this ADR).
 
 ## Context
 
@@ -219,20 +221,18 @@ The buffer is small (kilobytes) and is part of the AIR cache entry, not a separa
 ### CLI surface
 
 ```bash
-# Default: caching off until stabilized
+# Default: caching enabled, cache directory at target/gruel-cache/
+# next to the first source file
 gruel build src/*.gruel -o out
 
-# Enable caching
-gruel build --preview incremental_compilation src/*.gruel -o out
-
-# After stabilization: enabled by default, opt-out flag
+# Disable caching for this build only
 gruel build --no-cache src/*.gruel -o out
 
-# Wipe cache
-gruel cache clean
+# Wipe cache (defaults to ./target/gruel-cache/ when no --cache-dir)
+gruel --cache-clean
 
-# Show cache stats (size, hit rate from last build)
-gruel cache stats
+# Show cache stats (size, entry counts)
+gruel --cache-stats
 ```
 
 The cache directory location follows the workspace root by default but is overridable:
@@ -316,9 +316,9 @@ These benchmarks are required to land *before* the feature can be considered for
 
 - [x] **Phase 6: Observability and cache CLI** — `gruel --cache-stats` walks the cache directory and prints per-kind entry counts + human-readable byte sizes; `gruel --cache-clean` wipes and recreates the layout. Top-level flags rather than `gruel cache <sub>` subcommands; that refactor is deferred but functionally equivalent. `tracing` events from `gruel-cache` already in place from Phase 1. No automatic GC. **Cache hit-rate reporting in `--time-passes` deferred** alongside the RIR walker (ParseCacheStats threading through CompilationUnit's timing reporter is its own small change).
 
-- [x] **Phase 7: Cold-vs-hot benchmark infrastructure** — `bench_cache.sh` runs three scenarios per program (cold-no-cache, cold-cache-on, warm-cache-on) with median-of-N timing and warmup-pass to remove first-invocation OS-cache bias. Two benchmark programs in `benchmarks/cache/` (runtime_heavy, comptime_heavy). Initial release-build measurements on a tiny test program: warm-cache speedup ~1x because the workload is dominated by LLVM optimizer + linker time which the cache by design does not skip. A larger comptime-heavy workload would show the headline win — adding more representative programs and integrating into `bench.sh`'s manifest-driven runner is straightforward follow-up. The feature remains preview-gated and off by default.
+- [x] **Phase 7: Cold-vs-hot benchmark infrastructure** — `bench_cache.sh` runs three scenarios per program (cold-no-cache, cold-cache-on, warm-cache-on) with median-of-N timing and warmup-pass to remove first-invocation OS-cache bias. Two benchmark programs in `benchmarks/cache/` (runtime_heavy, comptime_heavy). Initial release-build measurements on a tiny test program: warm-cache speedup ~1x because the workload is dominated by LLVM optimizer + linker time which the cache by design does not skip. A larger comptime-heavy workload would show the headline win — adding more representative programs and integrating into `bench.sh`'s manifest-driven runner is straightforward follow-up.
 
-**Stabilization is intentionally deferred to a follow-up ADR.** Flipping the default to enabled is a separate, evidence-driven decision that should be made only after the dashboard has shown stable hit rates and acceptable cold-cache overhead over several iterations. That follow-up ADR will define the stabilization criteria, propose the rollout, and supersede this one once accepted.
+- [x] **Phase 8: Stabilization** — Removed the `--preview incremental_compilation` gate and the `PreviewFeature::IncrementalCompilation` variant. The driver now defaults `cache_dir` to `target/gruel-cache/` next to the first source file and enables caching unless `--no-cache` is passed. `--cache-stats` and `--cache-clean` fall back to `./target/gruel-cache/` when no explicit directory is supplied. Spec/UI test runner passes `--no-cache` automatically because each test runs in a fresh tempdir where caching is pure overhead. The library API (`CompileOptions::cache_dir`) keeps its `Option<PathBuf>`-with-`None`-disables semantics for programmatic callers (fuzz harnesses, tests).
 
 ## Consequences
 
