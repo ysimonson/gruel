@@ -105,7 +105,7 @@ impl<'de> Deserialize<'de> for ErrorContains {
 }
 
 /// A single test case.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Case {
     pub name: String,
     pub source: String,
