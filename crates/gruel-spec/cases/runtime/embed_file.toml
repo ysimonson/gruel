@@ -63,7 +63,10 @@ source = """
 fn pick(s: String) -> Slice(u8) {
     @embed_file(s)
 }
-fn main() -> i32 { 0 }
+fn main() -> i32 {
+    let _b = pick(String::new());
+    0
+}
 """
 compile_fail = true
 error_contains = "string literal"

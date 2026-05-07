@@ -178,7 +178,9 @@ fn use_path(s: String) -> i32 {
     let _m = @import(s);
     0
 }
-fn main() -> i32 { 0 }
+fn main() -> i32 {
+    use_path(String::new())
+}
 """
 compile_fail = true
 error_contains = "compile time"

@@ -12,7 +12,7 @@
 //! The specialization pass runs after semantic analysis but before CFG building.
 //! It transforms the AIR in-place and adds new specialized functions to the output.
 
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_rir::RirParamMode;
 use gruel_util::Span;
@@ -20,8 +20,22 @@ use gruel_util::{CompileError, CompileResult, ErrorKind};
 use lasso::{Spur, ThreadedRodeo};
 
 use crate::inst::{Air, AirInstData};
-use crate::sema::{AnalyzedFunction, FunctionInfo, InferenceContext, MethodInfo, Sema, SemaOutput};
+use crate::sema::{AnalyzedFunction, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::types::{StructId, Type};
+
+/// Function/method references discovered while specializing — feed back
+/// into the lazy work queue so reachability stays closed under
+/// specialization.
+#[derive(Debug, Default)]
+pub struct SpecializationRefs {
+    pub fns: HashSet<Spur>,
+    pub meths: HashSet<(StructId, Spur)>,
+}
+
+/// One row in the analyzed-functions accumulator: an analyzed body plus its
+/// per-function string and byte literal pools (remapped to global tables
+/// later).
+pub type AnalyzedRow = (AnalyzedFunction, Vec<String>, Vec<Vec<u8>>);
 
 /// A key for a specialized function: (base_function_name, type_arguments).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -40,83 +54,102 @@ struct SpecializationInfo {
     call_site_span: Span,
 }
 
-/// Perform the specialization pass on the sema output.
+/// Perform the specialization pass on the analyzed-functions accumulator.
 ///
-/// This collects all `CallGeneric` instructions, creates specialized functions,
-/// and rewrites calls to point to the specialized versions.
+/// Collects every `CallGeneric` instruction across the analyzed bodies,
+/// rewrites them to direct `Call`s by mangled name, and synthesizes the
+/// specialized bodies. Iterates until the accumulator is closed: each
+/// newly-synthesized body can introduce further `CallGeneric`s
+/// (transitively-generic specializations), so we re-collect and re-rewrite
+/// until no new keys appear.
+///
+/// Returns the set of regular function/method references discovered while
+/// analyzing the synthesized bodies. The caller feeds these back into the
+/// lazy work queue so reachability stays closed under specialization
+/// (e.g. `use_greeter[T=Foo]` exposes `Foo.greet` as a reachable method
+/// even though `main` only sees a `CallGeneric`).
 pub fn specialize(
-    output: &mut SemaOutput,
+    functions_with_strings: &mut Vec<AnalyzedRow>,
+    name_map: &mut HashMap<SpecializationKey, Spur>,
     sema: &mut Sema<'_>,
     infer_ctx: &InferenceContext,
     interner: &ThreadedRodeo,
-) -> CompileResult<()> {
-    // Phase 1: Collect all specialization requests
-    let mut specializations: HashMap<SpecializationKey, SpecializationInfo> = HashMap::default();
+) -> CompileResult<SpecializationRefs> {
+    let mut accumulated_refs = SpecializationRefs::default();
 
-    for func in &output.functions {
-        collect_specializations(&func.air, interner, &mut specializations);
-    }
-
-    if specializations.is_empty() {
-        // No generic calls, nothing to do
-        return Ok(());
-    }
-
-    // Build a map from key to just the mangled name for the rewrite phase
-    let name_map: HashMap<SpecializationKey, Spur> = specializations
-        .iter()
-        .map(|(k, v)| (k.clone(), v.mangled_name))
-        .collect();
-
-    // Phase 2: Rewrite CallGeneric to Call in all functions
-    for func in &mut output.functions {
-        rewrite_call_generic(&mut func.air, &name_map);
-    }
-
-    // Phase 3: Create specialized function bodies by re-analyzing with type substitution
-    for (key, info) in &specializations {
-        if let Some(fn_info) = sema.functions.get(&key.base_name) {
-            let base_info = *fn_info;
-            let specialized_func = create_specialized_function(
-                sema,
-                infer_ctx,
-                key,
-                info.mangled_name,
-                &base_info,
-                interner,
-            )?;
-            output.functions.push(specialized_func);
-            continue;
+    loop {
+        // Phase 1: collect every CallGeneric across the current accumulator.
+        let mut seen: HashMap<SpecializationKey, SpecializationInfo> = HashMap::default();
+        for (func, _, _) in functions_with_strings.iter() {
+            collect_specializations(&func.air, interner, &mut seen);
         }
 
-        // Fall back: the name might refer to a generic method encoded as
-        // "StructName.methodName" (ADR-0055 — method-level comptime type
-        // params). Try to split and resolve as a method.
-        if let Some((struct_id, method_name_sym)) =
-            resolve_method_name(sema, interner, key.base_name)
-            && let Some(method_info) = sema.methods.get(&(struct_id, method_name_sym)).copied()
-        {
-            let specialized_func = create_specialized_method(
-                sema,
-                infer_ctx,
-                key,
-                info.mangled_name,
-                struct_id,
-                &method_info,
-                interner,
-            )?;
-            output.functions.push(specialized_func);
-            continue;
+        // Take only keys we haven't already specialized in a prior round.
+        let new_specs: Vec<(SpecializationKey, SpecializationInfo)> = seen
+            .into_iter()
+            .filter(|(k, _)| !name_map.contains_key(k))
+            .collect();
+
+        if new_specs.is_empty() {
+            return Ok(accumulated_refs);
         }
 
-        let func_name = interner.resolve(&key.base_name);
-        return Err(CompileError::new(
-            ErrorKind::UndefinedFunction(func_name.to_string()),
-            info.call_site_span,
-        ));
-    }
+        for (k, info) in &new_specs {
+            name_map.insert(k.clone(), info.mangled_name);
+        }
 
-    Ok(())
+        // Phase 2: rewrite CallGeneric → Call across every body. Bodies
+        // already rewritten in earlier rounds no longer hold CallGenerics, so
+        // walking them is a cheap no-op.
+        for (func, _, _) in functions_with_strings.iter_mut() {
+            rewrite_call_generic(&mut func.air, &name_map);
+        }
+
+        // Phase 3: synthesize the specialized bodies for the new keys.
+        for (key, info) in new_specs {
+            if let Some(fn_info) = sema.functions.get(&key.base_name) {
+                let base_info = *fn_info;
+                let row = create_specialized_function(
+                    sema,
+                    infer_ctx,
+                    &key,
+                    info.mangled_name,
+                    &base_info,
+                    interner,
+                    &mut accumulated_refs,
+                )?;
+                functions_with_strings.push(row);
+                continue;
+            }
+
+            // Fall back: the name might refer to a generic method encoded as
+            // "StructName.methodName" (ADR-0055 — method-level comptime type
+            // params). Try to split and resolve as a method.
+            if let Some((struct_id, method_name_sym)) =
+                resolve_method_name(sema, interner, key.base_name)
+                && let Some(method_info) = sema.methods.get(&(struct_id, method_name_sym)).copied()
+            {
+                let row = create_specialized_method(
+                    sema,
+                    infer_ctx,
+                    &key,
+                    info.mangled_name,
+                    struct_id,
+                    &method_info,
+                    interner,
+                    &mut accumulated_refs,
+                )?;
+                functions_with_strings.push(row);
+                continue;
+            }
+
+            let func_name = interner.resolve(&key.base_name);
+            return Err(CompileError::new(
+                ErrorKind::UndefinedFunction(func_name.to_string()),
+                info.call_site_span,
+            ));
+        }
+    }
 }
 
 /// Parse a "StructName.methodName" mangled name into a (StructId, method Spur).
@@ -250,7 +283,8 @@ fn create_specialized_function(
     specialized_name: Spur,
     base_info: &FunctionInfo,
     interner: &ThreadedRodeo,
-) -> CompileResult<AnalyzedFunction> {
+    refs: &mut SpecializationRefs,
+) -> CompileResult<AnalyzedRow> {
     let specialized_name_str = interner.resolve(&specialized_name).to_string();
 
     // Get parameter data from the arena
@@ -329,10 +363,10 @@ fn create_specialized_function(
         param_modes,
         param_slot_types,
         _warnings,
-        _local_strings,
-        _local_bytes,
-        _ref_fns,
-        _ref_meths,
+        local_strings,
+        local_bytes,
+        ref_fns,
+        ref_meths,
     ) = sema.analyze_specialized_function(
         infer_ctx,
         return_type,
@@ -341,7 +375,10 @@ fn create_specialized_function(
         &type_subst,
     )?;
 
-    Ok(AnalyzedFunction {
+    refs.fns.extend(ref_fns);
+    refs.meths.extend(ref_meths);
+
+    let analyzed = AnalyzedFunction {
         name: specialized_name_str,
         air,
         num_locals,
@@ -349,7 +386,8 @@ fn create_specialized_function(
         param_modes,
         param_slot_types,
         is_destructor: false,
-    })
+    };
+    Ok((analyzed, local_strings, local_bytes))
 }
 
 /// Create a specialized method by re-analyzing the body with the method-
@@ -365,7 +403,8 @@ fn create_specialized_method(
     _struct_id: StructId,
     base_info: &MethodInfo,
     interner: &ThreadedRodeo,
-) -> CompileResult<AnalyzedFunction> {
+    refs: &mut SpecializationRefs,
+) -> CompileResult<AnalyzedRow> {
     let specialized_name_str = interner.resolve(&specialized_name).to_string();
 
     let param_names = sema.param_arena.names(base_info.params).to_vec();
@@ -445,10 +484,10 @@ fn create_specialized_method(
         modes_result,
         param_slot_types,
         _warnings,
-        _local_strings,
-        _local_bytes,
-        _ref_fns,
-        _ref_meths,
+        local_strings,
+        local_bytes,
+        ref_fns,
+        ref_meths,
     ) = sema.analyze_specialized_function(
         infer_ctx,
         return_type,
@@ -457,7 +496,10 @@ fn create_specialized_method(
         &type_subst,
     )?;
 
-    Ok(AnalyzedFunction {
+    refs.fns.extend(ref_fns);
+    refs.meths.extend(ref_meths);
+
+    let analyzed = AnalyzedFunction {
         name: specialized_name_str,
         air,
         num_locals,
@@ -465,7 +507,8 @@ fn create_specialized_method(
         param_modes: modes_result,
         param_slot_types,
         is_destructor: false,
-    })
+    };
+    Ok((analyzed, local_strings, local_bytes))
 }
 
 /// Like `substitute_param_type` but for method bodies: walks the RIR to find
