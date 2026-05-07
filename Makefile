@@ -26,8 +26,8 @@ quick-test:
 doctest:
 	cargo test --workspace --exclude gruel-runtime --doc
 
-# Run all tests (unit + doctests + spec + traceability + UI tests).
-# Pass ARGS="pattern" to filter spec/UI tests, e.g.: make test ARGS="1.1"
+# Run all tests (unit + doctests + spec + traceability + UI tests + examples).
+# Pass ARGS="pattern" to filter spec/UI/example tests, e.g.: make test ARGS="1.1"
 test: quick-test doctest
 	cargo build -p gruel
 	GRUEL_BINARY=target/debug/gruel \
@@ -39,6 +39,9 @@ test: quick-test doctest
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_UI_CASES=crates/gruel-ui-tests/cases \
 	cargo run -p gruel-test-runner --bin gruel-ui-tests -- --quiet $(ARGS)
+	GRUEL_BINARY=target/debug/gruel \
+	GRUEL_EXAMPLES_DIR=examples \
+	cargo run -p gruel-test-runner --bin gruel-examples-tests -- --quiet $(ARGS)
 
 # Format all Rust files.
 fmt:
