@@ -176,8 +176,8 @@ impl<'a> Sema<'a> {
         // types may reference unresolved method-level type params. The
         // inference pass falls back to fresh type variables for calls to
         // these methods, and the specialized bodies (synthesized by
-        // `specialize::create_specialized_method`) are analyzed separately
-        // with the concrete substitutions in place.
+        // `specialize::create_specialized`) are analyzed separately with the
+        // concrete substitutions in place.
         let method_sigs: HashMap<(StructId, Spur), MethodSig> = self
             .methods
             .iter()

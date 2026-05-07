@@ -14,12 +14,13 @@
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use gruel_rir::RirParamMode;
+use gruel_rir::{InstRef, RirParamMode};
 use gruel_util::Span;
 use gruel_util::{CompileError, CompileResult, ErrorKind};
 use lasso::{Spur, ThreadedRodeo};
 
 use crate::inst::{Air, AirInstData};
+use crate::param_arena::ParamRange;
 use crate::sema::{AnalyzedFunction, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::types::{StructId, Type};
 
@@ -107,47 +108,32 @@ pub fn specialize(
 
         // Phase 3: synthesize the specialized bodies for the new keys.
         for (key, info) in new_specs {
-            if let Some(fn_info) = sema.functions.get(&key.base_name) {
-                let base_info = *fn_info;
-                let row = create_specialized_function(
-                    sema,
-                    infer_ctx,
-                    &key,
-                    info.mangled_name,
-                    &base_info,
-                    interner,
-                    &mut accumulated_refs,
-                )?;
-                functions_with_strings.push(row);
-                continue;
-            }
-
-            // Fall back: the name might refer to a generic method encoded as
-            // "StructName.methodName" (ADR-0055 — method-level comptime type
-            // params). Try to split and resolve as a method.
-            if let Some((struct_id, method_name_sym)) =
+            let base = if let Some(fn_info) = sema.functions.get(&key.base_name).copied() {
+                SpecializeBase::function(&fn_info)
+            } else if let Some((struct_id, method_sym)) =
                 resolve_method_name(sema, interner, key.base_name)
-                && let Some(method_info) = sema.methods.get(&(struct_id, method_name_sym)).copied()
+                && let Some(method_info) = sema.methods.get(&(struct_id, method_sym)).copied()
             {
-                let row = create_specialized_method(
-                    sema,
-                    infer_ctx,
-                    &key,
-                    info.mangled_name,
-                    struct_id,
-                    &method_info,
-                    interner,
-                    &mut accumulated_refs,
-                )?;
-                functions_with_strings.push(row);
-                continue;
-            }
+                // ADR-0055: generic method encoded as "StructName.methodName".
+                SpecializeBase::method(&method_info)
+            } else {
+                let func_name = interner.resolve(&key.base_name);
+                return Err(CompileError::new(
+                    ErrorKind::UndefinedFunction(func_name.to_string()),
+                    info.call_site_span,
+                ));
+            };
 
-            let func_name = interner.resolve(&key.base_name);
-            return Err(CompileError::new(
-                ErrorKind::UndefinedFunction(func_name.to_string()),
-                info.call_site_span,
-            ));
+            let row = create_specialized(
+                sema,
+                infer_ctx,
+                &key,
+                info.mangled_name,
+                base,
+                interner,
+                &mut accumulated_refs,
+            )?;
+            functions_with_strings.push(row);
         }
     }
 }
@@ -272,195 +258,113 @@ fn mangle_specialized_name(base_name: &str, type_args: &[Type]) -> String {
     mangled
 }
 
-/// Create a specialized function by re-analyzing the body with type substitution.
+/// View into the parts of a base function or method that specialization
+/// needs. Adapts `FunctionInfo` and `MethodInfo` to one shape so the synthesis
+/// logic can stay generic.
+struct SpecializeBase {
+    params: ParamRange,
+    return_type: Type,
+    return_type_sym: Spur,
+    body: InstRef,
+    span: Span,
+    /// `Some((struct_type, has_self))` for methods (ADR-0055); `None` for
+    /// free functions.
+    method: Option<(Type, bool)>,
+}
+
+impl SpecializeBase {
+    fn function(info: &FunctionInfo) -> Self {
+        Self {
+            params: info.params,
+            return_type: info.return_type,
+            return_type_sym: info.return_type_sym,
+            body: info.body,
+            span: info.span,
+            method: None,
+        }
+    }
+
+    fn method(info: &MethodInfo) -> Self {
+        Self {
+            params: info.params,
+            return_type: info.return_type,
+            return_type_sym: info.return_type_sym,
+            body: info.body,
+            span: info.span,
+            method: Some((info.struct_type, info.has_self)),
+        }
+    }
+}
+
+/// Synthesize a specialized function or method by re-analyzing the body with
+/// the type substitutions implied by `key.type_args`.
 ///
-/// This builds a type substitution map from the comptime parameters to their concrete
-/// type arguments, then re-analyzes the function body with these substitutions.
-fn create_specialized_function(
+/// Comptime params are erased at runtime; references to them are substituted
+/// with concrete types via the resulting `type_subst` map. For methods,
+/// `Self` is also wired in so `Self { ... }` literals and `Self::Variant`
+/// paths resolve, and the receiver is prepended to the parameter list.
+///
+/// ADR-0055 (method-level comptime type params), ADR-0056 (interface bounds).
+fn create_specialized(
     sema: &mut Sema<'_>,
     infer_ctx: &InferenceContext,
     key: &SpecializationKey,
     specialized_name: Spur,
-    base_info: &FunctionInfo,
+    base: SpecializeBase,
     interner: &ThreadedRodeo,
     refs: &mut SpecializationRefs,
 ) -> CompileResult<AnalyzedRow> {
     let specialized_name_str = interner.resolve(&specialized_name).to_string();
 
-    // Get parameter data from the arena
-    let param_names = sema.param_arena.names(base_info.params);
-    let param_types = sema.param_arena.types(base_info.params);
-    let param_modes = sema.param_arena.modes(base_info.params);
-    let param_comptime = sema.param_arena.comptime(base_info.params);
+    let param_names = sema.param_arena.names(base.params).to_vec();
+    let param_types = sema.param_arena.types(base.params).to_vec();
+    let param_modes = sema.param_arena.modes(base.params).to_vec();
+    let param_comptime = sema.param_arena.comptime(base.params).to_vec();
 
-    // Build the type substitution map: comptime param name -> concrete Type
+    // Build type substitution: comptime param name -> concrete Type. Methods
+    // also bind `Self` to the receiver type.
     let mut type_subst: HashMap<Spur, Type> = HashMap::default();
     let mut type_arg_idx = 0;
-    let param_names_owned: Vec<Spur> = param_names.to_vec();
     for (i, is_comptime) in param_comptime.iter().enumerate() {
         if *is_comptime && type_arg_idx < key.type_args.len() {
             type_subst.insert(param_names[i], key.type_args[type_arg_idx]);
             type_arg_idx += 1;
         }
     }
+    if let Some((struct_type, _)) = base.method {
+        let self_sym = interner.get_or_intern("Self");
+        type_subst.insert(self_sym, struct_type);
+    }
 
-    // ADR-0056: for any comptime param with an interface bound, verify that
-    // the supplied concrete type structurally conforms to the interface.
-    for p in &param_names_owned {
+    // ADR-0056: for any comptime param with an interface bound, verify the
+    // concrete type structurally conforms. The bound table keys by
+    // (owner, param) where owner is the function name or "StructName.method"
+    // — both are already encoded in `key.base_name`.
+    for p in &param_names {
         if let Some(iid) = sema
             .comptime_interface_bounds
             .get(&(key.base_name, *p))
             .copied()
             && let Some(&concrete) = type_subst.get(p)
         {
-            sema.check_conforms(concrete, iid, base_info.span)?;
+            sema.check_conforms(concrete, iid, base.span)?;
         }
     }
 
-    // Calculate the return type by substituting type parameters
-    let return_type = if base_info.return_type == Type::COMPTIME_TYPE {
-        // The return type references a type parameter - substitute it
-        type_subst
-            .get(&base_info.return_type_sym)
-            .copied()
-            .unwrap_or(Type::UNIT)
-    } else {
-        base_info.return_type
-    };
+    // Substitute the return type if it references a type parameter (or
+    // `Self`). Concrete return types (e.g. `i32`) miss the lookup and fall
+    // through to the declared type unchanged.
+    let return_type = type_subst
+        .get(&base.return_type_sym)
+        .copied()
+        .unwrap_or(base.return_type);
 
-    // Build the specialized parameter list by:
-    // 1. Filtering out comptime parameters (they're erased at runtime)
-    // 2. Substituting type parameters in non-comptime parameter types
-    let specialized_params: Vec<(Spur, Type, RirParamMode)> = param_names
-        .iter()
-        .zip(param_types.iter())
-        .zip(param_modes.iter())
-        .zip(param_comptime.iter())
-        .filter(|(((_, _), _), is_comptime)| !*is_comptime)
-        .map(|(((name, ty), mode), _)| {
-            // If the type is ComptimeType, look it up in the substitution map
-            // The param name's type symbol is stored in param_types as ComptimeType,
-            // but we need to find which type param it references.
-            // For now, we'll need to look at the original RIR to get the type name.
-            let concrete_ty = if *ty == Type::COMPTIME_TYPE {
-                // This parameter's type is a type parameter. We need to find which one.
-                // The type name in RIR is stored in the param's ty field as a Spur.
-                // Unfortunately, we've lost that information by this point.
-                // We need to look at the original function in RIR.
-                substitute_param_type(sema, base_info, *name, &type_subst).unwrap_or(*ty)
-            } else {
-                *ty
-            };
-            (*name, concrete_ty, *mode)
-        })
-        .collect();
-
-    // Now analyze the function body with the specialized types
-    let (
-        air,
-        num_locals,
-        num_param_slots,
-        param_modes,
-        param_slot_types,
-        _warnings,
-        local_strings,
-        local_bytes,
-        ref_fns,
-        ref_meths,
-    ) = sema.analyze_specialized_function(
-        infer_ctx,
-        return_type,
-        &specialized_params,
-        base_info.body,
-        &type_subst,
-    )?;
-
-    refs.fns.extend(ref_fns);
-    refs.meths.extend(ref_meths);
-
-    let analyzed = AnalyzedFunction {
-        name: specialized_name_str,
-        air,
-        num_locals,
-        num_param_slots,
-        param_modes,
-        param_slot_types,
-        is_destructor: false,
-    };
-    Ok((analyzed, local_strings, local_bytes))
-}
-
-/// Create a specialized method by re-analyzing the body with the method-
-/// level type substitution (ADR-0055).
-///
-/// Unlike `create_specialized_function`, the synthesized function has a
-/// `self` receiver prepended to its parameter list (from the struct's type).
-fn create_specialized_method(
-    sema: &mut Sema<'_>,
-    infer_ctx: &InferenceContext,
-    key: &SpecializationKey,
-    specialized_name: Spur,
-    _struct_id: StructId,
-    base_info: &MethodInfo,
-    interner: &ThreadedRodeo,
-    refs: &mut SpecializationRefs,
-) -> CompileResult<AnalyzedRow> {
-    let specialized_name_str = interner.resolve(&specialized_name).to_string();
-
-    let param_names = sema.param_arena.names(base_info.params).to_vec();
-    let param_types = sema.param_arena.types(base_info.params).to_vec();
-    let param_modes = sema.param_arena.modes(base_info.params).to_vec();
-    let param_comptime = sema.param_arena.comptime(base_info.params).to_vec();
-
-    // Build method-level type substitution from comptime type params ->
-    // concrete type args (positional, in the order the comptime params
-    // appear).
-    let mut type_subst: HashMap<Spur, Type> = HashMap::default();
-    let mut type_arg_idx = 0;
-    for (i, is_comptime) in param_comptime.iter().enumerate() {
-        if *is_comptime && type_arg_idx < key.type_args.len() {
-            type_subst.insert(param_names[i], key.type_args[type_arg_idx]);
-            type_arg_idx += 1;
-        }
-    }
-    // Methods also need `Self` for the receiver — wire it through so struct-
-    // literal expressions `Self { ... }` inside the method body still resolve.
-    let self_sym = interner.get_or_intern("Self");
-    type_subst.insert(self_sym, base_info.struct_type);
-
-    // ADR-0056: enforce interface bounds on comptime type params at
-    // specialization time. The bound table is keyed by "StructName.method";
-    // re-derive that key here from `key.base_name` (which already encodes the
-    // method-mangled name; the bound was inserted under the unmangled
-    // "StructName.method" form, so reconstruct it).
-    let owner_for_bounds = key.base_name;
-    for p in &param_names {
-        if let Some(iid) = sema
-            .comptime_interface_bounds
-            .get(&(owner_for_bounds, *p))
-            .copied()
-            && let Some(&concrete) = type_subst.get(p)
-        {
-            sema.check_conforms(concrete, iid, base_info.span)?;
-        }
-    }
-
-    // Substitute the return type if it references a method-level type param.
-    let return_type = if let Some(&ty) = type_subst.get(&base_info.return_type_sym) {
-        ty
-    } else if base_info.return_type == Type::COMPTIME_TYPE {
-        // Unknown comptime return — fall back to the stored type.
-        base_info.return_type
-    } else {
-        base_info.return_type
-    };
-
-    // Build specialized param list: prepend self, drop comptime params,
-    // substitute type-param references.
+    // Specialized param list: prepend `self` for methods with a receiver,
+    // drop comptime params (erased), substitute `ComptimeType` references.
     let mut specialized_params: Vec<(Spur, Type, RirParamMode)> = Vec::new();
-    if base_info.has_self {
+    if let Some((struct_type, true)) = base.method {
         let self_val_sym = interner.get_or_intern("self");
-        specialized_params.push((self_val_sym, base_info.struct_type, RirParamMode::Normal));
+        specialized_params.push((self_val_sym, struct_type, RirParamMode::Normal));
     }
     for i in 0..param_names.len() {
         if param_comptime[i] {
@@ -470,7 +374,7 @@ fn create_specialized_method(
         let ty = param_types[i];
         let mode = param_modes[i];
         let concrete_ty = if ty == Type::COMPTIME_TYPE {
-            substitute_method_param_type(sema, base_info, name, &type_subst).unwrap_or(ty)
+            substitute_param_type(sema, base.body, name, &type_subst).unwrap_or(ty)
         } else {
             ty
         };
@@ -492,7 +396,7 @@ fn create_specialized_method(
         infer_ctx,
         return_type,
         &specialized_params,
-        base_info.body,
+        base.body,
         &type_subst,
     )?;
 
@@ -511,23 +415,23 @@ fn create_specialized_method(
     Ok((analyzed, local_strings, local_bytes))
 }
 
-/// Like `substitute_param_type` but for method bodies: walks the RIR to find
-/// the FnDecl matching `base_info.body` and resolves param type refs using
-/// `type_subst`.
-fn substitute_method_param_type(
+/// Resolve a type-parameter reference on `param_name` by walking the RIR to
+/// find the `FnDecl` whose body matches `body`, then looking up the
+/// parameter's source-text type symbol in `type_subst`.
+fn substitute_param_type(
     sema: &Sema<'_>,
-    base_info: &MethodInfo,
+    body: InstRef,
     param_name: Spur,
     type_subst: &HashMap<Spur, Type>,
 ) -> Option<Type> {
     for (_, inst) in sema.rir.iter() {
         if let gruel_rir::InstData::FnDecl {
-            body,
+            body: fn_body,
             params_start,
             params_len,
             ..
         } = &inst.data
-            && *body == base_info.body
+            && *fn_body == body
         {
             let params = sema.rir.get_params(*params_start, *params_len);
             for param in params {
@@ -539,42 +443,5 @@ fn substitute_method_param_type(
             }
         }
     }
-    None
-}
-
-/// Substitute a parameter's type using the type substitution map.
-///
-/// This looks up the parameter's type symbol in the original RIR function
-/// and substitutes it with the concrete type if it's a type parameter.
-fn substitute_param_type(
-    sema: &Sema<'_>,
-    base_info: &FunctionInfo,
-    param_name: Spur,
-    type_subst: &HashMap<Spur, Type>,
-) -> Option<Type> {
-    // Walk up to find the FnDecl that contains this body
-    for (_, inst) in sema.rir.iter() {
-        if let gruel_rir::InstData::FnDecl {
-            body,
-            params_start,
-            params_len,
-            ..
-        } = &inst.data
-            && *body == base_info.body
-        {
-            // Found the function declaration
-            let params = sema.rir.get_params(*params_start, *params_len);
-            for param in params {
-                if param.name == param_name {
-                    // Found the parameter - get its type symbol
-                    // If the type symbol is in our substitution map, use that
-                    if let Some(&concrete_ty) = type_subst.get(&param.ty) {
-                        return Some(concrete_ty);
-                    }
-                }
-            }
-        }
-    }
-
     None
 }
