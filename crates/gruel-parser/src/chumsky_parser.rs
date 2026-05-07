@@ -12,7 +12,7 @@ use crate::ast::{
     Ident, IfExpr, IndexExpr, IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item,
     LetStatement, LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, MethodSig, NegIntLit,
     Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, RangeExpr, ReturnExpr, SelfExpr,
-    SelfMode, SelfParam, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern,
+    SelfParam, SelfReceiverKind, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern,
     TupleExpr, TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility,
     WhileExpr,
 };
@@ -3313,11 +3313,8 @@ where
 /// Accepts:
 ///   `self`                  → ByValue (annotation elided)
 ///   `self : Self`           → ByValue
-///   `self : Ref ( Self )`   → Borrow (immutable reference)
-///   `self : MutRef ( Self )` → Inout (exclusive mutable reference)
-///
-/// The legacy `&self` / `&mut self` / `borrow self` / `inout self` sugars
-/// were removed by ADR-0076 Phase 5.
+///   `self : Ref ( Self )`   → Ref (shared borrow receiver)
+///   `self : MutRef ( Self )` → MutRef (exclusive mutable borrow receiver)
 fn self_param_parser<'src, I>() -> GruelParser<'src, I, SelfParam>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -3326,7 +3323,7 @@ where
         .then_ignore(just(TokenKind::Colon))
         .then_ignore(just(TokenKind::SelfType))
         .map_with(|_, e| SelfParam {
-            mode: SelfMode::ByValue,
+            kind: SelfReceiverKind::ByValue,
             span: span_from_extra(e),
         })
         .boxed();
@@ -3339,9 +3336,9 @@ where
             TokenKind::Ident(s) => {
                 let syms = &e.state().syms;
                 if s == syms.ref_name {
-                    Ok(SelfMode::Borrow)
+                    Ok(SelfReceiverKind::Ref)
                 } else if s == syms.mut_ref_name {
-                    Ok(SelfMode::Inout)
+                    Ok(SelfReceiverKind::MutRef)
                 } else {
                     Err(chumsky::error::Rich::custom(
                         e.span(),
@@ -3362,8 +3359,8 @@ where
         .then_ignore(just(TokenKind::LParen))
         .then_ignore(just(TokenKind::SelfType))
         .then_ignore(just(TokenKind::RParen))
-        .map_with(|mode, e| SelfParam {
-            mode,
+        .map_with(|kind, e| SelfParam {
+            kind,
             span: span_from_extra(e),
         })
         .boxed();
@@ -3371,7 +3368,7 @@ where
     // Bare `self` (no annotation) is ByValue.
     let bare_self = just(TokenKind::SelfValue)
         .map_with(|_, e| SelfParam {
-            mode: SelfMode::ByValue,
+            kind: SelfReceiverKind::ByValue,
             span: span_from_extra(e),
         })
         .boxed();

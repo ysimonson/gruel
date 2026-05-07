@@ -23,8 +23,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
     /// Format a call argument with its mode prefix.
     fn format_call_arg(arg: &RirCallArg) -> String {
         match arg.mode {
-            RirArgMode::Inout => format!("inout {}", arg.value),
-            RirArgMode::Borrow => format!("borrow {}", arg.value),
+            RirArgMode::MutRef => format!("mut_ref {}", arg.value),
+            RirArgMode::Ref => format!("ref {}", arg.value),
             RirArgMode::Normal => format!("{}", arg.value),
         }
     }
@@ -325,8 +325,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         .iter()
                         .map(|p| {
                             let mode_prefix = match p.mode {
-                                RirParamMode::Inout => "inout ",
-                                RirParamMode::Borrow => "borrow ",
+                                RirParamMode::MutRef => "mut_ref ",
+                                RirParamMode::Ref => "ref ",
                                 RirParamMode::Comptime => "comptime ",
                                 RirParamMode::Normal => "",
                             };

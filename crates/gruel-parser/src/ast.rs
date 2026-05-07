@@ -334,29 +334,31 @@ pub struct Method {
 }
 
 /// A self parameter in a method.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// ADR-0076 made `self : T` the sole spelling for receivers; the legacy
+/// `inout self` / `borrow self` keyword forms are gone. The receiver kind
+/// (by-value, `Ref(Self)`, `MutRef(Self)`) is determined at parse time and
+/// recorded here directly to avoid downstream stages having to re-classify
+/// the annotation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SelfParam {
-    /// Receiver mode written before `self` (`inout self`, `borrow self`,
-    /// or just `self`). `comptime self` is not allowed by the grammar
-    /// (ADR-0060).
-    pub mode: SelfMode,
-    /// Span covering the receiver (including any `inout`/`borrow` keyword).
+    /// Receiver kind, derived from the optional `: T` annotation.
+    pub kind: SelfReceiverKind,
+    /// Span covering the receiver.
     pub span: Span,
 }
 
-/// Receiver mode for a `self` parameter (ADR-0060).
-///
-/// Mirrors the runtime portion of [`ParamMode`] but excludes `Comptime`,
-/// which the grammar rejects on receivers.
+/// Classification of a [`SelfParam`] based on the parsed annotation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub enum SelfMode {
-    /// Plain `self` — by-value receiver.
+pub enum SelfReceiverKind {
+    /// `self`, `self : Self`, or any annotation not matching `Ref(Self)` /
+    /// `MutRef(Self)`. Lowered as a by-value receiver.
     #[default]
     ByValue,
-    /// `inout self` — exclusive mutable borrow.
-    Inout,
-    /// `borrow self` — shared immutable borrow.
-    Borrow,
+    /// `self : Ref(Self)` — shared borrow receiver.
+    Ref,
+    /// `self : MutRef(Self)` — exclusive mutable borrow receiver.
+    MutRef,
 }
 
 /// Visibility of an item (function, struct, enum, etc.)
@@ -391,15 +393,14 @@ pub struct Function {
 }
 
 /// Parameter passing mode.
+///
+/// ADR-0076 retired the `inout` / `borrow` keyword forms; ref-ness is now
+/// encoded in the parameter type (`Ref(T)` / `MutRef(T)`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ParamMode {
     /// Normal pass-by-value parameter
     #[default]
     Normal,
-    /// Inout parameter - mutated in place and returned to caller
-    Inout,
-    /// Borrow parameter - immutable borrow without ownership transfer
-    Borrow,
     /// Comptime parameter - evaluated at compile time (used for type parameters)
     Comptime,
 }
@@ -1000,15 +1001,15 @@ impl Pattern {
 }
 
 /// Argument passing mode.
+///
+/// ADR-0076 retired the `inout` / `borrow` argument prefixes; references are
+/// now constructed with `&x` / `&mut x` and pass as `Normal` arguments whose
+/// type carries the ref-ness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ArgMode {
     /// Normal pass-by-value argument
     #[default]
     Normal,
-    /// Inout argument - mutated in place
-    Inout,
-    /// Borrow argument - immutable borrow
-    Borrow,
 }
 
 /// An argument in a function call.
@@ -1018,21 +1019,8 @@ pub struct CallArg {
     pub mode: ArgMode,
     /// The argument expression
     pub expr: Expr,
-    /// Span covering the entire argument (including inout/borrow keyword if present)
+    /// Span covering the entire argument
     pub span: Span,
-}
-
-impl CallArg {
-    /// Returns true if this argument is passed as inout.
-    /// This is a convenience method for backwards compatibility.
-    pub fn is_inout(&self) -> bool {
-        self.mode == ArgMode::Inout
-    }
-
-    /// Returns true if this argument is passed as borrow.
-    pub fn is_borrow(&self) -> bool {
-        self.mode == ArgMode::Borrow
-    }
 }
 
 /// A function call expression.
@@ -1578,8 +1566,6 @@ fn fmt_method(f: &mut fmt::Formatter<'_>, method: &Method, level: usize) -> fmt:
 
 fn fmt_param(f: &mut fmt::Formatter<'_>, param: &Param) -> fmt::Result {
     match param.mode {
-        ParamMode::Inout => write!(f, "inout ")?,
-        ParamMode::Borrow => write!(f, "borrow ")?,
         ParamMode::Comptime => write!(f, "comptime ")?,
         ParamMode::Normal => {}
     }
@@ -1588,16 +1574,6 @@ fn fmt_param(f: &mut fmt::Formatter<'_>, param: &Param) -> fmt::Result {
 
 fn fmt_call_arg(f: &mut fmt::Formatter<'_>, arg: &CallArg, level: usize) -> fmt::Result {
     match arg.mode {
-        ArgMode::Inout => {
-            indent(f, level)?;
-            writeln!(f, "inout:")?;
-            fmt_expr(f, &arg.expr, level + 1)
-        }
-        ArgMode::Borrow => {
-            indent(f, level)?;
-            writeln!(f, "borrow:")?;
-            fmt_expr(f, &arg.expr, level + 1)
-        }
         ArgMode::Normal => fmt_expr(f, &arg.expr, level),
     }
 }

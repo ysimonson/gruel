@@ -135,7 +135,7 @@ pub struct ParamArena {
     /// All parameter types, indexed by position in the arena.
     types: Vec<Type>,
 
-    /// All parameter modes (Normal, Inout, Borrow, Comptime).
+    /// All parameter modes (Normal, MutRef, Ref, Comptime).
     modes: Vec<RirParamMode>,
 
     /// Whether each parameter is a comptime parameter.
@@ -356,8 +356,8 @@ mod tests {
             [Type::I32, Type::BOOL, Type::I64],
             [
                 RirParamMode::Normal,
-                RirParamMode::Inout,
-                RirParamMode::Borrow,
+                RirParamMode::MutRef,
+                RirParamMode::Ref,
             ],
             [false, false, true],
         );
@@ -368,8 +368,8 @@ mod tests {
             arena.modes(range),
             &[
                 RirParamMode::Normal,
-                RirParamMode::Inout,
-                RirParamMode::Borrow
+                RirParamMode::MutRef,
+                RirParamMode::Ref
             ]
         );
         assert_eq!(arena.comptime(range), &[false, false, true]);
@@ -392,7 +392,7 @@ mod tests {
 
         // Second function with 1 param
         let c = make_spur(&mut rodeo, "c");
-        let range2 = arena.alloc([c], [Type::BOOL], [RirParamMode::Inout], [false]);
+        let range2 = arena.alloc([c], [Type::BOOL], [RirParamMode::MutRef], [false]);
 
         // Verify they don't overlap
         assert_eq!(range1.len(), 2);
@@ -436,14 +436,14 @@ mod tests {
         let range = arena.alloc(
             [x, y],
             [Type::I32, Type::BOOL],
-            [RirParamMode::Normal, RirParamMode::Inout],
+            [RirParamMode::Normal, RirParamMode::MutRef],
             [false, true],
         );
 
         let items: Vec<_> = arena.iter(range).collect();
         assert_eq!(items.len(), 2);
         assert_eq!(items[0], (&x, &Type::I32, &RirParamMode::Normal, &false));
-        assert_eq!(items[1], (&y, &Type::BOOL, &RirParamMode::Inout, &true));
+        assert_eq!(items[1], (&y, &Type::BOOL, &RirParamMode::MutRef, &true));
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
         let range = arena.alloc(
             [x, y],
             [Type::I32, Type::BOOL],
-            [RirParamMode::Normal, RirParamMode::Inout],
+            [RirParamMode::Normal, RirParamMode::MutRef],
             [false, false],
         );
 
@@ -485,7 +485,7 @@ mod tests {
             pairs,
             vec![
                 (&Type::I32, &RirParamMode::Normal),
-                (&Type::BOOL, &RirParamMode::Inout)
+                (&Type::BOOL, &RirParamMode::MutRef)
             ]
         );
     }

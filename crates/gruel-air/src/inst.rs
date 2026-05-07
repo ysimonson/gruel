@@ -161,42 +161,53 @@ pub enum AirProjection {
 }
 
 /// Parameter passing mode in AIR.
+///
+/// Mirrors [`gruel_rir::RirParamMode`]. `MutRef` / `Ref` are the
+/// vestigial-but-used by-pointer markers that survive ADR-0076 for
+/// parameters whose declared type cannot itself be wrapped as
+/// `MutRef(...)` / `Ref(...)` in the type pool (notably interface params).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum AirParamMode {
-    /// Normal pass-by-value parameter
+    /// Normal pass-by-value parameter (or any reference whose ref-ness is
+    /// already encoded in the parameter `Type`).
     #[default]
     Normal,
-    /// Inout parameter - mutated in place and returned to caller
-    Inout,
-    /// Borrow parameter - immutable borrow without ownership transfer
-    Borrow,
+    /// Exclusive mutable borrow (interface-by-pointer ABI).
+    MutRef,
+    /// Shared immutable borrow (interface-by-pointer ABI).
+    Ref,
 }
 
 impl AirParamMode {
-    /// Returns true if the parameter is passed by reference (inout or borrow).
+    /// Returns true if the parameter is passed by reference per the legacy
+    /// mode mechanism. Type-driven `Ref(T)` / `MutRef(T)` parameters are
+    /// not detected here; callers must additionally inspect the parameter
+    /// `Type`.
     #[inline]
     pub fn is_by_ref(self) -> bool {
-        matches!(self, AirParamMode::Inout | AirParamMode::Borrow)
+        matches!(self, AirParamMode::MutRef | AirParamMode::Ref)
     }
 
-    /// Returns true if the parameter is an inout parameter.
+    /// Returns true if the parameter is an exclusive mutable borrow per
+    /// the legacy mode mechanism.
     #[inline]
-    pub fn is_inout(self) -> bool {
-        matches!(self, AirParamMode::Inout)
+    pub fn is_mut_ref(self) -> bool {
+        matches!(self, AirParamMode::MutRef)
     }
 
-    /// Returns true if the parameter is a borrow parameter.
+    /// Returns true if the parameter is a shared immutable borrow per the
+    /// legacy mode mechanism.
     #[inline]
-    pub fn is_borrow(self) -> bool {
-        matches!(self, AirParamMode::Borrow)
+    pub fn is_ref(self) -> bool {
+        matches!(self, AirParamMode::Ref)
     }
 }
 
 impl From<gruel_rir::RirParamMode> for AirParamMode {
     fn from(mode: gruel_rir::RirParamMode) -> Self {
         match mode {
-            gruel_rir::RirParamMode::Inout => AirParamMode::Inout,
-            gruel_rir::RirParamMode::Borrow => AirParamMode::Borrow,
+            gruel_rir::RirParamMode::MutRef => AirParamMode::MutRef,
+            gruel_rir::RirParamMode::Ref => AirParamMode::Ref,
             // Comptime params are erased by the time they reach codegen;
             // treat them as normal pass-by-value.
             gruel_rir::RirParamMode::Normal | gruel_rir::RirParamMode::Comptime => {
@@ -206,16 +217,16 @@ impl From<gruel_rir::RirParamMode> for AirParamMode {
     }
 }
 
-/// Argument passing mode in AIR.
+/// Argument passing mode in AIR. Mirrors [`AirParamMode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum AirArgMode {
-    /// Normal pass-by-value argument
+    /// Normal pass-by-value argument.
     #[default]
     Normal,
-    /// Inout argument - mutated in place
-    Inout,
-    /// Borrow argument - immutable borrow
-    Borrow,
+    /// Exclusive mutable reborrow (by-pointer ABI).
+    MutRef,
+    /// Shared immutable reborrow (by-pointer ABI).
+    Ref,
 }
 
 impl AirArgMode {
@@ -224,8 +235,8 @@ impl AirArgMode {
     pub fn as_u32(self) -> u32 {
         match self {
             AirArgMode::Normal => 0,
-            AirArgMode::Inout => 1,
-            AirArgMode::Borrow => 2,
+            AirArgMode::MutRef => 1,
+            AirArgMode::Ref => 2,
         }
     }
 
@@ -234,8 +245,8 @@ impl AirArgMode {
     pub fn from_u32(v: u32) -> Self {
         match v {
             0 => AirArgMode::Normal,
-            1 => AirArgMode::Inout,
-            2 => AirArgMode::Borrow,
+            1 => AirArgMode::MutRef,
+            2 => AirArgMode::Ref,
             _ => panic!("invalid AirArgMode value: {}", v),
         }
     }
@@ -245,8 +256,8 @@ impl From<gruel_rir::RirArgMode> for AirArgMode {
     fn from(mode: gruel_rir::RirArgMode) -> Self {
         match mode {
             gruel_rir::RirArgMode::Normal => AirArgMode::Normal,
-            gruel_rir::RirArgMode::Inout => AirArgMode::Inout,
-            gruel_rir::RirArgMode::Borrow => AirArgMode::Borrow,
+            gruel_rir::RirArgMode::MutRef => AirArgMode::MutRef,
+            gruel_rir::RirArgMode::Ref => AirArgMode::Ref,
         }
     }
 }
@@ -261,23 +272,24 @@ pub struct AirCallArg {
 }
 
 impl AirCallArg {
-    /// Returns true if this argument is passed as inout.
-    /// This is a convenience method for backwards compatibility.
-    pub fn is_inout(&self) -> bool {
-        self.mode == AirArgMode::Inout
+    /// Returns true if this argument is passed as an exclusive mutable
+    /// reborrow per the legacy mode mechanism.
+    pub fn is_mut_ref(&self) -> bool {
+        self.mode == AirArgMode::MutRef
     }
 
-    /// Returns true if this argument is passed as borrow.
-    pub fn is_borrow(&self) -> bool {
-        self.mode == AirArgMode::Borrow
+    /// Returns true if this argument is passed as a shared immutable
+    /// reborrow per the legacy mode mechanism.
+    pub fn is_ref(&self) -> bool {
+        self.mode == AirArgMode::Ref
     }
 }
 
 impl fmt::Display for AirCallArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.mode {
-            AirArgMode::Inout => write!(f, "inout {}", self.value),
-            AirArgMode::Borrow => write!(f, "borrow {}", self.value),
+            AirArgMode::MutRef => write!(f, "mut_ref {}", self.value),
+            AirArgMode::Ref => write!(f, "ref {}", self.value),
             AirArgMode::Normal => write!(f, "{}", self.value),
         }
     }

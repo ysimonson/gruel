@@ -271,11 +271,13 @@ impl<'a> ConstraintGenerator<'a> {
         };
         let p = ctx.params.get(name)?;
         // The arg binding's normalized inner type must match the callee's
-        // referent. The mode must be Borrow or Inout (i.e. the binding
-        // came from an original `Ref(T)` / `MutRef(T)` declaration).
+        // referent. The mode must be `Ref` or `MutRef` (i.e. the binding
+        // came from an original `Ref(T)` / `MutRef(T)` declaration that
+        // routes through the legacy by-pointer mode for interface-typed
+        // params per ADR-0076).
         if !matches!(
             p.mode,
-            gruel_rir::RirParamMode::Borrow | gruel_rir::RirParamMode::Inout
+            gruel_rir::RirParamMode::Ref | gruel_rir::RirParamMode::MutRef
         ) {
             return None;
         }

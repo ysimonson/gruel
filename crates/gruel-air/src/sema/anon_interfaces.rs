@@ -20,11 +20,12 @@ use crate::types::{IfaceTy, InterfaceDef, InterfaceId, InterfaceMethodReq, Recei
 
 /// Decode a `RirParamMode`-style byte (0/1/2) into a [`ReceiverMode`].
 /// Falls back to `ByValue` for unrecognized values. Shared by interface
-/// validation and method gather paths (ADR-0060).
+/// validation and method gather paths (ADR-0060). The byte mapping follows
+/// the parser-side encoding: 1 = `MutRef(Self)`, 2 = `Ref(Self)`.
 pub(crate) fn decode_receiver_mode(byte: u8) -> ReceiverMode {
     match byte {
-        1 => ReceiverMode::Inout,
-        2 => ReceiverMode::Borrow,
+        1 => ReceiverMode::MutRef,
+        2 => ReceiverMode::Ref,
         _ => ReceiverMode::ByValue,
     }
 }

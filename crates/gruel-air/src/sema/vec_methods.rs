@@ -130,7 +130,7 @@ impl<'a> Sema<'a> {
                     air,
                     "vec_push",
                     &[
-                        (receiver.air_ref, AirArgMode::Inout),
+                        (receiver.air_ref, AirArgMode::MutRef),
                         (val.air_ref, AirArgMode::Normal),
                     ],
                     Type::UNIT,
@@ -155,7 +155,7 @@ impl<'a> Sema<'a> {
                 self.emit_vec_intrinsic(
                     air,
                     "vec_pop",
-                    &[(receiver.air_ref, AirArgMode::Inout)],
+                    &[(receiver.air_ref, AirArgMode::MutRef)],
                     elem_ty,
                     span,
                 )
@@ -173,7 +173,7 @@ impl<'a> Sema<'a> {
                 self.emit_vec_intrinsic(
                     air,
                     "vec_clear",
-                    &[(receiver.air_ref, AirArgMode::Inout)],
+                    &[(receiver.air_ref, AirArgMode::MutRef)],
                     Type::UNIT,
                     span,
                 )
@@ -200,7 +200,7 @@ impl<'a> Sema<'a> {
                     air,
                     "vec_reserve",
                     &[
-                        (receiver.air_ref, AirArgMode::Inout),
+                        (receiver.air_ref, AirArgMode::MutRef),
                         (n.air_ref, AirArgMode::Normal),
                     ],
                     Type::UNIT,
@@ -213,7 +213,7 @@ impl<'a> Sema<'a> {
                 self.emit_vec_intrinsic(
                     air,
                     "vec_ptr",
-                    &[(receiver.air_ref, AirArgMode::Borrow)],
+                    &[(receiver.air_ref, AirArgMode::Ref)],
                     Type::new_ptr_const(id),
                     span,
                 )
@@ -224,7 +224,7 @@ impl<'a> Sema<'a> {
                 self.emit_vec_intrinsic(
                     air,
                     "vec_ptr_mut",
-                    &[(receiver.air_ref, AirArgMode::Inout)],
+                    &[(receiver.air_ref, AirArgMode::MutRef)],
                     Type::new_ptr_mut(id),
                     span,
                 )
@@ -253,7 +253,7 @@ impl<'a> Sema<'a> {
                     air,
                     "vec_terminated_ptr",
                     &[
-                        (receiver.air_ref, AirArgMode::Inout),
+                        (receiver.air_ref, AirArgMode::MutRef),
                         (s.air_ref, AirArgMode::Normal),
                     ],
                     Type::new_ptr_const(id),
@@ -331,7 +331,7 @@ impl<'a> Sema<'a> {
         self.emit_vec_intrinsic(
             air,
             intrinsic_name,
-            &[(receiver.air_ref, AirArgMode::Borrow)],
+            &[(receiver.air_ref, AirArgMode::Ref)],
             ret_ty,
             span,
         )

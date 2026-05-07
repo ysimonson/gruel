@@ -124,9 +124,9 @@ struct MethodBodySpec<'a> {
     /// rather than an associated function). When `true`, `self` is added
     /// as the first parameter with `host_type` as its type.
     has_self: bool,
-    /// Receiver mode (`self` / `&self` / `&mut self`). Encoded as
-    /// `RirParamMode` (0 = Normal, 1 = Inout, 2 = Borrow). Ignored when
-    /// `has_self` is `false`.
+    /// Receiver shape (ADR-0076 sole form: `self` / `self : MutRef(Self)` /
+    /// `self : Ref(Self)`). Encoded as a byte: 0 = by-value, 1 =
+    /// `MutRef(Self)`, 2 = `Ref(Self)`. Ignored when `has_self` is `false`.
     self_mode: u8,
 }
 
@@ -725,8 +725,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                 let self_sym = sema.interner.get_or_intern("self");
                 let self_mode = match method_info.receiver {
                     crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
-                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
-                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                    crate::types::ReceiverMode::Ref => RirParamMode::Ref,
+                    crate::types::ReceiverMode::MutRef => RirParamMode::MutRef,
                 };
                 param_info.push((self_sym, method_info.struct_type, self_mode));
             }
@@ -808,8 +808,8 @@ fn analyze_all_function_bodies_sequential(sema: &mut Sema<'_>) -> MultiErrorResu
                 let self_sym = sema.interner.get_or_intern("self");
                 let self_mode = match method_info.receiver {
                     crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
-                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
-                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                    crate::types::ReceiverMode::Ref => RirParamMode::Ref,
+                    crate::types::ReceiverMode::MutRef => RirParamMode::MutRef,
                 };
                 param_info.push((self_sym, method_info.struct_type, self_mode));
             }
@@ -1125,8 +1125,8 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                     let self_sym = sema.interner.get_or_intern("self");
                     let self_mode = match method_info.receiver {
                         crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
-                        crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
-                        crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                        crate::types::ReceiverMode::Ref => RirParamMode::Ref,
+                        crate::types::ReceiverMode::MutRef => RirParamMode::MutRef,
                     };
                     param_info.push((self_sym, method_info.struct_type, self_mode));
                 }
@@ -1415,8 +1415,8 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 let self_sym = sema.interner.get_or_intern("self");
                 let self_mode = match method_info.receiver {
                     crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
-                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
-                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                    crate::types::ReceiverMode::Ref => RirParamMode::Ref,
+                    crate::types::ReceiverMode::MutRef => RirParamMode::MutRef,
                 };
                 param_info.push((self_sym, method_info.struct_type, self_mode));
             }
@@ -1516,8 +1516,8 @@ fn analyze_function_bodies_lazy(sema: &mut Sema<'_>) -> MultiErrorResult<SemaOut
                 let self_sym = sema.interner.get_or_intern("self");
                 let self_mode = match method_info.receiver {
                     crate::types::ReceiverMode::ByValue => RirParamMode::Normal,
-                    crate::types::ReceiverMode::Borrow => RirParamMode::Borrow,
-                    crate::types::ReceiverMode::Inout => RirParamMode::Inout,
+                    crate::types::ReceiverMode::Ref => RirParamMode::Ref,
+                    crate::types::ReceiverMode::MutRef => RirParamMode::MutRef,
                 };
                 param_info.push((self_sym, method_info.struct_type, self_mode));
             }
@@ -2149,19 +2149,19 @@ impl<'a> Sema<'a> {
             let host = spec
                 .host_type
                 .expect("MethodBodySpec.has_self=true requires host_type to be set");
-            // Decode the receiver mode set by the parser (`self` / `&self` /
-            // `&mut self` — see ADR-0062). Receiver normalization parallels
-            // the regular-parameter normalization in
-            // `analyze_function_internal`: a `&self` (`SelfMode::Borrow`) self
-            // param becomes `(Self, Borrow)` and `&mut self`
-            // (`SelfMode::Inout`) becomes `(Self, Inout)`.
-            let self_mode = match spec.self_mode {
-                1 => RirParamMode::Inout,
-                2 => RirParamMode::Borrow,
-                _ => RirParamMode::Normal,
+            // ADR-0076: encode the receiver shape directly in the synthesized
+            // self parameter's type — the byte-encoded receiver mode set by
+            // the parser (1 = `MutRef(Self)`, 2 = `Ref(Self)`, 0 = by-value)
+            // becomes a `MutRef(Self)` / `Ref(Self)` / `Self` type with a
+            // `Normal` parameter mode. Body analysis, borrow tracking, and
+            // codegen all key off the type pool from this point forward.
+            let self_ty = match spec.self_mode {
+                1 => Type::new_mut_ref(self.type_pool.intern_mut_ref_from_type(host)),
+                2 => Type::new_ref(self.type_pool.intern_ref_from_type(host)),
+                _ => host,
             };
             let self_sym = self.interner.get_or_intern("self");
-            param_info.push((self_sym, host, self_mode));
+            param_info.push((self_sym, self_ty, RirParamMode::Normal));
         }
 
         // Add regular parameters with their modes. Use `resolve_param_type`
@@ -3881,8 +3881,8 @@ impl<'a> Sema<'a> {
             // path below.
             let recv_pass_mode = match method_info.receiver {
                 crate::types::ReceiverMode::ByValue => AirArgMode::Normal,
-                crate::types::ReceiverMode::Borrow => AirArgMode::Borrow,
-                crate::types::ReceiverMode::Inout => AirArgMode::Inout,
+                crate::types::ReceiverMode::Ref => AirArgMode::Ref,
+                crate::types::ReceiverMode::MutRef => AirArgMode::MutRef,
             };
             if !matches!(method_info.receiver, crate::types::ReceiverMode::ByValue)
                 && let Some(var) = receiver_var
@@ -4120,10 +4120,7 @@ impl<'a> Sema<'a> {
             if let Some(var) = receiver_var {
                 ctx.moved_vars.remove(&var);
             }
-            let extra = [
-                receiver_result.air_ref.as_u32(),
-                AirArgMode::Borrow.as_u32(),
-            ];
+            let extra = [receiver_result.air_ref.as_u32(), AirArgMode::Ref.as_u32()];
             let args_start = air.add_extra(&extra);
             let fn_name = self
                 .interner
@@ -4191,8 +4188,8 @@ impl<'a> Sema<'a> {
         // builtin-method paths above.
         let recv_pass_mode = match method_info.receiver {
             crate::types::ReceiverMode::ByValue => AirArgMode::Normal,
-            crate::types::ReceiverMode::Borrow => AirArgMode::Borrow,
-            crate::types::ReceiverMode::Inout => AirArgMode::Inout,
+            crate::types::ReceiverMode::Ref => AirArgMode::Ref,
+            crate::types::ReceiverMode::MutRef => AirArgMode::MutRef,
         };
         if !matches!(method_info.receiver, crate::types::ReceiverMode::ByValue)
             && let Some(var) = receiver_var
@@ -4495,16 +4492,16 @@ impl<'a> Sema<'a> {
         // Check that call-site argument modes match function parameter modes
         for (i, (arg, expected_mode)) in args.iter().zip(param_modes.iter()).enumerate() {
             match expected_mode {
-                RirParamMode::Inout => {
-                    if arg.mode != RirArgMode::Inout {
+                RirParamMode::MutRef => {
+                    if arg.mode != RirArgMode::MutRef {
                         return Err(CompileError::new(
                             ErrorKind::InoutKeywordMissing,
                             self.rir.get(args[i].value).span,
                         ));
                     }
                 }
-                RirParamMode::Borrow => {
-                    if arg.mode != RirArgMode::Borrow {
+                RirParamMode::Ref => {
+                    if arg.mode != RirArgMode::Ref {
                         return Err(CompileError::new(
                             ErrorKind::BorrowKeywordMissing,
                             self.rir.get(args[i].value).span,
@@ -5717,7 +5714,11 @@ impl<'a> Sema<'a> {
         // Arg 1: runtime value of struct type — analyze as a projection base
         // (does not mark the variable as moved, like regular field access)
         let value_result = self.analyze_inst_for_projection(air, args[0].value, ctx)?;
-        let struct_ty = value_result.ty;
+        // ADR-0076: auto-deref `Ref(Struct)` / `MutRef(Struct)` so prelude
+        // `derive Clone` (`fn clone(self: Ref(Self))`) can `@field(self, …)`
+        // and project into the referent struct without writing an explicit
+        // dereference.
+        let struct_ty = crate::sema::analyze_ops::unwrap_ref_for_place(self, value_result.ty);
 
         // Verify the value is a struct type
         let struct_id = match struct_ty.kind() {
@@ -6357,8 +6358,8 @@ impl<'a> Sema<'a> {
             {
                 let recv_pass_mode = match method_info.receiver {
                     crate::types::ReceiverMode::ByValue => AirArgMode::Normal,
-                    crate::types::ReceiverMode::Borrow => AirArgMode::Borrow,
-                    crate::types::ReceiverMode::Inout => AirArgMode::Inout,
+                    crate::types::ReceiverMode::Ref => AirArgMode::Ref,
+                    crate::types::ReceiverMode::MutRef => AirArgMode::MutRef,
                 };
                 let return_type = method_info.return_type;
                 let type_name = self.format_type_name(lhs_type);
@@ -10038,7 +10039,7 @@ impl<'a> Sema<'a> {
         // so codegen passes a pointer to the receiver storage; otherwise
         // pass by value and rely on the write-back path.
         let recv_mode = if mutates_in_place {
-            AirArgMode::Inout
+            AirArgMode::MutRef
         } else {
             AirArgMode::Normal
         };
@@ -10146,12 +10147,12 @@ impl<'a> Sema<'a> {
                 if let Some(param_info) = ctx.params.iter().find(|p| p.name == *name) {
                     // Check parameter mode
                     match param_info.mode {
-                        RirParamMode::Inout => {
+                        RirParamMode::MutRef => {
                             return Ok(Some(StringReceiverStorage::Param {
                                 abi_slot: param_info.abi_slot,
                             }));
                         }
-                        RirParamMode::Borrow => {
+                        RirParamMode::Ref => {
                             let name_str = self.interner.resolve(name);
                             return Err(CompileError::new(
                                 ErrorKind::MutateBorrowedValue {
@@ -10386,14 +10387,15 @@ impl<'a> Sema<'a> {
 
             // Lvalue check for legacy modes is here; for MakeRef the lvalue
             // check happens in `analyze_make_ref`.
-            if arg.is_inout() {
+            if arg.mode == RirArgMode::MutRef {
                 if self.extract_root_variable(arg.value).is_none() {
                     return Err(CompileError::new(
                         ErrorKind::InoutNonLvalue,
                         self.rir.get(arg.value).span,
                     ));
                 }
-            } else if arg.is_borrow() && self.extract_root_variable(arg.value).is_none() {
+            } else if arg.mode == RirArgMode::Ref && self.extract_root_variable(arg.value).is_none()
+            {
                 return Err(CompileError::new(
                     ErrorKind::BorrowNonLvalue,
                     self.rir.get(arg.value).span,
@@ -10442,10 +10444,10 @@ impl<'a> Sema<'a> {
     /// inout-like; `borrow`/`&x` count as borrow-like. Normal-mode arguments
     /// where the value is not a MakeRef return `(false, false)`.
     pub(crate) fn classify_borrowing_arg(&self, arg: &RirCallArg) -> (bool, bool) {
-        if arg.is_inout() {
+        if arg.mode == RirArgMode::MutRef {
             return (true, false);
         }
-        if arg.is_borrow() {
+        if arg.mode == RirArgMode::Ref {
             return (false, true);
         }
         if let InstData::MakeRef { is_mut, .. } = self.rir.get(arg.value).data {

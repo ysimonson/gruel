@@ -222,24 +222,27 @@ pub struct CfgInst {
     pub span: Span,
 }
 
-/// Argument passing mode in CFG.
+/// Argument passing mode in CFG. Mirrors [`gruel_air::AirArgMode`]; the
+/// `MutRef` / `Ref` markers survive ADR-0076 as the legacy by-pointer ABI
+/// signal used for parameters whose declared type cannot itself be wrapped
+/// as `Ref(...)` / `MutRef(...)` (notably interface-typed parameters).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CfgArgMode {
-    /// Normal pass-by-value argument
+    /// Normal pass-by-value argument.
     #[default]
     Normal,
-    /// Inout argument - mutated in place
-    Inout,
-    /// Borrow argument - immutable borrow
-    Borrow,
+    /// Exclusive mutable reborrow (by-pointer ABI).
+    MutRef,
+    /// Shared immutable reborrow (by-pointer ABI).
+    Ref,
 }
 
 impl From<gruel_air::AirArgMode> for CfgArgMode {
     fn from(mode: gruel_air::AirArgMode) -> Self {
         match mode {
             gruel_air::AirArgMode::Normal => CfgArgMode::Normal,
-            gruel_air::AirArgMode::Inout => CfgArgMode::Inout,
-            gruel_air::AirArgMode::Borrow => CfgArgMode::Borrow,
+            gruel_air::AirArgMode::MutRef => CfgArgMode::MutRef,
+            gruel_air::AirArgMode::Ref => CfgArgMode::Ref,
         }
     }
 }
@@ -254,19 +257,23 @@ pub struct CfgCallArg {
 }
 
 impl CfgCallArg {
-    /// Returns true if this argument is passed as inout (mutable by reference).
-    pub fn is_inout(&self) -> bool {
-        self.mode == CfgArgMode::Inout
+    /// Returns true if this argument is passed by exclusive mutable
+    /// reborrow per the legacy by-pointer ABI (ADR-0076 transport for
+    /// interface params).
+    pub fn is_mut_ref(&self) -> bool {
+        self.mode == CfgArgMode::MutRef
     }
 
-    /// Returns true if this argument is passed as borrow (immutable by reference).
-    pub fn is_borrow(&self) -> bool {
-        self.mode == CfgArgMode::Borrow
+    /// Returns true if this argument is passed by shared immutable
+    /// reborrow per the legacy by-pointer ABI.
+    pub fn is_ref(&self) -> bool {
+        self.mode == CfgArgMode::Ref
     }
 
-    /// Returns true if this argument is passed by reference (either inout or borrow).
+    /// Returns true if this argument is passed by reference (either
+    /// `MutRef` or `Ref` per the legacy ABI markers).
     pub fn is_by_ref(&self) -> bool {
-        matches!(self.mode, CfgArgMode::Inout | CfgArgMode::Borrow)
+        matches!(self.mode, CfgArgMode::MutRef | CfgArgMode::Ref)
     }
 }
 
@@ -744,17 +751,18 @@ impl Cfg {
             .unwrap_or(AirParamMode::Normal)
     }
 
-    /// Get whether a parameter slot is inout.
+    /// Get whether a parameter slot is an exclusive mutable borrow per the
+    /// legacy mode mechanism.
     #[inline]
-    pub fn is_param_inout(&self, slot: u32) -> bool {
-        self.param_mode(slot).is_inout()
+    pub fn is_param_mut_ref(&self, slot: u32) -> bool {
+        self.param_mode(slot).is_mut_ref()
     }
 
-    /// Get whether a parameter slot is borrow (legacy `borrow` mode or
-    /// ADR-0062 `Ref(T)`-typed parameter).
+    /// Get whether a parameter slot is a shared immutable borrow (legacy
+    /// `Ref` mode or ADR-0062 `Ref(T)`-typed parameter).
     #[inline]
-    pub fn is_param_borrow(&self, slot: u32) -> bool {
-        if self.param_mode(slot).is_borrow() {
+    pub fn is_param_ref(&self, slot: u32) -> bool {
+        if self.param_mode(slot).is_ref() {
             return true;
         }
         // ADR-0062: a `Ref(T)`-typed parameter has the same calling
@@ -1269,8 +1277,8 @@ impl Cfg {
                         write!(f, ", ")?;
                     }
                     match arg.mode {
-                        CfgArgMode::Inout => write!(f, "inout {}", arg.value)?,
-                        CfgArgMode::Borrow => write!(f, "borrow {}", arg.value)?,
+                        CfgArgMode::MutRef => write!(f, "mut_ref {}", arg.value)?,
+                        CfgArgMode::Ref => write!(f, "ref {}", arg.value)?,
                         CfgArgMode::Normal => write!(f, "{}", arg.value)?,
                     }
                 }

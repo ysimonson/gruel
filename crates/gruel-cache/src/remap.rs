@@ -278,11 +278,11 @@ impl RemapSpurs for Method {
 
 impl RemapSpurs for SelfParam {
     fn remap_spurs(&mut self, _table: &[Spur]) {
-        // SelfParam contains only a SelfMode (no Spurs) and a Span.
+        // SelfParam contains only a SelfReceiverKind (no Spurs) and a Span.
     }
 }
 
-impl RemapSpurs for SelfMode {
+impl RemapSpurs for SelfReceiverKind {
     fn remap_spurs(&mut self, _table: &[Spur]) {}
 }
 

@@ -640,24 +640,26 @@ impl IfaceTy {
 /// Receiver mode for an interface method (ADR-0060).
 ///
 /// Mirrors the parameter modes available on regular methods. `check_conforms`
-/// requires the candidate method's receiver mode to match exactly.
+/// requires the candidate method's receiver mode to match exactly. Per
+/// ADR-0076, the surface forms are `self : Self`, `self : Ref(Self)`, and
+/// `self : MutRef(Self)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReceiverMode {
-    /// `self` — by-value receiver.
+    /// `self` / `self : Self` — by-value receiver.
     ByValue,
-    /// `inout self` — exclusive mutable borrow.
-    Inout,
-    /// `borrow self` — shared immutable borrow.
-    Borrow,
+    /// `self : MutRef(Self)` — exclusive mutable borrow receiver.
+    MutRef,
+    /// `self : Ref(Self)` — shared immutable borrow receiver.
+    Ref,
 }
 
 impl ReceiverMode {
-    /// Render the receiver token (e.g. `self`, `inout self`, `borrow self`).
+    /// Render the receiver as it would appear in source.
     pub fn render(&self) -> &'static str {
         match self {
             ReceiverMode::ByValue => "self",
-            ReceiverMode::Inout => "inout self",
-            ReceiverMode::Borrow => "borrow self",
+            ReceiverMode::MutRef => "self: MutRef(Self)",
+            ReceiverMode::Ref => "self: Ref(Self)",
         }
     }
 }

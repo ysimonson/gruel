@@ -40,15 +40,23 @@ pub struct RirDirective {
 }
 
 /// Parameter passing mode in RIR.
+///
+/// Per ADR-0076, the surface language no longer has `inout` / `borrow`
+/// keyword forms. The legacy mode names are gone; `MutRef` / `Ref` survive
+/// as a transport mechanism for places where the param's `Type` cannot
+/// itself be wrapped (notably interface-typed parameters, where the type
+/// pool cannot intern `Ref(Interface)` / `MutRef(Interface)`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RirParamMode {
-    /// Normal pass-by-value parameter
+    /// Normal pass-by-value parameter (or any reference whose ref-ness is
+    /// already encoded in the parameter `Type`).
     #[default]
     Normal,
-    /// Inout parameter - mutated in place and returned to caller
-    Inout,
-    /// Borrow parameter - immutable borrow without ownership transfer
-    Borrow,
+    /// Exclusive mutable borrow on a parameter whose declared type cannot
+    /// itself be wrapped as `MutRef(...)` (e.g. interface params).
+    MutRef,
+    /// Shared immutable borrow with the same caveat as `MutRef`.
+    Ref,
     /// Comptime parameter - evaluated at compile time (used for type parameters)
     Comptime,
 }
@@ -67,15 +75,21 @@ pub struct RirParam {
 }
 
 /// Argument passing mode in RIR.
+///
+/// Mirrors [`RirParamMode`]: `MutRef` / `Ref` are vestigial-but-used
+/// markers carried alongside arguments whose ref-ness cannot be encoded in
+/// the AIR value type (interface forwarding) so codegen still routes them
+/// through the by-pointer ABI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RirArgMode {
-    /// Normal pass-by-value argument
+    /// Normal pass-by-value argument (or a `&x` / `&mut x` whose ref-ness
+    /// is already in the AIR value type).
     #[default]
     Normal,
-    /// Inout argument - mutated in place
-    Inout,
-    /// Borrow argument - immutable borrow
-    Borrow,
+    /// Exclusive mutable reborrow forwarded to a `MutRef`-mode parameter.
+    MutRef,
+    /// Shared immutable reborrow forwarded to a `Ref`-mode parameter.
+    Ref,
 }
 
 /// An argument in a function call.
@@ -85,19 +99,6 @@ pub struct RirCallArg {
     pub value: InstRef,
     /// The passing mode for this argument
     pub mode: RirArgMode,
-}
-
-impl RirCallArg {
-    /// Returns true if this argument is passed as inout.
-    /// This is a convenience method for backwards compatibility.
-    pub fn is_inout(&self) -> bool {
-        self.mode == RirArgMode::Inout
-    }
-
-    /// Returns true if this argument is passed as borrow.
-    pub fn is_borrow(&self) -> bool {
-        self.mode == RirArgMode::Borrow
-    }
 }
 
 /// A pattern in a match expression (RIR level - untyped).
@@ -997,8 +998,8 @@ impl Rir {
             let value = InstRef::from_raw(chunk[0]);
             let mode = match chunk[1] {
                 0 => RirArgMode::Normal,
-                1 => RirArgMode::Inout,
-                2 => RirArgMode::Borrow,
+                1 => RirArgMode::MutRef,
+                2 => RirArgMode::Ref,
                 _ => RirArgMode::Normal, // Fallback, shouldn't happen
             };
             args.push(RirCallArg { value, mode });
@@ -1029,8 +1030,8 @@ impl Rir {
             let ty = Spur::try_from_usize(chunk[1] as usize).unwrap();
             let mode = match chunk[2] {
                 0 => RirParamMode::Normal,
-                1 => RirParamMode::Inout,
-                2 => RirParamMode::Borrow,
+                1 => RirParamMode::MutRef,
+                2 => RirParamMode::Ref,
                 3 => RirParamMode::Comptime,
                 _ => RirParamMode::Normal, // Fallback
             };
@@ -2527,8 +2528,9 @@ pub enum InstData {
         /// Only true for methods in impl blocks that have a self parameter.
         /// Used by sema to know to add the implicit self parameter.
         has_self: bool,
-        /// Receiver mode for methods (ADR-0060). Encoded as `RirParamMode`
-        /// (0 = Normal, 1 = Inout, 2 = Borrow). Ignored when `!has_self`.
+        /// Receiver shape for methods (ADR-0060, ADR-0076). Encoded as a
+        /// byte: 0 = `self`/`self : Self` (by-value), 1 = `self : MutRef(Self)`,
+        /// 2 = `self : Ref(Self)`. Ignored when `!has_self`.
         receiver_mode: u8,
     },
 
@@ -2857,10 +2859,9 @@ pub enum InstData {
     /// A single method signature inside an `InterfaceDecl`.
     ///
     /// No body. The receiver is always present (interface methods cannot
-    /// be associated functions in MVP); its mode (`self`, `inout self`,
-    /// `borrow self`) is encoded in `receiver_mode` using the same numbering
-    /// as `RirParamMode` (Normal/Inout/Borrow only — Comptime is rejected
-    /// by the grammar).
+    /// be associated functions in MVP); its surface shape (`self`,
+    /// `self : MutRef(Self)`, or `self : Ref(Self)`) is encoded in
+    /// `receiver_mode` using the byte mapping 0/1/2.
     InterfaceMethodSig {
         /// Method name.
         name: Spur,
@@ -3134,27 +3135,25 @@ mod tests {
 
     // RirCallArg tests
     #[test]
-    fn test_rir_call_arg_is_inout() {
+    fn test_rir_call_arg_modes_distinct() {
         let arg_normal = RirCallArg {
             value: InstRef::from_raw(0),
             mode: RirArgMode::Normal,
         };
-        assert!(!arg_normal.is_inout());
-        assert!(!arg_normal.is_borrow());
-
-        let arg_inout = RirCallArg {
+        let arg_mut_ref = RirCallArg {
             value: InstRef::from_raw(0),
-            mode: RirArgMode::Inout,
+            mode: RirArgMode::MutRef,
         };
-        assert!(arg_inout.is_inout());
-        assert!(!arg_inout.is_borrow());
-
-        let arg_borrow = RirCallArg {
+        let arg_ref = RirCallArg {
             value: InstRef::from_raw(0),
-            mode: RirArgMode::Borrow,
+            mode: RirArgMode::Ref,
         };
-        assert!(!arg_borrow.is_inout());
-        assert!(arg_borrow.is_borrow());
+        assert_eq!(arg_normal.mode, RirArgMode::Normal);
+        assert_eq!(arg_mut_ref.mode, RirArgMode::MutRef);
+        assert_eq!(arg_ref.mode, RirArgMode::Ref);
+        assert_ne!(arg_normal.mode, arg_mut_ref.mode);
+        assert_ne!(arg_normal.mode, arg_ref.mode);
+        assert_ne!(arg_mut_ref.mode, arg_ref.mode);
     }
 
     // RirPrinter tests
@@ -3573,13 +3572,13 @@ mod tests {
             RirParam {
                 name: param2_name,
                 ty: param2_type,
-                mode: RirParamMode::Inout,
+                mode: RirParamMode::MutRef,
                 is_comptime: false,
             },
             RirParam {
                 name: param3_name,
                 ty: param3_type,
-                mode: RirParamMode::Borrow,
+                mode: RirParamMode::Ref,
                 is_comptime: false,
             },
         ]);
@@ -3604,8 +3603,8 @@ mod tests {
         let printer = RirPrinter::new(&rir, &interner);
         let output = printer.to_string();
         assert!(output.contains("a: i32"));
-        assert!(output.contains("inout b: i32"));
-        assert!(output.contains("borrow c: i32"));
+        assert!(output.contains("mut_ref b: i32"));
+        assert!(output.contains("ref c: i32"));
     }
 
     #[test]
@@ -3662,11 +3661,11 @@ mod tests {
             },
             RirCallArg {
                 value: arg2,
-                mode: RirArgMode::Inout,
+                mode: RirArgMode::MutRef,
             },
             RirCallArg {
                 value: arg3,
-                mode: RirArgMode::Borrow,
+                mode: RirArgMode::Ref,
             },
         ]);
 
@@ -3681,7 +3680,7 @@ mod tests {
 
         let printer = RirPrinter::new(&rir, &interner);
         let output = printer.to_string();
-        assert!(output.contains("call modify(%0, inout %1, borrow %2)"));
+        assert!(output.contains("call modify(%0, mut_ref %1, ref %2)"));
     }
 
     #[test]
@@ -4313,11 +4312,11 @@ mod tests {
         let (args_start, args_len) = rir.add_call_args(&[
             RirCallArg {
                 value: arg1,
-                mode: RirArgMode::Inout,
+                mode: RirArgMode::MutRef,
             },
             RirCallArg {
                 value: arg2,
-                mode: RirArgMode::Borrow,
+                mode: RirArgMode::Ref,
             },
         ]);
 
@@ -4333,7 +4332,7 @@ mod tests {
 
         let printer = RirPrinter::new(&rir, &interner);
         let output = printer.to_string();
-        assert!(output.contains("method_call %0.modify(inout %1, borrow %2)"));
+        assert!(output.contains("method_call %0.modify(mut_ref %1, ref %2)"));
     }
 
     #[test]

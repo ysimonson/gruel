@@ -50,6 +50,7 @@ pub use ast::{
     Pattern,
     ReturnExpr,
     SelfParam,
+    SelfReceiverKind,
     SoaAst,
     Statement,
     StructDecl,

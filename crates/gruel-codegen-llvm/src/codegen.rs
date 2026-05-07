@@ -424,7 +424,7 @@ fn declare_function<'ctx>(
                     0,
                 ),
             );
-            if cfg.is_param_borrow(i as u32) {
+            if cfg.is_param_ref(i as u32) {
                 f.add_attribute(
                     inkwell::attributes::AttributeLoc::Param(llvm_idx),
                     ctx.create_enum_attribute(
@@ -2153,7 +2153,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 let call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = args
                     .iter()
                     .filter_map(|arg| {
-                        if arg.is_inout() || arg.is_borrow() {
+                        if arg.is_mut_ref() || arg.is_ref() {
                             // By-ref: pass the raw pointer, not the loaded value.
                             let inst = self.cfg.get_inst(arg.value);
                             return match inst.data {
@@ -2223,7 +2223,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     let mut sret_param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
                         vec![ptr_ty.into()];
                     sret_param_types.extend(args.iter().filter_map(|arg| {
-                        if arg.is_inout() || arg.is_borrow() {
+                        if arg.is_mut_ref() || arg.is_ref() {
                             Some(ptr_ty.into())
                         } else {
                             let arg_ty = self.cfg.get_inst(arg.value).ty;
@@ -2265,7 +2265,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                             let param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
                                 args.iter()
                                     .filter_map(|arg| {
-                                        if arg.is_inout() || arg.is_borrow() {
+                                        if arg.is_mut_ref() || arg.is_ref() {
                                             Some(
                                                 self.ctx
                                                     .ptr_type(inkwell::AddressSpace::default())
@@ -4271,7 +4271,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         }
     }
 
-    /// Get a pointer to the Vec aggregate. Inout/Borrow CFG args are passed
+    /// Get a pointer to the Vec aggregate. `MutRef`/`Ref` CFG args are passed
     /// pre-load (the codegen call path materializes a pointer in `call_args`),
     /// but `Intrinsic` args don't go through that path — the Vec value is
     /// available as either a pointer (when the source has a stable storage

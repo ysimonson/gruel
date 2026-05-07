@@ -366,8 +366,8 @@ impl<'a> Sema<'a> {
                             .map(|p| (p.name, p.ty))
                             .collect();
                         let receiver = match *receiver_mode {
-                            1 => ReceiverMode::Inout,
-                            2 => ReceiverMode::Borrow,
+                            1 => ReceiverMode::MutRef,
+                            2 => ReceiverMode::Ref,
                             _ => ReceiverMode::ByValue,
                         };
                         methods.push(RawIfaceMethod {

@@ -8,7 +8,7 @@ use lasso::{Spur, ThreadedRodeo};
 use gruel_intrinsics::{IntrinsicKind, is_type_intrinsic, lookup_by_name};
 use gruel_parser::ast::{
     BlockExpr, ConstDecl, DeriveDecl, Directives, DropFn, FieldPattern, Ident, SelfParam,
-    TupleElemPattern,
+    SelfReceiverKind, TupleElemPattern,
 };
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp as AstBinOp, CallArg, Directive, DirectiveArg, EnumDecl,
@@ -16,6 +16,20 @@ use gruel_parser::{
     TypeExpr, UnaryOp as AstUnaryOp, ast::Visibility,
 };
 use gruel_util::{BinOp, UnaryOp};
+
+/// Encode a parsed receiver-kind classification as the byte the RIR (and
+/// downstream sema) consumes for `InterfaceMethodSig.receiver_mode` and
+/// `FnDecl.receiver_mode`.
+///
+/// Layout: 0 = by-value, 1 = `MutRef(Self)`, 2 = `Ref(Self)`. The numbering
+/// is preserved for cache-hash stability across the ADR-0076 cleanup.
+fn encode_self_receiver_kind(kind: SelfReceiverKind) -> u8 {
+    match kind {
+        SelfReceiverKind::ByValue => 0,
+        SelfReceiverKind::MutRef => 1,
+        SelfReceiverKind::Ref => 2,
+    }
+}
 
 use crate::inst::{
     FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDestructureField,
@@ -402,11 +416,7 @@ impl<'a> AstGen<'a> {
                     .collect();
                 let (params_start, params_len) = self.rir.add_params(&params);
 
-                let receiver_mode = match sig.receiver.mode {
-                    gruel_parser::ast::SelfMode::ByValue => 0u8,
-                    gruel_parser::ast::SelfMode::Inout => 1u8,
-                    gruel_parser::ast::SelfMode::Borrow => 2u8,
-                };
+                let receiver_mode = encode_self_receiver_kind(sig.receiver.kind);
                 self.rir.add_inst(Inst {
                     data: InstData::InterfaceMethodSig {
                         name,
@@ -523,11 +533,11 @@ impl<'a> AstGen<'a> {
 
         // Track whether this method has a self receiver (method vs associated function)
         let has_self = method.receiver.is_some();
-        let receiver_mode = match method.receiver.as_ref().map(|r| r.mode) {
-            Some(gruel_parser::ast::SelfMode::Inout) => 1u8,
-            Some(gruel_parser::ast::SelfMode::Borrow) => 2u8,
-            _ => 0u8,
-        };
+        let receiver_mode = method
+            .receiver
+            .as_ref()
+            .map(|r| encode_self_receiver_kind(r.kind))
+            .unwrap_or(0u8);
 
         // Emit methods as FnDecl instructions with has_self flag.
         // Sema uses has_self to add the implicit self parameter for methods.
@@ -586,8 +596,6 @@ impl<'a> AstGen<'a> {
     fn convert_param_mode(&self, mode: ParamMode) -> RirParamMode {
         match mode {
             ParamMode::Normal => RirParamMode::Normal,
-            ParamMode::Inout => RirParamMode::Inout,
-            ParamMode::Borrow => RirParamMode::Borrow,
             ParamMode::Comptime => RirParamMode::Comptime,
         }
     }
@@ -596,8 +604,6 @@ impl<'a> AstGen<'a> {
     fn convert_arg_mode(&self, mode: ArgMode) -> RirArgMode {
         match mode {
             ArgMode::Normal => RirArgMode::Normal,
-            ArgMode::Inout => RirArgMode::Inout,
-            ArgMode::Borrow => RirArgMode::Borrow,
         }
     }
 
@@ -1287,11 +1293,7 @@ impl<'a> AstGen<'a> {
                                     })
                                     .collect();
                                 let (params_start, params_len) = self.rir.add_params(&params);
-                                let receiver_mode = match sig.receiver.mode {
-                                    gruel_parser::ast::SelfMode::ByValue => 0u8,
-                                    gruel_parser::ast::SelfMode::Inout => 1u8,
-                                    gruel_parser::ast::SelfMode::Borrow => 2u8,
-                                };
+                                let receiver_mode = encode_self_receiver_kind(sig.receiver.kind);
                                 self.rir.add_inst(Inst {
                                     data: InstData::InterfaceMethodSig {
                                         name,
@@ -1456,7 +1458,7 @@ impl<'a> AstGen<'a> {
                     visibility: gruel_parser::ast::Visibility::Public,
                     name: call_ident,
                     receiver: Some(SelfParam {
-                        mode: gruel_parser::ast::SelfMode::ByValue,
+                        kind: gruel_parser::ast::SelfReceiverKind::ByValue,
                         span: anon_fn.span,
                     }),
                     params: anon_fn.params.clone(),

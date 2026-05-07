@@ -168,8 +168,8 @@ fn param_kind_flags(param: &super::context::ParamInfo) -> (bool, bool) {
         crate::types::TypeKind::MutRef(_) => (true, false),
         crate::types::TypeKind::Ref(_) => (false, true),
         _ => match param.mode {
-            gruel_rir::RirParamMode::Inout => (true, false),
-            gruel_rir::RirParamMode::Borrow => (false, true),
+            gruel_rir::RirParamMode::MutRef => (true, false),
+            gruel_rir::RirParamMode::Ref => (false, true),
             _ => (false, false),
         },
     }
@@ -5143,7 +5143,7 @@ impl<'a> Sema<'a> {
             };
             if needs_move_check {
                 let is_borrow = matches!(by_ref_kind, Some(false))
-                    || matches!(param_info.mode, RirParamMode::Borrow);
+                    || matches!(param_info.mode, RirParamMode::Ref);
                 if is_borrow {
                     if ctx.borrow_arg_skip_move != Some(name) {
                         let name_str = self.interner.resolve(&name);
@@ -5424,19 +5424,21 @@ impl<'a> Sema<'a> {
         if let Some(param_info) = ctx.params.iter().find(|p| p.name == name) {
             // ADR-0076 collapse: read ref-ness off the type pool. A param
             // of type `MutRef(T)` permits bare-name write-through; a param
-            // of type `Ref(T)` rejects it as a borrow mutation. The
-            // legacy `Inout` / `Borrow` modes still flow through for
-            // pre-collapse callers.
+            // of type `Ref(T)` rejects it as a borrow mutation. The legacy
+            // `MutRef` / `Ref` parameter modes (transport for interface
+            // params per ADR-0076) still flow through for pre-collapse
+            // callers.
             let by_ref_kind = match param_info.ty.kind() {
                 TypeKind::MutRef(_) => Some(true),
                 TypeKind::Ref(_) => Some(false),
                 _ => None,
             };
             match (by_ref_kind, param_info.mode) {
-                (Some(true), _) | (_, RirParamMode::Inout) => {
-                    // MutRef(T) param OR legacy `inout` mode — write-through.
+                (Some(true), _) | (_, RirParamMode::MutRef) => {
+                    // `MutRef(T)` param (type-driven) OR legacy `MutRef`
+                    // mode (interface transport) — write-through.
                 }
-                (Some(false), _) | (_, RirParamMode::Borrow) => {
+                (Some(false), _) | (_, RirParamMode::Ref) => {
                     return Err(CompileError::new(
                         ErrorKind::MutateBorrowedValue {
                             variable: name_str.to_string(),
@@ -7415,12 +7417,13 @@ impl<'a> Sema<'a> {
         self.check_exclusive_access(&args, span)?;
 
         // Check that call-site argument modes match function parameter modes.
-        // ADR-0076 Phase 2: a `&x` (`MakeRef { is_mut: false }`) expression in
-        // argument position is accepted for a `Borrow`-mode param, and a
-        // `&mut x` (`MakeRef { is_mut: true }`) is accepted for an
-        // `Inout`-mode param. This composes the new `Ref(I)` / `MutRef(I)`
-        // surface form (which normalizes to the Borrow/Inout legacy mode at
-        // signature time) with the new construction syntax.
+        // ADR-0076 Phase 2: a `&x` (`MakeRef { is_mut: false }`) expression
+        // in argument position is accepted for a `Ref`-mode param, and a
+        // `&mut x` (`MakeRef { is_mut: true }`) is accepted for a
+        // `MutRef`-mode param. This composes the `Ref(I)` / `MutRef(I)`
+        // surface form (which normalizes to the legacy `Ref` / `MutRef`
+        // transport modes at interface signature time) with the new
+        // construction syntax.
         for (i, (arg, expected_mode)) in args.iter().zip(param_modes.iter()).enumerate() {
             let arg_is_make_ref_immut = matches!(
                 self.rir.get(arg.value).data,
@@ -7431,16 +7434,16 @@ impl<'a> Sema<'a> {
                 gruel_rir::InstData::MakeRef { is_mut: true, .. }
             );
             match expected_mode {
-                RirParamMode::Inout => {
-                    if arg.mode != RirArgMode::Inout && !arg_is_make_ref_mut {
+                RirParamMode::MutRef => {
+                    if arg.mode != RirArgMode::MutRef && !arg_is_make_ref_mut {
                         return Err(CompileError::new(
                             ErrorKind::InoutKeywordMissing,
                             self.rir.get(args[i].value).span,
                         ));
                     }
                 }
-                RirParamMode::Borrow => {
-                    if arg.mode != RirArgMode::Borrow && !arg_is_make_ref_immut {
+                RirParamMode::Ref => {
+                    if arg.mode != RirArgMode::Ref && !arg_is_make_ref_immut {
                         return Err(CompileError::new(
                             ErrorKind::BorrowKeywordMissing,
                             self.rir.get(args[i].value).span,
@@ -7535,15 +7538,16 @@ impl<'a> Sema<'a> {
 
         // ADR-0076: implicit forwarding of a `Ref(T)` / `MutRef(T)` parameter.
         // If the callee expects `MutRef(T)` / `Ref(T)` and the arg is a bare
-        // `Var(name)` referencing a Borrow/Inout-mode parameter whose inner
-        // type is `T`, treat the arg as if the user had written `&name` /
-        // `&mut name`. Re-mode the arg here (before `analyze_call_args`)
-        // so the existing borrow-tracking machinery sees it as a borrow
-        // and doesn't apply move semantics; the post-process loop below
-        // also flips the AIR-arg mode so codegen passes the param pointer.
-        // Also stash the binding name in `ctx.borrow_arg_skip_move` for the
-        // duration of this arg's analysis so a `Borrow` parameter read
-        // doesn't trigger a "move out of borrow" error.
+        // `Var(name)` referencing a `Ref`/`MutRef`-mode parameter (legacy
+        // transport for interface params) whose inner type is `T`, treat the
+        // arg as if the user had written `&name` / `&mut name`. Re-mode the
+        // arg here (before `analyze_call_args`) so the existing
+        // borrow-tracking machinery sees it as a borrow and doesn't apply
+        // move semantics; the post-process loop below also flips the AIR-arg
+        // mode so codegen passes the param pointer. Also stash the binding
+        // name in `ctx.borrow_arg_skip_move` for the duration of this arg's
+        // analysis so a `Ref`-mode parameter read doesn't trigger a "move
+        // out of borrow" error.
         let mut args: Vec<RirCallArg> = args.to_vec();
         let mut implicit_borrow_arg: Vec<Option<Spur>> = vec![None; args.len()];
         for (i, param_ty) in param_types.iter().enumerate() {
@@ -7561,21 +7565,21 @@ impl<'a> Sema<'a> {
                 && p.ty == inner_ty
             {
                 let promoted_mode = match (param_ty.kind(), p.mode) {
-                    (crate::types::TypeKind::MutRef(_), RirParamMode::Inout) => {
-                        gruel_rir::RirArgMode::Inout
+                    (crate::types::TypeKind::MutRef(_), RirParamMode::MutRef) => {
+                        gruel_rir::RirArgMode::MutRef
                     }
-                    (crate::types::TypeKind::Ref(_), RirParamMode::Borrow) => {
-                        gruel_rir::RirArgMode::Borrow
+                    (crate::types::TypeKind::Ref(_), RirParamMode::Ref) => {
+                        gruel_rir::RirArgMode::Ref
                     }
-                    (crate::types::TypeKind::Ref(_), RirParamMode::Inout) => {
+                    (crate::types::TypeKind::Ref(_), RirParamMode::MutRef) => {
                         // A `MutRef(T)` parameter can be re-borrowed as `Ref(T)`
                         // (downgrading exclusivity to shared read-only).
-                        gruel_rir::RirArgMode::Borrow
+                        gruel_rir::RirArgMode::Ref
                     }
                     _ => continue,
                 };
                 args[i].mode = promoted_mode;
-                if matches!(p.mode, RirParamMode::Borrow) {
+                if matches!(p.mode, RirParamMode::Ref) {
                     implicit_borrow_arg[i] = Some(*name);
                 }
             }
@@ -7610,8 +7614,8 @@ impl<'a> Sema<'a> {
                 && air_args[i].mode == AirArgMode::Normal
             {
                 air_args[i].mode = match param_ty.kind() {
-                    crate::types::TypeKind::MutRef(_) => AirArgMode::Inout,
-                    crate::types::TypeKind::Ref(_) => AirArgMode::Borrow,
+                    crate::types::TypeKind::MutRef(_) => AirArgMode::MutRef,
+                    crate::types::TypeKind::Ref(_) => AirArgMode::Ref,
                     _ => unreachable!(),
                 };
             }

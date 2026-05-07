@@ -55,7 +55,7 @@ use lasso::ThreadedRodeo;
 use gruel_parser::ast::{
     AnonStructField, Ast, ConstDecl, DeriveDecl, EnumDecl, EnumVariant, EnumVariantField,
     EnumVariantKind, FieldDecl, Function, Ident, InterfaceDecl, Item, Method, MethodSig, Param,
-    SelfMode, SelfParam, StructDecl, TypeExpr, Visibility,
+    SelfParam, SelfReceiverKind, StructDecl, TypeExpr, Visibility,
 };
 
 use crate::fingerprint::{CacheKey, Hasher};
@@ -248,8 +248,6 @@ fn encode_param_mode(m: &gruel_parser::ast::ParamMode) -> u8 {
     use gruel_parser::ast::ParamMode;
     match m {
         ParamMode::Normal => 0,
-        ParamMode::Inout => 1,
-        ParamMode::Borrow => 2,
         ParamMode::Comptime => 3,
     }
 }
@@ -399,10 +397,10 @@ fn encode_method_sig_from_method(h: &mut Hasher, m: &Method, interner: &Threaded
 }
 
 fn encode_self_param(h: &mut Hasher, p: &SelfParam) {
-    let tag = match p.mode {
-        SelfMode::ByValue => 0,
-        SelfMode::Inout => 1,
-        SelfMode::Borrow => 2,
+    let tag = match p.kind {
+        SelfReceiverKind::ByValue => 0,
+        SelfReceiverKind::MutRef => 1,
+        SelfReceiverKind::Ref => 2,
     };
     h.update(&[tag]);
 }

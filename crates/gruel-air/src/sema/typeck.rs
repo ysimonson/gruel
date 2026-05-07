@@ -169,7 +169,7 @@ impl<'a> Sema<'a> {
         // `borrow` / `inout`.
         if let Some(&interface_id) = self.interfaces.get(&type_sym) {
             return match mode {
-                gruel_rir::RirParamMode::Inout | gruel_rir::RirParamMode::Borrow => {
+                gruel_rir::RirParamMode::MutRef | gruel_rir::RirParamMode::Ref => {
                     Ok((Type::new_interface(interface_id), mode))
                 }
                 _ => {
@@ -203,9 +203,9 @@ impl<'a> Sema<'a> {
             let arg_sym = self.interner.get_or_intern(&args[0]);
             if let Some(&interface_id) = self.interfaces.get(&arg_sym) {
                 let normalized_mode = if callee == "MutRef" {
-                    gruel_rir::RirParamMode::Inout
+                    gruel_rir::RirParamMode::MutRef
                 } else {
-                    gruel_rir::RirParamMode::Borrow
+                    gruel_rir::RirParamMode::Ref
                 };
                 return Ok((Type::new_interface(interface_id), normalized_mode));
             }
@@ -216,9 +216,9 @@ impl<'a> Sema<'a> {
                 && let TypeKind::Interface(_) = inner_ty.kind()
             {
                 let normalized_mode = if callee == "MutRef" {
-                    gruel_rir::RirParamMode::Inout
+                    gruel_rir::RirParamMode::MutRef
                 } else {
-                    gruel_rir::RirParamMode::Borrow
+                    gruel_rir::RirParamMode::Ref
                 };
                 return Ok((inner_ty, normalized_mode));
             }
