@@ -110,6 +110,15 @@ pub enum IntrinsicId {
     VecDispose,
     PartsToVec,
 
+    // ---- ADR-0081 Vec(T) byte-comparison and search methods ----
+    VecEq,
+    VecCmp,
+    VecContains,
+    VecStartsWith,
+    VecEndsWith,
+    VecConcat,
+    VecExtendFromSlice,
+
     // ---- ADR-0072 String / Vec(u8) bridge ----
     Utf8Validate,
     CStrToVec,
@@ -1048,6 +1057,91 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         description: "`@parts_to_vec(p: MutPtr(T), len: usize, cap: usize) -> Vec(T)` takes ownership of `p`. Requires a `checked` block.",
         examples: &[],
     },
+    // ---- ADR-0081 Vec(T) byte-comparison and search methods ----
+    IntrinsicDef {
+        id: IntrinsicId::VecEq,
+        name: "vec_eq",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Element-wise equality between two Vecs.",
+        description: "`@vec_eq(a, b)` returns `true` iff `a` and `b` have identical lengths and every element pair compares equal. Requires `T: Copy`. Surface form: `a == b` (via the Eq interface).",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecCmp,
+        name: "vec_cmp",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Lexicographic comparison between two Vecs.",
+        description: "`@vec_cmp(a, b)` returns `Ordering::Less` / `Ordering::Equal` / `Ordering::Greater` from element-by-element comparison with length tiebreak. Requires `T: Copy`. Surface form: `a.cmp(b)` and the `<` / `<=` / `>` / `>=` operators (via the Ord interface).",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecContains,
+        name: "vec_contains",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Test whether a Vec contains a given subsequence.",
+        description: "`@vec_contains(haystack, needle)` returns `true` iff the slice `needle` occurs as a contiguous subsequence within `haystack`. Empty `needle` matches anywhere (returns `true`). Requires `T: Copy`. Surface form: `haystack.contains(&needle[..])`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecStartsWith,
+        name: "vec_starts_with",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Test whether a Vec begins with a given prefix.",
+        description: "`@vec_starts_with(v, prefix)` returns `true` iff every element of `prefix` matches the corresponding leading element of `v`. Empty prefix returns `true`. Requires `T: Copy`. Surface form: `v.starts_with(&prefix[..])`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecEndsWith,
+        name: "vec_ends_with",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Test whether a Vec ends with a given suffix.",
+        description: "`@vec_ends_with(v, suffix)` returns `true` iff every element of `suffix` matches the corresponding trailing element of `v`. Empty suffix returns `true`. Requires `T: Copy`. Surface form: `v.ends_with(&suffix[..])`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecConcat,
+        name: "vec_concat",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Build a new Vec by concatenating self with another slice.",
+        description: "`@vec_concat(v, other)` allocates a fresh `Vec(T)` of length `v.len + other.len` containing the elements of `v` followed by `other`. The original `v` is consumed (moved). Requires `T: Copy`. Surface form: `v.concat(&other[..])`.",
+        examples: &[],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::VecExtendFromSlice,
+        name: "vec_extend_from_slice",
+        kind: IntrinsicKind::Expr,
+        category: Category::Vec,
+        requires_unchecked: false,
+        preview: None,
+        runtime_fn: None,
+        summary: "Append every element from a slice onto a Vec.",
+        description: "`@vec_extend_from_slice(v, other)` reserves additional capacity if needed, then memcpys every element of `other` onto the tail of `v`. Requires `T: Copy`. Surface form: `v.extend_from_slice(&other[..])`.",
+        examples: &[],
+    },
     IntrinsicDef {
         id: IntrinsicId::TestPreviewGate,
         name: "test_preview_gate",
@@ -1702,6 +1796,13 @@ mod tests {
                 | IntrinsicId::VecRepeat
                 | IntrinsicId::VecDispose
                 | IntrinsicId::PartsToVec
+                | IntrinsicId::VecEq
+                | IntrinsicId::VecCmp
+                | IntrinsicId::VecContains
+                | IntrinsicId::VecStartsWith
+                | IntrinsicId::VecEndsWith
+                | IntrinsicId::VecConcat
+                | IntrinsicId::VecExtendFromSlice
                 | IntrinsicId::TestPreviewGate
                 | IntrinsicId::Utf8Validate
                 | IntrinsicId::CStrToVec

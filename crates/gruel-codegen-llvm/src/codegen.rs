@@ -4185,6 +4185,18 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
             IntrinsicId::PartsToVec => Some(self.translate_parts_to_vec(args, ty)),
 
+            // ADR-0081 Phase 1: byte-comparison and search methods.
+            IntrinsicId::VecEq => Some(self.translate_vec_eq(args, ty)),
+            IntrinsicId::VecCmp => Some(self.translate_vec_cmp(args, ty)),
+            IntrinsicId::VecContains => Some(self.translate_vec_contains(args, ty)),
+            IntrinsicId::VecStartsWith => Some(self.translate_vec_starts_with(args, ty)),
+            IntrinsicId::VecEndsWith => Some(self.translate_vec_ends_with(args, ty)),
+            IntrinsicId::VecConcat => Some(self.translate_vec_concat(args, ty)),
+            IntrinsicId::VecExtendFromSlice => {
+                self.translate_vec_extend_from_slice(args);
+                None
+            }
+
             // ADR-0072: @utf8_validate(s) — call __gruel_utf8_validate(ptr, len) -> u8,
             // convert to bool.
             IntrinsicId::Utf8Validate => Some(self.translate_utf8_validate(args)),
@@ -5417,6 +5429,660 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         let len = self.zext_to_i64(len_raw);
         let cap = self.zext_to_i64(cap_raw);
         self.vec_pack(p, len, cap)
+    }
+
+    /// `memcmp(a, b, n)` declaration — libc symbol returning `i32`.
+    fn memcmp_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
+        let i64_ty = self.ctx.i64_type();
+        let i32_ty = self.ctx.i32_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let fn_ty = i32_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
+        self.module
+            .get_function("memcmp")
+            .unwrap_or_else(|| self.module.add_function("memcmp", fn_ty, None))
+    }
+
+    /// `llvm.memcpy.p0.p0.i64` declaration.
+    fn memcpy_intrinsic(&mut self) -> inkwell::values::FunctionValue<'ctx> {
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let i64_ty = self.ctx.i64_type();
+        let fn_ty = self.ctx.void_type().fn_type(
+            &[
+                ptr_ty.into(),
+                ptr_ty.into(),
+                i64_ty.into(),
+                self.ctx.bool_type().into(),
+            ],
+            false,
+        );
+        self.module
+            .get_function("llvm.memcpy.p0.p0.i64")
+            .unwrap_or_else(|| {
+                self.module
+                    .add_function("llvm.memcpy.p0.p0.i64", fn_ty, None)
+            })
+    }
+
+    /// Load `(ptr, len)` out of a Vec receiver. The receiver is a Ref/MutRef
+    /// or by-value Vec aggregate; `vec_recv_ptr` normalizes to a pointer
+    /// to the aggregate slot.
+    fn vec_load_ptr_len(
+        &mut self,
+        recv: CfgValue,
+    ) -> (
+        inkwell::values::PointerValue<'ctx>,
+        inkwell::values::IntValue<'ctx>,
+    ) {
+        let recv_ptr = self.vec_recv_ptr(recv);
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let buf_ptr_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 0, "vec_buf_ptr")
+            .unwrap();
+        let len_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "vec_len_ptr")
+            .unwrap();
+        let buf = self
+            .builder
+            .build_load(ptr_ty, buf_ptr_ptr, "vec_buf")
+            .unwrap()
+            .into_pointer_value();
+        let len = self
+            .builder
+            .build_load(i64_ty, len_ptr, "vec_len")
+            .unwrap()
+            .into_int_value();
+        (buf, len)
+    }
+
+    /// Extract `(ptr, len)` out of a slice value. Slice aggregates are
+    /// `{ ptr, i64 }` (ADR-0064).
+    fn slice_unpack(
+        &mut self,
+        slice_arg: CfgValue,
+    ) -> (
+        inkwell::values::PointerValue<'ctx>,
+        inkwell::values::IntValue<'ctx>,
+    ) {
+        let slice_val = self.get_value(slice_arg).into_struct_value();
+        let ptr = self
+            .builder
+            .build_extract_value(slice_val, 0, "slice_arg_ptr")
+            .unwrap()
+            .into_pointer_value();
+        let len = self
+            .builder
+            .build_extract_value(slice_val, 1, "slice_arg_len")
+            .unwrap()
+            .into_int_value();
+        (ptr, len)
+    }
+
+    /// `v.eq(other)` — len equality + memcmp of `len * sizeof(T)` bytes.
+    fn translate_vec_eq(&mut self, args: &[CfgValue], _ty: Type) -> BasicValueEnum<'ctx> {
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let i64_ty = self.ctx.i64_type();
+        let zero64 = i64_ty.const_zero();
+        let i32_zero = self.ctx.i32_type().const_zero();
+        let (ptr1, len1) = self.vec_load_ptr_len(args[0]);
+        let (ptr2, len2) = self.vec_load_ptr_len(args[1]);
+        let len_eq = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, len1, len2, "vec_eq_len")
+            .unwrap();
+        // Short-circuit: if lens differ, false. Otherwise call memcmp.
+        // Use a select after computing memcmp(len1) so we have a single SSA
+        // result without needing branches; memcmp on len1==len2 path is the
+        // load-bearing comparison, on len1!=len2 we ignore it.
+        let total_bytes = self
+            .builder
+            .build_int_mul(len1, elem_size, "vec_eq_bytes")
+            .unwrap();
+        // Guard memcmp against zero-length (memcmp(_, _, 0) is well-defined,
+        // but we still compute it to keep a single basic block).
+        let memcmp_fn = self.memcmp_fn();
+        let cmp = self
+            .builder
+            .build_call(
+                memcmp_fn,
+                &[ptr1.into(), ptr2.into(), total_bytes.into()],
+                "vec_eq_cmp",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+        let cmp_eq = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, cmp, i32_zero, "vec_eq_byte_eq")
+            .unwrap();
+        // If buf is null AND total_bytes is 0, calling memcmp is legal but
+        // pessimistic; the cmp_eq result is already true for that case
+        // (memcmp(_, _, 0) is 0).
+        let _ = (zero64, ptr1, ptr2);
+        let result = self
+            .builder
+            .build_and(len_eq, cmp_eq, "vec_eq")
+            .unwrap();
+        result.into()
+    }
+
+    /// `v.cmp(other)` — element-wise lex compare + len tiebreak,
+    /// returning an `Ordering` (i32 discriminant: Less=0, Equal=1, Greater=2).
+    fn translate_vec_cmp(&mut self, args: &[CfgValue], ty: Type) -> BasicValueEnum<'ctx> {
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let (ptr1, len1) = self.vec_load_ptr_len(args[0]);
+        let (ptr2, len2) = self.vec_load_ptr_len(args[1]);
+        // min(len1, len2)
+        let len1_lt_len2 = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::ULT, len1, len2, "vec_cmp_len_lt")
+            .unwrap();
+        let min_len = self
+            .builder
+            .build_select(len1_lt_len2, len1, len2, "vec_cmp_min_len")
+            .unwrap()
+            .into_int_value();
+        let total_bytes = self
+            .builder
+            .build_int_mul(min_len, elem_size, "vec_cmp_bytes")
+            .unwrap();
+        let memcmp_fn = self.memcmp_fn();
+        let cmp = self
+            .builder
+            .build_call(
+                memcmp_fn,
+                &[ptr1.into(), ptr2.into(), total_bytes.into()],
+                "vec_cmp_byte",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+        // Ordering enum is unit-only, lowered to its discriminant.
+        let ord_llvm = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
+            .expect("Ordering must have an LLVM type");
+        let ord_int_ty = ord_llvm.into_int_type();
+        let less = ord_int_ty.const_int(0, false);
+        let equal = ord_int_ty.const_int(1, false);
+        let greater = ord_int_ty.const_int(2, false);
+        let i32_zero = self.ctx.i32_type().const_zero();
+        // If memcmp < 0 → Less. If memcmp > 0 → Greater. Else compare lens.
+        let cmp_lt = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::SLT, cmp, i32_zero, "vec_cmp_byte_lt")
+            .unwrap();
+        let cmp_gt = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::SGT, cmp, i32_zero, "vec_cmp_byte_gt")
+            .unwrap();
+        let len_lt = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::ULT, len1, len2, "vec_cmp_lenlt")
+            .unwrap();
+        let len_gt = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::UGT, len1, len2, "vec_cmp_lengt")
+            .unwrap();
+        // Tiebreak: select(len_lt → Less, select(len_gt → Greater, Equal))
+        let len_tie = self
+            .builder
+            .build_select(len_gt, greater, equal, "vec_cmp_len_tie")
+            .unwrap()
+            .into_int_value();
+        let len_branch = self
+            .builder
+            .build_select(len_lt, less, len_tie, "vec_cmp_len_br")
+            .unwrap()
+            .into_int_value();
+        let bytes_branch_or_tie = self
+            .builder
+            .build_select(cmp_gt, greater, len_branch, "vec_cmp_or_tie")
+            .unwrap()
+            .into_int_value();
+        let result = self
+            .builder
+            .build_select(cmp_lt, less, bytes_branch_or_tie, "vec_cmp_result")
+            .unwrap()
+            .into_int_value();
+        result.into()
+    }
+
+    /// `v.starts_with(prefix)` — `prefix.len <= v.len && memcmp(v.ptr, prefix.ptr, prefix.len*size) == 0`.
+    fn translate_vec_starts_with(&mut self, args: &[CfgValue], _ty: Type) -> BasicValueEnum<'ctx> {
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let (vec_ptr, vec_len) = self.vec_load_ptr_len(args[0]);
+        let (sl_ptr, sl_len) = self.slice_unpack(args[1]);
+        let len_ok = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::ULE,
+                sl_len,
+                vec_len,
+                "starts_with_len_ok",
+            )
+            .unwrap();
+        let bytes = self
+            .builder
+            .build_int_mul(sl_len, elem_size, "starts_with_bytes")
+            .unwrap();
+        let memcmp_fn = self.memcmp_fn();
+        let cmp = self
+            .builder
+            .build_call(
+                memcmp_fn,
+                &[vec_ptr.into(), sl_ptr.into(), bytes.into()],
+                "starts_with_cmp",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+        let i32_zero = self.ctx.i32_type().const_zero();
+        let cmp_eq = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, cmp, i32_zero, "starts_with_cmp_eq")
+            .unwrap();
+        let result = self
+            .builder
+            .build_and(len_ok, cmp_eq, "starts_with")
+            .unwrap();
+        result.into()
+    }
+
+    /// `v.ends_with(suffix)` — `suffix.len <= v.len && memcmp(v.ptr + (v.len-suffix.len)*size, suffix.ptr, suffix.len*size) == 0`.
+    fn translate_vec_ends_with(&mut self, args: &[CfgValue], _ty: Type) -> BasicValueEnum<'ctx> {
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let (vec_ptr, vec_len) = self.vec_load_ptr_len(args[0]);
+        let (sl_ptr, sl_len) = self.slice_unpack(args[1]);
+        let len_ok = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::ULE,
+                sl_len,
+                vec_len,
+                "ends_with_len_ok",
+            )
+            .unwrap();
+        // offset_elements = vec_len - sl_len. Guard against underflow:
+        // when len_ok is false, we still compute it but ignore the result;
+        // use a select to pick zero in that case so the GEP stays in-bounds.
+        let zero_i64 = self.ctx.i64_type().const_zero();
+        let raw_offset = self
+            .builder
+            .build_int_sub(vec_len, sl_len, "ends_with_offset")
+            .unwrap();
+        let safe_offset = self
+            .builder
+            .build_select(len_ok, raw_offset, zero_i64, "ends_with_safe_offset")
+            .unwrap()
+            .into_int_value();
+        let byte_offset = self
+            .builder
+            .build_int_mul(safe_offset, elem_size, "ends_with_byte_off")
+            .unwrap();
+        let i8_ty = self.ctx.i8_type();
+        let tail_ptr = unsafe {
+            self.builder
+                .build_in_bounds_gep(i8_ty, vec_ptr, &[byte_offset], "ends_with_tail")
+                .unwrap()
+        };
+        let bytes = self
+            .builder
+            .build_int_mul(sl_len, elem_size, "ends_with_bytes")
+            .unwrap();
+        let memcmp_fn = self.memcmp_fn();
+        let cmp = self
+            .builder
+            .build_call(
+                memcmp_fn,
+                &[tail_ptr.into(), sl_ptr.into(), bytes.into()],
+                "ends_with_cmp",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+        let i32_zero = self.ctx.i32_type().const_zero();
+        let cmp_eq = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, cmp, i32_zero, "ends_with_cmp_eq")
+            .unwrap();
+        let result = self.builder.build_and(len_ok, cmp_eq, "ends_with").unwrap();
+        result.into()
+    }
+
+    /// `v.contains(needle)` — linear scan: for each `i in 0..=v.len-needle.len`,
+    /// `memcmp(v.ptr + i*size, needle.ptr, needle.len*size) == 0`.
+    fn translate_vec_contains(&mut self, args: &[CfgValue], _ty: Type) -> BasicValueEnum<'ctx> {
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let (vec_ptr, vec_len) = self.vec_load_ptr_len(args[0]);
+        let (sl_ptr, sl_len) = self.slice_unpack(args[1]);
+        let i64_ty = self.ctx.i64_type();
+        let i8_ty = self.ctx.i8_type();
+        let i32_zero = self.ctx.i32_type().const_zero();
+        let zero_i64 = i64_ty.const_zero();
+        let one_i64 = i64_ty.const_int(1, false);
+        // last_start = vec_len + 1 - needle_len  (so loop is i < last_start).
+        // If needle_len > vec_len: last_start = 0 (loop doesn't execute).
+        let needle_too_long = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::UGT,
+                sl_len,
+                vec_len,
+                "contains_needle_too_long",
+            )
+            .unwrap();
+        let len_diff = self
+            .builder
+            .build_int_sub(vec_len, sl_len, "contains_len_diff")
+            .unwrap();
+        let last_start_pos = self
+            .builder
+            .build_int_add(len_diff, one_i64, "contains_last_start_pos")
+            .unwrap();
+        let last_start = self
+            .builder
+            .build_select(
+                needle_too_long,
+                zero_i64,
+                last_start_pos,
+                "contains_last_start",
+            )
+            .unwrap()
+            .into_int_value();
+        let bytes_per_step = self
+            .builder
+            .build_int_mul(sl_len, elem_size, "contains_step_bytes")
+            .unwrap();
+        // Loop: for (i = 0; i < last_start; i += 1) { if memcmp(...)==0 return true }
+        let parent_block = self.builder.get_insert_block().unwrap();
+        let parent_fn = parent_block.get_parent().unwrap();
+        let head_bb = self.ctx.append_basic_block(parent_fn, "contains_head");
+        let body_bb = self.ctx.append_basic_block(parent_fn, "contains_body");
+        let cont_bb = self.ctx.append_basic_block(parent_fn, "contains_cont");
+        let end_bb = self.ctx.append_basic_block(parent_fn, "contains_end");
+        self.builder.build_unconditional_branch(head_bb).unwrap();
+        self.builder.position_at_end(head_bb);
+        let i_phi = self.builder.build_phi(i64_ty, "contains_i").unwrap();
+        i_phi.add_incoming(&[(&zero_i64, parent_block)]);
+        let i_val = i_phi.as_basic_value().into_int_value();
+        let cond = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::ULT,
+                i_val,
+                last_start,
+                "contains_cond",
+            )
+            .unwrap();
+        self.builder
+            .build_conditional_branch(cond, body_bb, end_bb)
+            .unwrap();
+        self.builder.position_at_end(body_bb);
+        let byte_off = self
+            .builder
+            .build_int_mul(i_val, elem_size, "contains_byte_off")
+            .unwrap();
+        let scan_ptr = unsafe {
+            self.builder
+                .build_in_bounds_gep(i8_ty, vec_ptr, &[byte_off], "contains_scan_ptr")
+                .unwrap()
+        };
+        let memcmp_fn = self.memcmp_fn();
+        let cmp = self
+            .builder
+            .build_call(
+                memcmp_fn,
+                &[scan_ptr.into(), sl_ptr.into(), bytes_per_step.into()],
+                "contains_cmp",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+        let cmp_eq = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, cmp, i32_zero, "contains_cmp_eq")
+            .unwrap();
+        self.builder
+            .build_conditional_branch(cmp_eq, end_bb, cont_bb)
+            .unwrap();
+        self.builder.position_at_end(cont_bb);
+        let next_i = self
+            .builder
+            .build_int_add(i_val, one_i64, "contains_next_i")
+            .unwrap();
+        i_phi.add_incoming(&[(&next_i, cont_bb)]);
+        self.builder.build_unconditional_branch(head_bb).unwrap();
+        self.builder.position_at_end(end_bb);
+        // Result: true iff we exited via the body branch (cmp_eq).
+        let result_phi = self
+            .builder
+            .build_phi(self.ctx.bool_type(), "contains_result")
+            .unwrap();
+        result_phi.add_incoming(&[
+            (&self.ctx.bool_type().const_zero(), head_bb),
+            (&self.ctx.bool_type().const_int(1, false), body_bb),
+        ]);
+        result_phi.as_basic_value()
+    }
+
+    /// `v.concat(other)` — alloc `(v.len + other.len) * size`, memcpy both,
+    /// return a fresh `Vec(T)` with `len == cap == v.len + other.len`.
+    fn translate_vec_concat(&mut self, args: &[CfgValue], _ty: Type) -> BasicValueEnum<'ctx> {
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let (vec_ptr, vec_len) = self.vec_load_ptr_len(args[0]);
+        let (sl_ptr, sl_len) = self.slice_unpack(args[1]);
+        let new_len = self
+            .builder
+            .build_int_add(vec_len, sl_len, "concat_new_len")
+            .unwrap();
+        let alloc_bytes = self
+            .builder
+            .build_int_mul(new_len, elem_size, "concat_alloc_bytes")
+            .unwrap();
+        let i64_ty = self.ctx.i64_type();
+        let align = i64_ty.const_int(8, false);
+        let alloc_fn = self.vec_alloc_fn();
+        let new_buf = self
+            .builder
+            .build_call(
+                alloc_fn,
+                &[alloc_bytes.into(), align.into()],
+                "concat_alloc",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        let memcpy_fn = self.memcpy_intrinsic();
+        let lhs_bytes = self
+            .builder
+            .build_int_mul(vec_len, elem_size, "concat_lhs_bytes")
+            .unwrap();
+        let rhs_bytes = self
+            .builder
+            .build_int_mul(sl_len, elem_size, "concat_rhs_bytes")
+            .unwrap();
+        let bool_false = self.ctx.bool_type().const_zero();
+        self.builder
+            .build_call(
+                memcpy_fn,
+                &[
+                    new_buf.into(),
+                    vec_ptr.into(),
+                    lhs_bytes.into(),
+                    bool_false.into(),
+                ],
+                "",
+            )
+            .unwrap();
+        let i8_ty = self.ctx.i8_type();
+        let rhs_dst = unsafe {
+            self.builder
+                .build_in_bounds_gep(i8_ty, new_buf, &[lhs_bytes], "concat_rhs_dst")
+                .unwrap()
+        };
+        self.builder
+            .build_call(
+                memcpy_fn,
+                &[
+                    rhs_dst.into(),
+                    sl_ptr.into(),
+                    rhs_bytes.into(),
+                    bool_false.into(),
+                ],
+                "",
+            )
+            .unwrap();
+        self.vec_pack(new_buf, new_len, new_len)
+    }
+
+    /// `v.extend_from_slice(other)` — reserve `other.len` more, memcpy at
+    /// `v.ptr + v.len*size`, set `v.len += other.len`. Receiver is a
+    /// MutRef; mutates the aggregate in place.
+    fn translate_vec_extend_from_slice(&mut self, args: &[CfgValue]) {
+        let recv_vec_ty = self.cfg.get_inst(args[0]).ty;
+        let elem_size = self.vec_elem_size(recv_vec_ty);
+        let recv_ptr = self.vec_recv_ptr(args[0]);
+        let agg_ty = self.vec_agg_type();
+        let i64_ty = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let buf_ptr_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 0, "ext_buf_ptr_ptr")
+            .unwrap();
+        let len_ptr_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 1, "ext_len_ptr_ptr")
+            .unwrap();
+        let cap_ptr_ptr = self
+            .builder
+            .build_struct_gep(agg_ty, recv_ptr, 2, "ext_cap_ptr_ptr")
+            .unwrap();
+        let old_buf = self
+            .builder
+            .build_load(ptr_ty, buf_ptr_ptr, "ext_old_buf")
+            .unwrap()
+            .into_pointer_value();
+        let old_len = self
+            .builder
+            .build_load(i64_ty, len_ptr_ptr, "ext_old_len")
+            .unwrap()
+            .into_int_value();
+        let old_cap = self
+            .builder
+            .build_load(i64_ty, cap_ptr_ptr, "ext_old_cap")
+            .unwrap()
+            .into_int_value();
+        let (sl_ptr, sl_len) = self.slice_unpack(args[1]);
+        let new_len = self
+            .builder
+            .build_int_add(old_len, sl_len, "ext_new_len")
+            .unwrap();
+        // Grow path: if new_len > old_cap, realloc to new_cap = new_len.
+        let needs_grow = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::UGT,
+                new_len,
+                old_cap,
+                "ext_needs_grow",
+            )
+            .unwrap();
+        let parent_block = self.builder.get_insert_block().unwrap();
+        let parent_fn = parent_block.get_parent().unwrap();
+        let grow_bb = self.ctx.append_basic_block(parent_fn, "ext_grow");
+        let cont_bb = self.ctx.append_basic_block(parent_fn, "ext_cont");
+        self.builder
+            .build_conditional_branch(needs_grow, grow_bb, cont_bb)
+            .unwrap();
+        // Grow: realloc(old_buf, old_cap*size, new_cap*size, align).
+        self.builder.position_at_end(grow_bb);
+        let old_bytes = self
+            .builder
+            .build_int_mul(old_cap, elem_size, "ext_old_bytes")
+            .unwrap();
+        let new_bytes = self
+            .builder
+            .build_int_mul(new_len, elem_size, "ext_new_bytes")
+            .unwrap();
+        let align = i64_ty.const_int(8, false);
+        let realloc_fn = self.vec_realloc_fn();
+        let new_buf = self
+            .builder
+            .build_call(
+                realloc_fn,
+                &[
+                    old_buf.into(),
+                    old_bytes.into(),
+                    new_bytes.into(),
+                    align.into(),
+                ],
+                "ext_realloc",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        self.builder.build_store(buf_ptr_ptr, new_buf).unwrap();
+        self.builder.build_store(cap_ptr_ptr, new_len).unwrap();
+        self.builder.build_unconditional_branch(cont_bb).unwrap();
+        // After grow (or if we didn't grow), reload the buf pointer and
+        // copy the slice into the tail.
+        self.builder.position_at_end(cont_bb);
+        let buf_after = self
+            .builder
+            .build_load(ptr_ty, buf_ptr_ptr, "ext_buf_after")
+            .unwrap()
+            .into_pointer_value();
+        let copy_offset = self
+            .builder
+            .build_int_mul(old_len, elem_size, "ext_copy_off")
+            .unwrap();
+        let i8_ty = self.ctx.i8_type();
+        let dst = unsafe {
+            self.builder
+                .build_in_bounds_gep(i8_ty, buf_after, &[copy_offset], "ext_dst")
+                .unwrap()
+        };
+        let copy_bytes = self
+            .builder
+            .build_int_mul(sl_len, elem_size, "ext_copy_bytes")
+            .unwrap();
+        let memcpy_fn = self.memcpy_intrinsic();
+        let bool_false = self.ctx.bool_type().const_zero();
+        self.builder
+            .build_call(
+                memcpy_fn,
+                &[
+                    dst.into(),
+                    sl_ptr.into(),
+                    copy_bytes.into(),
+                    bool_false.into(),
+                ],
+                "",
+            )
+            .unwrap();
+        self.builder.build_store(len_ptr_ptr, new_len).unwrap();
     }
 
     /// Translate a CFG terminator into LLVM control flow.

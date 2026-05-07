@@ -4418,6 +4418,41 @@ impl<'a> Sema<'a> {
             return Ok(AnalysisResult::new(air_ref, Type::BOOL));
         }
 
+        // ADR-0081 Phase 1: route `Vec(T) ==` / `<` to the Vec-method
+        // dispatch path (`vec_eq` / `vec_cmp` intrinsics). The Vec receiver
+        // isn't a user-declared struct, so the regular `lookup_user_method`
+        // path below would miss it; we recognize it explicitly here and
+        // reuse `finish_operator_dispatch` for the Ne / Lt / Le / Gt / Ge
+        // wrapping. Requires `T: Copy` (enforced inside the dispatch).
+        if matches!(lhs_type.kind(), TypeKind::Vec(_)) {
+            let method_name = if matches!(op, BinOp::Eq | BinOp::Ne) {
+                "eq"
+            } else {
+                "cmp"
+            };
+            // Pass the rhs through as a normal RIR call argument — the
+            // dispatch arm will project it (no move) and verify the type.
+            let dispatch_result = self.dispatch_vec_method_call(
+                air,
+                lhs_result,
+                method_name,
+                &[RirCallArg {
+                    value: rhs,
+                    mode: RirArgMode::Normal,
+                }],
+                span,
+                ctx,
+            )?;
+            return self.finish_operator_dispatch(
+                air,
+                op,
+                method_name,
+                dispatch_result.air_ref,
+                dispatch_result.ty,
+                span,
+            );
+        }
+
         // ADR-0078 Phase 4: operator desugaring for non-primitive types.
         //
         // Dispatch order:

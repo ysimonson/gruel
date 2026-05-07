@@ -260,7 +260,7 @@ Final size of `gruel-runtime/src/string.rs`: ~120 LOC. Renaming the file to `utf
 
 Each phase ships independently behind the `string_runtime_collapse` preview gate, ends with `make test` green, and quotes its LOC delta in the commit message.
 
-- [ ] **Phase 1: Preview gate + Vec(T) byte-comparison and search methods**
+- [x] **Phase 1: Preview gate + Vec(T) byte-comparison and search methods**
   - Add `PreviewFeature::StringRuntimeCollapse` to `gruel-error/src/lib.rs`. Wire `name()`, `adr()`, `all()`, `FromStr` impl.
   - Add 7 new `IntrinsicId` variants (`VecEq`, `VecCmp`, `VecContains`, `VecStartsWith`, `VecEndsWith`, `VecConcat`, `VecExtendFromSlice`) and `INTRINSICS` entries in `crates/gruel-intrinsics/src/lib.rs`. Each `Expr` kind, `T: Copy` constraint enforced at sema (no preview gate on the methods themselves — they're useful to all Vec users from day one).
   - Add 7 match arms to `dispatch_vec_method_call` in `crates/gruel-air/src/sema/vec_methods.rs`. The `eq` / `cmp` arms wire into ADR-0078's binop dispatch automatically (the analyzer looks for methods named `eq` / `cmp` with the right shape on user struct/enum types — Vec qualifies once the methods exist, **but** see Open Questions §3 about whether sema's Eq/Ord interface check recognizes built-in `TypeKind::Vec(_)` receivers; if not, a small extension to the interface-conformance lookup is part of this phase).

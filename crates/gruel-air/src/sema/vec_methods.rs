@@ -299,6 +299,23 @@ impl<'a> Sema<'a> {
                     span,
                 )
             }
+            // ADR-0081 Phase 1: byte-comparison and search methods.
+            "eq" | "cmp" => {
+                self.dispatch_vec_eq_cmp(air, receiver, elem_ty, method_name, args, span, ctx)
+            }
+            "contains" | "starts_with" | "ends_with" => self.dispatch_vec_byte_search(
+                air,
+                receiver,
+                elem_ty,
+                method_name,
+                args,
+                span,
+                ctx,
+            ),
+            "concat" => self.dispatch_vec_concat(air, receiver, elem_ty, args, span, ctx),
+            "extend_from_slice" => {
+                self.dispatch_vec_extend_from_slice(air, receiver, elem_ty, args, span, ctx)
+            }
             _ => Err(CompileError::new(
                 ErrorKind::UndefinedMethod {
                     type_name: self.format_type_name(receiver.ty),
@@ -360,6 +377,234 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, ret_ty))
+    }
+
+    /// ADR-0081 Phase 1: dispatch `v.eq(other)` / `v.cmp(other)` on
+    /// `Vec(T)` where `T: Copy`. Both `self` and `other` are passed by
+    /// `Ref` (no move) — comparison reads values without consuming them.
+    fn dispatch_vec_eq_cmp(
+        &mut self,
+        air: &mut Air,
+        receiver: AnalysisResult,
+        elem_ty: Type,
+        method_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if !self.is_type_copy(elem_ty) {
+            return Err(CompileError::new(
+                ErrorKind::InternalError(format!(
+                    "Vec(T).{}() requires T: Copy in v1 (T = {}); \
+                     non-Copy element comparison is deferred — see ADR-0081",
+                    method_name,
+                    self.format_type_name(elem_ty)
+                )),
+                span,
+            ));
+        }
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: 1,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+        let other = self.analyze_inst_for_projection(air, args[0].value, ctx)?;
+        if other.ty != receiver.ty && !other.ty.is_error() && !receiver.ty.is_error() {
+            return Err(CompileError::type_mismatch(
+                self.format_type_name(receiver.ty),
+                self.format_type_name(other.ty),
+                span,
+            ));
+        }
+        let (intrinsic_name, ret_ty) = if method_name == "eq" {
+            ("vec_eq", Type::BOOL)
+        } else {
+            // `cmp` returns `Ordering`. Resolve the cached enum id; fall
+            // back to a clear error if the prelude isn't loaded.
+            let ordering_id = self
+                .lang_items
+                .ordering()
+                .or(self.builtin_ordering_id)
+                .ok_or_else(|| {
+                    CompileError::new(
+                        ErrorKind::InternalError(
+                            "Ordering enum not found (prelude not loaded?)".into(),
+                        ),
+                        span,
+                    )
+                })?;
+            ("vec_cmp", Type::new_enum(ordering_id))
+        };
+        self.emit_vec_intrinsic(
+            air,
+            intrinsic_name,
+            &[
+                (receiver.air_ref, AirArgMode::Ref),
+                (other.air_ref, AirArgMode::Ref),
+            ],
+            ret_ty,
+            span,
+        )
+    }
+
+    /// ADR-0081 Phase 1: dispatch `v.contains(needle)`,
+    /// `v.starts_with(prefix)`, `v.ends_with(suffix)` on `Vec(T)` where
+    /// `T: Copy`. The argument is `Slice(T)`; receiver is `Ref(Self)`.
+    fn dispatch_vec_byte_search(
+        &mut self,
+        air: &mut Air,
+        receiver: AnalysisResult,
+        elem_ty: Type,
+        method_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if !self.is_type_copy(elem_ty) {
+            return Err(CompileError::new(
+                ErrorKind::InternalError(format!(
+                    "Vec(T).{}() requires T: Copy in v1 (T = {}); \
+                     non-Copy element search is deferred — see ADR-0081",
+                    method_name,
+                    self.format_type_name(elem_ty)
+                )),
+                span,
+            ));
+        }
+        let intrinsic_name = match method_name {
+            "contains" => "vec_contains",
+            "starts_with" => "vec_starts_with",
+            "ends_with" => "vec_ends_with",
+            _ => unreachable!(),
+        };
+        let other = self.analyze_slice_arg_for_vec(air, intrinsic_name, elem_ty, args, span, ctx)?;
+        self.emit_vec_intrinsic(
+            air,
+            intrinsic_name,
+            &[
+                (receiver.air_ref, AirArgMode::Ref),
+                (other.air_ref, AirArgMode::Normal),
+            ],
+            Type::BOOL,
+            span,
+        )
+    }
+
+    /// ADR-0081 Phase 1: dispatch `v.concat(other)` on `Vec(T)` where
+    /// `T: Copy`. Receiver is `Ref(Self)`; argument is `Slice(T)`;
+    /// returns a freshly-allocated `Vec(T)`.
+    fn dispatch_vec_concat(
+        &mut self,
+        air: &mut Air,
+        receiver: AnalysisResult,
+        elem_ty: Type,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if !self.is_type_copy(elem_ty) {
+            return Err(CompileError::new(
+                ErrorKind::InternalError(format!(
+                    "Vec(T).concat() requires T: Copy in v1 (T = {}); \
+                     non-Copy concat is deferred — see ADR-0081",
+                    self.format_type_name(elem_ty)
+                )),
+                span,
+            ));
+        }
+        let other = self.analyze_slice_arg_for_vec(air, "vec_concat", elem_ty, args, span, ctx)?;
+        self.emit_vec_intrinsic(
+            air,
+            "vec_concat",
+            &[
+                (receiver.air_ref, AirArgMode::Ref),
+                (other.air_ref, AirArgMode::Normal),
+            ],
+            receiver.ty,
+            span,
+        )
+    }
+
+    /// ADR-0081 Phase 1: dispatch `v.extend_from_slice(other)` on `Vec(T)`
+    /// where `T: Copy`. Receiver is `MutRef(Self)`; argument is `Slice(T)`.
+    fn dispatch_vec_extend_from_slice(
+        &mut self,
+        air: &mut Air,
+        receiver: AnalysisResult,
+        elem_ty: Type,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if !self.is_type_copy(elem_ty) {
+            return Err(CompileError::new(
+                ErrorKind::InternalError(format!(
+                    "Vec(T).extend_from_slice() requires T: Copy in v1 (T = {}); \
+                     non-Copy extend is deferred — see ADR-0081",
+                    self.format_type_name(elem_ty)
+                )),
+                span,
+            ));
+        }
+        let other =
+            self.analyze_slice_arg_for_vec(air, "vec_extend_from_slice", elem_ty, args, span, ctx)?;
+        self.emit_vec_intrinsic(
+            air,
+            "vec_extend_from_slice",
+            &[
+                (receiver.air_ref, AirArgMode::MutRef),
+                (other.air_ref, AirArgMode::Normal),
+            ],
+            Type::UNIT,
+            span,
+        )
+    }
+
+    /// Shared helper: analyze the single `Slice(T)` argument for the byte
+    /// search / concat / extend_from_slice methods.
+    fn analyze_slice_arg_for_vec(
+        &mut self,
+        air: &mut Air,
+        _intrinsic_name: &str,
+        elem_ty: Type,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: 1,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+        // The argument is conceptually a borrow (Slice(T) sits over the
+        // source storage). Use the projection path so the source isn't
+        // recorded as moved into the call.
+        let other = self.analyze_inst_for_projection(air, args[0].value, ctx)?;
+        let expected_slice_id = self.type_pool.intern_slice_from_type(elem_ty);
+        let expected_ty = Type::new_slice(expected_slice_id);
+        // Accept either `Slice(T)` or `MutSlice(T)` — both are valid input
+        // for read-only sequence ops.
+        let acceptable = match other.ty.kind() {
+            TypeKind::Slice(id) => self.type_pool.slice_def(id) == elem_ty,
+            TypeKind::MutSlice(id) => self.type_pool.mut_slice_def(id) == elem_ty,
+            _ => false,
+        };
+        if !acceptable && !other.ty.is_error() {
+            return Err(CompileError::type_mismatch(
+                self.format_type_name(expected_ty),
+                self.format_type_name(other.ty),
+                span,
+            ));
+        }
+        Ok(other)
     }
 
     /// `@vec(a, b, c)`: variadic literal construction.

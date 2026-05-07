@@ -1,0 +1,354 @@
+# Vec(T) byte-comparison and search methods (ADR-0081)
+#
+# Tests for the seven new methods added to Vec(T) for T: Copy:
+# eq, cmp, contains, starts_with, ends_with, concat, extend_from_slice.
+# These are exercised both directly (`v.eq(other)`, `v.contains(&n[..])`)
+# and via the `==` / `<` operator desugarings (ADR-0078).
+
+[section]
+id = "vec.byte_methods"
+spec_chapter = "7.3"
+name = "Vec Byte-Comparison and Search Methods"
+description = "Tests for ADR-0081: Vec(T) eq/cmp/contains/starts_with/ends_with/concat/extend_from_slice."
+
+[[case]]
+name = "vec_eq_basic_equal"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(1, 2, 3);
+    let b = @vec(1, 2, 3);
+    if a == b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_eq_basic_unequal"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(1, 2, 3);
+    let b = @vec(1, 2, 4);
+    if a != b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_eq_different_lengths"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(1, 2);
+    let b = @vec(1, 2, 3);
+    if a != b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_eq_empty"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a: Vec(i32) = Vec(i32)::new();
+    let b: Vec(i32) = Vec(i32)::new();
+    if a == b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_cmp_less"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(1, 2, 3);
+    let b = @vec(1, 2, 4);
+    if a < b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_cmp_greater"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(2);
+    let b = @vec(1, 2, 3);
+    if a > b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_cmp_prefix_is_less"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(1, 2);
+    let b = @vec(1, 2, 3);
+    if a < b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_cmp_le_equal"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(1, 2, 3);
+    let b = @vec(1, 2, 3);
+    if a <= b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_cmp_ge_with_strict"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(2);
+    let b = @vec(1);
+    if a >= b { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_starts_with_true"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(10, 20, 30, 40);
+    let p = @vec(10, 20);
+    if v.starts_with(&p[..]) { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_starts_with_false"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(10, 20, 30);
+    let p = @vec(20, 30);
+    if v.starts_with(&p[..]) { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_starts_with_empty_prefix"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(1, 2);
+    let p: Vec(i32) = Vec(i32)::new();
+    if v.starts_with(&p[..]) { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_starts_with_too_long"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(1, 2);
+    let p = @vec(1, 2, 3);
+    if v.starts_with(&p[..]) { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_ends_with_true"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(10, 20, 30, 40);
+    let s = @vec(30, 40);
+    if v.ends_with(&s[..]) { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_ends_with_false"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(10, 20, 30);
+    let s = @vec(10, 20);
+    if v.ends_with(&s[..]) { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_ends_with_empty"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(1, 2);
+    let s: Vec(i32) = Vec(i32)::new();
+    if v.ends_with(&s[..]) { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_contains_true"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(1, 2, 3, 4, 5);
+    let n = @vec(3, 4);
+    if v.contains(&n[..]) { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_contains_false"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(1, 2, 3);
+    let n = @vec(4, 5);
+    if v.contains(&n[..]) { 1 } else { 0 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_contains_empty_needle"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(1, 2, 3);
+    let n: Vec(i32) = Vec(i32)::new();
+    if v.contains(&n[..]) { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_contains_at_end"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let v = @vec(1, 2, 3, 4);
+    let n = @vec(3, 4);
+    if v.contains(&n[..]) { 0 } else { 1 }
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "vec_concat_basic"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(1, 2);
+    let b = @vec(3, 4);
+    let c = a.concat(&b[..]);
+    let n: i32 = @cast(c.len());
+    let sum = c[0] + c[1] + c[2] + c[3];
+    n + sum
+}
+"""
+exit_code = 14
+
+[[case]]
+name = "vec_concat_empty_lhs"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a: Vec(i32) = Vec(i32)::new();
+    let b = @vec(7, 8);
+    let c = a.concat(&b[..]);
+    let n: i32 = @cast(c.len());
+    n + c[0] + c[1]
+}
+"""
+exit_code = 17
+
+[[case]]
+name = "vec_concat_empty_rhs"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let a = @vec(7, 8);
+    let b: Vec(i32) = Vec(i32)::new();
+    let c = a.concat(&b[..]);
+    let n: i32 = @cast(c.len());
+    n + c[0] + c[1]
+}
+"""
+exit_code = 17
+
+[[case]]
+name = "vec_extend_from_slice_basic"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let mut a = @vec(1, 2);
+    let b = @vec(3, 4, 5);
+    a.extend_from_slice(&b[..]);
+    let n: i32 = @cast(a.len());
+    n + a[4]
+}
+"""
+exit_code = 10
+
+[[case]]
+name = "vec_extend_from_slice_empty"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let mut a = @vec(1, 2);
+    let b: Vec(i32) = Vec(i32)::new();
+    a.extend_from_slice(&b[..]);
+    let n: i32 = @cast(a.len());
+    n
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "vec_extend_from_slice_grow_doubles_cap"
+spec = ["7.3:10"]
+source = """
+fn main() -> i32 {
+    let mut a: Vec(i32) = Vec(i32)::with_capacity(2);
+    a.push(1);
+    a.push(2);
+    let b = @vec(3, 4, 5, 6, 7);
+    a.extend_from_slice(&b[..]);
+    let n: i32 = @cast(a.len());
+    n + a[6]
+}
+"""
+exit_code = 14
+
+[[case]]
+name = "vec_eq_struct_element"
+spec = ["7.3:10"]
+description = "Vec of a Copy struct compares element-wise via memcmp on aggregates."
+source = """
+copy struct Pair { x: i32, y: i32 }
+
+fn main() -> i32 {
+    let a = @vec(Pair { x: 1, y: 2 }, Pair { x: 3, y: 4 });
+    let b = @vec(Pair { x: 1, y: 2 }, Pair { x: 3, y: 4 });
+    if a == b { 0 } else { 1 }
+}
+"""
+exit_code = 0

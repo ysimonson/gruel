@@ -138,3 +138,36 @@ the buffer.
 to the `Clone` interface (cloning would create a second linear
 obligation). `@vec(...)` and `@vec_repeat(...)` likewise reject linear
 element types.
+
+## Byte-comparison and search methods
+
+{{ rule(id="7.3:10", cat="normative") }}
+
+`Vec(T)` for `T: Copy` exposes element-wise comparison and subsequence
+search methods (ADR-0081):
+
+- `eq(self: Ref(Self), other: Ref(Self)) -> bool` — `true` iff the two
+  vectors have equal length and every element pair compares equal under
+  primitive `==`. The `==` and `!=` operators on two `Vec(T)` values
+  desugar to this method (via the `Eq` interface dispatch from
+  ADR-0078).
+- `cmp(self: Ref(Self), other: Ref(Self)) -> Ordering` — element-wise
+  lexicographic comparison with length tiebreak (a shorter vector that
+  is a prefix of a longer one compares `Less`). The `<`, `<=`, `>`,
+  `>=` operators desugar to this method (via the `Ord` interface).
+- `contains(self: Ref(Self), needle: Slice(T)) -> bool` — `true` iff
+  `needle` occurs as a contiguous subsequence within `self`. Empty
+  `needle` returns `true`.
+- `starts_with(self: Ref(Self), prefix: Slice(T)) -> bool` /
+  `ends_with(self: Ref(Self), suffix: Slice(T)) -> bool` — leading /
+  trailing subsequence tests. Empty argument returns `true`.
+- `concat(self: Ref(Self), other: Slice(T)) -> Vec(T)` — allocates a
+  fresh `Vec(T)` of length `self.len + other.len` containing `self`
+  followed by `other`. `self` is borrowed (not consumed).
+- `extend_from_slice(self: MutRef(Self), other: Slice(T)) -> ()` —
+  reserves additional capacity and appends every element of `other`
+  in order onto the tail.
+
+All six methods require `T: Copy` in v1; per-element interface dispatch
+for non-Copy `T: Eq` / `T: Clone` is future work tracked alongside the
+non-Copy `clone` deferral.

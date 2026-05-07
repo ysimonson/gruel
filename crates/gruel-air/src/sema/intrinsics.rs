@@ -165,7 +165,14 @@ impl<'a> Sema<'a> {
             | IntrinsicId::VecPtrMut
             | IntrinsicId::VecTerminatedPtr
             | IntrinsicId::VecClone
-            | IntrinsicId::VecDispose => Err(CompileError::new(
+            | IntrinsicId::VecDispose
+            | IntrinsicId::VecEq
+            | IntrinsicId::VecCmp
+            | IntrinsicId::VecContains
+            | IntrinsicId::VecStartsWith
+            | IntrinsicId::VecEndsWith
+            | IntrinsicId::VecConcat
+            | IntrinsicId::VecExtendFromSlice => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),

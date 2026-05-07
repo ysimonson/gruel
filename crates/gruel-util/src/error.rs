@@ -351,6 +351,11 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// ADR-0081: collapse the bespoke `String` runtime onto `Vec(u8)`.
+    /// Stages the migration of the `String` type's method bodies from the
+    /// `BUILTIN_TYPES` registry + `String__*` runtime symbols into a regular
+    /// `pub struct String { bytes: Vec(u8) }` declaration in `prelude/string.gruel`.
+    StringRuntimeCollapse,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -382,6 +387,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::StringRuntimeCollapse => "ADR-0081",
         }
     }
 
@@ -2055,7 +2061,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, string_runtime_collapse");
     }
 
     // ========================================================================

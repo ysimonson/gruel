@@ -64,6 +64,13 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@vec_repeat` | expr | Vectors | — | — | Construct a Vec with N copies of a value. |
 | `@vec_dispose` | expr | Vectors | — | — | Free a Vec's heap buffer; panic if `len != 0`. |
 | `@parts_to_vec` | expr | Vectors | — | yes | Build a Vec from raw parts. |
+| `@vec_eq` | expr | Vectors | — | — | Element-wise equality between two Vecs. |
+| `@vec_cmp` | expr | Vectors | — | — | Lexicographic comparison between two Vecs. |
+| `@vec_contains` | expr | Vectors | — | — | Test whether a Vec contains a given subsequence. |
+| `@vec_starts_with` | expr | Vectors | — | — | Test whether a Vec begins with a given prefix. |
+| `@vec_ends_with` | expr | Vectors | — | — | Test whether a Vec ends with a given suffix. |
+| `@vec_concat` | expr | Vectors | — | — | Build a new Vec by concatenating self with another slice. |
+| `@vec_extend_from_slice` | expr | Vectors | — | — | Append every element from a slice onto a Vec. |
 | `@ptr_read` | expr | Raw Pointers | — | yes | Load a value through a raw pointer (internal). |
 | `@ptr_write` | expr | Raw Pointers | — | yes | Store a value through a raw mutable pointer (internal). |
 | `@ptr_read_volatile` | expr | Raw Pointers | — | yes | Volatile load through a raw pointer (internal). |
@@ -618,6 +625,41 @@ for i in @range(0, 10) { ... }
 `@parts_to_vec(p: MutPtr(T), len: usize, cap: usize) -> Vec(T)` takes ownership of `p`. Requires a `checked` block.
 
 - **Requires:** `checked { ... }` block
+
+### `@vec_eq`
+
+`@vec_eq(a, b)` returns `true` iff `a` and `b` have identical lengths and every element pair compares equal. Requires `T: Copy`. Surface form: `a == b` (via the Eq interface).
+
+
+### `@vec_cmp`
+
+`@vec_cmp(a, b)` returns `Ordering::Less` / `Ordering::Equal` / `Ordering::Greater` from element-by-element comparison with length tiebreak. Requires `T: Copy`. Surface form: `a.cmp(b)` and the `<` / `<=` / `>` / `>=` operators (via the Ord interface).
+
+
+### `@vec_contains`
+
+`@vec_contains(haystack, needle)` returns `true` iff the slice `needle` occurs as a contiguous subsequence within `haystack`. Empty `needle` matches anywhere (returns `true`). Requires `T: Copy`. Surface form: `haystack.contains(&needle[..])`.
+
+
+### `@vec_starts_with`
+
+`@vec_starts_with(v, prefix)` returns `true` iff every element of `prefix` matches the corresponding leading element of `v`. Empty prefix returns `true`. Requires `T: Copy`. Surface form: `v.starts_with(&prefix[..])`.
+
+
+### `@vec_ends_with`
+
+`@vec_ends_with(v, suffix)` returns `true` iff every element of `suffix` matches the corresponding trailing element of `v`. Empty suffix returns `true`. Requires `T: Copy`. Surface form: `v.ends_with(&suffix[..])`.
+
+
+### `@vec_concat`
+
+`@vec_concat(v, other)` allocates a fresh `Vec(T)` of length `v.len + other.len` containing the elements of `v` followed by `other`. The original `v` is consumed (moved). Requires `T: Copy`. Surface form: `v.concat(&other[..])`.
+
+
+### `@vec_extend_from_slice`
+
+`@vec_extend_from_slice(v, other)` reserves additional capacity if needed, then memcpys every element of `other` onto the tail of `v`. Requires `T: Copy`. Surface form: `v.extend_from_slice(&other[..])`.
+
 
 ## Raw Pointers
 
