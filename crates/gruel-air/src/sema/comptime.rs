@@ -530,6 +530,17 @@ impl<'a> Sema<'a> {
             } => {
                 let field_decls = self.rir.get_field_decls(*fields_start, *fields_len);
 
+                // Empty structs (no fields, no methods) are not allowed —
+                // mirrors the `EmptyStruct` check in the runtime analysis path
+                // (`analyze_inst` for `AnonStructType`). We need this here
+                // because type-constructor function bodies are now evaluated
+                // exclusively via this comptime path.
+                if field_decls.is_empty() && *methods_len == 0 {
+                    self.pending_anon_eval_errors
+                        .push(CompileError::new(ErrorKind::EmptyStruct, inst.span));
+                    return None;
+                }
+
                 let mut struct_fields = Vec::with_capacity(field_decls.len());
                 for (name_sym, type_sym) in field_decls {
                     let name_str = self.interner.resolve(&name_sym).to_string();
@@ -542,6 +553,34 @@ impl<'a> Sema<'a> {
 
                         is_pub: true,
                     });
+                }
+
+                // Detect duplicate method names up front so behaviour is the
+                // same whether or not a previous evaluation attempt partially
+                // populated `self.methods`. (`register_anon_struct_methods_*`
+                // also catches this, but only after registering the first
+                // copy — which would make a retry after a fall-through
+                // silently succeed.)
+                if *methods_len > 0 {
+                    let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
+                    let mut seen: HashSet<Spur> = HashSet::default();
+                    for mref in method_refs {
+                        if let InstData::FnDecl {
+                            name: method_name, ..
+                        } = &self.rir.get(mref).data
+                            && !seen.insert(*method_name)
+                        {
+                            let method_name_str = self.interner.resolve(method_name).to_string();
+                            self.pending_anon_eval_errors.push(CompileError::new(
+                                ErrorKind::DuplicateMethod {
+                                    type_name: "anonymous struct".to_string(),
+                                    method_name: method_name_str,
+                                },
+                                inst.span,
+                            ));
+                            return None;
+                        }
+                    }
                 }
 
                 // Extract method signatures for structural equality comparison
@@ -630,6 +669,40 @@ impl<'a> Sema<'a> {
                 let variant_decls = self
                     .rir
                     .get_enum_variant_decls(*variants_start, *variants_len);
+
+                // Empty enums are not allowed — mirrors the runtime
+                // analysis path's `EmptyAnonEnum` check.
+                if variant_decls.is_empty() {
+                    self.pending_anon_eval_errors
+                        .push(CompileError::new(ErrorKind::EmptyAnonEnum, inst.span));
+                    return None;
+                }
+
+                // Detect duplicate method names up front (parallel to the
+                // anon-struct case). Without this, type-constructor enum
+                // bodies would silently accept duplicate method declarations
+                // because runtime body analysis is now skipped for them.
+                if *methods_len > 0 {
+                    let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
+                    let mut seen: HashSet<Spur> = HashSet::default();
+                    for mref in method_refs {
+                        if let InstData::FnDecl {
+                            name: method_name, ..
+                        } = &self.rir.get(mref).data
+                            && !seen.insert(*method_name)
+                        {
+                            let method_name_str = self.interner.resolve(method_name).to_string();
+                            self.pending_anon_eval_errors.push(CompileError::new(
+                                ErrorKind::DuplicateMethod {
+                                    type_name: "anonymous enum".to_string(),
+                                    method_name: method_name_str,
+                                },
+                                inst.span,
+                            ));
+                            return None;
+                        }
+                    }
+                }
 
                 let mut enum_variants = Vec::with_capacity(variant_decls.len());
                 for (name_sym, field_type_syms, field_name_syms) in &variant_decls {
@@ -1643,6 +1716,89 @@ impl<'a> Sema<'a> {
         self.evaluate_comptime_block(inst_ref, &stub, span)
     }
 
+    /// Evaluate a type-constructor function body (one returning `type`) using
+    /// the stateful interpreter, with the call's type and value bindings seeded
+    /// into `comptime_type_overrides` and `locals`.
+    ///
+    /// Used as a fallback when `try_evaluate_const_with_subst` declines to
+    /// evaluate a multi-statement body — e.g. a `comptime if @ownership(T) !=
+    /// Ownership::Copy { @compile_error(...) }` guard before the trailing
+    /// `struct {…}` literal.
+    ///
+    /// Returns the produced `Type` on success, or a `CompileError` if the body
+    /// cannot be evaluated at compile time (or if a `@compile_error` fires).
+    pub(crate) fn evaluate_type_ctor_body(
+        &mut self,
+        body: InstRef,
+        type_subst: &rustc_hash::FxHashMap<Spur, Type>,
+        value_subst: &rustc_hash::FxHashMap<Spur, ConstValue>,
+        ctx: &AnalysisContext,
+        span: Span,
+    ) -> CompileResult<Type> {
+        let mut type_overrides: HashMap<Spur, Type> = HashMap::default();
+        for (k, v) in type_subst {
+            type_overrides.insert(*k, *v);
+        }
+        let mut locals: HashMap<Spur, ConstValue> = ctx.comptime_value_vars.clone();
+        for (k, v) in value_subst {
+            locals.insert(*k, *v);
+        }
+
+        let saved_overrides = std::mem::replace(&mut self.comptime_type_overrides, type_overrides);
+        let prev_steps = self.comptime_steps_used;
+        self.comptime_steps_used = 0;
+        self.comptime_call_depth += 1;
+        let pending_eval_errs_before = self.pending_anon_eval_errors.len();
+        let result = self.evaluate_comptime_inst(body, &mut locals, ctx, span);
+        self.comptime_call_depth -= 1;
+        self.comptime_steps_used = prev_steps;
+        self.comptime_type_overrides = saved_overrides;
+
+        // If the inner evaluator pushed a specific anon-eval validation error
+        // (e.g. empty struct, duplicate method) and then returned `None`, the
+        // generic "expression cannot be known at compile time" error from the
+        // delegation chain is unhelpful. Drain the new entries and surface
+        // the first one as the call's primary error.
+        if self.pending_anon_eval_errors.len() > pending_eval_errs_before {
+            let drained: Vec<_> = self
+                .pending_anon_eval_errors
+                .drain(pending_eval_errs_before..)
+                .collect();
+            // result may be Ok or Err; either way the validation failure wins.
+            let mut iter = drained.into_iter();
+            let primary = iter.next().expect("len check above guarantees one entry");
+            // Any extras stay in the buffer so they still surface at the end
+            // of analysis rather than being silently dropped.
+            for extra in iter {
+                self.pending_anon_eval_errors.push(extra);
+            }
+            return Err(primary);
+        }
+
+        match result? {
+            ConstValue::Type(ty) => Ok(ty),
+            ConstValue::ReturnSignal => match self.comptime_return_value.take() {
+                Some(ConstValue::Type(ty)) => Ok(ty),
+                _ => Err(CompileError::new(
+                    ErrorKind::ComptimeEvaluationFailed {
+                        reason: "type-constructor function did not return a `type` value"
+                            .to_string(),
+                    },
+                    span,
+                )),
+            },
+            other => Err(CompileError::new(
+                ErrorKind::ComptimeEvaluationFailed {
+                    reason: format!(
+                        "type-constructor function body produced a non-type value: {:?}",
+                        other
+                    ),
+                },
+                span,
+            )),
+        }
+    }
+
     /// Evaluate a comptime expression without clearing the heap.
     ///
     /// This is used by `@field` and other intrinsics inside `comptime_unroll for` bodies
@@ -2016,11 +2172,20 @@ impl<'a> Sema<'a> {
             // ── Type-related: delegate to existing evaluator ──────────────────
             // AnonStructType and TypeConst need the full try_evaluate_const
             // logic (type registry lookups, structural equality, etc.).
+            // Route through the substitution-aware variant so the active
+            // comptime call's type/value bindings (`comptime_type_overrides`
+            // plus the current `locals`) feed both field-type resolution and
+            // method registration — otherwise a multi-statement type-ctor
+            // body (`comptime if … ; struct {…}`) would fail to register
+            // methods that reference `T` or capture comptime values.
             InstData::AnonStructType { .. }
             | InstData::AnonEnumType { .. }
-            | InstData::TypeConst { .. } => self
-                .try_evaluate_const(inst_ref)
-                .ok_or_else(|| not_const(inst_span)),
+            | InstData::TypeConst { .. } => {
+                let type_subst = self.comptime_type_overrides.clone();
+                let value_subst = locals.clone();
+                self.try_evaluate_const_with_subst(inst_ref, &type_subst, &value_subst)
+                    .ok_or_else(|| not_const(inst_span))
+            }
 
             // ── While loop ────────────────────────────────────────────────────
             // `while cond { body }` — evaluates until condition is false.

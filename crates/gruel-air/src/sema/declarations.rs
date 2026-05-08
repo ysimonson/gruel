@@ -1811,7 +1811,12 @@ impl<'a> Sema<'a> {
             .iter()
             .map(|p| p.is_comptime && (p.ty == type_sym || self.interfaces.contains_key(&p.ty)))
             .collect();
-        let is_generic = is_type_param.iter().any(|b| *b);
+        // Any comptime parameter — type or value — makes the function generic.
+        // Comptime value parameters (e.g. `comptime n: i32`) need per-call
+        // specialization too: the body may contain a `comptime if n < 0 {…}`
+        // guard that can only be evaluated once `n` is bound to a concrete
+        // value at the call site.
+        let is_generic = params.iter().any(|p| p.is_comptime);
 
         // Collect type parameter names.
         let type_param_names: Vec<Spur> = params

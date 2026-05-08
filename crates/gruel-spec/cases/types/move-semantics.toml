@@ -1187,6 +1187,161 @@ fn main() -> i32 {
 compile_fail = true
 error_contains = "use_copy requires a Copy type"
 
+# Copy guard inside a comptime type-constructor function: a `comptime if`
+# predicate before the trailing type literal must run at the call site so
+# the user's `@compile_error` fires when the bound is violated.
+[[case]]
+name = "copy_guard_in_type_ctor_accepts_primitive"
+spec = ["3.8:60", "3.8:61"]
+description = "A `comptime if @ownership(T) != Copy { @compile_error(...) }` guard inside a type-constructor body lets the matching primitive instantiation through."
+source = """
+fn CopyablePair(comptime T: type) -> type {
+    comptime if @ownership(T) != Ownership::Copy {
+        @compile_error("CopyablePair requires a Copy type");
+    }
+    struct {
+        fst: T,
+        snd: T,
+    }
+}
+
+fn main() -> i32 {
+    let IntPair = CopyablePair(i32);
+    let p = IntPair { fst: 2, snd: 3 };
+    p.fst * p.snd
+}
+"""
+exit_code = 6
+
+[[case]]
+name = "copy_guard_in_type_ctor_rejects_affine"
+spec = ["3.8:60", "3.8:61", "3.8:62"]
+description = "Same guard rejects an affine struct at instantiation."
+source = """
+struct Foo { inner: i32 }
+
+fn CopyablePair(comptime T: type) -> type {
+    comptime if @ownership(T) != Ownership::Copy {
+        @compile_error("CopyablePair requires a Copy type");
+    }
+    struct {
+        fst: T,
+        snd: T,
+    }
+}
+
+fn main() -> i32 {
+    let FooPair = CopyablePair(Foo);
+    0
+}
+"""
+compile_fail = true
+error_contains = "CopyablePair requires a Copy type"
+
+# `comptime if` predicates that reference a comptime *value* parameter
+# (e.g. `comptime N: i32`) must also fire only at the call site. Type
+# constructors skip generic-style body analysis so the predicate sees the
+# bound value when each call is evaluated.
+[[case]]
+name = "value_guard_in_type_ctor_accepts_valid"
+spec = ["4.14:7"]
+description = "A `comptime if` predicate over a comptime value param admits valid arguments."
+source = """
+fn FixedBuffer(comptime N: i32) -> type {
+    comptime if N < 0 {
+        @compile_error("buffer size must be non-negative");
+    }
+    struct { len: i32 }
+}
+
+fn main() -> i32 {
+    let B = FixedBuffer(7);
+    let b = B { len: 0 };
+    b.len
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "value_guard_in_type_ctor_rejects_invalid"
+spec = ["4.14:7"]
+description = "Same predicate fires the user's `@compile_error` on an invalid argument."
+source = """
+fn FixedBuffer(comptime N: i32) -> type {
+    comptime if N < 0 {
+        @compile_error("buffer size must be non-negative");
+    }
+    struct { len: i32 }
+}
+
+fn main() -> i32 {
+    let B = FixedBuffer(-1);
+    0
+}
+"""
+compile_fail = true
+error_contains = "buffer size must be non-negative"
+
+# A `comptime if` predicate over a comptime value parameter inside an
+# ordinary (non-type-constructor) function is also evaluated at the call
+# site. Per-call specialization keys on (name, type_args, value_args) so
+# different values get distinct specializations and the guard fires only
+# for the values it applies to.
+[[case]]
+name = "value_guard_in_value_fn_accepts_valid"
+spec = ["4.14:7"]
+description = "Comptime-value guard on a non-type-ctor function admits valid arguments."
+source = """
+fn check_n(comptime n: i32) -> i32 {
+    comptime if n < 0 {
+        @compile_error("n must be non-negative");
+    }
+    n + 1
+}
+
+fn main() -> i32 {
+    check_n(7)
+}
+"""
+exit_code = 8
+
+[[case]]
+name = "value_guard_in_value_fn_rejects_invalid"
+spec = ["4.14:7"]
+description = "Same guard fires the user's `@compile_error` for an invalid argument."
+source = """
+fn check_n(comptime n: i32) -> i32 {
+    comptime if n < 0 {
+        @compile_error("n must be non-negative");
+    }
+    n + 1
+}
+
+fn main() -> i32 {
+    check_n(-1)
+}
+"""
+compile_fail = true
+error_contains = "n must be non-negative"
+
+[[case]]
+name = "value_guard_in_value_fn_two_call_sites"
+spec = ["4.14:7"]
+description = "Two calls with different comptime values produce distinct specializations."
+source = """
+fn check_n(comptime n: i32) -> i32 {
+    comptime if n < 0 {
+        @compile_error("n must be non-negative");
+    }
+    n + 1
+}
+
+fn main() -> i32 {
+    check_n(7) + check_n(10)
+}
+"""
+exit_code = 19
+
 # ADR-0067: linearity propagates through compound types.
 [[case]]
 name = "linear_array_implicit_drop_rejected"

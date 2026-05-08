@@ -214,6 +214,16 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                     continue;
                 }
 
+                // Skip type-constructor functions (return `type`). Their bodies
+                // run only via the comptime evaluator at each call site (see
+                // `evaluate_type_ctor_body`); analyzing them as ordinary
+                // runtime code would mis-evaluate `comptime if` predicates that
+                // reference comptime *value* parameters (e.g. `comptime N: i32`)
+                // before the call binds them.
+                if fn_info.return_type == Type::COMPTIME_TYPE {
+                    continue;
+                }
+
                 let fn_name_str = sema.interner.resolve(&fn_name).to_string();
 
                 // Find the function declaration in RIR to get params
@@ -1266,6 +1276,11 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
     for e in std::mem::take(&mut sema.pending_anon_derive_errors) {
         errors.push(e);
     }
+    // Surface anon-struct/enum eval validation errors that weren't drained by
+    // their evaluating call site (e.g. an unreached / dead type-constructor).
+    for e in std::mem::take(&mut sema.pending_anon_eval_errors) {
+        errors.push(e);
+    }
 
     errors.into_result_with(output)
 }
@@ -1745,11 +1760,21 @@ impl<'a> Sema<'a> {
         params: &[(Spur, Type, RirParamMode)],
         body: InstRef,
         type_subst: &rustc_hash::FxHashMap<Spur, Type>,
+        value_subst: Option<&rustc_hash::FxHashMap<Spur, ConstValue>>,
     ) -> RawFnAnalysis {
         // For specialized functions, we need to populate comptime_type_vars with the
         // type substitutions so that references to type parameters (like `P { ... }`)
-        // can be resolved in the function body.
-        self.analyze_function_internal(infer_ctx, return_type, params, body, Some(type_subst), None)
+        // can be resolved in the function body. The optional `value_subst` carries
+        // bindings for `comptime n: i32`-style value parameters so the body's
+        // `comptime if`/`@compile_error` checks see the call's concrete value.
+        self.analyze_function_internal(
+            infer_ctx,
+            return_type,
+            params,
+            body,
+            Some(type_subst),
+            value_subst,
+        )
     }
 
     /// Analyze a method body with `Self` type resolution.
@@ -5165,6 +5190,7 @@ impl<'a> Sema<'a> {
 
                 // Preserve mode and comptime flags so specialization can see
                 // method-level comptime type parameters.
+                let any_comptime_param = param_comptime.iter().any(|c| *c);
                 let param_range =
                     self.param_arena
                         .alloc(param_names, param_types, param_modes, param_comptime);
@@ -5180,7 +5206,12 @@ impl<'a> Sema<'a> {
                         body: *body,
                         span: method_inst.span,
                         is_unchecked: *is_unchecked,
-                        is_generic: !method_type_param_names.is_empty(),
+                        // Any comptime parameter — type or value — makes the
+                        // method generic so per-call specialization can bind
+                        // the values for `comptime if`/`@compile_error`
+                        // checks in the body. (Mirrors the top-level rule in
+                        // `declarations.rs`.)
+                        is_generic: any_comptime_param,
                         return_type_sym: *return_type,
                         is_pub: *method_is_pub,
                         file_id: method_inst.span.file_id,

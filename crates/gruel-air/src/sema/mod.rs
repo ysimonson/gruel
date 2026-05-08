@@ -124,6 +124,13 @@ pub struct Sema<'a> {
     /// analysis so users still see actionable diagnostics for an
     /// `@derive(...)` error on an anonymous struct/enum.
     pub(crate) pending_anon_derive_errors: Vec<gruel_util::CompileError>,
+    /// Validation errors raised while evaluating an anonymous struct/enum
+    /// type literal at comptime (empty body, duplicate method names).
+    /// Buffered for the same `Option<...>` reason as `pending_anon_derive_errors`.
+    /// `evaluate_type_ctor_body` drains the entries it caused so the call site
+    /// surfaces the specific error instead of a generic "comptime evaluation
+    /// failed"; any leftover entries are surfaced by `analyze_all` at the end.
+    pub(crate) pending_anon_eval_errors: Vec<gruel_util::CompileError>,
     /// Constant table: maps const name symbol to const info
     pub(crate) constants: HashMap<Spur, ConstInfo>,
     /// Enabled preview features
@@ -248,6 +255,7 @@ impl<'a> Sema<'a> {
             derives: HashMap::default(),
             derive_bindings: Vec::new(),
             pending_anon_derive_errors: Vec::new(),
+            pending_anon_eval_errors: Vec::new(),
             constants: HashMap::default(),
             preview_features,
             builtin_string_id: None,

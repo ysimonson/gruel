@@ -501,6 +501,15 @@ impl<'a> Sema<'a> {
             return Some(ty);
         }
 
+        // Then check the active comptime call's type overrides. The rich
+        // evaluator (`evaluate_comptime_inst`) seeds these when it enters a
+        // generic comptime call and delegates anon-struct/anon-enum field
+        // resolution to `try_evaluate_const`, which doesn't carry an explicit
+        // `type_subst`. Consulting overrides here makes that path resolve `T`.
+        if let Some(&ty) = self.comptime_type_overrides.get(&type_sym) {
+            return Some(ty);
+        }
+
         let type_name = self.interner.resolve(&type_sym);
 
         // ADR-0076: pervasive `Self` — substitute from `current_self` if set.
