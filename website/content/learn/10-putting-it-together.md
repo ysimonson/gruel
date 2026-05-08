@@ -118,7 +118,7 @@ The [GitHub repository](https://github.com/ysimonson/gruel) has more examples in
 - `primes.gruel` - Prime number sieve with trial division
 - `binary_search.gruel` - Binary search on a sorted array
 - `quicksort.gruel` - Full quicksort with 10-element arrays
-- `structs.gruel` - Working with Points and Rectangles
+- `shapes.gruel` - Interfaces with static and dynamic dispatch
 
 ## Next Steps
 

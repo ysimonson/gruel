@@ -5,7 +5,13 @@
 // - Tuple variants (positional fields)
 // - Struct variants (named fields)
 //
-// Match expressions destructure variants exhaustively.
+// Match expressions destructure variants exhaustively. Patterns that
+// don't care about a value can use wildcards:
+//
+//   - `_` arm                      catches every remaining variant
+//   - `Variant(_, _, x)`           drops unwanted tuple positions
+//   - `Variant { field: _, .. }`   drops unwanted struct fields
+//   - `Variant { x, .. }`          drops every unlisted struct field
 
 // Plain unit variants - like a C enum
 enum Direction {
@@ -17,18 +23,31 @@ enum Direction {
 
 // Tuple and struct variants together describe arbitrary shapes
 enum Shape {
-    Circle(i32),                       // radius
-    Rectangle { width: i32, height: i32 },
-    Triangle(i32, i32, i32),           // three sides
-    Point,                             // unit variant
+    Circle(i32),                                       // radius
+    Rectangle { width: i32, height: i32, tag: i32 },   // tag is bookkeeping
+    Triangle(i32, i32, i32),                           // three sides
+    Point,                                             // unit variant
 }
 
 fn area(shape: Shape) -> i32 {
     match shape {
+        // Tuple variant: bind the value we care about by name
         Shape::Circle(r) => 3 * r * r,                  // π ~ 3
-        Shape::Rectangle { width, height } => width * height,
-        Shape::Triangle(a, b, _c) => (a * b) / 2,       // approximate
+        // Struct variant: `..` ignores every unlisted field (`tag` here)
+        Shape::Rectangle { width, height, .. } => width * height,
+        // Bare `_` discards a tuple position - we only need the legs
+        Shape::Triangle(b, h, _) => (b * h) / 2,
+        // Unit variant
         Shape::Point => 0,
+    }
+}
+
+// `_` in field position discards a single named field while still
+// listing the others explicitly.
+fn rectangle_tag(shape: Shape) -> i32 {
+    match shape {
+        Shape::Rectangle { tag, width: _, height: _ } => tag,
+        _ => -1,                                       // wildcard arm
     }
 }
 
@@ -38,6 +57,15 @@ fn opposite(d: Direction) -> Direction {
         Direction::South => Direction::North,
         Direction::East => Direction::West,
         Direction::West => Direction::East,
+    }
+}
+
+// `_` arm collapses several variants into one branch.
+fn is_horizontal(d: Direction) -> bool {
+    match d {
+        Direction::East => true,
+        Direction::West => true,
+        _ => false,
     }
 }
 
@@ -53,24 +81,31 @@ fn direction_code(d: Direction) -> i32 {
 fn main() -> i32 {
     // Unit variants
     let here = Direction::North;
-    @dbg(direction_code(here));                  // 1
-    @dbg(direction_code(opposite(Direction::North)));  // 3 (south)
+    @dbg(direction_code(here));                            // 1
+    @dbg(direction_code(opposite(Direction::North)));      // 3 (south)
+    @dbg(is_horizontal(Direction::East));                  // true
+    @dbg(is_horizontal(Direction::North));                 // false
 
     // Tuple variant
     let circle = Shape::Circle(5);
-    @dbg(area(circle));                          // 75 = 3 * 5 * 5
+    @dbg(area(circle));                                    // 75 = 3 * 5 * 5
 
-    // Struct variant
-    let rect = Shape::Rectangle { width: 4, height: 7 };
-    @dbg(area(rect));                            // 28
+    // Struct variant - the `tag` field is dropped via `..`
+    let rect = Shape::Rectangle { width: 4, height: 7, tag: 99 };
+    @dbg(area(rect));                                      // 28
 
-    // Multi-field tuple variant
+    // ... but we can also pluck out just the tag with `_` for the rest
+    @dbg(rectangle_tag(Shape::Rectangle { width: 1, height: 1, tag: 42 }));  // 42
+
+    // Multi-field tuple variant - the third side is discarded with `_`
     let tri = Shape::Triangle(6, 8, 10);
-    @dbg(area(tri));                             // 24
+    @dbg(area(tri));                                       // 24
 
     // Unit variant inside an otherwise data-carrying enum
-    let point = Shape::Point;
-    @dbg(area(point));                           // 0
+    @dbg(area(Shape::Point));                              // 0
 
-    area(Shape::Rectangle { width: 5, height: 4 })
+    // Catch-all `_` arm matches anything not listed
+    @dbg(rectangle_tag(Shape::Point));                     // -1
+
+    area(Shape::Rectangle { width: 5, height: 4, tag: 0 })
 }
