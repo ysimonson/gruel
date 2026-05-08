@@ -6,7 +6,7 @@
 //! (`v.push(x)`, `v.len()`, etc.) both flow through this module.
 
 use gruel_rir::{InstRef, RirCallArg};
-use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature, Span};
+use gruel_util::{CompileError, CompileResult, ErrorKind, Span};
 
 use super::Sema;
 use super::context::{AnalysisContext, AnalysisResult};
@@ -32,27 +32,23 @@ impl<'a> Sema<'a> {
         };
         let elem_ty = self.type_pool.vec_def(vec_id);
 
-        // ADR-0082: under the preview gate, route through the prelude
-        // struct's associated function (e.g. `Vec(i32)::new()` calls
-        // the prelude `new` associated fn). Other branches fall back
-        // to the legacy codegen-inline intrinsic path.
-        if self
-            .preview_features
-            .contains(&PreviewFeature::VecRuntimeCollapse)
-        {
-            match self.try_dispatch_vec_static_via_prelude(
-                air,
-                vec_ty,
-                elem_ty,
-                function_name,
-                args,
-                span,
-                ctx,
-            ) {
-                Ok(Some(result)) => return Some(Ok(result)),
-                Ok(None) => {}
-                Err(e) => return Some(Err(e)),
-            }
+        // ADR-0082 Phase 4: route through the prelude struct's
+        // associated function. The legacy codegen-inline `vec_*`
+        // intrinsic emission below is dead code kept only for the
+        // off-prelude fallback (which doesn't fire for the recognized
+        // `new` / `with_capacity` names anymore).
+        match self.try_dispatch_vec_static_via_prelude(
+            air,
+            vec_ty,
+            elem_ty,
+            function_name,
+            args,
+            span,
+            ctx,
+        ) {
+            Ok(Some(result)) => return Some(Ok(result)),
+            Ok(None) => {}
+            Err(e) => return Some(Err(e)),
         }
 
         match function_name {
@@ -189,25 +185,24 @@ impl<'a> Sema<'a> {
         };
         let elem_ty = self.type_pool.vec_def(vec_id);
 
-        // ADR-0082: when the preview gate is on, route through the
-        // prelude `@lang("vec")` declaration's instantiated methods.
-        // The receiver value (TypeKind::Vec(_)) and the prelude
-        // struct's `Self` (TypeKind::Struct(StructId)) share an
-        // identical {ptr, len, cap} layout, so the AIR-level type pun
-        // is safe and codegen sees the same LLVM aggregate.
-        if self
-            .preview_features
-            .contains(&PreviewFeature::VecRuntimeCollapse)
-            && let Some(result) = self.try_dispatch_vec_method_via_prelude(
-                air,
-                receiver,
-                elem_ty,
-                method_name,
-                args,
-                span,
-                ctx,
-            )?
-        {
+        // ADR-0082 Phase 4: route through the prelude
+        // `@lang("vec")` declaration's instantiated methods. The
+        // receiver value (TypeKind::Vec(_)) and the prelude struct's
+        // `Self` (TypeKind::Struct(StructId)) share an identical
+        // {ptr, len, cap} layout, so the AIR-level type pun is safe
+        // and codegen sees the same LLVM aggregate. Falls through to
+        // the legacy codegen-inline path only for methods the prelude
+        // doesn't define (kept for byte-search methods etc. until
+        // those land in the prelude as well).
+        if let Some(result) = self.try_dispatch_vec_method_via_prelude(
+            air,
+            receiver,
+            elem_ty,
+            method_name,
+            args,
+            span,
+            ctx,
+        )? {
             return Ok(result);
         }
 
@@ -879,21 +874,17 @@ impl<'a> Sema<'a> {
                 self.rir.get(index).span,
             ));
         }
-        // ADR-0082: under the preview gate, route `v[i]` to the
-        // prelude struct's `index_read(i)` method.
-        if self
-            .preview_features
-            .contains(&PreviewFeature::VecRuntimeCollapse)
-            && let Some(result) = self.try_emit_prelude_index_call(
-                air,
-                base_res,
-                elem_ty,
-                "index_read",
-                &[index_res],
-                elem_ty,
-                span,
-            )?
-        {
+        // ADR-0082 Phase 4: route `v[i]` through the prelude
+        // struct's `index_read(i)` method.
+        if let Some(result) = self.try_emit_prelude_index_call(
+            air,
+            base_res,
+            elem_ty,
+            "index_read",
+            &[index_res],
+            elem_ty,
+            span,
+        )? {
             return Ok(Some(result));
         }
         let extra = vec![base_res.air_ref.as_u32(), index_res.air_ref.as_u32()];
@@ -943,21 +934,17 @@ impl<'a> Sema<'a> {
                 span,
             ));
         }
-        // ADR-0082: under the preview gate, route `v[i] = x` to the
-        // prelude struct's `index_write(i, x)` method.
-        if self
-            .preview_features
-            .contains(&PreviewFeature::VecRuntimeCollapse)
-            && let Some(result) = self.try_emit_prelude_index_call(
-                air,
-                base_res,
-                elem_ty,
-                "index_write",
-                &[index_res, value_res],
-                Type::UNIT,
-                span,
-            )?
-        {
+        // ADR-0082 Phase 4: route `v[i] = x` through the prelude
+        // struct's `index_write(i, x)` method.
+        if let Some(result) = self.try_emit_prelude_index_call(
+            air,
+            base_res,
+            elem_ty,
+            "index_write",
+            &[index_res, value_res],
+            Type::UNIT,
+            span,
+        )? {
             return Ok(Some(result));
         }
         let extra = vec![
