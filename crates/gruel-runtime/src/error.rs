@@ -2,7 +2,6 @@
 //!
 //! These functions are called by generated code when runtime errors occur:
 //! - Division by zero
-//! - Integer overflow
 //! - Integer cast overflow
 //! - Array bounds check failure
 //!
@@ -14,13 +13,6 @@ use crate::platform;
 #[unsafe(no_mangle)]
 pub extern "C" fn __gruel_div_by_zero() -> ! {
     platform::write_stderr(b"error: division by zero\n");
-    platform::exit(101)
-}
-
-/// Runtime error: integer overflow.
-#[unsafe(no_mangle)]
-pub extern "C" fn __gruel_overflow() -> ! {
-    platform::write_stderr(b"error: integer overflow\n");
     platform::exit(101)
 }
 
@@ -86,7 +78,6 @@ mod tests {
     #[test]
     fn test_error_message_lengths() {
         assert_eq!(b"error: division by zero\n".len(), 24);
-        assert_eq!(b"error: integer overflow\n".len(), 24);
         assert_eq!(b"error: integer cast overflow\n".len(), 29);
         assert_eq!(b"error: index out of bounds\n".len(), 27);
         assert_eq!(b"error: float-to-integer cast overflow\n".len(), 38);
@@ -95,7 +86,6 @@ mod tests {
     #[test]
     fn test_error_messages_are_valid_utf8() {
         assert!(core::str::from_utf8(b"error: division by zero\n").is_ok());
-        assert!(core::str::from_utf8(b"error: integer overflow\n").is_ok());
         assert!(core::str::from_utf8(b"error: integer cast overflow\n").is_ok());
         assert!(core::str::from_utf8(b"error: index out of bounds\n").is_ok());
         assert!(core::str::from_utf8(b"error: float-to-integer cast overflow\n").is_ok());

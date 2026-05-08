@@ -50,7 +50,7 @@ impl<'a> Sema<'a> {
                 let v = self.try_evaluate_const(*operand)?;
                 match (op, v) {
                     (UnaryOp::Neg, ConstValue::Integer(n)) => {
-                        n.checked_neg().map(ConstValue::Integer)
+                        Some(ConstValue::Integer(n.wrapping_neg()))
                     }
                     (UnaryOp::Not, ConstValue::Bool(b)) => Some(ConstValue::Bool(!b)),
                     (UnaryOp::BitNot, ConstValue::Integer(n)) => Some(ConstValue::Integer(!n)),
@@ -62,18 +62,15 @@ impl<'a> Sema<'a> {
                 let l = self.try_evaluate_const(*lhs)?;
                 let r = self.try_evaluate_const(*rhs)?;
                 match op {
-                    BinOp::Add => l
-                        .as_integer()?
-                        .checked_add(r.as_integer()?)
-                        .map(ConstValue::Integer),
-                    BinOp::Sub => l
-                        .as_integer()?
-                        .checked_sub(r.as_integer()?)
-                        .map(ConstValue::Integer),
-                    BinOp::Mul => l
-                        .as_integer()?
-                        .checked_mul(r.as_integer()?)
-                        .map(ConstValue::Integer),
+                    BinOp::Add => Some(ConstValue::Integer(
+                        l.as_integer()?.wrapping_add(r.as_integer()?),
+                    )),
+                    BinOp::Sub => Some(ConstValue::Integer(
+                        l.as_integer()?.wrapping_sub(r.as_integer()?),
+                    )),
+                    BinOp::Mul => Some(ConstValue::Integer(
+                        l.as_integer()?.wrapping_mul(r.as_integer()?),
+                    )),
                     BinOp::Div => {
                         let r = r.as_integer()?;
                         if r == 0 {
@@ -415,7 +412,7 @@ impl<'a> Sema<'a> {
                 let v = self.try_evaluate_const_with_subst(*operand, type_subst, value_subst)?;
                 match (op, v) {
                     (UnaryOp::Neg, ConstValue::Integer(n)) => {
-                        n.checked_neg().map(ConstValue::Integer)
+                        Some(ConstValue::Integer(n.wrapping_neg()))
                     }
                     (UnaryOp::Not, ConstValue::Bool(b)) => Some(ConstValue::Bool(!b)),
                     (UnaryOp::BitNot, ConstValue::Integer(n)) => Some(ConstValue::Integer(!n)),
@@ -427,18 +424,15 @@ impl<'a> Sema<'a> {
                 let l = self.try_evaluate_const_with_subst(*lhs, type_subst, value_subst)?;
                 let r = self.try_evaluate_const_with_subst(*rhs, type_subst, value_subst)?;
                 match op {
-                    BinOp::Add => l
-                        .as_integer()?
-                        .checked_add(r.as_integer()?)
-                        .map(ConstValue::Integer),
-                    BinOp::Sub => l
-                        .as_integer()?
-                        .checked_sub(r.as_integer()?)
-                        .map(ConstValue::Integer),
-                    BinOp::Mul => l
-                        .as_integer()?
-                        .checked_mul(r.as_integer()?)
-                        .map(ConstValue::Integer),
+                    BinOp::Add => Some(ConstValue::Integer(
+                        l.as_integer()?.wrapping_add(r.as_integer()?),
+                    )),
+                    BinOp::Sub => Some(ConstValue::Integer(
+                        l.as_integer()?.wrapping_sub(r.as_integer()?),
+                    )),
+                    BinOp::Mul => Some(ConstValue::Integer(
+                        l.as_integer()?.wrapping_mul(r.as_integer()?),
+                    )),
                     BinOp::Div => {
                         let r = r.as_integer()?;
                         if r == 0 {
@@ -1742,12 +1736,7 @@ impl<'a> Sema<'a> {
             InstData::Unary { op, operand } => {
                 let v = self.evaluate_comptime_inst(operand, locals, ctx, outer_span)?;
                 match op {
-                    UnaryOp::Neg => {
-                        let n = int(v, inst_span)?;
-                        n.checked_neg()
-                            .map(ConstValue::Integer)
-                            .ok_or_else(|| overflow(inst_span))
-                    }
+                    UnaryOp::Neg => Ok(ConstValue::Integer(int(v, inst_span)?.wrapping_neg())),
                     UnaryOp::Not => Ok(ConstValue::Bool(!bool_val(v, inst_span)?)),
                     UnaryOp::BitNot => Ok(ConstValue::Integer(!int(v, inst_span)?)),
                 }
@@ -1773,37 +1762,28 @@ impl<'a> Sema<'a> {
                     )
                 };
                 match op {
-                    BinOp::Add => int(lv, inst_span)?
-                        .checked_add(int(rv, inst_span)?)
-                        .map(ConstValue::Integer)
-                        .ok_or_else(|| overflow(inst_span)),
-                    BinOp::Sub => int(lv, inst_span)?
-                        .checked_sub(int(rv, inst_span)?)
-                        .map(ConstValue::Integer)
-                        .ok_or_else(|| overflow(inst_span)),
-                    BinOp::Mul => int(lv, inst_span)?
-                        .checked_mul(int(rv, inst_span)?)
-                        .map(ConstValue::Integer)
-                        .ok_or_else(|| overflow(inst_span)),
+                    BinOp::Add => Ok(ConstValue::Integer(
+                        int(lv, inst_span)?.wrapping_add(int(rv, inst_span)?),
+                    )),
+                    BinOp::Sub => Ok(ConstValue::Integer(
+                        int(lv, inst_span)?.wrapping_sub(int(rv, inst_span)?),
+                    )),
+                    BinOp::Mul => Ok(ConstValue::Integer(
+                        int(lv, inst_span)?.wrapping_mul(int(rv, inst_span)?),
+                    )),
                     BinOp::Div => {
                         let r = int(rv, inst_span)?;
                         if r == 0 {
                             return Err(div_zero("division"));
                         }
-                        int(lv, inst_span)?
-                            .checked_div(r)
-                            .map(ConstValue::Integer)
-                            .ok_or_else(|| overflow(inst_span))
+                        Ok(ConstValue::Integer(int(lv, inst_span)?.wrapping_div(r)))
                     }
                     BinOp::Mod => {
                         let r = int(rv, inst_span)?;
                         if r == 0 {
                             return Err(div_zero("modulo"));
                         }
-                        int(lv, inst_span)?
-                            .checked_rem(r)
-                            .map(ConstValue::Integer)
-                            .ok_or_else(|| overflow(inst_span))
+                        Ok(ConstValue::Integer(int(lv, inst_span)?.wrapping_rem(r)))
                     }
                     BinOp::Eq | BinOp::Ne => {
                         let eq = match (lv, rv) {

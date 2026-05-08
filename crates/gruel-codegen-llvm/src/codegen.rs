@@ -1328,71 +1328,6 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         Some(current_ptr)
     }
 
-    /// Emit an overflow-checked binary integer operation.
-    ///
-    /// Uses LLVM's `llvm.{sadd,ssub,smul,uadd,usub,umul}.with.overflow` intrinsics.
-    /// On overflow, calls `__gruel_overflow()` (which exits with code 101).
-    ///
-    /// `intrinsic_name` should be e.g. `"llvm.sadd.with.overflow"`.
-    fn build_checked_int_op(
-        &mut self,
-        l: inkwell::values::IntValue<'ctx>,
-        r: inkwell::values::IntValue<'ctx>,
-        intrinsic_name: &str,
-    ) -> inkwell::values::IntValue<'ctx> {
-        let int_type = l.get_type();
-        let intrinsic = Intrinsic::find(intrinsic_name)
-            .unwrap_or_else(|| panic!("LLVM intrinsic '{}' not found", intrinsic_name));
-        let intrinsic_fn = intrinsic
-            .get_declaration(self.module, &[int_type.into()])
-            .unwrap_or_else(|| panic!("failed to declare intrinsic '{}'", intrinsic_name));
-
-        let call = self
-            .builder
-            .build_call(intrinsic_fn, &[l.into(), r.into()], "ovf")
-            .unwrap();
-        let struct_val = call
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-            .into_struct_value();
-        let result = self
-            .builder
-            .build_extract_value(struct_val, 0, "res")
-            .unwrap()
-            .into_int_value();
-        let overflow = self
-            .builder
-            .build_extract_value(struct_val, 1, "ovf_flag")
-            .unwrap()
-            .into_int_value();
-        let overflow = self.build_expect_i1(overflow, false);
-
-        // Emit conditional branch to overflow handler or continuation.
-        let current_fn = self
-            .builder
-            .get_insert_block()
-            .unwrap()
-            .get_parent()
-            .unwrap();
-        let overflow_bb = self.ctx.append_basic_block(current_fn, "ovf_handler");
-        let cont_bb = self.ctx.append_basic_block(current_fn, "ovf_cont");
-
-        self.builder
-            .build_conditional_branch(overflow, overflow_bb, cont_bb)
-            .unwrap();
-
-        // Overflow handler: call __gruel_overflow() then unreachable.
-        self.builder.position_at_end(overflow_bb);
-        let panic_fn = self.get_or_declare_noreturn_fn("__gruel_overflow");
-        self.builder.build_call(panic_fn, &[], "").unwrap();
-        self.builder.build_unreachable().unwrap();
-
-        // Continue in the continuation block.
-        self.builder.position_at_end(cont_bb);
-        result
-    }
-
     /// Emit a division-by-zero check.
     ///
     /// If `divisor` is zero, calls `__gruel_div_by_zero()` (exits with code 101).
@@ -1601,17 +1536,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 } else {
                     let l = self.get_value(lhs).into_int_value();
                     let r = self.get_value(rhs).into_int_value();
-                    let signed = is_signed_type(lhs_ty);
-                    let intrinsic = match (op, signed) {
-                        (BinOp::Add, true) => "llvm.sadd.with.overflow",
-                        (BinOp::Add, false) => "llvm.uadd.with.overflow",
-                        (BinOp::Sub, true) => "llvm.ssub.with.overflow",
-                        (BinOp::Sub, false) => "llvm.usub.with.overflow",
-                        (BinOp::Mul, true) => "llvm.smul.with.overflow",
-                        (BinOp::Mul, false) => "llvm.umul.with.overflow",
+                    match op {
+                        BinOp::Add => self.builder.build_int_add(l, r, "add").unwrap().into(),
+                        BinOp::Sub => self.builder.build_int_sub(l, r, "sub").unwrap().into(),
+                        BinOp::Mul => self.builder.build_int_mul(l, r, "mul").unwrap().into(),
                         _ => unreachable!(),
-                    };
-                    self.build_checked_int_op(l, r, intrinsic).into()
+                    }
                 }
             }
             BinOp::Div | BinOp::Mod => {
@@ -1763,9 +1693,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     self.builder.build_float_neg(v, "fneg").unwrap().into()
                 } else {
                     let v = self.get_value(operand).into_int_value();
-                    let zero = v.get_type().const_zero();
-                    self.build_checked_int_op(zero, v, "llvm.ssub.with.overflow")
-                        .into()
+                    self.builder.build_int_neg(v, "neg").unwrap().into()
                 }
             }
             UnaryOp::Not => {

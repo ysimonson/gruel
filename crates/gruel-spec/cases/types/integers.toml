@@ -123,110 +123,118 @@ params = [
 ]
 
 # =============================================================================
-# Signed Integer Overflow (Runtime Panic - Exit 101)
+# Signed Integer Overflow (Wraps modulo 2^N)
 # =============================================================================
 
 [[case]]
-name = "{type}_overflow_addition"
+name = "{type}_wrap_addition"
 spec = ["3.1:6"]
-exit_code = 101
 source = """
-fn main() -> {type} {
+fn main() -> i32 {
     let x: {type} = {max};
-    x + 1
+    let y: {type} = x + 1;
+    if y == {min} { 0 } else { 1 }
 }
 """
+exit_code = 0
 params = [
-  { type = "i8", max = "127" },
-  { type = "i16", max = "32767" },
+  { type = "i8", max = "127", min = "-128" },
+  { type = "i16", max = "32767", min = "-32768" },
 ]
 
 [[case]]
-name = "{type}_overflow_subtraction"
+name = "{type}_wrap_subtraction"
 spec = ["3.1:6"]
-exit_code = 101
 source = """
-fn main() -> {type} {
+fn main() -> i32 {
     let x: {type} = {min};
-    x - 1
+    let y: {type} = x - 1;
+    if y == {max} { 0 } else { 1 }
 }
 """
+exit_code = 0
 params = [
-  { type = "i8", min = "-128" },
-  { type = "i16", min = "-32768" },
+  { type = "i8", min = "-128", max = "127" },
+  { type = "i16", min = "-32768", max = "32767" },
 ]
 
 [[case]]
-name = "i8_overflow_multiplication"
+name = "i8_wrap_multiplication"
 spec = ["3.1:6"]
 source = """
-fn main() -> i8 {
+fn main() -> i32 {
     let x: i8 = 16;
-    x * 16
+    let y: i8 = x * 16;
+    if y == 0 { 0 } else { 1 }
 }
 """
-exit_code = 101
+exit_code = 0
 
 [[case]]
-name = "i32_overflow_multiplication"
+name = "i32_wrap_multiplication"
 spec = ["3.1:6"]
 source = """
 fn main() -> i32 {
     let x: i32 = 2147483647;
-    x * 2
+    let y: i32 = x * 2;
+    if y == -2 { 0 } else { 1 }
 }
 """
-exit_code = 101
+exit_code = 0
 
 [[case]]
-name = "i64_overflow_addition"
+name = "i64_wrap_addition"
 spec = ["3.1:6"]
 source = """
-fn main() -> i64 {
+fn main() -> i32 {
     let x: i64 = 4611686018427387903;
     let y: i64 = x + x;
-    y + x
+    let z: i64 = y + x;
+    if z == -4611686018427387907 { 0 } else { 1 }
 }
 """
-exit_code = 101
+exit_code = 0
 
 [[case]]
-name = "i64_overflow_subtraction"
+name = "i64_wrap_subtraction"
 spec = ["3.1:6"]
 source = """
-fn main() -> i64 {
+fn main() -> i32 {
     let x: i64 = -4611686018427387903;
     let y: i64 = x + x;
-    y + x
+    let z: i64 = y + x;
+    if z == 4611686018427387907 { 0 } else { 1 }
 }
 """
-exit_code = 101
+exit_code = 0
 
 [[case]]
-name = "i64_overflow_multiplication"
+name = "i64_wrap_multiplication"
 spec = ["3.1:6"]
 source = """
-fn main() -> i64 {
+fn main() -> i32 {
     let x: i64 = 3037000500;
-    x * x
+    let y: i64 = x * x;
+    if y == -9223372036709301616 { 0 } else { 1 }
 }
 """
-exit_code = 101
+exit_code = 0
 
 # =============================================================================
-# Unsigned Integer Overflow (Runtime Panic - Exit 101)
+# Unsigned Integer Overflow (Wraps modulo 2^N)
 # =============================================================================
 
 [[case]]
-name = "{type}_overflow_addition"
+name = "{type}_wrap_addition"
 spec = ["3.1:13"]
-exit_code = 101
 source = """
-fn main() -> {type} {
+fn main() -> i32 {
     let x: {type} = {max};
-    x + 1
+    let y: {type} = x + 1;
+    if y == 0 { 0 } else { 1 }
 }
 """
+exit_code = 0
 params = [
   { type = "u8", max = "255" },
   { type = "u16", max = "65535" },
@@ -234,60 +242,64 @@ params = [
 ]
 
 [[case]]
-name = "u8_overflow_addition_rhs"
+name = "u8_wrap_addition_rhs"
 spec = ["3.1:13"]
 source = """
-fn main() -> u8 {
+fn main() -> i32 {
     let x: u8 = 200;
     let y: u8 = 100;
-    x + y
+    let z: u8 = x + y;
+    if z == 44 { 0 } else { 1 }
 }
 """
-exit_code = 101
+exit_code = 0
 
 [[case]]
-name = "{type}_overflow_subtraction"
+name = "{type}_wrap_subtraction"
 spec = ["3.1:13"]
-exit_code = 101
 source = """
-fn main() -> {type} {
+fn main() -> i32 {
     let x: {type} = 0;
-    x - 1
+    let y: {type} = x - 1;
+    if y == {max} { 0 } else { 1 }
 }
 """
+exit_code = 0
 params = [
-  { type = "u8" },
-  { type = "u16" },
-  { type = "u32" },
-  { type = "u64" },
+  { type = "u8", max = "255" },
+  { type = "u16", max = "65535" },
+  { type = "u32", max = "4294967295" },
+  { type = "u64", max = "18446744073709551615" },
 ]
 
 [[case]]
-name = "{type}_overflow_multiplication"
+name = "{type}_wrap_multiplication"
 spec = ["3.1:13"]
-exit_code = 101
 source = """
-fn main() -> {type} {
+fn main() -> i32 {
     let x: {type} = {value};
-    x * {value}
+    let y: {type} = x * {value};
+    if y == {expected} { 0 } else { 1 }
 }
 """
+exit_code = 0
 params = [
-  { type = "u8", value = "16" },
-  { type = "u32", value = "100000" },
+  { type = "u8", value = "16", expected = "0" },
+  { type = "u32", value = "100000", expected = "1410065408" },
 ]
 
 [[case]]
-name = "u64_overflow_addition"
+name = "u64_wrap_addition"
 spec = ["3.1:13"]
 source = """
-fn main() -> u64 {
+fn main() -> i32 {
     let x: u64 = 9223372036854775807;
     let y: u64 = x + x;
-    y + x
+    let z: u64 = y + x;
+    if z == 9223372036854775805 { 0 } else { 1 }
 }
 """
-exit_code = 101
+exit_code = 0
 
 # =============================================================================
 # Valid Arithmetic (No Overflow)

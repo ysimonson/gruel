@@ -28,15 +28,7 @@ Gruel detects certain error conditions at runtime and responds with a panic, ter
 
 {{ rule(id="B.2:2", cat="dynamic-semantics") }}
 
-Signed or unsigned integer arithmetic that overflows the representable range **MUST** cause a runtime panic.
-
-**Operations affected:**
-- Addition (`+`)
-- Subtraction (`-`)
-- Multiplication (`*`)
-- Unary negation (`-`)
-
-**Runtime behavior:** Panic with exit code 101.
+Signed or unsigned integer arithmetic that overflows the representable range **MUST** wrap around modulo 2^N (where N is the bit width of the type). Integer overflow is **not** a runtime panic. See chapter 8.1 for details.
 
 ## Division by Zero
 
@@ -66,7 +58,6 @@ Accessing an array element with an index outside the valid range `[0, length)` *
 
 | Condition | Exit Code |
 |-----------|-----------|
-| Integer overflow | 101 |
 | Division by zero | 101 |
 | Array out of bounds | 101 |
 
