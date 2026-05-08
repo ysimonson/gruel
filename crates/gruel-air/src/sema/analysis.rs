@@ -61,10 +61,7 @@ use gruel_util::{
 };
 use lasso::Spur;
 
-use super::context::{
-    AnalysisContext, AnalysisResult, BuiltinMethodContext, ComptimeHeapItem, ConstValue, ParamInfo,
-    ReceiverInfo,
-};
+use super::context::{AnalysisContext, AnalysisResult, ComptimeHeapItem, ConstValue, ParamInfo};
 use super::{AnalyzedFunction, InferenceContext, MethodInfo, Sema, SemaOutput};
 use crate::inference::{
     Constraint, ConstraintContext, ConstraintGenerator, ParamVarInfo, Unifier, UnifyResult,
@@ -3106,16 +3103,6 @@ impl<'a> Sema<'a> {
         let receiver_var = self.extract_root_variable(receiver);
         let method_name_str = self.interner.resolve(&method).to_string();
 
-        // Check if this is a builtin mutation method
-        let is_builtin_mutation_method = self.is_builtin_mutation_method(&method_name_str);
-
-        // Get storage location for mutation methods before analyzing receiver
-        let receiver_storage = if is_builtin_mutation_method {
-            self.get_string_receiver_storage(receiver, ctx, span)?
-        } else {
-            None
-        };
-
         // Analyze the receiver expression
         let receiver_result = self.analyze_inst(air, receiver, ctx)?;
         let receiver_type = receiver_result.ty;
@@ -3402,22 +3389,6 @@ impl<'a> Sema<'a> {
                 ));
             }
         };
-
-        // Check if this is a builtin type and handle its methods
-        if let Some(builtin_def) = self.get_builtin_type_def(struct_id) {
-            let method_ctx = BuiltinMethodContext {
-                struct_id,
-                builtin_def,
-                method_name: &method_name_str,
-                span,
-            };
-            let receiver_info = ReceiverInfo {
-                result: receiver_result,
-                var: receiver_var,
-                storage: receiver_storage,
-            };
-            return self.analyze_builtin_method(air, ctx, &method_ctx, receiver_info, &args);
-        }
 
         // Look up the struct name by its ID (for error messages)
         let struct_def = self.type_pool.struct_def(struct_id);
@@ -4267,21 +4238,6 @@ impl<'a> Sema<'a> {
         // regular associated functions on the prelude struct; they reach
         // the user-method lookup below alongside any other static method.
         // The previous registry-driven path retired with `STRING_TYPE`.
-
-        // Handle builtin type associated functions. ADR-0081 left
-        // `BUILTIN_TYPES` empty, so this is unreachable today; the path
-        // stays for forward compatibility if a future builtin populates
-        // the registry again.
-        if let Some(builtin_def) = self.get_builtin_type_def(struct_id) {
-            return self.analyze_builtin_assoc_fn(
-                air,
-                ctx,
-                (struct_id, builtin_def),
-                &function_name_str,
-                &args,
-                span,
-            );
-        }
 
         // Look up the function using StructId
         let method_key = (struct_id, function);

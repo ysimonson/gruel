@@ -6,7 +6,6 @@
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use gruel_builtins::BuiltinTypeDef;
 use gruel_rir::RirParamMode;
 use gruel_util::CompileWarning;
 use gruel_util::Span;
@@ -497,47 +496,10 @@ impl ConstValue {
     }
 }
 
-/// Storage location for a String receiver in mutation methods.
-///
-/// This is used by `analyze_builtin_method` to store the updated
-/// String back to the original variable after calling the runtime function.
-pub(crate) enum StringReceiverStorage {
-    /// The receiver is a local variable with the given slot.
-    Local { slot: u32 },
-    /// The receiver is a parameter with the given ABI slot.
-    Param { abi_slot: u32 },
-}
-
-/// Context for analyzing a method call on a builtin type.
-///
-/// Groups together the parameters that describe which builtin method is being
-/// called, reducing the number of parameters to `analyze_builtin_method`.
-pub(crate) struct BuiltinMethodContext<'a> {
-    /// The struct ID of the builtin type (e.g., String).
-    pub struct_id: StructId,
-    /// The builtin type definition containing method metadata.
-    pub builtin_def: &'static BuiltinTypeDef,
-    /// The name of the method being called.
-    pub method_name: &'a str,
-    /// The source span for error reporting.
-    pub span: Span,
-}
-
-/// Information about the receiver of a method call.
-///
-/// Groups together the receiver-related parameters for `analyze_builtin_method`,
-/// including the analyzed receiver expression, the original variable (if any),
-/// and the storage location for mutation methods.
-pub(crate) struct ReceiverInfo {
-    /// The analysis result of the receiver expression.
-    pub result: AnalysisResult,
-    /// The root variable symbol if the receiver is a variable reference.
-    /// Used to track moves and "unmove" for borrow semantics.
-    pub var: Option<Spur>,
-    /// Storage location for mutation methods that need to write back.
-    /// Only set when the receiver is a mutable lvalue and the method mutates.
-    pub storage: Option<StringReceiverStorage>,
-}
+// ADR-0081: `StringReceiverStorage`, `BuiltinMethodContext`, and
+// `ReceiverInfo` retired alongside the `BUILTIN_TYPES` registry. Method
+// dispatch on the prelude `String` flows through the regular user-method
+// path now.
 
 #[cfg(test)]
 mod tests {

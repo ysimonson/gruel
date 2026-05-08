@@ -2,14 +2,9 @@
 
 # Built-in Types Reference
 
-This page documents every built-in type, type constructor, and enum the Gruel compiler injects before processing user code. It is generated from the registries in [`gruel-builtins`] (see [ADR-0020](../designs/0020-builtin-types-as-structs.md)); any changes must be made in Rust, not here.
+This page documents every built-in type constructor, enum, and interface the Gruel compiler hard-codes by name. ADR-0081 retired the `BUILTIN_TYPES` registry; built-in *types* (currently just `String`) live in the prelude alongside `Option` / `Result`. The constructors, enums, and interfaces here are still hard-wired because their semantics aren't expressible as ordinary Gruel code.
 
 ## Quick Reference
-
-### Types
-
-| Name | Ownership | Methods | Associated fns | Operators |
-|---|---|---|---|---|
 
 ### Type Constructors
 
@@ -43,8 +38,6 @@ Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The c
 | `Drop` | `fn drop(self)` | method presence |
 | `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |
 | `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |
-
-## Types
 
 ## Type Constructors
 

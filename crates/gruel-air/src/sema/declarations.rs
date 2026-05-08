@@ -11,7 +11,7 @@
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use gruel_builtins::{is_reserved_type_constructor_name, is_reserved_type_name};
+use gruel_builtins::is_reserved_type_constructor_name;
 use gruel_rir::{InstData, InstRef, RirParamMode};
 use gruel_util::Span;
 use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
@@ -462,11 +462,11 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    // Check for collision with built-in type names or built-in
-                    // type constructors (e.g. Ptr, MutPtr — see ADR-0061).
-                    if is_reserved_type_name(&enum_name)
-                        || is_reserved_type_constructor_name(&enum_name)
-                    {
+                    // Check for collision with built-in type constructors
+                    // (e.g. Ptr, MutPtr — see ADR-0061). ADR-0081 retired
+                    // the BUILTIN_TYPES registry; collisions with prelude
+                    // types are caught by the duplicate-type check below.
+                    if is_reserved_type_constructor_name(&enum_name) {
                         return Err(CompileError::new(
                             ErrorKind::ReservedTypeName {
                                 type_name: enum_name,
@@ -564,11 +564,11 @@ impl<'a> Sema<'a> {
                 } => {
                     let struct_name = self.interner.resolve(name).to_string();
 
-                    // Check for collision with built-in type names or built-in
-                    // type constructors (e.g. Ptr, MutPtr — see ADR-0061).
-                    if is_reserved_type_name(&struct_name)
-                        || is_reserved_type_constructor_name(&struct_name)
-                    {
+                    // Check for collision with built-in type constructors
+                    // (e.g. Ptr, MutPtr — see ADR-0061). ADR-0081 retired
+                    // the BUILTIN_TYPES registry; collisions with prelude
+                    // types are caught by the duplicate-type check below.
+                    if is_reserved_type_constructor_name(&struct_name) {
                         return Err(CompileError::new(
                             ErrorKind::ReservedTypeName {
                                 type_name: struct_name,

@@ -8,15 +8,24 @@ weight = 4
 This section documents `String` as a newtype wrapper over `Vec(u8)` per
 ADR-0072.
 
+## Implementation Note
+
+ADR-0081 stabilized `String` as a regular `pub struct String { bytes:
+Vec(u8) }` in `prelude/string.gruel`. The compiler no longer special-cases
+the type beyond what the prelude scope already provides for `Option` /
+`Result`. Observable semantics (layout, UTF-8 invariant, conversion API)
+are unchanged.
+
 ## Newtype Definition
 
 {{ rule(id="7.4:1", cat="normative") }}
 
-`String` is a synthetic struct injected by the compiler. Conceptually:
+`String` is the prelude struct:
 
 ```gruel
-synthetic struct String {
+pub struct String {
     bytes: Vec(u8)   // private
+    // ... methods elided
 }
 ```
 

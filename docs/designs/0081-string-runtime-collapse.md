@@ -1,12 +1,12 @@
 ---
 id: 0081
 title: String Runtime Collapse onto Vec(u8)
-status: proposal
+status: implemented
 tags: [stdlib, strings, runtime, builtins]
-feature-flag: string_runtime_collapse
+feature-flag:
 created: 2026-05-07
-accepted:
-implemented:
+accepted: 2026-05-07
+implemented: 2026-05-08
 spec-sections: ["7.4"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -284,7 +284,7 @@ Each phase ships independently behind the `string_runtime_collapse` preview gate
   - Doc generator (`docs/generated/builtins-reference.md`): `BUILTIN_TYPES` is now empty, so the iterator-driven section becomes static text or is removed. Update `make gen-builtins-docs` and `make check-builtins-docs`.
   - `make test` green.
 
-- [ ] **Phase 4: Stabilize**
+- [x] **Phase 4: Stabilize**
   - Remove `PreviewFeature::StringRuntimeCollapse` from `gruel-error/src/lib.rs`.
   - Retire `BuiltinTypeDef` / `BuiltinField` / `BuiltinMethod` / `BuiltinAssociatedFn` / `BuiltinOperator` / `BuiltinReturnType` / `BuiltinParam` / `BuiltinParamType` / `BuiltinFieldType` / `ReceiverMode` types from `gruel-builtins/src/lib.rs` if no other consumer has emerged (they have none today). The corresponding `inject_builtin_types` and `analyze_builtin_method` paths in sema retire alongside. Total ~150 LOC out across builtins + sema.
   - ADR status → `implemented`.
