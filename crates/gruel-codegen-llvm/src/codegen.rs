@@ -920,12 +920,20 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         }
     }
 
-    /// Check if a Gruel type is the builtin `String` type.
+    /// Check if a Gruel type is the prelude `String` struct.
+    ///
+    /// ADR-0081 retired the registry-driven `STRING_TYPE`; the prelude
+    /// declares a regular `pub struct String { bytes: Vec(u8) }` instead.
+    /// Codegen still needs to recognise it for layout-aware paths
+    /// (`@dbg`, layout extraction).
     fn is_builtin_string(&self, ty: Type) -> bool {
         match ty.kind() {
             TypeKind::Struct(id) => {
                 let def = self.type_pool.struct_def(id);
-                def.is_builtin && def.name == "String"
+                def.name == "String"
+                    && def.fields.len() == 1
+                    && def.fields[0].name == "bytes"
+                    && matches!(def.fields[0].ty.kind(), TypeKind::Vec(_))
             }
             _ => false,
         }
@@ -963,121 +971,6 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .expect("extract bytes.len")
             .into_int_value();
         (ptr, len)
-    }
-
-    /// Extract the `(ptr, len, cap)` fields from a String struct value.
-    ///
-    /// Same as [`extract_str_ptr_len`] but also returns the `cap` field.
-    fn extract_str_ptr_len_cap(
-        &mut self,
-        str_val: BasicValueEnum<'ctx>,
-    ) -> (
-        inkwell::values::PointerValue<'ctx>,
-        inkwell::values::IntValue<'ctx>,
-        inkwell::values::IntValue<'ctx>,
-    ) {
-        let sv = str_val.into_struct_value();
-        let outer: AggregateValueEnum<'ctx> = sv.into();
-        let inner = self
-            .builder
-            .build_extract_value(outer, 0, "str_bytes")
-            .expect("extract String.bytes")
-            .into_struct_value();
-        let inner_agg: AggregateValueEnum<'ctx> = inner.into();
-        let ptr = self
-            .builder
-            .build_extract_value(inner_agg, 0, "str_ptr")
-            .expect("extract bytes.ptr")
-            .into_pointer_value();
-        let inner_agg: AggregateValueEnum<'ctx> = inner.into();
-        let len = self
-            .builder
-            .build_extract_value(inner_agg, 1, "str_len")
-            .expect("extract bytes.len")
-            .into_int_value();
-        let inner_agg: AggregateValueEnum<'ctx> = inner.into();
-        let cap = self
-            .builder
-            .build_extract_value(inner_agg, 2, "str_cap")
-            .expect("extract bytes.cap")
-            .into_int_value();
-        (ptr, len, cap)
-    }
-
-    /// Get or declare `__gruel_str_eq(ptr, len, ptr, len) -> i8`.
-    fn get_or_declare_str_eq(&self) -> FunctionValue<'ctx> {
-        const NAME: &str = "__gruel_str_eq";
-        if let Some(f) = self.module.get_function(NAME) {
-            return f;
-        }
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let i64_ty = self.ctx.i64_type();
-        let fn_type = self.ctx.i8_type().fn_type(
-            &[ptr_ty.into(), i64_ty.into(), ptr_ty.into(), i64_ty.into()],
-            false,
-        );
-        self.module.add_function(NAME, fn_type, None)
-    }
-
-    /// Get or declare `__gruel_str_cmp(ptr, len, ptr, len) -> i8`.
-    fn get_or_declare_str_cmp(&self) -> FunctionValue<'ctx> {
-        const NAME: &str = "__gruel_str_cmp";
-        if let Some(f) = self.module.get_function(NAME) {
-            return f;
-        }
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let i64_ty = self.ctx.i64_type();
-        let fn_type = self.ctx.i8_type().fn_type(
-            &[ptr_ty.into(), i64_ty.into(), ptr_ty.into(), i64_ty.into()],
-            false,
-        );
-        self.module.add_function(NAME, fn_type, None)
-    }
-
-    /// Build a string ordering comparison using `__gruel_str_cmp`.
-    /// `pred` should be the IntPredicate for comparing the cmp result against 0.
-    fn build_str_cmp(
-        &mut self,
-        l: BasicValueEnum<'ctx>,
-        r: BasicValueEnum<'ctx>,
-        pred: IntPredicate,
-        name: &str,
-    ) -> inkwell::values::IntValue<'ctx> {
-        let (ptr1, len1) = self.extract_str_ptr_len(l);
-        let (ptr2, len2) = self.extract_str_ptr_len(r);
-        let str_cmp_fn = self.get_or_declare_str_cmp();
-        let result = self
-            .builder
-            .build_call(
-                str_cmp_fn,
-                &[ptr1.into(), len1.into(), ptr2.into(), len2.into()],
-                "strcmp",
-            )
-            .unwrap();
-        let cmp_val = result
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-            .into_int_value();
-        let zero = self.ctx.i8_type().const_zero();
-        self.builder
-            .build_int_compare(pred, cmp_val, zero, name)
-            .unwrap()
-    }
-
-    /// Get or declare `__gruel_drop_String(ptr, len, cap) -> void`.
-    fn get_or_declare_drop_string(&self) -> FunctionValue<'ctx> {
-        const NAME: &str = "__gruel_drop_String";
-        if let Some(f) = self.module.get_function(NAME) {
-            return f;
-        }
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let i64_ty = self.ctx.i64_type();
-        let fn_type = self
-            .ctx
-            .void_type()
-            .fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false);
-        self.module.add_function(NAME, fn_type, None)
     }
 
     /// Extract the LLVM fields of a struct or elements of an array as a flat `Vec`.
@@ -1508,31 +1401,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         match ty.kind() {
             TypeKind::Struct(id) => {
                 let struct_def = self.type_pool.struct_def(id).clone();
-                // String equality uses __gruel_str_eq (content comparison, not field comparison).
-                if struct_def.is_builtin && struct_def.name == "String" {
-                    let (ptr1, len1) = self.extract_str_ptr_len(l);
-                    let (ptr2, len2) = self.extract_str_ptr_len(r);
-                    let str_eq_fn = self.get_or_declare_str_eq();
-                    let result = self
-                        .builder
-                        .build_call(
-                            str_eq_fn,
-                            &[ptr1.into(), len1.into(), ptr2.into(), len2.into()],
-                            "streq",
-                        )
-                        .unwrap();
-                    let byte_val = result
-                        .try_as_basic_value()
-                        .basic()
-                        .unwrap()
-                        .into_int_value();
-                    // __gruel_str_eq returns i8; convert to i1 for use as a bool.
-                    let zero = self.ctx.i8_type().const_zero();
-                    return self
-                        .builder
-                        .build_int_compare(IntPredicate::NE, byte_val, zero, "streq_b")
-                        .unwrap();
-                }
+                // ADR-0081: `String` is a regular struct now; `==` is
+                // routed at sema time to `String.eq` (which delegates to
+                // Vec(u8).eq). The registry-driven `__gruel_str_eq` path
+                // retired with the rest of the runtime String collapse.
                 let mut all_eq = self.ctx.bool_type().const_int(1, false); // start true
                 let mut llvm_idx = 0u32;
                 for field in &struct_def.fields {
@@ -1754,12 +1626,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     ),
                     _ => unreachable!(),
                 };
-                if self.is_builtin_string(lhs_ty) {
-                    let l = self.get_value(lhs);
-                    let r = self.get_value(rhs);
-                    self.build_str_cmp(l, r, sint, &format!("str{}", name))
-                        .into()
-                } else if lhs_ty.is_float() {
+                // ADR-0081: ordering comparisons on `String` are desugared
+                // at sema time to `String.cmp` calls (which delegate to
+                // `Vec(u8).cmp`). The registry-driven `__gruel_str_cmp`
+                // path retired with the rest of the runtime String
+                // collapse.
+                if lhs_ty.is_float() {
                     let l = self.get_value(lhs).into_float_value();
                     let r = self.get_value(rhs).into_float_value();
                     self.builder
@@ -2622,17 +2494,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     self.translate_vec_drop(val, dropped_ty);
                     return Ok(());
                 }
-                if self.is_builtin_string(dropped_ty) {
-                    // String: call __gruel_drop_String(ptr, len, cap) from the runtime.
-                    // Literals have cap == 0 and are safely treated as no-ops.
-                    if let Some(str_val) = self.values[dropped_value.as_u32() as usize] {
-                        let (ptr, len, cap) = self.extract_str_ptr_len_cap(str_val);
-                        let drop_fn = self.get_or_declare_drop_string();
-                        self.builder
-                            .build_call(drop_fn, &[ptr.into(), len.into(), cap.into()], "")
-                            .unwrap();
-                    }
-                } else if let Some(fn_name) = drop_names::drop_fn_name(dropped_ty, self.type_pool) {
+                if let Some(fn_name) = drop_names::drop_fn_name(dropped_ty, self.type_pool) {
                     // Non-trivial struct or array: call the synthesized __gruel_drop_* function.
                     //
                     // Struct drop glue takes the whole struct as a single LLVM parameter,
@@ -4363,6 +4225,16 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     .expect("param slot out of range")
                     .into_pointer_value()
             }
+            // ADR-0081: when the receiver is `place_read param.field` (e.g.
+            // `self.bytes` inside a prelude `String` method), we need a
+            // pointer to the field — not a load + alloca, which would
+            // mutate a copy. Build the GEP chain into the param/local that
+            // backs the place and pass that pointer through unchanged.
+            CfgInstData::PlaceRead { ref place } => {
+                let recv_ty = self.cfg.get_inst(recv).ty;
+                self.build_place_gep_chain(place, recv_ty)
+                    .expect("vec receiver: PlaceRead has void place type")
+            }
             _ => {
                 let v = self.get_value(recv);
                 let agg_ty = self.vec_agg_type();
@@ -4803,7 +4675,6 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         let old_bytes = self.builder.build_int_mul(cap, elem_size, "ob").unwrap();
         let new_bytes = self.builder.build_int_mul(needed, elem_size, "nb").unwrap();
         let align = i64_ty.const_int(8, false);
-        let realloc_fn = self.vec_realloc_fn();
         let old = self
             .builder
             .build_load(
@@ -4813,7 +4684,77 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             )
             .unwrap()
             .into_pointer_value();
-        let new_buf = self
+        // ADR-0081: when cap == 0, the buffer either is null or points to
+        // read-only data (string literals lower as `{ rodata, len, cap=0 }`).
+        // Reallocating either form would call platform::realloc on a
+        // non-heap pointer; instead, alloc a fresh buffer and memcpy the
+        // live `len * elem_size` bytes from the rodata source.
+        let zero = i64_ty.const_zero();
+        let cap_is_zero = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, cap, zero, "cap_zero")
+            .unwrap();
+        let alloc_fresh_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "reserve_alloc_fresh");
+        let realloc_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "reserve_realloc");
+        let post_grow_bb = self
+            .ctx
+            .append_basic_block(self.fn_value, "reserve_post_grow");
+        self.builder
+            .build_conditional_branch(cap_is_zero, alloc_fresh_bb, realloc_bb)
+            .unwrap();
+        // Fresh alloc + memcpy from rodata.
+        self.builder.position_at_end(alloc_fresh_bb);
+        let alloc_fn = self.vec_alloc_fn();
+        let fresh_buf = self
+            .builder
+            .build_call(alloc_fn, &[new_bytes.into(), align.into()], "fresh_buf")
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        let copy_bytes = self.builder.build_int_mul(len, elem_size, "cb").unwrap();
+        // memcpy fresh_buf <- old, copy_bytes
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let memcpy_ty = self.ctx.void_type().fn_type(
+            &[
+                ptr_ty.into(),
+                ptr_ty.into(),
+                i64_ty.into(),
+                self.ctx.bool_type().into(),
+            ],
+            false,
+        );
+        let memcpy_fn = self
+            .module
+            .get_function("llvm.memcpy.p0.p0.i64")
+            .unwrap_or_else(|| {
+                self.module
+                    .add_function("llvm.memcpy.p0.p0.i64", memcpy_ty, None)
+            });
+        self.builder
+            .build_call(
+                memcpy_fn,
+                &[
+                    fresh_buf.into(),
+                    old.into(),
+                    copy_bytes.into(),
+                    self.ctx.bool_type().const_zero().into(),
+                ],
+                "",
+            )
+            .unwrap();
+        self.builder
+            .build_unconditional_branch(post_grow_bb)
+            .unwrap();
+        // Realloc path (real heap buffer).
+        self.builder.position_at_end(realloc_bb);
+        let realloc_fn = self.vec_realloc_fn();
+        let realloc_buf = self
             .builder
             .build_call(
                 realloc_fn,
@@ -4825,6 +4766,14 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .basic()
             .unwrap()
             .into_pointer_value();
+        self.builder
+            .build_unconditional_branch(post_grow_bb)
+            .unwrap();
+        // Post-grow: phi the new buffer pointer, write back ptr/cap.
+        self.builder.position_at_end(post_grow_bb);
+        let new_buf_phi = self.builder.build_phi(ptr_ty, "new_buf").unwrap();
+        new_buf_phi.add_incoming(&[(&fresh_buf, alloc_fresh_bb), (&realloc_buf, realloc_bb)]);
+        let new_buf = new_buf_phi.as_basic_value().into_pointer_value();
         self.builder.build_store(buf_ptr, new_buf).unwrap();
         self.builder.build_store(cap_ptr, needed).unwrap();
         self.builder.build_unconditional_branch(after_bb).unwrap();
@@ -5108,9 +5057,23 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .unwrap()
             .into_pointer_value();
         let elem_size = self.vec_elem_size(vec_ty);
+        // ADR-0081: allocate `max(cap, len)` bytes. Normal Vecs uphold the
+        // invariant cap >= len, so this matches the previous `cap`-based
+        // allocation. String literals lower as `{ rodata, len=N, cap=0 }` —
+        // cloning that needs `len` bytes; the rodata buffer can't be freed
+        // and the cloned heap buffer must hold the data.
+        let cap_ge_len = self
+            .builder
+            .build_int_compare(IntPredicate::UGE, cap, len, "alloc_pick")
+            .unwrap();
+        let alloc_count = self
+            .builder
+            .build_select(cap_ge_len, cap, len, "alloc_count")
+            .unwrap()
+            .into_int_value();
         let alloc_bytes = self
             .builder
-            .build_int_mul(cap, elem_size, "alloc_bytes")
+            .build_int_mul(alloc_count, elem_size, "alloc_bytes")
             .unwrap();
         let copy_bytes = self
             .builder
@@ -5160,7 +5123,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 "",
             )
             .unwrap();
-        self.vec_pack(new_buf, len, cap)
+        // ADR-0081: the cloned Vec's `cap` matches the heap allocation, not
+        // the source's `cap`. For string literals the source had `cap=0`
+        // (rodata) but the clone's heap buffer is `max(cap, len)` bytes.
+        self.vec_pack(new_buf, len, alloc_count)
     }
 
     /// `@vec(a, b, c)` — alloc n, store each, len=cap=n.
@@ -5449,14 +5415,6 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
 
     /// Emit a drop call for a single element value.
     fn emit_element_drop(&mut self, val: BasicValueEnum<'ctx>, elem_ty: Type) {
-        if self.is_builtin_string(elem_ty) {
-            let (ptr, len, cap) = self.extract_str_ptr_len_cap(val);
-            let drop_fn = self.get_or_declare_drop_string();
-            self.builder
-                .build_call(drop_fn, &[ptr.into(), len.into(), cap.into()], "")
-                .unwrap();
-            return;
-        }
         if matches!(elem_ty.kind(), TypeKind::Vec(_)) {
             self.translate_vec_drop(val, elem_ty);
             return;
@@ -6074,7 +6032,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         self.builder
             .build_conditional_branch(needs_grow, grow_bb, cont_bb)
             .unwrap();
-        // Grow: realloc(old_buf, old_cap*size, new_cap*size, align).
+        // Grow: realloc(old_buf, old_cap*size, new_cap*size, align). When
+        // `old_cap == 0` the buffer is null or rodata (ADR-0081 string
+        // literals lower as `{ rodata, len, cap=0 }`); call alloc + memcpy
+        // the live `old_len * elem_size` bytes instead of reallocating a
+        // non-heap pointer.
         self.builder.position_at_end(grow_bb);
         let old_bytes = self
             .builder
@@ -6085,8 +6047,53 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .build_int_mul(new_len, elem_size, "ext_new_bytes")
             .unwrap();
         let align = i64_ty.const_int(8, false);
+        let zero = i64_ty.const_zero();
+        let cap_is_zero = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, old_cap, zero, "ext_cap_zero")
+            .unwrap();
+        let alloc_fresh_bb = self.ctx.append_basic_block(parent_fn, "ext_alloc_fresh");
+        let realloc_bb = self.ctx.append_basic_block(parent_fn, "ext_realloc_bb");
+        let post_grow_bb = self.ctx.append_basic_block(parent_fn, "ext_post_grow");
+        self.builder
+            .build_conditional_branch(cap_is_zero, alloc_fresh_bb, realloc_bb)
+            .unwrap();
+        // Fresh alloc + memcpy from rodata.
+        self.builder.position_at_end(alloc_fresh_bb);
+        let alloc_fn = self.vec_alloc_fn();
+        let fresh_buf = self
+            .builder
+            .build_call(alloc_fn, &[new_bytes.into(), align.into()], "ext_fresh_buf")
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        let copy_bytes_old = self
+            .builder
+            .build_int_mul(old_len, elem_size, "ext_copy_old")
+            .unwrap();
+        let memcpy_fn_for_grow = self.memcpy_intrinsic();
+        let bool_false = self.ctx.bool_type().const_zero();
+        self.builder
+            .build_call(
+                memcpy_fn_for_grow,
+                &[
+                    fresh_buf.into(),
+                    old_buf.into(),
+                    copy_bytes_old.into(),
+                    bool_false.into(),
+                ],
+                "",
+            )
+            .unwrap();
+        self.builder
+            .build_unconditional_branch(post_grow_bb)
+            .unwrap();
+        // Realloc path (real heap buffer).
+        self.builder.position_at_end(realloc_bb);
         let realloc_fn = self.vec_realloc_fn();
-        let new_buf = self
+        let realloc_buf = self
             .builder
             .build_call(
                 realloc_fn,
@@ -6103,6 +6110,14 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .basic()
             .unwrap()
             .into_pointer_value();
+        self.builder
+            .build_unconditional_branch(post_grow_bb)
+            .unwrap();
+        // Post-grow: phi the new buffer, store ptr/cap.
+        self.builder.position_at_end(post_grow_bb);
+        let new_buf_phi = self.builder.build_phi(ptr_ty, "ext_new_buf").unwrap();
+        new_buf_phi.add_incoming(&[(&fresh_buf, alloc_fresh_bb), (&realloc_buf, realloc_bb)]);
+        let new_buf = new_buf_phi.as_basic_value().into_pointer_value();
         self.builder.build_store(buf_ptr_ptr, new_buf).unwrap();
         self.builder.build_store(cap_ptr_ptr, new_len).unwrap();
         self.builder.build_unconditional_branch(cont_bb).unwrap();

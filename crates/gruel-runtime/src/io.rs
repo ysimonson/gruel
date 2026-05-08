@@ -4,15 +4,19 @@
 //! - `__gruel_read_line` - Read a line from standard input
 
 use crate::platform;
-use crate::string::StringResult;
+use crate::utf8::VecU8Result;
 
 /// Read a line from standard input.
 ///
 /// Reads bytes from stdin until a newline (`\n`) or EOF. Returns the line
 /// as a String (excluding the trailing newline) via sret convention.
+/// ADR-0081: the prelude `String` is `{ Vec(u8) }`, which has the same
+/// 24-byte `(ptr, len, cap)` layout as `VecU8Result`. The runtime writes
+/// the flat form; the LLVM type wrapping into the outer `String` is a
+/// type-level concern only.
 #[unsafe(no_mangle)]
 #[allow(non_snake_case)]
-pub extern "C" fn __gruel_read_line(out: *mut StringResult) {
+pub extern "C" fn __gruel_read_line(out: *mut VecU8Result) {
     let mut ptr: *mut u8 = core::ptr::null_mut();
     let mut buf_size: usize = 0;
 

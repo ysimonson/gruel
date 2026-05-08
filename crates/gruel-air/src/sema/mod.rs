@@ -35,7 +35,6 @@ mod analyze_ops;
 mod anon_enums;
 mod anon_interfaces;
 mod anon_structs;
-mod builtin_methods;
 mod builtins;
 mod comptime;
 mod conformance;

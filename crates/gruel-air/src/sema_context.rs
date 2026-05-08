@@ -266,11 +266,13 @@ unsafe impl<'a> Send for SemaContext<'a> {}
 unsafe impl<'a> Sync for SemaContext<'a> {}
 
 impl<'a> SemaContext<'a> {
-    /// Get the builtin String type as a Type::Struct.
+    /// Get the prelude `String` type as a `Type::Struct`. Returns
+    /// `Type::ERROR` when the prelude isn't loaded (e.g., test fixtures
+    /// that bypass the prelude); callers propagate the error cleanly.
     pub fn builtin_string_type(&self) -> Type {
         self.builtin_string_id
             .map(Type::new_struct)
-            .expect("String type should be registered during builtin injection")
+            .unwrap_or(Type::ERROR)
     }
 
     /// Look up a struct by name.
@@ -540,44 +542,12 @@ impl<'a> SemaContext<'a> {
     // Builtin type helpers (duplicated from Sema for parallel analysis)
     // ========================================================================
 
-    /// Check if a type is the builtin String type.
+    /// Check if a type is the prelude `String` struct.
     pub fn is_builtin_string(&self, ty: Type) -> bool {
         match ty.kind() {
             TypeKind::Struct(struct_id) => Some(struct_id) == self.builtin_string_id,
             _ => false,
         }
-    }
-
-    /// Get the builtin type definition for a struct if it's a builtin type.
-    pub fn get_builtin_type_def(
-        &self,
-        struct_id: StructId,
-    ) -> Option<&'static gruel_builtins::BuiltinTypeDef> {
-        let struct_def = self.type_pool.struct_def(struct_id);
-        if struct_def.is_builtin {
-            gruel_builtins::get_builtin_type(&struct_def.name)
-        } else {
-            None
-        }
-    }
-
-    /// Check if a method name is a builtin mutation method.
-    pub fn is_builtin_mutation_method(&self, method_name: &str) -> bool {
-        use gruel_builtins::{BUILTIN_TYPES, ReceiverMode};
-
-        for builtin in BUILTIN_TYPES {
-            if let Some(method) = builtin.find_method(method_name)
-                && method.receiver_mode == ReceiverMode::ByMutRef
-            {
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Get the AIR output type for a builtin struct.
-    pub fn builtin_air_type(&self, struct_id: StructId) -> Type {
-        Type::new_struct(struct_id)
     }
 
     /// Check if a type is a linear type.
@@ -590,12 +560,11 @@ impl<'a> SemaContext<'a> {
 
     /// Check if a type conforms to the `Clone` interface (ADR-0065).
     ///
-    /// Linear types never conform. Copy types automatically conform. Built-in
-    /// types with a `clone` method (e.g. `String`) conform. `@derive(Clone)`
-    /// structs (with `is_clone == true`) conform via the synthesized
-    /// `<TypeName>.clone`. User structs with hand-written `fn clone(borrow
-    /// self) -> Self` need full conformance check via `check_conforms`; this
-    /// fast query returns false for them.
+    /// Linear types never conform. Copy types automatically conform.
+    /// `@derive(Clone)` structs (with `is_clone == true`) conform via the
+    /// synthesized `<TypeName>.clone`. User structs with hand-written
+    /// `fn clone(borrow self) -> Self` need full conformance check via
+    /// `check_conforms`; this fast query returns false for them.
     pub fn is_type_clone(&self, ty: Type) -> bool {
         if self.is_type_linear(ty) {
             return false;
@@ -604,11 +573,6 @@ impl<'a> SemaContext<'a> {
             return true;
         }
         if let TypeKind::Struct(struct_id) = ty.kind() {
-            if let Some(builtin) = self.get_builtin_type_def(struct_id)
-                && builtin.find_method("clone").is_some()
-            {
-                return true;
-            }
             let struct_def = self.type_pool.struct_def(struct_id);
             if struct_def.is_clone {
                 return true;

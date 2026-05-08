@@ -507,7 +507,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(output.type_pool.stats().struct_count, 3); // Inner, Outer, and String (builtin)
+        // ADR-0081: BUILTIN_TYPES is empty; no synthetic structs are
+        // injected by this helper (the prelude is skipped).
+        assert_eq!(output.type_pool.stats().struct_count, 2); // Inner, Outer
     }
 
     #[test]
@@ -566,76 +568,12 @@ mod tests {
         assert_eq!(output.functions.len(), 2);
     }
 
-    // =========================================================================
-    // Builtin type tests
-    // =========================================================================
-    // These tests verify that builtin types (String, etc.) work correctly.
-
-    #[test]
-    fn test_string_type_injected() {
-        // String type should exist after builtin injection
-        let output = compile_to_air(
-            "fn main() -> i32 {
-                let s = \"hello\";
-                0
-            }",
-        )
-        .unwrap();
-
-        // String struct should exist in the pool
-        assert!(
-            output
-                .type_pool
-                .all_struct_ids()
-                .iter()
-                .map(|id| output.type_pool.struct_def(*id))
-                .any(|s| s.name == "String")
-        );
-    }
-
-    #[test]
-    fn test_string_len_method() {
-        // String.len() should return u64
-        let output = compile_to_air(
-            "fn main() -> u64 {
-                let s = \"hello\";
-                s.len()
-            }",
-        )
-        .unwrap();
-
-        assert_eq!(output.functions[0].air.return_type(), Type::U64);
-    }
-
-    #[test]
-    fn test_string_is_empty_method() {
-        // String.is_empty() should return bool
-        let output = compile_to_air(
-            "fn main() -> bool {
-                let s = \"hello\";
-                s.is_empty()
-            }",
-        )
-        .unwrap();
-
-        assert_eq!(output.functions[0].air.return_type(), Type::BOOL);
-    }
-
-    #[test]
-    fn test_string_literal_type_inference() {
-        // String literal should have type String
-        let output = compile_to_air(
-            "fn main() -> bool {
-                let s = \"hello\";
-                let t = \"world\";
-                s.is_empty()
-            }",
-        )
-        .unwrap();
-
-        // Should have local storage for two string variables
-        assert!(output.functions[0].num_locals >= 2);
-    }
+    // ADR-0081: the registry-driven `String` retired with `STRING_TYPE`;
+    // String is now a regular struct declared in `prelude/string.gruel`
+    // and the unit-test harness `compile_to_air` deliberately skips the
+    // prelude. End-to-end String coverage lives in
+    // `crates/gruel-spec/cases/types/{strings,mutable-strings,
+    // char_string,string_vec_bridge}.toml`.
 
     // =========================================================================
     // Move tracking integration tests
@@ -872,29 +810,10 @@ mod tests {
         sema
     }
 
-    #[test]
-    fn test_type_pool_populated_with_builtin_string() {
-        // The String type should be in the pool after builtin injection
-        let sema = gather_declarations_for_testing("fn main() -> i32 { 0 }");
-
-        let string_name = sema.interner.get("String").unwrap();
-        let pool_string = sema.type_pool.get_struct_by_name(string_name);
-
-        assert!(pool_string.is_some(), "String should be in the type pool");
-
-        // Verify the struct lookup has it
-        let registry_string = sema.structs.get(&string_name);
-        assert!(
-            registry_string.is_some(),
-            "String should be in struct registry"
-        );
-
-        // Check the pool definition
-        let pool_def = sema.type_pool.get_struct_def(pool_string.unwrap()).unwrap();
-
-        assert_eq!(pool_def.name, "String");
-        assert!(pool_def.is_builtin, "String should be marked as builtin");
-    }
+    // ADR-0081: removed `test_type_pool_populated_with_builtin_string`;
+    // String moved to the prelude and `gather_declarations_for_testing`
+    // deliberately skips the prelude. End-to-end String coverage lives in
+    // the spec test suite.
 
     #[test]
     fn test_type_pool_populated_with_user_struct() {
@@ -982,18 +901,19 @@ mod tests {
 
         let stats = sema.type_pool.stats();
 
-        // 3 structs: String (builtin synthetic) + A + B from user source.
-        // ADR-0078 Phase 3: the prelude is not loaded by this test helper,
-        // so the four prelude-resident built-in enums (Arch, Os, TypeKind,
-        // Ownership) are absent from the pool.
-        assert_eq!(stats.struct_count, 3);
+        // 2 structs: A + B. ADR-0081 retired the synthetic `String` and
+        // ADR-0078 Phase 3 moved the prelude-resident enums out of the
+        // builtin injection path; this helper deliberately skips the
+        // prelude, so neither contributes here.
+        assert_eq!(stats.struct_count, 2);
         // 1 enum: just E from user source.
         assert_eq!(stats.enum_count, 1);
         // No arrays in Phase 1
         assert_eq!(stats.array_count, 0);
-        // Total: 5 composite types (struct_count + enum_count + array_count
-        // + Vec(u8) interned by String's `bytes` field per ADR-0072).
-        assert_eq!(stats.total, 5);
+        // Total: 3 composite types (struct_count + enum_count +
+        // array_count). ADR-0081 dropped the `Vec(u8)` interning that
+        // came in via the synthetic String's field type.
+        assert_eq!(stats.total, 3);
     }
 
     #[test]
@@ -1036,10 +956,11 @@ mod tests {
             );
         }
 
-        // Verify stats are available
+        // Verify stats are available. ADR-0081 retired the synthetic
+        // String builtin; counts come from the user source alone.
         let stats = sema.type_pool.stats();
-        assert!(stats.struct_count > 0); // At least String builtin
-        assert!(stats.enum_count > 0); // The enum we added
+        assert!(stats.struct_count > 0);
+        assert!(stats.enum_count > 0);
     }
 
     // ------------------------------------------------------------------

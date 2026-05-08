@@ -1,656 +1,27 @@
-//! Built-in type definitions for the Gruel compiler.
+//! Built-in registries for the Gruel compiler.
 //!
-//! This crate provides the registry of built-in types like `String`. These are
-//! types that behave like user-defined structs but have runtime implementations
-//! for their methods rather than generated code.
+//! After ADR-0081 retired the `STRING_TYPE` registry, this crate hosts
+//! three smaller registries the compiler still keys off of:
 //!
-//! # Architecture
+//! - **Built-in type constructors** ([`BUILTIN_TYPE_CONSTRUCTORS`]):
+//!   `Ptr`, `MutPtr`, `Ref`, `MutRef`, `Slice`, `MutSlice`, `Vec` — written
+//!   in source as `Name(arg, ...)` in type position and lowered directly to
+//!   `TypeKind` variants by sema.
+//! - **Lang items** ([`LangInterfaceItem`], [`LangEnumItem`]): the closed
+//!   set of `@lang("…")` strings the compiler recognises and binds to
+//!   prelude interface or enum declarations (`Drop`, `Clone`, `Handle`,
+//!   `Eq`, `Ord`, `Ordering`).
+//! - **Built-in interface and enum names** ([`BUILTIN_INTERFACE_NAMES`],
+//!   [`BUILTIN_ENUM_NAMES`]): breadcrumbs the doc generator and other
+//!   crates use to refer to prelude declarations without re-typing the
+//!   strings.
 //!
-//! Built-in types are represented as "synthetic structs" — the compiler injects
-//! them as `StructDef` entries before processing user code. This allows them to
-//! flow through the same code paths as user-defined types, eliminating scattered
-//! special-case handling throughout the compiler.
-//!
-//! The injection happens in `Sema::inject_builtin_types()` during the declaration
-//! gathering phase. After injection:
-//!
-//! - The type is accessible by name (e.g., `String`)
-//! - Methods are registered and callable (e.g., `s.len()`)
-//! - Associated functions work (e.g., `String::new()`)
-//! - Operators are supported (e.g., `s1 == s2`)
-//! - Drop glue is automatically generated if `drop_fn` is set
-//!
-//! # Adding a New Built-in Type
-//!
-//! To add a new built-in type (e.g., `Vec<T>` when generics are available):
-//!
-//! ## Step 1: Define the Type
-//!
-//! Create a `BuiltinTypeDef` constant describing the type's structure:
-//!
-//! ```rust,ignore
-//! pub static VEC_TYPE: BuiltinTypeDef = BuiltinTypeDef {
-//!     name: "Vec",  // How users refer to it in source code
-//!     fields: &[
-//!         BuiltinField { name: "ptr", ty: BuiltinFieldType::U64, is_pub: false },
-//!         BuiltinField { name: "len", ty: BuiltinFieldType::U64, is_pub: false },
-//!         BuiltinField { name: "cap", ty: BuiltinFieldType::U64, is_pub: false },
-//!     ],
-//!     is_copy: false,  // Vec owns heap memory, so it's a move type
-//!     drop_fn: Some("__gruel_drop_Vec"),  // Runtime destructor
-//!     operators: &[
-//!         // Vec might support equality if elements do
-//!     ],
-//!     associated_fns: &[
-//!         BuiltinAssociatedFn {
-//!             name: "new",
-//!             params: &[],
-//!             return_ty: BuiltinReturnType::SelfType,
-//!             runtime_fn: "Vec__new",
-//!             is_pub: true,
-//!         },
-//!         BuiltinAssociatedFn {
-//!             name: "with_capacity",
-//!             params: &[BuiltinParam { name: "capacity", ty: BuiltinParamType::U64 }],
-//!             return_ty: BuiltinReturnType::SelfType,
-//!             runtime_fn: "Vec__with_capacity",
-//!             is_pub: true,
-//!         },
-//!     ],
-//!     methods: &[
-//!         BuiltinMethod {
-//!             name: "len",
-//!             receiver_mode: ReceiverMode::ByRef,
-//!             params: &[],
-//!             return_ty: BuiltinReturnType::U64,
-//!             runtime_fn: "Vec__len",
-//!             is_pub: true,
-//!         },
-//!         BuiltinMethod {
-//!             name: "push",
-//!             receiver_mode: ReceiverMode::ByMutRef,
-//!             params: &[BuiltinParam { name: "value", ty: BuiltinParamType::U64 }],
-//!             return_ty: BuiltinReturnType::SelfType,
-//!             runtime_fn: "Vec__push",
-//!             is_pub: true,
-//!         },
-//!         // ... more methods
-//!     ],
-//! };
-//! ```
-//!
-//! ## Step 2: Register the Type
-//!
-//! Add it to the `BUILTIN_TYPES` slice:
-//!
-//! ```rust,ignore
-//! pub static BUILTIN_TYPES: &[&BuiltinTypeDef] = &[
-//!     &STRING_TYPE,
-//!     &VEC_TYPE,  // Add new types here
-//! ];
-//! ```
-//!
-//! ## Step 3: Implement Runtime Functions
-//!
-//! In `gruel-runtime`, implement the functions referenced in the type definition:
-//!
-//! ```rust,ignore
-//! // In gruel-runtime/src/lib.rs or a new module
-//!
-//! #[unsafe(no_mangle)]
-//! pub extern "C" fn Vec__new(out: *mut u64) {
-//!     // Initialize empty Vec at `out` pointer
-//!     unsafe {
-//!         *out = 0;           // ptr = null
-//!         *out.add(1) = 0;    // len = 0
-//!         *out.add(2) = 0;    // cap = 0
-//!     }
-//! }
-//!
-//! #[unsafe(no_mangle)]
-//! pub extern "C" fn __gruel_drop_Vec(ptr: *mut u64) {
-//!     // Free the Vec's heap allocation if any
-//!     unsafe {
-//!         let data_ptr = *ptr as *mut u8;
-//!         let cap = *ptr.add(2);
-//!         if cap > 0 {
-//!             __gruel_free(data_ptr, cap as usize);
-//!         }
-//!     }
-//! }
-//! ```
-//!
-//! ## Naming Conventions
-//!
-//! - **Associated functions**: `TypeName__function_name` (e.g., `String__new`)
-//! - **Methods**: `TypeName__method_name` (e.g., `String__len`)
-//! - **Drop functions**: `__gruel_drop_TypeName` (e.g., `__gruel_drop_String`)
-//! - **Operators**: `__gruel_typename_op` (e.g., `__gruel_str_eq`)
-//!
-//! ## Key Types
-//!
-//! - [`BuiltinTypeDef`]: Complete definition of a built-in type
-//! - [`BuiltinField`]: A field in the struct layout
-//! - [`BuiltinMethod`]: An instance method (takes `self`)
-//! - [`BuiltinAssociatedFn`]: A static function (e.g., `Type::new()`)
-//! - [`BuiltinOperator`]: Operator overload (e.g., `==`, `!=`)
-//! - [`ReceiverMode`]: How `self` is passed to methods
-//!
-//! See [`STRING_TYPE`] for a complete working example.
-
-/// Binary operators that can be overloaded for built-in types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinOp {
-    /// Equality: `==`
-    Eq,
-    /// Inequality: `!=`
-    Ne,
-    /// Less than: `<`
-    Lt,
-    /// Less than or equal: `<=`
-    Le,
-    /// Greater than: `>`
-    Gt,
-    /// Greater than or equal: `>=`
-    Ge,
-}
-
-/// Field type for built-in struct fields.
-///
-/// This is a simplified type representation for defining builtin struct layouts.
-/// It maps to actual `Type` variants during struct injection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltinFieldType {
-    /// 64-bit unsigned integer (used for pointers, lengths, capacities)
-    U64,
-    /// 8-bit unsigned integer
-    U8,
-    /// Boolean
-    Bool,
-    /// Reference to another built-in parameterized type, given by source-form
-    /// name (e.g. `"Vec(u8)"`). Sema is responsible for parsing and resolving
-    /// this string to the corresponding `Type`. Used by ADR-0072 to define
-    /// `String` as a synthetic struct with a single `bytes: Vec(u8)` field.
-    BuiltinType(&'static str),
-}
-
-/// A field in a built-in struct.
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinField {
-    /// Field name
-    pub name: &'static str,
-    /// Field type
-    pub ty: BuiltinFieldType,
-    /// ADR-0073: whether this field is `pub`. Non-pub built-in fields are
-    /// unreachable from user code (built-ins live in a synthetic module
-    /// the user is never part of). Replaces the old ADR-0072 `private`
-    /// flag and routes through the unified visibility check.
-    pub is_pub: bool,
-}
-
-/// How the receiver is passed to a method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReceiverMode {
-    /// Method takes ownership: `fn method(self)`
-    ByValue,
-    /// Method borrows: `fn method(&self)`
-    ByRef,
-    /// Method mutably borrows: `fn method(&mut self)`
-    ByMutRef,
-}
-
-/// A parameter to a built-in method or associated function.
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinParam {
-    /// Parameter name
-    pub name: &'static str,
-    /// Parameter type (simplified)
-    pub ty: BuiltinParamType,
-}
-
-/// Type of a parameter to a built-in function.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltinParamType {
-    /// 64-bit unsigned integer
-    U64,
-    /// Pointer-sized unsigned integer
-    Usize,
-    /// 8-bit unsigned integer
-    U8,
-    /// Boolean
-    Bool,
-    /// Unicode scalar value (ADR-0071).
-    Char,
-    /// The built-in type itself (e.g., String for String methods)
-    SelfType,
-    /// Reference to another built-in parameterized type by source-form
-    /// name (e.g. `"Vec(u8)"`, `"Ptr(u8)"`). Sema resolves the string
-    /// to the corresponding `Type`. Per ADR-0072.
-    BuiltinType(&'static str),
-}
-
-/// Return type of a built-in method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltinReturnType {
-    /// No return value (unit type)
-    Unit,
-    /// 64-bit unsigned integer
-    U64,
-    /// Pointer-sized unsigned integer
-    Usize,
-    /// 8-bit unsigned integer
-    U8,
-    /// Boolean (returned as u8: 0 or 1)
-    Bool,
-    /// Returns the built-in type itself
-    SelfType,
-    /// Reference to another built-in parameterized type by source-form
-    /// name (e.g. `"Vec(u8)"`, `"Ptr(u8)"`). Per ADR-0072.
-    BuiltinType(&'static str),
-}
-
-/// An operator overload for a built-in type.
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinOperator {
-    /// The operator being overloaded
-    pub op: BinOp,
-    /// Runtime function to call (e.g., `__gruel_str_eq`)
-    pub runtime_fn: &'static str,
-    /// Whether to invert the result (for `!=` using `==` implementation)
-    pub invert_result: bool,
-}
-
-/// An associated function on a built-in type (e.g., `String::new`).
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinAssociatedFn {
-    /// Function name (e.g., "new")
-    pub name: &'static str,
-    /// Parameters (excluding any implicit out pointer)
-    pub params: &'static [BuiltinParam],
-    /// Return type
-    pub return_ty: BuiltinReturnType,
-    /// Runtime function name (e.g., "String__new")
-    pub runtime_fn: &'static str,
-    /// ADR-0073: whether this associated function is `pub`. Defaults to
-    /// `true` for everything currently exposed; future internal helpers
-    /// can be hidden by setting this to `false`.
-    pub is_pub: bool,
-}
-
-/// An instance method on a built-in type (e.g., `s.len()`).
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinMethod {
-    /// Method name (e.g., "len")
-    pub name: &'static str,
-    /// How the receiver is passed
-    pub receiver_mode: ReceiverMode,
-    /// Additional parameters after self
-    pub params: &'static [BuiltinParam],
-    /// Return type
-    pub return_ty: BuiltinReturnType,
-    /// Runtime function name (e.g., "String__len")
-    pub runtime_fn: &'static str,
-    /// ADR-0073: whether this method is `pub`. Defaults to `true` for
-    /// everything currently exposed; future internal helpers can be
-    /// hidden by setting this to `false`.
-    pub is_pub: bool,
-}
-
-/// Definition of a built-in type.
-///
-/// This describes everything the compiler needs to know about a built-in type:
-/// its layout (fields), behavior (operators), and available operations (methods).
-#[derive(Debug, Clone)]
-pub struct BuiltinTypeDef {
-    /// Type name as it appears in source code (e.g., "String")
-    pub name: &'static str,
-    /// Fields that make up the struct layout
-    pub fields: &'static [BuiltinField],
-    /// Whether this type is Copy (can be implicitly duplicated)
-    pub is_copy: bool,
-    /// Runtime function to call for drop, if any
-    pub drop_fn: Option<&'static str>,
-    /// Supported operators and their implementations
-    pub operators: &'static [BuiltinOperator],
-    /// Associated functions (e.g., `String::new`)
-    pub associated_fns: &'static [BuiltinAssociatedFn],
-    /// Instance methods (e.g., `s.len()`)
-    pub methods: &'static [BuiltinMethod],
-}
-
-// ============================================================================
-// String Type Definition
-// ============================================================================
-
-/// The built-in String type.
-///
-/// ADR-0072: `String` is a synthetic struct containing a single private
-/// `bytes: Vec(u8)` field. The runtime in-memory layout — `{ ptr, len,
-/// cap }`, 24 bytes on 64-bit — is identical to `Vec(u8)`, so conversions
-/// between the two are zero-cost. The single `bytes` field is private:
-/// sema rejects user code that attempts to read or write it. Method
-/// bodies on `String` are the only sites with access to the inner buffer.
-///
-/// String is a move type (not Copy) because it owns heap-allocated memory.
-/// The drop function delegates to `Vec(u8)`'s drop logic.
-pub static STRING_TYPE: BuiltinTypeDef = BuiltinTypeDef {
-    name: "String",
-    fields: &[BuiltinField {
-        name: "bytes",
-        ty: BuiltinFieldType::BuiltinType("Vec(u8)"),
-        is_pub: false,
-    }],
-    is_copy: false,
-    drop_fn: Some("__gruel_drop_String"),
-    operators: &[
-        BuiltinOperator {
-            op: BinOp::Eq,
-            runtime_fn: "__gruel_str_eq",
-            invert_result: false,
-        },
-        BuiltinOperator {
-            op: BinOp::Ne,
-            runtime_fn: "__gruel_str_eq",
-            invert_result: true,
-        },
-        BuiltinOperator {
-            op: BinOp::Lt,
-            runtime_fn: "__gruel_str_cmp",
-            invert_result: false,
-        },
-        BuiltinOperator {
-            op: BinOp::Le,
-            runtime_fn: "__gruel_str_cmp",
-            invert_result: false,
-        },
-        BuiltinOperator {
-            op: BinOp::Gt,
-            runtime_fn: "__gruel_str_cmp",
-            invert_result: false,
-        },
-        BuiltinOperator {
-            op: BinOp::Ge,
-            runtime_fn: "__gruel_str_cmp",
-            invert_result: false,
-        },
-    ],
-    associated_fns: &[
-        BuiltinAssociatedFn {
-            name: "new",
-            params: &[],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__new",
-            is_pub: true,
-        },
-        BuiltinAssociatedFn {
-            name: "with_capacity",
-            params: &[BuiltinParam {
-                name: "capacity",
-                ty: BuiltinParamType::Usize,
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__with_capacity",
-            is_pub: true,
-        },
-        // ADR-0071: build a String containing the UTF-8 encoding of a single
-        // char.  Implemented in the runtime via UTF-8 encode + heap alloc.
-        BuiltinAssociatedFn {
-            name: "from_char",
-            params: &[BuiltinParam {
-                name: "c",
-                ty: BuiltinParamType::Char,
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__from_char",
-            is_pub: true,
-        },
-        // ADR-0072: zero-cost trusted construction from a Vec(u8). The
-        // memory layout matches String exactly, so the runtime is a memcpy.
-        // The `checked` requirement is enforced at the sema layer because
-        // it's preview-gated and the registry has no per-call gate.
-        BuiltinAssociatedFn {
-            name: "from_utf8_unchecked",
-            params: &[BuiltinParam {
-                name: "v",
-                ty: BuiltinParamType::BuiltinType("Vec(u8)"),
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__from_utf8_unchecked",
-            is_pub: true,
-        },
-        // ADR-0072: ingest a NUL-terminated C string and return a String,
-        // skipping UTF-8 validation. Caller-asserted invariant.
-        BuiltinAssociatedFn {
-            name: "from_c_str_unchecked",
-            params: &[BuiltinParam {
-                name: "p",
-                ty: BuiltinParamType::BuiltinType("Ptr(u8)"),
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__from_c_str_unchecked",
-            is_pub: true,
-        },
-    ],
-    methods: &[
-        // Query methods (take &self)
-        BuiltinMethod {
-            name: "len",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[],
-            return_ty: BuiltinReturnType::Usize,
-            runtime_fn: "String__len",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "capacity",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[],
-            return_ty: BuiltinReturnType::Usize,
-            runtime_fn: "String__capacity",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "is_empty",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[],
-            return_ty: BuiltinReturnType::Bool,
-            runtime_fn: "String__is_empty",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "clone",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__clone",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "contains",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[BuiltinParam {
-                name: "needle",
-                ty: BuiltinParamType::SelfType,
-            }],
-            return_ty: BuiltinReturnType::Bool,
-            runtime_fn: "String__contains",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "starts_with",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[BuiltinParam {
-                name: "prefix",
-                ty: BuiltinParamType::SelfType,
-            }],
-            return_ty: BuiltinReturnType::Bool,
-            runtime_fn: "String__starts_with",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "ends_with",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[BuiltinParam {
-                name: "suffix",
-                ty: BuiltinParamType::SelfType,
-            }],
-            return_ty: BuiltinReturnType::Bool,
-            runtime_fn: "String__ends_with",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "concat",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[BuiltinParam {
-                name: "other",
-                ty: BuiltinParamType::SelfType,
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__concat",
-            is_pub: true,
-        },
-        // Mutation methods (take &mut self, return modified String)
-        BuiltinMethod {
-            name: "push_str",
-            receiver_mode: ReceiverMode::ByMutRef,
-            params: &[BuiltinParam {
-                name: "other",
-                ty: BuiltinParamType::SelfType,
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__push_str",
-            is_pub: true,
-        },
-        // ADR-0072: `push(c: char)` is the safe codepoint-aware primary
-        // (was `push_char` in ADR-0071, renamed at ADR-0072 stabilization).
-        // Append the UTF-8 encoding of `c` (1-4 bytes) to `self`. The
-        // `char` invariant guarantees the appended bytes are well-formed
-        // UTF-8 by construction.
-        BuiltinMethod {
-            name: "push",
-            receiver_mode: ReceiverMode::ByMutRef,
-            params: &[BuiltinParam {
-                name: "c",
-                ty: BuiltinParamType::Char,
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__push_char",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "clear",
-            receiver_mode: ReceiverMode::ByMutRef,
-            params: &[],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__clear",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "reserve",
-            receiver_mode: ReceiverMode::ByMutRef,
-            params: &[BuiltinParam {
-                name: "additional",
-                ty: BuiltinParamType::Usize,
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__reserve",
-            is_pub: true,
-        },
-        // ADR-0072: byte-count accessor (synonym for `len`). The split
-        // naming leaves room for future `chars_len()` once codepoint
-        // iteration ships.
-        BuiltinMethod {
-            name: "bytes_len",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[],
-            return_ty: BuiltinReturnType::Usize,
-            runtime_fn: "String__len",
-            is_pub: true,
-        },
-        BuiltinMethod {
-            name: "bytes_capacity",
-            receiver_mode: ReceiverMode::ByRef,
-            params: &[],
-            return_ty: BuiltinReturnType::Usize,
-            runtime_fn: "String__capacity",
-            is_pub: true,
-        },
-        // ADR-0072: consume the String, return its underlying Vec(u8).
-        // O(1); runtime is a memcpy because the layouts are identical.
-        BuiltinMethod {
-            name: "into_bytes",
-            receiver_mode: ReceiverMode::ByValue,
-            params: &[],
-            return_ty: BuiltinReturnType::BuiltinType("Vec(u8)"),
-            runtime_fn: "String__into_bytes",
-            is_pub: true,
-        },
-        // ADR-0072: niche escape hatch — append a single raw byte. Caller
-        // assumes the UTF-8 invariant burden. Sema gates this method to
-        // `checked` blocks separately (see analyze_builtin_method).
-        BuiltinMethod {
-            name: "push_byte",
-            receiver_mode: ReceiverMode::ByMutRef,
-            params: &[BuiltinParam {
-                name: "byte",
-                ty: BuiltinParamType::U8,
-            }],
-            return_ty: BuiltinReturnType::SelfType,
-            runtime_fn: "String__push",
-            is_pub: true,
-        },
-        // ADR-0072: NUL-terminated handoff for C interop. Delegates to
-        // Vec(u8)::terminated_ptr with sentinel 0u8. `checked` block only
-        // (gated by sema; preview-feature flag string_vec_bridge).
-        BuiltinMethod {
-            name: "terminated_ptr",
-            receiver_mode: ReceiverMode::ByMutRef,
-            params: &[],
-            return_ty: BuiltinReturnType::BuiltinType("Ptr(u8)"),
-            runtime_fn: "String__terminated_ptr",
-            is_pub: true,
-        },
-    ],
-};
-
-// ============================================================================
-// Registry
-// ============================================================================
-
-/// All built-in types.
-///
-/// The compiler iterates over this to inject synthetic structs before
-/// processing user code.
-pub static BUILTIN_TYPES: &[&BuiltinTypeDef] = &[&STRING_TYPE];
-
-// ============================================================================
-// Built-in Enums (Target Platform)
-// ============================================================================
-
-// ADR-0078 Phase 3: the platform-reflection enums (`Arch`, `Os`) live
-// in `prelude/target.gruel`; the type-reflection enums (`TypeKind`,
-// `Ownership`) live in `prelude/type_info.gruel`. The intrinsics that
-// produce values of those types (`@target_arch`, `@target_os`,
-// `@type_info`, `@ownership`) cache their `EnumId`s after declaration
-// resolution via `Sema::cache_builtin_enum_ids`. Variant order in the
-// prelude files matches the order returned by the compiler-side
-// `arch_variant_index` / `os_variant_index` mappers; see
-// `crates/gruel-air/src/sema/analysis.rs`.
-
-/// Names of the four prelude-resident built-in enums. Kept here only so
-/// other crates have a single source of truth when they need to refer to
-/// the names (e.g. for documentation generation).
-pub static BUILTIN_ENUM_NAMES: &[&str] = &["Arch", "Os", "TypeKind", "Ownership"];
-
-/// Look up a built-in type by name.
-pub fn get_builtin_type(name: &str) -> Option<&'static BuiltinTypeDef> {
-    BUILTIN_TYPES.iter().find(|t| t.name == name).copied()
-}
-
-/// Check if a name is reserved for a built-in type.
-pub fn is_reserved_type_name(name: &str) -> bool {
-    BUILTIN_TYPES.iter().any(|t| t.name == name)
-}
+//! All four prelude-resident built-in enums (`Arch`, `Os`, `TypeKind`,
+//! `Ownership`) and the three interfaces (`Drop`, `Clone`, `Handle`)
+//! live in the prelude — see `prelude/target.gruel`,
+//! `prelude/type_info.gruel`, and `prelude/interfaces.gruel`. The
+//! compiler caches their `EnumId` / `InterfaceId`s after declaration
+//! resolution; see `Sema::cache_builtin_enum_ids` in `gruel-air`.
 
 // ============================================================================
 // Built-in Type Constructors (parameterized types)
@@ -783,21 +154,40 @@ pub fn is_reserved_type_constructor_name(name: &str) -> bool {
 }
 
 // ============================================================================
-// Built-in Interfaces (Drop, Copy, Clone, Handle)
+// Built-in Enums (Arch, Os, TypeKind, Ownership)
+// ============================================================================
+//
+// ADR-0078 Phase 3: the platform-reflection enums (`Arch`, `Os`) live
+// in `prelude/target.gruel`; the type-reflection enums (`TypeKind`,
+// `Ownership`) live in `prelude/type_info.gruel`. The intrinsics that
+// produce values of those types (`@target_arch`, `@target_os`,
+// `@type_info`, `@ownership`) cache their `EnumId`s after declaration
+// resolution via `Sema::cache_builtin_enum_ids`. Variant order in the
+// prelude files matches the order returned by the compiler-side
+// `arch_variant_index` / `os_variant_index` mappers; see
+// `crates/gruel-air/src/sema/analysis.rs`.
+
+/// Names of the four prelude-resident built-in enums. Kept here only so
+/// other crates have a single source of truth when they need to refer to
+/// the names (e.g. for documentation generation).
+pub static BUILTIN_ENUM_NAMES: &[&str] = &["Arch", "Os", "TypeKind", "Ownership"];
+
+// ============================================================================
+// Built-in Interfaces (Drop, Clone, Handle)
 // ============================================================================
 //
 // ADR-0078 Phase 2: the interface declarations live in
 // `prelude/interfaces.gruel`. The compiler still recognizes them by
-// interned name (the hardcoded behaviors — drop glue, @derive(Copy/Clone)
+// interned name (the hardcoded behaviors — drop glue, @derive(Clone)
 // synthesis, Handle linearity carve-out — key off these names).
+// ADR-0080 retired `Copy` from the interface set: posture is declared
+// on the type and queried via `@ownership(T)`, not via interface
+// conformance.
 
-/// Names of the four compiler-recognized built-in interfaces. Kept here only
-/// so the doc generator can point at `prelude/interfaces.gruel` for
-/// canonical declarations. Do not use this for anything load-bearing — the
-/// compiler resolves these names through the prelude scope.
-/// ADR-0080 retired `Copy` from the interface set: posture is declared
-/// on the type and queried via `@ownership(T)`, not via interface
-/// conformance.
+/// Names of the three compiler-recognized built-in interfaces. Kept
+/// here only so the doc generator can point at `prelude/interfaces.gruel`
+/// for canonical declarations. Do not use this for anything load-bearing
+/// — the compiler resolves these names through the prelude scope.
 pub static BUILTIN_INTERFACE_NAMES: &[&str] = &["Drop", "Clone", "Handle"];
 
 // ============================================================================
@@ -920,104 +310,8 @@ pub fn all_lang_item_names() -> Vec<&'static str> {
 }
 
 // ============================================================================
-// Helper methods
-// ============================================================================
-
-impl BuiltinTypeDef {
-    /// Get the number of slots this type uses in the ABI.
-    ///
-    /// Each field uses one slot (all fields are currently scalar types).
-    pub fn slot_count(&self) -> u32 {
-        self.fields.len() as u32
-    }
-
-    /// Find an associated function by name.
-    pub fn find_associated_fn(&self, name: &str) -> Option<&BuiltinAssociatedFn> {
-        self.associated_fns.iter().find(|f| f.name == name)
-    }
-
-    /// Find a method by name.
-    pub fn find_method(&self, name: &str) -> Option<&BuiltinMethod> {
-        self.methods.iter().find(|m| m.name == name)
-    }
-
-    /// Find an operator implementation.
-    pub fn find_operator(&self, op: BinOp) -> Option<&BuiltinOperator> {
-        self.operators.iter().find(|o| o.op == op)
-    }
-
-    /// Check if this type supports a given operator.
-    pub fn supports_operator(&self, op: BinOp) -> bool {
-        self.operators.iter().any(|o| o.op == op)
-    }
-}
-
-// ============================================================================
 // Reference doc generation
 // ============================================================================
-
-impl BinOp {
-    /// Source-form symbol for this operator (e.g. `==`).
-    pub fn symbol(self) -> &'static str {
-        match self {
-            BinOp::Eq => "==",
-            BinOp::Ne => "!=",
-            BinOp::Lt => "<",
-            BinOp::Le => "<=",
-            BinOp::Gt => ">",
-            BinOp::Ge => ">=",
-        }
-    }
-}
-
-impl BuiltinFieldType {
-    fn name(self) -> &'static str {
-        match self {
-            BuiltinFieldType::U64 => "u64",
-            BuiltinFieldType::U8 => "u8",
-            BuiltinFieldType::Bool => "bool",
-            BuiltinFieldType::BuiltinType(name) => name,
-        }
-    }
-}
-
-impl BuiltinParamType {
-    fn name(self, self_ty: &str) -> String {
-        match self {
-            BuiltinParamType::U64 => "u64".to_string(),
-            BuiltinParamType::Usize => "usize".to_string(),
-            BuiltinParamType::U8 => "u8".to_string(),
-            BuiltinParamType::Bool => "bool".to_string(),
-            BuiltinParamType::Char => "char".to_string(),
-            BuiltinParamType::SelfType => self_ty.to_string(),
-            BuiltinParamType::BuiltinType(name) => name.to_string(),
-        }
-    }
-}
-
-impl BuiltinReturnType {
-    fn name(self, self_ty: &str) -> String {
-        match self {
-            BuiltinReturnType::Unit => "()".to_string(),
-            BuiltinReturnType::U64 => "u64".to_string(),
-            BuiltinReturnType::Usize => "usize".to_string(),
-            BuiltinReturnType::U8 => "u8".to_string(),
-            BuiltinReturnType::Bool => "bool".to_string(),
-            BuiltinReturnType::SelfType => self_ty.to_string(),
-            BuiltinReturnType::BuiltinType(name) => name.to_string(),
-        }
-    }
-}
-
-impl ReceiverMode {
-    fn signature(self) -> &'static str {
-        match self {
-            ReceiverMode::ByValue => "self",
-            ReceiverMode::ByRef => "&self",
-            ReceiverMode::ByMutRef => "&mut self",
-        }
-    }
-}
 
 impl BuiltinTypeConstructorKind {
     fn description(self) -> &'static str {
@@ -1033,51 +327,8 @@ impl BuiltinTypeConstructorKind {
     }
 }
 
-fn fn_signature(
-    name: &str,
-    params: &[BuiltinParam],
-    ret: BuiltinReturnType,
-    self_ty: &str,
-) -> String {
-    let mut s = String::new();
-    s.push_str(name);
-    s.push('(');
-    for (i, p) in params.iter().enumerate() {
-        if i > 0 {
-            s.push_str(", ");
-        }
-        s.push_str(p.name);
-        s.push_str(": ");
-        s.push_str(&p.ty.name(self_ty));
-    }
-    s.push(')');
-    if !matches!(ret, BuiltinReturnType::Unit) {
-        s.push_str(" -> ");
-        s.push_str(&ret.name(self_ty));
-    }
-    s
-}
-
-fn method_signature(m: &BuiltinMethod, self_ty: &str) -> String {
-    let mut s = String::from("fn ");
-    s.push_str(m.name);
-    s.push('(');
-    s.push_str(m.receiver_mode.signature());
-    for p in m.params {
-        s.push_str(", ");
-        s.push_str(p.name);
-        s.push_str(": ");
-        s.push_str(&p.ty.name(self_ty));
-    }
-    s.push(')');
-    if !matches!(m.return_ty, BuiltinReturnType::Unit) {
-        s.push_str(" -> ");
-        s.push_str(&m.return_ty.name(self_ty));
-    }
-    s
-}
-
-/// Render the reference page for built-in types, type constructors, and enums.
+/// Render the reference page for built-in type constructors, enums, and
+/// interfaces.
 ///
 /// The output is a self-contained markdown page generated from the registries
 /// in this crate. It is the source of truth for the checked-in reference page
@@ -1087,35 +338,10 @@ pub fn render_reference_markdown() -> String {
     let mut out = String::new();
     out.push_str("<!-- AUTO-GENERATED by `cargo run -p gruel-builtins-docs`. Do not edit by hand; edit the registries in `crates/gruel-builtins/src/lib.rs` and regenerate. -->\n\n");
     out.push_str("# Built-in Types Reference\n\n");
-    out.push_str("This page documents every built-in type, type constructor, and enum the Gruel compiler injects before processing user code. It is generated from the registries in [`gruel-builtins`] (see [ADR-0020](../designs/0020-builtin-types-as-structs.md)); any changes must be made in Rust, not here.\n\n");
+    out.push_str("This page documents every built-in type constructor, enum, and interface the Gruel compiler hard-codes by name. ADR-0081 retired the `BUILTIN_TYPES` registry; built-in *types* (currently just `String`) live in the prelude alongside `Option` / `Result`. The constructors, enums, and interfaces here are still hard-wired because their semantics aren't expressible as ordinary Gruel code.\n\n");
 
     // ---- Quick reference ----
     out.push_str("## Quick Reference\n\n");
-
-    out.push_str("### Types\n\n");
-    out.push_str("| Name | Ownership | Methods | Associated fns | Operators |\n");
-    out.push_str("|---|---|---|---|---|\n");
-    for t in BUILTIN_TYPES {
-        let ownership = if t.is_copy { "copy" } else { "affine" };
-        let ops: Vec<&'static str> = t.operators.iter().map(|o| o.op.symbol()).collect();
-        let ops_str = if ops.is_empty() {
-            "—".to_string()
-        } else {
-            ops.iter()
-                .map(|s| format!("`{}`", s))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        out.push_str(&format!(
-            "| `{}` | {} | {} | {} | {} |\n",
-            t.name,
-            ownership,
-            t.methods.len(),
-            t.associated_fns.len(),
-            ops_str,
-        ));
-    }
-    out.push('\n');
 
     out.push_str("### Type Constructors\n\n");
     out.push_str("| Name | Arity | Description |\n");
@@ -1148,74 +374,6 @@ pub fn render_reference_markdown() -> String {
     out.push_str("| `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |\n");
     out.push_str("| `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |\n");
     out.push('\n');
-
-    // ---- Types in detail ----
-    out.push_str("## Types\n\n");
-    for t in BUILTIN_TYPES {
-        out.push_str(&format!("### `{}`\n\n", t.name));
-
-        let ownership = if t.is_copy {
-            "Copy (implicitly duplicated by bitwise copy).".to_string()
-        } else if let Some(drop_fn) = t.drop_fn {
-            format!("Affine (move semantics; dropped via `{}`).", drop_fn)
-        } else {
-            "Affine (move semantics; no destructor).".to_string()
-        };
-        out.push_str(&format!("**Ownership:** {}\n\n", ownership));
-
-        if !t.fields.is_empty() {
-            out.push_str("**Layout:**\n\n");
-            out.push_str("| Field | Type |\n");
-            out.push_str("|---|---|\n");
-            for f in t.fields {
-                out.push_str(&format!("| `{}` | `{}` |\n", f.name, f.ty.name()));
-            }
-            out.push('\n');
-        }
-
-        if !t.operators.is_empty() {
-            out.push_str("**Operators:**\n\n");
-            out.push_str("| Operator | Runtime symbol | Notes |\n");
-            out.push_str("|---|---|---|\n");
-            for op in t.operators {
-                let notes = if op.invert_result {
-                    "result inverted"
-                } else {
-                    "—"
-                };
-                out.push_str(&format!(
-                    "| `{}` | `{}` | {} |\n",
-                    op.op.symbol(),
-                    op.runtime_fn,
-                    notes,
-                ));
-            }
-            out.push('\n');
-        }
-
-        if !t.associated_fns.is_empty() {
-            out.push_str("**Associated functions:**\n\n");
-            for f in t.associated_fns {
-                let sig = fn_signature(
-                    &format!("{}::{}", t.name, f.name),
-                    f.params,
-                    f.return_ty,
-                    t.name,
-                );
-                out.push_str(&format!("- `{}` — runtime: `{}`\n", sig, f.runtime_fn));
-            }
-            out.push('\n');
-        }
-
-        if !t.methods.is_empty() {
-            out.push_str("**Methods:**\n\n");
-            for m in t.methods {
-                let sig = method_signature(m, t.name);
-                out.push_str(&format!("- `{}` — runtime: `{}`\n", sig, m.runtime_fn));
-            }
-            out.push('\n');
-        }
-    }
 
     // ---- Type constructors in detail ----
     out.push_str("## Type Constructors\n\n");
@@ -1303,113 +461,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_string_type_exists() {
-        assert_eq!(STRING_TYPE.name, "String");
-        // ADR-0072 + ADR-0073: single non-pub `bytes: Vec(u8)` field.
-        assert_eq!(STRING_TYPE.fields.len(), 1);
-        assert_eq!(STRING_TYPE.fields[0].name, "bytes");
-        assert!(!STRING_TYPE.fields[0].is_pub);
-        assert!(!STRING_TYPE.is_copy);
-        assert_eq!(STRING_TYPE.drop_fn, Some("__gruel_drop_String"));
-    }
-
-    #[test]
-    fn test_string_slot_count() {
-        // One ABI slot — the inner Vec(u8) — per ADR-0072.
-        assert_eq!(STRING_TYPE.slot_count(), 1);
-    }
-
-    #[test]
-    fn test_string_associated_fns() {
-        let new_fn = STRING_TYPE.find_associated_fn("new").unwrap();
-        assert_eq!(new_fn.runtime_fn, "String__new");
-        assert!(new_fn.params.is_empty());
-
-        let with_cap = STRING_TYPE.find_associated_fn("with_capacity").unwrap();
-        assert_eq!(with_cap.runtime_fn, "String__with_capacity");
-        assert_eq!(with_cap.params.len(), 1);
-    }
-
-    #[test]
-    fn test_string_methods() {
-        let len = STRING_TYPE.find_method("len").unwrap();
-        assert_eq!(len.runtime_fn, "String__len");
-        assert_eq!(len.receiver_mode, ReceiverMode::ByRef);
-
-        let push_str = STRING_TYPE.find_method("push_str").unwrap();
-        assert_eq!(push_str.runtime_fn, "String__push_str");
-        assert_eq!(push_str.receiver_mode, ReceiverMode::ByMutRef);
-    }
-
-    #[test]
-    fn test_string_operators() {
-        assert!(STRING_TYPE.supports_operator(BinOp::Eq));
-        assert!(STRING_TYPE.supports_operator(BinOp::Ne));
-        assert!(STRING_TYPE.supports_operator(BinOp::Lt));
-        assert!(STRING_TYPE.supports_operator(BinOp::Gt));
-
-        let eq = STRING_TYPE.find_operator(BinOp::Eq).unwrap();
-        assert_eq!(eq.runtime_fn, "__gruel_str_eq");
-        assert!(!eq.invert_result);
-
-        let ne = STRING_TYPE.find_operator(BinOp::Ne).unwrap();
-        assert_eq!(ne.runtime_fn, "__gruel_str_eq");
-        assert!(ne.invert_result);
-    }
-
-    #[test]
-    fn test_get_builtin_type() {
-        assert!(get_builtin_type("String").is_some());
-        assert!(get_builtin_type("Vec").is_none());
-    }
-
-    #[test]
-    fn test_is_reserved_type_name() {
-        assert!(is_reserved_type_name("String"));
-        assert!(!is_reserved_type_name("MyStruct"));
-    }
-
-    #[test]
-    fn test_all_string_methods_present() {
-        // Verify all expected methods are defined
-        let expected_methods = [
-            "len",
-            "capacity",
-            "is_empty",
-            "clone",
-            "contains",
-            "starts_with",
-            "ends_with",
-            "concat",
-            "push_str",
-            "push",
-            "clear",
-            "reserve",
-        ];
-        for name in expected_methods {
-            assert!(
-                STRING_TYPE.find_method(name).is_some(),
-                "missing method: {}",
-                name
-            );
-        }
-    }
-
-    // ADR-0078 Phase 3: built-in enum declarations now live in
-    // `prelude/target.gruel` (`Arch`, `Os`) and `prelude/type_info.gruel`
-    // (`TypeKind`, `Ownership`). The compiler-side `arch_variant_index`
-    // / `os_variant_index` mappers (in `gruel-air/src/sema/analysis.rs`)
-    // encode the variant order; their unit tests in that crate cover
-    // the mapping. The breadcrumb static below lets other crates
-    // reference the names without re-typing them.
-    #[test]
     fn test_builtin_enum_names() {
         assert_eq!(BUILTIN_ENUM_NAMES, &["Arch", "Os", "TypeKind", "Ownership"]);
     }
-
-    // ========================================================================
-    // Built-in Type Constructor Tests
-    // ========================================================================
 
     #[test]
     fn test_builtin_type_constructors_registry() {

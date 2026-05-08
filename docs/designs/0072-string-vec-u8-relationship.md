@@ -346,6 +346,7 @@ Net: `gruel-runtime/src/string.rs` collapses from ~490 LOC to ~50 LOC.
 
 ## Future Work
 
+- ~~Final composition + runtime collapse~~ — resolved by ADR-0081 (String migrated to a regular prelude struct; the `String__*` runtime functions are gone).
 - `s.chars() -> ...` codepoint iterator — enabled by `char` and the UTF-8 invariant established here, but waiting on Gruel's general iterator interface.
 - Codepoint-indexed slicing operations (e.g., `s.char_at(i: usize)`).
 - Borrowed `&str` / `Slice(u8)` views once references mature.

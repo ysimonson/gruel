@@ -2,6 +2,12 @@
 //!
 //! Thin wrappers around libc's malloc/free/realloc. The actual allocator
 //! implementation comes from whatever libc is linked (musl, glibc, etc.).
+//!
+//! The `__gruel_alloc` / `__gruel_free` / `__gruel_realloc` extern symbols
+//! are the FFI entry points that `gruel-codegen-llvm` calls from `Vec(T)`'s
+//! inline lowerings (push, reserve, clone, …); the in-crate Rust functions
+//! `alloc`/`free`/`realloc` exist so the rest of the runtime can call into
+//! the same pool without going through the FFI boundary.
 
 use crate::platform;
 
@@ -38,4 +44,31 @@ pub fn realloc(ptr: *mut u8, _old_size: u64, new_size: u64, _align: u64) -> *mut
         return core::ptr::null_mut();
     }
     unsafe { platform::realloc(ptr, new_size as usize) }
+}
+
+// =============================================================================
+// FFI entry points
+// =============================================================================
+
+/// Allocate memory from the heap. Called by `Vec(T)`'s codegen.
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_alloc(size: u64, align: u64) -> *mut u8 {
+    alloc(size, align)
+}
+
+/// Free memory previously allocated by `__gruel_alloc`.
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_free(ptr: *mut u8, size: u64, align: u64) {
+    free(ptr, size, align)
+}
+
+/// Reallocate memory to a new size.
+#[unsafe(no_mangle)]
+pub extern "C" fn __gruel_realloc(
+    ptr: *mut u8,
+    old_size: u64,
+    new_size: u64,
+    align: u64,
+) -> *mut u8 {
+    realloc(ptr, old_size, new_size, align)
 }

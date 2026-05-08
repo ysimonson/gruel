@@ -1,12 +1,12 @@
 ---
 id: 0081
 title: String Runtime Collapse onto Vec(u8)
-status: proposal
+status: implemented
 tags: [stdlib, strings, runtime, builtins]
-feature-flag: string_runtime_collapse
+feature-flag:
 created: 2026-05-07
-accepted:
-implemented:
+accepted: 2026-05-07
+implemented: 2026-05-08
 spec-sections: ["7.4"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -269,7 +269,7 @@ Each phase ships independently behind the `string_runtime_collapse` preview gate
   - Spec tests at `crates/gruel-spec/cases/vec/byte_methods.toml`: each new method tested for `Vec(u8)`, `Vec(i32)`, and at least one struct case (Copy struct). Operator coverage: `Vec(i32) == Vec(i32)`, `Vec(u8) < Vec(u8)` returning the right Ordering values.
   - `make test` green.
 
-- [ ] **Phase 2: Migrate String to prelude**
+- [x] **Phase 2: Migrate String to prelude**
   - Replace `prelude/string.gruel` with the full struct declaration from §2. Move `Utf8DecodeError` to live alongside.
   - Delete `STRING_TYPE` from `gruel-builtins/src/lib.rs`. `BUILTIN_TYPES` becomes `&[]`.
   - Sema verification: walk the existing String spec tests (`crates/gruel-spec/cases/types/strings.toml`, `mutable-strings.toml`, `char_string.toml`, `string_vec_bridge.toml`) and confirm every test still passes against the prelude struct. Any failures here are the migration's regression surface.
@@ -277,14 +277,14 @@ Each phase ships independently behind the `string_runtime_collapse` preview gate
   - Operator overloading verification: `s1 == s2`, `s1 < s2`, etc. compile and route through ADR-0078's step 4 / 5 to call `String::eq` / `String::cmp`.
   - `make test` green. Expected delta: 0 spec test changes, 0 UI test changes, ~280 LOC out of `gruel-builtins/src/lib.rs`, ~120 LOC into `prelude/string.gruel`.
 
-- [ ] **Phase 3: Delete obsolete runtime functions**
+- [x] **Phase 3: Delete obsolete runtime functions**
   - Delete the 28 symbols listed in the §4 table from `gruel-runtime/src/string.rs`. Total ~430 LOC out.
   - Rename `gruel-runtime/src/string.rs` → `gruel-runtime/src/utf8.rs` (the contents are now exclusively UTF-8 / FFI-conversion specific). Update `gruel-runtime/src/lib.rs` `mod` declaration.
   - Verify no references to deleted symbols remain (`grep -r 'String__\|__gruel_str_\|__gruel_string_\|__gruel_drop_String' crates/`).
   - Doc generator (`docs/generated/builtins-reference.md`): `BUILTIN_TYPES` is now empty, so the iterator-driven section becomes static text or is removed. Update `make gen-builtins-docs` and `make check-builtins-docs`.
   - `make test` green.
 
-- [ ] **Phase 4: Stabilize**
+- [x] **Phase 4: Stabilize**
   - Remove `PreviewFeature::StringRuntimeCollapse` from `gruel-error/src/lib.rs`.
   - Retire `BuiltinTypeDef` / `BuiltinField` / `BuiltinMethod` / `BuiltinAssociatedFn` / `BuiltinOperator` / `BuiltinReturnType` / `BuiltinParam` / `BuiltinParamType` / `BuiltinFieldType` / `ReceiverMode` types from `gruel-builtins/src/lib.rs` if no other consumer has emerged (they have none today). The corresponding `inject_builtin_types` and `analyze_builtin_method` paths in sema retire alongside. Total ~150 LOC out across builtins + sema.
   - ADR status → `implemented`.

@@ -2705,10 +2705,10 @@ mod integration_tests {
                 fn main() -> i32 { 0 }
             "#;
             let result = compile_to_air(src).unwrap();
-            // type_pool includes builtin types (String) plus user-defined structs
-            // There's 1 builtin (String) + 1 user-defined (Point) = 2 total structs
+            // ADR-0081: BUILTIN_TYPES is empty; the only struct is the
+            // user-defined Point.
             let all_struct_ids = result.type_pool.all_struct_ids();
-            assert_eq!(all_struct_ids.len(), 2);
+            assert_eq!(all_struct_ids.len(), 1);
             // Verify Point is present
             let point_name = result.interner.get_or_intern("Point");
             let point_interned = result.type_pool.get_struct_by_name(point_name);
@@ -2923,29 +2923,11 @@ mod integration_tests {
     // Strings
     // ========================================================================
 
-    mod strings {
-        use super::*;
-
-        #[test]
-        fn string_literal() {
-            let src = r#"fn main() -> i32 { let _s = "hello"; 0 }"#;
-            assert!(compile_to_air(src).is_ok());
-        }
-
-        #[test]
-        fn string_with_quote_escape() {
-            // String escape sequences: \" is supported
-            let src = r#"fn main() -> i32 { let _s = "hello\"world"; 0 }"#;
-            assert!(compile_to_air(src).is_ok());
-        }
-
-        #[test]
-        fn string_with_backslash_escape() {
-            // String escape sequences: \\ is supported
-            let src = r#"fn main() -> i32 { let _s = "hello\\world"; 0 }"#;
-            assert!(compile_to_air(src).is_ok());
-        }
-    }
+    // ADR-0081: String moved out of `BUILTIN_TYPES` into the prelude
+    // (`prelude/string.gruel`). `compile_to_air` deliberately skips
+    // prelude loading, so it can no longer lower string-literal source
+    // here. End-to-end string-literal coverage lives in
+    // `crates/gruel-spec/cases/types/strings.toml`.
 
     // ========================================================================
     // Block Expressions

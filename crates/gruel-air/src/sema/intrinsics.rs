@@ -17,7 +17,7 @@ use lasso::Spur;
 use super::Sema;
 use super::analysis::{arch_variant_index, os_variant_index};
 use super::context::{AnalysisContext, AnalysisResult, ComptimeHeapItem, ConstValue};
-use crate::inst::{Air, AirArgMode, AirInst, AirInstData};
+use crate::inst::{Air, AirInst, AirInstData};
 use crate::types::{Type, TypeKind};
 
 impl<'a> Sema<'a> {
@@ -267,62 +267,6 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, vec_ty))
-    }
-
-    /// ADR-0072: dispatch `String::name(args)` to a prelude function whose
-    /// body uses comptime-generic types like `Result(String, ...)`. Mirrors
-    /// the pattern used for `char::from_u32` -> `char__from_u32` in
-    /// ADR-0071.
-    pub(super) fn dispatch_string_prelude_assoc_fn(
-        &mut self,
-        air: &mut Air,
-        ctx: &mut AnalysisContext,
-        prelude_fn_name: &str,
-        method_name: &str,
-        args: &[RirCallArg],
-        span: Span,
-    ) -> CompileResult<AnalysisResult> {
-        // Enforce the same preview / checked gates the registry path would.
-        self.check_string_vec_bridge_method_gates("String", method_name, ctx, span)?;
-        let fn_name = self.interner.get_or_intern(prelude_fn_name);
-        let fn_info = self.functions.get(&fn_name).ok_or_else(|| {
-            CompileError::new(
-                ErrorKind::InternalError(format!(
-                    "prelude function `{}` not found",
-                    prelude_fn_name
-                )),
-                span,
-            )
-        })?;
-        let return_ty = fn_info.return_type;
-        let expected_param_count = fn_info.params.len();
-        if args.len() != expected_param_count {
-            return Err(CompileError::new(
-                ErrorKind::WrongArgumentCount {
-                    expected: expected_param_count,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-        ctx.referenced_functions.insert(fn_name);
-        let mut extra: Vec<u32> = Vec::with_capacity(args.len() * 2);
-        for arg in args {
-            let r = self.analyze_inst(air, arg.value, ctx)?;
-            extra.push(r.air_ref.as_u32());
-            extra.push(AirArgMode::Normal.as_u32());
-        }
-        let args_start = air.add_extra(&extra);
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Call {
-                name: fn_name,
-                args_start,
-                args_len: args.len() as u32,
-            },
-            ty: return_ty,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, return_ty))
     }
 
     /// Analyze `@utf8_validate(s: borrow Slice(u8)) -> bool` (ADR-0072).

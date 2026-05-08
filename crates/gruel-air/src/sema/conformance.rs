@@ -225,14 +225,10 @@ impl<'a> Sema<'a> {
                 slot_methods: Vec::new(),
             }));
         }
-        if let TypeKind::Struct(struct_id) = candidate.kind()
-            && let Some(builtin) = self.get_builtin_type_def(struct_id)
-            && builtin.find_method("clone").is_some()
-        {
-            return Some(Ok(ConformanceWitness {
-                slot_methods: Vec::new(),
-            }));
-        }
+        // ADR-0081 retired the registry-driven `String.clone` carve-out;
+        // the prelude `String` declares its `clone` method like any other
+        // user struct, so the standard `methods.contains_key` lookup
+        // below catches it.
         // ADR-0065 Phase 2: `@derive(Clone)` structs have an `is_clone` flag
         // and a synthesized `<TypeName>.clone` function emitted by
         // `clone_glue`. The conformance witness needs no real method slot —
