@@ -6,7 +6,7 @@
 //! (`v.push(x)`, `v.len()`, etc.) both flow through this module.
 
 use gruel_rir::{InstRef, RirCallArg};
-use gruel_util::{CompileError, CompileResult, ErrorKind, Span};
+use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature, Span};
 
 use super::Sema;
 use super::context::{AnalysisContext, AnalysisResult};
@@ -99,6 +99,21 @@ impl<'a> Sema<'a> {
             _ => unreachable!("dispatch_vec_method_call called with non-Vec receiver"),
         };
         let elem_ty = self.type_pool.vec_def(vec_id);
+
+        // ADR-0082: when the preview gate is on, route through the
+        // prelude `@lang("vec")` declaration's instantiated methods.
+        // The receiver value (TypeKind::Vec(_)) and the prelude
+        // struct's `Self` (TypeKind::Struct(StructId)) share an
+        // identical {ptr, len, cap} layout, so the AIR-level type pun
+        // is safe and codegen sees the same LLVM aggregate.
+        if self
+            .preview_features
+            .contains(&PreviewFeature::VecRuntimeCollapse)
+            && let Some(result) =
+                self.try_dispatch_vec_method_via_prelude(air, receiver, elem_ty, method_name, args, span, ctx)?
+        {
+            return Ok(result);
+        }
 
         match method_name {
             "len" => self.emit_vec_query(air, "vec_len", receiver, args, span, Type::USIZE),
@@ -894,5 +909,88 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, vec_ty))
+    }
+
+    /// ADR-0082: route a Vec method call through the prelude
+    /// `@lang("vec")` declaration's instantiated struct methods.
+    /// Returns `Ok(Some(result))` on success, `Ok(None)` if the
+    /// prelude declaration / registry doesn't yet have an entry for
+    /// this element type or the method (caller falls back to legacy
+    /// codegen-inline path), or `Err(_)` if the prelude method exists
+    /// but its arity / arg types don't match.
+    fn try_dispatch_vec_method_via_prelude(
+        &mut self,
+        air: &mut Air,
+        receiver: AnalysisResult,
+        elem_ty: Type,
+        method_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<Option<AnalysisResult>> {
+        // Ensure the prelude struct exists for this element type.
+        self.populate_vec_instance(elem_ty);
+        let Some(struct_id) = self.vec_instance_for_elem(elem_ty) else {
+            return Ok(None);
+        };
+        let method_sym = self.interner.get_or_intern(method_name);
+        let Some(method_info) = self.methods.get(&(struct_id, method_sym)).copied() else {
+            return Ok(None);
+        };
+        if !method_info.has_self {
+            return Ok(None);
+        }
+        let recv_pass_mode = match method_info.receiver {
+            crate::types::ReceiverMode::ByValue => AirArgMode::Normal,
+            crate::types::ReceiverMode::Ref => AirArgMode::Ref,
+            crate::types::ReceiverMode::MutRef => AirArgMode::MutRef,
+        };
+
+        // Track lazy analysis (the method body may not have been
+        // analyzed yet — this matches the work-queue logic in
+        // analyze_method_call_impl).
+        ctx.referenced_methods.insert((struct_id, method_sym));
+
+        let method_param_types = self.param_arena.types(method_info.params).to_vec();
+        if args.len() != method_param_types.len() {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: method_param_types.len(),
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        let mut air_args = vec![crate::AirCallArg {
+            value: receiver.air_ref,
+            mode: recv_pass_mode,
+        }];
+        air_args.extend(self.analyze_call_args(air, args, ctx)?);
+
+        let struct_def = self.type_pool.struct_def(struct_id);
+        let call_name = format!("{}.{}", struct_def.name, method_name);
+        let call_name_sym = self.interner.get_or_intern(&call_name);
+
+        let args_len = air_args.len() as u32;
+        let mut extra_data = Vec::with_capacity(air_args.len() * 2);
+        for arg in &air_args {
+            extra_data.push(arg.value.as_u32());
+            extra_data.push(arg.mode.as_u32());
+        }
+        let args_start = air.add_extra(&extra_data);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Call {
+                name: call_name_sym,
+                args_start,
+                args_len,
+            },
+            ty: method_info.return_type,
+            span,
+        });
+        Ok(Some(AnalysisResult::new(
+            air_ref,
+            method_info.return_type,
+        )))
     }
 }

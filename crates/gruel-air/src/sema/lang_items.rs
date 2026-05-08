@@ -81,6 +81,19 @@ impl<'a> Sema<'a> {
         self.vec_instance_registry.get(&struct_id).copied()
     }
 
+    /// ADR-0082: reverse lookup — given an element type, return the
+    /// `StructId` of the `@lang("vec")` instance for that element.
+    /// Returns `None` if `populate_vec_instance` has not yet been
+    /// called for `elem_ty` (or the lang-item Vec is unbound).
+    pub(crate) fn vec_instance_for_elem(
+        &self,
+        elem_ty: crate::types::Type,
+    ) -> Option<crate::types::StructId> {
+        self.vec_instance_registry
+            .iter()
+            .find_map(|(sid, t)| if *t == elem_ty { Some(*sid) } else { None })
+    }
+
     /// ADR-0082: ensure the prelude `@lang("vec")` function's
     /// instantiation for `elem_ty` has been evaluated and its
     /// `StructId` registered. Idempotent — early-returns if the
