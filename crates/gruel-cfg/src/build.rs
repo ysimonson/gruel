@@ -123,6 +123,13 @@ pub struct CfgBuilder<'a> {
     /// Each scope contains the slots that became live in that scope.
     /// Used to emit StorageDead (and Drop if needed) at scope exit.
     scope_stack: Vec<Vec<LiveSlot>>,
+    /// Records the scope-stack depth at which each slot's `StorageLive`
+    /// was first registered. Used by `re_add_local_slot` so a reassignment
+    /// inside an inner scope (e.g. inside a for-loop body) puts the slot
+    /// back into its original outer scope rather than the inner one —
+    /// otherwise the inner scope's exit would drop the freshly-stored
+    /// value at the end of every loop iteration.
+    slot_origin_depth: std::collections::HashMap<u32, usize>,
     /// Parameters that are live and need dropping at function exit.
     /// Non-inout parameters whose types need drop are added here at function entry.
     /// When a parameter is consumed (passed to another function, moved into a struct, etc.),
@@ -197,6 +204,7 @@ impl<'a> CfgBuilder<'a> {
             value_cache: vec![None; func.air.len()],
             warnings: Vec::new(),
             scope_stack: vec![Vec::new()], // Start with one scope for the function body
+            slot_origin_depth: std::collections::HashMap::new(),
             live_params,
         };
 
@@ -2104,7 +2112,12 @@ impl<'a> CfgBuilder<'a> {
                 // Emit StorageLive to CFG
                 self.emit(CfgInstData::StorageLive { slot: *slot }, Type::UNIT, span);
 
-                // Record this slot as live in the current scope for drop elaboration
+                // Record this slot as live in the current scope for drop elaboration.
+                // Also remember the depth so a later forget+reassignment in a
+                // nested scope re-attaches the slot to the same scope rather
+                // than dropping it at the inner-scope exit.
+                let depth = self.scope_stack.len().saturating_sub(1);
+                self.slot_origin_depth.insert(*slot, depth);
                 if let Some(scope) = self.scope_stack.last_mut() {
                     scope.push(LiveSlot {
                         slot: *slot,
@@ -2696,16 +2709,30 @@ impl<'a> CfgBuilder<'a> {
         }
     }
 
-    /// Re-add a local slot to the current scope after it was previously forgotten.
-    /// This handles the case where a variable is moved (forget_local_slot), then
-    /// reassigned — the new value needs to be tracked for drop at scope exit.
+    /// Re-add a local slot to its original scope after it was previously
+    /// forgotten. This handles the case where a variable is moved
+    /// (`forget_local_slot`) and then reassigned — the new value needs to
+    /// be tracked for drop, but only at the scope exit where the slot
+    /// originally became live (not at any inner scope's exit).
     fn re_add_local_slot(&mut self, slot: u32, ty: Type, span: gruel_util::Span) {
         // Only add if not already tracked (avoid double-tracking)
         let already_tracked = self
             .scope_stack
             .iter()
             .any(|scope| scope.iter().any(|ls| ls.slot == slot));
-        if !already_tracked && let Some(scope) = self.scope_stack.last_mut() {
+        if already_tracked {
+            return;
+        }
+        let target_depth = self
+            .slot_origin_depth
+            .get(&slot)
+            .copied()
+            .unwrap_or_else(|| self.scope_stack.len().saturating_sub(1));
+        // Clamp in case the original scope has already been popped (a
+        // reassignment outside the slot's original scope is a sema bug,
+        // but we don't want to panic here).
+        let depth = target_depth.min(self.scope_stack.len().saturating_sub(1));
+        if let Some(scope) = self.scope_stack.get_mut(depth) {
             scope.push(LiveSlot { slot, ty, span });
         }
     }

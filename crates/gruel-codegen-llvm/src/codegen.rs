@@ -216,9 +216,44 @@ fn build_module<'ctx>(
                 // Function name: `StructName.method`.
                 let struct_name = type_pool.struct_def(struct_id).name.clone();
                 let mangled = format!("{}.{}", struct_name, req.name);
-                let fn_ptr = match fn_map.get(mangled.as_str()) {
-                    Some(fv) => fv.as_global_value().as_pointer_value(),
-                    None => ptr_ty.const_null(),
+                let actual_fn = match fn_map.get(mangled.as_str()) {
+                    Some(fv) => *fv,
+                    None => {
+                        slots.push(ptr_ty.const_null());
+                        continue;
+                    }
+                };
+                // The dispatch site (see the `Dispatch` lowering) calls the
+                // vtable slot as `fn(ptr_data, ...args) -> ret`, passing
+                // the data pointer for `self`. Methods declared with
+                // `self: Ref(Self)` already expect a pointer and can be
+                // dropped into the vtable directly. Methods declared with
+                // a by-value `self`, however, expect the struct as a
+                // by-value parameter — we synthesize a thin trampoline
+                // that loads the receiver from the data pointer and
+                // forwards to the real method, bridging the calling
+                // convention mismatch.
+                let struct_ty = gruel_air::Type::new_struct(struct_id);
+                let abi_slots = type_pool.abi_slot_count(struct_ty);
+                let actual_first_param = actual_fn.get_type().get_param_types().first().copied();
+                let already_takes_ptr_self =
+                    matches!(actual_first_param, Some(t) if t.is_pointer_type());
+                let needs_trampoline = abi_slots > 0 && !already_takes_ptr_self;
+                let fn_ptr = if needs_trampoline {
+                    emit_vtable_trampoline(
+                        context,
+                        &builder,
+                        &module,
+                        type_pool,
+                        actual_fn,
+                        struct_ty,
+                        &mangled,
+                        interface_id,
+                    )
+                    .as_global_value()
+                    .as_pointer_value()
+                } else {
+                    actual_fn.as_global_value().as_pointer_value()
                 };
                 slots.push(fn_ptr);
             }
@@ -385,6 +420,101 @@ pub fn generate_ir(inputs: &CodegenInputs<'_>, opt_level: OptLevel) -> CompileRe
 ///
 /// The function body is filled in by [`define_function`]. Declaring all
 /// functions before defining any allows mutual recursion to resolve.
+/// Synthesize a trampoline used by interface vtables.
+///
+/// Vtable dispatch passes the receiver's data pointer as the first argument,
+/// but the concrete method's calling convention takes `self` by value (a
+/// regular by-value struct parameter). The trampoline bridges the two: it
+/// receives `(ptr, ...args)`, loads the receiver from the pointer, and
+/// forwards to the actual method using its native calling convention.
+#[allow(clippy::too_many_arguments)]
+fn emit_vtable_trampoline<'ctx>(
+    ctx: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &Module<'ctx>,
+    type_pool: &TypeInternPool,
+    actual_fn: FunctionValue<'ctx>,
+    struct_ty: gruel_air::Type,
+    method_mangled: &str,
+    interface_id: gruel_air::InterfaceId,
+) -> FunctionValue<'ctx> {
+    let trampoline_name = format!("{}.thunk__i{}", method_mangled, interface_id.0);
+    if let Some(existing) = module.get_function(&trampoline_name) {
+        return existing;
+    }
+
+    let actual_fn_type = actual_fn.get_type();
+    let actual_param_types = actual_fn_type.get_param_types();
+    let ptr_ty = ctx.ptr_type(inkwell::AddressSpace::default());
+
+    // Build the trampoline's signature: ptr (data), then any non-self params.
+    let mut tramp_params: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+        Vec::with_capacity(actual_param_types.len());
+    tramp_params.push(ptr_ty.into());
+    // The first actual param is self (consumed by the load below); the rest
+    // pass through unchanged.
+    for pty in actual_param_types.iter().skip(1) {
+        tramp_params.push(*pty);
+    }
+    let tramp_fn_type = match actual_fn_type.get_return_type() {
+        Some(ret_ty) => ret_ty.fn_type(&tramp_params, false),
+        None => ctx.void_type().fn_type(&tramp_params, false),
+    };
+    let trampoline = module.add_function(&trampoline_name, tramp_fn_type, None);
+    trampoline.add_attribute(
+        inkwell::attributes::AttributeLoc::Function,
+        ctx.create_enum_attribute(
+            inkwell::attributes::Attribute::get_named_enum_kind_id("nounwind"),
+            0,
+        ),
+    );
+
+    // Save+restore builder position so we can splice the trampoline body in
+    // without disturbing the caller's insertion point.
+    let saved_block = builder.get_insert_block();
+    let entry = ctx.append_basic_block(trampoline, "entry");
+    builder.position_at_end(entry);
+
+    let data_ptr = trampoline
+        .get_nth_param(0)
+        .expect("trampoline has at least one parameter")
+        .into_pointer_value();
+    let self_llvm_ty = gruel_type_to_llvm(struct_ty, ctx, type_pool)
+        .expect("struct types have an LLVM representation");
+    let self_val = builder
+        .build_load(self_llvm_ty, data_ptr, "self")
+        .expect("trampoline self load");
+
+    let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
+        Vec::with_capacity(actual_param_types.len());
+    call_args.push(self_val.into());
+    for i in 1..actual_param_types.len() {
+        call_args.push(
+            trampoline
+                .get_nth_param(i as u32)
+                .expect("trampoline param exists")
+                .into(),
+        );
+    }
+    let call_site = builder
+        .build_call(actual_fn, &call_args, "tramp.call")
+        .expect("trampoline forward call");
+    match call_site.try_as_basic_value().basic() {
+        Some(rv) => {
+            builder.build_return(Some(&rv)).unwrap();
+        }
+        None => {
+            builder.build_return(None).unwrap();
+        }
+    }
+
+    if let Some(b) = saved_block {
+        builder.position_at_end(b);
+    }
+
+    trampoline
+}
+
 fn declare_function<'ctx>(
     cfg: &Cfg,
     ctx: &'ctx Context,
@@ -5493,10 +5623,7 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         // pessimistic; the cmp_eq result is already true for that case
         // (memcmp(_, _, 0) is 0).
         let _ = (zero64, ptr1, ptr2);
-        let result = self
-            .builder
-            .build_and(len_eq, cmp_eq, "vec_eq")
-            .unwrap();
+        let result = self.builder.build_and(len_eq, cmp_eq, "vec_eq").unwrap();
         result.into()
     }
 
@@ -5618,7 +5745,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         let i32_zero = self.ctx.i32_type().const_zero();
         let cmp_eq = self
             .builder
-            .build_int_compare(inkwell::IntPredicate::EQ, cmp, i32_zero, "starts_with_cmp_eq")
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                cmp,
+                i32_zero,
+                "starts_with_cmp_eq",
+            )
             .unwrap();
         let result = self
             .builder

@@ -1,0 +1,47 @@
+// For loops - iterating with @range and over collections
+//
+// Gruel's `for` loop iterates over anything iterable. The two main
+// sources of iterators are `@range(...)` and any container that
+// supports iteration (arrays, slices, vectors).
+
+fn main() -> i32 {
+    // @range(end) iterates 0..end (exclusive)
+    let mut sum = 0;
+    for i in @range(10) {
+        sum = sum + i;
+    }
+    @dbg(sum);  // 45 = 0+1+...+9
+
+    // @range(start, end) iterates start..end
+    let mut product = 1;
+    for i in @range(1, 6) {
+        product = product * i;
+    }
+    @dbg(product);  // 120 = 5!
+
+    // @range(start, end, step) iterates with a custom step
+    let mut even_sum = 0;
+    for i in @range(0, 20, 2) {
+        even_sum = even_sum + i;
+    }
+    @dbg(even_sum);  // 90 = 0+2+4+...+18
+
+    // For-in works on fixed-size arrays directly
+    let primes = [2, 3, 5, 7, 11];
+    let mut prime_sum = 0;
+    for p in primes {
+        prime_sum = prime_sum + p;
+    }
+    @dbg(prime_sum);  // 28
+
+    // Nested for loops
+    let mut count = 0;
+    for _i in @range(3) {
+        for _j in @range(4) {
+            count = count + 1;
+        }
+    }
+    @dbg(count);  // 12
+
+    sum
+}

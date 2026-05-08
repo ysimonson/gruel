@@ -1,0 +1,54 @@
+// Vec(T) - growable, heap-allocated arrays
+//
+// Unlike fixed-size arrays, `Vec(T)` grows on demand. Construct one
+// with `Vec(T)::new()`, the `@vec(...)` literal, or `@vec_repeat(v, n)`.
+
+fn main() -> i32 {
+    // Build up a Vec one element at a time
+    let mut v: Vec(i32) = Vec(i32)::new();
+    v.push(10);
+    v.push(20);
+    v.push(30);
+
+    let len_v: i32 = @cast(v.len());
+    @dbg(len_v);                     // 3
+    @dbg(v[0] + v[1] + v[2]);        // 60
+
+    // Pop the last element off
+    let last = v.pop();
+    @dbg(last);                      // 30
+    let after_pop: i32 = @cast(v.len());
+    @dbg(after_pop);                 // 2
+
+    // Pre-allocate when you know the capacity
+    let mut buf: Vec(i32) = Vec(i32)::with_capacity(16);
+    buf.push(7);
+    buf.push(8);
+    buf.push(9);
+    @dbg(buf[0] + buf[1] + buf[2]);  // 24
+
+    // `@vec(...)` literal builds a Vec from its values
+    let lit = @vec(1, 2, 3, 4, 5);
+    let lit_len: i32 = @cast(lit.len());
+    @dbg(lit_len);                   // 5
+    @dbg(lit[0] + lit[4]);           // 6
+
+    // `@vec_repeat(value, count)` makes a Vec full of one value
+    let zeros = @vec_repeat(0, 8);
+    let zeros_len: i32 = @cast(zeros.len());
+    @dbg(zeros_len);                 // 8
+    @dbg(zeros[0] + zeros[7]);       // 0
+
+    // Build a Vec with for-in to populate, then iterate to sum
+    let mut grid: Vec(i32) = Vec(i32)::with_capacity(8);
+    for i in @range(1, 6) {
+        grid.push(i * i);
+    }
+    let mut total: i32 = 0;
+    for n in grid {
+        total = total + n;
+    }
+    @dbg(total);                     // 1 + 4 + 9 + 16 + 25 = 55
+
+    buf[0] + buf[1] + buf[2]
+}

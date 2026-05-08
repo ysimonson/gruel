@@ -6261,6 +6261,10 @@ impl<'a> Sema<'a> {
                 .with_help(help));
             }
 
+            // Mark the root variable as used so unused-variable analysis
+            // accounts for tuple/struct field projections.
+            ctx.used_locals.insert(trace.root_var);
+
             // Emit PlaceRead instruction
             let place_ref = Self::build_place_ref(air, &trace);
             let air_ref = air.add_inst(AirInst {

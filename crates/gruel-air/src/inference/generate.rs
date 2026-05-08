@@ -1173,6 +1173,7 @@ impl<'a> ConstraintGenerator<'a> {
                         TypeKind::MutSlice(id) => {
                             InferType::Concrete(self.type_pool.mut_slice_def(id))
                         }
+                        TypeKind::Vec(id) => InferType::Concrete(self.type_pool.vec_def(id)),
                         _ => iterable_info.ty.clone(),
                     },
                     other => other.clone(),

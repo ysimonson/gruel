@@ -1,0 +1,51 @@
+// Strings - heap-promotable UTF-8 text
+//
+// A string literal is a borrowed view (zero capacity, immutable bytes).
+// `String::new()` and friends produce an owning, growable string. Once
+// you push onto a literal, it is "promoted" to an owning String.
+
+fn main() -> i32 {
+    // Literal length and capacity (literals have cap = 0)
+    let greeting_len: i32 = @cast("hello".len());
+    let greeting_cap: i32 = @cast("hello".capacity());
+    @dbg("hello");           // hello
+    @dbg(greeting_len);      // 5
+    @dbg(greeting_cap);      // 0
+
+    // String::new() makes an empty, growable String
+    let buf = String::new();
+    @dbg(buf.is_empty());    // true
+
+    // Build up content with push_str
+    let mut greeting = String::new();
+    greeting.push_str("hello");
+    greeting.push_str(", ");
+    greeting.push_str("world!");
+    let len: i32 = @cast(greeting.len());
+    @dbg(greeting);          // hello, world! (consumes greeting)
+    @dbg(len);               // 13
+
+    // Mutating a literal heap-promotes it
+    let mut s = "stand-alone";
+    s.push_str(" no more");
+    @dbg(s);                 // stand-alone no more
+
+    // push_str works inside loops; the underlying buffer survives across
+    // iterations rather than being dropped at the body's scope exit.
+    let cap: usize = 64;
+    let mut packed = String::with_capacity(cap);
+    for _i in @range(5) {
+        packed.push_str("ha");
+    }
+    @dbg(packed);            // hahahahaha
+
+    // Strings compare by content
+    if "abc" == "abc" {
+        @dbg(1);             // 1
+    }
+    if "abc" != "abcd" {
+        @dbg(2);             // 2
+    }
+
+    len
+}

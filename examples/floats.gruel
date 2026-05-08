@@ -1,0 +1,60 @@
+// Floating-point types - f32 and f64
+//
+// Gruel supports IEEE 754 floating-point types: f16, f32, and f64.
+// Float literals default to f64 unless context demands otherwise.
+// Use @cast to convert between numeric types.
+
+fn circle_area(r: f64) -> f64 {
+    let pi: f64 = 3.14159265358979;
+    pi * r * r
+}
+
+fn lerp(a: f64, b: f64, t: f64) -> f64 {
+    a + (b - a) * t
+}
+
+// Newton's method for square root
+fn fsqrt(x: f64) -> f64 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    let mut guess: f64 = x;
+    let half: f64 = 0.5;
+    for _i in @range(20) {
+        guess = half * (guess + x / guess);
+    }
+    guess
+}
+
+fn truncate(x: f64) -> i32 {
+    let i: i32 = @cast(x);
+    i
+}
+
+fn main() -> i32 {
+    // Area of a unit circle: ~3.14
+    let area = circle_area(1.0);
+    @dbg(truncate(area));  // 3
+
+    // Area of a circle with radius 5: ~78.54
+    let big_area = circle_area(5.0);
+    @dbg(truncate(big_area));  // 78
+
+    // Linear interpolation halfway between 0.0 and 100.0
+    let mid = lerp(0.0, 100.0, 0.5);
+    @dbg(truncate(mid));  // 50
+
+    // sqrt(2) ~ 1.414, scaled by 1000 to print as i32
+    let s = fsqrt(2.0);
+    @dbg(truncate(s * 1000.0));  // 1414
+
+    // f32 with scientific-notation literal
+    let speed_of_light: f32 = 3.0e8;
+    let billion: f32 = 1.0e9;
+    let ratio: f32 = speed_of_light / billion;
+    let percent: f32 = ratio * 100.0;
+    let p: i32 = @cast(percent);
+    @dbg(p);  // 30
+
+    truncate(mid)
+}

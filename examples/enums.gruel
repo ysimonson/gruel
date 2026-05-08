@@ -1,0 +1,76 @@
+// Enums - sum types with data-carrying variants
+//
+// Gruel enums can have:
+// - Unit variants (no payload)
+// - Tuple variants (positional fields)
+// - Struct variants (named fields)
+//
+// Match expressions destructure variants exhaustively.
+
+// Plain unit variants - like a C enum
+enum Direction {
+    North,
+    East,
+    South,
+    West,
+}
+
+// Tuple and struct variants together describe arbitrary shapes
+enum Shape {
+    Circle(i32),                       // radius
+    Rectangle { width: i32, height: i32 },
+    Triangle(i32, i32, i32),           // three sides
+    Point,                             // unit variant
+}
+
+fn area(shape: Shape) -> i32 {
+    match shape {
+        Shape::Circle(r) => 3 * r * r,                  // π ~ 3
+        Shape::Rectangle { width, height } => width * height,
+        Shape::Triangle(a, b, _c) => (a * b) / 2,       // approximate
+        Shape::Point => 0,
+    }
+}
+
+fn opposite(d: Direction) -> Direction {
+    match d {
+        Direction::North => Direction::South,
+        Direction::South => Direction::North,
+        Direction::East => Direction::West,
+        Direction::West => Direction::East,
+    }
+}
+
+fn direction_code(d: Direction) -> i32 {
+    match d {
+        Direction::North => 1,
+        Direction::East => 2,
+        Direction::South => 3,
+        Direction::West => 4,
+    }
+}
+
+fn main() -> i32 {
+    // Unit variants
+    let here = Direction::North;
+    @dbg(direction_code(here));                  // 1
+    @dbg(direction_code(opposite(Direction::North)));  // 3 (south)
+
+    // Tuple variant
+    let circle = Shape::Circle(5);
+    @dbg(area(circle));                          // 75 = 3 * 5 * 5
+
+    // Struct variant
+    let rect = Shape::Rectangle { width: 4, height: 7 };
+    @dbg(area(rect));                            // 28
+
+    // Multi-field tuple variant
+    let tri = Shape::Triangle(6, 8, 10);
+    @dbg(area(tri));                             // 24
+
+    // Unit variant inside an otherwise data-carrying enum
+    let point = Shape::Point;
+    @dbg(area(point));                           // 0
+
+    area(Shape::Rectangle { width: 5, height: 4 })
+}

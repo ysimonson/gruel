@@ -1,0 +1,66 @@
+// Anonymous functions
+//
+// `fn(x: T) -> U { ... }` is a first-class value. Each anonymous
+// function has its own unique anonymous struct type. Higher-order
+// methods use `comptime F: type, f: F` and infer F from the lambda.
+
+// A wrapper that provides higher-order methods. Using a method (rather
+// than a free function) lets the compiler infer the lambda's anonymous
+// struct type from the argument.
+copy struct Pipe {
+    value: i32,
+
+    fn new(v: i32) -> Self { Self { value: v } }
+
+    fn apply(self, comptime F: type, f: F) -> Self {
+        Self { value: f(self.value) }
+    }
+
+    fn get(self) -> i32 { self.value }
+}
+
+// Reduce-style helper: apply f to each element of `data` and sum.
+struct Numbers {
+    data: [i32; 5],
+
+    fn map_sum(self, comptime F: type, f: F) -> i32 {
+        let Numbers { data } = self;
+        let mut total: i32 = 0;
+        for x in data {
+            total = total + f(x);
+        }
+        total
+    }
+}
+
+fn main() -> i32 {
+    // Bind a lambda to a name and call it directly
+    let add_one = fn(x: i32) -> i32 { x + 1 };
+    @dbg(add_one(10));                 // 11
+
+    // Pass lambdas through methods - F is inferred from the argument
+    let result = Pipe::new(10)
+        .apply(fn(x: i32) -> i32 { x + 5 })
+        .apply(fn(x: i32) -> i32 { x * 2 })
+        .get();
+    @dbg(result);                      // (10 + 5) * 2 = 30
+
+    // Map-sum with various lambdas (one Numbers per call since the
+    // struct is affine - it owns its array).
+    @dbg(Numbers { data: [1, 2, 3, 4, 5] }.map_sum(fn(x: i32) -> i32 { x * x }));   // 55
+    @dbg(Numbers { data: [1, 2, 3, 4, 5] }.map_sum(fn(x: i32) -> i32 { x + 10 })); // 65
+
+    // Two lambdas with the same signature have *different* types
+    let inc = fn(x: i32) -> i32 { x + 1 };
+    let dec = fn(x: i32) -> i32 { x - 1 };
+    @dbg(inc(20) + dec(20));           // 21 + 19 = 40
+
+    // Nested anonymous functions
+    let make = fn() -> i32 {
+        let inner = fn(x: i32) -> i32 { x * 3 };
+        inner(14)
+    };
+    @dbg(make());                      // 42
+
+    result
+}

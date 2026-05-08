@@ -1,0 +1,69 @@
+// Interfaces - structural conformance, both static and dynamic dispatch
+//
+// Gruel interfaces are structural: a type conforms simply by having
+// methods of the right shape (no `impl Trait for Type` declaration).
+// Two ways to consume an interface:
+//   - `comptime T: I` monomorphizes per concrete type (zero overhead).
+//   - `Ref(I)` is a fat pointer (data + vtable) that dispatches at run
+//     time. One body, many concrete types.
+
+interface Shape {
+    fn area(self) -> i32;
+    fn perimeter(self) -> i32;
+}
+
+copy struct Square {
+    side: i32,
+
+    fn area(self) -> i32 { self.side * self.side }
+    fn perimeter(self) -> i32 { 4 * self.side }
+}
+
+copy struct Rectangle {
+    width: i32,
+    height: i32,
+
+    fn area(self) -> i32 { self.width * self.height }
+    fn perimeter(self) -> i32 { 2 * (self.width + self.height) }
+}
+
+copy struct RightTriangle {
+    base: i32,
+    height: i32,
+    hypotenuse: i32,
+
+    fn area(self) -> i32 { (self.base * self.height) / 2 }
+    fn perimeter(self) -> i32 { self.base + self.height + self.hypotenuse }
+}
+
+// Static dispatch: `comptime T: Shape` says "T must structurally conform
+// to Shape". Each concrete call site (Square, Rectangle, ...) gets its
+// own specialized copy of `describe_static`.
+fn describe_static(comptime T: Shape, s: T) -> i32 {
+    s.area() + s.perimeter()
+}
+
+// Dynamic dispatch: `Ref(Shape)` is a fat pointer. One function body,
+// dispatched through the vtable at run time.
+fn describe_dynamic(s: Ref(Shape)) -> i32 {
+    s.area() + s.perimeter()
+}
+
+fn main() -> i32 {
+    let sq = Square { side: 5 };
+    let rect = Rectangle { width: 3, height: 7 };
+    let tri = RightTriangle { base: 3, height: 4, hypotenuse: 5 };
+
+    // Static dispatch — each call is a separate monomorphization.
+    @dbg(describe_static(Square, sq));            // 25 + 20 = 45
+    @dbg(describe_static(Rectangle, rect));       // 21 + 20 = 41
+    @dbg(describe_static(RightTriangle, tri));    // 6 + 12 = 18
+
+    // Dynamic dispatch — same call site, different concrete types,
+    // routed through a vtable behind the fat pointer.
+    @dbg(describe_dynamic(&sq));                  // 45
+    @dbg(describe_dynamic(&rect));                // 41
+    @dbg(describe_dynamic(&tri));                 // 18
+
+    describe_static(Square, sq)
+}

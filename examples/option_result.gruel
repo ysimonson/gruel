@@ -1,0 +1,80 @@
+// Option(T) and Result(T, E) - canonical sum types from the prelude
+//
+// `Option(T)` describes "a value or nothing".
+// `Result(T, E)` describes "a value or an error".
+//
+// Both are generic enums supplied by the prelude; instantiate them
+// once with `let O = Option(i32);` and reference variants as `O::Some`
+// and `O::None`.
+
+// Search a fixed array for `target`. Returns the index, or None.
+fn find(arr: Ref([i32; 6]), target: i32) -> Option(usize) {
+    let O = Option(usize);
+    let mut found: O = O::None;
+    let mut i: usize = 0;
+    while i < 6 {
+        if arr[i] == target {
+            found = O::Some(i);
+        }
+        i = i + 1;
+    }
+    found
+}
+
+// Integer division that fails cleanly on a zero denominator.
+fn checked_div(a: i32, b: i32) -> Result(i32, i32) {
+    let R = Result(i32, i32);
+    if b == 0 {
+        R::Err(-1)
+    } else {
+        R::Ok(a / b)
+    }
+}
+
+fn main() -> i32 {
+    let xs = [10, 20, 30, 40, 50, 60];
+
+    // Pattern match an Option
+    let O = Option(usize);
+    let result_a: i32 = match find(&xs, 30) {
+        O::Some(i) => @cast(i),
+        O::None => -1,
+    };
+    @dbg(result_a);                            // 2
+
+    let result_b: i32 = match find(&xs, 999) {
+        O::Some(_) => 0,
+        O::None => -1,
+    };
+    @dbg(result_b);                            // -1
+
+    // Method form
+    let maybe = find(&xs, 60);
+    @dbg(maybe.is_some());                     // true
+
+    let absent = find(&xs, 7);
+    let fallback: usize = 999;
+    let idx_or_default: i32 = @cast(absent.unwrap_or(fallback));
+    @dbg(idx_or_default);                      // 999
+
+    // Match a Result
+    let R = Result(i32, i32);
+    let q_value = match checked_div(84, 2) {
+        R::Ok(v) => v,
+        R::Err(e) => e,
+    };
+    @dbg(q_value);                             // 42
+
+    let bad_value = match checked_div(1, 0) {
+        R::Ok(_) => 0,
+        R::Err(e) => e,
+    };
+    @dbg(bad_value);                           // -1
+
+    let good = checked_div(100, 4);
+    @dbg(good.is_ok());                        // true
+
+    let last = find(&xs, 60);
+    let last_idx: usize = last.unwrap_or(0);
+    @cast(last_idx)
+}

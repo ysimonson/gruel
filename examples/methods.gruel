@@ -1,0 +1,75 @@
+// Methods - functions defined inside a struct or enum body
+//
+// Gruel has no `impl` blocks. Methods live directly inside the type's
+// declaration and use `self` for the receiver. `Self` resolves to the
+// host type (handy for constructors and chaining APIs).
+
+copy struct Point {
+    x: i32,
+    y: i32,
+
+    // Associated function: no `self`, called as `Point::origin()`
+    fn origin() -> Self {
+        Self { x: 0, y: 0 }
+    }
+
+    fn new(x: i32, y: i32) -> Self {
+        Self { x: x, y: y }
+    }
+
+    // Method: takes `self` and produces a new Point
+    fn translate(self, dx: i32, dy: i32) -> Self {
+        Self { x: self.x + dx, y: self.y + dy }
+    }
+
+    // Methods can call other methods on `self`
+    fn manhattan(self) -> i32 {
+        let ax = if self.x < 0 { -self.x } else { self.x };
+        let ay = if self.y < 0 { -self.y } else { self.y };
+        ax + ay
+    }
+}
+
+// `Counter` shows method chaining: each call returns a fresh Self.
+copy struct Counter {
+    value: i32,
+
+    fn new() -> Self {
+        Self { value: 0 }
+    }
+
+    fn inc(self) -> Self {
+        let v: i32 = self.value + 1;
+        Self { value: v }
+    }
+
+    fn add(self, n: i32) -> Self {
+        Self { value: self.value + n }
+    }
+
+    fn get(self) -> i32 {
+        self.value
+    }
+}
+
+fn main() -> i32 {
+    // Associated function (Type::name())
+    @dbg(Point::origin().manhattan());  // 0
+
+    // Constructor + method call
+    let p = Point::new(3, 4).translate(7, -1);
+    @dbg(p.manhattan());               // 13
+
+    // Methods that derive a value from `self`
+    @dbg(Point::new(-5, 12).manhattan());  // 17
+
+    // Method chaining
+    let total = Counter::new()
+        .inc()
+        .inc()
+        .add(40)
+        .get();
+    @dbg(total);                       // 42
+
+    p.manhattan()
+}

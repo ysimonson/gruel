@@ -303,15 +303,9 @@ impl<'a> Sema<'a> {
             "eq" | "cmp" => {
                 self.dispatch_vec_eq_cmp(air, receiver, elem_ty, method_name, args, span, ctx)
             }
-            "contains" | "starts_with" | "ends_with" => self.dispatch_vec_byte_search(
-                air,
-                receiver,
-                elem_ty,
-                method_name,
-                args,
-                span,
-                ctx,
-            ),
+            "contains" | "starts_with" | "ends_with" => {
+                self.dispatch_vec_byte_search(air, receiver, elem_ty, method_name, args, span, ctx)
+            }
             "concat" => self.dispatch_vec_concat(air, receiver, elem_ty, args, span, ctx),
             "extend_from_slice" => {
                 self.dispatch_vec_extend_from_slice(air, receiver, elem_ty, args, span, ctx)
@@ -481,7 +475,8 @@ impl<'a> Sema<'a> {
             "ends_with" => "vec_ends_with",
             _ => unreachable!(),
         };
-        let other = self.analyze_slice_arg_for_vec(air, intrinsic_name, elem_ty, args, span, ctx)?;
+        let other =
+            self.analyze_slice_arg_for_vec(air, intrinsic_name, elem_ty, args, span, ctx)?;
         self.emit_vec_intrinsic(
             air,
             intrinsic_name,

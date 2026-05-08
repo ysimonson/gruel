@@ -1,0 +1,56 @@
+// Tuples - heterogeneous, fixed-arity products
+//
+// Tuples group a fixed number of values of possibly different types.
+// They support destructuring bindings, structural equality, and
+// index access (`t.0`, `t.1`, ...).
+
+fn swap(p: (i32, i32)) -> (i32, i32) {
+    (p.1, p.0)
+}
+
+// Functions can return multiple values via tuples
+fn divmod(a: i32, b: i32) -> (i32, i32) {
+    (a / b, a % b)
+}
+
+// Tuples can mix types
+fn flagged_value(n: i32) -> (i32, bool) {
+    (n, n > 0)
+}
+
+fn main() -> i32 {
+    // Index access on a tuple binding
+    let pair: (i32, i32) = (10, 32);
+    @dbg(pair.0 + pair.1);  // 42
+
+    // Destructure a pair into two bindings
+    let (lo, hi) = (1, 99);
+    @dbg(swap((lo, hi)).0);  // 99
+    @dbg(swap((lo, hi)).1);  // 1
+
+    // Multiple return values via destructuring
+    let (q, r) = divmod(17, 5);
+    @dbg(q);  // 3 (quotient)
+    @dbg(r);  // 2 (remainder)
+
+    // Mixed types - bind only the parts you care about with `_`
+    let (value, positive) = flagged_value(7);
+    if positive {
+        @dbg(value);  // 7
+    }
+
+    // Nested tuples - parens are required for nested field access
+    let nested: ((i32, i32), i32) = ((10, 20), 12);
+    @dbg((nested.0).0 + (nested.0).1 + nested.1);  // 42
+
+    // Singleton tuples need a trailing comma to disambiguate from parens
+    let single: (i32,) = (42,);
+    @dbg(single.0);  // 42
+
+    // Structural equality
+    if (1, 2, 3) == (1, 2, 3) {
+        @dbg(1);  // 1
+    }
+
+    pair.0 + pair.1
+}
