@@ -30,6 +30,31 @@ impl<'a> Sema<'a> {
         let TypeKind::Vec(vec_id) = vec_ty.kind() else {
             return None;
         };
+        let elem_ty = self.type_pool.vec_def(vec_id);
+
+        // ADR-0082: under the preview gate, route through the prelude
+        // struct's associated function (e.g. `Vec(i32)::new()` calls
+        // the prelude `new` associated fn). Other branches fall back
+        // to the legacy codegen-inline intrinsic path.
+        if self
+            .preview_features
+            .contains(&PreviewFeature::VecRuntimeCollapse)
+        {
+            match self.try_dispatch_vec_static_via_prelude(
+                air,
+                vec_ty,
+                elem_ty,
+                function_name,
+                args,
+                span,
+                ctx,
+            ) {
+                Ok(Some(result)) => return Some(Ok(result)),
+                Ok(None) => {}
+                Err(e) => return Some(Err(e)),
+            }
+        }
+
         match function_name {
             "new" => {
                 if !args.is_empty() {
@@ -81,6 +106,70 @@ impl<'a> Sema<'a> {
                 span,
             ))),
         }
+    }
+
+    /// ADR-0082: route a `Vec(T)::name(args)` static call through the
+    /// prelude struct's associated function (`has_self == false`).
+    /// Returns `Ok(None)` if the prelude struct or function isn't yet
+    /// registered, or `Err(_)` for a found-but-mis-arity'd call.
+    fn try_dispatch_vec_static_via_prelude(
+        &mut self,
+        air: &mut Air,
+        vec_ty: Type,
+        elem_ty: Type,
+        function_name: &str,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<Option<AnalysisResult>> {
+        self.populate_vec_instance(elem_ty);
+        let Some(struct_id) = self.vec_instance_for_elem(elem_ty) else {
+            return Ok(None);
+        };
+        let fn_sym = self.interner.get_or_intern(function_name);
+        let Some(method_info) = self.methods.get(&(struct_id, fn_sym)).copied() else {
+            return Ok(None);
+        };
+        if method_info.has_self {
+            return Ok(None);
+        }
+
+        let method_param_types = self.param_arena.types(method_info.params).to_vec();
+        if args.len() != method_param_types.len() {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: method_param_types.len(),
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        let air_args = self.analyze_call_args(air, args, ctx)?;
+        let struct_def = self.type_pool.struct_def(struct_id);
+        let call_name = format!("{}.{}", struct_def.name, function_name);
+        let call_name_sym = self.interner.get_or_intern(&call_name);
+        let args_len = air_args.len() as u32;
+        let mut extra_data = Vec::with_capacity(air_args.len() * 2);
+        for arg in &air_args {
+            extra_data.push(arg.value.as_u32());
+            extra_data.push(arg.mode.as_u32());
+        }
+        let args_start = air.add_extra(&extra_data);
+        // The prelude method returns `Self` (the prelude struct). Cast
+        // to the legacy `TypeKind::Vec(_)` for compatibility with the
+        // rest of sema until full elimination in Phase 5. Layouts
+        // match, so the AIR-level type pun is safe at codegen.
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Call {
+                name: call_name_sym,
+                args_start,
+                args_len,
+            },
+            ty: vec_ty,
+            span,
+        });
+        Ok(Some(AnalysisResult::new(air_ref, vec_ty)))
     }
 
     /// Dispatch an instance method call on a Vec receiver
@@ -783,6 +872,23 @@ impl<'a> Sema<'a> {
                 self.rir.get(index).span,
             ));
         }
+        // ADR-0082: under the preview gate, route `v[i]` to the
+        // prelude struct's `index_read(i)` method.
+        if self
+            .preview_features
+            .contains(&PreviewFeature::VecRuntimeCollapse)
+            && let Some(result) = self.try_emit_prelude_index_call(
+                air,
+                base_res,
+                elem_ty,
+                "index_read",
+                &[index_res],
+                elem_ty,
+                span,
+            )?
+        {
+            return Ok(Some(result));
+        }
         let extra = vec![base_res.air_ref.as_u32(), index_res.air_ref.as_u32()];
         let args_start = air.add_extra(&extra);
         let name = self.interner.get_or_intern("vec_index_read");
@@ -829,6 +935,23 @@ impl<'a> Sema<'a> {
                 self.format_type_name(value_res.ty),
                 span,
             ));
+        }
+        // ADR-0082: under the preview gate, route `v[i] = x` to the
+        // prelude struct's `index_write(i, x)` method.
+        if self
+            .preview_features
+            .contains(&PreviewFeature::VecRuntimeCollapse)
+            && let Some(result) = self.try_emit_prelude_index_call(
+                air,
+                base_res,
+                elem_ty,
+                "index_write",
+                &[index_res, value_res],
+                Type::UNIT,
+                span,
+            )?
+        {
+            return Ok(Some(result));
         }
         let extra = vec![
             base_res.air_ref.as_u32(),
@@ -909,6 +1032,71 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, vec_ty))
+    }
+
+    /// ADR-0082: route a Vec indexing operation (`v[i]` /
+    /// `v[i] = x`) through the prelude struct's `index_read` /
+    /// `index_write` method. Receiver mode is determined by the
+    /// method's signature. Returns `Ok(None)` if the prelude struct
+    /// or method isn't yet registered (caller falls back to legacy).
+    fn try_emit_prelude_index_call(
+        &mut self,
+        air: &mut Air,
+        receiver: AnalysisResult,
+        elem_ty: Type,
+        method_name: &str,
+        analyzed_args: &[AnalysisResult],
+        return_type: Type,
+        span: Span,
+    ) -> CompileResult<Option<AnalysisResult>> {
+        self.populate_vec_instance(elem_ty);
+        let Some(struct_id) = self.vec_instance_for_elem(elem_ty) else {
+            return Ok(None);
+        };
+        let method_sym = self.interner.get_or_intern(method_name);
+        let Some(method_info) = self.methods.get(&(struct_id, method_sym)).copied() else {
+            return Ok(None);
+        };
+        if !method_info.has_self {
+            return Ok(None);
+        }
+        let recv_pass_mode = match method_info.receiver {
+            crate::types::ReceiverMode::ByValue => AirArgMode::Normal,
+            crate::types::ReceiverMode::Ref => AirArgMode::Ref,
+            crate::types::ReceiverMode::MutRef => AirArgMode::MutRef,
+        };
+
+        let mut air_args = vec![crate::AirCallArg {
+            value: receiver.air_ref,
+            mode: recv_pass_mode,
+        }];
+        for r in analyzed_args {
+            air_args.push(crate::AirCallArg {
+                value: r.air_ref,
+                mode: AirArgMode::Normal,
+            });
+        }
+
+        let struct_def = self.type_pool.struct_def(struct_id);
+        let call_name = format!("{}.{}", struct_def.name, method_name);
+        let call_name_sym = self.interner.get_or_intern(&call_name);
+        let args_len = air_args.len() as u32;
+        let mut extra_data = Vec::with_capacity(air_args.len() * 2);
+        for arg in &air_args {
+            extra_data.push(arg.value.as_u32());
+            extra_data.push(arg.mode.as_u32());
+        }
+        let args_start = air.add_extra(&extra_data);
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Call {
+                name: call_name_sym,
+                args_start,
+                args_len,
+            },
+            ty: return_type,
+            span,
+        });
+        Ok(Some(AnalysisResult::new(air_ref, return_type)))
     }
 
     /// ADR-0082: route a Vec method call through the prelude
