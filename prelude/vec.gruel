@@ -1,17 +1,16 @@
 // ADR-0066 + ADR-0082: owned, growable vector — { ptr, len, cap }.
 //
-// In Phase 2 of ADR-0082 this declaration is dead code: type resolution
-// for `Vec(T)` still hits the `BuiltinTypeConstructorKind::Vec`
-// shortcut in `gruel-air::sema::typeck`, and method dispatch still
-// emits the `vec_*` codegen-inline intrinsics. Phase 3 flips the
-// dispatch to look up methods on the instantiated body of *this*
-// function instead.
+// `@lang("vec")` binds this declaration to the compiler's vec
+// recognition (drop synthesis, indexing `v[i]`, slice borrow `&v[..]`).
+// Phase 3 of ADR-0082 routes those surfaces through this declaration
+// rather than a built-in `TypeKind::Vec` variant.
 //
 // Allocations come from `@alloc` / `@realloc` / `@free` (ADR-0082).
 // Per-element drop is expressed via `self.ptr.offset(i).read()` —
 // the read produces an owned `T` whose drop runs at scope exit,
 // avoiding a separate `@drop(value)` primitive.
 
+@lang("vec")
 pub fn Vec(comptime T: type) -> type {
     struct {
         ptr: MutPtr(T),

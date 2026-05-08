@@ -7520,9 +7520,15 @@ impl<'a> Sema<'a> {
             let empty_type_subst: rustc_hash::FxHashMap<Spur, Type> =
                 rustc_hash::FxHashMap::default();
             let pending_eval_errs_before = self.pending_anon_eval_errors.len();
-            if let Some(ConstValue::Type(ty)) =
-                self.try_evaluate_const_with_subst(fn_body, &empty_type_subst, &value_subst)
-            {
+            // ADR-0082: track which type-constructor function is being
+            // evaluated so the comptime path can populate the
+            // `vec_instance_registry` when it processes the lang-item
+            // Vec body's anonymous struct.
+            let saved_ctor = self.comptime_ctor_fn.replace(name);
+            let const_result =
+                self.try_evaluate_const_with_subst(fn_body, &empty_type_subst, &value_subst);
+            self.comptime_ctor_fn = saved_ctor;
+            if let Some(ConstValue::Type(ty)) = const_result {
                 // Success! Return a TypeConst instruction instead of a runtime call
                 let air_ref = air.add_inst(AirInst {
                     data: AirInstData::TypeConst(ty),
@@ -7550,13 +7556,16 @@ impl<'a> Sema<'a> {
             // (with `comptime T: type` params), let the dedicated generic path
             // below handle the fallback — it has the type substitution we need.
             if !is_generic {
-                let ty = self.evaluate_type_ctor_body(
+                let saved_ctor = self.comptime_ctor_fn.replace(name);
+                let ty_result = self.evaluate_type_ctor_body(
                     fn_body,
                     &empty_type_subst,
                     &value_subst,
                     ctx,
                     span,
-                )?;
+                );
+                self.comptime_ctor_fn = saved_ctor;
+                let ty = ty_result?;
                 let air_ref = air.add_inst(AirInst {
                     data: AirInstData::TypeConst(ty),
                     ty: Type::COMPTIME_TYPE,
@@ -7828,9 +7837,12 @@ impl<'a> Sema<'a> {
                     }
                 }
                 let pending_eval_errs_before = self.pending_anon_eval_errors.len();
-                if let Some(ConstValue::Type(ty)) =
-                    self.try_evaluate_const_with_subst(fn_body, &type_subst, &value_subst)
-                {
+                // ADR-0082: ctor-fn tracking for vec_instance_registry.
+                let saved_ctor = self.comptime_ctor_fn.replace(name);
+                let const_result =
+                    self.try_evaluate_const_with_subst(fn_body, &type_subst, &value_subst);
+                self.comptime_ctor_fn = saved_ctor;
+                if let Some(ConstValue::Type(ty)) = const_result {
                     // Success! Return a TypeConst instruction instead of a runtime call
                     let air_ref = air.add_inst(AirInst {
                         data: AirInstData::TypeConst(ty),
@@ -7854,8 +7866,11 @@ impl<'a> Sema<'a> {
                 // bodies (e.g. `comptime if @ownership(T) != Ownership::Copy {
                 // @compile_error(...) }; struct {…}`). Errors propagate so the
                 // user's `@compile_error` shows up as a real diagnostic.
-                let ty =
-                    self.evaluate_type_ctor_body(fn_body, &type_subst, &value_subst, ctx, span)?;
+                let saved_ctor = self.comptime_ctor_fn.replace(name);
+                let ty_result =
+                    self.evaluate_type_ctor_body(fn_body, &type_subst, &value_subst, ctx, span);
+                self.comptime_ctor_fn = saved_ctor;
+                let ty = ty_result?;
                 let air_ref = air.add_inst(AirInst {
                     data: AirInstData::TypeConst(ty),
                     ty: Type::COMPTIME_TYPE,

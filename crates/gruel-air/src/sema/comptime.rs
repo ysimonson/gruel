@@ -638,6 +638,23 @@ impl<'a> Sema<'a> {
                     self.pending_anon_derive_errors.push(e);
                     return None;
                 }
+                // ADR-0082: if we're inside the lang-item Vec function's
+                // evaluation, register this StructId as a Vec instance for
+                // the captured element type.
+                if let Some(ctor_fn) = self.comptime_ctor_fn
+                    && Some(ctor_fn) == self.lang_items.vec_fn()
+                    && let Some(struct_id) = struct_ty.as_struct()
+                {
+                    let info = self.functions.get(&ctor_fn);
+                    if let Some(info) = info {
+                        let param_names = self.param_arena.names(info.params);
+                        if let Some(elem_ty) =
+                            param_names.first().and_then(|n| type_subst.get(n).copied())
+                        {
+                            self.vec_instance_registry.insert(struct_id, elem_ty);
+                        }
+                    }
+                }
                 Some(ConstValue::Type(struct_ty))
             }
 
@@ -1735,6 +1752,20 @@ impl<'a> Sema<'a> {
         ctx: &AnalysisContext,
         span: Span,
     ) -> CompileResult<Type> {
+        // ADR-0082: detect whether this evaluation is the `@lang("vec")`
+        // function body. If so, register the resulting `StructId` as a
+        // Vec instance for the captured element type, so later sema
+        // queries (`as_vec_instance`) can recognize the struct.
+        let lang_vec_elem: Option<Type> = self.lang_items.vec_fn().and_then(|sym| {
+            let info = self.functions.get(&sym)?;
+            if info.body != body {
+                return None;
+            }
+            // The lang-item Vec function has exactly one comptime type
+            // parameter (T); read its substitution.
+            let param_names = self.param_arena.names(info.params);
+            param_names.first().and_then(|n| type_subst.get(n).copied())
+        });
         let mut type_overrides: HashMap<Spur, Type> = HashMap::default();
         for (k, v) in type_subst {
             type_overrides.insert(*k, *v);
@@ -1775,28 +1806,40 @@ impl<'a> Sema<'a> {
             return Err(primary);
         }
 
-        match result? {
-            ConstValue::Type(ty) => Ok(ty),
+        let final_ty = match result? {
+            ConstValue::Type(ty) => ty,
             ConstValue::ReturnSignal => match self.comptime_return_value.take() {
-                Some(ConstValue::Type(ty)) => Ok(ty),
-                _ => Err(CompileError::new(
+                Some(ConstValue::Type(ty)) => ty,
+                _ => {
+                    return Err(CompileError::new(
+                        ErrorKind::ComptimeEvaluationFailed {
+                            reason: "type-constructor function did not return a `type` value"
+                                .to_string(),
+                        },
+                        span,
+                    ));
+                }
+            },
+            other => {
+                return Err(CompileError::new(
                     ErrorKind::ComptimeEvaluationFailed {
-                        reason: "type-constructor function did not return a `type` value"
-                            .to_string(),
+                        reason: format!(
+                            "type-constructor function body produced a non-type value: {:?}",
+                            other
+                        ),
                     },
                     span,
-                )),
-            },
-            other => Err(CompileError::new(
-                ErrorKind::ComptimeEvaluationFailed {
-                    reason: format!(
-                        "type-constructor function body produced a non-type value: {:?}",
-                        other
-                    ),
-                },
-                span,
-            )),
+                ));
+            }
+        };
+
+        // ADR-0082: register the lang-item Vec instance.
+        if let Some(elem_ty) = lang_vec_elem
+            && let crate::types::TypeKind::Struct(struct_id) = final_ty.kind()
+        {
+            self.vec_instance_registry.insert(struct_id, elem_ty);
         }
+        Ok(final_ty)
     }
 
     /// Evaluate a comptime expression without clearing the heap.

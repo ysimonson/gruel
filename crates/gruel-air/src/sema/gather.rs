@@ -122,6 +122,8 @@ impl<'a> GatherOutput<'a> {
             anon_struct_captured_values: HashMap::default(),
             anon_enum_method_sigs: HashMap::default(),
             anon_enum_captured_values: HashMap::default(),
+            vec_instance_registry: HashMap::default(),
+            comptime_ctor_fn: None,
             comptime_steps_used: 0,
             comptime_return_value: None,
             comptime_call_depth: 0,

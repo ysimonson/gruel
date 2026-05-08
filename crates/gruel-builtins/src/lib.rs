@@ -231,6 +231,37 @@ pub enum LangEnumItem {
     Ordering,
 }
 
+/// Lang-item name applied to a function declaration. Used for
+/// type-constructor functions whose result has compiler-recognized
+/// behavior (indexing, slice-borrow, drop synthesis, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LangFnItem {
+    /// `Vec(comptime T: type) -> type` (ADR-0082). Instances of the
+    /// returned struct are recognized as the canonical owned-buffer
+    /// vector for `v[i]` indexing, `&v[..]` slice borrows, and drop
+    /// synthesis.
+    Vec,
+}
+
+impl LangFnItem {
+    pub fn name(self) -> &'static str {
+        match self {
+            LangFnItem::Vec => "vec",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "vec" => LangFnItem::Vec,
+            _ => return None,
+        })
+    }
+
+    pub fn all() -> &'static [LangFnItem] {
+        &[LangFnItem::Vec]
+    }
+}
+
 impl LangInterfaceItem {
     /// The string the prelude uses inside `@lang("…")` for this item.
     pub fn name(self) -> &'static str {
@@ -284,26 +315,31 @@ impl LangEnumItem {
 pub enum LangItemKind {
     Interface(LangInterfaceItem),
     Enum(LangEnumItem),
+    Fn(LangFnItem),
 }
 
 impl LangItemKind {
     pub fn from_str(s: &str) -> Option<Self> {
         if let Some(i) = LangInterfaceItem::from_str(s) {
             Some(LangItemKind::Interface(i))
+        } else if let Some(e) = LangEnumItem::from_str(s) {
+            Some(LangItemKind::Enum(e))
         } else {
-            LangEnumItem::from_str(s).map(LangItemKind::Enum)
+            LangFnItem::from_str(s).map(LangItemKind::Fn)
         }
     }
 }
 
 /// Closed list of lang-item names recognized by the compiler. Driving
 /// data for diagnostics — the actual lookup goes through
-/// `LangInterfaceItem::from_str` / `LangEnumItem::from_str`.
+/// `LangInterfaceItem::from_str` / `LangEnumItem::from_str` /
+/// `LangFnItem::from_str`.
 pub fn all_lang_item_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> = LangInterfaceItem::all()
         .iter()
         .map(|i| i.name())
         .chain(LangEnumItem::all().iter().map(|e| e.name()))
+        .chain(LangFnItem::all().iter().map(|f| f.name()))
         .collect();
     names.sort();
     names

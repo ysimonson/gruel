@@ -185,6 +185,20 @@ pub struct Sema<'a> {
     pub(crate) anon_enum_method_sigs: HashMap<EnumId, Vec<AnonMethodSig>>,
     /// Captured comptime values for anonymous enums (same semantics as anonymous structs).
     pub(crate) anon_enum_captured_values: HashMap<EnumId, HashMap<Spur, ConstValue>>,
+    /// ADR-0082: registry of `StructId`s produced by instantiating the
+    /// `@lang("vec")` function for some element type `T`. Maps the
+    /// instance struct's `StructId` to the element type. Populated when
+    /// `Vec(T)` is evaluated in type position; consulted by the
+    /// `as_vec_instance` helper used by indexing, slice borrow, drop
+    /// synthesis, and method dispatch.
+    pub(crate) vec_instance_registry: HashMap<StructId, Type>,
+    /// ADR-0082: the prelude `@lang(...)` function whose body is
+    /// currently being evaluated by the comptime interpreter. Set
+    /// transiently by callers of `try_evaluate_const_with_subst` /
+    /// `evaluate_type_ctor_body` so the anon-struct evaluation path
+    /// can detect "this struct is a Vec instance" and populate
+    /// `vec_instance_registry`. `None` outside such evaluations.
+    pub(crate) comptime_ctor_fn: Option<Spur>,
     /// Loop iteration counter for the current comptime block evaluation.
     /// Reset to 0 at the start of each `evaluate_comptime_block` call.
     /// Incremented once per loop iteration; triggers an error when it exceeds
@@ -276,6 +290,8 @@ impl<'a> Sema<'a> {
             anon_struct_captured_values: HashMap::default(),
             anon_enum_method_sigs: HashMap::default(),
             anon_enum_captured_values: HashMap::default(),
+            vec_instance_registry: HashMap::default(),
+            comptime_ctor_fn: None,
             comptime_steps_used: 0,
             comptime_return_value: None,
             comptime_call_depth: 0,

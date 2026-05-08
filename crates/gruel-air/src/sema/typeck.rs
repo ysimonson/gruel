@@ -360,6 +360,13 @@ impl<'a> Sema<'a> {
                         // resulting Vec is itself linear (via is_type_linear
                         // recursion) and must be drained + disposed.
                         let vec_id = self.type_pool.intern_vec_from_type(arg_types[0]);
+                        // ADR-0082: also evaluate the prelude's
+                        // `@lang("vec")` function for this T so its
+                        // instance struct (and methods) gets registered
+                        // in `vec_instance_registry`. This runs in
+                        // parallel with the existing TypeKind::Vec path
+                        // until Phase 3 finishes wiring the bridge.
+                        self.populate_vec_instance(arg_types[0]);
                         Ok(Type::new_vec(vec_id))
                     }
                 };
@@ -418,7 +425,14 @@ impl<'a> Sema<'a> {
             // The body must produce a `Type` value.
             let value_subst: rustc_hash::FxHashMap<lasso::Spur, super::ConstValue> =
                 rustc_hash::FxHashMap::default();
-            match self.try_evaluate_const_with_subst(fn_info.body, &subst, &value_subst) {
+            // ADR-0082: track which type-constructor function is being
+            // evaluated so the comptime path can populate the
+            // `vec_instance_registry` when it processes the lang-item
+            // Vec body's anonymous struct.
+            let saved_ctor = self.comptime_ctor_fn.replace(callee_sym);
+            let result = self.try_evaluate_const_with_subst(fn_info.body, &subst, &value_subst);
+            self.comptime_ctor_fn = saved_ctor;
+            match result {
                 Some(super::ConstValue::Type(t)) => Ok(t),
                 _ => Err(
                     CompileError::new(ErrorKind::UnknownType(type_name.to_string()), span)
