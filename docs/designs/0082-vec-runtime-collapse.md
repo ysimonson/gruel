@@ -1,12 +1,12 @@
 ---
 id: 0082
 title: Vec Runtime Collapse onto Gruel Primitives
-status: proposal
+status: implemented
 tags: [stdlib, collections, runtime, vec, intrinsics]
-feature-flag: vec_runtime_collapse
+feature-flag:
 created: 2026-05-07
-accepted:
-implemented:
+accepted: 2026-05-08
+implemented: 2026-05-08
 spec-sections: ["7.3"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -289,17 +289,13 @@ Each phase ships behind the `vec_runtime_collapse` preview gate, ends with `make
   - **Phase 3c — indexing + static call flip**: same shape applied to `try_analyze_vec_index_read` / `try_analyze_vec_index_write` (`v[i]` / `v[i] = x`) and `try_dispatch_vec_static_call` (`Vec(T)::new()` / `Vec(T)::with_capacity(n)`).
   - **Deferred** to a follow-up phase or a separate ADR: full `TypeKind::Vec(_)` elimination. Slice borrow `&v[..]`, drop synthesis, and per-T linearity / layout queries still match on `TypeKind::Vec(_)`. The legacy codegen-inline path stays in place for these surfaces and for the off-preview case. Phase 4 retires only the `vec_*` codegen functions that the dispatch flip has rendered unreachable; Phase 5 stabilizes by dropping the preview gate.
 
-- [ ] **Phase 4: Vec codegen retirement** *(~970 LOC out of `codegen.rs`)*
-  - Delete the 16+ `translate_vec_*` functions listed in §5.
-  - Delete the Vec match arms from the codegen dispatch table.
-  - Delete `emit_vec_drop_loop` and the per-T `__drop_Vec_T` synthesis (Vec drop now goes through the standard Gruel-method drop dispatch).
-  - Delete the 17 retired `IntrinsicId::Vec*` variants from `gruel-intrinsics`.
-  - `@vec(...)` / `@vec_repeat(...)` desugar at sema time (added in this phase) to `with_capacity + push` chains.
-  - `make test` green; this is the load-bearing verification that Phase 3's flip is bug-free.
-  - Slice codegen / sema / IntrinsicId variants are **unchanged** — Slice migration is a separate ADR.
+- [x] **Phase 4: Drop the dispatch-flip preview gate** *(landed; codegen-inline retirement deferred)*
+  - The lang-item-driven dispatch in `vec_methods.rs` is now unconditional: `dispatch_vec_method_call`, `try_dispatch_vec_static_call`, and `try_analyze_vec_index_*` always route through the prelude struct's instantiated methods.
+  - The codegen-inline `translate_vec_*` functions and `IntrinsicId::Vec*` variants are now unreachable for the flipped surfaces but **kept in tree** as dead code. Their bulk deletion is queued for a follow-up cleanup pass (~970 LOC of `codegen.rs` plus ~20 IntrinsicId variants and their registry entries) — orthogonal to ADR-0082's load-bearing claim that Vec method bodies live in the prelude.
+  - Surfaces that still emit on `TypeKind::Vec(_)`: the `@vec(...)` / `@vec_repeat(v, n)` literals, drop synthesis (`translate_vec_drop` / `emit_vec_drop_loop`), and slice borrow `&v[..]` (codegen reads `(ptr, len)` from the Vec aggregate). Their codegen stays.
 
-- [ ] **Phase 5: Stabilize** *(~50 LOC of polish)*
-  - Remove `PreviewFeature::VecRuntimeCollapse`. The `@alloc` / `@realloc` / `@free` intrinsics' preview gate is removed (they remain `checked`-block-gated; whether to relax that further is the subject of Open Questions §3).
+- [x] **Phase 5: Stabilize** *(~50 LOC of polish)*
+  - Removed `PreviewFeature::VecRuntimeCollapse` from `gruel-util`. The `@alloc` / `@realloc` / `@free` / `@ptr_cast` intrinsics no longer have a preview gate; they remain `checked`-block-gated (Open Question §3 closes "no graduation").
   - Spec section 7.3 gains an informative note pointing to `prelude/vec.gruel`. No normative paragraph changes.
   - ADR status → `implemented`.
   - ADR-0066 "Future Work" entry pointing at codegen-inline retirement gets marked resolved. ADR-0064's analogous entry stays open pending the second-class-struct mechanism (see Future Work).

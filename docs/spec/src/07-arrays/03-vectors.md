@@ -171,3 +171,15 @@ search methods (ADR-0081):
 All six methods require `T: Copy` in v1; per-element interface dispatch
 for non-Copy `T: Eq` / `T: Clone` is future work tracked alongside the
 non-Copy `clone` deferral.
+
+{{ rule(id="7.3:50", cat="informative") }}
+
+Vec method bodies live in [`prelude/vec.gruel`](../../../prelude/vec.gruel)
+as a `pub fn Vec(comptime T: type) -> type` returning an anonymous
+struct (ADR-0082). The compiler binds that declaration via
+`@lang("vec")` and routes method calls, indexing (`v[i]`), and static
+calls (`Vec(T)::new()` / `Vec(T)::with_capacity(n)`) to the prelude
+struct's instantiated methods. Per-element drop, the heap-buffer
+allocation policy (initial cap = 4, doubling growth), and bounds
+checks are all expressed in Gruel — adding a new method
+(`Vec::last`, `Vec::find`, etc.) is an edit to that one file.
