@@ -1023,6 +1023,19 @@ impl<'a> CfgBuilder<'a> {
                 // Lower the final value
                 let result = self.lower_inst(*value);
 
+                // When the block's final value is a `Load` of an in-scope
+                // local (i.e., the value flowed out via the implicit
+                // result), mark the local as consumed so the pop-scope
+                // drop dispatch below skips it. Without this hand-off,
+                // the pop emits a drop on the local's slot — freeing
+                // the heap that the just-loaded value points at —
+                // and any function whose body ends in a bare `v`
+                // (Vec / String / any heap-owning type) returns a
+                // dangling pointer to the caller.
+                if !is_storage_live_wrapper {
+                    self.forget_consumed_value(*value);
+                }
+
                 // Pop scope and emit StorageDead (with Drop if needed) in reverse order.
                 // BUT: if the value diverged (break/continue/return), the diverging
                 // instruction already emitted drops for all scopes via emit_drops_for_all_scopes,
