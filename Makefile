@@ -15,33 +15,45 @@ ifeq ($(shell test -d $(LLVM22_BREW) && echo yes),yes)
   export LLVM_SYS_221_PREFIX ?= $(LLVM22_BREW)
 endif
 
+# Wall-clock guard for `make test` stages so a hung compiler/test runner can't
+# wedge the build forever. Uses GNU `timeout` (Linux) or `gtimeout` (macOS via
+# `brew install coreutils`); silently no-ops if neither is installed.
+# Override with `make test TEST_TIMEOUT=300` to change the per-stage budget.
+TEST_TIMEOUT ?= 600
+TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
+ifeq ($(TIMEOUT_BIN),)
+  TIMEOUT :=
+else
+  TIMEOUT := $(TIMEOUT_BIN) --foreground --kill-after=10 $(TEST_TIMEOUT)
+endif
+
 # Run unit tests only (fast feedback during development).
 # Skips doctests — rustdoc's merged-doctest pass costs ~25s/crate even when
 # the crate has none. Run `make doctest` to exercise them.
 quick-test:
-	cargo test --workspace --exclude gruel-runtime --lib --bins --tests
+	$(TIMEOUT) cargo test --workspace --exclude gruel-runtime --lib --bins --tests
 
 # Run doctests across the workspace. Slow (rustdoc per-crate overhead) so it's
 # split out from quick-test.
 doctest:
-	cargo test --workspace --exclude gruel-runtime --doc
+	$(TIMEOUT) cargo test --workspace --exclude gruel-runtime --doc
 
 # Run all tests (unit + doctests + spec + traceability + UI tests + examples).
 # Pass ARGS="pattern" to filter spec/UI/example tests, e.g.: make test ARGS="1.1"
 test: quick-test doctest
-	cargo build -p gruel
+	$(TIMEOUT) cargo build -p gruel
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_SPEC_CASES=crates/gruel-spec/cases \
-	cargo run -p gruel-spec -- --quiet $(ARGS)
+	$(TIMEOUT) cargo run -p gruel-spec -- --quiet $(ARGS)
 	GRUEL_SPEC_DIR=docs/spec/src \
 	GRUEL_SPEC_CASES=crates/gruel-spec/cases \
-	cargo run -p gruel-spec -- --traceability
+	$(TIMEOUT) cargo run -p gruel-spec -- --traceability
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_UI_CASES=crates/gruel-ui-tests/cases \
-	cargo run -p gruel-test-runner --bin gruel-ui-tests -- --quiet $(ARGS)
+	$(TIMEOUT) cargo run -p gruel-test-runner --bin gruel-ui-tests -- --quiet $(ARGS)
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_EXAMPLES_DIR=examples \
-	cargo run -p gruel-test-runner --bin gruel-examples-tests -- --quiet $(ARGS)
+	$(TIMEOUT) cargo run -p gruel-test-runner --bin gruel-examples-tests -- --quiet $(ARGS)
 
 # Format all Rust files.
 fmt:
