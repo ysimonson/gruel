@@ -8,16 +8,6 @@ description = "Tests that verify LLVM IR attributes are emitted correctly for op
 # =============================================================================
 
 [[case]]
-name = "overflow_panic_has_cold_attribute"
-source = """
-fn main() -> i32 {
-    let x: i32 = 1 + 2;
-    x
-}
-"""
-asm_contains = ['"cold"', '"noreturn"', "__gruel_overflow"]
-
-[[case]]
 name = "bounds_check_panic_has_cold_attribute"
 source = """
 fn main() -> i32 {
@@ -40,14 +30,6 @@ asm_contains = ['"cold"', '"noreturn"', "__gruel_div_by_zero"]
 # =============================================================================
 # llvm.expect branch weight hints
 # =============================================================================
-
-[[case]]
-name = "overflow_check_has_expect"
-source = """
-fn add(a: i32, b: i32) -> i32 { a + b }
-fn main() -> i32 { add(1, 2) }
-"""
-asm_contains = ["@llvm.expect.i1(i1 %ovf_flag, i1 false)"]
 
 [[case]]
 name = "bounds_check_has_expect"

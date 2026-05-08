@@ -8,15 +8,15 @@ template = "spec/page.html"
 
 {{ rule(id="8.1:1", cat="dynamic-semantics") }}
 
-Integer overflow during arithmetic operations **MUST** cause a runtime panic.
+Integer arithmetic that overflows the representable range of its result type **MUST** wrap around modulo 2^N, where N is the bit width of the type. The result is the unique value in the type's range that is congruent to the mathematical result modulo 2^N.
 
 {{ rule(id="8.1:2", cat="dynamic-semantics") }}
 
-On overflow, the program **MUST** terminate with exit code 101 and print an error message.
+Integer overflow does not cause a runtime panic and does not abort the program.
 
 {{ rule(id="8.1:3", cat="normative") }}
 
-The following operations **MAY** overflow:
+The following operations wrap on overflow:
 - Addition (`+`)
 - Subtraction (`-`)
 - Multiplication (`*`)
@@ -26,7 +26,7 @@ The following operations **MAY** overflow:
 
 ```gruel
 fn main() -> i32 {
-    2147483647 + 1  // Runtime error: integer overflow
+    2147483647 + 1  // wraps to -2147483648
 }
 ```
 
@@ -34,10 +34,10 @@ fn main() -> i32 {
 
 ```gruel
 fn main() -> i32 {
-    -2147483648 - 1  // Runtime error: integer overflow
+    -2147483648 - 1  // wraps to 2147483647
 }
 ```
 
 {{ rule(id="8.1:6") }}
 
-Future versions of Gruel may provide wrapping arithmetic operations that do not panic on overflow.
+Future versions of Gruel may provide checked or saturating arithmetic operations as alternatives to the default wrapping semantics.

@@ -34,7 +34,7 @@ The type `isize` is a signed integer type whose size equals the target platform'
 
 {{ rule(id="3.1:6", cat="dynamic-semantics") }}
 
-Signed integer arithmetic that overflows **MUST** cause a runtime panic.
+Signed integer arithmetic that would overflow the representable range of the result type **MUST** wrap around modulo 2^N, where N is the bit width of the type. The result is the unique value in the type's range that is congruent to the mathematical result modulo 2^N.
 
 {{ rule(id="3.1:7") }}
 
@@ -76,7 +76,7 @@ The type `usize` is an unsigned integer type whose size equals the target platfo
 
 {{ rule(id="3.1:13", cat="dynamic-semantics") }}
 
-Unsigned integer arithmetic that overflows **MUST** cause a runtime panic.
+Unsigned integer arithmetic that would overflow the representable range of the result type **MUST** wrap around modulo 2^N, where N is the bit width of the type.
 
 ## Integer Literal Type Inference
 

@@ -44,7 +44,7 @@ It is a compile-time error if an expression inside a comptime block cannot be ev
 
 - References to runtime variables
 - Calls to generic functions (functions with `comptime T: type` parameters) in a non-generic comptime context
-- Operations that would overflow or panic at runtime
+- Operations that would panic at runtime (e.g., division by zero)
 - System calls, external functions, or raw pointer dereferences
 
 ```gruel

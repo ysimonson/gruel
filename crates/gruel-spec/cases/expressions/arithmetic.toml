@@ -190,24 +190,24 @@ params = [
 ]
 
 # =============================================================================
-# Runtime Negation of MIN Value (Overflow)
+# Runtime Negation of MIN Value (Wraps)
 # =============================================================================
 
 [[case]]
 name = "runtime_negation_min_{type}"
 spec = ["4.2:16"]
-description = "Negating MIN at runtime causes overflow"
+description = "Negating MIN at runtime wraps back to MIN (since -MIN = MIN mod 2^N)"
 source = """
 fn main() -> i32 {
     let x: {type} = {value};
     let y: {type} = -x;
-    {tail}
+    if y == {value} { 0 } else { 1 }
 }
 """
-runtime_error = "integer overflow"
+exit_code = 0
 params = [
-  { type = "i32", value = "-2147483648", tail = "y" },
-  { type = "i8", value = "-128", tail = "0" },
+  { type = "i32", value = "-2147483648" },
+  { type = "i8", value = "-128" },
 ]
 
 # =============================================================================
@@ -261,16 +261,33 @@ params = [
 ]
 
 [[case]]
-name = "overflow_{op}"
+name = "wrap_{op}"
 spec = ["8.1:1", "4.2:9"]
-source = "fn main() -> i32 { {expr} }"
-runtime_error = "integer overflow"
+source = """
+fn main() -> i32 {
+    let x: i32 = {lhs};
+    let y: i32 = x {oper} {rhs};
+    if y == {expected} { 0 } else { 1 }
+}
+"""
+exit_code = 0
 params = [
-  { op = "add", expr = "2147483647 + 1" },
-  { op = "sub", expr = "-2147483648 - 1" },
-  { op = "mul", expr = "2147483647 * 2" },
-  { op = "neg", expr = "--2147483648" },
+  { op = "add", lhs = "2147483647", oper = "+", rhs = "1", expected = "-2147483648" },
+  { op = "sub", lhs = "-2147483648", oper = "-", rhs = "1", expected = "2147483647" },
+  { op = "mul", lhs = "2147483647", oper = "*", rhs = "2", expected = "-2" },
 ]
+
+[[case]]
+name = "wrap_neg_min"
+spec = ["8.1:1", "4.2:9"]
+source = """
+fn main() -> i32 {
+    let x: i32 = -2147483648;
+    let y: i32 = -x;
+    if y == -2147483648 { 0 } else { 1 }
+}
+"""
+exit_code = 0
 
 # =============================================================================
 # Unsigned Division/Modulo

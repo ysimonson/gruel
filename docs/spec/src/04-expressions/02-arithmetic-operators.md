@@ -80,18 +80,18 @@ fn main() -> i32 {
 
 {{ rule(id="4.2:15", cat="normative") }}
 
-When a negated integer literal represents the minimum value of a signed integer type, the compiler evaluates the negation at compile time and produces the minimum value directly. This special case allows expressions like `-128: i8` without runtime overflow.
+When a negated integer literal represents the minimum value of a signed integer type, the compiler evaluates the negation at compile time and produces the minimum value directly. This allows expressions like `-128: i8` to be written.
 
 {{ rule(id="4.2:16", cat="dynamic-semantics") }}
 
-When negation is applied to a non-literal expression holding the minimum value of a signed integer type, the operation overflows and **MUST** cause a runtime panic.
+When negation is applied to a non-literal expression holding the minimum value of a signed integer type, the result wraps to the same minimum value (since `-MIN ≡ MIN (mod 2^N)`).
 
 {{ rule(id="4.2:17") }}
 
 ```gruel
 fn main() -> i32 {
     let x: i8 = -128;    // valid: compile-time constant
-    let y: i8 = -x;      // runtime panic: negating -128 overflows
+    let y: i8 = -x;      // y == -128 (wraps)
     0
 }
 ```
@@ -100,13 +100,13 @@ fn main() -> i32 {
 
 {{ rule(id="4.2:9", cat="dynamic-semantics") }}
 
-Arithmetic operations that overflow the range of their type **MUST** cause a runtime panic.
+Arithmetic operations that overflow the representable range of their type **MUST** wrap around modulo 2^N, where N is the bit width of the type (see paragraphs 3.1:6 and 3.1:13).
 
 {{ rule(id="4.2:10") }}
 
 ```gruel
 fn main() -> i32 {
-    2147483647 + 1  // Runtime error: integer overflow
+    2147483647 + 1  // wraps to -2147483648
 }
 ```
 
