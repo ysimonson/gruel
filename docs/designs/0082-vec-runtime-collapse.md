@@ -275,7 +275,7 @@ Each phase ships behind the `vec_runtime_collapse` preview gate, ends with `make
   - Spec tests at `crates/gruel-spec/cases/intrinsics/memory.toml`: each intrinsic exercised in a `checked` block with a roundtrip alloc+write+read+free.
   - Verify `@ptr_cast(MutPtr(T), MutPtr(u8))` works in `checked` (or whatever the current cast intrinsic is — confirm and document).
 
-- [ ] **Phase 2: Prelude Vec declaration** *(~150 LOC added in `prelude/vec.gruel`, no compiler changes yet)*
+- [x] **Phase 2: Prelude Vec declaration** *(~150 LOC added in `prelude/vec.gruel`, no compiler changes yet)*
   - Create `prelude/vec.gruel` with the full `pub fn Vec(comptime T: type) -> type { ... }` declaration including all methods listed in §3.
   - The file is parsed by the existing prelude loader (no loader changes — `prelude/*.gruel` is already auto-discovered per ADR-0078).
   - **At this point the file exists but no code calls it.** The existing TypeKind::Vec dispatch still goes through the codegen-inline path. The prelude declaration is dead code until Phase 3.
@@ -337,11 +337,11 @@ Each phase ships behind the `vec_runtime_collapse` preview gate, ends with `make
 
 1. **`prelude/vec.gruel` vs `prelude/collections/vec.gruel`?** The prelude is currently flat. Vec and (future) HashMap, BTreeMap, Slice (post-migration), etc. argue for a `collections/` subdirectory. The flat form is simpler for v1. Resolve by Phase 2; the directory shape is the same either way.
 
-2. **`@alloc(size, align) -> MutPtr(u8)` byte-form vs `@alloc_n(T, n) -> MutPtr(T)` typed-form.** The byte form matches the runtime symbol shape exactly; the typed form is more ergonomic for the Vec body. Lean toward shipping the byte form first (load-bearing primitive) and adding typed wrappers as syntactic sugar in a follow-up. The Vec body's `let p_u8 = @alloc(...); let p = @ptr_cast(MutPtr(T), p_u8);` is mildly clunky but correct.
+2. **`@alloc(size, align) -> MutPtr(u8)` byte-form vs `@alloc_n(T, n) -> MutPtr(T)` typed-form.** ~~The byte form matches the runtime symbol shape exactly; the typed form is more ergonomic for the Vec body.~~ **Resolved in Phase 1**: shipped a hybrid — `@alloc(size, align)` returns `MutPtr(T)` where `T` is HM-inferred from binding context (`let p: MutPtr(T) = checked { @alloc(...) };`). Same shape for `@realloc` (return matches input pointer's pointee type). Avoids the `let p_u8: MutPtr(u8) = ...; let p = @ptr_cast(MutPtr(T), p_u8);` two-step.
 
 3. **Should `@alloc` / `@realloc` / `@free` graduate out of `checked`-block gating after Phase 5?** No, these should be checked.
 
-4. **`@ptr_cast` interface.** The Vec body needs to convert `MutPtr(u8)` from `@alloc` into `MutPtr(T)`. What's the canonical way to express that today? If `@ptr_cast` exists, it's `@ptr_cast(MutPtr(T), p_u8)`. If not, this ADR adds one (~10 LOC of intrinsic + sema). Verify in Phase 1's first commit.
+4. **`@ptr_cast` interface.** ~~The Vec body needs to convert `MutPtr(u8)` from `@alloc` into `MutPtr(T)`.~~ **Resolved in Phase 1**: shipped `@ptr_cast(p) -> MutPtr(T)/Ptr(T)`, with the target type HM-inferred from binding context (one-arg form, like `@cast`). The two-step `let p_u8 = @alloc(...); let p: MutPtr(T) = @ptr_cast(p_u8);` is unnecessary because `@alloc` returns `MutPtr(T)` directly; `@ptr_cast` is used in the prelude `Vec::ptr` / `terminated_ptr` to build a `Ptr(T)` view of `self.ptr: MutPtr(T)`.
 
 5. **Inlining quality for the Gruel-level `Vec::push`.** Today the codegen-inline `translate_vec_push` produces tight LLVM. After migration, the Gruel-level `push` body goes through standard inlining. Worth a benchmark at Phase 3 boundary; if there's a regression, decide whether to add an `@inline(always)`-style attribute (small new feature) or accept the regression.
 

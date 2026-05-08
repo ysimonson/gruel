@@ -1,0 +1,321 @@
+// ADR-0066 + ADR-0082: owned, growable vector — { ptr, len, cap }.
+//
+// In Phase 2 of ADR-0082 this declaration is dead code: type resolution
+// for `Vec(T)` still hits the `BuiltinTypeConstructorKind::Vec`
+// shortcut in `gruel-air::sema::typeck`, and method dispatch still
+// emits the `vec_*` codegen-inline intrinsics. Phase 3 flips the
+// dispatch to look up methods on the instantiated body of *this*
+// function instead.
+//
+// Allocations come from `@alloc` / `@realloc` / `@free` (ADR-0082).
+// Per-element drop is expressed via `self.ptr.offset(i).read()` —
+// the read produces an owned `T` whose drop runs at scope exit,
+// avoiding a separate `@drop(value)` primitive.
+
+pub fn Vec(comptime T: type) -> type {
+    struct {
+        ptr: MutPtr(T),
+        len: usize,
+        cap: usize,
+
+        pub fn new() -> Self {
+            let null_p: MutPtr(T) = checked { MutPtr(T)::null() };
+            Self { ptr: null_p, len: 0, cap: 0 }
+        }
+
+        pub fn with_capacity(n: usize) -> Self {
+            if n == 0 {
+                return Self::new();
+            }
+            let bytes: usize = n * @size_of(T);
+            let align: usize = @align_of(T);
+            let p: MutPtr(T) = checked { @alloc(bytes, align) };
+            Self { ptr: p, len: 0, cap: n }
+        }
+
+        pub fn len(self: Ref(Self)) -> usize { self.len }
+        pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+        pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
+
+        pub fn push(self: MutRef(Self), value: T) {
+            if self.len == self.cap {
+                let new_cap: usize = if self.cap == 0 { 4 } else { self.cap * 2 };
+                let elem_size: usize = @size_of(T);
+                let align: usize = @align_of(T);
+                let old_bytes: usize = self.cap * elem_size;
+                let new_bytes: usize = new_cap * elem_size;
+                let p: MutPtr(T) = checked {
+                    @realloc(self.ptr, old_bytes, new_bytes, align)
+                };
+                self.ptr = p;
+                self.cap = new_cap;
+            }
+            checked { self.ptr.offset(self.len).write(value) };
+            self.len = self.len + 1;
+        }
+
+        pub fn pop(self: MutRef(Self)) -> Option(T) {
+            if self.len == 0 {
+                let O = Option(T);
+                return O::None;
+            }
+            self.len = self.len - 1;
+            let v: T = checked { self.ptr.offset(self.len).read() };
+            let O = Option(T);
+            O::Some(v)
+        }
+
+        // Drop every live element (each `read` consumes the slot, its
+        // drop runs at scope exit), reset len.
+        pub fn clear(self: MutRef(Self)) {
+            let mut i: usize = 0;
+            while i < self.len {
+                let _: T = checked { self.ptr.offset(i).read() };
+                i = i + 1;
+            }
+            self.len = 0;
+        }
+
+        pub fn reserve(self: MutRef(Self), additional: usize) {
+            let needed: usize = self.len + additional;
+            if needed <= self.cap {
+                return;
+            }
+            // Grow at least to needed, doubling if smaller.
+            let doubled: usize = if self.cap == 0 { 4 } else { self.cap * 2 };
+            let new_cap: usize = if doubled < needed { needed } else { doubled };
+            let elem_size: usize = @size_of(T);
+            let align: usize = @align_of(T);
+            let old_bytes: usize = self.cap * elem_size;
+            let new_bytes: usize = new_cap * elem_size;
+            let p: MutPtr(T) = checked {
+                @realloc(self.ptr, old_bytes, new_bytes, align)
+            };
+            self.ptr = p;
+            self.cap = new_cap;
+        }
+
+        // Indexing primitives (ADR-0082 §3). Surface forms `v[i]` /
+        // `v[i] = x` route here in Phase 3.
+        pub fn index_read(self: Ref(Self), i: usize) -> T {
+            if i >= self.len {
+                @panic("Vec index out of bounds");
+            }
+            checked { self.ptr.offset(i).read() }
+        }
+
+        pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+            if i >= self.len {
+                @panic("Vec index out of bounds");
+            }
+            checked { self.ptr.offset(i).write(value) };
+        }
+
+        // Const view of the buffer. `checked` requirement is wrapped
+        // internally; user call sites do not need their own checked block.
+        pub fn ptr(self: Ref(Self)) -> Ptr(T) {
+            checked { @ptr_cast(self.ptr) }
+        }
+
+        pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) {
+            self.ptr
+        }
+
+        // Write `s` at ptr[len] (growing if cap == len) and return a
+        // const view. Used by FFI handoff (e.g. C-string convention).
+        pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
+            if self.len == self.cap {
+                let new_cap: usize = if self.cap == 0 { 4 } else { self.cap * 2 };
+                let elem_size: usize = @size_of(T);
+                let align: usize = @align_of(T);
+                let old_bytes: usize = self.cap * elem_size;
+                let new_bytes: usize = new_cap * elem_size;
+                let p: MutPtr(T) = checked {
+                    @realloc(self.ptr, old_bytes, new_bytes, align)
+                };
+                self.ptr = p;
+                self.cap = new_cap;
+            }
+            checked { self.ptr.offset(self.len).write(s) };
+            checked { @ptr_cast(self.ptr) }
+        }
+
+        // Explicit-release for linear `T` and explicit drop for non-linear `T`.
+        // Panics if len != 0 (any contained element would otherwise leak).
+        pub fn dispose(self) {
+            if self.len != 0 {
+                @panic("Vec::dispose called on a non-empty Vec");
+            }
+            if self.cap != 0 {
+                let elem_size: usize = @size_of(T);
+                let align: usize = @align_of(T);
+                let bytes: usize = self.cap * elem_size;
+                checked { @free(self.ptr, bytes, align) };
+            }
+        }
+
+        // Standard drop: drain elements, free buffer if any.
+        pub fn drop(self) {
+            let mut i: usize = 0;
+            while i < self.len {
+                let _: T = checked { self.ptr.offset(i).read() };
+                i = i + 1;
+            }
+            if self.cap != 0 {
+                let elem_size: usize = @size_of(T);
+                let align: usize = @align_of(T);
+                let bytes: usize = self.cap * elem_size;
+                checked { @free(self.ptr, bytes, align) };
+            }
+        }
+
+        // Bitwise clone for `T: Copy` instantiations. The body assumes
+        // copy semantics — instantiating for non-Copy `T` produces a
+        // sema error at the per-element read.
+        pub fn clone(self: Ref(Self)) -> Self {
+            if self.len == 0 {
+                return Self::new();
+            }
+            let cap: usize = self.cap;
+            let elem_size: usize = @size_of(T);
+            let align: usize = @align_of(T);
+            let bytes: usize = cap * elem_size;
+            let dst: MutPtr(T) = checked { @alloc(bytes, align) };
+            let mut i: usize = 0;
+            while i < self.len {
+                let v: T = checked { self.ptr.offset(i).read() };
+                checked { dst.offset(i).write(v) };
+                i = i + 1;
+            }
+            Self { ptr: dst, len: self.len, cap: cap }
+        }
+
+        // ADR-0081 byte-comparison and search methods. `T: Copy`
+        // (enforced per-instantiation by the read in the loop body).
+        pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool {
+            if self.len != other.len {
+                return false;
+            }
+            let mut i: usize = 0;
+            while i < self.len {
+                let a: T = checked { self.ptr.offset(i).read() };
+                let b: T = checked { other.ptr.offset(i).read() };
+                if !(a == b) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            true
+        }
+
+        pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering {
+            let n: usize = if self.len < other.len { self.len } else { other.len };
+            let mut i: usize = 0;
+            while i < n {
+                let a: T = checked { self.ptr.offset(i).read() };
+                let b: T = checked { other.ptr.offset(i).read() };
+                if a < b { return Ordering::Less; }
+                if a > b { return Ordering::Greater; }
+                i = i + 1;
+            }
+            if self.len < other.len { return Ordering::Less; }
+            if self.len > other.len { return Ordering::Greater; }
+            Ordering::Equal
+        }
+
+        pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
+            let nlen: usize = needle.len();
+            if nlen == 0 { return true; }
+            if nlen > self.len { return false; }
+            let limit: usize = self.len - nlen + 1;
+            let mut i: usize = 0;
+            while i < limit {
+                let mut k: usize = 0;
+                let mut matched: bool = true;
+                while k < nlen {
+                    let a: T = checked { self.ptr.offset(i + k).read() };
+                    let b: T = needle[k];
+                    if !(a == b) {
+                        matched = false;
+                        k = nlen;
+                    } else {
+                        k = k + 1;
+                    }
+                }
+                if matched { return true; }
+                i = i + 1;
+            }
+            false
+        }
+
+        pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
+            let plen: usize = prefix.len();
+            if plen > self.len { return false; }
+            let mut i: usize = 0;
+            while i < plen {
+                let a: T = checked { self.ptr.offset(i).read() };
+                let b: T = prefix[i];
+                if !(a == b) { return false; }
+                i = i + 1;
+            }
+            true
+        }
+
+        pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
+            let slen: usize = suffix.len();
+            if slen > self.len { return false; }
+            let off: usize = self.len - slen;
+            let mut i: usize = 0;
+            while i < slen {
+                let a: T = checked { self.ptr.offset(off + i).read() };
+                let b: T = suffix[i];
+                if !(a == b) { return false; }
+                i = i + 1;
+            }
+            true
+        }
+
+        pub fn concat(self, other: Slice(T)) -> Self {
+            let olen: usize = other.len();
+            let total: usize = self.len + olen;
+            if total == 0 {
+                let _ = self;
+                return Self::new();
+            }
+            let elem_size: usize = @size_of(T);
+            let align: usize = @align_of(T);
+            let bytes: usize = total * elem_size;
+            let dst: MutPtr(T) = checked { @alloc(bytes, align) };
+            let mut i: usize = 0;
+            while i < self.len {
+                let v: T = checked { self.ptr.offset(i).read() };
+                checked { dst.offset(i).write(v) };
+                i = i + 1;
+            }
+            let mut j: usize = 0;
+            while j < olen {
+                let v: T = other[j];
+                checked { dst.offset(self.len + j).write(v) };
+                j = j + 1;
+            }
+            // Free the consumed-self buffer; we already drained it.
+            if self.cap != 0 {
+                let old_bytes: usize = self.cap * elem_size;
+                checked { @free(self.ptr, old_bytes, align) };
+            }
+            Self { ptr: dst, len: total, cap: total }
+        }
+
+        pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
+            let olen: usize = other.len();
+            self.reserve(olen);
+            let mut j: usize = 0;
+            while j < olen {
+                let v: T = other[j];
+                checked { self.ptr.offset(self.len + j).write(v) };
+                j = j + 1;
+            }
+            self.len = self.len + olen;
+        }
+    }
+}

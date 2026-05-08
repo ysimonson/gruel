@@ -46,6 +46,7 @@ const PRELUDE_SUBMODULE_ORDER: &[&str] = &[
     "option.gruel",
     "result.gruel",
     "char.gruel",
+    "vec.gruel",
     "string.gruel",
 ];
 

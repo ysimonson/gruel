@@ -147,3 +147,20 @@ fn main() -> i32 {
 """
 compile_fail = true
 error_contains = "checked"
+
+# =============================================================================
+# Phase 2: prelude/vec.gruel must parse without breaking compilation. The
+# file is dead code at this point (Phase 3 of ADR-0082 flips the dispatch
+# to use it), but its presence in the auto-loaded prelude exercises the
+# generic-function-returning-anonymous-struct pattern across every build.
+# =============================================================================
+
+[[case]]
+name = "prelude_vec_file_does_not_break_build"
+spec = ["8.4:1"]
+source = """
+fn main() -> i32 {
+    42
+}
+"""
+exit_code = 42

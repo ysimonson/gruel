@@ -359,8 +359,7 @@ impl<'a> Sema<'a> {
             ));
         }
 
-        let args_start =
-            air.add_extra(&[size.air_ref.as_u32(), align.air_ref.as_u32()]);
+        let args_start = air.add_extra(&[size.air_ref.as_u32(), align.air_ref.as_u32()]);
         let name = self.interner.get_or_intern_static("alloc");
         let air_ref = air.add_inst(AirInst {
             data: AirInstData::Intrinsic {
@@ -506,11 +505,7 @@ impl<'a> Sema<'a> {
             ));
         }
         let p = self.analyze_inst(air, args[0].value, ctx)?;
-        if !matches!(
-            p.ty.kind(),
-            TypeKind::PtrMut(_) | TypeKind::PtrConst(_)
-        ) && !p.ty.is_error()
-        {
+        if !matches!(p.ty.kind(), TypeKind::PtrMut(_) | TypeKind::PtrConst(_)) && !p.ty.is_error() {
             return Err(CompileError::new(
                 ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
                     name: "ptr_cast".to_string(),
