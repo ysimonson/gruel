@@ -1089,8 +1089,18 @@ impl<'a> Sema<'a> {
             if path == import_path {
                 return Ok(path.clone());
             }
-            // Check if the file path ends with the import path (handles relative imports)
-            if path.ends_with(import_path) {
+            // Suffix match at a path-component boundary. A bare
+            // `path.ends_with(import_path)` would mis-match any file whose
+            // name happens to share the import's trailing characters: for
+            // `@import("string.gruel")` from the prelude, a user file at
+            // `scratch/test_make_string.gruel` literally ends with
+            // `"string.gruel"` and would incorrectly win over the prelude's
+            // own `prelude/string.gruel`. Require the byte before the
+            // matched suffix to be `/`.
+            if path.len() > import_path.len()
+                && path.ends_with(import_path)
+                && path.as_bytes()[path.len() - import_path.len() - 1] == b'/'
+            {
                 return Ok(path.clone());
             }
             // For imports like "math" or "math.gruel", check if the file is named accordingly
