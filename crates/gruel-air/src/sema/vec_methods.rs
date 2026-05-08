@@ -198,8 +198,15 @@ impl<'a> Sema<'a> {
         if self
             .preview_features
             .contains(&PreviewFeature::VecRuntimeCollapse)
-            && let Some(result) =
-                self.try_dispatch_vec_method_via_prelude(air, receiver, elem_ty, method_name, args, span, ctx)?
+            && let Some(result) = self.try_dispatch_vec_method_via_prelude(
+                air,
+                receiver,
+                elem_ty,
+                method_name,
+                args,
+                span,
+                ctx,
+            )?
         {
             return Ok(result);
         }
@@ -1176,9 +1183,6 @@ impl<'a> Sema<'a> {
             ty: method_info.return_type,
             span,
         });
-        Ok(Some(AnalysisResult::new(
-            air_ref,
-            method_info.return_type,
-        )))
+        Ok(Some(AnalysisResult::new(air_ref, method_info.return_type)))
     }
 }

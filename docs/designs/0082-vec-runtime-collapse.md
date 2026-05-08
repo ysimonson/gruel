@@ -282,19 +282,12 @@ Each phase ships behind the `vec_runtime_collapse` preview gate, ends with `make
   - Spec test: a no-op test that exercises a tiny program importing nothing — confirms the prelude file parses and instantiates without breaking other tests.
   - Note: this phase intentionally lands the Gruel source separately from the dispatch flip, so any parse / sema issue in the file is caught before mass test breakage.
 
-- [ ] **Phase 3: Lang-item-driven elimination of `TypeKind::Vec`** *(replaces the original "dispatch flip" plan; cleaner overall)*
-  - **Why deviate**: the original Phase 3 had to bridge the type identity gap between `TypeKind::Vec(VecTypeId)` (the value type at the call site) and `TypeKind::Struct(StructId)` (the prelude struct's type). That bridging required either a type-pun hack or a new AIR bitcast op. Tagging the prelude `Vec` function with `@lang("vec")` and resolving `Vec(T)` through the existing comptime-fn type-call path makes the value type AND the method's `Self` type the same `TypeKind::Struct(StructId)` from the start. No bridge needed; a smaller surface to change overall, because Phase 4's codegen retirement falls out naturally.
-  - Add `LangFnItem::Vec` to `gruel-builtins`, tag prelude `Vec` with `@lang("vec")`, and extend `populate_lang_items` to recognize `@lang(...)` on `pub fn` declarations.
-  - Build a `vec_instance_registry` keyed by `StructId` that records `(elem_ty, fn_call_site)` for every struct produced by instantiating the lang-item Vec function. Helper: `Sema::as_vec_instance(ty) -> Option<elem_ty>`.
-  - Remove `BuiltinTypeConstructorKind::Vec` from typeck — `Vec(T)` resolves through the existing parameterized-type-call path that already handles `Option(T)` / `Result(T, E)`.
-  - Replace every `TypeKind::Vec(_)` match site (~33 across air, codegen, cfg) with `as_vec_instance(...)` lookups against the registry. This includes:
-    - Method dispatch routing (`analyze_method_call_impl`) — receiver of a Vec-instance struct routes through normal struct methods on the prelude declaration; `dispatch_vec_method_call` collapses to nothing.
-    - Indexing dispatch (`try_analyze_vec_index_read` / `try_analyze_vec_index_write`) — `v[i]` desugars to `v.index_read(i)` / `v.index_write(i, val)` on Vec-instance structs.
-    - Slice-borrow dispatch (`MakeSlice` / `&v[..]`) — recognized via `as_vec_instance`, lowers to a `Slice(T)` built from `(self.ptr, self.len)`.
-    - Drop synthesis (`drop_names`) — Vec-instance structs go through the normal prelude `drop` method.
-    - Layout / interning / linearity recursion — `as_vec_instance` based.
-  - Remove `TypeKind::Vec(VecTypeId)` and `VecTypeId` from the type pool.
-  - Gate the entire transition behind the existing `vec_runtime_collapse` preview feature. Phase 4 stays as the codegen retirement step.
+- [x] **Phase 3: Lang-item-driven dispatch flip** *(landed in 3a/3b/3c; full `TypeKind::Vec` elimination deferred to Phase 4/5 cleanup)*
+  - **Why deviate**: the original Phase 3 had to bridge the type identity gap between `TypeKind::Vec(VecTypeId)` (the value type at the call site) and `TypeKind::Struct(StructId)` (the prelude struct's type). Tagging the prelude `Vec` function with `@lang("vec")` and consulting a `StructId → elem_ty` registry lets the dispatch flip route through the prelude struct's methods without removing `TypeKind::Vec` entirely; the receiver air_ref is type-punned (the layouts are identical, AIR `Call` doesn't strictly type-check args, codegen sees the same `{ptr, i64, i64}` aggregate at LLVM level).
+  - **Phase 3a — infrastructure**: added `LangFnItem::Vec` to `gruel-builtins`, tagged prelude `Vec` with `@lang("vec")`, extended `populate_lang_items` to walk `FnDecl`, populated `vec_instance_registry: HashMap<StructId, Type>` from a `comptime_ctor_fn` hook in the comptime evaluator, exposed `Sema::as_vec_instance(ty)` and `Sema::vec_instance_for_elem(elem_ty)`.
+  - **Phase 3b — method dispatch flip**: under `--preview vec_runtime_collapse`, `dispatch_vec_method_call` routes through `try_dispatch_vec_method_via_prelude`, looking up `(StructId, method)` in `self.methods` and emitting a regular `Call("Type.method", ...)` AIR node. Receiver passed in `recv_pass_mode` per the prelude method's `receiver`.
+  - **Phase 3c — indexing + static call flip**: same shape applied to `try_analyze_vec_index_read` / `try_analyze_vec_index_write` (`v[i]` / `v[i] = x`) and `try_dispatch_vec_static_call` (`Vec(T)::new()` / `Vec(T)::with_capacity(n)`).
+  - **Deferred** to a follow-up phase or a separate ADR: full `TypeKind::Vec(_)` elimination. Slice borrow `&v[..]`, drop synthesis, and per-T linearity / layout queries still match on `TypeKind::Vec(_)`. The legacy codegen-inline path stays in place for these surfaces and for the off-preview case. Phase 4 retires only the `vec_*` codegen functions that the dispatch flip has rendered unreachable; Phase 5 stabilizes by dropping the preview gate.
 
 - [ ] **Phase 4: Vec codegen retirement** *(~970 LOC out of `codegen.rs`)*
   - Delete the 16+ `translate_vec_*` functions listed in §5.

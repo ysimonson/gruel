@@ -104,11 +104,7 @@ impl<'a> Sema<'a> {
     /// back to the legacy path when the registry has no entry.
     pub(crate) fn populate_vec_instance(&mut self, elem_ty: crate::types::Type) {
         // Skip if any existing entry already maps to this element.
-        if self
-            .vec_instance_registry
-            .values()
-            .any(|t| *t == elem_ty)
-        {
+        if self.vec_instance_registry.values().any(|t| *t == elem_ty) {
             return;
         }
         let Some(vec_fn_sym) = self.lang_items.vec_fn() else {
