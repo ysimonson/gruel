@@ -7515,12 +7515,14 @@ impl<'a> Sema<'a> {
                     }
                 }
             }
-            // Try to evaluate the function body at compile time
-            if let Some(ConstValue::Type(ty)) = self.try_evaluate_const_with_subst(
-                fn_body,
-                &rustc_hash::FxHashMap::default(),
-                &value_subst,
-            ) {
+            // Try the simple constant-folding evaluator first — single-instruction
+            // bodies (`fn F() -> type { struct {…} }`) hit this fast path.
+            let empty_type_subst: rustc_hash::FxHashMap<Spur, Type> =
+                rustc_hash::FxHashMap::default();
+            let pending_eval_errs_before = self.pending_anon_eval_errors.len();
+            if let Some(ConstValue::Type(ty)) =
+                self.try_evaluate_const_with_subst(fn_body, &empty_type_subst, &value_subst)
+            {
                 // Success! Return a TypeConst instruction instead of a runtime call
                 let air_ref = air.add_inst(AirInst {
                     data: AirInstData::TypeConst(ty),
@@ -7529,8 +7531,40 @@ impl<'a> Sema<'a> {
                 });
                 return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
             }
-            // If we can't evaluate at compile time, fall through to runtime call
-            // (which will fail at link time, but gives a better error experience)
+            // The simple evaluator returned None. If it was because of a
+            // specific anon-eval validation failure (empty struct, duplicate
+            // method), surface that directly — running the rich-eval fallback
+            // would just push the same error a second time.
+            if self.pending_anon_eval_errors.len() > pending_eval_errs_before {
+                let err = self
+                    .pending_anon_eval_errors
+                    .remove(pending_eval_errs_before);
+                // Drop any duplicate entries pushed in the same simple-path call
+                // so they don't surface twice at the end of analysis.
+                self.pending_anon_eval_errors
+                    .truncate(pending_eval_errs_before);
+                return Err(err);
+            }
+            // Non-generic case (no type params): fall back to the rich comptime
+            // interpreter for multi-statement bodies. For generic functions
+            // (with `comptime T: type` params), let the dedicated generic path
+            // below handle the fallback — it has the type substitution we need.
+            if !is_generic {
+                let ty = self.evaluate_type_ctor_body(
+                    fn_body,
+                    &empty_type_subst,
+                    &value_subst,
+                    ctx,
+                    span,
+                )?;
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::TypeConst(ty),
+                    ty: Type::COMPTIME_TYPE,
+                    span,
+                });
+                return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
+            }
+            // Fall through to generic dispatch below.
         }
 
         // Check that comptime parameters receive compile-time constant values
@@ -7700,8 +7734,9 @@ impl<'a> Sema<'a> {
 
         // Handle generic function calls differently
         if is_generic {
-            // Separate type arguments from runtime arguments
+            // Separate type/value comptime arguments from runtime arguments.
             let mut type_args: Vec<Type> = Vec::new();
+            let mut value_args: Vec<ConstValue> = Vec::new();
             let mut runtime_args: Vec<AirCallArg> = Vec::new();
             let mut type_subst: rustc_hash::FxHashMap<Spur, Type> =
                 rustc_hash::FxHashMap::default();
@@ -7730,11 +7765,29 @@ impl<'a> Sema<'a> {
                             ));
                         }
                     } else {
-                        // This is a VALUE parameter (e.g., comptime n: i32)
-                        // It's still passed at runtime but must be a compile-time constant.
-                        // The constant-ness has already been validated above.
-                        // We don't erase value parameters - they're passed normally.
-                        runtime_args.push(air_arg.clone());
+                        // This is a VALUE parameter (e.g., `comptime n: i32`).
+                        // Erase it: extract its compile-time constant for the
+                        // specialization key and *don't* pass it as a runtime
+                        // argument. The specialized body sees `n` as a comptime
+                        // local bound to the captured value.
+                        let arg_span = self.rir.get(args[i].value).span;
+                        match self.try_evaluate_comptime_arg(args[i].value, ctx, arg_span) {
+                            Some(const_val) => value_args.push(const_val),
+                            None => {
+                                let param_name = self.interner.resolve(&param_names[i]).to_string();
+                                return Err(CompileError::new(
+                                    ErrorKind::ComptimeArgNotConst {
+                                        param_name: param_name.clone(),
+                                    },
+                                    arg_span,
+                                )
+                                .with_help(format!(
+                                    "parameter '{}' is declared as 'comptime' and requires \
+                                     a compile-time known value",
+                                    param_name
+                                )));
+                            }
+                        }
                     }
                 } else {
                     runtime_args.push(air_arg.clone());
@@ -7774,6 +7827,7 @@ impl<'a> Sema<'a> {
                         }
                     }
                 }
+                let pending_eval_errs_before = self.pending_anon_eval_errors.len();
                 if let Some(ConstValue::Type(ty)) =
                     self.try_evaluate_const_with_subst(fn_body, &type_subst, &value_subst)
                 {
@@ -7785,8 +7839,29 @@ impl<'a> Sema<'a> {
                     });
                     return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
                 }
-                // If we can't evaluate at compile time, fall through to the error below
-                // (we can't have a runtime call that returns `type`)
+                // Surface specific anon-eval validation errors instead of
+                // running the rich-eval fallback (which would just re-trigger
+                // the same validation and push a duplicate error).
+                if self.pending_anon_eval_errors.len() > pending_eval_errs_before {
+                    let err = self
+                        .pending_anon_eval_errors
+                        .remove(pending_eval_errs_before);
+                    self.pending_anon_eval_errors
+                        .truncate(pending_eval_errs_before);
+                    return Err(err);
+                }
+                // Fall back to the rich comptime interpreter for multi-statement
+                // bodies (e.g. `comptime if @ownership(T) != Ownership::Copy {
+                // @compile_error(...) }; struct {…}`). Errors propagate so the
+                // user's `@compile_error` shows up as a real diagnostic.
+                let ty =
+                    self.evaluate_type_ctor_body(fn_body, &type_subst, &value_subst, ctx, span)?;
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::TypeConst(ty),
+                    ty: Type::COMPTIME_TYPE,
+                    span,
+                });
+                return Ok(AnalysisResult::new(air_ref, Type::COMPTIME_TYPE));
             }
 
             // Encode type arguments into extra array (as raw Type discriminants)
@@ -7817,6 +7892,13 @@ impl<'a> Sema<'a> {
                 ty: return_type,
                 span,
             });
+            // Record the comptime value arguments alongside the call so the
+            // specialization pass can build a per-(name, type_args, value_args)
+            // key. Without this, two calls that differ only by a `comptime n`
+            // would collapse into the same specialization.
+            if !value_args.is_empty() {
+                air.set_comptime_value_args(air_ref.as_u32(), value_args);
+            }
             Ok(AnalysisResult::new(air_ref, return_type))
         } else {
             // Regular non-generic call

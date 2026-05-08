@@ -724,6 +724,14 @@ pub struct Air {
     /// Storage for places (ADR-0030 Phase 8).
     /// AirPlaceRef values are indices into this array.
     places: Vec<AirPlace>,
+    /// Comptime value arguments captured at each `CallGeneric` site, keyed by
+    /// the `CallGeneric` instruction's index. Populated when the call has
+    /// `comptime n: i32` (or other value comptime) parameters; the
+    /// specialization pass reads these to build a unique
+    /// `(name, type_args, value_args)` key per call so per-call `comptime
+    /// if`/`@compile_error` checks fire only for the values they apply to.
+    #[serde(default)]
+    comptime_value_args: rustc_hash::FxHashMap<u32, Vec<crate::sema::ConstValue>>,
 }
 
 impl Air {
@@ -735,7 +743,29 @@ impl Air {
             return_type,
             projections: Vec::new(),
             places: Vec::new(),
+            comptime_value_args: rustc_hash::FxHashMap::default(),
         }
+    }
+
+    /// Record the comptime value arguments captured at a `CallGeneric` site.
+    /// Indexed by the `CallGeneric` instruction's index in `instructions`.
+    pub fn set_comptime_value_args(
+        &mut self,
+        inst_index: u32,
+        value_args: Vec<crate::sema::ConstValue>,
+    ) {
+        if !value_args.is_empty() {
+            self.comptime_value_args.insert(inst_index, value_args);
+        }
+    }
+
+    /// Retrieve the comptime value arguments captured at the given
+    /// `CallGeneric` site, or an empty slice if none were recorded.
+    pub fn comptime_value_args(&self, inst_index: u32) -> &[crate::sema::ConstValue] {
+        self.comptime_value_args
+            .get(&inst_index)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Add an instruction and return its reference.

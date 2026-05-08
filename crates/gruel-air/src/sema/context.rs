@@ -429,7 +429,7 @@ pub enum ComptimeHeapItem {
 ///
 /// This is used for constant expression evaluation, primarily for compile-time
 /// bounds checking. It can be extended for future `comptime` features.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ConstValue {
     /// Integer value (signed to handle arithmetic correctly)
     Integer(i64),

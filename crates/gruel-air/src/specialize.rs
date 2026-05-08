@@ -21,7 +21,7 @@ use lasso::{Spur, ThreadedRodeo};
 
 use crate::inst::{Air, AirInstData};
 use crate::param_arena::ParamRange;
-use crate::sema::{AnalyzedFunction, FunctionInfo, InferenceContext, MethodInfo, Sema};
+use crate::sema::{AnalyzedFunction, ConstValue, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::types::{StructId, Type};
 
 /// Function/method references discovered while specializing — feed back
@@ -45,6 +45,12 @@ pub struct SpecializationKey {
     pub base_name: Spur,
     /// Type arguments (e.g., [Type::I32])
     pub type_args: Vec<Type>,
+    /// Comptime value arguments captured at the call site (e.g. `[Integer(7)]`
+    /// for `check_n(7)` where the parameter is `comptime n: i32`). Two calls
+    /// with the same type args but different value args produce different
+    /// specializations so per-call `comptime if`/`@compile_error` checks fire
+    /// only for the values they apply to.
+    pub value_args: Vec<ConstValue>,
 }
 
 /// Info about a specialization: the mangled name and the first call site span.
@@ -160,7 +166,7 @@ fn collect_specializations(
     interner: &ThreadedRodeo,
     specializations: &mut HashMap<SpecializationKey, SpecializationInfo>,
 ) {
-    for inst in air.instructions() {
+    for (i, inst) in air.instructions().iter().enumerate() {
         if let AirInstData::CallGeneric {
             name,
             type_args_start,
@@ -175,15 +181,21 @@ fn collect_specializations(
                 .map(|&encoded| Type::from_u32(encoded))
                 .collect();
 
+            // Comptime value arguments captured at the call site (sidecar
+            // populated by `analyze_call_impl` when the function has
+            // `comptime n: i32`-style parameters).
+            let value_args = air.comptime_value_args(i as u32).to_vec();
+
             let key = SpecializationKey {
                 base_name: *name,
                 type_args: type_args.clone(),
+                value_args: value_args.clone(),
             };
 
             specializations.entry(key).or_insert_with(|| {
                 // Generate a mangled name for the specialized function
                 let base_name = interner.resolve(name);
-                let mangled = mangle_specialized_name(base_name, &type_args);
+                let mangled = mangle_specialized_name(base_name, &type_args, &value_args);
                 let mangled_sym = interner.get_or_intern(&mangled);
                 SpecializationInfo {
                     mangled_name: mangled_sym,
@@ -216,9 +228,12 @@ fn rewrite_call_generic(air: &mut Air, specializations: &HashMap<SpecializationK
                 .map(|&encoded| Type::from_u32(encoded))
                 .collect();
 
+            let value_args = air.comptime_value_args(i as u32).to_vec();
+
             let key = SpecializationKey {
                 base_name: *name,
                 type_args,
+                value_args,
             };
 
             if let Some(&specialized_name) = specializations.get(&key) {
@@ -245,7 +260,14 @@ fn rewrite_call_generic(air: &mut Air, specializations: &HashMap<SpecializationK
 /// and enum types, which would collide across different structs — so we also
 /// append the raw `Type` discriminant, which is unique per type. Primitive
 /// types get their normal name for readability.
-fn mangle_specialized_name(base_name: &str, type_args: &[Type]) -> String {
+///
+/// Comptime value arguments are appended after type args so two calls that
+/// differ only by a `comptime n: i32` produce distinct specializations.
+fn mangle_specialized_name(
+    base_name: &str,
+    type_args: &[Type],
+    value_args: &[ConstValue],
+) -> String {
     let mut mangled = base_name.to_string();
     for ty in type_args {
         mangled.push_str("__");
@@ -254,6 +276,39 @@ fn mangle_specialized_name(base_name: &str, type_args: &[Type]) -> String {
         // `name()` is a generic placeholder.
         mangled.push('#');
         mangled.push_str(&ty.as_u32().to_string());
+    }
+    for v in value_args {
+        mangled.push_str("__v");
+        match v {
+            ConstValue::Integer(n) => {
+                mangled.push('i');
+                if *n < 0 {
+                    mangled.push('m');
+                    mangled.push_str(&(-(*n as i128)).to_string());
+                } else {
+                    mangled.push_str(&n.to_string());
+                }
+            }
+            ConstValue::Bool(b) => {
+                mangled.push('b');
+                mangled.push(if *b { '1' } else { '0' });
+            }
+            ConstValue::Type(t) => {
+                mangled.push('t');
+                mangled.push_str(&t.as_u32().to_string());
+            }
+            ConstValue::ComptimeStr(idx) => {
+                mangled.push('s');
+                mangled.push_str(&idx.to_string());
+            }
+            ConstValue::Unit => mangled.push('u'),
+            // Composite/heap-backed and signal variants don't appear in
+            // call-site value args today; mangle defensively if they ever do.
+            _ => {
+                mangled.push('x');
+                mangled.push_str(&format!("{:?}", v));
+            }
+        }
     }
     mangled
 }
@@ -321,14 +376,43 @@ fn create_specialized(
     let param_modes = sema.param_arena.modes(base.params).to_vec();
     let param_comptime = sema.param_arena.comptime(base.params).to_vec();
 
-    // Build type substitution: comptime param name -> concrete Type. Methods
-    // also bind `Self` to the receiver type.
+    // Determine which comptime params are type-shaped (`comptime T: type` or
+    // `comptime T: SomeInterface`) vs value-shaped (`comptime n: i32`). The
+    // call site emits separate `type_args` and `value_args` lists in matching
+    // declaration order, so we walk both side by side.
+    let type_sym = interner.get_or_intern("type");
+    let declared_ty_syms: Vec<Option<Spur>> = param_names
+        .iter()
+        .map(|n| param_declared_type_sym(sema, base.body, *n))
+        .collect();
+    let is_comptime_type_param: Vec<bool> = param_names
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            if !param_comptime[i] {
+                return false;
+            }
+            // Type-shaped if declared as `type` or as an interface name; the
+            // resolved param type is a fallback for synthesized methods whose
+            // declared symbol isn't in RIR.
+            match declared_ty_syms[i] {
+                Some(s) => s == type_sym || sema.interfaces.contains_key(&s),
+                None => param_types[i] == Type::COMPTIME_TYPE,
+            }
+        })
+        .collect();
+
     let mut type_subst: HashMap<Spur, Type> = HashMap::default();
+    let mut value_subst: HashMap<Spur, ConstValue> = HashMap::default();
     let mut type_arg_idx = 0;
-    for (i, is_comptime) in param_comptime.iter().enumerate() {
-        if *is_comptime && type_arg_idx < key.type_args.len() {
+    let mut value_arg_idx = 0;
+    for (i, &is_type) in is_comptime_type_param.iter().enumerate() {
+        if is_type && type_arg_idx < key.type_args.len() {
             type_subst.insert(param_names[i], key.type_args[type_arg_idx]);
             type_arg_idx += 1;
+        } else if param_comptime[i] && !is_type && value_arg_idx < key.value_args.len() {
+            value_subst.insert(param_names[i], key.value_args[value_arg_idx]);
+            value_arg_idx += 1;
         }
     }
     if let Some((struct_type, _)) = base.method {
@@ -398,6 +482,7 @@ fn create_specialized(
         &specialized_params,
         base.body,
         &type_subst,
+        Some(&value_subst),
     )?;
 
     refs.fns.extend(ref_fns);
@@ -439,6 +524,32 @@ fn substitute_param_type(
                     && let Some(&concrete) = type_subst.get(&param.ty)
                 {
                     return Some(concrete);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Look up the *source-text* type symbol declared for `param_name` in the
+/// `FnDecl` whose body is `body`. Used by specialization to distinguish a
+/// `comptime T: type` parameter (declared symbol == "type") from a
+/// `comptime n: i32` parameter (declared symbol == "i32") — the resolved
+/// `Type` field on the param can be `COMPTIME_TYPE` for both.
+fn param_declared_type_sym(sema: &Sema<'_>, body: InstRef, param_name: Spur) -> Option<Spur> {
+    for (_, inst) in sema.rir.iter() {
+        if let gruel_rir::InstData::FnDecl {
+            body: fn_body,
+            params_start,
+            params_len,
+            ..
+        } = &inst.data
+            && *fn_body == body
+        {
+            let params = sema.rir.get_params(*params_start, *params_len);
+            for param in params {
+                if param.name == param_name {
+                    return Some(param.ty);
                 }
             }
         }
