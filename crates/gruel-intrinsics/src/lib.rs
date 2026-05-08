@@ -123,6 +123,21 @@ pub enum IntrinsicId {
     Utf8Validate,
     CStrToVec,
 
+    // ---- ADR-0082 memory intrinsics (require checked) ----
+    /// `@alloc(size, align) -> MutPtr(T)`: allocate `size` bytes with the
+    /// given alignment. Return type is inferred from context.
+    Alloc,
+    /// `@realloc(p, old_size, new_size, align) -> MutPtr(T)`: resize an
+    /// existing allocation. Return type matches the input pointer's type.
+    Realloc,
+    /// `@free(p, size, align)`: free an allocation produced by `@alloc`/
+    /// `@realloc`.
+    Free,
+    /// `@ptr_cast(p) -> MutPtr(T)` / `Ptr(T)`: reinterpret the pointer as
+    /// the inferred target pointer type. Result type comes from HM
+    /// inference (let-annotation or call context).
+    PtrCast,
+
     // ---- ADR-0079 Phase 2b: derive-construction primitives ----
     /// `@uninit(T) -> Uninit(T)`: handle to T-sized storage. Drop is
     /// suppressed on the slot until `@finalize` consumes it.
@@ -1254,6 +1269,60 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         description: "`@utf8_validate(s: borrow Slice(u8)) -> bool` returns `true` iff the bytes in `s` form a valid UTF-8 sequence. Used by `String::from_utf8` (ADR-0072).",
         examples: &["@utf8_validate(&v[..])"],
     },
+    // ADR-0082: Gruel-callable wrappers for the existing
+    // `__gruel_alloc` / `__gruel_realloc` / `__gruel_free` runtime
+    // symbols. These let prelude collection types (Vec, future
+    // HashMap, etc.) express their allocation logic in Gruel rather
+    // than codegen-inline LLVM. Gated to `checked` blocks because
+    // raw memory ops can leak / double-free / alias.
+    IntrinsicDef {
+        id: IntrinsicId::Alloc,
+        name: "alloc",
+        kind: IntrinsicKind::Expr,
+        category: Category::Pointer,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::VecRuntimeCollapse),
+        runtime_fn: Some("__gruel_alloc"),
+        summary: "Allocate a raw heap buffer (ADR-0082).",
+        description: "`@alloc(size: usize, align: usize) -> MutPtr(T)` allocates `size` bytes with alignment `align` and returns a raw pointer. The result type is inferred from the binding context (e.g. `let p: MutPtr(T) = checked { @alloc(...) };`). Lowers to `__gruel_alloc(size, align)`. Requires a `checked` block.",
+        examples: &["checked { @alloc(@size_of(T) * n, @align_of(T)) }"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::Realloc,
+        name: "realloc",
+        kind: IntrinsicKind::Expr,
+        category: Category::Pointer,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::VecRuntimeCollapse),
+        runtime_fn: Some("__gruel_realloc"),
+        summary: "Resize a raw heap allocation (ADR-0082).",
+        description: "`@realloc(p, old_size, new_size, align) -> MutPtr(T)` resizes the allocation referenced by `p`. The pointee type of the result matches the input. Lowers to `__gruel_realloc(p, old, new, align)`. Requires a `checked` block.",
+        examples: &["checked { @realloc(p, old_b, new_b, @align_of(T)) }"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::Free,
+        name: "free",
+        kind: IntrinsicKind::Expr,
+        category: Category::Pointer,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::VecRuntimeCollapse),
+        runtime_fn: Some("__gruel_free"),
+        summary: "Free a raw heap allocation (ADR-0082).",
+        description: "`@free(p, size, align)` releases the buffer at `p`. Lowers to `__gruel_free(p, size, align)`. Requires a `checked` block.",
+        examples: &["checked { @free(p, n * @size_of(T), @align_of(T)) }"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::PtrCast,
+        name: "ptr_cast",
+        kind: IntrinsicKind::Expr,
+        category: Category::Pointer,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::VecRuntimeCollapse),
+        runtime_fn: None,
+        summary: "Reinterpret a pointer as another pointer type (ADR-0082).",
+        description: "`@ptr_cast(p) -> MutPtr(T)` / `Ptr(T)` reinterprets the raw pointer `p` as a pointer of the target type, where the target is inferred from the binding context (HM inference, like `@cast`). Both source and target must be `MutPtr(_)` / `Ptr(_)`. The cast is a no-op at the LLVM level (pointers are opaque); only the Gruel-side type tracking changes. Requires a `checked` block.",
+        examples: &["let p: MutPtr(T) = checked { @ptr_cast(p_u8) };"],
+    },
 ];
 
 // ============================================================================
@@ -1810,7 +1879,11 @@ mod tests {
                 | IntrinsicId::Finalize
                 | IntrinsicId::FieldSet
                 | IntrinsicId::VariantUninit
-                | IntrinsicId::VariantField => {}
+                | IntrinsicId::VariantField
+                | IntrinsicId::Alloc
+                | IntrinsicId::Realloc
+                | IntrinsicId::Free
+                | IntrinsicId::PtrCast => {}
             }
         }
     }
@@ -1887,6 +1960,11 @@ mod tests {
             "parts_to_vec",
             // ADR-0072
             "cstr_to_vec",
+            // ADR-0082: memory intrinsics gated to checked blocks.
+            "alloc",
+            "realloc",
+            "free",
+            "ptr_cast",
         ]
         .into_iter()
         .collect();

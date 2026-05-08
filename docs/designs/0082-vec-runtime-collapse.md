@@ -267,7 +267,7 @@ Net: 24 IntrinsicId variants retire, 3 add (`@alloc`, `@realloc`, `@free`). Tota
 
 Each phase ships behind the `vec_runtime_collapse` preview gate, ends with `make test` green, quotes its LOC delta in the commit message. Phases 1 and 2 are independent (could parallelize); 3–5 are strictly sequential.
 
-- [ ] **Phase 1: Memory intrinsics** *(~80 LOC added)*
+- [x] **Phase 1: Memory intrinsics** *(~80 LOC added)*
   - Add `PreviewFeature::VecRuntimeCollapse` to `gruel-error/src/lib.rs`.
   - Add `IntrinsicId::Alloc` / `Realloc` / `Free` to `gruel-intrinsics/src/lib.rs` with `Expr` kind, `checked`-block requirement, preview gate to `vec_runtime_collapse`, runtime_fn populated.
   - Sema: type-check arity (2 for alloc, 4 for realloc, 3 for free), argument types (all `usize` except pointer args). Reject outside `checked` blocks.

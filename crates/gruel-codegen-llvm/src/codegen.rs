@@ -4125,9 +4125,76 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             // via sret, return the Vec(u8) aggregate.
             IntrinsicId::CStrToVec => Some(self.translate_cstr_to_vec(args)),
 
+            // ADR-0082: Gruel-callable wrappers for the existing
+            // __gruel_alloc / __gruel_realloc / __gruel_free runtime
+            // symbols. The Sema-side type tracking is what makes the
+            // returned pointer carry a typed pointee; LLVM sees opaque
+            // pointers either way, so codegen is a thin direct call.
+            IntrinsicId::Alloc => Some(self.translate_alloc(args)),
+            IntrinsicId::Realloc => Some(self.translate_realloc(args)),
+            IntrinsicId::Free => {
+                self.translate_free(args);
+                None
+            }
+            // @ptr_cast(p) is identity at the LLVM level (pointers are
+            // opaque). Sema already swapped the result type; just pass
+            // through.
+            IntrinsicId::PtrCast => Some(self.get_value(args[0])),
+
             // ---- Fallback: return zero value for unimplemented intrinsics ----
             _ => gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero()),
         }
+    }
+
+    /// Codegen for `@alloc(size, align) -> MutPtr(T)` (ADR-0082). Direct
+    /// call to `__gruel_alloc(size, align)`.
+    fn translate_alloc(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
+        let size = self.get_value(args[0]).into_int_value();
+        let align = self.get_value(args[1]).into_int_value();
+        let size = self.zext_to_i64(size);
+        let align = self.zext_to_i64(align);
+        let alloc_fn = self.vec_alloc_fn();
+        self.builder
+            .build_call(alloc_fn, &[size.into(), align.into()], "alloc")
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+    }
+
+    /// Codegen for `@realloc(p, old_size, new_size, align) -> MutPtr(T)` (ADR-0082).
+    fn translate_realloc(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
+        let p = self.get_value(args[0]).into_pointer_value();
+        let old_size = self.get_value(args[1]).into_int_value();
+        let new_size = self.get_value(args[2]).into_int_value();
+        let align = self.get_value(args[3]).into_int_value();
+        let old_size = self.zext_to_i64(old_size);
+        let new_size = self.zext_to_i64(new_size);
+        let align = self.zext_to_i64(align);
+        let realloc_fn = self.vec_realloc_fn();
+        self.builder
+            .build_call(
+                realloc_fn,
+                &[p.into(), old_size.into(), new_size.into(), align.into()],
+                "realloc",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+    }
+
+    /// Codegen for `@free(p, size, align)` (ADR-0082).
+    fn translate_free(&mut self, args: &[CfgValue]) {
+        let p = self.get_value(args[0]).into_pointer_value();
+        let size = self.get_value(args[1]).into_int_value();
+        let align = self.get_value(args[2]).into_int_value();
+        let size = self.zext_to_i64(size);
+        let align = self.zext_to_i64(align);
+        let free_fn = self.vec_free_fn();
+        self.builder
+            .build_call(free_fn, &[p.into(), size.into(), align.into()], "")
+            .unwrap();
     }
 
     /// Codegen for `@cstr_to_vec(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).

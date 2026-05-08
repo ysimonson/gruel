@@ -1,0 +1,149 @@
+# ADR-0082: Gruel-callable memory intrinsics
+#
+# `@alloc(size, align) -> MutPtr(T)` / `@realloc(p, old, new, align) -> MutPtr(T)`
+# / `@free(p, size, align)` / `@ptr_cast(p) -> MutPtr(T)/Ptr(T)` are thin
+# wrappers over the existing `__gruel_alloc` / `__gruel_realloc` /
+# `__gruel_free` runtime symbols. Each requires a `checked` block and is
+# gated behind `--preview vec_runtime_collapse` until ADR-0082 stabilizes.
+
+[section]
+id = "intrinsics.memory"
+spec_chapter = "8.4"
+name = "Memory Intrinsics (ADR-0082)"
+description = "Roundtrip alloc + write + read + free, plus the preview gate."
+
+# =============================================================================
+# Roundtrip: alloc + write + read + free
+# =============================================================================
+
+[[case]]
+name = "alloc_write_read_free"
+spec = ["8.4:1"]
+preview = "vec_runtime_collapse"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let n: usize = 4;
+    let size: usize = n * @size_of(i32);
+    let align: usize = @align_of(i32);
+    let p: MutPtr(i32) = checked { @alloc(size, align) };
+    checked {
+        p.offset(0).write(10);
+        p.offset(1).write(20);
+        p.offset(2).write(30);
+        p.offset(3).write(42);
+    };
+    let last: i32 = checked { p.offset(3).read() };
+    checked { @free(p, size, align) };
+    last
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# realloc preserves contents
+# =============================================================================
+
+[[case]]
+name = "realloc_grows_buffer"
+spec = ["8.4:1"]
+preview = "vec_runtime_collapse"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let align: usize = @align_of(i32);
+    let one: usize = 1;
+    let two: usize = 2;
+    let four: usize = 4;
+    let old_bytes: usize = two * @size_of(i32);
+    let new_bytes: usize = four * @size_of(i32);
+    let p: MutPtr(i32) = checked { @alloc(old_bytes, align) };
+    checked {
+        p.offset(0).write(7);
+        p.offset(1).write(35);
+    };
+    let p2: MutPtr(i32) = checked { @realloc(p, old_bytes, new_bytes, align) };
+    checked {
+        p2.offset(2).write(0);
+        p2.offset(3).write(0);
+    };
+    let total: i32 = checked {
+        p2.offset(0).read() + p2.offset(1).read()
+    };
+    checked { @free(p2, new_bytes, align) };
+    total
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# @ptr_cast retypes a pointer (identity at LLVM level)
+# =============================================================================
+
+[[case]]
+name = "ptr_cast_retypes_pointer"
+spec = ["8.4:1"]
+preview = "vec_runtime_collapse"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let n: usize = 1;
+    let size: usize = n * @size_of(i32);
+    let align: usize = @align_of(i32);
+    let p: MutPtr(i32) = checked { @alloc(size, align) };
+    checked { p.offset(0).write(42) };
+    // Cast MutPtr(i32) → Ptr(i32) (read-only view).
+    let pc: Ptr(i32) = checked { @ptr_cast(p) };
+    let v: i32 = checked { pc.offset(0).read() };
+    checked { @free(p, size, align) };
+    v
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Preview gate: @alloc without --preview is rejected
+# =============================================================================
+
+[[case]]
+name = "alloc_requires_preview_gate"
+spec = ["8.4:1"]
+source = """
+fn main() -> i32 {
+    let p: MutPtr(i32) = checked { @alloc(4, 4) };
+    0
+}
+"""
+compile_fail = true
+error_contains = "vec_runtime_collapse"
+
+[[case]]
+name = "free_requires_preview_gate"
+spec = ["8.4:1"]
+source = """
+fn main() -> i32 {
+    let p: MutPtr(i32) = checked { MutPtr(i32)::null() };
+    checked { @free(p, 0, 1) };
+    0
+}
+"""
+compile_fail = true
+error_contains = "vec_runtime_collapse"
+
+# =============================================================================
+# `checked` block requirement (ADR-0028)
+# =============================================================================
+
+[[case]]
+name = "alloc_outside_checked_rejected"
+spec = ["8.4:1"]
+preview = "vec_runtime_collapse"
+preview_should_pass = true
+source = """
+fn main() -> i32 {
+    let p: MutPtr(i32) = @alloc(4, 4);
+    0
+}
+"""
+compile_fail = true
+error_contains = "checked"
