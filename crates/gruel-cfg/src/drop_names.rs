@@ -46,20 +46,18 @@ pub fn type_needs_drop(ty: Type, type_pool: &TypeInternPool) -> bool {
 }
 
 /// Return the name of the synthesized `__gruel_drop_*` function for `ty`,
-/// or `None` if the type is trivially droppable or is a built-in with a
-/// runtime-provided destructor (e.g. `String` → `__gruel_drop_String` lives
-/// in `gruel-runtime` and is called via a dedicated code path, not through
-/// a synthesized wrapper).
+/// or `None` if the type is trivially droppable.
+///
+/// ADR-0081: previously, built-in types with `destructor` set (only
+/// `String`, dropped via the runtime `__gruel_drop_String`) returned
+/// `None` here so codegen could route to the runtime symbol directly.
+/// That carve-out retired with the runtime collapse — `String` is now
+/// a regular prelude struct whose drop is auto-synthesized from its
+/// `bytes: Vec(u8)` field.
 pub fn drop_fn_name(ty: Type, type_pool: &TypeInternPool) -> Option<String> {
     match ty.kind() {
         TypeKind::Struct(id) => {
             let def = type_pool.struct_def(id);
-            // Built-in types with runtime destructors are handled by the
-            // is_builtin_string / runtime-call path in codegen, not by a
-            // synthesized wrapper.
-            if def.is_builtin && def.destructor.is_some() {
-                return None;
-            }
             if type_needs_drop(ty, type_pool) {
                 Some(format!("__gruel_drop_{}", def.name))
             } else {

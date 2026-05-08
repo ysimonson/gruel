@@ -277,7 +277,7 @@ Each phase ships independently behind the `string_runtime_collapse` preview gate
   - Operator overloading verification: `s1 == s2`, `s1 < s2`, etc. compile and route through ADR-0078's step 4 / 5 to call `String::eq` / `String::cmp`.
   - `make test` green. Expected delta: 0 spec test changes, 0 UI test changes, ~280 LOC out of `gruel-builtins/src/lib.rs`, ~120 LOC into `prelude/string.gruel`.
 
-- [ ] **Phase 3: Delete obsolete runtime functions**
+- [x] **Phase 3: Delete obsolete runtime functions**
   - Delete the 28 symbols listed in the §4 table from `gruel-runtime/src/string.rs`. Total ~430 LOC out.
   - Rename `gruel-runtime/src/string.rs` → `gruel-runtime/src/utf8.rs` (the contents are now exclusively UTF-8 / FFI-conversion specific). Update `gruel-runtime/src/lib.rs` `mod` declaration.
   - Verify no references to deleted symbols remain (`grep -r 'String__\|__gruel_str_\|__gruel_string_\|__gruel_drop_String' crates/`).

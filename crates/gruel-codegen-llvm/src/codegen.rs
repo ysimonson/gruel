@@ -843,67 +843,6 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         (ptr, len)
     }
 
-    /// Get or declare `__gruel_str_eq(ptr, len, ptr, len) -> i8`.
-    fn get_or_declare_str_eq(&self) -> FunctionValue<'ctx> {
-        const NAME: &str = "__gruel_str_eq";
-        if let Some(f) = self.module.get_function(NAME) {
-            return f;
-        }
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let i64_ty = self.ctx.i64_type();
-        let fn_type = self.ctx.i8_type().fn_type(
-            &[ptr_ty.into(), i64_ty.into(), ptr_ty.into(), i64_ty.into()],
-            false,
-        );
-        self.module.add_function(NAME, fn_type, None)
-    }
-
-    /// Get or declare `__gruel_str_cmp(ptr, len, ptr, len) -> i8`.
-    fn get_or_declare_str_cmp(&self) -> FunctionValue<'ctx> {
-        const NAME: &str = "__gruel_str_cmp";
-        if let Some(f) = self.module.get_function(NAME) {
-            return f;
-        }
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let i64_ty = self.ctx.i64_type();
-        let fn_type = self.ctx.i8_type().fn_type(
-            &[ptr_ty.into(), i64_ty.into(), ptr_ty.into(), i64_ty.into()],
-            false,
-        );
-        self.module.add_function(NAME, fn_type, None)
-    }
-
-    /// Build a string ordering comparison using `__gruel_str_cmp`.
-    /// `pred` should be the IntPredicate for comparing the cmp result against 0.
-    fn build_str_cmp(
-        &mut self,
-        l: BasicValueEnum<'ctx>,
-        r: BasicValueEnum<'ctx>,
-        pred: IntPredicate,
-        name: &str,
-    ) -> inkwell::values::IntValue<'ctx> {
-        let (ptr1, len1) = self.extract_str_ptr_len(l);
-        let (ptr2, len2) = self.extract_str_ptr_len(r);
-        let str_cmp_fn = self.get_or_declare_str_cmp();
-        let result = self
-            .builder
-            .build_call(
-                str_cmp_fn,
-                &[ptr1.into(), len1.into(), ptr2.into(), len2.into()],
-                "strcmp",
-            )
-            .unwrap();
-        let cmp_val = result
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-            .into_int_value();
-        let zero = self.ctx.i8_type().const_zero();
-        self.builder
-            .build_int_compare(pred, cmp_val, zero, name)
-            .unwrap()
-    }
-
     /// Extract the LLVM fields of a struct or elements of an array as a flat `Vec`.
     ///
     /// Used to build the argument list for synthesized `__gruel_drop_*` functions,
@@ -1332,31 +1271,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         match ty.kind() {
             TypeKind::Struct(id) => {
                 let struct_def = self.type_pool.struct_def(id).clone();
-                // String equality uses __gruel_str_eq (content comparison, not field comparison).
-                if struct_def.is_builtin && struct_def.name == "String" {
-                    let (ptr1, len1) = self.extract_str_ptr_len(l);
-                    let (ptr2, len2) = self.extract_str_ptr_len(r);
-                    let str_eq_fn = self.get_or_declare_str_eq();
-                    let result = self
-                        .builder
-                        .build_call(
-                            str_eq_fn,
-                            &[ptr1.into(), len1.into(), ptr2.into(), len2.into()],
-                            "streq",
-                        )
-                        .unwrap();
-                    let byte_val = result
-                        .try_as_basic_value()
-                        .basic()
-                        .unwrap()
-                        .into_int_value();
-                    // __gruel_str_eq returns i8; convert to i1 for use as a bool.
-                    let zero = self.ctx.i8_type().const_zero();
-                    return self
-                        .builder
-                        .build_int_compare(IntPredicate::NE, byte_val, zero, "streq_b")
-                        .unwrap();
-                }
+                // ADR-0081: `String` is a regular struct now; `==` is
+                // routed at sema time to `String.eq` (which delegates to
+                // Vec(u8).eq). The registry-driven `__gruel_str_eq` path
+                // retired with the rest of the runtime String collapse.
                 let mut all_eq = self.ctx.bool_type().const_int(1, false); // start true
                 let mut llvm_idx = 0u32;
                 for field in &struct_def.fields {
@@ -1578,12 +1496,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     ),
                     _ => unreachable!(),
                 };
-                if self.is_builtin_string(lhs_ty) {
-                    let l = self.get_value(lhs);
-                    let r = self.get_value(rhs);
-                    self.build_str_cmp(l, r, sint, &format!("str{}", name))
-                        .into()
-                } else if lhs_ty.is_float() {
+                // ADR-0081: ordering comparisons on `String` are desugared
+                // at sema time to `String.cmp` calls (which delegate to
+                // `Vec(u8).cmp`). The registry-driven `__gruel_str_cmp`
+                // path retired with the rest of the runtime String
+                // collapse.
+                if lhs_ty.is_float() {
                     let l = self.get_value(lhs).into_float_value();
                     let r = self.get_value(rhs).into_float_value();
                     self.builder

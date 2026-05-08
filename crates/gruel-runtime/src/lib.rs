@@ -14,7 +14,11 @@
 //! - **Runtime errors**: Division by zero and integer overflow trigger calls to
 //!   error handlers in the [`error`] module.
 //! - **Debug output**: The `@dbg` builtin calls functions in the [`debug`] module.
-//! - **String operations**: String equality, allocation, and methods are in the [`string`] module.
+//! - **Heap allocation**: `Vec(T)`'s codegen calls into [`heap`] for
+//!   alloc/realloc/free.
+//! - **UTF-8 helpers**: The validator and C-string ingestor used by the
+//!   prelude `String::from_utf8` / `String::from_c_str` bodies live in the
+//!   [`utf8`] module (post ADR-0081 collapse).
 //! - **I/O operations**: Input functions like `readLine()` are in the [`io`] module.
 //!
 //! # Platform Requirements
@@ -75,8 +79,9 @@ compile_error!(
 // Platform abstraction layer (backed by libc)
 pub mod platform;
 
-// Heap allocation
-mod heap;
+// Heap allocation (also hosts the `__gruel_alloc` / `__gruel_free` /
+// `__gruel_realloc` FFI symbols called from `Vec(T)` codegen).
+pub mod heap;
 
 // Runtime modules
 pub mod debug;
@@ -85,7 +90,4 @@ pub mod error;
 pub mod io;
 pub mod parse;
 pub mod random;
-pub mod string;
-
-// Re-export StringResult for use by other modules
-pub use string::StringResult;
+pub mod utf8;
