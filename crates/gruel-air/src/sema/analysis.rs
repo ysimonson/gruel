@@ -1016,11 +1016,26 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                                 warnings,
                                 local_strings,
                                 local_bytes,
-                                _ref_fns,
-                                _ref_meths,
+                                referenced_fns,
+                                referenced_meths,
                             )) => {
                                 functions_with_strings.push((analyzed, local_strings, local_bytes));
                                 all_warnings.extend(warnings);
+                                // ADR-0081: feed references from the derived
+                                // body back into the work queue so symbols
+                                // it depends on (e.g. `String.clone` from a
+                                // `@derive(Clone)` body's `@field(...).clone()`
+                                // calls) get analyzed and emitted.
+                                for ref_fn in referenced_fns {
+                                    if !analyzed_functions.contains(&ref_fn) {
+                                        pending_functions.push(ref_fn);
+                                    }
+                                }
+                                for ref_meth in referenced_meths {
+                                    if !analyzed_methods.contains(&ref_meth) {
+                                        pending_methods.push(ref_meth);
+                                    }
+                                }
                             }
                             Err(e) => errors.push(e),
                         }
@@ -1072,11 +1087,23 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                                 warnings,
                                 local_strings,
                                 local_bytes,
-                                _ref_fns,
-                                _ref_meths,
+                                referenced_fns,
+                                referenced_meths,
                             )) => {
                                 functions_with_strings.push((analyzed, local_strings, local_bytes));
                                 all_warnings.extend(warnings);
+                                // ADR-0081: feed references from the derived
+                                // body back into the work queue.
+                                for ref_fn in referenced_fns {
+                                    if !analyzed_functions.contains(&ref_fn) {
+                                        pending_functions.push(ref_fn);
+                                    }
+                                }
+                                for ref_meth in referenced_meths {
+                                    if !analyzed_methods.contains(&ref_meth) {
+                                        pending_methods.push(ref_meth);
+                                    }
+                                }
                             }
                             Err(e) => errors.push(e),
                         }
@@ -3472,6 +3499,13 @@ impl<'a> Sema<'a> {
             span,
         )?;
 
+        // ADR-0072 + ADR-0081: the prelude `String` has a `checked`-only
+        // bridge surface (`push_byte`, `terminated_ptr`,
+        // `from_utf8_unchecked`, `from_c_str_unchecked`). The registry-
+        // driven method dispatch is gone, so apply the same name-based
+        // gates here.
+        self.check_string_vec_bridge_method_gates(&struct_def.name, &method_name_str, ctx, span)?;
+
         // ADR-0062: a `&self` / `&mut self` receiver is sugar for a borrow
         // (immutable / mutable). The receiver expression's `analyze_inst`
         // already recorded a move on the root variable since it was
@@ -3487,6 +3521,37 @@ impl<'a> Sema<'a> {
             && let Some(var) = receiver_var
         {
             ctx.moved_vars.remove(&var);
+        }
+
+        // ADR-0081: a `MutRef(Self)` receiver requires the bound variable
+        // to be `let mut` (or to come through a `MutRef(_)` parameter /
+        // local). Without this, `let s = String::new(); s.push_str("...")`
+        // would silently mutate `s` despite the `let`'s implicit-immutable
+        // binding.
+        if matches!(method_info.receiver, crate::types::ReceiverMode::MutRef)
+            && let Some(var) = receiver_var
+        {
+            let is_mutable = ctx
+                .params
+                .iter()
+                .find(|p| p.name == var)
+                .map(|p| {
+                    matches!(p.ty.kind(), TypeKind::MutRef(_))
+                        || matches!(p.mode, RirParamMode::MutRef)
+                })
+                .or_else(|| {
+                    ctx.locals
+                        .get(&var)
+                        .map(|local| local.is_mut || matches!(local.ty.kind(), TypeKind::MutRef(_)))
+                })
+                .unwrap_or(true);
+            if !is_mutable {
+                let name_str = self.interner.resolve(&var).to_string();
+                return Err(CompileError::new(
+                    ErrorKind::AssignToImmutable(name_str),
+                    span,
+                ));
+            }
         }
 
         // Check if calling an unchecked method requires a checked block
@@ -4198,36 +4263,15 @@ impl<'a> Sema<'a> {
                 .ok_or_compile_error(ErrorKind::UnknownType(type_name_str.clone()), span)?
         };
 
-        // ADR-0072: redirect `String::from_utf8(v)` to the prelude function
-        // `String__from_utf8` so the `Result(String, Utf8DecodeError)`
-        // return type can be constructed in source code (where comptime-
-        // generic enums work). The error type wraps `Vec(u8)` because
-        // `Result(String, Vec(u8))` itself can't be instantiated from a
-        // prelude body — see Utf8DecodeError in the prelude source.
-        if self.is_builtin_string(Type::new_struct(struct_id)) && function_name_str == "from_utf8" {
-            return self.dispatch_string_prelude_assoc_fn(
-                air,
-                ctx,
-                "String__from_utf8",
-                &function_name_str,
-                &args,
-                span,
-            );
-        }
-        // ADR-0072: same redirect for `String::from_c_str(p)`.
-        if self.is_builtin_string(Type::new_struct(struct_id)) && function_name_str == "from_c_str"
-        {
-            return self.dispatch_string_prelude_assoc_fn(
-                air,
-                ctx,
-                "String__from_c_str",
-                &function_name_str,
-                &args,
-                span,
-            );
-        }
+        // ADR-0081: `String::from_utf8` / `String::from_c_str` are now
+        // regular associated functions on the prelude struct; they reach
+        // the user-method lookup below alongside any other static method.
+        // The previous registry-driven path retired with `STRING_TYPE`.
 
-        // Handle builtin type associated functions
+        // Handle builtin type associated functions. ADR-0081 left
+        // `BUILTIN_TYPES` empty, so this is unreachable today; the path
+        // stays for forward compatibility if a future builtin populates
+        // the registry again.
         if let Some(builtin_def) = self.get_builtin_type_def(struct_id) {
             return self.analyze_builtin_assoc_fn(
                 air,
@@ -4275,6 +4319,12 @@ impl<'a> Sema<'a> {
             &function_name_str,
             span,
         )?;
+
+        // ADR-0072 + ADR-0081: the prelude `String` has a `checked`-only
+        // bridge surface for static constructors (`from_utf8_unchecked`,
+        // `from_c_str_unchecked`). The registry-driven dispatch is gone,
+        // so apply the same name-based gates here.
+        self.check_string_vec_bridge_method_gates(&struct_def.name, &function_name_str, ctx, span)?;
 
         // Check if calling an unchecked associated function requires a checked block
         if method_info.is_unchecked && ctx.checked_depth == 0 {
@@ -4458,12 +4508,12 @@ impl<'a> Sema<'a> {
         // Dispatch order:
         //   1. Numeric / bool / char / unit primitives — fall through to the
         //      regular `Bin` path (existing behavior).
-        //   2. Built-in `String` — fall through; codegen routes via the
-        //      registry-driven `__gruel_str_eq` / `__gruel_str_cmp` helpers.
-        //   3. User struct or enum with an `eq` (for `==` / `!=`) or `cmp`
+        //   2. User struct or enum with an `eq` (for `==` / `!=`) or `cmp`
         //      (for `<` / `<=` / `>` / `>=`) method — desugar to a method
         //      call. The conformer's signature must match `Eq::eq` /
-        //      `Ord::cmp` from `prelude/cmp.gruel`.
+        //      `Ord::cmp` from `prelude/cmp.gruel`. ADR-0081: the prelude
+        //      `String` flows through this path; its `eq` / `cmp` methods
+        //      delegate to `Vec(u8)` byte comparisons.
         //
         // This is the load-bearing piece of ADR-0078 Phase 4 — it's what
         // makes the `Eq` / `Ord` interfaces useful as overloading hooks.
@@ -4471,7 +4521,6 @@ impl<'a> Sema<'a> {
             && lhs_type != Type::BOOL
             && lhs_type != Type::CHAR
             && lhs_type != Type::UNIT
-            && !self.is_builtin_string(lhs_type)
         {
             // ADR-0079: read the method name out of the lang-item
             // interface declaration when available. The prelude-tagged
@@ -4511,6 +4560,19 @@ impl<'a> Sema<'a> {
                 };
                 let return_type = method_info.return_type;
                 let type_name = self.format_type_name(lhs_type);
+
+                // ADR-0026 lazy analysis: register the dispatched method so
+                // its body is analyzed and emitted by the work queue. The
+                // regular method-call path does this via
+                // `ctx.referenced_methods.insert(method_key)`; mirror that
+                // here so prelude / user-defined `eq` / `cmp` aren't dropped
+                // from codegen.
+                if let TypeKind::Struct(struct_id) = lhs_type.kind() {
+                    ctx.referenced_methods.insert((struct_id, method_sym));
+                } else if let TypeKind::Enum(enum_id) = lhs_type.kind() {
+                    ctx.referenced_methods
+                        .insert((crate::types::StructId(enum_id.0), method_sym));
+                }
 
                 // Analyze rhs through the regular call-arg path so it gets
                 // proper move tracking against the method's `other: Self`
@@ -4597,28 +4659,24 @@ impl<'a> Sema<'a> {
         // Validate the type is appropriate for this comparison
         if allow_bool {
             // Equality operators (==, !=) work on integers, floats, booleans, chars,
-            // strings, unit, and structs. (ADR-0071: char comparison is by codepoint
-            // value.)
-            // Note: String is now a struct, so is_struct() covers it
+            // unit, and structs. (ADR-0071: char comparison is by codepoint
+            // value.) ADR-0081: String is a regular struct in the prelude,
+            // covered by `is_struct()`.
             if !lhs_type.is_numeric()
                 && lhs_type != Type::BOOL
                 && lhs_type != Type::CHAR
                 && lhs_type != Type::UNIT
                 && !lhs_type.is_struct()
-                && !self.is_builtin_string(lhs_type)
             {
                 return Err(CompileError::type_mismatch(
-                    "numeric, bool, char, string, unit, or struct".to_string(),
+                    "numeric, bool, char, unit, or struct".to_string(),
                     lhs_type.name().to_string(),
                     self.rir.get(lhs).span,
                 ));
             }
-        } else if !lhs_type.is_numeric()
-            && lhs_type != Type::CHAR
-            && !self.is_builtin_string(lhs_type)
-        {
+        } else if !lhs_type.is_numeric() && lhs_type != Type::CHAR {
             return Err(CompileError::type_mismatch(
-                "numeric, char, or string".to_string(),
+                "numeric or char".to_string(),
                 lhs_type.name().to_string(),
                 self.rir.get(lhs).span,
             ));

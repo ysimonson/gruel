@@ -1,43 +1,157 @@
-// ADR-0072: String prelude functions (validated conversions over Vec(u8)).
+// ADR-0072 + ADR-0081: String is a thin wrapper over Vec(u8). The methods
+// here delegate to Vec(u8) for byte-buffer primitives and use
+// `char__encode_utf8` for codepoint-aware mutation.
+//
+// The `bytes` field is non-pub: only methods declared in this prelude file
+// can read or write it (per ADR-0073's unified is_accessible check).
 
-// Error wrapper used by `String::from_utf8` to ferry the invalid byte buffer
-// back to the caller. The struct wrapping makes the second type argument
-// concrete in `Result(String, Utf8DecodeError)` — instantiating
-// `Result(String, Vec(u8))` from a prelude body errors because the comptime
-// evaluator can't bind the `E` parameter to a parameterized builtin
-// type-call (`Vec(u8)` is a built-in constructor, not a comptime function).
-// Non-pub: Utf8DecodeError is a prelude-internal type. User code that needs
-// to inspect the failed bytes can match on the `Result` and read the
-// `bytes` field through the synthesized clone path. (We may make this pub
-// in a follow-up once we have a stable accessor API.)
-struct Utf8DecodeError {
+pub struct String {
     bytes: Vec(u8),
-}
 
-// Validated `Vec(u8) -> String` conversion. Performs a UTF-8 scan; on
-// success consumes `v` and returns `Result::Ok(s)`, on failure hands `v`
-// back inside `Result::Err(Utf8DecodeError { bytes: v })`.
-pub fn String__from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
-    let valid: bool = checked {
-        let p = v.ptr();
-        let n = v.len();
-        let s: Slice(u8) = @parts_to_slice(p, n);
-        @utf8_validate(s)
-    };
-    if valid {
-        let s: String = checked { String::from_utf8_unchecked(v) };
-        let R = Result(String, Utf8DecodeError);
-        R::Ok(s)
-    } else {
-        let e = Utf8DecodeError { bytes: v };
-        let R = Result(String, Utf8DecodeError);
-        R::Err(e)
+    pub fn new() -> Self {
+        Self { bytes: Vec(u8)::new() }
+    }
+
+    pub fn with_capacity(n: usize) -> Self {
+        Self { bytes: Vec(u8)::with_capacity(n) }
+    }
+
+    pub fn from_char(c: char) -> Self {
+        let mut s = Self::new();
+        s.push(c);
+        s
+    }
+
+    pub fn len(self: Ref(Self)) -> usize { self.bytes.len() }
+    pub fn capacity(self: Ref(Self)) -> usize { self.bytes.capacity() }
+    pub fn is_empty(self: Ref(Self)) -> bool { self.bytes.is_empty() }
+    pub fn bytes_len(self: Ref(Self)) -> usize { self.bytes.len() }
+    pub fn bytes_capacity(self: Ref(Self)) -> usize { self.bytes.capacity() }
+
+    pub fn clone(self: Ref(Self)) -> Self {
+        Self { bytes: self.bytes.clone() }
+    }
+
+    // Argument is `Self` (consumed). Matches the registry-driven shape that
+    // these methods replaced; tests pass string literals directly without
+    // taking explicit borrows. The body destructures to take ownership of
+    // the inner Vec(u8) — ADR-0036 bans partial field moves, so we move the
+    // whole struct in one step.
+    pub fn contains(self: Ref(Self), needle: Self) -> bool {
+        let String { bytes: needle_bytes } = needle;
+        self.bytes.contains(&needle_bytes[..])
+    }
+
+    pub fn starts_with(self: Ref(Self), prefix: Self) -> bool {
+        let String { bytes: prefix_bytes } = prefix;
+        self.bytes.starts_with(&prefix_bytes[..])
+    }
+
+    pub fn ends_with(self: Ref(Self), suffix: Self) -> bool {
+        let String { bytes: suffix_bytes } = suffix;
+        self.bytes.ends_with(&suffix_bytes[..])
+    }
+
+    pub fn concat(self: Ref(Self), other: Self) -> Self {
+        let String { bytes: other_bytes } = other;
+        Self { bytes: self.bytes.concat(&other_bytes[..]) }
+    }
+
+    pub fn push_str(self: MutRef(Self), other: Self) {
+        let String { bytes: other_bytes } = other;
+        self.bytes.extend_from_slice(&other_bytes[..]);
+    }
+
+    pub fn clear(self: MutRef(Self)) {
+        self.bytes.clear();
+    }
+
+    pub fn reserve(self: MutRef(Self), additional: usize) {
+        self.bytes.reserve(additional);
+    }
+
+    // ADR-0072: safe codepoint-aware mutator. `char__encode_utf8` (in
+    // prelude/char.gruel) writes the canonical UTF-8 encoding of `c` to a
+    // 4-byte stack buffer and returns the byte count.
+    pub fn push(self: MutRef(Self), c: char) {
+        let zero: u8 = 0;
+        let mut buf: [u8; 4] = [zero, zero, zero, zero];
+        let n: usize = char__encode_utf8(c, &mut buf);
+        self.bytes.extend_from_slice(&buf[..n]);
+    }
+
+    // Eq / Ord conformance — picked up by ADR-0078's binop dispatch
+    // step 4/5 for `==`, `!=`, `<`, `<=`, `>`, `>=`. `other: Self` matches
+    // the lang-item interface signatures in `prelude/cmp.gruel`. The body
+    // destructures `other` so the inner Vec(u8) can flow into the call
+    // without tripping ADR-0036's partial-move ban.
+    pub fn eq(self: Ref(Self), other: Self) -> bool {
+        let String { bytes: other_bytes } = other;
+        self.bytes == other_bytes
+    }
+
+    pub fn cmp(self: Ref(Self), other: Self) -> Ordering {
+        let String { bytes: other_bytes } = other;
+        self.bytes.cmp(other_bytes)
+    }
+
+    // O(1) move-out: destructure to move the single field.
+    pub fn into_bytes(self) -> Vec(u8) {
+        let String { bytes } = self;
+        bytes
+    }
+
+    // ADR-0072: validated UTF-8 conversions.
+    pub fn from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
+        let valid: bool = checked {
+            let p = v.ptr();
+            let n = v.len();
+            let s: Slice(u8) = @parts_to_slice(p, n);
+            @utf8_validate(s)
+        };
+        if valid {
+            let s: String = checked { String::from_utf8_unchecked(v) };
+            let R = Result(String, Utf8DecodeError);
+            R::Ok(s)
+        } else {
+            let e = Utf8DecodeError { bytes: v };
+            let R = Result(String, Utf8DecodeError);
+            R::Err(e)
+        }
+    }
+
+    pub fn from_c_str(p: Ptr(u8)) -> Result(String, Utf8DecodeError) {
+        let v: Vec(u8) = checked { @cstr_to_vec(p) };
+        String::from_utf8(v)
+    }
+
+    // ADR-0072 escape hatches. Sema gates these to `checked` blocks by
+    // name (see `check_string_vec_bridge_method_gates`); the language
+    // doesn't yet expose `unchecked fn` syntax inside struct method
+    // declarations.
+    pub fn from_utf8_unchecked(v: Vec(u8)) -> Self {
+        Self { bytes: v }
+    }
+
+    pub fn from_c_str_unchecked(p: Ptr(u8)) -> Self {
+        Self::from_utf8_unchecked(@cstr_to_vec(p))
+    }
+
+    pub fn push_byte(self: MutRef(Self), byte: u8) {
+        self.bytes.push(byte);
+    }
+
+    pub fn terminated_ptr(self: MutRef(Self)) -> Ptr(u8) {
+        let zero: u8 = 0;
+        checked {
+            self.bytes.terminated_ptr(zero)
+        }
     }
 }
 
-// Validated `Ptr(u8) -> String` conversion. strlen + alloc + memcpy into a
-// `Vec(u8)` (via `__gruel_cstr_to_vec`), then forwards to `String__from_utf8`.
-pub fn String__from_c_str(p: Ptr(u8)) -> Result(String, Utf8DecodeError) {
-    let v: Vec(u8) = checked { @cstr_to_vec(p) };
-    String__from_utf8(v)
+// Error wrapper used by `String::from_utf8` to ferry the invalid byte buffer
+// back to the caller. The struct wrapping makes the second type argument
+// concrete in `Result(String, Utf8DecodeError)`.
+pub struct Utf8DecodeError {
+    bytes: Vec(u8),
 }

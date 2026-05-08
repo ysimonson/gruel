@@ -1230,7 +1230,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         category: Category::Meta,
         requires_unchecked: true,
         // Implementation-detail intrinsic invoked by the prelude
-        // `String__from_c_str` body. The user-visible gate is on
+        // `String::from_c_str` body. The user-visible gate is on
         // `String::from_c_str` itself (ADR-0072).
         preview: None,
         runtime_fn: Some("__gruel_cstr_to_vec"),
@@ -1245,7 +1245,7 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         category: Category::Meta,
         requires_unchecked: false,
         // Implementation-detail intrinsic invoked by the prelude
-        // `String__from_utf8` body. The user-visible gate is on
+        // `String::from_utf8` body. The user-visible gate is on
         // `String::from_utf8` itself (ADR-0072), so this stays ungated to
         // allow eager prelude analysis without `--preview string_vec_bridge`.
         preview: None,

@@ -10,7 +10,6 @@ This page documents every built-in type, type constructor, and enum the Gruel co
 
 | Name | Ownership | Methods | Associated fns | Operators |
 |---|---|---|---|---|
-| `String` | affine | 17 | 5 | `==`, `!=`, `<`, `<=`, `>`, `>=` |
 
 ### Type Constructors
 
@@ -46,55 +45,6 @@ Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The c
 | `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |
 
 ## Types
-
-### `String`
-
-**Ownership:** Affine (move semantics; dropped via `__gruel_drop_String`).
-
-**Layout:**
-
-| Field | Type |
-|---|---|
-| `bytes` | `Vec(u8)` |
-
-**Operators:**
-
-| Operator | Runtime symbol | Notes |
-|---|---|---|
-| `==` | `__gruel_str_eq` | — |
-| `!=` | `__gruel_str_eq` | result inverted |
-| `<` | `__gruel_str_cmp` | — |
-| `<=` | `__gruel_str_cmp` | — |
-| `>` | `__gruel_str_cmp` | — |
-| `>=` | `__gruel_str_cmp` | — |
-
-**Associated functions:**
-
-- `String::new() -> String` — runtime: `String__new`
-- `String::with_capacity(capacity: usize) -> String` — runtime: `String__with_capacity`
-- `String::from_char(c: char) -> String` — runtime: `String__from_char`
-- `String::from_utf8_unchecked(v: Vec(u8)) -> String` — runtime: `String__from_utf8_unchecked`
-- `String::from_c_str_unchecked(p: Ptr(u8)) -> String` — runtime: `String__from_c_str_unchecked`
-
-**Methods:**
-
-- `fn len(&self) -> usize` — runtime: `String__len`
-- `fn capacity(&self) -> usize` — runtime: `String__capacity`
-- `fn is_empty(&self) -> bool` — runtime: `String__is_empty`
-- `fn clone(&self) -> String` — runtime: `String__clone`
-- `fn contains(&self, needle: String) -> bool` — runtime: `String__contains`
-- `fn starts_with(&self, prefix: String) -> bool` — runtime: `String__starts_with`
-- `fn ends_with(&self, suffix: String) -> bool` — runtime: `String__ends_with`
-- `fn concat(&self, other: String) -> String` — runtime: `String__concat`
-- `fn push_str(&mut self, other: String) -> String` — runtime: `String__push_str`
-- `fn push(&mut self, c: char) -> String` — runtime: `String__push_char`
-- `fn clear(&mut self) -> String` — runtime: `String__clear`
-- `fn reserve(&mut self, additional: usize) -> String` — runtime: `String__reserve`
-- `fn bytes_len(&self) -> usize` — runtime: `String__len`
-- `fn bytes_capacity(&self) -> usize` — runtime: `String__capacity`
-- `fn into_bytes(self) -> Vec(u8)` — runtime: `String__into_bytes`
-- `fn push_byte(&mut self, byte: u8) -> String` — runtime: `String__push`
-- `fn terminated_ptr(&mut self) -> Ptr(u8)` — runtime: `String__terminated_ptr`
 
 ## Type Constructors
 

@@ -266,11 +266,13 @@ unsafe impl<'a> Send for SemaContext<'a> {}
 unsafe impl<'a> Sync for SemaContext<'a> {}
 
 impl<'a> SemaContext<'a> {
-    /// Get the builtin String type as a Type::Struct.
+    /// Get the prelude `String` type as a `Type::Struct`. Returns
+    /// `Type::ERROR` when the prelude isn't loaded (e.g., test fixtures
+    /// that bypass the prelude); callers propagate the error cleanly.
     pub fn builtin_string_type(&self) -> Type {
         self.builtin_string_id
             .map(Type::new_struct)
-            .expect("String type should be registered during builtin injection")
+            .unwrap_or(Type::ERROR)
     }
 
     /// Look up a struct by name.

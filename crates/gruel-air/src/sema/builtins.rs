@@ -63,11 +63,6 @@ impl<'a> Sema<'a> {
             // Register in struct lookup with pool-based StructId
             self.structs.insert(name_spur, struct_id);
 
-            // Store special IDs for quick access
-            if builtin.name == "String" {
-                self.builtin_string_id = Some(struct_id);
-            }
-
             // Note: Associated functions and methods are not registered here.
             // They are handled by looking up methods in the builtin registry
             // when analyzing method calls on builtin types.
@@ -92,6 +87,16 @@ impl<'a> Sema<'a> {
     /// Called once after `resolve_declarations` has run — by which time the
     /// prelude's enum declarations have been registered into `self.enums`.
     pub(crate) fn cache_builtin_enum_ids(&mut self) {
+        // ADR-0081: cache the prelude `String` struct id so the rest of sema
+        // (intrinsics returning String, type checks for `@parse_*` args, etc.)
+        // can keep using `is_builtin_string` / `builtin_string_type` as
+        // fast lookups without a name resolution at every call site.
+        if let Some(spur) = self.interner.get("String")
+            && let Some(&id) = self.structs.get(&spur)
+        {
+            self.builtin_string_id = Some(id);
+        }
+
         if let Some(spur) = self.interner.get("Arch")
             && let Some(&id) = self.enums.get(&spur)
         {
@@ -155,13 +160,17 @@ impl<'a> Sema<'a> {
 
     /// Get the String struct type.
     ///
-    /// Returns the Type::Struct for the builtin String type.
-    /// Panics if called before builtin types are injected.
+    /// Returns `Type::new_struct` for the prelude-resident `String` if the
+    /// prelude has been loaded; otherwise returns `Type::ERROR`. Callers
+    /// (e.g., string-literal lowering, `@parse_*` argument validation,
+    /// `@read_line`) propagate the error type so the compile errors out
+    /// cleanly instead of panicking when a test fixture skips the
+    /// prelude.
     pub(crate) fn builtin_string_type(&self) -> Type {
-        Type::new_struct(
-            self.builtin_string_id
-                .expect("builtin types not injected yet"),
-        )
+        match self.builtin_string_id {
+            Some(id) => Type::new_struct(id),
+            None => Type::ERROR,
+        }
     }
 
     /// Check if a method name is a builtin mutation method.

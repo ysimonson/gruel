@@ -145,14 +145,9 @@ pub extern "C" fn __gruel_string_clone(ptr: *const u8, len: u64) -> *mut u8 {
     new_ptr
 }
 
-/// Drop a String, freeing its heap buffer if heap-allocated.
-#[unsafe(no_mangle)]
-#[allow(non_snake_case)]
-pub extern "C" fn __gruel_drop_String(ptr: *mut u8, _len: u64, cap: u64) {
-    if cap > 0 {
-        heap::free(ptr, cap, 1);
-    }
-}
+// ADR-0081: `__gruel_drop_String` retired. The prelude `String` is a
+// regular struct whose drop is auto-synthesized from its `bytes: Vec(u8)`
+// field — see `gruel-compiler::drop_glue`.
 
 // =============================================================================
 // String Construction Functions

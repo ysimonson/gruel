@@ -6214,6 +6214,29 @@ impl<'a> Sema<'a> {
                 .map(|id| self.type_pool.struct_def(id).is_linear)
                 .unwrap_or(false);
 
+            // ADR-0081: detect projection through a `Ref(T)` / `MutRef(T)`
+            // root binding. The trace's `is_borrow_param` flag covers
+            // `Ref(_)` parameters (per `param_kind_flags`); we additionally
+            // walk the params and locals to catch `MutRef(_)` bindings,
+            // which `param_kind_flags` reports as "mutable" rather than
+            // "borrow". In either case, field access is a borrow
+            // projection — never a move — so ADR-0036's partial-move ban
+            // does not apply.
+            let projects_through_ref = trace.is_borrow_param
+                || ctx.locals.get(&trace.root_var).is_some_and(|local| {
+                    matches!(
+                        local.ty.kind(),
+                        crate::types::TypeKind::Ref(_) | crate::types::TypeKind::MutRef(_)
+                    )
+                })
+                || ctx.params.iter().any(|p| {
+                    p.name == trace.root_var
+                        && matches!(
+                            p.ty.kind(),
+                            crate::types::TypeKind::Ref(_) | crate::types::TypeKind::MutRef(_)
+                        )
+                });
+
             // Move checking using the trace
             if is_linear {
                 // For linear types, field access consumes the entire struct
@@ -6221,7 +6244,7 @@ impl<'a> Sema<'a> {
                     .entry(trace.root_var)
                     .or_default()
                     .mark_path_moved(&[], span);
-            } else if !self.is_type_copy(field_type) {
+            } else if !self.is_type_copy(field_type) && !projects_through_ref {
                 // ADR-0036: Ban partial field moves. Must destructure instead.
                 // ADR-0048: for tuple-shaped structs, render tuple-syntax names
                 // and suggest tuple destructuring.

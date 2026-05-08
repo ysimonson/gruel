@@ -269,7 +269,7 @@ Each phase ships independently behind the `string_runtime_collapse` preview gate
   - Spec tests at `crates/gruel-spec/cases/vec/byte_methods.toml`: each new method tested for `Vec(u8)`, `Vec(i32)`, and at least one struct case (Copy struct). Operator coverage: `Vec(i32) == Vec(i32)`, `Vec(u8) < Vec(u8)` returning the right Ordering values.
   - `make test` green.
 
-- [ ] **Phase 2: Migrate String to prelude**
+- [x] **Phase 2: Migrate String to prelude**
   - Replace `prelude/string.gruel` with the full struct declaration from §2. Move `Utf8DecodeError` to live alongside.
   - Delete `STRING_TYPE` from `gruel-builtins/src/lib.rs`. `BUILTIN_TYPES` becomes `&[]`.
   - Sema verification: walk the existing String spec tests (`crates/gruel-spec/cases/types/strings.toml`, `mutable-strings.toml`, `char_string.toml`, `string_vec_bridge.toml`) and confirm every test still passes against the prelude struct. Any failures here are the migration's regression surface.
