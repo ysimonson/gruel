@@ -141,6 +141,21 @@ fn main() -> i32 {
 exit_code = 0
 
 [[case]]
+name = "dbg_does_not_consume_string"
+spec = ["4.13:9d"]
+source = """
+fn take(s: String) -> i32 { 0 }
+
+fn main() -> i32 {
+    let s: String = "hello";
+    @dbg(s);
+    @dbg(s, 42);
+    take(s)
+}
+"""
+exit_code = 0
+
+[[case]]
 name = "dbg_invalid_type_unit"
 spec = ["4.13:7"]
 source = """
