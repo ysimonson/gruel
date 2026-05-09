@@ -770,11 +770,73 @@ impl<'a> ConstraintGenerator<'a> {
                         func.return_type.clone()
                     }
                 } else {
-                    // Unknown function - still process arguments for constraint generation
-                    for arg in args.iter() {
-                        self.generate(arg.value, ctx);
+                    // ADR-0082: when a `Call` targets a method on an
+                    // anonymous struct (the dispatch flip emits these
+                    // for `Vec(I32)::new()`, `v.push(x)`, etc.), the
+                    // mangled name `{struct_name}::{method}` or
+                    // `{struct_name}.{method}` won't be in `functions`.
+                    // Parse it and look up `method_sigs` so the literal
+                    // arg constraints are emitted, otherwise int literals
+                    // default to `i32` and codegen sees i32-vs-usize
+                    // mismatches at the call boundary.
+                    let mangled = self.interner.resolve(name).to_string();
+                    let split = mangled
+                        .rfind("::")
+                        .map(|i| (&mangled[..i], &mangled[i + 2..]))
+                        .or_else(|| {
+                            mangled
+                                .rfind('.')
+                                .map(|i| (&mangled[..i], &mangled[i + 1..]))
+                        });
+                    // Resolve the struct via the live type pool — anonymous
+                    // structs created post-`build_inference_context` (which
+                    // is when `populate_vec_instance` builds Vec(I32)
+                    // instances) aren't in `self.structs` yet.
+                    let struct_id_opt: Option<crate::types::StructId> = split
+                        .and_then(|(struct_name, _)| self.interner.get(struct_name))
+                        .and_then(|s| self.type_pool.get_struct_by_name(s))
+                        .and_then(|i| i.pool_index())
+                        .map(crate::types::StructId::from_pool_index);
+                    let method_sym_opt =
+                        split.and_then(|(_, method_name)| self.interner.get(method_name));
+                    if let (Some(struct_id), Some(method_sym)) = (struct_id_opt, method_sym_opt)
+                        && let Some(method) = self.methods.get(&(struct_id, method_sym))
+                    {
+                        // Check arg/param-count parity; constrain each
+                        // arg to its expected param type. Mirrors the
+                        // top-level fn-call logic above.
+                        let m_param_types = method.param_types.clone();
+                        if args.len() != m_param_types.len() {
+                            for arg in args.iter() {
+                                self.generate(arg.value, ctx);
+                            }
+                        } else {
+                            for (arg, param_ty) in args.iter().zip(m_param_types.iter()) {
+                                let arg_info = self.generate(arg.value, ctx);
+                                let is_iface = matches!(
+                                    param_ty,
+                                    InferType::Concrete(t) if matches!(
+                                        t.kind(),
+                                        crate::types::TypeKind::Interface(_)
+                                    )
+                                );
+                                if !is_iface {
+                                    self.add_constraint(Constraint::equal(
+                                        arg_info.ty,
+                                        param_ty.clone(),
+                                        arg_info.span,
+                                    ));
+                                }
+                            }
+                        }
+                        method.return_type.clone()
+                    } else {
+                        // Unknown function - still process arguments for constraint generation
+                        for arg in args.iter() {
+                            self.generate(arg.value, ctx);
+                        }
+                        InferType::Concrete(Type::ERROR)
                     }
-                    InferType::Concrete(Type::ERROR)
                 }
             }
 
@@ -986,6 +1048,10 @@ impl<'a> ConstraintGenerator<'a> {
                     Some(IntrinsicId::Free) => {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::UNIT)
+                    }
+                    Some(IntrinsicId::BytesEq) => {
+                        visit_args(self, ctx);
+                        InferType::Concrete(Type::BOOL)
                     }
                     // ADR-0079 Phase 2b: `@field_set` is a unit-yielding side
                     // effect on an uninit handle. `@finalize` returns the
@@ -1432,14 +1498,44 @@ impl<'a> ConstraintGenerator<'a> {
             }
 
             // Field access
-            InstData::FieldGet { base, field: _ } => {
+            InstData::FieldGet { base, field } => {
                 // Generate constraints for the base expression (needed for nested field access)
-                let _base_info = self.generate(*base, ctx);
-                // We need to look up the field type from the struct definition.
-                // For now, use a fresh type variable - full resolution happens during
-                // semantic analysis which has access to struct definitions.
-                let result_var = self.fresh_var();
-                InferType::Var(result_var)
+                let base_info = self.generate(*base, ctx);
+                // ADR-0082: when the base has a concrete struct type
+                // (whether normal or after auto-deref through Ref/MutRef
+                // — `self: Ref(Self)` is the load-bearing case for vec
+                // methods like `is_empty` whose body is `self.len == 0`),
+                // look up the field's declared type so the integer
+                // literal on the other side of the comparison is pinned
+                // to it. Without this, FieldGet returns a fresh var,
+                // the literal defaults to i32, and codegen sees an
+                // i64-vs-i32 mismatch when the field is `usize`.
+                let mut field_ty: Option<crate::types::Type> = None;
+                if let InferType::Concrete(base_ty) = &base_info.ty {
+                    let resolved = match base_ty.kind() {
+                        crate::types::TypeKind::Struct(_) => Some(*base_ty),
+                        crate::types::TypeKind::Ref(id) => Some(self.type_pool.ref_def(id)),
+                        crate::types::TypeKind::MutRef(id) => Some(self.type_pool.mut_ref_def(id)),
+                        _ => None,
+                    };
+                    if let Some(struct_ty) = resolved
+                        && let Some(struct_id) = struct_ty.as_struct()
+                    {
+                        let struct_def = self.type_pool.struct_def(struct_id);
+                        let field_name = self.interner.resolve(field);
+                        if let Some((_, sf)) = struct_def.find_field(field_name) {
+                            field_ty = Some(sf.ty);
+                        }
+                    }
+                }
+                if let Some(ty) = field_ty {
+                    InferType::Concrete(ty)
+                } else {
+                    // Fall back to fresh var if we don't yet know the
+                    // base's type (sema fixes this up post-HM).
+                    let result_var = self.fresh_var();
+                    InferType::Var(result_var)
+                }
             }
 
             // Field assignment
@@ -2146,6 +2242,20 @@ impl<'a> ConstraintGenerator<'a> {
     /// Handles primitive types, array syntax `[T; N]`, pointer syntax `ptr mut T` / `ptr const T`,
     /// and struct/enum types.
     fn resolve_type_name(&self, name: &str) -> Option<InferType> {
+        // ADR-0082: type_subst lookup. When resolving a method body
+        // for a parameterized struct instance (e.g. `Vec(I32)`), the
+        // outer fn's comptime type bindings (`T → I32`, `Self →
+        // <struct_type>`) are stored in `self.type_subst`. Consult it
+        // before everything else so a bare `T` annotation in
+        // `let p: MutPtr(T) = ...` (which decomposes to a recursive
+        // resolve_type_name("T")) resolves to the concrete type.
+        if let Some(subst) = self.type_subst
+            && let Some(name_spur) = self.interner.get(name)
+            && let Some(&ty) = subst.get(&name_spur)
+        {
+            return Some(InferType::Concrete(ty));
+        }
+
         // Check for array syntax first: [T; N]
         if let Some((element_type_str, length)) = parse_array_type_syntax(name) {
             // Recursively resolve the element type

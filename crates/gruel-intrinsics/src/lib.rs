@@ -90,34 +90,14 @@ pub enum IntrinsicId {
     PartsToMutSlice,
 
     // ---- Vec operations (ADR-0066) ----
-    VecNew,
-    VecWithCapacity,
-    VecLen,
-    VecCapacity,
-    VecIsEmpty,
-    VecPush,
-    VecPop,
-    VecClear,
-    VecReserve,
-    VecIndexRead,
-    VecIndexWrite,
-    VecPtr,
-    VecPtrMut,
-    VecTerminatedPtr,
-    VecClone,
+    // ADR-0082: most Vec method intrinsics retired in favour of
+    // dispatching through `prelude/vec.gruel`'s `pub fn Vec(...)`
+    // instantiation. The remaining variants here are the *user-facing*
+    // syntactic intrinsics (`@vec`, `@vec_repeat`, `@parts_to_vec`)
+    // — they bypass the prelude struct because they construct one.
     VecLiteral,
     VecRepeat,
-    VecDispose,
     PartsToVec,
-
-    // ---- ADR-0081 Vec(T) byte-comparison and search methods ----
-    VecEq,
-    VecCmp,
-    VecContains,
-    VecStartsWith,
-    VecEndsWith,
-    VecConcat,
-    VecExtendFromSlice,
 
     // ---- ADR-0072 String / Vec(u8) bridge ----
     Utf8Validate,
@@ -137,6 +117,11 @@ pub enum IntrinsicId {
     /// the inferred target pointer type. Result type comes from HM
     /// inference (let-annotation or call context).
     PtrCast,
+    /// `@bytes_eq(a, b, n) -> bool`: byte-level equality of two pointers.
+    /// Lowered to `__gruel_memcmp`. Used by the prelude `Vec.eq` body so
+    /// `Vec(T)` for a Copy struct `T` (e.g. `Pair { x: i32, y: i32 }`)
+    /// compares correctly without requiring `T: Eq`.
+    BytesEq,
 
     // ---- ADR-0079 Phase 2b: derive-construction primitives ----
     /// `@uninit(T) -> Uninit(T)`: handle to T-sized storage. Drop is
@@ -843,187 +828,11 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         description: "`@slice_index_write(m, i, v)` performs `m[i] = v`. Requires `MutSlice(T)`. Bounds-checks at runtime. Surface form: `m[i] = v`.",
         examples: &[],
     },
-    // ---- Vec operations (ADR-0066) ----
-    IntrinsicDef {
-        id: IntrinsicId::VecNew,
-        name: "vec_new",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Create an empty Vec(T).",
-        description: "`@vec_new(T)` returns an empty `Vec(T)` (cap=0, ptr=null). Surface form: `Vec(T)::new()`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecWithCapacity,
-        name: "vec_with_capacity",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Create a Vec(T) with a preallocated buffer.",
-        description: "`@vec_with_capacity(T, n)` returns an empty `Vec(T)` whose `cap >= n`. Surface form: `Vec(T)::with_capacity(n)`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecLen,
-        name: "vec_len",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Length of a vec.",
-        description: "`@vec_len(v)` returns the live element count. Surface form: `v.len()`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecCapacity,
-        name: "vec_capacity",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Capacity of a vec.",
-        description: "`@vec_capacity(v)` returns the allocated slot count. Surface form: `v.capacity()`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecIsEmpty,
-        name: "vec_is_empty",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Whether a vec has length zero.",
-        description: "`@vec_is_empty(v)` returns `v.len() == 0`. Surface form: `v.is_empty()`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecPush,
-        name: "vec_push",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Append an element to a Vec.",
-        description: "`@vec_push(v, x)` appends `x` to `v`, growing the buffer if needed. Surface form: `v.push(x)`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecPop,
-        name: "vec_pop",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Remove and return the last element of a Vec.",
-        description: "`@vec_pop(v)` returns `Option(T)` — `None` on empty, `Some(t)` otherwise. Surface form: `v.pop()`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecClear,
-        name: "vec_clear",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Drop all elements of a Vec without freeing the buffer.",
-        description: "`@vec_clear(v)` runs the per-element drop loop and sets `len = 0`. Surface form: `v.clear()`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecReserve,
-        name: "vec_reserve",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Ensure a Vec has capacity for additional elements.",
-        description: "`@vec_reserve(v, n)` grows the buffer so that `cap >= len + n`. Surface form: `v.reserve(n)`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecIndexRead,
-        name: "vec_index_read",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Read an element from a vec with bounds checking.",
-        description: "`@vec_index_read(v, i)` returns `v[i]`. Bounds-checked at runtime. Requires `T: Copy`. Surface form: `v[i]`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecIndexWrite,
-        name: "vec_index_write",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Write an element to a vec with bounds checking.",
-        description: "`@vec_index_write(v, i, x)` performs `v[i] = x`. Bounds-checked at runtime. Surface form: `v[i] = x`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecPtr,
-        name: "vec_ptr",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: true,
-        preview: None,
-        runtime_fn: None,
-        summary: "Extract the data pointer from a Vec.",
-        description: "`@vec_ptr(v)` returns a `Ptr(T)` to the first element. Requires a `checked` block. Surface form: `v.ptr()`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecPtrMut,
-        name: "vec_ptr_mut",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: true,
-        preview: None,
-        runtime_fn: None,
-        summary: "Extract the mutable data pointer from a Vec.",
-        description: "`@vec_ptr_mut(v)` returns a `MutPtr(T)`. Requires a `checked` block. Surface form: `v.ptr_mut()`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecTerminatedPtr,
-        name: "vec_terminated_ptr",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: true,
-        preview: None,
-        runtime_fn: None,
-        summary: "Write a sentinel and return the data pointer.",
-        description: "`@vec_terminated_ptr(v, s)` writes `s` at `ptr[len]` (growing if needed), returns `Ptr(T)`. Requires a `checked` block. Surface form: `v.terminated_ptr(s)`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecClone,
-        name: "vec_clone",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Clone a Vec.",
-        description: "`@vec_clone(v)` returns a deep copy of `v`. Requires `T: Clone`. Surface form: `v.clone()`.",
-        examples: &[],
-    },
+    // ---- Vec construction intrinsics (ADR-0066 + ADR-0082) ----
+    // The per-method intrinsics (`vec_push`, `vec_pop`, `vec_clone`, …)
+    // retired with ADR-0082; their bodies live in `prelude/vec.gruel`.
+    // What remains is the syntactic sugar that *constructs* a Vec —
+    // `@vec(...)` literals and `@parts_to_vec` for FFI handoff.
     IntrinsicDef {
         id: IntrinsicId::VecLiteral,
         name: "vec",
@@ -1049,18 +858,6 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &["@vec_repeat(0, 100)"],
     },
     IntrinsicDef {
-        id: IntrinsicId::VecDispose,
-        name: "vec_dispose",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: Some("__gruel_vec_dispose_panic"),
-        summary: "Free a Vec's heap buffer; panic if `len != 0`.",
-        description: "`@vec_dispose(v)` is the explicit-release form for `Vec(T)`. It panics if `v.len != 0` (so any contained linear elements are still live), then frees the heap buffer. Surface form: `v.dispose()`. For `Vec(T:Linear)` this is the only legal release path; for non-linear `T` it's an explicit alternative to implicit drop.",
-        examples: &[],
-    },
-    IntrinsicDef {
         id: IntrinsicId::PartsToVec,
         name: "parts_to_vec",
         kind: IntrinsicKind::Expr,
@@ -1070,91 +867,6 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         runtime_fn: None,
         summary: "Build a Vec from raw parts.",
         description: "`@parts_to_vec(p: MutPtr(T), len: usize, cap: usize) -> Vec(T)` takes ownership of `p`. Requires a `checked` block.",
-        examples: &[],
-    },
-    // ---- ADR-0081 Vec(T) byte-comparison and search methods ----
-    IntrinsicDef {
-        id: IntrinsicId::VecEq,
-        name: "vec_eq",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Element-wise equality between two Vecs.",
-        description: "`@vec_eq(a, b)` returns `true` iff `a` and `b` have identical lengths and every element pair compares equal. Requires `T: Copy`. Surface form: `a == b` (via the Eq interface).",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecCmp,
-        name: "vec_cmp",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Lexicographic comparison between two Vecs.",
-        description: "`@vec_cmp(a, b)` returns `Ordering::Less` / `Ordering::Equal` / `Ordering::Greater` from element-by-element comparison with length tiebreak. Requires `T: Copy`. Surface form: `a.cmp(b)` and the `<` / `<=` / `>` / `>=` operators (via the Ord interface).",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecContains,
-        name: "vec_contains",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Test whether a Vec contains a given subsequence.",
-        description: "`@vec_contains(haystack, needle)` returns `true` iff the slice `needle` occurs as a contiguous subsequence within `haystack`. Empty `needle` matches anywhere (returns `true`). Requires `T: Copy`. Surface form: `haystack.contains(&needle[..])`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecStartsWith,
-        name: "vec_starts_with",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Test whether a Vec begins with a given prefix.",
-        description: "`@vec_starts_with(v, prefix)` returns `true` iff every element of `prefix` matches the corresponding leading element of `v`. Empty prefix returns `true`. Requires `T: Copy`. Surface form: `v.starts_with(&prefix[..])`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecEndsWith,
-        name: "vec_ends_with",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Test whether a Vec ends with a given suffix.",
-        description: "`@vec_ends_with(v, suffix)` returns `true` iff every element of `suffix` matches the corresponding trailing element of `v`. Empty suffix returns `true`. Requires `T: Copy`. Surface form: `v.ends_with(&suffix[..])`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecConcat,
-        name: "vec_concat",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Build a new Vec by concatenating self with another slice.",
-        description: "`@vec_concat(v, other)` allocates a fresh `Vec(T)` of length `v.len + other.len` containing the elements of `v` followed by `other`. The original `v` is consumed (moved). Requires `T: Copy`. Surface form: `v.concat(&other[..])`.",
-        examples: &[],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::VecExtendFromSlice,
-        name: "vec_extend_from_slice",
-        kind: IntrinsicKind::Expr,
-        category: Category::Vec,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: None,
-        summary: "Append every element from a slice onto a Vec.",
-        description: "`@vec_extend_from_slice(v, other)` reserves additional capacity if needed, then memcpys every element of `other` onto the tail of `v`. Requires `T: Copy`. Surface form: `v.extend_from_slice(&other[..])`.",
         examples: &[],
     },
     IntrinsicDef {
@@ -1322,6 +1034,18 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         summary: "Reinterpret a pointer as another pointer type (ADR-0082).",
         description: "`@ptr_cast(p) -> MutPtr(T)` / `Ptr(T)` reinterprets the raw pointer `p` as a pointer of the target type, where the target is inferred from the binding context (HM inference, like `@cast`). Both source and target must be `MutPtr(_)` / `Ptr(_)`. The cast is a no-op at the LLVM level (pointers are opaque); only the Gruel-side type tracking changes. Requires a `checked` block.",
         examples: &["let p: MutPtr(T) = checked { @ptr_cast(p_u8) };"],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::BytesEq,
+        name: "bytes_eq",
+        kind: IntrinsicKind::Expr,
+        category: Category::Pointer,
+        requires_unchecked: true,
+        preview: None,
+        runtime_fn: Some("__gruel_memcmp"),
+        summary: "Byte-level equality of two memory regions (ADR-0082).",
+        description: "`@bytes_eq(a, b, n) -> bool` returns `true` iff the `n` bytes at `a` and `b` are equal. `a` and `b` must be `Ptr(_)` / `MutPtr(_)` values. Used by the prelude `Vec.eq` body so a `Vec(T)` over a Copy struct `T` (without an `Eq` impl) compares element-wise via `memcmp`. Requires a `checked` block.",
+        examples: &["checked { @bytes_eq(p1, p2, n) }"],
     },
 ];
 
@@ -1846,32 +1570,9 @@ mod tests {
                 | IntrinsicId::SlicePtrMut
                 | IntrinsicId::PartsToSlice
                 | IntrinsicId::PartsToMutSlice
-                | IntrinsicId::VecNew
-                | IntrinsicId::VecWithCapacity
-                | IntrinsicId::VecLen
-                | IntrinsicId::VecCapacity
-                | IntrinsicId::VecIsEmpty
-                | IntrinsicId::VecPush
-                | IntrinsicId::VecPop
-                | IntrinsicId::VecClear
-                | IntrinsicId::VecReserve
-                | IntrinsicId::VecIndexRead
-                | IntrinsicId::VecIndexWrite
-                | IntrinsicId::VecPtr
-                | IntrinsicId::VecPtrMut
-                | IntrinsicId::VecTerminatedPtr
-                | IntrinsicId::VecClone
                 | IntrinsicId::VecLiteral
                 | IntrinsicId::VecRepeat
-                | IntrinsicId::VecDispose
                 | IntrinsicId::PartsToVec
-                | IntrinsicId::VecEq
-                | IntrinsicId::VecCmp
-                | IntrinsicId::VecContains
-                | IntrinsicId::VecStartsWith
-                | IntrinsicId::VecEndsWith
-                | IntrinsicId::VecConcat
-                | IntrinsicId::VecExtendFromSlice
                 | IntrinsicId::TestPreviewGate
                 | IntrinsicId::Utf8Validate
                 | IntrinsicId::CStrToVec
@@ -1883,7 +1584,8 @@ mod tests {
                 | IntrinsicId::Alloc
                 | IntrinsicId::Realloc
                 | IntrinsicId::Free
-                | IntrinsicId::PtrCast => {}
+                | IntrinsicId::PtrCast
+                | IntrinsicId::BytesEq => {}
             }
         }
     }
@@ -1954,9 +1656,6 @@ mod tests {
             "slice_ptr_mut",
             "parts_to_slice",
             "parts_to_mut_slice",
-            "vec_ptr",
-            "vec_ptr_mut",
-            "vec_terminated_ptr",
             "parts_to_vec",
             // ADR-0072
             "cstr_to_vec",
@@ -1965,6 +1664,7 @@ mod tests {
             "realloc",
             "free",
             "ptr_cast",
+            "bytes_eq",
         ]
         .into_iter()
         .collect();

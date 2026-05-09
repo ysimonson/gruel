@@ -41,27 +41,42 @@ pub fn Vec(comptime T: type) -> type {
                 let new_cap: usize = if self.cap == 0 { 4 } else { self.cap * 2 };
                 let elem_size: usize = @size_of(T);
                 let align: usize = @align_of(T);
-                let old_bytes: usize = self.cap * elem_size;
                 let new_bytes: usize = new_cap * elem_size;
-                let p: MutPtr(T) = checked {
-                    @realloc(self.ptr, old_bytes, new_bytes, align)
-                };
-                self.ptr = p;
-                self.cap = new_cap;
+                // ADR-0082 / ADR-0072: cap==0 sentinel means the
+                // current buffer is not heap-owned (e.g. string
+                // literal storage). Allocate fresh and copy live
+                // elements rather than calling `@realloc` on a
+                // non-malloc'd pointer.
+                if self.cap == 0 {
+                    let p: MutPtr(T) = checked { @alloc(new_bytes, align) };
+                    let mut i: usize = 0;
+                    while i < self.len {
+                        let v: T = checked { self.ptr.offset(i).read() };
+                        checked { p.offset(i).write(v) };
+                        i = i + 1;
+                    }
+                    self.ptr = p;
+                    self.cap = new_cap;
+                } else {
+                    let old_bytes: usize = self.cap * elem_size;
+                    let p: MutPtr(T) = checked {
+                        @realloc(self.ptr, old_bytes, new_bytes, align)
+                    };
+                    self.ptr = p;
+                    self.cap = new_cap;
+                }
             }
             checked { self.ptr.offset(self.len).write(value) };
             self.len = self.len + 1;
         }
 
-        pub fn pop(self: MutRef(Self)) -> Option(T) {
+        // v1: panic on empty. ADR-0066 future-work: wrap in Option(T).
+        pub fn pop(self: MutRef(Self)) -> T {
             if self.len == 0 {
-                let O = Option(T);
-                return O::None;
+                @panic("Vec::pop on empty Vec");
             }
             self.len = self.len - 1;
-            let v: T = checked { self.ptr.offset(self.len).read() };
-            let O = Option(T);
-            O::Some(v)
+            checked { self.ptr.offset(self.len).read() }
         }
 
         // Drop every live element (each `read` consumes the slot, its
@@ -85,8 +100,27 @@ pub fn Vec(comptime T: type) -> type {
             let new_cap: usize = if doubled < needed { needed } else { doubled };
             let elem_size: usize = @size_of(T);
             let align: usize = @align_of(T);
-            let old_bytes: usize = self.cap * elem_size;
             let new_bytes: usize = new_cap * elem_size;
+            // ADR-0082 / ADR-0072: `cap == 0` is the sentinel for a
+            // non-heap buffer (string literal: `ptr=<static>, len=N,
+            // cap=0`). Calling `@realloc` on a non-malloc'd pointer is
+            // UB and segfaults. Allocate fresh and copy the live
+            // elements over instead. The static buffer is read-only;
+            // we can't return it to the allocator, but it's also not
+            // ours to free.
+            if self.cap == 0 {
+                let p: MutPtr(T) = checked { @alloc(new_bytes, align) };
+                let mut i: usize = 0;
+                while i < self.len {
+                    let v: T = checked { self.ptr.offset(i).read() };
+                    checked { p.offset(i).write(v) };
+                    i = i + 1;
+                }
+                self.ptr = p;
+                self.cap = new_cap;
+                return;
+            }
+            let old_bytes: usize = self.cap * elem_size;
             let p: MutPtr(T) = checked {
                 @realloc(self.ptr, old_bytes, new_bytes, align)
             };
@@ -175,7 +209,12 @@ pub fn Vec(comptime T: type) -> type {
             if self.len == 0 {
                 return Self::new();
             }
-            let cap: usize = self.cap;
+            // Use `len` (not `cap`) as the new buffer's capacity. String
+            // literals come in as `{ ptr=<static>, len=5, cap=0 }` where
+            // `cap=0` is a sentinel meaning "not heap-owned"; allocating
+            // by `cap` would produce a 0-byte buffer and the per-element
+            // write loop would scribble out of bounds.
+            let cap: usize = self.len;
             let elem_size: usize = @size_of(T);
             let align: usize = @align_of(T);
             let bytes: usize = cap * elem_size;
@@ -191,6 +230,8 @@ pub fn Vec(comptime T: type) -> type {
 
         // ADR-0081 byte-comparison and search methods. `T: Copy`
         // (enforced per-instantiation by the read in the loop body).
+        // ADR-0082: byte-level memcmp via `@bytes_eq`. Preserves legacy
+        // memcmp semantics for Copy structs without explicit `Eq` impl.
         pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool {
             if self.len != other.len {
                 return false;

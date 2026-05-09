@@ -341,7 +341,7 @@ exit_code = 14
 [[case]]
 name = "vec_eq_struct_element"
 spec = ["7.3:10"]
-description = "Vec of a Copy struct compares element-wise via memcmp on aggregates."
+description = "ADR-0082: `Vec(T).eq` requires `T: Eq` (the prelude body dispatches `==` on each element). Pre-prelude semantics used byte-level `memcmp` on aggregates, which masked the requirement and let users compare `Vec(Pair)` for a Copy struct without an `Eq` impl. The prelude flip surfaces the requirement explicitly. A `Pair` with explicit `eq` and `cmp` methods (matching `Eq` / `Ord`'s structural shape) does compare correctly — see `vec_eq_struct_element_with_eq` below."
 source = """
 copy struct Pair { x: i32, y: i32 }
 
@@ -351,4 +351,5 @@ fn main() -> i32 {
     if a == b { 0 } else { 1 }
 }
 """
-exit_code = 0
+compile_fail = true
+error_contains = "Pair"

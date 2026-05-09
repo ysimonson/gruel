@@ -265,6 +265,16 @@ impl<'a> Sema<'a> {
             };
         }
 
+        // ADR-0082: type substitutions from the active comptime
+        // call/method body. Set by `analyze_function_internal` (around
+        // body analysis of a specialized fn or a method on a
+        // parameterized struct instance). Allows `T` references inside
+        // the body to resolve to the bound concrete type. Mirrors the
+        // pattern used by `resolve_type_for_comptime_with_subst`.
+        if let Some(&ty) = self.comptime_type_overrides.get(&type_sym) {
+            return Ok(ty);
+        }
+
         // Check primitive types first.
         // Note: String is handled below via struct lookup (it's a builtin struct).
         match type_name {
@@ -580,6 +590,95 @@ impl<'a> Sema<'a> {
             let pointee_ty = self.resolve_type_for_comptime_with_subst(pointee_sym, type_subst)?;
             let ptr_type_id = self.type_pool.intern_ptr_mut_from_type(pointee_ty);
             Some(Type::new_ptr_mut(ptr_type_id))
+        } else if let Some((callee_name, arg_strs)) =
+            crate::types::parse_type_call_syntax(type_name)
+        {
+            // ADR-0082: function-call type forms (`MutPtr(T)`, `Ptr(T)`,
+            // `Slice(T)`, `Vec(T)`, plus user-defined parameterized types
+            // like `Option(T)`). Mirrors the runtime `resolve_type` path
+            // but resolves args under `type_subst` so an outer fn's
+            // comptime params (e.g. `T`) are captured into the concrete
+            // type. Without this, a struct field like `ptr: MutPtr(T)`
+            // can't be resolved when the struct is built by a comptime
+            // type-constructor.
+            if let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name) {
+                if arg_strs.len() != constructor.arity {
+                    return None;
+                }
+                let mut arg_types: Vec<Type> = Vec::with_capacity(arg_strs.len());
+                for arg_str in &arg_strs {
+                    let arg_sym = self.interner.get_or_intern(arg_str);
+                    let arg_ty = self.resolve_type_for_comptime_with_subst(arg_sym, type_subst)?;
+                    arg_types.push(arg_ty);
+                }
+                use gruel_builtins::BuiltinTypeConstructorKind;
+                return match constructor.kind {
+                    BuiltinTypeConstructorKind::Ptr => {
+                        let id = self.type_pool.intern_ptr_const_from_type(arg_types[0]);
+                        Some(Type::new_ptr_const(id))
+                    }
+                    BuiltinTypeConstructorKind::MutPtr => {
+                        let id = self.type_pool.intern_ptr_mut_from_type(arg_types[0]);
+                        Some(Type::new_ptr_mut(id))
+                    }
+                    BuiltinTypeConstructorKind::Ref => {
+                        let id = self.type_pool.intern_ref_from_type(arg_types[0]);
+                        Some(Type::new_ref(id))
+                    }
+                    BuiltinTypeConstructorKind::MutRef => {
+                        let id = self.type_pool.intern_mut_ref_from_type(arg_types[0]);
+                        Some(Type::new_mut_ref(id))
+                    }
+                    BuiltinTypeConstructorKind::Slice => {
+                        let id = self.type_pool.intern_slice_from_type(arg_types[0]);
+                        Some(Type::new_slice(id))
+                    }
+                    BuiltinTypeConstructorKind::MutSlice => {
+                        let id = self.type_pool.intern_mut_slice_from_type(arg_types[0]);
+                        Some(Type::new_mut_slice(id))
+                    }
+                    BuiltinTypeConstructorKind::Vec => {
+                        let id = self.type_pool.intern_vec_from_type(arg_types[0]);
+                        Some(Type::new_vec(id))
+                    }
+                };
+            }
+            // ADR-0057 + ADR-0082: user-defined parameterized type call
+            // (e.g. `Option(T)`). Resolve args under `type_subst`, then
+            // recursively evaluate the callee's body with a substitution
+            // map binding the callee's comptime params to the resolved
+            // arg types. Mirrors the runtime `resolve_type` path.
+            let callee_sym = self.interner.get_or_intern(&callee_name);
+            let fn_info = self.functions.get(&callee_sym).copied()?;
+            let mut arg_types: Vec<Type> = Vec::with_capacity(arg_strs.len());
+            for arg_str in &arg_strs {
+                let arg_sym = self.interner.get_or_intern(arg_str);
+                let arg_ty = self.resolve_type_for_comptime_with_subst(arg_sym, type_subst)?;
+                arg_types.push(arg_ty);
+            }
+            let param_comptime = self.param_arena.comptime(fn_info.params).to_vec();
+            let param_names = self.param_arena.names(fn_info.params).to_vec();
+            let comptime_param_names: Vec<Spur> = param_names
+                .iter()
+                .zip(param_comptime.iter())
+                .filter_map(|(n, &c)| if c { Some(*n) } else { None })
+                .collect();
+            if comptime_param_names.len() != arg_types.len() {
+                return None;
+            }
+            let mut subst: rustc_hash::FxHashMap<Spur, Type> = rustc_hash::FxHashMap::default();
+            for (n, t) in comptime_param_names.iter().zip(arg_types.iter()) {
+                subst.insert(*n, *t);
+            }
+            let value_subst: rustc_hash::FxHashMap<Spur, super::ConstValue> =
+                rustc_hash::FxHashMap::default();
+            let saved_ctor = self.comptime_ctor_fn.replace(callee_sym);
+            let result = self.try_evaluate_const_with_subst(fn_info.body, &subst, &value_subst);
+            self.comptime_ctor_fn = saved_ctor;
+            match result {
+                Some(super::ConstValue::Type(t)) => Some(t),
+                _ => None,
+            }
         } else {
             None // Unknown type
         }

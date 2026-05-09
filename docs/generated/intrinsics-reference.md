@@ -45,32 +45,9 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@parts_to_slice` | expr | Slices | — | yes | Build a slice from a raw pointer and a length. |
 | `@parts_to_mut_slice` | expr | Slices | — | yes | Build a mutable slice from a raw mutable pointer and a length. |
 | `@slice_index_write` | expr | Slices | — | — | Write an element to a mutable slice with bounds checking. |
-| `@vec_new` | expr | Vectors | — | — | Create an empty Vec(T). |
-| `@vec_with_capacity` | expr | Vectors | — | — | Create a Vec(T) with a preallocated buffer. |
-| `@vec_len` | expr | Vectors | — | — | Length of a vec. |
-| `@vec_capacity` | expr | Vectors | — | — | Capacity of a vec. |
-| `@vec_is_empty` | expr | Vectors | — | — | Whether a vec has length zero. |
-| `@vec_push` | expr | Vectors | — | — | Append an element to a Vec. |
-| `@vec_pop` | expr | Vectors | — | — | Remove and return the last element of a Vec. |
-| `@vec_clear` | expr | Vectors | — | — | Drop all elements of a Vec without freeing the buffer. |
-| `@vec_reserve` | expr | Vectors | — | — | Ensure a Vec has capacity for additional elements. |
-| `@vec_index_read` | expr | Vectors | — | — | Read an element from a vec with bounds checking. |
-| `@vec_index_write` | expr | Vectors | — | — | Write an element to a vec with bounds checking. |
-| `@vec_ptr` | expr | Vectors | — | yes | Extract the data pointer from a Vec. |
-| `@vec_ptr_mut` | expr | Vectors | — | yes | Extract the mutable data pointer from a Vec. |
-| `@vec_terminated_ptr` | expr | Vectors | — | yes | Write a sentinel and return the data pointer. |
-| `@vec_clone` | expr | Vectors | — | — | Clone a Vec. |
 | `@vec` | expr | Vectors | — | — | Construct a Vec from individual elements. |
 | `@vec_repeat` | expr | Vectors | — | — | Construct a Vec with N copies of a value. |
-| `@vec_dispose` | expr | Vectors | — | — | Free a Vec's heap buffer; panic if `len != 0`. |
 | `@parts_to_vec` | expr | Vectors | — | yes | Build a Vec from raw parts. |
-| `@vec_eq` | expr | Vectors | — | — | Element-wise equality between two Vecs. |
-| `@vec_cmp` | expr | Vectors | — | — | Lexicographic comparison between two Vecs. |
-| `@vec_contains` | expr | Vectors | — | — | Test whether a Vec contains a given subsequence. |
-| `@vec_starts_with` | expr | Vectors | — | — | Test whether a Vec begins with a given prefix. |
-| `@vec_ends_with` | expr | Vectors | — | — | Test whether a Vec ends with a given suffix. |
-| `@vec_concat` | expr | Vectors | — | — | Build a new Vec by concatenating self with another slice. |
-| `@vec_extend_from_slice` | expr | Vectors | — | — | Append every element from a slice onto a Vec. |
 | `@ptr_read` | expr | Raw Pointers | — | yes | Load a value through a raw pointer (internal). |
 | `@ptr_write` | expr | Raw Pointers | — | yes | Store a value through a raw mutable pointer (internal). |
 | `@ptr_read_volatile` | expr | Raw Pointers | — | yes | Volatile load through a raw pointer (internal). |
@@ -87,6 +64,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@realloc` | expr | Raw Pointers | — | yes | Resize a raw heap allocation (ADR-0082). |
 | `@free` | expr | Raw Pointers | — | yes | Free a raw heap allocation (ADR-0082). |
 | `@ptr_cast` | expr | Raw Pointers | — | yes | Reinterpret a pointer as another pointer type (ADR-0082). |
+| `@bytes_eq` | expr | Raw Pointers | — | yes | Byte-level equality of two memory regions (ADR-0082). |
 | `@syscall` | expr | System Calls | — | yes | Direct OS system call. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
 | `@cstr_to_vec` | expr | Preview / Meta | — | yes | Copy a NUL-terminated C string into a fresh Vec(u8). |
@@ -518,84 +496,6 @@ for i in @range(0, 10) { ... }
 
 ## Vectors
 
-### `@vec_new`
-
-`@vec_new(T)` returns an empty `Vec(T)` (cap=0, ptr=null). Surface form: `Vec(T)::new()`.
-
-
-### `@vec_with_capacity`
-
-`@vec_with_capacity(T, n)` returns an empty `Vec(T)` whose `cap >= n`. Surface form: `Vec(T)::with_capacity(n)`.
-
-
-### `@vec_len`
-
-`@vec_len(v)` returns the live element count. Surface form: `v.len()`.
-
-
-### `@vec_capacity`
-
-`@vec_capacity(v)` returns the allocated slot count. Surface form: `v.capacity()`.
-
-
-### `@vec_is_empty`
-
-`@vec_is_empty(v)` returns `v.len() == 0`. Surface form: `v.is_empty()`.
-
-
-### `@vec_push`
-
-`@vec_push(v, x)` appends `x` to `v`, growing the buffer if needed. Surface form: `v.push(x)`.
-
-
-### `@vec_pop`
-
-`@vec_pop(v)` returns `Option(T)` — `None` on empty, `Some(t)` otherwise. Surface form: `v.pop()`.
-
-
-### `@vec_clear`
-
-`@vec_clear(v)` runs the per-element drop loop and sets `len = 0`. Surface form: `v.clear()`.
-
-
-### `@vec_reserve`
-
-`@vec_reserve(v, n)` grows the buffer so that `cap >= len + n`. Surface form: `v.reserve(n)`.
-
-
-### `@vec_index_read`
-
-`@vec_index_read(v, i)` returns `v[i]`. Bounds-checked at runtime. Requires `T: Copy`. Surface form: `v[i]`.
-
-
-### `@vec_index_write`
-
-`@vec_index_write(v, i, x)` performs `v[i] = x`. Bounds-checked at runtime. Surface form: `v[i] = x`.
-
-
-### `@vec_ptr`
-
-`@vec_ptr(v)` returns a `Ptr(T)` to the first element. Requires a `checked` block. Surface form: `v.ptr()`.
-
-- **Requires:** `checked { ... }` block
-
-### `@vec_ptr_mut`
-
-`@vec_ptr_mut(v)` returns a `MutPtr(T)`. Requires a `checked` block. Surface form: `v.ptr_mut()`.
-
-- **Requires:** `checked { ... }` block
-
-### `@vec_terminated_ptr`
-
-`@vec_terminated_ptr(v, s)` writes `s` at `ptr[len]` (growing if needed), returns `Ptr(T)`. Requires a `checked` block. Surface form: `v.terminated_ptr(s)`.
-
-- **Requires:** `checked { ... }` block
-
-### `@vec_clone`
-
-`@vec_clone(v)` returns a deep copy of `v`. Requires `T: Clone`. Surface form: `v.clone()`.
-
-
 ### `@vec`
 
 `@vec(a, b, c)` returns a `Vec(T)` of length 3 with the given elements. Mirrors Rust's `vec![…]`. Requires at least one argument; element types unify to a single `T`.
@@ -618,52 +518,11 @@ for i in @range(0, 10) { ... }
 @vec_repeat(0, 100)
 ```
 
-### `@vec_dispose`
-
-`@vec_dispose(v)` is the explicit-release form for `Vec(T)`. It panics if `v.len != 0` (so any contained linear elements are still live), then frees the heap buffer. Surface form: `v.dispose()`. For `Vec(T:Linear)` this is the only legal release path; for non-linear `T` it's an explicit alternative to implicit drop.
-
-- **Runtime symbol:** `__gruel_vec_dispose_panic`
-
 ### `@parts_to_vec`
 
 `@parts_to_vec(p: MutPtr(T), len: usize, cap: usize) -> Vec(T)` takes ownership of `p`. Requires a `checked` block.
 
 - **Requires:** `checked { ... }` block
-
-### `@vec_eq`
-
-`@vec_eq(a, b)` returns `true` iff `a` and `b` have identical lengths and every element pair compares equal. Requires `T: Copy`. Surface form: `a == b` (via the Eq interface).
-
-
-### `@vec_cmp`
-
-`@vec_cmp(a, b)` returns `Ordering::Less` / `Ordering::Equal` / `Ordering::Greater` from element-by-element comparison with length tiebreak. Requires `T: Copy`. Surface form: `a.cmp(b)` and the `<` / `<=` / `>` / `>=` operators (via the Ord interface).
-
-
-### `@vec_contains`
-
-`@vec_contains(haystack, needle)` returns `true` iff the slice `needle` occurs as a contiguous subsequence within `haystack`. Empty `needle` matches anywhere (returns `true`). Requires `T: Copy`. Surface form: `haystack.contains(&needle[..])`.
-
-
-### `@vec_starts_with`
-
-`@vec_starts_with(v, prefix)` returns `true` iff every element of `prefix` matches the corresponding leading element of `v`. Empty prefix returns `true`. Requires `T: Copy`. Surface form: `v.starts_with(&prefix[..])`.
-
-
-### `@vec_ends_with`
-
-`@vec_ends_with(v, suffix)` returns `true` iff every element of `suffix` matches the corresponding trailing element of `v`. Empty suffix returns `true`. Requires `T: Copy`. Surface form: `v.ends_with(&suffix[..])`.
-
-
-### `@vec_concat`
-
-`@vec_concat(v, other)` allocates a fresh `Vec(T)` of length `v.len + other.len` containing the elements of `v` followed by `other`. The original `v` is consumed (moved). Requires `T: Copy`. Surface form: `v.concat(&other[..])`.
-
-
-### `@vec_extend_from_slice`
-
-`@vec_extend_from_slice(v, other)` reserves additional capacity if needed, then memcpys every element of `other` onto the tail of `v`. Requires `T: Copy`. Surface form: `v.extend_from_slice(&other[..])`.
-
 
 ## Raw Pointers
 
@@ -788,6 +647,19 @@ checked { @free(p, n * @size_of(T), @align_of(T)) }
 
 ```gruel
 let p: MutPtr(T) = checked { @ptr_cast(p_u8) };
+```
+
+### `@bytes_eq`
+
+`@bytes_eq(a, b, n) -> bool` returns `true` iff the `n` bytes at `a` and `b` are equal. `a` and `b` must be `Ptr(_)` / `MutPtr(_)` values. Used by the prelude `Vec.eq` body so a `Vec(T)` over a Copy struct `T` (without an `Eq` impl) compares element-wise via `memcmp`. Requires a `checked` block.
+
+- **Runtime symbol:** `__gruel_memcmp`
+- **Requires:** `checked { ... }` block
+
+**Examples:**
+
+```gruel
+checked { @bytes_eq(p1, p2, n) }
 ```
 
 ## System Calls

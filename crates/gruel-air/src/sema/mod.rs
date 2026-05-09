@@ -181,10 +181,21 @@ pub struct Sema<'a> {
     /// stored here, keyed by StructId. These values become part of type identity:
     /// FixedBuffer(42) and FixedBuffer(100) are different types.
     pub(crate) anon_struct_captured_values: HashMap<StructId, HashMap<Spur, ConstValue>>,
+    /// ADR-0082: captured comptime *type* substitutions for anonymous
+    /// structs created from a parameterized comptime function (e.g.
+    /// `pub fn Vec(comptime T: type) -> type { struct { ... } }`). Stores
+    /// `T → I32` per `Vec(I32)` instance. Looked up when analyzing method
+    /// bodies so type names that reference the outer fn's comptime params
+    /// resolve at body-analysis time. Parallels `anon_struct_captured_values`
+    /// for type substitutions instead of value substitutions.
+    pub(crate) anon_struct_type_subst: HashMap<StructId, HashMap<Spur, Type>>,
     /// Method signatures for anonymous enums, used for structural equality comparison.
     pub(crate) anon_enum_method_sigs: HashMap<EnumId, Vec<AnonMethodSig>>,
     /// Captured comptime values for anonymous enums (same semantics as anonymous structs).
     pub(crate) anon_enum_captured_values: HashMap<EnumId, HashMap<Spur, ConstValue>>,
+    /// ADR-0082: captured comptime *type* substitutions for anonymous
+    /// enums (parallel to `anon_struct_type_subst`).
+    pub(crate) anon_enum_type_subst: HashMap<EnumId, HashMap<Spur, Type>>,
     /// ADR-0082: registry of `StructId`s produced by instantiating the
     /// `@lang("vec")` function for some element type `T`. Maps the
     /// instance struct's `StructId` to the element type. Populated when
@@ -288,8 +299,10 @@ impl<'a> Sema<'a> {
             inline_enum_drops: HashMap::default(),
             anon_struct_method_sigs: HashMap::default(),
             anon_struct_captured_values: HashMap::default(),
+            anon_struct_type_subst: HashMap::default(),
             anon_enum_method_sigs: HashMap::default(),
             anon_enum_captured_values: HashMap::default(),
+            anon_enum_type_subst: HashMap::default(),
             vec_instance_registry: HashMap::default(),
             comptime_ctor_fn: None,
             comptime_steps_used: 0,

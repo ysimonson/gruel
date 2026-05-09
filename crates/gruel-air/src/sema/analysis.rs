@@ -368,6 +368,8 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                         .get(&struct_id)
                         .cloned()
                         .unwrap_or_else(HashMap::default);
+                    // ADR-0082: outer comptime fn's type subst (T → I32 etc.).
+                    let outer_type_subst = sema.anon_struct_type_subst.get(&struct_id).cloned();
 
                     match sema.analyze_method_body(
                         &infer_ctx,
@@ -376,6 +378,7 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                         method_info.body,
                         method_info.struct_type,
                         &captured_values,
+                        outer_type_subst.as_ref(),
                     ) {
                         Ok((
                             air,
@@ -618,6 +621,34 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                             && !analyzed_anon_struct_methods.contains(&(*struct_id, *method_name))
                             && !method_info.is_generic
                         {
+                            // ADR-0082: skip Copy-gated Vec methods when
+                            // the instance's element type is non-Copy.
+                            // Their bodies (e.g. `clone`, `eq`, `cmp`,
+                            // `contains`, …) read elements via
+                            // `ptr.offset(i).read()` which sema rejects
+                            // for non-Copy T. The dispatch path already
+                            // returns "T: Copy required" before we get
+                            // here, so the bodies are unreachable.
+                            let m_name = sema.interner.resolve(method_name);
+                            let copy_only = matches!(
+                                m_name,
+                                "clone"
+                                    | "eq"
+                                    | "cmp"
+                                    | "contains"
+                                    | "starts_with"
+                                    | "ends_with"
+                                    | "concat"
+                                    | "extend_from_slice"
+                            );
+                            if copy_only
+                                && let Some(subst) = sema.anon_struct_type_subst.get(struct_id)
+                                && let Some(t_sym) = sema.interner.get("T")
+                                && let Some(&elem_ty) = subst.get(&t_sym)
+                                && !sema.is_type_copy(elem_ty)
+                            {
+                                return None;
+                            }
                             Some((*struct_id, *method_name, *method_info))
                         } else {
                             None
@@ -663,6 +694,7 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                         .get(&struct_id)
                         .cloned()
                         .unwrap_or_else(HashMap::default);
+                    let outer_type_subst = sema.anon_struct_type_subst.get(&struct_id).cloned();
                     match sema.analyze_method_body(
                         &infer_ctx,
                         method_info.return_type,
@@ -670,6 +702,7 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                         method_info.body,
                         method_info.struct_type,
                         &captured_values,
+                        outer_type_subst.as_ref(),
                     ) {
                         Ok((
                             air,
@@ -762,6 +795,7 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                         .get(&enum_id)
                         .cloned()
                         .unwrap_or_else(HashMap::default);
+                    let outer_type_subst = sema.anon_enum_type_subst.get(&enum_id).cloned();
 
                     match sema.analyze_method_body(
                         &infer_ctx,
@@ -770,6 +804,7 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                         method_info.body,
                         method_info.struct_type,
                         &captured_values,
+                        outer_type_subst.as_ref(),
                     ) {
                         Ok((
                             air,
@@ -1716,11 +1751,36 @@ impl<'a> Sema<'a> {
             unroll_arm_bindings: HashMap::default(),
         };
 
+        // ADR-0082: install the `type_subst` (and `Self`) into
+        // `comptime_type_overrides` so `resolve_type` calls inside the
+        // body see the right substitutions for `T`, `Self`, etc. Saved
+        // and restored around body analysis so the override doesn't
+        // leak across functions. (Mirrors the comptime-interpreter's
+        // own use of `comptime_type_overrides` on line ~1778 in
+        // `comptime.rs`.)
+        let mut active_overrides: HashMap<Spur, Type> = HashMap::default();
+        if let Some(subst) = type_subst {
+            for (k, v) in subst.iter() {
+                active_overrides.insert(*k, *v);
+            }
+        }
+        if let Some(host) = self.current_self {
+            let self_sym = self.interner.get_or_intern("Self");
+            active_overrides.entry(self_sym).or_insert(host);
+        }
+        let saved_overrides =
+            std::mem::replace(&mut self.comptime_type_overrides, active_overrides);
+
         // ======================================================================
         // Phase 3: AIR Emission
         // ======================================================================
         // Analyze the body expression, emitting AIR with resolved types
-        let body_result = self.analyze_inst(&mut air, body, &mut ctx)?;
+        let body_analysis = self.analyze_inst(&mut air, body, &mut ctx);
+
+        // Restore the previous overrides regardless of analyze_inst's outcome.
+        self.comptime_type_overrides = saved_overrides;
+
+        let body_result = body_analysis?;
 
         // Add implicit return only if body doesn't already diverge (e.g., explicit return)
         if body_result.ty != Type::NEVER {
@@ -1782,6 +1842,12 @@ impl<'a> Sema<'a> {
     /// This is used for anonymous struct methods where `Self` should resolve to the
     /// struct type. The `self_type` is added to the type substitution map under the
     /// symbol "Self", allowing `Self { ... }` struct literals to work correctly.
+    ///
+    /// ADR-0082: when the host type is an anonymous struct/enum produced by a
+    /// parameterized comptime function (e.g. `Vec(I32)`), `outer_type_subst`
+    /// carries the outer fn's type bindings (`T → I32`) into body analysis so
+    /// references to `T` inside the method body resolve. Pass `None` for plain
+    /// (non-parameterized) anonymous structs.
     fn analyze_method_body(
         &mut self,
         infer_ctx: &InferenceContext,
@@ -1790,10 +1856,14 @@ impl<'a> Sema<'a> {
         body: InstRef,
         self_type: Type,
         captured_comptime_values: &rustc_hash::FxHashMap<Spur, ConstValue>,
+        outer_type_subst: Option<&rustc_hash::FxHashMap<Spur, Type>>,
     ) -> RawFnAnalysis {
-        // Create a type substitution map with Self -> the struct type
+        // Start with the outer comptime fn's type bindings (T → I32 etc.)
+        // and overlay Self. Later we'd merge any method-level subst here too.
+        let mut type_subst: HashMap<Spur, Type> = outer_type_subst
+            .map(|s| s.iter().map(|(k, v)| (*k, *v)).collect())
+            .unwrap_or_default();
         let self_sym = self.interner.get_or_intern("Self");
-        let mut type_subst = HashMap::default();
         type_subst.insert(self_sym, self_type);
 
         self.analyze_function_internal(
@@ -5098,6 +5168,18 @@ impl<'a> Sema<'a> {
 
         let mut seen_methods: rustc_hash::FxHashSet<Spur> = rustc_hash::FxHashSet::default();
 
+        // ADR-0082: capture the outer comptime fn's type substitution
+        // (e.g. `T → I32` for a `Vec(I32)` instance) so method body
+        // analysis can resolve `T` references inside the body. Stored
+        // per-struct and merged into the body analyzer's type_subst by
+        // `analyze_method_body`. Empty subst is recorded too (cheap, and
+        // makes lookup-without-result mean "don't carry anything").
+        if !type_subst.is_empty() {
+            let owned: rustc_hash::FxHashMap<Spur, Type> =
+                type_subst.iter().map(|(k, v)| (*k, *v)).collect();
+            self.anon_struct_type_subst.insert(struct_id, owned);
+        }
+
         // ADR-0076: bind `Self` to the anonymous struct's `Type` while
         // resolving method signatures.
         let saved_self = self.current_self.replace(struct_type);
@@ -5420,6 +5502,15 @@ impl<'a> Sema<'a> {
         let method_refs = self.rir.get_inst_refs(methods_start, methods_len);
 
         let mut seen_methods: rustc_hash::FxHashSet<Spur> = rustc_hash::FxHashSet::default();
+
+        // ADR-0082: capture the outer comptime fn's type substitution
+        // (parallel to the anon-struct path above). Lets enum method
+        // bodies resolve `T` etc. when analyzed.
+        if !type_subst.is_empty() {
+            let owned: rustc_hash::FxHashMap<Spur, Type> =
+                type_subst.iter().map(|(k, v)| (*k, *v)).collect();
+            self.anon_enum_type_subst.insert(enum_id, owned);
+        }
 
         // ADR-0076: bind `Self` to the anonymous enum's `Type` while
         // resolving method signatures.

@@ -147,32 +147,7 @@ impl<'a> Sema<'a> {
             | IntrinsicId::SliceIndexRead
             | IntrinsicId::SliceIndexWrite
             | IntrinsicId::SlicePtr
-            | IntrinsicId::SlicePtrMut
-            // ADR-0066: Vec methods are dispatched via VEC_METHODS / static
-            // path-call paths, not direct @vec_* expressions.
-            | IntrinsicId::VecNew
-            | IntrinsicId::VecWithCapacity
-            | IntrinsicId::VecLen
-            | IntrinsicId::VecCapacity
-            | IntrinsicId::VecIsEmpty
-            | IntrinsicId::VecPush
-            | IntrinsicId::VecPop
-            | IntrinsicId::VecClear
-            | IntrinsicId::VecReserve
-            | IntrinsicId::VecIndexRead
-            | IntrinsicId::VecIndexWrite
-            | IntrinsicId::VecPtr
-            | IntrinsicId::VecPtrMut
-            | IntrinsicId::VecTerminatedPtr
-            | IntrinsicId::VecClone
-            | IntrinsicId::VecDispose
-            | IntrinsicId::VecEq
-            | IntrinsicId::VecCmp
-            | IntrinsicId::VecContains
-            | IntrinsicId::VecStartsWith
-            | IntrinsicId::VecEndsWith
-            | IntrinsicId::VecConcat
-            | IntrinsicId::VecExtendFromSlice => Err(CompileError::new(
+            | IntrinsicId::SlicePtrMut => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(def.name.to_string()),
                 span,
             )),
@@ -233,7 +208,62 @@ impl<'a> Sema<'a> {
             IntrinsicId::PtrCast => {
                 self.analyze_ptr_cast_intrinsic(air, inst_ref, &args, span, ctx)
             }
+            IntrinsicId::BytesEq => {
+                self.analyze_bytes_eq_intrinsic(air, &args, span, ctx)
+            }
         }
+    }
+
+    /// Analyze `@bytes_eq(a, b, n: usize) -> bool` (ADR-0082).
+    fn analyze_bytes_eq_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        Self::require_checked_for_intrinsic(ctx, "bytes_eq", span)?;
+        if args.len() != 3 {
+            return Err(CompileError::new(
+                ErrorKind::WrongArgumentCount {
+                    expected: 3,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+        let a = self.analyze_inst(air, args[0].value, ctx)?;
+        let b = self.analyze_inst(air, args[1].value, ctx)?;
+        let n = self.analyze_inst(air, args[2].value, ctx)?;
+        // Accept any Ptr/MutPtr for a and b — caller will have already
+        // narrowed via @ptr_cast if needed. Reject obvious mismatches.
+        let a_ok = matches!(a.ty.kind(), TypeKind::PtrConst(_) | TypeKind::PtrMut(_));
+        let b_ok = matches!(b.ty.kind(), TypeKind::PtrConst(_) | TypeKind::PtrMut(_));
+        if (!a_ok && !a.ty.is_error()) || (!b_ok && !b.ty.is_error()) {
+            return Err(CompileError::type_mismatch(
+                "Ptr(_) or MutPtr(_)".to_string(),
+                format!(
+                    "{} and {}",
+                    self.format_type_name(a.ty),
+                    self.format_type_name(b.ty)
+                ),
+                span,
+            ));
+        }
+        Self::require_usize(self, "bytes_eq", "n", n.ty, span)?;
+        let args_start =
+            air.add_extra(&[a.air_ref.as_u32(), b.air_ref.as_u32(), n.air_ref.as_u32()]);
+        let name = self.interner.get_or_intern_static("bytes_eq");
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name,
+                args_start,
+                args_len: 3,
+            },
+            ty: Type::BOOL,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, Type::BOOL))
     }
 
     /// Analyze `@cstr_to_vec(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).

@@ -6891,7 +6891,27 @@ impl<'a> Sema<'a> {
     /// holding a slice, or a slice-typed function-call result.
     pub(crate) fn peek_inst_type(&self, inst_ref: InstRef, ctx: &AnalysisContext) -> Option<Type> {
         match &self.rir.get(inst_ref).data {
-            InstData::VarRef { name } => ctx.locals.get(name).map(|l| l.ty),
+            InstData::VarRef { name } => {
+                // `VarRef` resolves locals first, then falls through to
+                // params (parallel to `analyze_var_ref` at line ~5105).
+                // Without the param fallback, slice-typed method
+                // parameters (e.g. `other: Slice(T)` in
+                // `extend_from_slice`) would skip the slice-index fast
+                // path and hit the array-only branch, which errors with
+                // "cannot index into non-array type '<slice>'".
+                ctx.locals.get(name).map(|l| l.ty).or_else(|| {
+                    ctx.params.iter().find(|p| p.name == *name).map(|p| {
+                        // Auto-deref Ref/MutRef params so a `borrow s:
+                        // Slice(T)` peeks as `Slice(T)`, mirroring
+                        // `analyze_var_ref`'s ty-derivation.
+                        match p.ty.kind() {
+                            crate::types::TypeKind::Ref(id) => self.type_pool.ref_def(id),
+                            crate::types::TypeKind::MutRef(id) => self.type_pool.mut_ref_def(id),
+                            _ => p.ty,
+                        }
+                    })
+                })
+            }
             InstData::ParamRef { name, .. } => {
                 ctx.params.iter().find(|p| p.name == *name).map(|p| p.ty)
             }

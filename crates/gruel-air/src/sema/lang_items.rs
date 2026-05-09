@@ -69,18 +69,6 @@ impl<'a> Sema<'a> {
         &self.lang_items
     }
 
-    /// ADR-0082: if `ty` is `TypeKind::Struct` for an instance of the
-    /// `@lang("vec")` function (i.e. it was produced by evaluating
-    /// `Vec(elem_ty)` through the prelude declaration), return the
-    /// element type. Returns `None` for plain user structs and for any
-    /// type that's not a struct.
-    pub(crate) fn as_vec_instance(&self, ty: crate::types::Type) -> Option<crate::types::Type> {
-        let crate::types::TypeKind::Struct(struct_id) = ty.kind() else {
-            return None;
-        };
-        self.vec_instance_registry.get(&struct_id).copied()
-    }
-
     /// ADR-0082: reverse lookup — given an element type, return the
     /// `StructId` of the `@lang("vec")` instance for that element.
     /// Returns `None` if `populate_vec_instance` has not yet been
@@ -255,11 +243,14 @@ impl<'a> Sema<'a> {
                     }
                     (DeclKind::Fn, LangItemKind::Fn(item)) => {
                         // ADR-0082: bind the function's name `Spur` so
-                        // `Sema::lang_items().vec_fn()` returns it; the
-                        // function body lives in `self.functions[name]`.
-                        if !self.functions.contains_key(&name) {
-                            continue;
-                        }
+                        // `Sema::lang_items().vec_fn()` returns it. We
+                        // bind unconditionally — `self.functions` isn't
+                        // populated until `resolve_remaining_declarations`,
+                        // which runs *after* `populate_lang_items`.
+                        // Function-existence checks happen lazily at use
+                        // sites (e.g. `populate_vec_instance`'s
+                        // `self.functions.get(&vec_fn_sym)` lookup), by
+                        // which time the map is populated.
                         pending.push(Pending {
                             kind: PendingKind::Fn(item, name),
                             site: host_span,
