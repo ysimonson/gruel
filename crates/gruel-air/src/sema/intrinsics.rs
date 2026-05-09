@@ -322,8 +322,27 @@ impl<'a> Sema<'a> {
     ) -> CompileResult<AnalysisResult> {
         let mut arg_air_refs = Vec::with_capacity(args.len());
         for arg in args {
+            // @dbg observes its arguments without consuming them: if the arg
+            // is a variable of an affine type (e.g. String), the load that
+            // analyze_inst emits would otherwise mark the variable as moved.
+            // Snapshot moved_vars and restore the relevant entry afterwards,
+            // mirroring the borrow-self pattern used by Vec methods.
+            let root_var = self.extract_root_variable(arg.value);
+            let prior_move_state = root_var.and_then(|v| ctx.moved_vars.get(&v).cloned());
+
             let arg_result = self.analyze_inst(air, arg.value, ctx)?;
             let arg_type = arg_result.ty;
+
+            if let Some(var) = root_var {
+                match prior_move_state {
+                    Some(state) => {
+                        ctx.moved_vars.insert(var, state);
+                    }
+                    None => {
+                        ctx.moved_vars.remove(&var);
+                    }
+                }
+            }
 
             // Validate type. At runtime, @dbg accepts integers, booleans, and
             // strings. Structs/enums/arrays are rejected (except errors/never,

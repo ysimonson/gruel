@@ -91,6 +91,10 @@ Each `@dbg` call whose arguments are evaluated at compile time also produces a p
 
 The compiler collects the formatted messages from compile-time `@dbg` calls in a buffer on the compilation result, whether or not the compiler also prints them. A compiler-driver flag (`--capture-comptime-dbg`) suppresses the on-the-fly stderr print while leaving the buffer intact; this flag is intended for tools that consume the buffer directly.
 
+{{ rule(id="4.13:9d", cat="normative") }}
+
+`@dbg` observes its arguments without consuming them. When an argument is a place expression of an affine type (e.g. `String`), the binding remains usable after the call.
+
 {{ rule(id="4.13:10", cat="normative") }}
 
 The return type of `@dbg` is `()`.
