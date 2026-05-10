@@ -23,6 +23,9 @@ struct ExpectedEntry {
     exit_code: i32,
     #[serde(default)]
     stdout: Option<String>,
+    /// Optional `--preview <feature>` flag for gated examples (ADR-0084).
+    #[serde(default)]
+    preview: Option<String>,
 }
 
 fn load_manifest(path: &Path) -> BTreeMap<String, ExpectedEntry> {
@@ -114,6 +117,8 @@ fn main() {
                 source,
                 exit_code: Some(expected.exit_code),
                 expected_stdout: expected.stdout.clone(),
+                preview: expected.preview.clone(),
+                preview_should_pass: expected.preview.is_some(),
                 ..Case::default()
             };
 

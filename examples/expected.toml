@@ -311,3 +311,11 @@ stdout = """
 40
 42
 """
+
+[spawn]
+# ADR-0084: @spawn validation + JoinHandle linearity work today; the
+# runtime side is the codegen follow-up to Phase 5. Until that lands,
+# `JoinHandle::join` runs the prelude's panic body, which is the
+# `exit_code = 101` we observe (matching ADR-0008's panic exit).
+exit_code = 101
+preview = "thread_safety"

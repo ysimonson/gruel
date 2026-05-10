@@ -1,0 +1,25 @@
+// ADR-0084: minimal `@spawn` end-to-end shape.
+//
+// Compile with `--preview thread_safety`:
+//
+//     gruel --preview thread_safety examples/spawn.gruel out
+//     ./out
+//
+// The thread spawn passes sema validation: the worker takes a single
+// argument, the argument type is `Send` (i32 is intrinsically Sync),
+// and the return type is `Send`. The handle is consumed via `.join()`
+// to satisfy linearity (ADR-0067).
+//
+// The runtime side of @spawn is the codegen follow-up to ADR-0084's
+// Phase 5 — the prelude `JoinHandle::join` body panics until the
+// follow-up lands. Once it does, this example will return 42 from
+// `main()` instead of exiting via the panic path.
+
+fn worker(input: i32) -> i32 {
+    input + 1
+}
+
+fn main() -> i32 {
+    let h = @spawn(worker, 41);
+    h.join()
+}

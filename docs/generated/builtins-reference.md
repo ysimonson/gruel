@@ -28,6 +28,7 @@ Platform-reflection enums (`Arch`, `Os`) live in `prelude/target.gruel`; type-re
 | `Os` | `Linux`, `Macos`, `Windows`, `Freestanding`, `Wasi` |
 | `TypeKind` | `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array` |
 | `Ownership` | `Copy`, `Affine`, `Linear` |
+| `ThreadSafety` | `Unsend`, `Send`, `Sync` |
 
 ### Interfaces
 
@@ -130,6 +131,14 @@ Platform-reflection (`Arch`, `Os`) and type-reflection (`TypeKind`, `Ownership`)
 | 0 | `Ownership::Copy` |
 | 1 | `Ownership::Affine` |
 | 2 | `Ownership::Linear` |
+
+### `ThreadSafety`
+
+| Index | Variant |
+|---|---|
+| 0 | `ThreadSafety::Unsend` |
+| 1 | `ThreadSafety::Send` |
+| 2 | `ThreadSafety::Sync` |
 
 ## Interfaces
 

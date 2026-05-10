@@ -566,6 +566,7 @@ pub fn render_reference_markdown() -> String {
     out.push_str("| `Os` | `Linux`, `Macos`, `Windows`, `Freestanding`, `Wasi` |\n");
     out.push_str("| `TypeKind` | `Struct`, `Enum`, `Int`, `Bool`, `Unit`, `Never`, `Array` |\n");
     out.push_str("| `Ownership` | `Copy`, `Affine`, `Linear` |\n");
+    out.push_str("| `ThreadSafety` | `Unsend`, `Send`, `Sync` |\n");
     out.push('\n');
 
     out.push_str("### Interfaces\n\n");
@@ -648,6 +649,7 @@ pub fn render_reference_markdown() -> String {
             &["Struct", "Enum", "Int", "Bool", "Unit", "Never", "Array"][..],
         ),
         ("Ownership", &["Copy", "Affine", "Linear"][..]),
+        ("ThreadSafety", &["Unsend", "Send", "Sync"][..]),
     ] {
         out.push_str(&format!("### `{}`\n\n", name));
         out.push_str("| Index | Variant |\n");

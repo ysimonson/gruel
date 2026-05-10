@@ -561,20 +561,33 @@ them.
 
 ### Phase 6: Spec text + corpus
 
-- [ ] New spec section `docs/spec/src/03-types/15-thread-safety.md`
+- [x] New spec section `docs/spec/src/03-types/15-thread-safety.md`
       describing the trichotomy, structural minimum inference, the
       `@mark(unsend)` / `@mark(checked_send)` /
       `@mark(checked_sync)` overrides, and the built-in facts
       (primitives → Sync, raw pointers → Unsend). Note in the
       section that prelude containers default to their structural
-      inference until updated separately.
-- [ ] New spec section `docs/spec/src/04-expressions/14-spawn.md`
+      inference until updated separately. (Landed in Phase 1 alongside
+      the corresponding tests so traceability stayed at 100%.)
+- [x] New spec section `docs/spec/src/04-expressions/17-spawn.md`
       describing the `@spawn` intrinsic and `JoinHandle` semantics.
-- [ ] Update `docs/spec/src/02-lexical-structure/05-builtins.md` to
-      list `JoinHandle` and the `ThreadSafety` enum.
-- [ ] Add a worked example to `examples/` demonstrating
-      `@spawn(worker, job)` end-to-end.
-- [ ] Regenerate `docs/generated/builtins-reference.md` and
+      (Renumbered from `14-spawn` because slot 14 is held by
+      `14-comptime.md` — `4.17:*` paragraph IDs are unique.)
+- [x] Update the auto-generated reference page
+      (`docs/generated/builtins-reference.md`) to list the
+      `ThreadSafety` enum alongside `Ownership` — extended the
+      hardcoded enum table in `crates/gruel-builtins/src/lib.rs`
+      and regenerated. The `02-lexical-structure/05-builtins.md`
+      handwritten page covers the `@`-builtin grammar and the
+      `@allow` directive only; per-intrinsic and per-enum docs
+      come from the registry-generated page, so the new entries
+      surface there.
+- [x] Add a worked example `examples/spawn.gruel` plus an
+      `expected.toml` entry. Required teaching the example test
+      runner about the `preview` field so preview-gated examples
+      compile with the right `--preview` flag (a small extension
+      to `gruel-test-runner/src/bin/gruel-examples-tests.rs`).
+- [x] Regenerate `docs/generated/builtins-reference.md` and
       `docs/generated/intrinsics-reference.md`.
 
 ### Phase 7: Stabilize
