@@ -31,6 +31,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
 | `@embed_file` | expr | Compile-time Reflection | — | — | Embed a file's contents at compile time as `Slice(u8)`. |
 | `@spawn` | expr | Compile-time Reflection | thread_safety | — | Spawn a worker thread running `fn(arg) -> R`. |
+| `@thread_join` | expr | Compile-time Reflection | thread_safety | yes | Internal lowering target for JoinHandle::join (ADR-0084). |
 | `@uninit` | type | Compile-time Reflection | — | — | Allocate a partially-initialized value of a given type (ADR-0079). |
 | `@finalize` | expr | Compile-time Reflection | — | — | Consume an `Uninit(T)` handle and return a real `T` (ADR-0079). |
 | `@field_set` | expr | Compile-time Reflection | — | — | Write a field of an in-progress `@uninit`/`@variant_uninit` handle (ADR-0079). |
@@ -374,6 +375,14 @@ let h = @spawn(worker, Job { id: 1 });
 ```gruel
 let report = h.join();
 ```
+
+### `@thread_join`
+
+`@thread_join(h: MutPtr(u8)) -> R` is the codegen-level wrapper around `__gruel_thread_join`. Called only from the prelude `JoinHandle::join` body inside a `checked` block; user code reaches the runtime through the prelude method. Result type comes from the surrounding context.
+
+- **Runtime symbol:** `__gruel_thread_join`
+- **Preview gate:** `--preview thread_safety` (ADR-0084)
+- **Requires:** `checked { ... }` block
 
 ### `@uninit`
 

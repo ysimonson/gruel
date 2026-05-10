@@ -757,6 +757,21 @@ impl<'a> CfgBuilder<'a> {
                     span,
                 );
                 self.cache(air_ref, value);
+                // ADR-0084: copy the per-`@spawn` bookkeeping from
+                // AIR into CFG so codegen can reach it without a
+                // back-reference to AIR.
+                if intrinsic_name == "spawn"
+                    && let Some(target) = self.air.spawn_target(air_ref)
+                {
+                    self.cfg.record_spawn_target(
+                        value,
+                        crate::inst::SpawnTarget {
+                            worker_fn: target.worker_fn,
+                            arg_type: target.arg_type,
+                            return_type: target.return_type,
+                        },
+                    );
+                }
                 // Diverging intrinsics (e.g. `@panic`, `@compile_error`)
                 // have `Never` type and never return. Mark the current
                 // block unreachable so the Branch / Block lowerings don't

@@ -25,12 +25,11 @@ pub fn JoinHandle(comptime R: type) -> type {
         // Consume the handle and return the spawned function's
         // result. Blocks until the spawned thread finishes.
         //
-        // Phase 5 lowers this to `__gruel_thread_join`. Until that
-        // lands the body intentionally panics — there's no way for
-        // user code to construct a `JoinHandle` without `@spawn`,
-        // so the panic should be unreachable in practice.
+        // Lowers to the prelude-internal `@thread_join` intrinsic,
+        // which codegen replaces with `__gruel_thread_join(handle,
+        // &out)` and a load of the `R`-shaped slot.
         pub fn join(self) -> R {
-            @panic("JoinHandle::join requires --preview thread_safety with @spawn (Phase 5 of ADR-0084)")
+            checked { @thread_join(self.handle) }
         }
 
         // Drop backstop. Reached only if the linearity check fails

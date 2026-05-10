@@ -2265,7 +2265,17 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             } => {
                 let name_str = self.interner.resolve(&name);
                 let args = self.cfg.get_extra(args_start, args_len).to_vec();
-                self.translate_intrinsic(ty, name_str, &args)
+                // ADR-0084: @spawn needs the per-site bookkeeping
+                // recorded by sema (worker fn name + arg/return
+                // types). Dispatch ahead of the registry so the
+                // dedicated handler can read it.
+                if name_str == "spawn" {
+                    self.translate_spawn(ty, val, &args)
+                } else if name_str == "thread_join" {
+                    self.translate_thread_join(ty, &args)
+                } else {
+                    self.translate_intrinsic(ty, name_str, &args)
+                }
             }
 
             // ---- Integer cast ----
@@ -4198,6 +4208,259 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         self.builder
             .build_call(free_fn, &[p.into(), size.into(), align.into()], "")
             .unwrap();
+    }
+
+    /// Codegen for `@spawn(fn, arg) -> JoinHandle(R)` (ADR-0084).
+    ///
+    /// Emits, in order:
+    ///
+    /// 1. A heap allocation for the argument value via `__gruel_alloc`,
+    ///    sized to the argument type's layout. The Gruel arg value is
+    ///    stored into the allocation.
+    /// 2. A per-(worker, arg type, ret type) thunk function with the C
+    ///    `void*(*)(void*)` signature pthread_create requires. The
+    ///    thunk reads the arg back out of the slot, frees the slot,
+    ///    calls the worker, allocates a return slot, stores the
+    ///    return value, and returns the slot pointer.
+    /// 3. A call to `__gruel_thread_spawn(thunk, arg_buf, ret_size)`
+    ///    that returns the opaque handle pointer.
+    /// 4. A `JoinHandle(R)` struct literal with `handle = <call result>`.
+    ///
+    /// All sizes (`arg_size`, `ret_size`) come from `layout_of` on the
+    /// recorded `SpawnTarget`. Zero-sized arguments / return values
+    /// short-circuit the heap allocation; the runtime treats null
+    /// `arg_buf` / `ret_size == 0` as "no slot to copy from/to".
+    fn translate_spawn(
+        &mut self,
+        result_ty: Type,
+        spawn_value: gruel_cfg::CfgValue,
+        args: &[CfgValue],
+    ) -> Option<BasicValueEnum<'ctx>> {
+        let target = self
+            .cfg
+            .spawn_target(spawn_value)
+            .copied()
+            .expect("ADR-0084: @spawn must have a recorded SpawnTarget");
+        let arg_layout = gruel_air::layout::layout_of(self.type_pool, target.arg_type);
+        let ret_layout = gruel_air::layout::layout_of(self.type_pool, target.return_type);
+        let i64_ty = self.ctx.i64_type();
+        let usize_ty = i64_ty;
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+
+        // 1. Allocate the arg slot (or use null for zero-sized args).
+        let arg_buf = if arg_layout.size == 0 {
+            ptr_ty.const_null()
+        } else {
+            let alloc_fn = self.vec_alloc_fn();
+            let size_v = i64_ty.const_int(arg_layout.size, false);
+            let align_v = i64_ty.const_int(arg_layout.align.max(1), false);
+            self.builder
+                .build_call(alloc_fn, &[size_v.into(), align_v.into()], "spawn_arg_buf")
+                .unwrap()
+                .try_as_basic_value()
+                .basic()
+                .expect("__gruel_alloc returns ptr")
+                .into_pointer_value()
+        };
+
+        // 2. Store the arg value into the slot.
+        if arg_layout.size > 0 {
+            let arg_val = self.get_value(args[0]);
+            self.builder.build_store(arg_buf, arg_val).unwrap();
+        }
+
+        // 3. Look up (or generate) the per-instantiation thunk.
+        let thunk = self.get_or_build_spawn_thunk(&target, &arg_layout, &ret_layout);
+
+        // 4. Call __gruel_thread_spawn.
+        let spawn_fn = self.get_or_declare_thread_spawn();
+        let ret_size_v = usize_ty.const_int(ret_layout.size, false);
+        let handle_ptr = self
+            .builder
+            .build_call(
+                spawn_fn,
+                &[
+                    thunk.as_global_value().as_pointer_value().into(),
+                    arg_buf.into(),
+                    ret_size_v.into(),
+                ],
+                "spawn_handle",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .expect("__gruel_thread_spawn returns ptr");
+
+        // 5. Build the JoinHandle(R) struct literal — single field
+        //    `handle: MutPtr(u8)` carries the runtime handle pointer.
+        let jh_llvm_ty = gruel_type_to_llvm(result_ty, self.ctx, self.type_pool)
+            .expect("JoinHandle(R) must have an LLVM struct representation")
+            .into_struct_type();
+        let jh_undef = jh_llvm_ty.get_undef();
+        let jh = self
+            .builder
+            .build_insert_value(jh_undef, handle_ptr, 0, "jh")
+            .unwrap();
+        Some(jh.as_basic_value_enum())
+    }
+
+    /// ADR-0084: `__gruel_thread_spawn(thunk, arg_buf, ret_size) -> *u8`.
+    fn get_or_declare_thread_spawn(&self) -> inkwell::values::FunctionValue<'ctx> {
+        const NAME: &str = "__gruel_thread_spawn";
+        if let Some(f) = self.module.get_function(NAME) {
+            return f;
+        }
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let i64_ty = self.ctx.i64_type();
+        let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
+        self.module.add_function(NAME, fn_ty, None)
+    }
+
+    /// ADR-0084: `__gruel_thread_join(handle, ret_out)`.
+    fn get_or_declare_thread_join(&self) -> inkwell::values::FunctionValue<'ctx> {
+        const NAME: &str = "__gruel_thread_join";
+        if let Some(f) = self.module.get_function(NAME) {
+            return f;
+        }
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let fn_ty = self
+            .ctx
+            .void_type()
+            .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
+        self.module.add_function(NAME, fn_ty, None)
+    }
+
+    /// ADR-0084: `@thread_join(h: MutPtr(u8)) -> R` — internal lowering
+    /// target for `JoinHandle::join`. Allocates a stack slot for the
+    /// `R`-shaped return value, calls `__gruel_thread_join(h, &slot)`,
+    /// and loads the slot.
+    fn translate_thread_join(
+        &mut self,
+        result_ty: Type,
+        args: &[CfgValue],
+    ) -> Option<BasicValueEnum<'ctx>> {
+        let handle = self.get_value(args[0]).into_pointer_value();
+        let join_fn = self.get_or_declare_thread_join();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let null = ptr_ty.const_null();
+        // Zero-sized return: pass null and skip the load.
+        let llvm_ret_ty = gruel_type_to_llvm(result_ty, self.ctx, self.type_pool);
+        let Some(llvm_ret_ty) = llvm_ret_ty else {
+            self.builder
+                .build_call(join_fn, &[handle.into(), null.into()], "")
+                .unwrap();
+            return None;
+        };
+        // Stack slot for the return value.
+        let slot = self.build_entry_alloca(llvm_ret_ty, "join_ret");
+        self.builder
+            .build_call(join_fn, &[handle.into(), slot.into()], "")
+            .unwrap();
+        let loaded = self
+            .builder
+            .build_load(llvm_ret_ty, slot, "join_val")
+            .unwrap();
+        Some(loaded)
+    }
+
+    /// ADR-0084: build the per-instantiation thunk that bridges
+    /// pthread's C calling convention to the Gruel worker.
+    fn get_or_build_spawn_thunk(
+        &mut self,
+        target: &gruel_cfg::SpawnTarget,
+        arg_layout: &gruel_air::layout::Layout,
+        ret_layout: &gruel_air::layout::Layout,
+    ) -> inkwell::values::FunctionValue<'ctx> {
+        let worker_name = self.interner.resolve(&target.worker_fn).to_string();
+        let thunk_name = format!("__gruel_spawn_thunk__{}", worker_name);
+        if let Some(f) = self.module.get_function(&thunk_name) {
+            return f;
+        }
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let i64_ty = self.ctx.i64_type();
+        let thunk_fn_ty = ptr_ty.fn_type(&[ptr_ty.into()], false);
+        let thunk = self.module.add_function(&thunk_name, thunk_fn_ty, None);
+
+        // Save current builder position so we can restore it after
+        // emitting the thunk body.
+        let saved_block = self.builder.get_insert_block();
+
+        let entry = self.ctx.append_basic_block(thunk, "entry");
+        self.builder.position_at_end(entry);
+        let arg_buf = thunk.get_nth_param(0).unwrap().into_pointer_value();
+
+        // Load the arg value out of the slot (skipped for zero-sized).
+        let arg_val: Option<BasicValueEnum<'ctx>> = if arg_layout.size > 0 {
+            let arg_llvm = gruel_type_to_llvm(target.arg_type, self.ctx, self.type_pool)
+                .expect("spawn arg type must have an LLVM representation");
+            Some(self.builder.build_load(arg_llvm, arg_buf, "arg").unwrap())
+        } else {
+            None
+        };
+
+        // Free the arg slot before the worker runs (we own it).
+        if arg_layout.size > 0 {
+            let free_fn = self.vec_free_fn();
+            let size_v = i64_ty.const_int(arg_layout.size, false);
+            let align_v = i64_ty.const_int(arg_layout.align.max(1), false);
+            self.builder
+                .build_call(
+                    free_fn,
+                    &[arg_buf.into(), size_v.into(), align_v.into()],
+                    "",
+                )
+                .unwrap();
+        }
+
+        // Look up or declare the worker function. We declare it with
+        // its Gruel-side name; the global codegen pass will define
+        // its body separately.
+        let worker = self.module.get_function(&worker_name).unwrap_or_else(|| {
+            let arg_llvm_ty = gruel_type_to_llvm_param(target.arg_type, self.ctx, self.type_pool);
+            let ret_llvm_ty = gruel_type_to_llvm(target.return_type, self.ctx, self.type_pool);
+            let params: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                arg_llvm_ty.into_iter().collect();
+            let fn_ty = match ret_llvm_ty {
+                Some(ret) => ret.fn_type(&params, false),
+                None => self.ctx.void_type().fn_type(&params, false),
+            };
+            self.module.add_function(&worker_name, fn_ty, None)
+        });
+
+        // Call the worker. Pass the arg if any.
+        let call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
+            arg_val.iter().map(|v| (*v).into()).collect();
+        let call_site = self.builder.build_call(worker, &call_args, "call").unwrap();
+
+        // Allocate ret slot + memcpy the result.
+        let ret_buf = if ret_layout.size > 0 {
+            let alloc_fn = self.vec_alloc_fn();
+            let size_v = i64_ty.const_int(ret_layout.size, false);
+            let align_v = i64_ty.const_int(ret_layout.align.max(1), false);
+            let ret_buf = self
+                .builder
+                .build_call(alloc_fn, &[size_v.into(), align_v.into()], "ret_buf")
+                .unwrap()
+                .try_as_basic_value()
+                .basic()
+                .expect("__gruel_alloc returns ptr")
+                .into_pointer_value();
+            if let Some(ret_val) = call_site.try_as_basic_value().basic() {
+                self.builder.build_store(ret_buf, ret_val).unwrap();
+            }
+            ret_buf
+        } else {
+            ptr_ty.const_null()
+        };
+
+        self.builder.build_return(Some(&ret_buf)).unwrap();
+
+        // Restore the builder so the caller can keep emitting at the
+        // outer block.
+        if let Some(block) = saved_block {
+            self.builder.position_at_end(block);
+        }
+        thunk
     }
 
     /// Codegen for `@cstr_to_vec(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).

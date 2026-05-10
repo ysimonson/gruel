@@ -148,6 +148,13 @@ pub enum IntrinsicId {
     // ---- ADR-0084 thread spawn ----
     /// `@spawn(fn, arg) -> JoinHandle(R)` — spawn a worker thread.
     Spawn,
+    /// `@thread_join(handle: MutPtr(u8)) -> R` — internal lowering
+    /// target for `JoinHandle::join`. Reads the runtime handle out
+    /// of the prelude struct's `handle` field, calls
+    /// `__gruel_thread_join`, copies the return value into a stack
+    /// slot, and returns it. Codegen consults the let-binding
+    /// context for the result type. Not user-callable.
+    ThreadJoin,
 
     // ---- Preview / test infra ----
     TestPreviewGate,
@@ -920,6 +927,18 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         ],
     },
     IntrinsicDef {
+        id: IntrinsicId::ThreadJoin,
+        name: "thread_join",
+        kind: IntrinsicKind::Expr,
+        category: Category::Comptime,
+        requires_unchecked: true,
+        preview: Some(PreviewFeature::ThreadSafety),
+        runtime_fn: Some("__gruel_thread_join"),
+        summary: "Internal lowering target for JoinHandle::join (ADR-0084).",
+        description: "`@thread_join(h: MutPtr(u8)) -> R` is the codegen-level wrapper around `__gruel_thread_join`. Called only from the prelude `JoinHandle::join` body inside a `checked` block; user code reaches the runtime through the prelude method. Result type comes from the surrounding context.",
+        examples: &[],
+    },
+    IntrinsicDef {
         id: IntrinsicId::Uninit,
         name: "uninit",
         kind: IntrinsicKind::Type,
@@ -1625,7 +1644,8 @@ mod tests {
                 | IntrinsicId::Realloc
                 | IntrinsicId::Free
                 | IntrinsicId::PtrCast
-                | IntrinsicId::BytesEq => {}
+                | IntrinsicId::BytesEq
+                | IntrinsicId::ThreadJoin => {}
             }
         }
     }
@@ -1706,6 +1726,8 @@ mod tests {
             "free",
             "ptr_cast",
             "bytes_eq",
+            // ADR-0084: prelude-internal join wrapper.
+            "thread_join",
         ]
         .into_iter()
         .collect();

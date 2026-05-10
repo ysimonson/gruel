@@ -393,7 +393,7 @@ name = "spawn_accepts_sync_arg"
 spec = ["4.17:1", "4.17:2", "4.17:5", "4.17:10", "4.17:12"]
 preview = "thread_safety"
 preview_should_pass = true
-description = "ADR-0084: @spawn accepts an i32 (Sync) arg and Sync return — validation passes. The handle is consumed via `.join()` to satisfy linearity. Codegen for @spawn is still landing; the prelude `join` body panics, so the runtime exit code matches the panic exit (101)."
+description = "ADR-0084: end-to-end @spawn(worker, 41) → join → 42. Validation passes (i32 is Sync, worker returns Sync), the per-instantiation thunk adapts the C calling convention, and __gruel_thread_join blocks until the spawned thread finishes."
 source = """
 fn worker(x: i32) -> i32 { x + 1 }
 fn main() -> i32 {
@@ -401,7 +401,7 @@ fn main() -> i32 {
     h.join()
 }
 """
-exit_code = 101
+exit_code = 42
 
 [[case]]
 name = "spawn_intrinsic_preview_gated"

@@ -732,6 +732,24 @@ pub struct Air {
     /// if`/`@compile_error` checks fire only for the values they apply to.
     #[serde(default)]
     comptime_value_args: rustc_hash::FxHashMap<u32, Vec<crate::sema::ConstValue>>,
+    /// ADR-0084: per-`@spawn` site bookkeeping. Keyed by the spawn
+    /// instruction's index, carries the worker function name and the
+    /// arg/return types so codegen can emit the per-instantiation
+    /// thunk + `__gruel_thread_spawn` call without re-deriving them.
+    #[serde(default)]
+    spawn_targets: rustc_hash::FxHashMap<u32, SpawnTarget>,
+}
+
+/// ADR-0084: codegen bookkeeping for one `@spawn(fn, arg)` call.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct SpawnTarget {
+    /// Interned name of the worker function (resolves to a top-level
+    /// `fn` in the program).
+    pub worker_fn: lasso::Spur,
+    /// Worker's parameter type (= argument type at the spawn site).
+    pub arg_type: Type,
+    /// Worker's return type. Must be `≥ Send` per ADR-0084.
+    pub return_type: Type,
 }
 
 impl Air {
@@ -744,7 +762,31 @@ impl Air {
             projections: Vec::new(),
             places: Vec::new(),
             comptime_value_args: rustc_hash::FxHashMap::default(),
+            spawn_targets: rustc_hash::FxHashMap::default(),
         }
+    }
+
+    /// ADR-0084: record codegen bookkeeping for a `@spawn` site.
+    pub fn record_spawn_target(
+        &mut self,
+        air_ref: AirRef,
+        worker_fn: lasso::Spur,
+        arg_type: Type,
+        return_type: Type,
+    ) {
+        self.spawn_targets.insert(
+            air_ref.as_u32(),
+            SpawnTarget {
+                worker_fn,
+                arg_type,
+                return_type,
+            },
+        );
+    }
+
+    /// Look up the bookkeeping recorded for a `@spawn` site, if any.
+    pub fn spawn_target(&self, air_ref: AirRef) -> Option<&SpawnTarget> {
+        self.spawn_targets.get(&air_ref.as_u32())
     }
 
     /// Record the comptime value arguments captured at a `CallGeneric` site.

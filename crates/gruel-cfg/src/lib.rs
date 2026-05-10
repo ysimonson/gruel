@@ -25,7 +25,7 @@ use gruel_util::CompileWarning;
 pub use build::CfgBuilder;
 pub use inst::{
     BasicBlock, BlockId, Cfg, CfgArgMode, CfgCallArg, CfgInst, CfgInstData, CfgValue,
-    MakeSliceData, Place, PlaceBase, Projection, Terminator,
+    MakeSliceData, Place, PlaceBase, Projection, SpawnTarget, Terminator,
 };
 
 // Re-export types from gruel-air that we use

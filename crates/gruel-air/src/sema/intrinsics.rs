@@ -214,6 +214,11 @@ impl<'a> Sema<'a> {
             }
             // ADR-0084: spawn a worker thread.
             IntrinsicId::Spawn => self.analyze_spawn_intrinsic(air, &args, span, ctx),
+            // ADR-0084: prelude-internal wrapper around __gruel_thread_join.
+            // Called only from `JoinHandle::join`'s body — the result type
+            // is inferred from the binding context (let-annotation or
+            // function return).
+            IntrinsicId::ThreadJoin => self.analyze_thread_join_intrinsic(air, inst_ref, &args, span, ctx),
         }
     }
 
@@ -1750,12 +1755,11 @@ impl<'a> Sema<'a> {
         // in the prelude (ADR-0084 Phase 4).
         let join_handle_ty = self.instantiate_join_handle(return_type, span, ctx)?;
 
-        // Emit the spawn AIR instruction. Codegen consumes this in a
-        // follow-up; until then, the result type carries the right
-        // shape so downstream analysis (linearity check on the
-        // returned JoinHandle, `.join()` lookup) works. Only the
-        // value-arg goes into the AIR slot — the function reference
-        // is not a runtime value.
+        // Emit the spawn AIR instruction. Codegen looks up the worker
+        // function name from `air.spawn_targets` (a side table keyed
+        // by the @spawn instruction's air_ref), gets the arg value
+        // from the AIR slot, allocates the arg/return buffers, and
+        // calls __gruel_thread_spawn.
         let args_start = air.add_extra(&[arg_result.air_ref.as_u32()]);
         let name = self.interner.get_or_intern_static("spawn");
         let air_ref = air.add_inst(AirInst {
@@ -1767,7 +1771,50 @@ impl<'a> Sema<'a> {
             ty: join_handle_ty,
             span,
         });
+        air.record_spawn_target(air_ref, fn_name_spur, param_type, return_type);
+        // Mark the worker as reachable so the lazy analyzer pulls
+        // its body in (otherwise DCE would drop it — `@spawn` is the
+        // only reference and it's not a regular Call site).
+        ctx.referenced_functions.insert(fn_name_spur);
         Ok(AnalysisResult::new(air_ref, join_handle_ty))
+    }
+
+    /// ADR-0084: prelude-internal `@thread_join(handle: MutPtr(u8)) -> R`.
+    /// Called only from `JoinHandle::join`'s body. Result type is
+    /// inferred from the binding context (the `R` from the function's
+    /// return slot or the let annotation).
+    fn analyze_thread_join_intrinsic(
+        &mut self,
+        air: &mut Air,
+        inst_ref: InstRef,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        if args.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicWrongArgCount {
+                    name: "thread_join".to_string(),
+                    expected: 1,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+        let handle = self.analyze_inst(air, args[0].value, ctx)?;
+        let result_type = Self::get_resolved_type(ctx, inst_ref, span, "@thread_join intrinsic")?;
+        let args_start = air.add_extra(&[handle.air_ref.as_u32()]);
+        let name = self.interner.get_or_intern_static("thread_join");
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name,
+                args_start,
+                args_len: 1,
+            },
+            ty: result_type,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, result_type))
     }
 
     /// ADR-0084 helper: instantiate `JoinHandle(R)` for a given `R`

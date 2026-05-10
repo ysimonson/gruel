@@ -675,6 +675,23 @@ pub struct Cfg {
     /// Retained here so that backends can declare function signatures even when
     /// DCE has removed unused `Param { index }` instructions from the body.
     param_types: Vec<Type>,
+    /// ADR-0084: per-`@spawn` site bookkeeping. Keyed by the value
+    /// index of the CfgInstData::Intrinsic { name="spawn" } node;
+    /// codegen reads it to emit the per-instantiation thunk and
+    /// `__gruel_thread_spawn` call.
+    spawn_targets: rustc_hash::FxHashMap<u32, SpawnTarget>,
+}
+
+/// ADR-0084: codegen bookkeeping for one `@spawn(fn, arg)` call.
+#[derive(Debug, Clone, Copy)]
+pub struct SpawnTarget {
+    /// Interned name of the worker function (resolves to a top-level
+    /// `fn` in the program).
+    pub worker_fn: lasso::Spur,
+    /// Worker's parameter type (= argument type at the spawn site).
+    pub arg_type: Type,
+    /// Worker's return type. Must be `≥ Send` per ADR-0084.
+    pub return_type: Type,
 }
 
 impl Cfg {
@@ -701,7 +718,18 @@ impl Cfg {
             fn_name,
             param_modes,
             param_types,
+            spawn_targets: rustc_hash::FxHashMap::default(),
         }
+    }
+
+    /// ADR-0084: record the worker fn + types for a `@spawn` instruction.
+    pub fn record_spawn_target(&mut self, value: CfgValue, target: SpawnTarget) {
+        self.spawn_targets.insert(value.0, target);
+    }
+
+    /// Look up the bookkeeping recorded for a `@spawn` site, if any.
+    pub fn spawn_target(&self, value: CfgValue) -> Option<&SpawnTarget> {
+        self.spawn_targets.get(&value.0)
     }
 
     /// Get the return type.

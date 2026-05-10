@@ -1088,6 +1088,15 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Var(self.fresh_var())
                     }
+                    // ADR-0084: @thread_join's result type comes from
+                    // the binding context (let-annotation or function
+                    // return). Same pattern as @cast / @alloc — emit
+                    // a fresh var so HM unifies it with the user's
+                    // annotation.
+                    Some(IntrinsicId::ThreadJoin) => {
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
                     // Other intrinsics (@dbg, @assert, @test_preview_gate, @import)
                     // and any unknown name return Unit. Sema handles the unknown case
                     // with a proper diagnostic; we just pick a coherent type here.
