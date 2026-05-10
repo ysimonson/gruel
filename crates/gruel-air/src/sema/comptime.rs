@@ -224,6 +224,24 @@ impl<'a> Sema<'a> {
                     self.pending_anon_derive_errors.push(e);
                     return None;
                 }
+                // ADR-0083 / ADR-0084: apply `@mark(...)` directives so
+                // posture and thread-safety overrides on
+                // `pub fn Foo(comptime T: type) -> type { @mark(...) struct { ... } }`
+                // bodies (e.g. prelude `JoinHandle`) reach the
+                // freshly-constructed StructDef.
+                if is_new
+                    && *directives_len > 0
+                    && let Some(struct_id) = struct_ty.as_struct()
+                    && let Err(e) = self.apply_anon_struct_marks(
+                        struct_id,
+                        *directives_start,
+                        *directives_len,
+                        inst.span,
+                    )
+                {
+                    self.pending_anon_derive_errors.push(e);
+                    return None;
+                }
                 Some(ConstValue::Type(struct_ty))
             }
 
@@ -305,6 +323,20 @@ impl<'a> Sema<'a> {
                     && let TypeKind::Enum(enum_id) = enum_ty.kind()
                     && let Err(e) =
                         self.splice_anon_enum_derives(enum_id, *directives_start, *directives_len)
+                {
+                    self.pending_anon_derive_errors.push(e);
+                    return None;
+                }
+                // ADR-0083 / ADR-0084: apply `@mark(...)` on the anon enum.
+                if is_new
+                    && *directives_len > 0
+                    && let TypeKind::Enum(enum_id) = enum_ty.kind()
+                    && let Err(e) = self.apply_anon_enum_marks(
+                        enum_id,
+                        *directives_start,
+                        *directives_len,
+                        inst.span,
+                    )
                 {
                     self.pending_anon_derive_errors.push(e);
                     return None;
@@ -638,6 +670,23 @@ impl<'a> Sema<'a> {
                     self.pending_anon_derive_errors.push(e);
                     return None;
                 }
+                // ADR-0083 / ADR-0084: apply `@mark(...)` directives to
+                // the parameterized anon struct. This is the path
+                // `pub fn JoinHandle(R) -> type { @mark(...) struct {...} }`
+                // takes for each `R` instantiation.
+                if is_new
+                    && *directives_len > 0
+                    && let Some(struct_id) = struct_ty.as_struct()
+                    && let Err(e) = self.apply_anon_struct_marks(
+                        struct_id,
+                        *directives_start,
+                        *directives_len,
+                        inst.span,
+                    )
+                {
+                    self.pending_anon_derive_errors.push(e);
+                    return None;
+                }
                 // ADR-0082: if we're inside the lang-item Vec function's
                 // evaluation, register this StructId as a Vec instance for
                 // the captured element type.
@@ -767,6 +816,21 @@ impl<'a> Sema<'a> {
                     && let TypeKind::Enum(enum_id) = enum_ty.kind()
                     && let Err(e) =
                         self.splice_anon_enum_derives(enum_id, *directives_start, *directives_len)
+                {
+                    self.pending_anon_derive_errors.push(e);
+                    return None;
+                }
+                // ADR-0083 / ADR-0084: apply `@mark(...)` on the
+                // parameterized anon enum.
+                if is_new
+                    && *directives_len > 0
+                    && let TypeKind::Enum(enum_id) = enum_ty.kind()
+                    && let Err(e) = self.apply_anon_enum_marks(
+                        enum_id,
+                        *directives_start,
+                        *directives_len,
+                        inst.span,
+                    )
                 {
                     self.pending_anon_derive_errors.push(e);
                     return None;

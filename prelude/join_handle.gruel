@@ -1,0 +1,43 @@
+// ADR-0084: linear handle to a spawned thread.
+//
+// `JoinHandle(R)` is the thread-side bookkeeping returned by `@spawn`
+// (Phase 5). It owns a thread-handle pointer and yields the spawned
+// function's return value through `join(self) -> R`.
+//
+// **Posture: linear.** The handle must be consumed via `join` — the
+// linearity check (ADR-0067) catches any code path that drops it.
+// `__gruel_drop_JoinHandle` is a runtime backstop for cases the
+// linearity check misses.
+//
+// **Thread-safety: unconditionally `Send`.** The handle stores a
+// thread-handle pointer; the result `R` is checked to be at least
+// `Send` at the `@spawn` site, so a `JoinHandle(R)` is always paired
+// with a `Send` `R` by construction. The `@mark(checked_send)`
+// override is the compiler-internal use of an upgrade marker — the
+// type has no user-visible field machinery to upgrade through, so
+// the override is the only way to express its safety.
+
+pub fn JoinHandle(comptime R: type) -> type {
+    @mark(linear, checked_send) struct {
+        // Opaque thread-handle pointer produced by the runtime.
+        handle: MutPtr(u8),
+
+        // Consume the handle and return the spawned function's
+        // result. Blocks until the spawned thread finishes.
+        //
+        // Phase 5 lowers this to `__gruel_thread_join`. Until that
+        // lands the body intentionally panics — there's no way for
+        // user code to construct a `JoinHandle` without `@spawn`,
+        // so the panic should be unreachable in practice.
+        pub fn join(self) -> R {
+            @panic("JoinHandle::join requires --preview thread_safety with @spawn (Phase 5 of ADR-0084)")
+        }
+
+        // Drop backstop. Reached only if the linearity check fails
+        // to enforce consumption — the linear posture should make
+        // this unreachable for well-typed code.
+        fn drop(self) {
+            @panic("JoinHandle dropped without join — linearity check escaped")
+        }
+    }
+}

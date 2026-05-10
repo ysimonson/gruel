@@ -481,20 +481,39 @@ quotes its LOC delta in the commit message.
 
 ### Phase 4: `JoinHandle(R)` built-in
 
-- [ ] Define `JoinHandle` as a `BuiltinTypeConstructor` in
-      `gruel-builtins`. Arity 1, lowers to a synthetic struct via
-      the ADR-0020 mechanism.
-- [ ] Posture: Linear (must-consume).
-- [ ] Thread-safety: synthetic struct definition carries
-      `@mark(checked_send)` (unconditionally Send; see Decision §
-      `JoinHandle(R)` for rationale).
-- [ ] Drop impl: `__gruel_drop_JoinHandle` aborts the program with
-      a clear message — backstop only.
-- [ ] `join(self) -> R` method registered in the BuiltinTypeDef
-      method list, lowering to `__gruel_thread_join`.
-- [ ] Spec tests: `join_handle_must_be_consumed`,
-      `join_handle_join_returns_r`,
-      `join_handle_is_send`.
+- [x] Define `JoinHandle` as a prelude function (per ADR-0066/0082
+      pattern, supersedes the original "BuiltinTypeConstructor"
+      framing — Vec moved out of the constructor registry to a
+      `pub fn Vec(comptime T: type) -> type` body, and JoinHandle
+      follows the same shape). Lives in `prelude/join_handle.gruel`,
+      re-exported from `_prelude.gruel`.
+- [x] Posture: Linear via `@mark(linear)` on the inner struct head.
+- [x] Thread-safety: inner struct carries `@mark(checked_send)`
+      (unconditionally Send; see Decision § `JoinHandle(R)`
+      rationale).
+- [x] Drop impl: inline `fn drop(self)` panics with a clear message
+      — backstop only. Replaces the originally-named
+      `__gruel_drop_JoinHandle` runtime function (Phase 5 will land
+      the runtime side once `@spawn` exists).
+- [x] `join(self) -> R` method registered on the inner struct.
+      Currently panics — Phase 5 swaps the body for a
+      `__gruel_thread_join` call once the runtime function exists.
+- [x] Spec tests: `join_handle_is_send`,
+      `join_handle_is_linear`, `join_handle_must_be_consumed`
+      (placeholder until Phase 5; JoinHandle has no public
+      constructor today, so the linearity check has no surface to
+      fire on). The `join_handle_join_returns_r` case lands with
+      Phase 5 alongside `@spawn`.
+
+Side fix that surfaced while wiring this up: the existing analysis
+and comptime paths processed `@derive(...)` on anonymous structs but
+not `@mark(...)`. Posture/thread-safety markers on
+`pub fn Foo(comptime T: type) -> type { @mark(...) struct {...} }`
+bodies were being silently dropped. Two new helpers
+`apply_anon_struct_marks` / `apply_anon_enum_marks` close that gap
+in `crates/gruel-air/src/sema/declarations.rs`, and the four
+construction sites (analysis + comptime; struct + enum) now invoke
+them.
 
 ### Phase 5: `@spawn` intrinsic + runtime support
 

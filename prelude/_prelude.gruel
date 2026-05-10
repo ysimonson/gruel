@@ -34,3 +34,10 @@ pub const char__encode_utf8 = __char.char__encode_utf8;
 const __string = @import("string.gruel");
 pub const String = __string.String;
 pub const Utf8DecodeError = __string.Utf8DecodeError;
+
+// ADR-0084: linear handle returned by @spawn. Preview-gated by the
+// thread_safety feature flag — the import is harmless without the
+// flag (the body never executes), but @mark(checked_send) requires
+// --preview thread_safety to compile.
+const __join_handle = @import("join_handle.gruel");
+pub const JoinHandle = __join_handle.JoinHandle;

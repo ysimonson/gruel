@@ -721,6 +721,86 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
+    /// ADR-0083 / ADR-0084: apply `@mark(...)` directives recorded on
+    /// an anonymous struct expression to its already-created `StructDef`.
+    /// Mirrors what `validate_consistency` does for named declarations:
+    /// reads the marker outcome, then writes posture and thread-safety
+    /// fields. Called from the comptime evaluator and analysis paths
+    /// after `find_or_create_anon_struct` returns a fresh `StructId`.
+    pub(crate) fn apply_anon_struct_marks(
+        &mut self,
+        struct_id: StructId,
+        directives_start: u32,
+        directives_len: u32,
+        span: Span,
+    ) -> CompileResult<()> {
+        let outcome = self.process_mark_directives(
+            directives_start,
+            directives_len,
+            "struct",
+            ItemKinds::STRUCT,
+            span,
+        )?;
+        let mut def = self.type_pool.struct_def(struct_id);
+        // Posture: a marker overrides the structurally-inferred
+        // is_copy/is_linear that `find_or_create_anon_struct` set.
+        if outcome.copy {
+            def.is_copy = true;
+            def.is_linear = false;
+        }
+        if outcome.linear {
+            def.is_copy = false;
+            def.is_linear = true;
+        }
+        if outcome.affine {
+            def.is_copy = false;
+            def.is_linear = false;
+        }
+        // Thread-safety: marker wins over the structural minimum the
+        // anon-struct constructor pre-computed.
+        if let Some(level) = outcome.thread_safety_override {
+            def.thread_safety = level;
+        }
+        self.type_pool.update_struct_def(struct_id, def);
+        Ok(())
+    }
+
+    /// Same as `apply_anon_struct_marks`, but for anonymous enums
+    /// (variant-payload structural fold + override).
+    pub(crate) fn apply_anon_enum_marks(
+        &mut self,
+        enum_id: EnumId,
+        directives_start: u32,
+        directives_len: u32,
+        span: Span,
+    ) -> CompileResult<()> {
+        let outcome = self.process_mark_directives(
+            directives_start,
+            directives_len,
+            "enum",
+            ItemKinds::ENUM,
+            span,
+        )?;
+        let mut def = self.type_pool.enum_def(enum_id);
+        if outcome.copy {
+            def.is_copy = true;
+            def.is_linear = false;
+        }
+        if outcome.linear {
+            def.is_copy = false;
+            def.is_linear = true;
+        }
+        if outcome.affine {
+            def.is_copy = false;
+            def.is_linear = false;
+        }
+        if let Some(level) = outcome.thread_safety_override {
+            def.thread_safety = level;
+        }
+        self.type_pool.update_enum_def(enum_id, def);
+        Ok(())
+    }
+
     /// ADR-0083: process the `@mark(...)` directives on a type declaration.
     ///
     /// Walks the directive list and validates each marker against the

@@ -2735,7 +2735,8 @@ impl<'a> Sema<'a> {
                 fields_len,
                 methods_start,
                 methods_len,
-                ..
+                directives_start,
+                directives_len,
             } => {
                 // Get the field declarations from the RIR
                 let field_decls = self.rir.get_field_decls(*fields_start, *fields_len);
@@ -2766,11 +2767,27 @@ impl<'a> Sema<'a> {
 
                 // Check if an equivalent anonymous struct already exists (structural equality)
                 // This now compares fields, method signatures, AND captured comptime values
-                let (struct_ty, _is_new) = self.find_or_create_anon_struct(
+                let (struct_ty, is_new) = self.find_or_create_anon_struct(
                     &struct_fields,
                     &method_sigs,
                     &HashMap::default(),
                 );
+                // ADR-0083 / ADR-0084: apply `@mark(...)` directives on
+                // freshly-built anonymous struct expressions, mirroring
+                // the comptime-evaluator path. Reached for
+                // anon-struct expressions analyzed outside a comptime
+                // type-constructor body.
+                if is_new && *directives_len > 0 {
+                    let struct_id = struct_ty
+                        .as_struct()
+                        .expect("anon struct must have StructId");
+                    self.apply_anon_struct_marks(
+                        struct_id,
+                        *directives_start,
+                        *directives_len,
+                        inst.span,
+                    )?;
+                }
 
                 // DON'T register methods here - they should be registered during const evaluation
                 // (either try_evaluate_const for non-comptime, or try_evaluate_const_with_subst for comptime).
@@ -2833,7 +2850,8 @@ impl<'a> Sema<'a> {
                 variants_len,
                 methods_start,
                 methods_len,
-                ..
+                directives_start,
+                directives_len,
             } => {
                 // Get the variant declarations from the RIR
                 let variant_decls = self
@@ -2893,11 +2911,24 @@ impl<'a> Sema<'a> {
                 let method_sigs = self.extract_anon_method_sigs(*methods_start, *methods_len);
 
                 // Check if an equivalent anonymous enum already exists (structural equality)
-                let (enum_ty, _is_new) = self.find_or_create_anon_enum(
+                let (enum_ty, is_new) = self.find_or_create_anon_enum(
                     &enum_variants,
                     &method_sigs,
                     &HashMap::default(),
                 );
+                // ADR-0083 / ADR-0084: apply `@mark(...)` on the
+                // freshly-built anon enum, mirroring the comptime path.
+                if is_new
+                    && *directives_len > 0
+                    && let TypeKind::Enum(enum_id) = enum_ty.kind()
+                {
+                    self.apply_anon_enum_marks(
+                        enum_id,
+                        *directives_start,
+                        *directives_len,
+                        inst.span,
+                    )?;
+                }
 
                 let air_ref = air.add_inst(AirInst {
                     data: AirInstData::TypeConst(enum_ty),
