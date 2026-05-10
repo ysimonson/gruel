@@ -350,17 +350,21 @@ its LOC delta in the commit message.
 
 ### Phase 2: Coexistence with the keyword path
 
-- [ ] Both pathways write to the same `is_copy` / `is_linear` flags
+- [x] Both pathways write to the same `is_copy` / `is_linear` flags
       on `StructDef` / `EnumDef`. The validator
-      (`validate_posture_consistency`) needs no changes — it already
-      reads the flags.
-- [ ] If a type carries *both* an `@mark(linear)` directive and the
-      `linear` keyword, treat them as redundant-but-consistent (no
-      error). Conflicts (`@mark(linear)` keyword + `@mark(copy)`
-      directive) hit the existing mutual-exclusion path.
-- [ ] Spec tests asserting that the keyword form and the directive
-      form produce identical posture flags on equivalent
-      declarations.
+      (`validate_posture_consistency`) reads the flags directly —
+      keyword and directive paths are indistinguishable downstream.
+- [x] `register_type_names` OR-folds `kw_is_copy || mark_outcome.copy`
+      and `kw_is_linear || mark_outcome.linear`, so a redundant
+      combination (`@mark(linear) linear struct …`) is accepted.
+      Conflicts (`@mark(copy) linear struct …`,
+      `@mark(linear) copy struct …`) hit the existing
+      `LinearStructCopy` mutual-exclusion path.
+- [x] Spec tests in `cases/items/mark-directive.toml`:
+      `mark_redundant_with_keyword_copy_ok`,
+      `mark_redundant_with_keyword_linear_ok`,
+      `mark_copy_with_linear_keyword_rejected`,
+      `mark_linear_with_copy_keyword_rejected`.
 
 ### Phase 3: Migrate the corpus
 
