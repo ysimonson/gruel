@@ -1,12 +1,12 @@
 ---
 id: 0083
 title: `@mark(...)` directive for marker traits
-status: proposal
+status: implemented
 tags: [types, ownership, syntax, directives]
-feature-flag: mark_directive
+feature-flag:
 created: 2026-05-10
-accepted:
-implemented:
+accepted: 2026-05-10
+implemented: 2026-05-10
 spec-sections: ["2.5", "3.8"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -457,16 +457,34 @@ its LOC delta in the commit message.
 
 ### Phase 5: Stabilize
 
-- [ ] Remove the `mark_directive` preview gate from `PreviewFeature`
-      and the `require_preview` call site in `register_type_names`.
-      The `--preview mark_directive` flag is no longer recognized;
-      spec tests drop the corresponding `preview = "..."` lines.
-- [ ] Sweep residual `copy struct` / `linear struct` / `copy enum`
-      / `linear enum` strings in the codebase; verify the only
-      survivors are inside historical ADR bodies (per the
-      "no rewriting old ADRs" rule).
-- [ ] ADR status → `implemented`; update frontmatter
-      (`accepted`, `implemented`).
+- [x] Removed `PreviewFeature::MarkDirective` from
+      `gruel-util/src/error.rs`. `--preview mark_directive` is no
+      longer recognised; the preview-required call site in
+      `process_mark_directives` retired with it. The
+      `compile_to_air` and `gather_declarations_for_testing`
+      helpers no longer enable any preview features.
+- [x] Stripped `preview = "mark_directive"` and
+      `preview_should_pass = true` from every spec case still
+      carrying them. Script:
+      `scratch/strip_mark_preview.py`. Renamed the Phase 2
+      "redundant-with-keyword" tests to the more accurate
+      `mark_duplicate_*` form now that the keyword path is gone.
+      Dropped the `mark_preview_gated` test entirely.
+- [x] Swept residual `copy struct` / `linear struct` / `copy enum`
+      / `linear enum` strings: the only remaining occurrences are
+      in historical ADR bodies (0008, 0059, 0065, 0067, 0075,
+      0078, 0079, 0080) — those are protected by the
+      "no rewriting old ADRs" rule. Comments in
+      `gruel-air/src/intern_pool.rs`,
+      `gruel-air/src/sema/typeck.rs`,
+      `gruel-air/src/sema/lang_items.rs`, and a stale
+      `description` field in `cases/types/move-semantics.toml`
+      remain as historical breadcrumbs and are not load-bearing.
+- [x] `make test` passes on the final state (2157 spec, 92 UI,
+      20 examples, 100% normative spec coverage).
+- [x] ADR status → `implemented`; frontmatter updated
+      (`accepted: 2026-05-10`, `implemented: 2026-05-10`,
+      `feature-flag:` cleared).
 
 ## Consequences
 

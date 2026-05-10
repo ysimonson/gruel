@@ -198,8 +198,6 @@ exit_code = 4
 
 [[case]]
 name = "copy_struct_with_array_field_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:2", "3.8:20"]
 description = "ADR-0083: arrays of Copy elements are Copy under uniform inference, so a `copy struct` may now contain an array of Copy elements."
 source = """
@@ -214,8 +212,6 @@ exit_code = 3
 
 [[case]]
 name = "copy_struct_with_array_of_non_copy_error"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:18", "3.8:20"]
 description = "@derive(Copy) struct cannot contain array of non-Copy type"
 source = """
@@ -597,8 +593,6 @@ exit_code = 43
 
 [[case]]
 name = "copy_struct_nested_copy"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:20", "3.8:21"]
 description = "@derive(Copy) struct containing other @derive(Copy) structs"
 source = """
@@ -619,8 +613,6 @@ exit_code = 10
 
 [[case]]
 name = "copy_struct_deeply_nested"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:20", "3.8:21"]
 description = "@derive(Copy) struct with 3+ levels of nesting"
 source = """
@@ -640,8 +632,6 @@ exit_code = 6
 
 [[case]]
 name = "copy_struct_non_copy_field_error"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:18", "3.8:19"]
 description = "@derive(Copy) struct with non-Copy field is a compile error. ADR-0083: keep `Inner` non-Copy with a `String` field."
 source = """
@@ -656,8 +646,6 @@ error_contains = "affine"
 
 [[case]]
 name = "copy_struct_enum_field"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:20"]
 description = "@derive(Copy) struct with enum field (enums are Copy)"
 source = """
@@ -793,8 +781,6 @@ expected_stdout = "99\n"
 
 [[case]]
 name = "linear_struct_consumed"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:30", "3.8:31", "3.8:32", "3.8:33", "3.8:34"]
 description = "Linear struct can be consumed by passing to a function"
 source = """
@@ -811,8 +797,6 @@ exit_code = 42
 
 [[case]]
 name = "linear_struct_returned"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:32", "3.8:33"]
 description = "Linear struct returned from function transfers responsibility to caller"
 source = """
@@ -830,8 +814,6 @@ exit_code = 10
 
 [[case]]
 name = "linear_struct_dropped_error"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:32", "3.8:35", "3.8:36"]
 description = "Linear value dropped without being consumed is an error"
 source = """
@@ -847,8 +829,6 @@ error_contains = "linear value"
 
 [[case]]
 name = "linear_struct_copy_error"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:37", "3.8:38"]
 description = "ADR-0080: a `linear struct` cannot also be `copy` — the parser rejects the keyword combo, so `@derive(Copy)` is now an unknown derive."
 source = """
@@ -862,8 +842,6 @@ error_contains = "Copy"
 
 [[case]]
 name = "linear_copy_reverse_order_error"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:37"]
 description = "Linear and @derive(Copy) in reverse order is also an error"
 source = """
@@ -876,8 +854,6 @@ exit_code = 0
 
 [[case]]
 name = "linear_struct_chain_consumed"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:32", "3.8:33"]
 description = "Linear value can be chained through functions"
 source = """
@@ -898,8 +874,6 @@ exit_code = 42
 
 [[case]]
 name = "linear_in_branch_consumed"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:32"]
 description = "Linear value must be consumed in all branches"
 source = """
@@ -987,8 +961,6 @@ error_contains = "use of moved value"
 
 [[case]]
 name = "linear_field_access"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:32", "3.8:33"]
 description = "Field access on @mark(linear) struct counts as move (consuming)"
 source = """
@@ -1120,8 +1092,6 @@ exit_code = 0
 
 [[case]]
 name = "handle_with_linear"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:49"]
 description = "Linear struct can conform to Handle"
 source = """
@@ -1380,8 +1350,6 @@ exit_code = 19
 # ADR-0067: linearity propagates through compound types.
 [[case]]
 name = "linear_array_implicit_drop_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:32"]
 description = "Array of linear elements cannot be implicitly dropped (ADR-0067)"
 source = """
@@ -1397,8 +1365,6 @@ error_contains = "linear value"
 
 [[case]]
 name = "linear_array_index_partial_move_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:32"]
 description = "Indexing into an array of linear elements is rejected (partial moves are banned, ADR-0036)"
 source = """
@@ -1416,8 +1382,6 @@ error_contains = "cannot move out of indexed position"
 
 [[case]]
 name = "linear_zero_array_drop_ok"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:32"]
 description = "Empty array of linear elements has no payload — implicit drop OK"
 source = """

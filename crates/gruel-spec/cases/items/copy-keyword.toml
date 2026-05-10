@@ -19,8 +19,6 @@ description = "Posture-consistency, mutual-exclusion, and drop-interaction tests
 
 [[case]]
 name = "copy_struct_parses"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:14"]
 source = """
 @mark(copy) struct Point { x: i32, y: i32 }
@@ -33,8 +31,6 @@ exit_code = 3
 
 [[case]]
 name = "copy_enum_parses"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:14"]
 source = """
 @mark(copy) enum Color { Red, Green, Blue }
@@ -51,8 +47,6 @@ exit_code = 1
 
 [[case]]
 name = "linear_enum_parses"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:30"]
 source = """
 @mark(linear) enum Resource { Open, Closed }
@@ -109,8 +103,6 @@ exit_code = 42
 
 [[case]]
 name = "linear_copy_struct_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:62"]
 source = """
 linear @mark(copy) struct Bad { x: i32 }
@@ -120,8 +112,6 @@ compile_fail = true
 
 [[case]]
 name = "copy_linear_struct_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:62"]
 source = """
 copy @mark(linear) struct Bad { x: i32 }
@@ -135,8 +125,6 @@ compile_fail = true
 
 [[case]]
 name = "copy_struct_is_copy_by_assignment"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:14", "3.8:16"]
 description = "ADR-0080: a `copy struct` is implicitly duplicated on `let b = a`."
 source = """
@@ -151,8 +139,6 @@ exit_code = 6
 
 [[case]]
 name = "copy_enum_is_copy_by_assignment"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:14", "3.8:16"]
 description = "ADR-0080: a `copy enum` is implicitly duplicated on `let b = a`, even with no payloads."
 source = """
@@ -171,8 +157,6 @@ exit_code = 1
 
 [[case]]
 name = "linear_enum_dropped_without_consume_error"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:30", "3.8:32"]
 description = "ADR-0080: a `linear enum` value must be explicitly consumed."
 source = """
@@ -187,8 +171,6 @@ error_contains = "linear value"
 
 [[case]]
 name = "linear_enum_consumed_by_function"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:30", "3.8:33"]
 description = "ADR-0080: a `linear enum` is consumed by passing to a function."
 source = """
@@ -222,8 +204,6 @@ exit_code = 3
 
 [[case]]
 name = "copy_struct_with_copy_fields_ok"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:14"]
 description = "ADR-0080: a `copy struct` whose fields are all Copy is itself Copy and may be aliased."
 source = """
@@ -243,8 +223,6 @@ exit_code = 33
 
 [[case]]
 name = "copy_struct_with_affine_field_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:18"]
 description = "ADR-0080: a `copy struct` may not contain a non-Copy field."
 source = """
@@ -256,8 +234,6 @@ error_contains = "affine"
 
 [[case]]
 name = "copy_enum_with_affine_payload_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:18"]
 description = "ADR-0080: a `copy enum` may not have a non-Copy payload."
 source = """
@@ -269,8 +245,6 @@ error_contains = "affine"
 
 [[case]]
 name = "affine_struct_with_linear_field_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:30"]
 description = "ADR-0083: under uniform structural inference, an unmarked struct with a linear field propagates linear upward — the host becomes Linear automatically rather than producing an error."
 source = """
@@ -286,8 +260,6 @@ exit_code = 7
 
 [[case]]
 name = "affine_enum_with_linear_payload_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:30"]
 description = "ADR-0083: under uniform structural inference, an unmarked enum with a linear payload becomes Linear automatically."
 source = """
@@ -308,8 +280,6 @@ exit_code = 9
 
 [[case]]
 name = "linear_enum_with_linear_payload_ok"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:30"]
 description = "ADR-0080: a `linear enum` accepts linear payloads (linear absorbs)."
 source = """
@@ -330,8 +300,6 @@ exit_code = 7
 
 [[case]]
 name = "copy_struct_with_drop_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:62"]
 description = "ADR-0080: `copy` and `Drop` remain mutually exclusive."
 source = """

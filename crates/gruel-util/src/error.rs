@@ -351,10 +351,6 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
-    /// `@mark(...)` directive for marker traits (ADR-0083).
-    /// Replaces ADR-0080's `copy` / `linear` keyword slot with a uniform
-    /// directive on the type-decl head.
-    MarkDirective,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -386,7 +382,6 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
-            PreviewFeature::MarkDirective => "ADR-0083",
         }
     }
 
@@ -2072,7 +2067,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra, mark_directive");
+        assert_eq!(names, "test_infra");
     }
 
     // ========================================================================

@@ -99,8 +99,6 @@ error_contains = "does not conform to interface `Clone`"
 # A `linear` type does NOT conform to Clone.
 [[case]]
 name = "clone_interface_rejects_linear"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:72"]
 description = "comptime T: Clone rejects linear types"
 source = """
@@ -200,8 +198,6 @@ exit_code = 42
 # (ADR-0079).
 [[case]]
 name = "derive_clone_struct_non_copy_field"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:71"]
 description = "@derive(Clone) recurses through Clone fields (e.g. String)"
 source = """
@@ -220,8 +216,6 @@ exit_code = 0
 # @derive(Clone) on a @mark(linear) struct is rejected.
 [[case]]
 name = "derive_clone_linear_rejected"
-preview = "mark_directive"
-preview_should_pass = true
 spec = ["3.8:72"]
 description = "@derive(Clone) on @mark(linear) struct is rejected"
 source = """

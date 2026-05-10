@@ -16,7 +16,6 @@ use gruel_builtins::{
     is_reserved_type_constructor_name,
 };
 use gruel_rir::{InstData, InstRef, RirParamMode};
-use gruel_util::PreviewFeature;
 use gruel_util::Span;
 use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
 use lasso::Spur;
@@ -694,9 +693,8 @@ impl<'a> Sema<'a> {
 
     /// ADR-0083: process the `@mark(...)` directives on a type declaration.
     ///
-    /// Walks the directive list, gates each `@mark` use behind the
-    /// `mark_directive` preview feature, and validates each marker against
-    /// the `BUILTIN_MARKERS` registry. Returns a flag-set describing which
+    /// Walks the directive list and validates each marker against the
+    /// `BUILTIN_MARKERS` registry. Returns a flag-set describing which
     /// posture markers were declared so the caller can fold them into the
     /// type's `is_copy` / `is_linear` bits (and the `mark_affine_decls`
     /// side set).
@@ -724,12 +722,6 @@ impl<'a> Sema<'a> {
             if dir_name != "mark" {
                 continue;
             }
-            // Gate the directive itself behind the preview feature.
-            self.require_preview(
-                PreviewFeature::MarkDirective,
-                "the `@mark(...)` directive",
-                directive.span,
-            )?;
             if directive.args.is_empty() {
                 return Err(CompileError::new(
                     ErrorKind::UnknownMarker {

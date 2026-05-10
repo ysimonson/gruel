@@ -19,8 +19,6 @@ description = "Marker directive for declaration-time posture (Copy / Affine / Li
 [[case]]
 name = "mark_copy_struct_basic"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: `@mark(copy)` declares the struct Copy, exactly like the `copy` keyword."
 source = """
 @mark(copy) struct Point { x: i32, y: i32 }
@@ -35,8 +33,6 @@ exit_code = 6
 [[case]]
 name = "mark_linear_struct_basic"
 spec = ["3.8:30"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: `@mark(linear)` declares the struct Linear."
 source = """
 @mark(linear) struct Resource { value: i32 }
@@ -53,8 +49,6 @@ exit_code = 42
 [[case]]
 name = "mark_linear_enum_basic"
 spec = ["3.8:30"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: `@mark(linear)` declares an enum Linear."
 source = """
 @mark(linear) enum Resource { Open, Closed }
@@ -74,8 +68,6 @@ exit_code = 1
 [[case]]
 name = "mark_copy_enum_basic"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: `@mark(copy)` declares an enum Copy."
 source = """
 @mark(copy) enum Color { Red, Green, Blue }
@@ -98,8 +90,6 @@ exit_code = 1
 [[case]]
 name = "mark_affine_suppresses_copy_inference"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: `@mark(affine)` keeps a struct Affine even when its members would infer Copy."
 source = """
 @mark(affine) struct Token { id: i32 }
@@ -116,8 +106,6 @@ exit_code = 7
 [[case]]
 name = "mark_affine_with_linear_field_rejected"
 spec = ["3.8:30"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: `@mark(affine)` cannot hide a Linear member; Linear is contagious upward."
 source = """
 @mark(linear) struct Resource { value: i32 }
@@ -134,8 +122,6 @@ error_contains = "linear"
 [[case]]
 name = "mark_unmarked_struct_of_copy_infers_copy"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: an unmarked struct whose fields are all Copy infers Copy posture."
 source = """
 struct Pair { x: i32, y: i32 }
@@ -154,8 +140,6 @@ exit_code = 14
 [[case]]
 name = "mark_copy_struct_anon"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: anonymous struct types accept `@mark(copy)` in the directive list."
 source = """
 fn make_point() -> type {
@@ -177,8 +161,6 @@ exit_code = 3
 [[case]]
 name = "mark_unknown_marker_diagnostic"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: an unknown marker name is rejected with a near-match suggestion."
 source = """
 @mark(coopy) struct Bad { x: i32 }
@@ -190,8 +172,6 @@ error_contains = "unknown marker"
 [[case]]
 name = "mark_copy_and_linear_rejected"
 spec = ["3.8:62"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: `@mark(copy)` and `@mark(linear)` on the same item are mutually exclusive."
 source = """
 @mark(copy) @mark(linear) struct Bad { x: i32 }
@@ -202,8 +182,6 @@ compile_fail = true
 [[case]]
 name = "mark_combines_with_derive"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: `@mark` and `@derive` can appear in the same directive list."
 source = """
 @derive(Clone) @mark(copy) struct Pair { x: i32, y: i32 }
@@ -218,8 +196,6 @@ exit_code = 3
 [[case]]
 name = "mark_multi_arg_form"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: `@mark(copy)` accepts a single argument; the multi-arg form is the union of markers."
 source = """
 @mark(copy) struct Pair { x: i32, y: i32 }
@@ -234,8 +210,6 @@ exit_code = 12
 [[case]]
 name = "mark_two_directives_form"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
 description = "ADR-0083: writing two compatible `@mark(...)` directives is allowed (union of markers)."
 source = """
 @mark(copy) @derive(Clone) struct Pair { x: i32, y: i32 }
@@ -247,30 +221,14 @@ fn main() -> i32 {
 """
 exit_code = 3
 
-[[case]]
-name = "mark_preview_gated"
-spec = ["3.8:14"]
-description = "ADR-0083: `@mark(...)` requires `--preview mark_directive`; without it the directive errors."
-source = """
-@mark(copy) struct Point { x: i32, y: i32 }
-fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
-    p.x + p.y
-}
-"""
-compile_fail = true
-error_contains = "preview"
-
 # =============================================================================
-# Phase 2: coexistence with the ADR-0080 keyword path
+# Multi-directive form: duplicate / conflicting markers
 # =============================================================================
 
 [[case]]
-name = "mark_redundant_with_keyword_copy_ok"
+name = "mark_duplicate_copy_ok"
 spec = ["3.8:14"]
-preview = "mark_directive"
-preview_should_pass = true
-description = "ADR-0083 Phase 2: `@mark(copy)` on a `copy struct` is redundant-but-consistent — accepted, not an error."
+description = "ADR-0083: writing `@mark(copy)` twice on the same item is harmless — markers are unioned by name."
 source = """
 @mark(copy) @mark(copy) struct Point { x: i32, y: i32 }
 fn main() -> i32 {
@@ -282,11 +240,9 @@ fn main() -> i32 {
 exit_code = 3
 
 [[case]]
-name = "mark_redundant_with_keyword_linear_ok"
+name = "mark_duplicate_linear_ok"
 spec = ["3.8:30"]
-preview = "mark_directive"
-preview_should_pass = true
-description = "ADR-0083 Phase 2: `@mark(linear)` on a `linear struct` is redundant-but-consistent."
+description = "ADR-0083: writing `@mark(linear)` twice on the same item is harmless — markers are unioned by name."
 source = """
 @mark(linear) @mark(linear) struct Resource { value: i32 }
 fn consume(r: Resource) -> i32 { r.value }
@@ -298,11 +254,9 @@ fn main() -> i32 {
 exit_code = 7
 
 [[case]]
-name = "mark_copy_with_linear_keyword_rejected"
+name = "mark_copy_then_linear_rejected"
 spec = ["3.8:62"]
-preview = "mark_directive"
-preview_should_pass = true
-description = "ADR-0083 Phase 2: `@mark(copy)` on a `linear struct` is the existing Copy⊥Linear conflict via the directive path."
+description = "ADR-0083: `@mark(copy)` followed by `@mark(linear)` is rejected via the existing Copy⊥Linear path."
 source = """
 @mark(copy) @mark(linear) struct Bad { x: i32 }
 fn main() -> i32 { 0 }
@@ -310,11 +264,9 @@ fn main() -> i32 { 0 }
 compile_fail = true
 
 [[case]]
-name = "mark_linear_with_copy_keyword_rejected"
+name = "mark_linear_then_copy_rejected"
 spec = ["3.8:62"]
-preview = "mark_directive"
-preview_should_pass = true
-description = "ADR-0083 Phase 2: `@mark(linear)` on a `copy struct` is the existing Copy⊥Linear conflict via the directive path."
+description = "ADR-0083: `@mark(linear)` followed by `@mark(copy)` is the symmetric Copy⊥Linear conflict."
 source = """
 @mark(linear) @mark(copy) struct Bad { x: i32 }
 fn main() -> i32 { 0 }

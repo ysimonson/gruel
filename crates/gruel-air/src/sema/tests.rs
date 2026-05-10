@@ -18,13 +18,7 @@ mod tests {
         let astgen = AstGen::new(&ast, &interner);
         let rir = astgen.generate();
 
-        // ADR-0083 Phase 3: enable `mark_directive` so unit tests can use
-        // the `@mark(...)` form alongside the existing `copy`/`linear`
-        // keyword forms during the migration window. Phase 5 retires the
-        // gate and this enable can be removed.
-        let mut preview = PreviewFeatures::default();
-        preview.insert(gruel_util::PreviewFeature::MarkDirective);
-        let sema = Sema::new(&rir, &interner, preview);
+        let sema = Sema::new(&rir, &interner, PreviewFeatures::default());
         sema.analyze_all()
     }
 
@@ -823,11 +817,7 @@ mod tests {
         let rir = Box::leak(Box::new(rir));
         let interner = Box::leak(Box::new(interner));
 
-        // ADR-0083 Phase 3: same migration-window enable as
-        // `compile_to_air` so test fixtures can use `@mark(...)`.
-        let mut preview = PreviewFeatures::default();
-        preview.insert(gruel_util::PreviewFeature::MarkDirective);
-        let mut sema = Sema::new(rir, interner, preview);
+        let mut sema = Sema::new(rir, interner, PreviewFeatures::default());
         sema.inject_builtin_types();
         sema.register_type_names().unwrap();
         sema.resolve_declarations().unwrap();
