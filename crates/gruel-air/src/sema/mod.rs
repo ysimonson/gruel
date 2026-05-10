@@ -145,6 +145,10 @@ pub struct Sema<'a> {
     pub(crate) builtin_typekind_id: Option<EnumId>,
     /// EnumId of the synthetic Ownership enum (for @ownership intrinsic).
     pub(crate) builtin_ownership_id: Option<EnumId>,
+    /// EnumId of the prelude `ThreadSafety` enum (ADR-0084), used by
+    /// the `@thread_safety` intrinsic to materialize a value of the
+    /// classification ladder.
+    pub(crate) builtin_thread_safety_id: Option<EnumId>,
     /// EnumId of the prelude `Ordering` enum (ADR-0078 Phase 4: target of
     /// `Ord::cmp`; analyzed at every `<`/`<=`/`>`/`>=` desugaring on a
     /// type that conforms to `Ord`).
@@ -302,6 +306,7 @@ impl<'a> Sema<'a> {
             builtin_os_id: None,
             builtin_typekind_id: None,
             builtin_ownership_id: None,
+            builtin_thread_safety_id: None,
             builtin_ordering_id: None,
             lang_items: LangItems::default(),
             known: KnownSymbols::new(interner),

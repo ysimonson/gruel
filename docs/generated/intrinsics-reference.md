@@ -25,6 +25,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@type_name` | type | Compile-time Reflection | — | — | Name of a type as a comptime string. |
 | `@type_info` | type | Compile-time Reflection | — | — | Reflective info about a type. |
 | `@ownership` | type | Compile-time Reflection | — | — | Ownership posture of a type (`Copy`, `Affine`, or `Linear`). |
+| `@thread_safety` | type | Compile-time Reflection | thread_safety | — | Thread-safety classification of a type (`Unsend`, `Send`, or `Sync`). |
 | `@implements` | type+iface | Compile-time Reflection | — | — | Whether a type structurally implements an interface. |
 | `@field` | expr | Compile-time Reflection | — | — | Access a field by comptime-known name. |
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
@@ -282,6 +283,26 @@ let r = @random_u64();
 
 ```gruel
 match @ownership(T) { Ownership::Copy => ..., Ownership::Affine => ..., Ownership::Linear => ... }
+```
+
+### `@thread_safety`
+
+`@thread_safety(T)` returns a variant of the built-in `ThreadSafety` enum classifying `T` on the trichotomy `Unsend < Send < Sync` (see ADR-0084): `Unsend` if `T` cannot cross a thread boundary, `Send` if it can be moved between threads, `Sync` if it can be shared. Primitives are intrinsically `Sync`; raw pointers (`Ptr(T)` / `MutPtr(T)`) are intrinsically `Unsend`. Composite types take the structural minimum over their members, optionally overridden by `@mark(unsend)` / `@mark(checked_send)` / `@mark(checked_sync)`. Evaluated at compile time.
+
+- **Preview gate:** `--preview thread_safety` (ADR-0084)
+
+**Examples:**
+
+```gruel
+@thread_safety(i32) // ThreadSafety::Sync
+```
+
+```gruel
+@thread_safety(MutPtr(u8)) // ThreadSafety::Unsend
+```
+
+```gruel
+comptime if (@thread_safety(T) == ThreadSafety::Sync) { ... }
 ```
 
 ### `@implements`

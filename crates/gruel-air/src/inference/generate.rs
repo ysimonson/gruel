@@ -1113,6 +1113,20 @@ impl<'a> ConstraintGenerator<'a> {
                             InferType::Concrete(Type::ERROR)
                         }
                     }
+                    Some(IntrinsicId::ThreadSafety) => {
+                        // ADR-0084: @thread_safety returns the prelude
+                        // `ThreadSafety` enum. Same lookup shape as
+                        // @ownership.
+                        if let Some(spur) = self.interner.get("ThreadSafety") {
+                            if let Some(&ty) = self.enums.get(&spur) {
+                                InferType::Concrete(ty)
+                            } else {
+                                InferType::Concrete(Type::ERROR)
+                            }
+                        } else {
+                            InferType::Concrete(Type::ERROR)
+                        }
+                    }
                     // ADR-0079 Phase 2b: `@uninit(T)` only appears in
                     // `let h = …` position, where sema captures it via the
                     // side-table. Use a fresh var so the alloc's

@@ -56,6 +56,14 @@ impl<'a> Sema<'a> {
         {
             self.builtin_ownership_id = Some(id);
         }
+        // ADR-0084: cache the prelude `ThreadSafety` enum so the
+        // `@thread_safety` intrinsic can materialize variants without a
+        // name lookup at every call site.
+        if let Some(spur) = self.interner.get("ThreadSafety")
+            && let Some(&id) = self.enums.get(&spur)
+        {
+            self.builtin_thread_safety_id = Some(id);
+        }
         // ADR-0078 Phase 4: cache `Ordering` for the binop dispatch in
         // `analyze_comparison`, which constructs `Ordering::Less` /
         // `Ordering::Greater` enum-variant AIR refs to compare against the
@@ -115,6 +123,20 @@ impl<'a> Sema<'a> {
             0
         } else {
             1
+        }
+    }
+
+    /// ADR-0084: variant index of the `ThreadSafety` builtin enum
+    /// classifying `ty`.
+    ///
+    /// Variant order in `prelude/type_info.gruel`: `Unsend` = 0,
+    /// `Send` = 1, `Sync` = 2 — matches the compiler-side `ThreadSafety`
+    /// enum's derived `Ord` impl.
+    pub(crate) fn thread_safety_variant_index(&self, ty: Type) -> u32 {
+        match self.type_pool.is_thread_safety_type(ty) {
+            gruel_builtins::ThreadSafety::Unsend => 0,
+            gruel_builtins::ThreadSafety::Send => 1,
+            gruel_builtins::ThreadSafety::Sync => 2,
         }
     }
 

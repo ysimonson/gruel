@@ -333,10 +333,10 @@ pub fn all_marker_names() -> Vec<&'static str> {
 // `arch_variant_index` / `os_variant_index` mappers; see
 // `crates/gruel-air/src/sema/analysis.rs`.
 
-/// Names of the four prelude-resident built-in enums. Kept here only so
+/// Names of the prelude-resident built-in enums. Kept here only so
 /// other crates have a single source of truth when they need to refer to
 /// the names (e.g. for documentation generation).
-pub static BUILTIN_ENUM_NAMES: &[&str] = &["Arch", "Os", "TypeKind", "Ownership"];
+pub static BUILTIN_ENUM_NAMES: &[&str] = &["Arch", "Os", "TypeKind", "Ownership", "ThreadSafety"];
 
 // ============================================================================
 // Built-in Interfaces (Drop, Clone, Handle)
@@ -720,7 +720,10 @@ mod tests {
 
     #[test]
     fn test_builtin_enum_names() {
-        assert_eq!(BUILTIN_ENUM_NAMES, &["Arch", "Os", "TypeKind", "Ownership"]);
+        assert_eq!(
+            BUILTIN_ENUM_NAMES,
+            &["Arch", "Os", "TypeKind", "Ownership", "ThreadSafety"]
+        );
     }
 
     #[test]

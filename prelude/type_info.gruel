@@ -28,3 +28,15 @@ pub enum Ownership {
     Affine,
     Linear,
 }
+
+// Thread-safety classification (`@thread_safety(T)`) — see ADR-0084.
+//
+// The variant order matches the trichotomy `Unsend < Send < Sync`,
+// which is the order the compiler-side `ThreadSafety` enum uses for
+// its derived `Ord` impl. Variant indices: Unsend = 0, Send = 1,
+// Sync = 2.
+pub enum ThreadSafety {
+    Unsend,
+    Send,
+    Sync,
+}

@@ -98,6 +98,119 @@ fn main() -> i32 { 0 }
 """
 exit_code = 0
 
+# =============================================================================
+# Phase 3: @thread_safety comptime intrinsic
+# =============================================================================
+#
+# Direct queries against the trichotomy. The intrinsic returns a
+# variant of the prelude `ThreadSafety` enum; the test exit code
+# encodes which variant for easy assertion.
+
+[[case]]
+name = "thread_safety_returns_sync_for_i32"
+spec = ["3.15:1", "3.15:3"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @thread_safety(i32) returns ThreadSafety::Sync."
+source = """
+fn main() -> i32 {
+    match @thread_safety(i32) {
+        ThreadSafety::Unsend => 1,
+        ThreadSafety::Send => 2,
+        ThreadSafety::Sync => 3,
+    }
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "thread_safety_returns_sync_for_bool"
+spec = ["3.15:3"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @thread_safety(bool) returns ThreadSafety::Sync."
+source = """
+fn main() -> i32 {
+    match @thread_safety(bool) {
+        ThreadSafety::Unsend => 1,
+        ThreadSafety::Send => 2,
+        ThreadSafety::Sync => 3,
+    }
+}
+"""
+exit_code = 3
+
+[[case]]
+name = "thread_safety_returns_unsend_for_marked_struct"
+spec = ["3.15:8"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: a struct with @mark(unsend) overrides the structurally-Sync inference; @thread_safety returns Unsend."
+source = """
+@mark(unsend) struct ThreadAffine { id: i32 }
+fn main() -> i32 {
+    match @thread_safety(ThreadAffine) {
+        ThreadSafety::Unsend => 1,
+        ThreadSafety::Send => 2,
+        ThreadSafety::Sync => 3,
+    }
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "thread_safety_returns_send_for_struct_with_checked_send"
+spec = ["3.15:8"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @mark(checked_send) overrides the structural minimum; @thread_safety returns Send."
+source = """
+@mark(checked_send) struct AssertedSend { x: i32, y: i32 }
+fn main() -> i32 {
+    match @thread_safety(AssertedSend) {
+        ThreadSafety::Unsend => 1,
+        ThreadSafety::Send => 2,
+        ThreadSafety::Sync => 3,
+    }
+}
+"""
+exit_code = 2
+
+[[case]]
+name = "thread_safety_in_comptime_branch"
+spec = ["3.15:1", "3.15:5"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @thread_safety can drive a comptime branch — pattern matching against the result selects different behavior at compile time."
+source = """
+fn classify(comptime T: type) -> i32 {
+    comptime if (@thread_safety(T) == ThreadSafety::Sync) {
+        return 100;
+    }
+    return 0;
+}
+fn main() -> i32 {
+    classify(i32)
+}
+"""
+exit_code = 100
+
+[[case]]
+name = "thread_safety_intrinsic_preview_gated"
+spec = ["3.15:1"]
+description = "ADR-0084: @thread_safety is gated behind --preview thread_safety."
+source = """
+fn main() -> i32 {
+    match @thread_safety(i32) {
+        ThreadSafety::Unsend => 1,
+        ThreadSafety::Send => 2,
+        ThreadSafety::Sync => 3,
+    }
+}
+"""
+compile_fail = true
+error_contains = "thread_safety"
+
 [[case]]
 name = "checked_send_on_primitive_struct"
 spec = ["3.15:1", "3.15:3"]

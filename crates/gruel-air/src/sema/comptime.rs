@@ -3370,6 +3370,16 @@ impl<'a> Sema<'a> {
                             variant_idx,
                         })
                     }
+                    Some(IntrinsicId::ThreadSafety) => {
+                        let enum_id = self
+                            .builtin_thread_safety_id
+                            .expect("ThreadSafety enum not injected - internal compiler error");
+                        let variant_idx = self.thread_safety_variant_index(ty);
+                        Ok(ConstValue::EnumVariant {
+                            enum_id,
+                            variant_idx,
+                        })
+                    }
                     _ => Err(not_const(inst_span)),
                 }
             }

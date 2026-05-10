@@ -72,6 +72,8 @@ pub struct GatherOutput<'a> {
     pub builtin_typekind_id: Option<EnumId>,
     /// EnumId of the synthetic Ownership enum (for @ownership intrinsic).
     pub builtin_ownership_id: Option<EnumId>,
+    /// EnumId of the prelude `ThreadSafety` enum (ADR-0084).
+    pub builtin_thread_safety_id: Option<EnumId>,
     /// EnumId of the prelude `Ordering` enum (ADR-0078 Phase 4).
     pub builtin_ordering_id: Option<EnumId>,
     /// Type intern pool (ADR-0024 Phase 1).
@@ -109,6 +111,7 @@ impl<'a> GatherOutput<'a> {
             builtin_os_id: self.builtin_os_id,
             builtin_typekind_id: self.builtin_typekind_id,
             builtin_ownership_id: self.builtin_ownership_id,
+            builtin_thread_safety_id: self.builtin_thread_safety_id,
             builtin_ordering_id: self.builtin_ordering_id,
             lang_items: super::LangItems::default(),
             known: KnownSymbols::new(self.interner),

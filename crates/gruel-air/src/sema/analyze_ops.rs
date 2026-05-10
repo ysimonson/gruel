@@ -8081,6 +8081,28 @@ impl<'a> Sema<'a> {
                 });
                 Ok(AnalysisResult::new(air_ref, result_type))
             }
+            Some(IntrinsicId::ThreadSafety) => {
+                // ADR-0084: comptime classification on the trichotomy.
+                self.require_preview(
+                    gruel_util::PreviewFeature::ThreadSafety,
+                    "@thread_safety() intrinsic",
+                    span,
+                )?;
+                let enum_id = self
+                    .builtin_thread_safety_id
+                    .expect("ThreadSafety enum not injected - internal compiler error");
+                let variant_index = self.thread_safety_variant_index(ty);
+                let result_type = Type::new_enum(enum_id);
+                let air_ref = air.add_inst(AirInst {
+                    data: AirInstData::EnumVariant {
+                        enum_id,
+                        variant_index,
+                    },
+                    ty: result_type,
+                    span,
+                });
+                Ok(AnalysisResult::new(air_ref, result_type))
+            }
             _ => Err(CompileError::new(
                 ErrorKind::UnknownIntrinsic(intrinsic_name.to_string()),
                 span,

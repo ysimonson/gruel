@@ -456,21 +456,26 @@ quotes its LOC delta in the commit message.
 
 ### Phase 3: Comptime query `@thread_safety`
 
-- [ ] Add `IntrinsicId::ThreadSafety` to the `gruel-intrinsics`
+- [x] Add `IntrinsicId::ThreadSafety` to the `gruel-intrinsics`
       enum.
-- [ ] Append the `IntrinsicDef` (kind: `Type`, category:
-      `TypeReflection`, runtime_fn: `None`, preview:
+- [x] Append the `IntrinsicDef` (kind: `Type`, category:
+      `Comptime`, runtime_fn: `None`, preview:
       `Some(PreviewFeature::ThreadSafety)`).
-- [ ] Inject a `ThreadSafety` enum into the prelude during sema's
+- [x] Inject a `ThreadSafety` enum into the prelude during sema's
       builtin-enum injection pass (alongside `Ownership`).
-- [ ] Sema arm in `analyze_type_intrinsic` reads the type's
+- [x] Sema arm in `analyze_type_intrinsic` reads the type's
       `thread_safety`.
-- [ ] Codegen lowers to a constant enum value at LLVM emission
-      (compile-time constant; no runtime call).
-- [ ] Run `make gen-intrinsic-docs` to regenerate
+- [x] Codegen lowers to a constant enum value at LLVM emission
+      (compile-time constant; no runtime call) — handled by reusing
+      the existing `EnumVariant` air node, which lowers as a constant.
+- [x] Run `make gen-intrinsic-docs` to regenerate
       `docs/generated/intrinsics-reference.md`.
-- [ ] Spec tests: `thread_safety_returns_sync_for_i32`,
-      `thread_safety_returns_unsend_for_ptr`,
+- [x] Spec tests: `thread_safety_returns_sync_for_i32`,
+      `thread_safety_returns_unsend_for_ptr` (covered as
+      `thread_safety_returns_unsend_for_marked_struct` since the
+      type-position parser does not accept `MutPtr(u8)` as a direct
+      argument to a type intrinsic — the same pre-existing limitation
+      affects `@ownership(MutPtr(u8))`),
       `thread_safety_returns_send_for_struct_with_checked_send`,
       `thread_safety_in_comptime_branch`.
 

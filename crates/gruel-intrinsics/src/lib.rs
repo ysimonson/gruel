@@ -50,6 +50,9 @@ pub enum IntrinsicId {
     TypeName,
     TypeInfo,
     Ownership,
+    /// ADR-0084: comptime classification of `T` on the `Unsend < Send <
+    /// Sync` ladder.
+    ThreadSafety,
     Implements,
     Field,
     Import,
@@ -479,6 +482,22 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
             "@ownership(i32) // Ownership::Copy",
             "@ownership(String) // Ownership::Affine",
             "match @ownership(T) { Ownership::Copy => ..., Ownership::Affine => ..., Ownership::Linear => ... }",
+        ],
+    },
+    IntrinsicDef {
+        id: IntrinsicId::ThreadSafety,
+        name: "thread_safety",
+        kind: IntrinsicKind::Type,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::ThreadSafety),
+        runtime_fn: None,
+        summary: "Thread-safety classification of a type (`Unsend`, `Send`, or `Sync`).",
+        description: "`@thread_safety(T)` returns a variant of the built-in `ThreadSafety` enum classifying `T` on the trichotomy `Unsend < Send < Sync` (see ADR-0084): `Unsend` if `T` cannot cross a thread boundary, `Send` if it can be moved between threads, `Sync` if it can be shared. Primitives are intrinsically `Sync`; raw pointers (`Ptr(T)` / `MutPtr(T)`) are intrinsically `Unsend`. Composite types take the structural minimum over their members, optionally overridden by `@mark(unsend)` / `@mark(checked_send)` / `@mark(checked_sync)`. Evaluated at compile time.",
+        examples: &[
+            "@thread_safety(i32) // ThreadSafety::Sync",
+            "@thread_safety(MutPtr(u8)) // ThreadSafety::Unsend",
+            "comptime if (@thread_safety(T) == ThreadSafety::Sync) { ... }",
         ],
     },
     IntrinsicDef {
@@ -1542,6 +1561,7 @@ mod tests {
                 | IntrinsicId::TypeName
                 | IntrinsicId::TypeInfo
                 | IntrinsicId::Ownership
+                | IntrinsicId::ThreadSafety
                 | IntrinsicId::Implements
                 | IntrinsicId::Field
                 | IntrinsicId::Import
@@ -1623,6 +1643,7 @@ mod tests {
             "type_name",
             "type_info",
             "ownership",
+            "thread_safety",
             "uninit",
         ]
         .into_iter()

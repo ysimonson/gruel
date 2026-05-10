@@ -135,6 +135,7 @@ impl<'a> Sema<'a> {
             | IntrinsicId::TypeName
             | IntrinsicId::TypeInfo
             | IntrinsicId::Ownership
+            | IntrinsicId::ThreadSafety
             | IntrinsicId::Implements
             | IntrinsicId::Range
             // Slice methods/indexing are dispatched via the SLICE_METHODS
