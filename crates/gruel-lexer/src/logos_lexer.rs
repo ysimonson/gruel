@@ -320,8 +320,6 @@ pub enum LogosTokenKind {
     Interface,
     #[token("drop")]
     Drop,
-    #[token("linear")]
-    Linear,
     #[token("self")]
     SelfValue,
     #[token("Self")]
@@ -519,7 +517,6 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::Enum => TokenKind::Enum,
             LogosTokenKind::Interface => TokenKind::Interface,
             LogosTokenKind::Drop => TokenKind::Drop,
-            LogosTokenKind::Linear => TokenKind::Linear,
             LogosTokenKind::SelfValue => TokenKind::SelfValue,
             LogosTokenKind::SelfType => TokenKind::SelfType,
             LogosTokenKind::ComptimeUnroll => TokenKind::ComptimeUnroll,

@@ -214,7 +214,7 @@ parser rejects `copy linear` and `linear copy`.
 {{ rule(id="2.5:30") }}
 
 ```gruel
-copy struct Point { x: i32, y: i32 }
+@mark(copy) struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };

@@ -1,13 +1,17 @@
-# ADR-0080: `copy` keyword for Copy types
+# ADR-0083: posture-consistency, mutual exclusion, and drop interaction
 #
-# Stable spec tests for the `copy` / `linear` posture keywords on
-# struct and enum declaration heads.
+# This file used to host ADR-0080's `copy`/`linear` keyword tests. After
+# ADR-0083 Phase 4 retired the keyword path, the tests here exercise the
+# same posture rules through the `@mark(...)` directive form. The new
+# directive-only assertions live in `mark-directive.toml`; this file
+# keeps the consistency and drop-interaction coverage that was already
+# in place.
 
 [section]
 id = "items.copy_keyword"
 spec_chapter = "3.8"
-name = "`copy` keyword (ADR-0080)"
-description = "Posture keywords on struct and enum declarations: `copy struct`, `copy enum`, `linear enum`."
+name = "Posture consistency under `@mark(...)` (ADR-0083)"
+description = "Posture-consistency, mutual-exclusion, and drop-interaction tests originally written for ADR-0080's keyword form, kept under the directive form after ADR-0083 Phase 4."
 
 # =============================================================================
 # Parse-only acceptance

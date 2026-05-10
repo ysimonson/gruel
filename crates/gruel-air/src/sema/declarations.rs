@@ -470,8 +470,6 @@ impl<'a> Sema<'a> {
             match &inst.data {
                 InstData::EnumDecl {
                     is_pub,
-                    is_copy: kw_is_copy,
-                    is_linear: kw_is_linear,
                     name,
                     variants_start,
                     variants_len,
@@ -481,13 +479,10 @@ impl<'a> Sema<'a> {
                 } => {
                     let enum_name = self.interner.resolve(name).to_string();
 
-                    // ADR-0083: process `@mark(...)` directives on the type
-                    // declaration. The directive runs in parallel with the
-                    // ADR-0080 `copy`/`linear` keyword path during the
-                    // migration window (Phases 1–3); both paths populate the
-                    // same `is_copy`/`is_linear` flags. `@mark(affine)` is
-                    // tracked separately because there is no ADR-0080 keyword
-                    // equivalent for it.
+                    // ADR-0083 Phase 4: posture is declared exclusively via
+                    // the `@mark(...)` directive — the keyword path retired.
+                    // `@mark(affine)` is tracked separately because Affine
+                    // does not have a dedicated `is_*` flag.
                     let mark_outcome = self.process_mark_directives(
                         *directives_start,
                         *directives_len,
@@ -496,13 +491,9 @@ impl<'a> Sema<'a> {
                         inst.span,
                     )?;
 
-                    let is_copy = *kw_is_copy || mark_outcome.copy;
-                    let is_linear = *kw_is_linear || mark_outcome.linear;
+                    let is_copy = mark_outcome.copy;
+                    let is_linear = mark_outcome.linear;
 
-                    // ADR-0080 belt-and-braces: parser already rejects
-                    // `copy linear` / `linear copy` syntactically; this catches
-                    // the path where one is a keyword and the other arrives
-                    // via `@derive(Copy)` or `@mark(copy/linear)`.
                     if is_copy && is_linear {
                         return Err(CompileError::new(
                             ErrorKind::LinearStructCopy(enum_name.clone()),
@@ -617,8 +608,6 @@ impl<'a> Sema<'a> {
                     directives_start,
                     directives_len,
                     is_pub,
-                    is_copy: kw_is_copy,
-                    is_linear: kw_is_linear,
                     name,
                     ..
                 } => {
@@ -647,8 +636,8 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    // ADR-0083: parallel `@mark(...)` directive path. See the
-                    // EnumDecl branch above for the rationale.
+                    // ADR-0083 Phase 4: posture is declared exclusively via
+                    // the `@mark(...)` directive — the keyword path retired.
                     let mark_outcome = self.process_mark_directives(
                         *directives_start,
                         *directives_len,
@@ -657,8 +646,8 @@ impl<'a> Sema<'a> {
                         inst.span,
                     )?;
 
-                    let is_copy = *kw_is_copy || mark_outcome.copy;
-                    let is_linear = *kw_is_linear || mark_outcome.linear;
+                    let is_copy = mark_outcome.copy;
+                    let is_linear = mark_outcome.linear;
 
                     // Linear types cannot be Copy.
                     if is_linear && is_copy {

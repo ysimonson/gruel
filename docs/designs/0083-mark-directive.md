@@ -418,31 +418,42 @@ its LOC delta in the commit message.
 
 ### Phase 4: Retire the keyword path
 
-- [ ] Delete `posture_parser` and its uses in struct/enum head
-      parsers (`chumsky_parser.rs:2259`, `2320`, `2982`, `3117`).
-- [ ] Drop the `copy_name: Spur` field from `ParserSyms` and its
+- [x] Deleted `posture_parser` and its uses in struct/enum head
+      parsers; the heads no longer accept the keyword form.
+- [x] Dropped `copy_name: Spur` from `ParserSyms` and its
       initializer.
-- [ ] Delete `TokenKind::Linear` and `LogosTokenKind::Linear` plus
-      their display/conversion arms. Drop the
-      `just(TokenKind::Linear)` entry in `item_start()`
-      (`chumsky_parser.rs:3521`) — that lookahead is the only
-      remaining use after `posture_parser` retires, and it's
-      stale once `linear` is no longer a head keyword.
-- [ ] Sema-side: remove the keyword sources of `is_copy` /
-      `is_linear` flag-setting; the only writers are the
-      `@mark(...)` recognizer.
-- [ ] AST `StructDecl.is_copy` / `is_linear` and
-      `EnumDecl.is_copy` / `is_linear` survive as the storage for
-      directive-derived flags. The fields keep their names; only
-      their write sites change.
-- [ ] Update spec tests in `cases/items/copy-keyword.toml`: rename
-      to `cases/items/mark-directive.toml` (or fold into the new
-      file from Phase 1) and rewrite sources to directive form.
-      Keep golden coverage for posture consistency, mutual
-      exclusion, drop interaction.
-- [ ] Spec text final pass: remove any residual mention of `copy` /
-      `linear` as keywords; grammar appendix loses the
-      posture-keyword production.
+- [x] Deleted `TokenKind::Linear` and `LogosTokenKind::Linear` plus
+      their display/conversion arms. Dropped the
+      `just(TokenKind::Linear)` entry in `item_start()`. The
+      `TokenKind::Linear` arm in the directive-arg parser is also
+      gone — `linear` is now a regular identifier and falls
+      through to `ident_parser`. `linear_name: Spur` retired with
+      it.
+- [x] Sema-side: `register_type_names` no longer reads
+      `kw_is_copy` / `kw_is_linear` from `StructDecl`/`EnumDecl`.
+      The `@mark(...)` recognizer is the sole writer of `is_copy`
+      / `is_linear` flags on `StructDef` / `EnumDef`.
+- [x] AST `StructDecl.is_copy` / `is_linear` and
+      `EnumDecl.is_copy` / `is_linear` survive as fields, but the
+      parser now always sets them to `false` — sema fills them
+      from the directive list. Future cleanup may retire the AST
+      fields entirely.
+- [x] `cases/items/copy-keyword.toml` rewritten to the directive
+      form (`@mark(copy) struct …`, `@mark(linear) enum …`).
+      Posture consistency, mutual exclusion, and drop interaction
+      coverage retained. Section description updated to reflect
+      the directive surface.
+- [x] Spec text final pass:
+      `docs/spec/src/03-types/08-move-semantics.md` and
+      `docs/spec/src/02-lexical-structure/05-builtins.md`
+      rewritten to describe `@mark(copy)` / `@mark(linear)` and
+      uniform structural inference in place of the keyword form.
+      Grammar appendix had no posture-keyword production so no
+      change needed there.
+- [x] Migrated `examples/closures.gruel`, `examples/methods.gruel`,
+      `examples/shapes.gruel` off the keyword form — the structs
+      have only primitive Copy fields, so uniform inference
+      makes them Copy without a directive.
 
 ### Phase 5: Stabilize
 

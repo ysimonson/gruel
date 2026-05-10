@@ -62,14 +62,6 @@ pub struct PrimitiveTypeSpurs {
     /// write `@derive(Foo)` even though `derive` is also a reserved keyword
     /// for top-level derive items (ADR-0058).
     pub derive_name: Spur,
-    /// The identifier "copy" — recognized as a contextual posture keyword
-    /// in struct/enum declaration heads (ADR-0080). Remains a valid
-    /// identifier elsewhere.
-    pub copy_name: Spur,
-    /// The identifier "linear" — accepted as a directive arg so users can
-    /// write `@mark(linear)` even though `linear` is also a reserved keyword
-    /// for the struct/enum head slot (ADR-0083).
-    pub linear_name: Spur,
 }
 
 impl PrimitiveTypeSpurs {
@@ -96,8 +88,6 @@ impl PrimitiveTypeSpurs {
             mut_ref_name: interner.get_or_intern("MutRef"),
             drop_name: interner.get_or_intern("drop"),
             derive_name: interner.get_or_intern("derive"),
-            copy_name: interner.get_or_intern("copy"),
-            linear_name: interner.get_or_intern("linear"),
         }
     }
 }
@@ -211,35 +201,6 @@ where
         },
     }
     .boxed()
-}
-
-/// Parser for the optional posture keyword in struct/enum heads (ADR-0080).
-///
-/// Recognises `copy` (a contextual identifier) and `linear` (a hard keyword).
-/// Returns `(is_copy, is_linear)`. The trailing `struct` / `enum` keyword
-/// in the surrounding parser bounds the alternative — `linear copy` and
-/// `copy linear` cannot both match because the second word will hit the
-/// `struct`/`enum` matcher and fail.
-fn posture_parser<'src, I>() -> GruelParser<'src, I, (bool, bool)>
-where
-    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
-{
-    let copy_kw: GruelParser<I, (bool, bool)> = select! {
-        TokenKind::Ident(name) => name,
-    }
-    .try_map_with(|name, e: &mut MapExtra<'src, '_, I, ParserExtras<'src>>| {
-        if name == e.state().0.syms.copy_name {
-            Ok((true, false))
-        } else {
-            Err(Rich::custom(e.span(), "expected `copy`"))
-        }
-    })
-    .boxed();
-    let linear_kw = just(TokenKind::Linear).map(|_| (false, true)).boxed();
-    choice((copy_kw, linear_kw))
-        .or_not()
-        .map(|opt| opt.unwrap_or((false, false)))
-        .boxed()
 }
 
 /// Parser for primitive type keywords: i8, i16, i32, i64, u8, u16, u32, u64, bool
@@ -632,28 +593,15 @@ where
     ))
     .boxed();
 
-    // ADR-0083: `@mark(linear)` and `@mark(copy)` need to accept the
-    // posture keywords as identifier arguments. `copy` is already a
-    // contextual identifier, so it falls through to `ident_parser`. `linear`
-    // is a hard keyword (`TokenKind::Linear`), so we accept it explicitly
-    // and intern the name on the parser state. Same shape as the
-    // directive-name carve-out for `derive`.
+    // ADR-0083: `@mark(...)` directive args. After Phase 4 retired
+    // `TokenKind::Linear`, both `copy` and `linear` are regular
+    // identifiers and fall through to `ident_parser`.
     let directive_arg = choice((
         select! {
             TokenKind::String(s) = e => DirectiveArg::String(StringLit {
                 value: s,
                 span: span_from_extra(e),
             }),
-        }
-        .boxed(),
-        select! {
-            TokenKind::Linear = e => {
-                let state: &mut SimpleState<ParserState> = e.state();
-                DirectiveArg::Ident(Ident {
-                    name: state.0.syms.linear_name,
-                    span: span_from_extra(e),
-                })
-            },
         }
         .boxed(),
         ident_parser().map(DirectiveArg::Ident).boxed(),
@@ -2260,37 +2208,32 @@ where
     // Methods inside anonymous structs follow the same syntax as impl block methods
     let anon_struct_method = anon_struct_method_parser(expr.clone());
 
-    // Parse optional posture keyword for anonymous types: `copy`
-    // (contextual identifier) or `linear` (hard keyword).
-    let anon_posture: GruelParser<I, (bool, bool)> = posture_parser();
-
-    let anon_struct_header: GruelParser<
-        'src,
-        I,
-        (Directives, bool, bool, Vec<AnonStructField>, Vec<Method>),
-    > = directives_parser()
-        .then(anon_posture.clone())
-        .then_ignore(just(TokenKind::Struct))
-        .then_ignore(just(TokenKind::LBrace))
-        .then(anon_struct_fields)
-        .then(
-            // Then parse methods (not comma-separated, each ends with })
-            anon_struct_method.repeated().collect::<Vec<_>>(),
-        )
-        .map(|(((directives, (is_copy, is_linear)), fields), methods)| {
-            (directives, is_copy, is_linear, fields, methods)
-        })
-        .boxed();
+    // ADR-0083 Phase 4: posture is now declared exclusively via the
+    // `@mark(...)` directive. The `is_copy` / `is_linear` flags on the
+    // AST nodes survive only as the directive-derived storage; sema
+    // populates them from the directive list at registration time. No
+    // posture keyword is parsed here.
+    let anon_struct_header: GruelParser<'src, I, (Directives, Vec<AnonStructField>, Vec<Method>)> =
+        directives_parser()
+            .then_ignore(just(TokenKind::Struct))
+            .then_ignore(just(TokenKind::LBrace))
+            .then(anon_struct_fields)
+            .then(
+                // Then parse methods (not comma-separated, each ends with })
+                anon_struct_method.repeated().collect::<Vec<_>>(),
+            )
+            .map(|((directives, fields), methods)| (directives, fields, methods))
+            .boxed();
 
     let anon_struct_type_expr = anon_struct_header
         .then_ignore(just(TokenKind::RBrace))
-        .map_with(|(directives, is_copy, is_linear, fields, methods), e| {
+        .map_with(|(directives, fields, methods), e| {
             let span = span_from_extra(e);
             Expr::TypeLit(TypeLitExpr {
                 type_expr: TypeExpr::AnonymousStruct {
                     directives,
-                    is_copy,
-                    is_linear,
+                    is_copy: false,
+                    is_linear: false,
                     fields,
                     methods,
                     span,
@@ -2327,8 +2270,9 @@ where
     //   fn Option(comptime T: type) -> type { enum { Some(T), None } }
     let anon_enum_method = anon_struct_method_parser(expr.clone());
 
+    // ADR-0083 Phase 4: same posture-keyword retirement for anonymous
+    // enum literals — directive list only.
     let anon_enum_type_expr = directives_parser()
-        .then(anon_posture)
         .then_ignore(just(TokenKind::Enum))
         .then_ignore(just(TokenKind::LBrace))
         .then(enum_variants_parser())
@@ -2337,22 +2281,20 @@ where
             anon_enum_method.repeated().collect::<Vec<_>>(),
         )
         .then_ignore(just(TokenKind::RBrace))
-        .map_with(
-            |(((directives, (is_copy, is_linear)), variants), methods), e| {
-                let span = span_from_extra(e);
-                Expr::TypeLit(TypeLitExpr {
-                    type_expr: TypeExpr::AnonymousEnum {
-                        directives,
-                        is_copy,
-                        is_linear,
-                        variants,
-                        methods,
-                        span,
-                    },
+        .map_with(|((directives, variants), methods), e| {
+            let span = span_from_extra(e);
+            Expr::TypeLit(TypeLitExpr {
+                type_expr: TypeExpr::AnonymousEnum {
+                    directives,
+                    is_copy: false,
+                    is_linear: false,
+                    variants,
+                    methods,
                     span,
-                })
-            },
-        );
+                },
+                span,
+            })
+        });
 
     // Anonymous interface type as expression (ADR-0057):
     //   interface { fn name(self [, params]) [-> RetType]; ... }
@@ -3003,20 +2945,13 @@ where
         }
     });
 
-    // Parse optional posture keyword: `copy` (contextual identifier) or
-    // `linear` (hard keyword). Mutually exclusive — the parser picks one
-    // and the trailing `struct` / `enum` keyword bounds the alternative.
-    // Returns (is_copy, is_linear).
-    let posture: GruelParser<I, (bool, bool)> = posture_parser();
-
-    // Box the struct header after 3 thens to keep the accumulated type short.
-    let struct_head: GruelParser<I, (Directives, Visibility, bool, bool, Ident)> =
-        directives_parser()
-            .then(visibility)
-            .then(posture)
-            .then(just(TokenKind::Struct).ignore_then(ident_parser()))
-            .map(|(((d, v), (is_copy, is_linear)), name)| (d, v, is_copy, is_linear, name))
-            .boxed();
+    // ADR-0083 Phase 4: posture is declared via `@mark(...)` only;
+    // the head no longer accepts the keyword form.
+    let struct_head: GruelParser<I, (Directives, Visibility, Ident)> = directives_parser()
+        .then(visibility)
+        .then(just(TokenKind::Struct).ignore_then(ident_parser()))
+        .map(|((d, v), name)| (d, v, name))
+        .boxed();
 
     // Box the struct body so DelimitedBy wraps a short Boxed type.
     let struct_body: GruelParser<I, (Vec<FieldDecl>, Vec<Method>)> = field_decls_parser()
@@ -3026,17 +2961,15 @@ where
     struct_head
         .then(struct_body.delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)))
         .map_with(
-            |((directives, visibility, is_copy, is_linear, name), (fields, methods)), e| {
-                StructDecl {
-                    directives,
-                    visibility,
-                    is_copy,
-                    is_linear,
-                    name,
-                    fields,
-                    methods,
-                    span: span_from_extra(e),
-                }
+            |((directives, visibility, name), (fields, methods)), e| StructDecl {
+                directives,
+                visibility,
+                is_copy: false,
+                is_linear: false,
+                name,
+                fields,
+                methods,
+                span: span_from_extra(e),
             },
         )
         .boxed()
@@ -3127,31 +3060,25 @@ where
         }
     });
 
-    // Parse optional posture keyword: `copy` (contextual identifier) or
-    // `linear` (hard keyword). Mutually exclusive.
-    let posture: GruelParser<I, (bool, bool)> = posture_parser();
-
+    // ADR-0083 Phase 4: posture is declared via `@mark(...)` only.
     let enum_body: GruelParser<I, (Vec<EnumVariant>, Vec<Method>)> = enum_variants_parser()
         .then(method_parser().repeated().collect::<Vec<_>>())
         .boxed();
 
     directives_parser()
         .then(visibility)
-        .then(posture)
         .then(just(TokenKind::Enum).ignore_then(ident_parser()))
         .then(enum_body.delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)))
         .map_with(
-            |((((directives, visibility), (is_copy, is_linear)), name), (variants, methods)), e| {
-                EnumDecl {
-                    directives,
-                    visibility,
-                    is_copy,
-                    is_linear,
-                    name,
-                    variants,
-                    methods,
-                    span: span_from_extra(e),
-                }
+            |(((directives, visibility), name), (variants, methods)), e| EnumDecl {
+                directives,
+                visibility,
+                is_copy: false,
+                is_linear: false,
+                name,
+                variants,
+                methods,
+                span: span_from_extra(e),
             },
         )
         .boxed()
@@ -3545,7 +3472,6 @@ where
     .boxed();
     let item_start_b: GruelParser<'src, I, ()> = choice((
         just(TokenKind::Pub).ignored().boxed(),
-        just(TokenKind::Linear).ignored().boxed(),
         just(TokenKind::Unchecked).ignored().boxed(),
         just(TokenKind::At).ignored().boxed(), // For @directives
     ))

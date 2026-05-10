@@ -13,7 +13,7 @@
 //!
 //! A name is allowed if it is:
 //! - In the intrinsics registry (`gruel_intrinsics::lookup_by_name`)
-//! - A known directive (`allow`, `derive`, `lang`)
+//! - A known directive (`allow`, `derive`, `lang`, `mark`)
 //! - Listed under FILE_EXCEPTIONS for the file in which it appears
 //!   (used for retired/typo names that the spec deliberately mentions)
 
@@ -24,7 +24,7 @@ use std::process::ExitCode;
 
 use gruel_intrinsics::lookup_by_name;
 
-const KNOWN_DIRECTIVES: &[&str] = &["allow", "derive", "lang"];
+const KNOWN_DIRECTIVES: &[&str] = &["allow", "derive", "lang", "mark"];
 
 /// Per-file allowlist for names the spec deliberately documents but which
 /// are not real builtins. Path is relative to the spec root.

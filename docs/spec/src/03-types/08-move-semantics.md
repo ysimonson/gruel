@@ -41,30 +41,35 @@ fn main() -> i32 {
 }
 ```
 
-## The `copy` Keyword
+## The `@mark(copy)` Directive
 
 {{ rule(id="3.8:14", cat="normative") }}
 
-A struct or enum type **MAY** be declared as a Copy type using the `copy`
-keyword before the `struct` or `enum` token (ADR-0080). The keyword is the
-sole way to opt a nominal type into Copy.
+A struct or enum type's posture **MAY** be declared with an `@mark(copy)`
+directive on the type's declaration head (ADR-0083). Under uniform
+structural inference, an unmarked type whose members are all Copy
+already infers Copy posture; `@mark(copy)` is therefore an *assertion*
+that the type's members keep it Copy and turns a silent posture
+downgrade (e.g. adding a non-Copy field later) into a declaration-site
+error.
 
 {{ rule(id="3.8:15", cat="syntax") }}
 
 ```ebnf
-copy_struct = "copy" "struct" IDENT "{" [ struct_fields ] "}" ;
-copy_enum   = "copy" "enum"   IDENT "{" [ enum_variants ] "}" ;
+mark_directive = "@mark" "(" marker_name ("," marker_name)* ")" ;
+marker_name    = "copy" | "affine" | "linear" ;
 ```
 
 {{ rule(id="3.8:16", cat="normative") }}
 
-A struct or enum declared `copy` is a Copy type. Using a Copy value does
-not consume it; the value is implicitly duplicated.
+A struct or enum that infers Copy posture (or that carries `@mark(copy)`)
+is a Copy type. Using a Copy value does not consume it; the value is
+implicitly duplicated.
 
 {{ rule(id="3.8:17", cat="example") }}
 
 ```gruel
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }   // infers Copy
 
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };
@@ -76,31 +81,31 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:18", cat="legality-rule") }}
 
-A type marked `copy` **MUST** contain only members (fields, variant
-payloads) that are themselves Copy types. It is a compile-time error if
-any member has a type that is affine or linear.
+A type marked `@mark(copy)` **MUST** contain only members (fields,
+variant payloads) that are themselves Copy types. It is a compile-time
+error if any member has a type that is affine or linear.
 
 {{ rule(id="3.8:19", cat="example") }}
 
 ```gruel
-struct Inner { value: i32 }  // affine (no `copy` keyword)
+struct Inner { name: String }              // infers Affine (String is Affine)
 
-copy struct Outer { inner: Inner }  // ERROR: field 'inner' is affine
+@mark(copy) struct Outer { inner: Inner }  // ERROR: field 'inner' is affine
 ```
 
 {{ rule(id="3.8:20", cat="normative") }}
 
-A `copy` struct or enum **MAY** contain members of primitive Copy types
-(integers, booleans, unit), other `copy` struct or enum types, or tuples
-of Copy elements. Arrays and `Vec` are perpetually non-Copy regardless of
-their element type — they are containers, not value types.
+A type that infers Copy (or asserts Copy via `@mark(copy)`) **MAY**
+contain members of primitive Copy types (integers, booleans, unit),
+other Copy types, tuples of Copy elements, or arrays of Copy elements
+(ADR-0083 Open Question 1). `Vec(T)` is perpetually non-Copy because it
+owns heap memory and conforms to `Drop`.
 
 {{ rule(id="3.8:21", cat="example") }}
 
 ```gruel
-copy struct Point { x: i32, y: i32 }
-
-copy struct Rect { top_left: Point, bottom_right: Point }  // OK: Point is Copy
+struct Point { x: i32, y: i32 }                       // infers Copy
+struct Rect { top_left: Point, bottom_right: Point }  // infers Copy
 
 fn main() -> i32 {
     let r = Rect {
@@ -116,13 +121,15 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:30", cat="normative") }}
 
-A struct or enum type **MAY** be declared as a linear type using the `linear` keyword before the `struct` or `enum` token.
+A struct or enum type **MAY** be declared as a linear type with an
+`@mark(linear)` directive on the type's declaration head. A type whose
+members include a Linear field also infers Linear automatically (linear
+is contagious upward, ADR-0083).
 
 {{ rule(id="3.8:31", cat="syntax") }}
 
 ```ebnf
-linear_struct = "linear" "struct" IDENT "{" [ struct_fields ] "}" ;
-linear_enum   = "linear" "enum"   IDENT "{" [ enum_variants ] "}" ;
+mark_linear = "@mark" "(" "linear" ")" ;
 ```
 
 {{ rule(id="3.8:32", cat="normative") }}
@@ -140,7 +147,7 @@ A linear value is consumed when it is:
 {{ rule(id="3.8:34", cat="example") }}
 
 ```gruel
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn consume(m: MustUse) -> i32 { m.value }
 
@@ -157,7 +164,7 @@ It is a compile-time error to allow a linear value to be implicitly dropped.
 {{ rule(id="3.8:36", cat="example") }}
 
 ```gruel
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn main() -> i32 {
     let m = MustUse { value: 1 };  // ERROR: linear value dropped without being consumed
@@ -167,14 +174,16 @@ fn main() -> i32 {
 
 {{ rule(id="3.8:37", cat="legality-rule") }}
 
-A linear struct or enum **MUST NOT** also be marked `copy`. The keyword
-combinations `copy linear` and `linear copy` are syntactically rejected
-by the parser.
+A `@mark(linear)` struct or enum **MUST NOT** also carry `@mark(copy)`.
+The two posture markers are mutually exclusive whether they appear in
+one directive or in two — the validator collects all markers from all
+`@mark(...)` directives on an item, deduplicates by name, and rejects
+the combination.
 
 {{ rule(id="3.8:38", cat="example") }}
 
 ```gruel
-copy linear struct Invalid { value: i32 }  // ERROR: parser rejects `copy linear`
+@mark(copy) @mark(linear) struct Invalid { value: i32 }  // ERROR
 ```
 
 {{ rule(id="3.8:39", cat="informative") }}
@@ -251,7 +260,7 @@ The difference between `Copy` and `Handle`:
 
 {{ rule(id="3.8:49", cat="normative") }}
 
-A linear struct **MAY** conform to `Handle`. Explicit duplication of a linear value is the canonical use case for `Handle` (e.g., forking a transaction).
+A `@mark(linear)` struct **MAY** conform to `Handle`. Explicit duplication of a linear value is the canonical use case for `Handle` (e.g., forking a transaction).
 
 ## Use After Move
 
