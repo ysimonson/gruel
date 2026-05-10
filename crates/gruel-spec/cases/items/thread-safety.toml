@@ -262,14 +262,160 @@ exit_code = 1
 name = "join_handle_must_be_consumed"
 spec = ["3.15:11"]
 preview = "thread_safety"
-description = "ADR-0084: a stored `JoinHandle` left unconsumed at scope exit must be rejected by the linearity check (ADR-0067 must-consume discipline). Marked preview-only (no preview_should_pass) until Phase 5 adds @spawn — JoinHandle has no public constructor today, so the linearity check has no surface to fire on."
+preview_should_pass = true
+description = "ADR-0084: a JoinHandle returned by @spawn must be consumed (linearity, ADR-0067). Without a `.join()` the compiler rejects the program."
 source = """
+fn worker(x: i32) -> i32 { x + 1 }
 fn main() -> i32 {
-    // Placeholder — real test arrives with @spawn in Phase 5.
+    let _h = @spawn(worker, 1);
+    // Never consumed — must be a linearity error.
     0
 }
 """
-exit_code = 0
+compile_fail = true
+error_contains = "must be consumed"
+
+# =============================================================================
+# Phase 5: @spawn intrinsic
+# =============================================================================
+#
+# Validation tests cover the sema-side checks. Tests that exercise the
+# actual thread spawn (basic_returns_value, thunk handling) are
+# preview-only until codegen + runtime integration lands.
+
+[[case]]
+name = "spawn_arg_must_be_send"
+spec = ["3.15:1"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @spawn rejects an argument whose type is structurally Unsend (e.g. a struct holding a raw pointer)."
+source = """
+struct Buffer { ptr: MutPtr(u8), len: usize }
+fn worker(b: Buffer) -> i32 { @cast(b.len) }
+fn make() -> Buffer {
+    checked { Buffer { ptr: MutPtr(u8)::null(), len: 0 } }
+}
+fn main() -> i32 {
+    let b = make();
+    let h = @spawn(worker, b);
+    h.join()
+}
+"""
+compile_fail = true
+error_contains = "not Send"
+
+[[case]]
+name = "spawn_return_must_be_send"
+spec = ["3.15:1"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @spawn rejects a function whose return type is Unsend."
+source = """
+struct Result_ { ptr: MutPtr(u8) }
+fn worker(x: i32) -> Result_ { Result_ { ptr: checked { @null_ptr() } } }
+fn main() -> i32 {
+    let h = @spawn(worker, 1);
+    let _r = h.join();
+    0
+}
+"""
+compile_fail = true
+error_contains = "not Send"
+
+[[case]]
+name = "spawn_rejects_ref_arg"
+spec = ["3.15:1"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @spawn rejects a function whose parameter is `Ref(T)` or `MutRef(T)` — references are scope-bound (ADR-0076) and cannot outlive the caller."
+source = """
+fn worker(b: Ref(i32)) -> i32 { 0 }
+fn main() -> i32 {
+    let x = 1;
+    let h = @spawn(worker, &x);
+    h.join()
+}
+"""
+compile_fail = true
+error_contains = "reference"
+
+[[case]]
+name = "spawn_rejects_linear_arg"
+spec = ["3.15:1"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @spawn rejects a function whose parameter is Linear — linear values are per-thread today."
+source = """
+@mark(linear, checked_send) struct Token { id: i32 }
+fn consume(t: Token) -> i32 { t.id }
+fn main() -> i32 {
+    let t = Token { id: 1 };
+    let h = @spawn(consume, t);
+    h.join()
+}
+"""
+compile_fail = true
+error_contains = "Linear"
+
+[[case]]
+name = "spawn_rejects_wrong_arity"
+spec = ["3.15:1"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @spawn rejects a worker that does not take exactly one parameter."
+source = """
+fn worker(a: i32, b: i32) -> i32 { a + b }
+fn main() -> i32 {
+    let h = @spawn(worker, 1);
+    h.join()
+}
+"""
+compile_fail = true
+error_contains = "exactly one parameter"
+
+[[case]]
+name = "spawn_rejects_unknown_function"
+spec = ["3.15:1"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @spawn rejects a name that does not resolve to a top-level function."
+source = """
+fn main() -> i32 {
+    let h = @spawn(nonexistent_worker, 1);
+    h.join()
+}
+"""
+compile_fail = true
+error_contains = "did not resolve"
+
+[[case]]
+name = "spawn_accepts_sync_arg"
+spec = ["3.15:1"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @spawn accepts an i32 (Sync) arg and Sync return — validation passes. The handle is consumed via `.join()` to satisfy linearity. Codegen for @spawn is still landing; the prelude `join` body panics, so the runtime exit code matches the panic exit (101)."
+source = """
+fn worker(x: i32) -> i32 { x + 1 }
+fn main() -> i32 {
+    let h = @spawn(worker, 41);
+    h.join()
+}
+"""
+exit_code = 101
+
+[[case]]
+name = "spawn_intrinsic_preview_gated"
+spec = ["3.15:1"]
+description = "ADR-0084: @spawn is gated behind --preview thread_safety."
+source = """
+fn worker(x: i32) -> i32 { x + 1 }
+fn main() -> i32 {
+    let h = @spawn(worker, 1);
+    h.join()
+}
+"""
+compile_fail = true
+error_contains = "thread_safety"
 
 [[case]]
 name = "checked_send_on_primitive_struct"

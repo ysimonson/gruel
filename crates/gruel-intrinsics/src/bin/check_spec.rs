@@ -38,10 +38,6 @@ const FILE_EXCEPTIONS: &[(&str, &[&str])] = &[
     // ADR-0047 retired @compileLog in favor of @dbg. The retirement is
     // documented under stable paragraph IDs.
     ("04-expressions/14-comptime.md", &["compileLog"]),
-    // ADR-0084 thread-safety section forward-references @spawn; it
-    // arrives in Phase 5 of the same ADR. The exception is removed
-    // when that lands.
-    ("03-types/15-thread-safety.md", &["spawn"]),
 ];
 
 fn main() -> ExitCode {

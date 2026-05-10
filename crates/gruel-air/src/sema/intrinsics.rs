@@ -212,6 +212,8 @@ impl<'a> Sema<'a> {
             IntrinsicId::BytesEq => {
                 self.analyze_bytes_eq_intrinsic(air, &args, span, ctx)
             }
+            // ADR-0084: spawn a worker thread.
+            IntrinsicId::Spawn => self.analyze_spawn_intrinsic(air, &args, span, ctx),
         }
     }
 
@@ -1611,5 +1613,218 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, result_type))
+    }
+
+    /// ADR-0084: `@spawn(fn, arg) -> JoinHandle(R)`.
+    ///
+    /// Validates the function reference and argument:
+    ///
+    /// - `fn` must be a top-level function name (no methods, no
+    ///   anonymous functions in v1).
+    /// - The function must take exactly one parameter.
+    /// - The argument's type must match the parameter type
+    ///   (bidirectionally).
+    /// - The argument type must be classified ≥ `Send` and not be
+    ///   `Linear` or a `Ref`/`MutRef`.
+    /// - The function's return type must be classified ≥ `Send`.
+    ///
+    /// Returns the instantiated `JoinHandle(R)` type. Codegen for the
+    /// thread spawn (per-instantiation thunk + heap-allocated arg
+    /// slot + runtime call) lands in a follow-up — for the v1
+    /// preview-gated cut, lowering produces a runtime panic.
+    fn analyze_spawn_intrinsic(
+        &mut self,
+        air: &mut Air,
+        args: &[RirCallArg],
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
+        // ADR-0084: arity check — single function + single argument.
+        if args.len() != 2 {
+            return Err(CompileError::new(
+                ErrorKind::IntrinsicWrongArgCount {
+                    name: "spawn".to_string(),
+                    expected: 2,
+                    found: args.len(),
+                },
+                span,
+            ));
+        }
+
+        // First arg must be a top-level function name. Inspect the RIR
+        // node directly to avoid analyzing it as an expression (Gruel
+        // functions are not first-class values today).
+        let fn_inst = self.rir.get(args[0].value);
+        let fn_name_spur = match &fn_inst.data {
+            gruel_rir::InstData::VarRef { name } => *name,
+            _ => {
+                return Err(CompileError::new(
+                    ErrorKind::SpawnFunctionNotFound {
+                        name: "<expression>".to_string(),
+                    },
+                    fn_inst.span,
+                ));
+            }
+        };
+        let fn_name_str = self.interner.resolve(&fn_name_spur).to_string();
+        let fn_info = match self.functions.get(&fn_name_spur).copied() {
+            Some(info) => info,
+            None => {
+                return Err(CompileError::new(
+                    ErrorKind::SpawnFunctionNotFound { name: fn_name_str },
+                    fn_inst.span,
+                ));
+            }
+        };
+
+        let param_types = self.param_arena.types(fn_info.params).to_vec();
+        if param_types.len() != 1 {
+            return Err(CompileError::new(
+                ErrorKind::SpawnFunctionWrongArity {
+                    fn_name: fn_name_str,
+                    arity: param_types.len(),
+                },
+                fn_inst.span,
+            ));
+        }
+        let param_type = param_types[0];
+        let return_type = fn_info.return_type;
+
+        // Validate the argument: type-check it against the parameter type.
+        let arg_result = self.analyze_inst(air, args[1].value, ctx)?;
+        if arg_result.ty != param_type && !arg_result.ty.is_error() && !param_type.is_error() {
+            return Err(CompileError::new(
+                ErrorKind::TypeMismatch {
+                    expected: self.format_type_name(param_type),
+                    found: self.format_type_name(arg_result.ty),
+                },
+                self.rir.get(args[1].value).span,
+            ));
+        }
+
+        // ADR-0084 §`@spawn` checks 4–6: arg must be ≥ Send, not
+        // Linear, and not a reference. Order matters — surface the
+        // most specific diagnostic first.
+        if matches!(param_type.kind(), TypeKind::Ref(_) | TypeKind::MutRef(_)) {
+            return Err(CompileError::new(
+                ErrorKind::SpawnArgIsRef {
+                    arg_type: self.format_type_name(param_type),
+                },
+                fn_inst.span,
+            ));
+        }
+        if self.is_type_linear(param_type) {
+            return Err(CompileError::new(
+                ErrorKind::SpawnArgIsLinear {
+                    arg_type: self.format_type_name(param_type),
+                },
+                fn_inst.span,
+            ));
+        }
+        let arg_safety = self.type_pool.is_thread_safety_type(param_type);
+        if arg_safety < gruel_builtins::ThreadSafety::Send {
+            return Err(CompileError::new(
+                ErrorKind::SpawnArgNotSend {
+                    arg_type: self.format_type_name(param_type),
+                },
+                fn_inst.span,
+            ));
+        }
+
+        // ADR-0084 §`@spawn` check: return type must also be ≥ Send.
+        let ret_safety = self.type_pool.is_thread_safety_type(return_type);
+        if ret_safety < gruel_builtins::ThreadSafety::Send {
+            return Err(CompileError::new(
+                ErrorKind::SpawnReturnNotSend {
+                    fn_name: fn_name_str.clone(),
+                    ret_type: self.format_type_name(return_type),
+                },
+                fn_inst.span,
+            ));
+        }
+
+        // Resolve the JoinHandle(R) instantiation. Calls into the
+        // comptime evaluator with R bound to the function's return
+        // type, mirroring the way `Vec(T)` resolves at user call sites
+        // — JoinHandle is a `pub fn JoinHandle(comptime R: type) -> type`
+        // in the prelude (ADR-0084 Phase 4).
+        let join_handle_ty = self.instantiate_join_handle(return_type, span, ctx)?;
+
+        // Emit the spawn AIR instruction. Codegen consumes this in a
+        // follow-up; until then, the result type carries the right
+        // shape so downstream analysis (linearity check on the
+        // returned JoinHandle, `.join()` lookup) works. Only the
+        // value-arg goes into the AIR slot — the function reference
+        // is not a runtime value.
+        let args_start = air.add_extra(&[arg_result.air_ref.as_u32()]);
+        let name = self.interner.get_or_intern_static("spawn");
+        let air_ref = air.add_inst(AirInst {
+            data: AirInstData::Intrinsic {
+                name,
+                args_start,
+                args_len: 1,
+            },
+            ty: join_handle_ty,
+            span,
+        });
+        Ok(AnalysisResult::new(air_ref, join_handle_ty))
+    }
+
+    /// ADR-0084 helper: instantiate `JoinHandle(R)` for a given `R`
+    /// by invoking the prelude function via the comptime evaluator.
+    /// Returns the `Type::new_struct(...)` for the parameterized
+    /// instance. Mirrors the call-site machinery in
+    /// `analyze_call`'s generic-type-ctor branch — substitution lives
+    /// in both the type and value maps so the body's `@mark(...)` and
+    /// field-type references resolve correctly.
+    fn instantiate_join_handle(
+        &mut self,
+        ret_type: Type,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<Type> {
+        let jh_spur = self.interner.get("JoinHandle").ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::InternalError(
+                    "ADR-0084: prelude function `JoinHandle` not interned".into(),
+                ),
+                span,
+            )
+        })?;
+        let jh_info = self.functions.get(&jh_spur).copied().ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::InternalError(
+                    "ADR-0084: prelude `JoinHandle` not registered as a function".into(),
+                ),
+                span,
+            )
+        })?;
+        let param_names = self.param_arena.names(jh_info.params).to_vec();
+        let r_param = param_names.first().copied().ok_or_else(|| {
+            CompileError::new(
+                ErrorKind::InternalError(
+                    "ADR-0084: prelude `JoinHandle` must take one comptime parameter".into(),
+                ),
+                span,
+            )
+        })?;
+        let mut value_subst: rustc_hash::FxHashMap<Spur, ConstValue> =
+            rustc_hash::FxHashMap::default();
+        value_subst.insert(r_param, ConstValue::Type(ret_type));
+        let mut type_subst: rustc_hash::FxHashMap<Spur, Type> = rustc_hash::FxHashMap::default();
+        type_subst.insert(r_param, ret_type);
+        let saved_ctor = self.comptime_ctor_fn.replace(jh_spur);
+        let result = self.try_evaluate_const_with_subst(jh_info.body, &type_subst, &value_subst);
+        self.comptime_ctor_fn = saved_ctor;
+        if let Some(ConstValue::Type(ty)) = result {
+            return Ok(ty);
+        }
+        // Fall back to the rich comptime interpreter for multi-statement
+        // bodies (mirrors `analyze_call`'s generic-type-ctor branch).
+        let saved_ctor = self.comptime_ctor_fn.replace(jh_spur);
+        let ty_result =
+            self.evaluate_type_ctor_body(jh_info.body, &type_subst, &value_subst, ctx, span);
+        self.comptime_ctor_fn = saved_ctor;
+        ty_result
     }
 }

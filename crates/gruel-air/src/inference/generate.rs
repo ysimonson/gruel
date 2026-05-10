@@ -1077,6 +1077,17 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Var(self.fresh_var())
                     }
+                    // ADR-0084: @spawn returns a JoinHandle(R) whose
+                    // R is the spawned function's return type. Sema's
+                    // analyze_spawn_intrinsic instantiates the
+                    // parameterized type and writes the concrete
+                    // result into AIR; the inference layer just
+                    // hands back a fresh var so HM doesn't constrain
+                    // it prematurely. (Mirrors the @uninit pattern.)
+                    Some(IntrinsicId::Spawn) => {
+                        visit_args(self, ctx);
+                        InferType::Var(self.fresh_var())
+                    }
                     // Other intrinsics (@dbg, @assert, @test_preview_gate, @import)
                     // and any unknown name return Unit. Sema handles the unknown case
                     // with a proper diagnostic; we just pick a coherent type here.

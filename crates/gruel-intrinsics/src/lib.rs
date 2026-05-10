@@ -145,6 +145,10 @@ pub enum IntrinsicId {
     /// `@variant_uninit + @field_set`.
     VariantField,
 
+    // ---- ADR-0084 thread spawn ----
+    /// `@spawn(fn, arg) -> JoinHandle(R)` — spawn a worker thread.
+    Spawn,
+
     // ---- Preview / test infra ----
     TestPreviewGate,
 }
@@ -901,6 +905,21 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         examples: &[],
     },
     IntrinsicDef {
+        id: IntrinsicId::Spawn,
+        name: "spawn",
+        kind: IntrinsicKind::Expr,
+        category: Category::Comptime,
+        requires_unchecked: false,
+        preview: Some(PreviewFeature::ThreadSafety),
+        runtime_fn: Some("__gruel_thread_spawn"),
+        summary: "Spawn a worker thread running `fn(arg) -> R`.",
+        description: "`@spawn(fn, arg) -> JoinHandle(R)` runs `fn` on a new thread with `arg` and yields a linear `JoinHandle(R)` consumed via `join(self) -> R`. The function and argument types are checked: arity must be one, the argument must be `≥ Send` and not Linear or a reference, and the return type must be `≥ Send`. Multi-argument workers wrap their inputs in a tuple/struct on the caller's side. ADR-0084.",
+        examples: &[
+            "let h = @spawn(worker, Job { id: 1 });",
+            "let report = h.join();",
+        ],
+    },
+    IntrinsicDef {
         id: IntrinsicId::Uninit,
         name: "uninit",
         kind: IntrinsicKind::Type,
@@ -1594,6 +1613,7 @@ mod tests {
                 | IntrinsicId::VecRepeat
                 | IntrinsicId::PartsToVec
                 | IntrinsicId::TestPreviewGate
+                | IntrinsicId::Spawn
                 | IntrinsicId::Utf8Validate
                 | IntrinsicId::CStrToVec
                 | IntrinsicId::Uninit

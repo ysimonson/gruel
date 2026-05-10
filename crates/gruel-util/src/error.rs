@@ -976,6 +976,39 @@ pub enum ErrorKind {
         "conflicting thread-safety markers on type `{type_name}`: at most one of `unsend`, `checked_send`, `checked_sync` may be applied"
     )]
     ConflictingThreadSafetyMarkers { type_name: String },
+    /// `@spawn(fn, arg)` argument has type that is not at least `Send`
+    /// on the trichotomy (ADR-0084).
+    #[error(
+        "@spawn argument of type `{arg_type}` is not Send (classified as Unsend); the spawned thread cannot take ownership across thread boundaries"
+    )]
+    SpawnArgNotSend { arg_type: String },
+    /// `@spawn(fn, _)` return type is not at least `Send` (ADR-0084).
+    #[error(
+        "@spawn function `{fn_name}` returns `{ret_type}`, which is not Send (classified as Unsend); the join site cannot transfer the result back across the thread boundary"
+    )]
+    SpawnReturnNotSend { fn_name: String, ret_type: String },
+    /// `@spawn(fn, arg)` argument is a `Ref(T)` or `MutRef(T)` —
+    /// references are scope-bound and cannot outlive the caller's frame.
+    #[error(
+        "@spawn argument of type `{arg_type}` is a reference; the spawned thread outlives the caller's scope so references cannot be passed across — move ownership instead"
+    )]
+    SpawnArgIsRef { arg_type: String },
+    /// `@spawn(fn, arg)` argument is a Linear type — linearity is a
+    /// per-thread property today.
+    #[error(
+        "@spawn argument of type `{arg_type}` is Linear; linear values cannot be transferred across threads in the v1 spawn surface"
+    )]
+    SpawnArgIsLinear { arg_type: String },
+    /// `@spawn(fn, _)` function has wrong arity. v1 only supports
+    /// single-argument workers; tuple-wrap multiple values on the
+    /// caller's side.
+    #[error("@spawn function `{fn_name}` must take exactly one parameter; found {arity}")]
+    SpawnFunctionWrongArity { fn_name: String, arity: usize },
+    /// `@spawn(fn, _)` function name does not resolve to a top-level
+    /// function. Methods, anonymous functions, and comptime-bound
+    /// values are not supported in v1.
+    #[error("@spawn first argument must be a top-level function name; `{name}` did not resolve")]
+    SpawnFunctionNotFound { name: String },
     /// Duplicate method definition in impl blocks for the same type
     #[error("duplicate method '{method_name}' for type '{type_name}'")]
     DuplicateMethod {
@@ -1299,6 +1332,12 @@ impl ErrorKind {
             ErrorKind::UnknownMarker { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
             ErrorKind::MarkerNotApplicable { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
             ErrorKind::ConflictingThreadSafetyMarkers { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
+            ErrorKind::SpawnArgNotSend { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
+            ErrorKind::SpawnReturnNotSend { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
+            ErrorKind::SpawnArgIsRef { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
+            ErrorKind::SpawnArgIsLinear { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
+            ErrorKind::SpawnFunctionWrongArity { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
+            ErrorKind::SpawnFunctionNotFound { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
             ErrorKind::DuplicateMethod { .. } => ErrorCode::DUPLICATE_METHOD,
             ErrorKind::DeriveDirectFieldAccess { .. } => ErrorCode::DERIVE_DIRECT_FIELD_ACCESS,
             ErrorKind::DeriveNotADerive { .. } => ErrorCode::DERIVE_NOT_A_DERIVE,

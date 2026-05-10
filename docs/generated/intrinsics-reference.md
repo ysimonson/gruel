@@ -30,6 +30,7 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@field` | expr | Compile-time Reflection | — | — | Access a field by comptime-known name. |
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
 | `@embed_file` | expr | Compile-time Reflection | — | — | Embed a file's contents at compile time as `Slice(u8)`. |
+| `@spawn` | expr | Compile-time Reflection | thread_safety | — | Spawn a worker thread running `fn(arg) -> R`. |
 | `@uninit` | type | Compile-time Reflection | — | — | Allocate a partially-initialized value of a given type (ADR-0079). |
 | `@finalize` | expr | Compile-time Reflection | — | — | Consume an `Uninit(T)` handle and return a real `T` (ADR-0079). |
 | `@field_set` | expr | Compile-time Reflection | — | — | Write a field of an in-progress `@uninit`/`@variant_uninit` handle (ADR-0079). |
@@ -355,6 +356,23 @@ comptime if (@thread_safety(T) == ThreadSafety::Sync) { ... }
 
 ```gruel
 let data: Slice(u8) = @embed_file("asset.bin");
+```
+
+### `@spawn`
+
+`@spawn(fn, arg) -> JoinHandle(R)` runs `fn` on a new thread with `arg` and yields a linear `JoinHandle(R)` consumed via `join(self) -> R`. The function and argument types are checked: arity must be one, the argument must be `≥ Send` and not Linear or a reference, and the return type must be `≥ Send`. Multi-argument workers wrap their inputs in a tuple/struct on the caller's side. ADR-0084.
+
+- **Runtime symbol:** `__gruel_thread_spawn`
+- **Preview gate:** `--preview thread_safety` (ADR-0084)
+
+**Examples:**
+
+```gruel
+let h = @spawn(worker, Job { id: 1 });
+```
+
+```gruel
+let report = h.join();
 ```
 
 ### `@uninit`

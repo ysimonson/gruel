@@ -90,4 +90,6 @@ pub mod error;
 pub mod io;
 pub mod parse;
 pub mod random;
+// ADR-0084: pthread-backed @spawn / JoinHandle::join.
+pub mod thread;
 pub mod utf8;
