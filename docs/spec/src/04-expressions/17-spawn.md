@@ -6,8 +6,7 @@ weight = 17
 # Thread Spawn
 
 This section describes the `@spawn` intrinsic and the `JoinHandle(R)`
-prelude type. Both are gated behind `--preview thread_safety`
-(ADR-0084).
+prelude type (ADR-0084).
 
 ## `@spawn(fn, arg)`
 

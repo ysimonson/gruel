@@ -885,12 +885,8 @@ impl<'a> Sema<'a> {
                     MarkerKind::Posture(Posture::Affine) => outcome.affine = true,
                     MarkerKind::Posture(Posture::Linear) => outcome.linear = true,
                     MarkerKind::ThreadSafety(level) => {
-                        // ADR-0084: thread-safety markers are gated.
-                        self.require_preview(
-                            gruel_util::PreviewFeature::ThreadSafety,
-                            "@mark(unsend) / @mark(checked_send) / @mark(checked_sync)",
-                            directive.span,
-                        )?;
+                        // ADR-0084: thread-safety markers stabilized
+                        // — no preview gate after Phase 7.
                         if let Some(prev) = outcome.thread_safety_override
                             && prev != level
                         {

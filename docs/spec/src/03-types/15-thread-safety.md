@@ -9,12 +9,6 @@ This section describes how Gruel classifies types for thread-boundary
 crossings. The classification is a single trichotomy ordered as
 `Unsend < Send < Sync`.
 
-> **Status: preview.** Everything in this section is gated behind
-> `--preview thread_safety` (ADR-0084). The classification field exists
-> on every type today, but the markers, comptime intrinsic, `JoinHandle`
-> built-in, and `@spawn` intrinsic are unstable until the feature is
-> stabilized.
-
 ## Trichotomy
 
 {{ rule(id="3.15:1", cat="normative") }}

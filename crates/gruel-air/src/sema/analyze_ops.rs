@@ -8083,11 +8083,7 @@ impl<'a> Sema<'a> {
             }
             Some(IntrinsicId::ThreadSafety) => {
                 // ADR-0084: comptime classification on the trichotomy.
-                self.require_preview(
-                    gruel_util::PreviewFeature::ThreadSafety,
-                    "@thread_safety() intrinsic",
-                    span,
-                )?;
+                // Stabilized in Phase 7 — no preview gate.
                 let enum_id = self
                     .builtin_thread_safety_id
                     .expect("ThreadSafety enum not injected - internal compiler error");

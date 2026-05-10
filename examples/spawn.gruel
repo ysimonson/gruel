@@ -1,14 +1,10 @@
 // ADR-0084: minimal `@spawn` end-to-end shape.
 //
-// Compile with `--preview thread_safety`:
-//
-//     gruel --preview thread_safety examples/spawn.gruel out
+//     gruel examples/spawn.gruel out
 //     ./out
 //
-// The thread spawn passes sema validation: the worker takes a single
-// argument, the argument type is `Send` (i32 is intrinsically Sync),
-// and the return type is `Send`. The handle is consumed via `.join()`
-// to satisfy linearity (ADR-0067).
+// The worker takes a single Send argument and returns Send. The
+// handle is linear and must be consumed via `.join()` (ADR-0067).
 //
 // Codegen emits a per-(arg, ret) thunk that adapts the C
 // `void *(*)(void *)` calling convention pthread expects, allocates

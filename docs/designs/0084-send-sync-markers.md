@@ -1,13 +1,13 @@
 ---
 id: 0084
 title: Markers for `Send` and `Sync`
-status: proposal
+status: implemented
 tags: [types, ownership, concurrency, syntax, directives, intrinsics]
-feature-flag: thread_safety
+feature-flag:
 created: 2026-05-10
-accepted:
-implemented:
-spec-sections: ["3.X", "4.X"]
+accepted: 2026-05-10
+implemented: 2026-05-10
+spec-sections: ["3.15", "4.17"]
 superseded-by:
 ---
 
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -592,14 +592,19 @@ them.
 
 ### Phase 7: Stabilize
 
-- [ ] Remove `PreviewFeature::ThreadSafety` from
+- [x] Remove `PreviewFeature::ThreadSafety` from
       `gruel-util/src/error.rs`. `--preview thread_safety` no
       longer recognized.
-- [ ] Strip `preview = "thread_safety"` and `preview_should_pass =
-      true` from every spec case still carrying them.
-- [ ] `make test` passes on the final state, including the new
+- [x] Strip `preview = "thread_safety"` and `preview_should_pass =
+      true` from every spec case still carrying them. Three
+      preview-gating-only test cases (`thread_safety_intrinsic_preview_gated`,
+      `spawn_intrinsic_preview_gated`,
+      `mark_thread_safety_preview_gated`,
+      `unsend_marker_preview_gated`) deleted since the gate they
+      were asserting is gone.
+- [x] `make test` passes on the final state, including the
       thread-safety spec section in the traceability check.
-- [ ] ADR status → `implemented`; frontmatter updated.
+- [x] ADR status → `implemented`; frontmatter updated.
 
 ## Consequences
 

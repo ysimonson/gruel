@@ -25,13 +25,13 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@type_name` | type | Compile-time Reflection | — | — | Name of a type as a comptime string. |
 | `@type_info` | type | Compile-time Reflection | — | — | Reflective info about a type. |
 | `@ownership` | type | Compile-time Reflection | — | — | Ownership posture of a type (`Copy`, `Affine`, or `Linear`). |
-| `@thread_safety` | type | Compile-time Reflection | thread_safety | — | Thread-safety classification of a type (`Unsend`, `Send`, or `Sync`). |
+| `@thread_safety` | type | Compile-time Reflection | — | — | Thread-safety classification of a type (`Unsend`, `Send`, or `Sync`). |
 | `@implements` | type+iface | Compile-time Reflection | — | — | Whether a type structurally implements an interface. |
 | `@field` | expr | Compile-time Reflection | — | — | Access a field by comptime-known name. |
 | `@import` | expr | Compile-time Reflection | — | — | Import another source file (placeholder). |
 | `@embed_file` | expr | Compile-time Reflection | — | — | Embed a file's contents at compile time as `Slice(u8)`. |
-| `@spawn` | expr | Compile-time Reflection | thread_safety | — | Spawn a worker thread running `fn(arg) -> R`. |
-| `@thread_join` | expr | Compile-time Reflection | thread_safety | yes | Internal lowering target for JoinHandle::join (ADR-0084). |
+| `@spawn` | expr | Compile-time Reflection | — | — | Spawn a worker thread running `fn(arg) -> R`. |
+| `@thread_join` | expr | Compile-time Reflection | — | yes | Internal lowering target for JoinHandle::join (ADR-0084). |
 | `@uninit` | type | Compile-time Reflection | — | — | Allocate a partially-initialized value of a given type (ADR-0079). |
 | `@finalize` | expr | Compile-time Reflection | — | — | Consume an `Uninit(T)` handle and return a real `T` (ADR-0079). |
 | `@field_set` | expr | Compile-time Reflection | — | — | Write a field of an in-progress `@uninit`/`@variant_uninit` handle (ADR-0079). |
@@ -291,7 +291,6 @@ match @ownership(T) { Ownership::Copy => ..., Ownership::Affine => ..., Ownershi
 
 `@thread_safety(T)` returns a variant of the built-in `ThreadSafety` enum classifying `T` on the trichotomy `Unsend < Send < Sync` (see ADR-0084): `Unsend` if `T` cannot cross a thread boundary, `Send` if it can be moved between threads, `Sync` if it can be shared. Primitives are intrinsically `Sync`; raw pointers (`Ptr(T)` / `MutPtr(T)`) are intrinsically `Unsend`. Composite types take the structural minimum over their members, optionally overridden by `@mark(unsend)` / `@mark(checked_send)` / `@mark(checked_sync)`. Evaluated at compile time.
 
-- **Preview gate:** `--preview thread_safety` (ADR-0084)
 
 **Examples:**
 
@@ -364,7 +363,6 @@ let data: Slice(u8) = @embed_file("asset.bin");
 `@spawn(fn, arg) -> JoinHandle(R)` runs `fn` on a new thread with `arg` and yields a linear `JoinHandle(R)` consumed via `join(self) -> R`. The function and argument types are checked: arity must be one, the argument must be `≥ Send` and not Linear or a reference, and the return type must be `≥ Send`. Multi-argument workers wrap their inputs in a tuple/struct on the caller's side. ADR-0084.
 
 - **Runtime symbol:** `__gruel_thread_spawn`
-- **Preview gate:** `--preview thread_safety` (ADR-0084)
 
 **Examples:**
 
@@ -381,7 +379,6 @@ let report = h.join();
 `@thread_join(h: MutPtr(u8)) -> R` is the codegen-level wrapper around `__gruel_thread_join`. Called only from the prelude `JoinHandle::join` body inside a `checked` block; user code reaches the runtime through the prelude method. Result type comes from the surrounding context.
 
 - **Runtime symbol:** `__gruel_thread_join`
-- **Preview gate:** `--preview thread_safety` (ADR-0084)
 - **Requires:** `checked { ... }` block
 
 ### `@uninit`

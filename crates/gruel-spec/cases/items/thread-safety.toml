@@ -1,14 +1,9 @@
-# ADR-0084: Markers for `Send` and `Sync`
+# ADR-0084: Markers for `Send` and `Sync` (stabilized).
 #
-# Phase 1 spec tests: trichotomy + structural inference. Tests cover
-# built-in facts (primitives → Sync, raw pointers → Unsend), structural
-# minimum across composites, the three thread-safety markers, mutual
-# exclusion, and preview-gating.
-#
-# These tests are gated behind `--preview thread_safety`. Tests that
-# the markers/intrinsic implementation can already pass are flagged
-# `preview_should_pass = true` so CI requires them to remain green
-# while the feature is unstable.
+# Tests cover the trichotomy, structural inference, the three
+# thread-safety markers, mutual exclusion, the `@thread_safety`
+# comptime intrinsic, the `JoinHandle(R)` prelude type, and the
+# `@spawn` intrinsic + runtime.
 
 [section]
 id = "items.thread_safety"
@@ -30,8 +25,6 @@ description = "Trichotomy `Unsend < Send < Sync`, structural inference, and the 
 [[case]]
 name = "checked_sync_on_primitive_struct"
 spec = ["3.15:1", "3.15:2", "3.15:3"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: a struct of all-primitive fields is structurally Sync; @mark(checked_sync) is redundant but accepted. Exercises the trichotomy, the strict ordering, and the primitive Sync rule."
 source = """
 @mark(checked_sync) struct Pair { x: i32, y: i32 }
@@ -49,8 +42,6 @@ exit_code = 12
 [[case]]
 name = "struct_with_ptr_field_can_be_marked_checked_sync"
 spec = ["3.15:4", "3.15:5"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: a struct holding a MutPtr(T) infers Unsend by structural minimum (raw pointers are intrinsically Unsend, ADR-0084 Decision §Inference), but @mark(checked_sync) overrides that — the user is asserting the type is Sync-safe in practice."
 source = """
 @mark(checked_sync) struct Buffer { len: usize, ptr: MutPtr(u8) }
@@ -61,8 +52,6 @@ exit_code = 0
 [[case]]
 name = "empty_struct_is_sync"
 spec = ["3.15:6"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: empty composites fold to the Sync identity for the structural-minimum operation; @mark(checked_sync) on an empty struct compiles without conflict."
 source = """
 @mark(checked_sync) struct Empty {}
@@ -73,8 +62,6 @@ exit_code = 0
 [[case]]
 name = "struct_of_primitives_can_be_marked_checked_sync"
 spec = ["3.15:5"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: a struct whose fields are all primitives infers Sync via the structural minimum; @mark(checked_sync) is accepted (redundant but legal — see Decision § Inference, no diagnostic on legitimate downgrades / matches)."
 source = """
 @mark(checked_sync) struct Vector3 { x: i32, y: i32, z: i32 }
@@ -88,8 +75,6 @@ exit_code = 6
 [[case]]
 name = "nested_struct_with_ptr_can_be_marked_checked_send"
 spec = ["3.15:5"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: structural minimum propagates through nested struct fields; the outer struct's marker overrides the inferred Unsend."
 source = """
 struct Inner { ptr: MutPtr(u8) }
@@ -109,8 +94,6 @@ exit_code = 0
 [[case]]
 name = "thread_safety_returns_sync_for_i32"
 spec = ["3.15:1", "3.15:3"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @thread_safety(i32) returns ThreadSafety::Sync."
 source = """
 fn main() -> i32 {
@@ -126,8 +109,6 @@ exit_code = 3
 [[case]]
 name = "thread_safety_returns_sync_for_bool"
 spec = ["3.15:3"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @thread_safety(bool) returns ThreadSafety::Sync."
 source = """
 fn main() -> i32 {
@@ -143,8 +124,6 @@ exit_code = 3
 [[case]]
 name = "thread_safety_returns_unsend_for_marked_struct"
 spec = ["3.15:8"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: a struct with @mark(unsend) overrides the structurally-Sync inference; @thread_safety returns Unsend."
 source = """
 @mark(unsend) struct ThreadAffine { id: i32 }
@@ -161,8 +140,6 @@ exit_code = 1
 [[case]]
 name = "thread_safety_returns_send_for_struct_with_checked_send"
 spec = ["3.15:8"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @mark(checked_send) overrides the structural minimum; @thread_safety returns Send."
 source = """
 @mark(checked_send) struct AssertedSend { x: i32, y: i32 }
@@ -179,8 +156,6 @@ exit_code = 2
 [[case]]
 name = "thread_safety_in_comptime_branch"
 spec = ["3.15:1", "3.15:5"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @thread_safety can drive a comptime branch — pattern matching against the result selects different behavior at compile time."
 source = """
 fn classify(comptime T: type) -> i32 {
@@ -195,36 +170,17 @@ fn main() -> i32 {
 """
 exit_code = 100
 
-[[case]]
-name = "thread_safety_intrinsic_preview_gated"
-spec = ["3.15:1"]
-description = "ADR-0084: @thread_safety is gated behind --preview thread_safety."
-source = """
-fn main() -> i32 {
-    match @thread_safety(i32) {
-        ThreadSafety::Unsend => 1,
-        ThreadSafety::Send => 2,
-        ThreadSafety::Sync => 3,
-    }
-}
-"""
-compile_fail = true
-error_contains = "thread_safety"
-
 # =============================================================================
-# Phase 4: JoinHandle(R) built-in
+# JoinHandle(R) built-in
 # =============================================================================
 #
 # `JoinHandle(R)` lives in `prelude/join_handle.gruel` as a parameterized
 # type built from a `pub fn JoinHandle(comptime R: type) -> type` that
-# returns an `@mark(linear, checked_send) struct { ... }`. The body is
-# preview-gated via the `@mark(...)` thread-safety markers.
+# returns an `@mark(linear, checked_send) struct { ... }`.
 
 [[case]]
 name = "join_handle_is_send"
-spec = ["3.15:8"]
-preview = "thread_safety"
-preview_should_pass = true
+spec = ["3.15:8", "4.17:14"]
 description = "ADR-0084: JoinHandle(R) inherits its @mark(checked_send) override and reports as Send."
 source = """
 fn classify(comptime T: type) -> i32 {
@@ -242,8 +198,6 @@ exit_code = 2
 [[case]]
 name = "join_handle_is_linear"
 spec = ["3.15:11"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: JoinHandle(R) is declared @mark(linear) so its instances must be consumed; @ownership reports Linear."
 source = """
 fn classify(comptime T: type) -> i32 {
@@ -261,8 +215,6 @@ exit_code = 1
 [[case]]
 name = "join_handle_must_be_consumed"
 spec = ["3.15:11", "4.17:13", "4.17:15"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: a JoinHandle returned by @spawn must be consumed (linearity, ADR-0067). Without a `.join()` the compiler rejects the program."
 source = """
 fn worker(x: i32) -> i32 { x + 1 }
@@ -286,8 +238,6 @@ error_contains = "must be consumed"
 [[case]]
 name = "spawn_arg_must_be_send"
 spec = ["3.15:1", "4.17:6"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @spawn rejects an argument whose type is structurally Unsend (e.g. a struct holding a raw pointer)."
 source = """
 struct Buffer { ptr: MutPtr(u8), len: usize }
@@ -307,8 +257,6 @@ error_contains = "not Send"
 [[case]]
 name = "spawn_return_must_be_send"
 spec = ["3.15:1", "4.17:9"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @spawn rejects a function whose return type is Unsend."
 source = """
 struct Result_ { ptr: MutPtr(u8) }
@@ -325,8 +273,6 @@ error_contains = "not Send"
 [[case]]
 name = "spawn_rejects_ref_arg"
 spec = ["3.15:1", "4.17:8"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @spawn rejects a function whose parameter is `Ref(T)` or `MutRef(T)` — references are scope-bound (ADR-0076) and cannot outlive the caller."
 source = """
 fn worker(b: Ref(i32)) -> i32 { 0 }
@@ -342,8 +288,6 @@ error_contains = "reference"
 [[case]]
 name = "spawn_rejects_linear_arg"
 spec = ["3.15:1", "4.17:7"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @spawn rejects a function whose parameter is Linear — linear values are per-thread today."
 source = """
 @mark(linear, checked_send) struct Token { id: i32 }
@@ -360,8 +304,6 @@ error_contains = "Linear"
 [[case]]
 name = "spawn_rejects_wrong_arity"
 spec = ["4.17:4"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @spawn rejects a worker that does not take exactly one parameter."
 source = """
 fn worker(a: i32, b: i32) -> i32 { a + b }
@@ -376,8 +318,6 @@ error_contains = "exactly one parameter"
 [[case]]
 name = "spawn_rejects_unknown_function"
 spec = ["4.17:3"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @spawn rejects a name that does not resolve to a top-level function."
 source = """
 fn main() -> i32 {
@@ -391,8 +331,6 @@ error_contains = "did not resolve"
 [[case]]
 name = "spawn_accepts_sync_arg"
 spec = ["4.17:1", "4.17:2", "4.17:5", "4.17:10", "4.17:12"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: end-to-end @spawn(worker, 41) → join → 42. Validation passes (i32 is Sync, worker returns Sync), the per-instantiation thunk adapts the C calling convention, and __gruel_thread_join blocks until the spawned thread finishes."
 source = """
 fn worker(x: i32) -> i32 { x + 1 }
@@ -404,24 +342,8 @@ fn main() -> i32 {
 exit_code = 42
 
 [[case]]
-name = "spawn_intrinsic_preview_gated"
-spec = ["3.15:1", "4.17:1", "4.17:14"]
-description = "ADR-0084: @spawn is gated behind --preview thread_safety."
-source = """
-fn worker(x: i32) -> i32 { x + 1 }
-fn main() -> i32 {
-    let h = @spawn(worker, 1);
-    h.join()
-}
-"""
-compile_fail = true
-error_contains = "thread_safety"
-
-[[case]]
 name = "checked_send_on_primitive_struct"
 spec = ["3.15:1", "3.15:3"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @mark(checked_send) is accepted on a structurally-Sync struct."
 source = """
 @mark(checked_send) struct Counter { value: i32 }
@@ -435,8 +357,6 @@ exit_code = 42
 [[case]]
 name = "unsend_marker_downgrades_struct"
 spec = ["3.15:8"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @mark(unsend) is always safe — downgrades a structurally-Sync struct."
 source = """
 @mark(unsend) struct ThreadAffine { id: i32 }
@@ -454,8 +374,6 @@ exit_code = 7
 [[case]]
 name = "mutually_exclusive_unsend_and_checked_send"
 spec = ["3.15:9"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: applying both `unsend` and `checked_send` to the same type is rejected."
 source = """
 @mark(unsend, checked_send) struct Bad { x: i32 }
@@ -467,8 +385,6 @@ error_contains = "conflicting thread-safety markers"
 [[case]]
 name = "mutually_exclusive_checked_send_and_checked_sync"
 spec = ["3.15:9"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: applying both `checked_send` and `checked_sync` to the same type is rejected."
 source = """
 @mark(checked_send, checked_sync) struct Bad { x: i32 }
@@ -480,8 +396,6 @@ error_contains = "conflicting thread-safety markers"
 [[case]]
 name = "mutually_exclusive_unsend_and_checked_sync"
 spec = ["3.15:9"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: applying both `unsend` and `checked_sync` to the same type is rejected."
 source = """
 @mark(unsend, checked_sync) struct Bad { x: i32 }
@@ -497,8 +411,6 @@ error_contains = "conflicting thread-safety markers"
 [[case]]
 name = "thread_safety_combined_with_posture_marker"
 spec = ["3.15:11", "3.15:12"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: posture markers and thread-safety markers occupy independent namespaces — one of each may appear on the same type."
 source = """
 @mark(linear, checked_sync) struct LockedPool { id: i32 }
@@ -515,8 +427,6 @@ exit_code = 1
 [[case]]
 name = "thread_safety_with_copy_marker"
 spec = ["3.15:11"]
-preview = "thread_safety"
-preview_should_pass = true
 description = "ADR-0084: @mark(copy) and @mark(checked_sync) coexist on the same type."
 source = """
 @mark(copy, checked_sync) struct Point { x: i32, y: i32 }
@@ -528,31 +438,3 @@ fn main() -> i32 {
 """
 exit_code = 14
 
-# =============================================================================
-# Preview gating
-# =============================================================================
-
-[[case]]
-name = "mark_thread_safety_preview_gated"
-spec = ["3.15:8"]
-description = "ADR-0084: thread-safety markers require --preview thread_safety."
-source = """
-@mark(checked_send) struct Counter { value: i32 }
-fn main() -> i32 {
-    let c = Counter { value: 0 };
-    c.value
-}
-"""
-compile_fail = true
-error_contains = "thread_safety"
-
-[[case]]
-name = "unsend_marker_preview_gated"
-spec = ["3.15:8"]
-description = "ADR-0084: @mark(unsend) also requires the preview gate (the namespace is gated, not just the upgrade markers)."
-source = """
-@mark(unsend) struct ThreadAffine { id: i32 }
-fn main() -> i32 { 0 }
-"""
-compile_fail = true
-error_contains = "thread_safety"

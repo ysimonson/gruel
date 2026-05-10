@@ -351,11 +351,6 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
-    /// ADR-0084: thread-safety markers (`@mark(unsend)` /
-    /// `@mark(checked_send)` / `@mark(checked_sync)`), the
-    /// `@thread_safety(T)` intrinsic, the `JoinHandle(R)` built-in, and
-    /// the `@spawn(fn, arg)` intrinsic.
-    ThreadSafety,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -387,7 +382,6 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
-            PreviewFeature::ThreadSafety => "ADR-0084",
         }
     }
 
@@ -2119,7 +2113,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra, thread_safety");
+        assert_eq!(names, "test_infra");
     }
 
     // ========================================================================
