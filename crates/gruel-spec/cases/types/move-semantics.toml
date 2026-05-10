@@ -107,13 +107,14 @@ exit_code = 6
 [[case]]
 name = "array_use_after_move_error"
 spec = ["3.8:2"]
-description = "ADR-0080: aliasing the same array twice is a use-after-move error."
+description = "ADR-0083: aliasing the same array of non-Copy elements twice is a use-after-move error."
 source = """
+struct Token { value: i32, name: String }
+fn consume(arr: [Token; 1]) -> i32 { 0 }
 fn main() -> i32 {
-    let arr: [i32; 3] = [1, 2, 3];
-    let arr2 = arr;
-    let arr3 = arr;
-    arr2[0] + arr3[1]
+    let arr: [Token; 1] = [Token { value: 1, name: "a" }];
+    let _x = consume(arr);
+    consume(arr)
 }
 """
 compile_fail = true
@@ -170,9 +171,9 @@ name = "array_of_non_copy_is_not_copy"
 spec = ["3.8:2", "3.8:3"]
 description = "Array of non-Copy struct is not Copy"
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 fn main() -> i32 {
-    let arr: [Data; 2] = [Data { value: 1 }, Data { value: 2 }];
+    let arr: [Data; 2] = [Data { value: 1, name: "x" }, Data { value: 2, name: "x" }];
     let arr2 = arr;
     arr[0].value
 }
@@ -183,13 +184,14 @@ error_contains = "use of moved value"
 [[case]]
 name = "array_of_copy_struct_moves"
 spec = ["3.8:2", "3.8:16"]
-description = "ADR-0080: an array of Copy structs is itself non-Copy — assignment moves the whole array."
+description = "ADR-0083 (Open Question 1): an array of Copy structs is itself Copy and may be aliased — reverts ADR-0080."
 source = """
 copy struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     let points: [Point; 2] = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
     let p2 = points;
-    p2[0].x + p2[1].x
+    let p3 = points;
+    p2[0].x + p3[1].x
 }
 """
 exit_code = 4
@@ -197,20 +199,23 @@ exit_code = 4
 [[case]]
 name = "copy_struct_with_array_field_rejected"
 spec = ["3.8:2", "3.8:20"]
-description = "ADR-0080: arrays are non-Copy, so a `@derive(Copy)` struct may no longer have an array field."
+description = "ADR-0083: arrays of Copy elements are Copy under uniform inference, so a `copy struct` may now contain an array of Copy elements."
 source = """
 copy struct Container { values: [i32; 3] }
-fn main() -> i32 { 0 }
+fn main() -> i32 {
+    let c = Container { values: [1, 2, 3] };
+    let d = c;
+    c.values[0] + d.values[1]
+}
 """
-compile_fail = true
-error_contains = "affine"
+exit_code = 3
 
 [[case]]
 name = "copy_struct_with_array_of_non_copy_error"
 spec = ["3.8:18", "3.8:20"]
 description = "@derive(Copy) struct cannot contain array of non-Copy type"
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 
 copy struct Container { items: [Data; 2] }
 
@@ -227,9 +232,9 @@ error_contains = "affine"
 name = "struct_is_move_type"
 spec = ["3.8:3", "3.8:4"]
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
+    let p = Point { x: 1, y: 2, name: "p" };
     let q = p;
     q.x + q.y
 }
@@ -240,9 +245,9 @@ exit_code = 3
 name = "struct_use_after_move_error"
 spec = ["3.8:5", "3.8:6"]
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
+    let p = Point { x: 1, y: 2, name: "p" };
     let q = p;
     let r = p;
     0
@@ -255,9 +260,9 @@ error_contains = "use of moved value"
 name = "struct_move_on_assignment"
 spec = ["3.8:7"]
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 fn main() -> i32 {
-    let d = Data { value: 42 };
+    let d = Data { value: 42, name: "x" };
     let e = d;
     d.value
 }
@@ -269,10 +274,10 @@ error_contains = "use of moved value"
 name = "struct_move_on_function_call"
 spec = ["3.8:7", "3.8:8", "3.8:11"]
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 fn consume(d: Data) -> i32 { d.value }
 fn main() -> i32 {
-    let d = Data { value: 42 };
+    let d = Data { value: 42, name: "x" };
     let result = consume(d);
     d.value
 }
@@ -284,10 +289,10 @@ error_contains = "use of moved value"
 name = "struct_move_valid_single_use"
 spec = ["3.8:7", "3.8:8"]
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 fn consume(d: Data) -> i32 { d.value }
 fn main() -> i32 {
-    let d = Data { value: 42 };
+    let d = Data { value: 42, name: "x" };
     consume(d)
 }
 """
@@ -301,9 +306,9 @@ exit_code = 42
 name = "field_access_no_move"
 spec = ["3.8:3"]
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 fn main() -> i32 {
-    let p = Point { x: 10, y: 20 };
+    let p = Point { x: 10, y: 20, name: "p" };
     p.x + p.y
 }
 """
@@ -313,9 +318,9 @@ exit_code = 30
 name = "field_access_then_move"
 spec = ["3.8:3", "3.8:7"]
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
+    let p = Point { x: 1, y: 2, name: "p" };
     let x = p.x;
     let q = p;
     x + q.y
@@ -327,9 +332,9 @@ exit_code = 3
 name = "field_access_after_move_error"
 spec = ["3.8:5"]
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
+    let p = Point { x: 1, y: 2, name: "p" };
     let q = p;
     p.x
 }
@@ -345,9 +350,9 @@ error_contains = "use of moved value"
 name = "field_assign_after_move_error"
 spec = ["3.8:5"]
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 fn main() -> i32 {
-    let mut p = Point { x: 1, y: 2 };
+    let mut p = Point { x: 1, y: 2, name: "p" };
     let _q = p;
     p.x = 10;
     0
@@ -382,11 +387,11 @@ name = "shadowing_creates_new_binding"
 spec = ["3.8:12"]
 description = "Shadowing creates a new binding, doesn't affect original move state"
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 fn main() -> i32 {
-    let d = Data { value: 1 };
+    let d = Data { value: 1, name: "x" };
     let _x = d;  // d is moved
-    let d = Data { value: 2 };  // New 'd' shadows the moved one
+    let d = Data { value: 2, name: "x" };  // New 'd' shadows the moved one
     d.value  // This is the new 'd', which is valid
 }
 """
@@ -397,11 +402,11 @@ name = "shadowing_then_use_original_error"
 spec = ["3.8:12"]
 description = "After shadowing a moved variable, accessing original is still error"
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 fn main() -> i32 {
-    let d = Data { value: 1 };
+    let d = Data { value: 1, name: "x" };
     let original = d;  // d is moved
-    let d = Data { value: 2 };  // Shadows with new binding
+    let d = Data { value: 2, name: "x" };  // Shadows with new binding
     let _y = d;  // Use new d
     original.value  // The original value was moved into 'original'
 }
@@ -417,8 +422,8 @@ name = "struct_returned_from_function"
 spec = ["3.8:7"]
 description = "Returning a struct from a function transfers ownership to the caller"
 source = """
-struct Point { x: i32, y: i32 }
-fn make_point() -> Point { Point { x: 1, y: 2 } }
+struct Point { x: i32, y: i32, name: String }
+fn make_point() -> Point { Point { x: 1, y: 2, name: "p" } }
 fn main() -> i32 {
     let p = make_point();
     p.x + p.y
@@ -431,8 +436,8 @@ name = "struct_returned_then_moved"
 spec = ["3.8:7"]
 description = "Struct returned from function can be moved like any other owned value"
 source = """
-struct Data { value: i32 }
-fn create() -> Data { Data { value: 42 } }
+struct Data { value: i32, name: String }
+fn create() -> Data { Data { value: 42, name: "x" } }
 fn consume(d: Data) -> i32 { d.value }
 fn main() -> i32 {
     let d = create();
@@ -446,8 +451,8 @@ name = "struct_returned_use_after_move_error"
 spec = ["3.8:5", "3.8:7"]
 description = "Struct returned from function follows normal move rules"
 source = """
-struct Data { value: i32 }
-fn create() -> Data { Data { value: 42 } }
+struct Data { value: i32, name: String }
+fn create() -> Data { Data { value: 42, name: "x" } }
 fn main() -> i32 {
     let d = create();
     let e = d;
@@ -462,9 +467,9 @@ name = "return_moves_local_variable"
 spec = ["3.8:7"]
 description = "Returning a local variable moves it out of the function"
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 fn make_point() -> Point {
-    let p = Point { x: 10, y: 20 };
+    let p = Point { x: 10, y: 20, name: "p" };
     p
 }
 fn main() -> i32 {
@@ -479,9 +484,9 @@ name = "return_expression_creates_value"
 spec = ["3.8:7"]
 description = "Struct literal in return position transfers ownership directly"
 source = """
-struct Pair { a: i32, b: i32 }
+struct Pair { a: i32, b: i32, name: String }
 fn make_pair(x: i32, y: i32) -> Pair {
-    Pair { a: x, b: y }
+    Pair { a: x, b: y, name: "p" }
 }
 fn main() -> i32 {
     let p = make_pair(3, 4);
@@ -495,8 +500,8 @@ name = "chained_returns"
 spec = ["3.8:7"]
 description = "Ownership can transfer through multiple function returns"
 source = """
-struct Value { n: i32 }
-fn inner() -> Value { Value { n: 5 } }
+struct Value { n: i32, name: String }
+fn inner() -> Value { Value { n: 5, name: "v" } }
 fn outer() -> Value { inner() }
 fn main() -> i32 {
     let v = outer();
@@ -510,10 +515,10 @@ name = "return_parameter"
 spec = ["3.8:7", "3.8:11"]
 description = "Function can return its parameter, transferring ownership back"
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 fn identity(d: Data) -> Data { d }
 fn main() -> i32 {
-    let d = Data { value: 100 };
+    let d = Data { value: 100, name: "x" };
     let e = identity(d);
     e.value
 }
@@ -525,10 +530,10 @@ name = "return_parameter_original_invalid"
 spec = ["3.8:5", "3.8:7", "3.8:11"]
 description = "After passing to function that returns it, original binding is still moved"
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 fn identity(d: Data) -> Data { d }
 fn main() -> i32 {
-    let d = Data { value: 100 };
+    let d = Data { value: 100, name: "x" };
     let _e = identity(d);
     d.value
 }
@@ -628,9 +633,9 @@ exit_code = 6
 [[case]]
 name = "copy_struct_non_copy_field_error"
 spec = ["3.8:18", "3.8:19"]
-description = "@derive(Copy) struct with non-Copy field is a compile error"
+description = "@derive(Copy) struct with non-Copy field is a compile error. ADR-0083: keep `Inner` non-Copy with a `String` field."
 source = """
-struct Inner { value: i32 }
+struct Inner { value: i32, name: String }
 
 copy struct Outer { inner: Inner }
 
@@ -664,9 +669,9 @@ name = "non_copy_struct_still_moves"
 spec = ["3.8:3"]
 description = "Struct without @derive(Copy) still has move semantics"
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
+    let p = Point { x: 1, y: 2, name: "p" };
     let q = p;
     let r = p;
     0
@@ -684,11 +689,11 @@ name = "cannot_move_non_copy_field"
 spec = ["3.8:22", "3.8:23"]
 description = "Moving a non-copy field out of a struct is a compile error"
 source = """
-struct Inner { x: i32 }
+struct Inner { x: i32, name: String }
 struct S { a: Inner, b: Inner }
 
 fn main() -> i32 {
-    let s = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
+    let s = S { a: Inner { x: 1, name: "i" }, b: Inner { x: 2, name: "i" } };
     let x = s.a;
     0
 }
@@ -701,13 +706,13 @@ name = "cannot_move_non_copy_field_in_call"
 spec = ["3.8:22"]
 description = "Passing a non-copy field as an argument is a move error"
 source = """
-struct Inner { x: i32 }
+struct Inner { x: i32, name: String }
 struct S { a: Inner, b: Inner }
 
 fn consume(i: Inner) -> i32 { i.x }
 
 fn main() -> i32 {
-    let s = S { a: Inner { x: 1 }, b: Inner { x: 2 } };
+    let s = S { a: Inner { x: 1, name: "i" }, b: Inner { x: 2, name: "i" } };
     consume(s.a)
 }
 """
@@ -719,12 +724,12 @@ name = "cannot_move_nested_non_copy_field"
 spec = ["3.8:22"]
 description = "Moving a nested non-copy field is also banned"
 source = """
-struct Inner { x: i32 }
+struct Inner { x: i32, name: String }
 struct Middle { a: Inner, b: Inner }
 struct Outer { m: Middle }
 
 fn main() -> i32 {
-    let o = Outer { m: Middle { a: Inner { x: 1 }, b: Inner { x: 2 } } };
+    let o = Outer { m: Middle { a: Inner { x: 1, name: "i" }, b: Inner { x: 2, name: "i" } } };
     let x = o.m.a;
     0
 }
@@ -754,7 +759,7 @@ name = "copy_field_access_with_non_copy_sibling"
 spec = ["3.8:28"]
 description = "Copy fields can be read even when sibling fields are non-copy"
 source = """
-struct Inner { x: i32 }
+struct Inner { x: i32, name: String }
 
 drop fn Inner(self) {
     @dbg(self.x);
@@ -763,7 +768,7 @@ drop fn Inner(self) {
 struct Tagged { tag: i32, data: Inner }
 
 fn main() -> i32 {
-    let t = Tagged { tag: 42, data: Inner { x: 99 } };
+    let t = Tagged { tag: 42, data: Inner { x: 99, name: "i" } };
     t.tag
 }
 """
@@ -893,12 +898,12 @@ name = "affine_in_branch_consumed"
 spec = ["3.8:5", "3.8:7"]
 description = "Affine value consumed in both branches is considered moved after"
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 
 fn consume(p: Point) -> i32 { p.x }
 
 fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
+    let p = Point { x: 1, y: 2, name: "p" };
     let cond = true;
     let result = if cond {
         consume(p)
@@ -915,12 +920,12 @@ name = "affine_in_branch_use_after_both_moves"
 spec = ["3.8:5", "3.8:7"]
 description = "Using affine value after consuming in both branches is an error"
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 
 fn consume(p: Point) -> i32 { p.x }
 
 fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
+    let p = Point { x: 1, y: 2, name: "p" };
     let cond = true;
     if cond {
         consume(p);
@@ -938,12 +943,12 @@ name = "affine_in_one_branch_use_after"
 spec = ["3.8:5", "3.8:7"]
 description = "Using affine value after consuming in only one branch is an error"
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 
 fn consume(p: Point) -> i32 { p.x }
 
 fn main() -> i32 {
-    let p = Point { x: 1, y: 2 };
+    let p = Point { x: 1, y: 2, name: "p" };
     let cond = true;
     if cond {
         consume(p);
@@ -1216,9 +1221,9 @@ exit_code = 6
 [[case]]
 name = "copy_guard_in_type_ctor_rejects_affine"
 spec = ["3.8:60", "3.8:61", "3.8:62"]
-description = "Same guard rejects an affine struct at instantiation."
+description = "Same guard rejects an affine struct at instantiation. ADR-0083: keep `Foo` non-Copy with a `String` field."
 source = """
-struct Foo { inner: i32 }
+struct Foo { inner: i32, name: String }
 
 fn CopyablePair(comptime T: type) -> type {
     comptime if @ownership(T) != Ownership::Copy {

@@ -80,16 +80,16 @@ exit_code = 0
 [[case]]
 name = "clone_interface_rejects_struct_without_clone_method"
 spec = ["3.8:71"]
-description = "comptime T: Clone rejects affine struct without clone method"
+description = "comptime T: Clone rejects affine struct without clone method. ADR-0083: keep `Foo` non-Copy with a `String` field so it doesn't auto-conform via Copy."
 source = """
-struct Foo {}
+struct Foo { name: String }
 
 fn use_clone(comptime T: Clone, t: T) -> i32 {
     0
 }
 
 fn main() -> i32 {
-    use_clone(Foo, Foo {});
+    use_clone(Foo, Foo { name: "x" });
     0
 }
 """

@@ -603,14 +603,14 @@ params = [
 [[case]]
 name = "borrow_cannot_move_out"
 spec = ["6.1:25"]
-description = "Cannot move out of a borrowed value"
+description = "Cannot move out of a borrowed value. ADR-0083: keep `Data` non-Copy with a `String` field."
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 fn try_move(d: Ref(Data)) -> Data {
     d
 }
 fn main() -> i32 {
-    let d = Data { value: 42 };
+    let d = Data { value: 42, name: "x" };
     let e = try_move(&d);
     e.value
 }

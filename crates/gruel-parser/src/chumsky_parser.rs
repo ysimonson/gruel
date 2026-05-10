@@ -66,6 +66,10 @@ pub struct PrimitiveTypeSpurs {
     /// in struct/enum declaration heads (ADR-0080). Remains a valid
     /// identifier elsewhere.
     pub copy_name: Spur,
+    /// The identifier "linear" — accepted as a directive arg so users can
+    /// write `@mark(linear)` even though `linear` is also a reserved keyword
+    /// for the struct/enum head slot (ADR-0083).
+    pub linear_name: Spur,
 }
 
 impl PrimitiveTypeSpurs {
@@ -93,6 +97,7 @@ impl PrimitiveTypeSpurs {
             drop_name: interner.get_or_intern("drop"),
             derive_name: interner.get_or_intern("derive"),
             copy_name: interner.get_or_intern("copy"),
+            linear_name: interner.get_or_intern("linear"),
         }
     }
 }
@@ -627,12 +632,28 @@ where
     ))
     .boxed();
 
+    // ADR-0083: `@mark(linear)` and `@mark(copy)` need to accept the
+    // posture keywords as identifier arguments. `copy` is already a
+    // contextual identifier, so it falls through to `ident_parser`. `linear`
+    // is a hard keyword (`TokenKind::Linear`), so we accept it explicitly
+    // and intern the name on the parser state. Same shape as the
+    // directive-name carve-out for `derive`.
     let directive_arg = choice((
         select! {
             TokenKind::String(s) = e => DirectiveArg::String(StringLit {
                 value: s,
                 span: span_from_extra(e),
             }),
+        }
+        .boxed(),
+        select! {
+            TokenKind::Linear = e => {
+                let state: &mut SimpleState<ParserState> = e.state();
+                DirectiveArg::Ident(Ident {
+                    name: state.0.syms.linear_name,
+                    span: span_from_extra(e),
+                })
+            },
         }
         .boxed(),
         ident_parser().map(DirectiveArg::Ident).boxed(),
@@ -2439,7 +2460,13 @@ where
     // Note: self_type_expr must come before call_and_access_parser since Self is a keyword
     // Note: comptime_expr and checked_expr must come before block_expr since they start with keywords
     // Note: type_lit_expr must come before call_and_access_parser since type names are keywords
-    // Note: anon_struct_type_expr must come before call_and_access_parser since struct is a keyword
+    // Note: anon_struct_type_expr / anon_enum_type_expr must come before
+    // any_intrinsic_call: ADR-0083's `@mark(...)` is a directive that
+    // appears in the directive list of an anonymous type literal, but the
+    // parser otherwise parses `@name(args)` as an intrinsic call. Trying the
+    // anon-type form first lets `directives_parser()` consume the leading
+    // `@mark(copy)`, then the trailing `struct` / `enum` keyword
+    // disambiguates from a plain intrinsic call.
     //
     // NOTE: Split into sub-groups to keep Choice<tuple> symbol length < 4K.
     // 13 elements of Boxed<I,Expr,E> in one tuple would produce ~7K symbols on macOS.
@@ -2451,13 +2478,13 @@ where
         self_enum_struct_lit.boxed(),
         self_enum_variant.boxed(),
         self_type_expr.boxed(),
+        anon_struct_type_expr.boxed(),
+        anon_enum_type_expr.boxed(),
         any_intrinsic_call.boxed(),
     ))
     .boxed();
     let primary_b: GruelParser<'src, I, Expr> = choice((
         array_lit.boxed(),
-        anon_struct_type_expr.boxed(),
-        anon_enum_type_expr.boxed(),
         anon_interface_type_expr.boxed(),
         anon_fn_expr,
         // ADR-0071: must come before type_lit_expr (which consumes the `char` token alone).

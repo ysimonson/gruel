@@ -475,13 +475,13 @@ error_contains = "missing field"
 [[case]]
 name = "destructure_consumes_struct"
 spec = ["5.1:16"]
-description = "Destructured struct cannot be used afterwards"
+description = "Destructured struct cannot be used afterwards. ADR-0083: keep `Point` non-Copy with a `name: String` field."
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32, name: String }
 
 fn main() -> i32 {
-    let p = Point { x: 10, y: 32 };
-    let Point { x, y } = p;
+    let p = Point { x: 10, y: 32, name: "p" };
+    let Point { x, y, name } = p;
     p.x
 }
 """

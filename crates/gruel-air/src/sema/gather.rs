@@ -3,7 +3,7 @@
 //! This module contains the [`GatherOutput`] struct which holds the state built
 //! during declaration gathering that is needed for function body analysis.
 
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_rir::Rir;
 use gruel_util::PreviewFeatures;
@@ -136,6 +136,7 @@ impl<'a> GatherOutput<'a> {
             suppress_comptime_dbg_print: false,
             current_self: None,
             target: gruel_target::Target::host(),
+            mark_affine_decls: HashSet::default(),
         }
     }
 }

@@ -1669,8 +1669,9 @@ exit_code = 1
 [[case]]
 name = "ownership_default_struct_is_affine"
 spec = ["4.13:108", "4.13:111"]
+description = "ADR-0083: a struct that infers Affine (here, has a non-Copy `String` field) reports Affine via @ownership."
 source = """
-struct Point { x: i32, y: i32 }
+struct Point { x: i32, name: String }
 
 fn main() -> i32 {
     match @ownership(Point) {
@@ -1759,8 +1760,9 @@ exit_code = 10
 [[case]]
 name = "ownership_compile_time_constant"
 spec = ["4.13:112"]
+description = "ADR-0083: posture is queryable at compile time; here a struct with a non-Copy field infers Affine."
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, label: String }
 
 fn main() -> i32 {
     // Used in a comptime context: the value must be available at compile time.

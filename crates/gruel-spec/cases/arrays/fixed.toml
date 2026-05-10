@@ -587,12 +587,12 @@ exit_code = 42
 [[case]]
 name = "array_non_copy_element_move_error"
 spec = ["7.1:28"]
-description = "Cannot move non-Copy element out of array index"
+description = "Cannot move non-Copy element out of array index. ADR-0083: a struct of all-Copy fields would now infer Copy, so we keep `BigThing` non-Copy with a `name: String` field."
 source = """
-struct BigThing { value: i32 }
+struct BigThing { value: i32, name: String }
 
 fn main() -> i32 {
-    let arr: [BigThing; 2] = [BigThing { value: 1 }, BigThing { value: 2 }];
+    let arr: [BigThing; 2] = [BigThing { value: 1, name: "a" }, BigThing { value: 2, name: "b" }];
     let x = arr[0];
     x.value
 }

@@ -351,6 +351,10 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// `@mark(...)` directive for marker traits (ADR-0083).
+    /// Replaces ADR-0080's `copy` / `linear` keyword slot with a uniform
+    /// directive on the type-decl head.
+    MarkDirective,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -382,6 +386,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::MarkDirective => "ADR-0083",
         }
     }
 
@@ -954,6 +959,16 @@ pub enum ErrorKind {
     /// pointer (for `@handle` and `@copy`).
     #[error("unknown directive `@{name}`{}", note.as_deref().map(|n| format!("; {n}")).unwrap_or_default())]
     UnknownDirective { name: String, note: Option<String> },
+    /// `@mark(...)` carries a marker name not in `BUILTIN_MARKERS` (ADR-0083).
+    #[error("unknown marker `{name}`{}", note.as_deref().map(|n| format!("; {n}")).unwrap_or_default())]
+    UnknownMarker { name: String, note: Option<String> },
+    /// `@mark(...)` carries a marker that is not applicable to the host
+    /// item kind (ADR-0083).
+    #[error("marker `{marker}` is not applicable to {item_kind}")]
+    MarkerNotApplicable {
+        marker: String,
+        item_kind: &'static str,
+    },
     /// Duplicate method definition in impl blocks for the same type
     #[error("duplicate method '{method_name}' for type '{type_name}'")]
     DuplicateMethod {
@@ -1274,6 +1289,8 @@ impl ErrorKind {
             ErrorKind::CloneStructNonCopyField { .. } => ErrorCode::COPY_STRUCT_NON_COPY_FIELD,
             ErrorKind::PostureMismatch { .. } => ErrorCode::COPY_STRUCT_NON_COPY_FIELD,
             ErrorKind::UnknownDirective { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
+            ErrorKind::UnknownMarker { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
+            ErrorKind::MarkerNotApplicable { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
             ErrorKind::DuplicateMethod { .. } => ErrorCode::DUPLICATE_METHOD,
             ErrorKind::DeriveDirectFieldAccess { .. } => ErrorCode::DERIVE_DIRECT_FIELD_ACCESS,
             ErrorKind::DeriveNotADerive { .. } => ErrorCode::DERIVE_NOT_A_DERIVE,
@@ -2055,7 +2072,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, mark_directive");
     }
 
     // ========================================================================

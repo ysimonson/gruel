@@ -2782,9 +2782,15 @@ mod integration_tests {
 
         #[test]
         fn struct_move_semantics() {
-            // After moving a struct, it should not be usable
+            // After moving a struct, it should not be usable. ADR-0083:
+            // a struct of all-Copy fields would now infer Copy, so we
+            // attach a `fn drop(self)` to keep `Point` non-Copy
+            // (Drop ⊥ Copy).
             let src = r#"
-                struct Point { x: i32, y: i32 }
+                struct Point {
+                    x: i32, y: i32,
+                    fn drop(self) { @ignore_unused(self); }
+                }
                 fn consume(p: Point) -> i32 { p.x }
                 fn main() -> i32 {
                     let p = Point { x: 1, y: 2 };

@@ -11,8 +11,12 @@
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use gruel_builtins::is_reserved_type_constructor_name;
+use gruel_builtins::{
+    BUILTIN_MARKERS, ItemKinds, MarkerKind, Posture, get_builtin_marker,
+    is_reserved_type_constructor_name,
+};
 use gruel_rir::{InstData, InstRef, RirParamMode};
+use gruel_util::PreviewFeature;
 use gruel_util::Span;
 use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
 use lasso::Spur;
@@ -25,12 +29,18 @@ use crate::types::{
     StructDef, StructField, StructId, Type,
 };
 
-/// Posture declared by the user on a type definition (ADR-0080).
+/// Posture declared by the user on a type definition (ADR-0080 / ADR-0083).
+///
+/// `Unmarked` is the default — the user did not write a `copy`/`linear`
+/// keyword nor any `@mark(posture)` directive. Under uniform structural
+/// inference (ADR-0083), unmarked types pick up their final posture from
+/// their members; marked types must be consistent with the declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeclaredPosture {
     Copy,
     Affine,
     Linear,
+    Unmarked,
 }
 
 impl DeclaredPosture {
@@ -39,8 +49,19 @@ impl DeclaredPosture {
             DeclaredPosture::Copy => "copy",
             DeclaredPosture::Affine => "affine",
             DeclaredPosture::Linear => "linear",
+            DeclaredPosture::Unmarked => "unmarked",
         }
     }
+}
+
+/// ADR-0083: outcome of processing the `@mark(...)` directive list on a
+/// type declaration. Each field records whether at least one `@mark`
+/// directive in the list named the corresponding posture marker.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct MarkOutcome {
+    pub copy: bool,
+    pub affine: bool,
+    pub linear: bool,
 }
 
 /// Posture observed on a member's type (ADR-0080).
@@ -61,14 +82,19 @@ impl MemberPosture {
     }
 }
 
-/// ADR-0080: compare a member's posture against the host's declared
-/// posture and produce a `PostureMismatch` error if the rule is violated.
+/// ADR-0080 / ADR-0083: compare a member's posture against the host's
+/// declared posture and produce a `PostureMismatch` error if the rule is
+/// violated.
 ///
-/// Rules (with `Linear` short-circuited by the caller, since linear hosts
-/// accept anything):
+/// Rules:
 ///
 /// - `Copy` host: every member must be Copy.
-/// - `Affine` host: no member may be Linear.
+/// - `Affine` host (`@mark(affine)`): no member may be Linear (linear is
+///   contagious upward and cannot be hidden behind an affine declaration,
+///   ADR-0083).
+/// - `Linear` host: accepts anything.
+/// - `Unmarked`: no constraint here — under uniform inference the final
+///   posture is the inferred posture, never an error.
 fn check_posture_against_declared(
     host_kind: &'static str,
     host_name: &str,
@@ -79,11 +105,13 @@ fn check_posture_against_declared(
     member_posture: MemberPosture,
     span: Span,
 ) -> Option<CompileError> {
-    let violates = match (declared, member_posture) {
-        (DeclaredPosture::Copy, MemberPosture::Affine | MemberPosture::Linear) => true,
-        (DeclaredPosture::Affine, MemberPosture::Linear) => true,
-        _ => false,
-    };
+    let violates = matches!(
+        (declared, member_posture),
+        (
+            DeclaredPosture::Copy,
+            MemberPosture::Affine | MemberPosture::Linear
+        ) | (DeclaredPosture::Affine, MemberPosture::Linear)
+    );
     if !violates {
         return None;
     }
@@ -278,7 +306,7 @@ impl<'a> Sema<'a> {
             }
             for directive in self.rir.get_directives(start, len) {
                 let name = self.interner.resolve(&directive.name).to_string();
-                if name == "allow" || name == "derive" || name == "lang" {
+                if name == "allow" || name == "derive" || name == "lang" || name == "mark" {
                     continue;
                 }
                 let note = directive_diagnosis_note(&name);
@@ -442,20 +470,48 @@ impl<'a> Sema<'a> {
             match &inst.data {
                 InstData::EnumDecl {
                     is_pub,
-                    is_copy,
-                    is_linear,
+                    is_copy: kw_is_copy,
+                    is_linear: kw_is_linear,
                     name,
                     variants_start,
                     variants_len,
+                    directives_start,
+                    directives_len,
                     ..
                 } => {
                     let enum_name = self.interner.resolve(name).to_string();
 
+                    // ADR-0083: process `@mark(...)` directives on the type
+                    // declaration. The directive runs in parallel with the
+                    // ADR-0080 `copy`/`linear` keyword path during the
+                    // migration window (Phases 1–3); both paths populate the
+                    // same `is_copy`/`is_linear` flags. `@mark(affine)` is
+                    // tracked separately because there is no ADR-0080 keyword
+                    // equivalent for it.
+                    let mark_outcome = self.process_mark_directives(
+                        *directives_start,
+                        *directives_len,
+                        "enum",
+                        ItemKinds::ENUM,
+                        inst.span,
+                    )?;
+
+                    let is_copy = *kw_is_copy || mark_outcome.copy;
+                    let is_linear = *kw_is_linear || mark_outcome.linear;
+
                     // ADR-0080 belt-and-braces: parser already rejects
                     // `copy linear` / `linear copy` syntactically; this catches
                     // the path where one is a keyword and the other arrives
-                    // via `@derive(Copy)`.
-                    if *is_copy && *is_linear {
+                    // via `@derive(Copy)` or `@mark(copy/linear)`.
+                    if is_copy && is_linear {
+                        return Err(CompileError::new(
+                            ErrorKind::LinearStructCopy(enum_name.clone()),
+                            inst.span,
+                        ));
+                    }
+                    // ADR-0083: `@mark(affine)` cannot coexist with Copy or
+                    // Linear declarations.
+                    if mark_outcome.affine && (is_copy || is_linear) {
                         return Err(CompileError::new(
                             ErrorKind::LinearStructCopy(enum_name.clone()),
                             inst.span,
@@ -540,8 +596,8 @@ impl<'a> Sema<'a> {
                     let enum_def = EnumDef {
                         name: enum_name,
                         variants,
-                        is_copy: *is_copy,
-                        is_linear: *is_linear,
+                        is_copy,
+                        is_linear,
                         is_pub: *is_pub,
                         file_id: inst.span.file_id,
                         destructor: None,
@@ -552,13 +608,17 @@ impl<'a> Sema<'a> {
 
                     // Register in enum lookup with pool-based EnumId
                     self.enums.insert(*name, enum_id);
+
+                    if mark_outcome.affine {
+                        self.mark_affine_decls.insert(*name);
+                    }
                 }
                 InstData::StructDecl {
                     directives_start,
                     directives_len,
                     is_pub,
                     is_copy: kw_is_copy,
-                    is_linear,
+                    is_linear: kw_is_linear,
                     name,
                     ..
                 } => {
@@ -587,15 +647,27 @@ impl<'a> Sema<'a> {
                         ));
                     }
 
-                    let _ = *directives_start;
-                    let _ = *directives_len;
-                    // ADR-0080 Phase 5: `@derive(Copy)` is retired; the
-                    // `copy` keyword is now the sole source of truth for
-                    // `StructDef.is_copy`.
-                    let is_copy = *kw_is_copy;
+                    // ADR-0083: parallel `@mark(...)` directive path. See the
+                    // EnumDecl branch above for the rationale.
+                    let mark_outcome = self.process_mark_directives(
+                        *directives_start,
+                        *directives_len,
+                        "struct",
+                        ItemKinds::STRUCT,
+                        inst.span,
+                    )?;
 
-                    // Linear types cannot be @derive(Copy)
-                    if *is_linear && is_copy {
+                    let is_copy = *kw_is_copy || mark_outcome.copy;
+                    let is_linear = *kw_is_linear || mark_outcome.linear;
+
+                    // Linear types cannot be Copy.
+                    if is_linear && is_copy {
+                        return Err(CompileError::new(
+                            ErrorKind::LinearStructCopy(struct_name.clone()),
+                            inst.span,
+                        ));
+                    }
+                    if mark_outcome.affine && (is_copy || is_linear) {
                         return Err(CompileError::new(
                             ErrorKind::LinearStructCopy(struct_name.clone()),
                             inst.span,
@@ -608,7 +680,7 @@ impl<'a> Sema<'a> {
                         fields: Vec::new(), // Filled in during resolve_declarations
                         is_copy,
                         is_clone: false, // Filled in during resolve_declarations after fields known
-                        is_linear: *is_linear,
+                        is_linear,
                         destructor: None,  // Filled in during resolve_declarations
                         is_builtin: false, // User-defined struct
                         is_pub: *is_pub,
@@ -620,11 +692,120 @@ impl<'a> Sema<'a> {
 
                     // Register in struct lookup with pool-based StructId
                     self.structs.insert(*name, struct_id);
+
+                    if mark_outcome.affine {
+                        self.mark_affine_decls.insert(*name);
+                    }
                 }
                 _ => {}
             }
         }
         Ok(())
+    }
+
+    /// ADR-0083: process the `@mark(...)` directives on a type declaration.
+    ///
+    /// Walks the directive list, gates each `@mark` use behind the
+    /// `mark_directive` preview feature, and validates each marker against
+    /// the `BUILTIN_MARKERS` registry. Returns a flag-set describing which
+    /// posture markers were declared so the caller can fold them into the
+    /// type's `is_copy` / `is_linear` bits (and the `mark_affine_decls`
+    /// side set).
+    ///
+    /// Errors out on:
+    /// - Unknown markers (with edit-distance suggestions).
+    /// - Markers not applicable to the host item kind.
+    /// - Conflicting posture markers within the same directive list (e.g.
+    ///   `@mark(copy)` + `@mark(linear)`).
+    pub(crate) fn process_mark_directives(
+        &self,
+        directives_start: u32,
+        directives_len: u32,
+        item_kind_name: &'static str,
+        item_kind: ItemKinds,
+        span: Span,
+    ) -> CompileResult<MarkOutcome> {
+        let mut outcome = MarkOutcome::default();
+        if directives_len == 0 {
+            return Ok(outcome);
+        }
+        let directives = self.rir.get_directives(directives_start, directives_len);
+        for directive in directives.iter() {
+            let dir_name = self.interner.resolve(&directive.name);
+            if dir_name != "mark" {
+                continue;
+            }
+            // Gate the directive itself behind the preview feature.
+            self.require_preview(
+                PreviewFeature::MarkDirective,
+                "the `@mark(...)` directive",
+                directive.span,
+            )?;
+            if directive.args.is_empty() {
+                return Err(CompileError::new(
+                    ErrorKind::UnknownMarker {
+                        name: String::new(),
+                        note: Some(format!(
+                            "`@mark(...)` requires at least one marker name; valid markers: {}",
+                            BUILTIN_MARKERS
+                                .iter()
+                                .map(|m| m.name)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )),
+                    },
+                    directive.span,
+                ));
+            }
+            for arg in &directive.args {
+                let marker_name = self.interner.resolve(arg).to_string();
+                let marker = match get_builtin_marker(&marker_name) {
+                    Some(m) => m,
+                    None => {
+                        let note = marker_diagnosis_note(&marker_name);
+                        return Err(CompileError::new(
+                            ErrorKind::UnknownMarker {
+                                name: marker_name,
+                                note,
+                            },
+                            directive.span,
+                        ));
+                    }
+                };
+                let applicable = match item_kind {
+                    k if k == ItemKinds::STRUCT => marker.applicable_to.includes_struct(),
+                    k if k == ItemKinds::ENUM => marker.applicable_to.includes_enum(),
+                    _ => true,
+                };
+                if !applicable {
+                    return Err(CompileError::new(
+                        ErrorKind::MarkerNotApplicable {
+                            marker: marker.name.to_string(),
+                            item_kind: item_kind_name,
+                        },
+                        directive.span,
+                    ));
+                }
+                match marker.kind {
+                    MarkerKind::Posture(Posture::Copy) => outcome.copy = true,
+                    MarkerKind::Posture(Posture::Affine) => outcome.affine = true,
+                    MarkerKind::Posture(Posture::Linear) => outcome.linear = true,
+                }
+            }
+        }
+        // Mutual exclusion across all `@mark` directives on this item.
+        let posture_count = (outcome.copy as u8) + (outcome.affine as u8) + (outcome.linear as u8);
+        if posture_count > 1 {
+            // Reuse the existing `LinearStructCopy` diagnostic spelling for
+            // Copy + Linear; for the rarer Copy + Affine / Affine + Linear
+            // combinations we still want a clear error, so we fall back to
+            // the same kind with a generic name placeholder.
+            return Err(CompileError::new(
+                ErrorKind::LinearStructCopy("<conflicting `@mark(...)` markers>".to_string()),
+                span,
+            ));
+        }
+        Ok(outcome)
     }
 
     /// Phase 2: Resolve all declarations.
@@ -1417,27 +1598,63 @@ impl<'a> Sema<'a> {
     /// The walker is one function rather than a struct-validator + enum-
     /// validator pair because the only difference between the two cases is
     /// how members are enumerated; the posture-folding logic is identical.
-    pub(crate) fn validate_posture_consistency(&self) -> CompileResult<()> {
+    pub(crate) fn validate_posture_consistency(&mut self) -> CompileResult<()> {
+        // ADR-0083 Phase 1: instead of just validating declared posture
+        // against members, we run *uniform structural inference* on every
+        // named struct/enum. The result reconciles with whatever the user
+        // declared via the `copy`/`linear` keyword (ADR-0080) or
+        // `@mark(...)` directive (ADR-0083):
+        //
+        // - declared Linear (or `@mark(linear)`) → final is Linear (no
+        //   member constraint).
+        // - declared Copy (or `@mark(copy)`) → every member must be Copy;
+        //   final is Copy.
+        // - declared Affine via `@mark(affine)` → no member may be
+        //   Linear; final is Affine (suppresses Copy inference).
+        // - no declaration → final posture is the inferred posture
+        //   (NEW: previously named types were Affine by default; now
+        //   structs/enums of all-Copy members infer Copy).
+        //
+        // ADR-0080 carve-out: types with `fn drop(self)` are never Copy
+        // (Copy ⊥ Drop). We pre-scan RIR for both inline `fn drop` methods
+        // and top-level `drop fn TypeName(self)` declarations and downgrade
+        // Copy → Affine when a destructor is present.
+        //
+        // Member-postures are classified via `classify_posture`, which
+        // already handles arrays/tuples/Vec/Option/Result transparently.
+        let types_with_drop = self.collect_types_with_drop();
         for (_, inst) in self.rir.iter() {
             match &inst.data {
-                InstData::StructDecl { name, .. } => {
+                InstData::StructDecl {
+                    name,
+                    methods_start,
+                    methods_len,
+                    ..
+                } => {
                     let Some(&struct_id) = self.structs.get(name) else {
                         continue;
                     };
                     let def = self.type_pool.struct_def(struct_id);
-                    let declared = if def.is_copy {
-                        DeclaredPosture::Copy
-                    } else if def.is_linear {
+                    let declared_affine = self.mark_affine_decls.contains(name);
+                    let declared = if def.is_linear {
                         DeclaredPosture::Linear
-                    } else {
+                    } else if def.is_copy {
+                        DeclaredPosture::Copy
+                    } else if declared_affine {
                         DeclaredPosture::Affine
+                    } else {
+                        DeclaredPosture::Unmarked
                     };
-                    if declared == DeclaredPosture::Linear {
-                        continue;
-                    }
                     let host_name = def.name.clone();
+                    let mut any_linear = false;
+                    let mut all_copy = true;
                     for field in &def.fields {
                         let posture = self.classify_posture(field.ty);
+                        match posture {
+                            MemberPosture::Linear => any_linear = true,
+                            MemberPosture::Affine => all_copy = false,
+                            MemberPosture::Copy => {}
+                        }
                         if let Some(err) = check_posture_against_declared(
                             "struct",
                             host_name.as_str(),
@@ -1451,23 +1668,40 @@ impl<'a> Sema<'a> {
                             return Err(err);
                         }
                     }
+                    let has_drop = self.has_inline_drop_method(*methods_start, *methods_len)
+                        || types_with_drop.contains(name);
+                    let inferred = if any_linear {
+                        MemberPosture::Linear
+                    } else if all_copy && !has_drop {
+                        MemberPosture::Copy
+                    } else {
+                        MemberPosture::Affine
+                    };
+                    self.apply_inferred_struct_posture(struct_id, declared, inferred);
                 }
-                InstData::EnumDecl { name, .. } => {
+                InstData::EnumDecl {
+                    name,
+                    methods_start,
+                    methods_len,
+                    ..
+                } => {
                     let Some(&enum_id) = self.enums.get(name) else {
                         continue;
                     };
                     let def = self.type_pool.enum_def(enum_id);
-                    let declared = if def.is_copy {
-                        DeclaredPosture::Copy
-                    } else if def.is_linear {
+                    let declared_affine = self.mark_affine_decls.contains(name);
+                    let declared = if def.is_linear {
                         DeclaredPosture::Linear
-                    } else {
+                    } else if def.is_copy {
+                        DeclaredPosture::Copy
+                    } else if declared_affine {
                         DeclaredPosture::Affine
+                    } else {
+                        DeclaredPosture::Unmarked
                     };
-                    if declared == DeclaredPosture::Linear {
-                        continue;
-                    }
                     let host_name = def.name.clone();
+                    let mut any_linear = false;
+                    let mut all_copy = true;
                     for variant in &def.variants {
                         for (i, field_ty) in variant.fields.iter().enumerate() {
                             let member_name = if let Some(name) = variant.field_names.get(i) {
@@ -1476,6 +1710,11 @@ impl<'a> Sema<'a> {
                                 format!("{}::{}.{}", host_name, variant.name, i)
                             };
                             let posture = self.classify_posture(*field_ty);
+                            match posture {
+                                MemberPosture::Linear => any_linear = true,
+                                MemberPosture::Affine => all_copy = false,
+                                MemberPosture::Copy => {}
+                            }
                             if let Some(err) = check_posture_against_declared(
                                 "enum",
                                 host_name.as_str(),
@@ -1490,11 +1729,100 @@ impl<'a> Sema<'a> {
                             }
                         }
                     }
+                    let has_drop = self.has_inline_drop_method(*methods_start, *methods_len)
+                        || types_with_drop.contains(name);
+                    let inferred = if any_linear {
+                        MemberPosture::Linear
+                    } else if all_copy && !has_drop {
+                        MemberPosture::Copy
+                    } else {
+                        MemberPosture::Affine
+                    };
+                    self.apply_inferred_enum_posture(enum_id, declared, inferred);
                 }
                 _ => {}
             }
         }
         Ok(())
+    }
+
+    /// ADR-0083: walk the RIR once and collect the names of every
+    /// struct/enum that has a top-level `drop fn TypeName(self)` declaration.
+    /// Used during posture inference to suppress Copy on Drop types.
+    fn collect_types_with_drop(&self) -> HashSet<Spur> {
+        let mut out: HashSet<Spur> = HashSet::default();
+        for (_, inst) in self.rir.iter() {
+            if let InstData::DropFnDecl { type_name, .. } = &inst.data {
+                out.insert(*type_name);
+            }
+        }
+        out
+    }
+
+    /// ADR-0080 / ADR-0083: detect whether a struct/enum's inline method
+    /// list contains a `fn drop(self)` declaration. The top-level
+    /// `drop fn TypeName(self)` form is collected separately by
+    /// `collect_types_with_drop`.
+    fn has_inline_drop_method(&self, methods_start: u32, methods_len: u32) -> bool {
+        if methods_len == 0 {
+            return false;
+        }
+        let drop_name = self.interner.get("drop");
+        let Some(drop_name) = drop_name else {
+            return false;
+        };
+        let method_refs = self.rir.get_inst_refs(methods_start, methods_len);
+        for method_ref in method_refs {
+            let method_inst = self.rir.get(method_ref);
+            if let InstData::FnDecl { name, has_self, .. } = &method_inst.data
+                && *name == drop_name
+                && *has_self
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// ADR-0083 Phase 1: write the final posture into the struct's
+    /// `is_copy` / `is_linear` flags. If the user declared the posture
+    /// (`copy struct` / `linear struct` / `@mark(...)`), the flags are
+    /// already set in `register_type_names`; we only need to fill them
+    /// in for unmarked types from the inferred posture.
+    fn apply_inferred_struct_posture(
+        &mut self,
+        struct_id: StructId,
+        declared: DeclaredPosture,
+        inferred: MemberPosture,
+    ) {
+        if declared != DeclaredPosture::Unmarked {
+            return;
+        }
+        let mut def = self.type_pool.struct_def(struct_id);
+        match inferred {
+            MemberPosture::Copy => def.is_copy = true,
+            MemberPosture::Affine => {}
+            MemberPosture::Linear => def.is_linear = true,
+        }
+        self.type_pool.update_struct_def(struct_id, def);
+    }
+
+    fn apply_inferred_enum_posture(
+        &mut self,
+        enum_id: EnumId,
+        declared: DeclaredPosture,
+        inferred: MemberPosture,
+    ) {
+        if declared != DeclaredPosture::Unmarked {
+            return;
+        }
+        let mut def = self.type_pool.enum_def(enum_id);
+        match inferred {
+            MemberPosture::Copy => def.is_copy = true,
+            MemberPosture::Affine => {}
+            MemberPosture::Linear => def.is_linear = true,
+        }
+        self.type_pool.update_enum_def(enum_id, def);
     }
 
     /// Classify a type's ownership posture (ADR-0080).
@@ -2673,13 +3001,32 @@ fn directive_diagnosis_note(name: &str) -> Option<String> {
         _ => {}
     }
 
-    const RECOGNIZED: &[&str] = &["allow", "derive"];
+    const RECOGNIZED: &[&str] = &["allow", "derive", "mark"];
     RECOGNIZED
         .iter()
         .map(|cand| (cand, levenshtein_distance(name, cand)))
         .filter(|(_, d)| *d <= 2)
         .min_by_key(|(_, d)| *d)
         .map(|(cand, _)| format!("did you mean `@{cand}`?"))
+}
+
+/// ADR-0083: edit-distance suggestion for a typo'd marker name.
+///
+/// Returns a "did you mean `X`?" hint when there's a near-match in the
+/// `BUILTIN_MARKERS` registry, otherwise emits a list of the recognized
+/// markers so users see what's available.
+fn marker_diagnosis_note(name: &str) -> Option<String> {
+    let names: Vec<&'static str> = BUILTIN_MARKERS.iter().map(|m| m.name).collect();
+    if let Some(suggestion) = names
+        .iter()
+        .map(|cand| (*cand, levenshtein_distance(name, cand)))
+        .filter(|(_, d)| *d <= 2)
+        .min_by_key(|(_, d)| *d)
+        .map(|(cand, _)| cand)
+    {
+        return Some(format!("did you mean `{suggestion}`?"));
+    }
+    Some(format!("recognized markers: {}", names.join(", ")))
 }
 
 /// Wagner-Fischer Levenshtein distance. Used by `directive_diagnosis_note`

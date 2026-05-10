@@ -361,10 +361,10 @@ exit_code = 3
 name = "for_array_move_type_basic"
 spec = ["4.8:33", "4.8:35", "4.8:38"]
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 
 fn main() -> i32 {
-    let arr: [Data; 3] = [Data { value: 10 }, Data { value: 20 }, Data { value: 30 }];
+    let arr: [Data; 3] = [Data { value: 10, name: "a" }, Data { value: 20, name: "b" }, Data { value: 30, name: "c" }];
     let mut sum = 0;
     for d in arr {
         sum = sum + d.value;
@@ -378,12 +378,12 @@ exit_code = 60
 name = "for_array_move_type_consumed"
 spec = ["4.8:35"]
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 
 fn consume(arr: [Data; 2]) -> i32 { 0 }
 
 fn main() -> i32 {
-    let arr: [Data; 2] = [Data { value: 1 }, Data { value: 2 }];
+    let arr: [Data; 2] = [Data { value: 1, name: "a" }, Data { value: 2, name: "b" }];
     for d in arr {
         let _x = d.value;
     }
@@ -397,10 +397,10 @@ error_contains = "use of moved value"
 name = "for_array_move_type_break_forbidden"
 spec = ["4.8:37"]
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 
 fn main() -> i32 {
-    let arr: [Data; 3] = [Data { value: 1 }, Data { value: 2 }, Data { value: 3 }];
+    let arr: [Data; 3] = [Data { value: 1, name: "a" }, Data { value: 2, name: "b" }, Data { value: 3, name: "c" }];
     let mut sum = 0;
     for d in arr {
         if d.value == 2 {
@@ -418,10 +418,10 @@ error_contains = "break"
 name = "for_array_move_type_continue_allowed"
 spec = ["4.8:32", "4.8:35"]
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 
 fn main() -> i32 {
-    let arr: [Data; 3] = [Data { value: 1 }, Data { value: 2 }, Data { value: 3 }];
+    let arr: [Data; 3] = [Data { value: 1, name: "a" }, Data { value: 2, name: "b" }, Data { value: 3, name: "c" }];
     let mut sum = 0;
     for d in arr {
         if d.value == 2 {
@@ -438,10 +438,10 @@ exit_code = 4
 name = "for_array_move_type_single"
 spec = ["4.8:33", "4.8:35"]
 source = """
-struct Data { value: i32 }
+struct Data { value: i32, name: String }
 
 fn main() -> i32 {
-    let arr: [Data; 1] = [Data { value: 42 }];
+    let arr: [Data; 1] = [Data { value: 42, name: "a" }];
     let mut result = 0;
     for d in arr {
         result = d.value;

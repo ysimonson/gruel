@@ -582,31 +582,43 @@ mod tests {
 
     #[test]
     fn test_use_after_move_error() {
-        // Using a moved value should error
+        // Using a moved value should error. ADR-0083: a struct of all-Copy
+        // fields now infers Copy under uniform structural inference, so we
+        // declare the struct `linear` (or attach a `fn drop`) to keep it
+        // non-Copy. `linear` doesn't require preview gating in this helper.
         let result = compile_to_air(
-            "struct NonCopy { x: i32 }
+            "linear struct NonCopy { x: i32 }
              fn consume(n: NonCopy) -> i32 { n.x }
              fn main() -> i32 {
                  let n = NonCopy { x: 42 };
                  let x = consume(n);
-                 n.x  // Error: n was moved
+                 consume(n)  // Error: n was moved
              }",
         );
 
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(matches!(
-            errors.iter().next().unwrap().kind,
-            ErrorKind::UseAfterMove { .. }
-        ));
+        let err = errors.iter().next().unwrap();
+        assert!(
+            matches!(err.kind, ErrorKind::UseAfterMove { .. }),
+            "expected UseAfterMove, got {:?}",
+            err.kind
+        );
     }
 
     #[test]
     fn test_partial_move_banned() {
         // ADR-0036: Moving a non-copy field out of a struct is always an error.
         // Users must destructure the entire struct instead.
+        // ADR-0083: a struct of all-Copy fields now infers Copy under
+        // uniform inference. To keep `Inner` non-Copy without making the
+        // outer type linear (which short-circuits the partial-move check),
+        // attach a `fn drop` to `Inner`: Drop ⊥ Copy.
         let result = compile_to_air(
-            "struct Inner { x: i32 }
+            "struct Inner {
+                 x: i32,
+                 fn drop(self) { @ignore_unused(self); }
+             }
              struct Outer { a: Inner, b: i32 }
              fn consume(i: Inner) -> i32 { i.x }
              fn main() -> i32 {
@@ -618,10 +630,12 @@ mod tests {
 
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(matches!(
-            errors.iter().next().unwrap().kind,
-            ErrorKind::CannotMoveField { .. }
-        ));
+        let err = errors.iter().next().unwrap();
+        assert!(
+            matches!(err.kind, ErrorKind::CannotMoveField { .. }),
+            "expected CannotMoveField, got {:?}",
+            err.kind
+        );
     }
 
     #[test]

@@ -154,6 +154,115 @@ pub fn is_reserved_type_constructor_name(name: &str) -> bool {
 }
 
 // ============================================================================
+// Built-in Markers (ADR-0083: `@mark(...)` directive)
+// ============================================================================
+//
+// Markers are declaration-time-only attributes carried by `@mark(...)` on
+// struct/enum (and anonymous literal) heads. They sit alongside `@derive`,
+// `@lang`, and `@allow` in the directive list. Today's marker set is
+// closed and small (`copy`, `affine`, `linear` — all of them postures);
+// future ADRs may add more without parser surgery — adding a row here is
+// the extension point.
+//
+// Three markers cover the posture trichotomy: `copy` asserts the type
+// must structurally infer Copy; `affine` suppresses Copy inference (the
+// type is always Affine, even if its members would otherwise make it
+// Copy); `linear` overrides inference to declare the type Linear
+// regardless of member postures.
+
+/// What a marker conveys to sema. Today every marker is a posture, but
+/// the kind is wrapped so future markers (e.g. capability tags, layout
+/// hints) can plug in without mixing concerns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerKind {
+    Posture(Posture),
+}
+
+/// Posture trichotomy carried by `MarkerKind::Posture` (ADR-0080 / ADR-0083).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Posture {
+    /// The type is Copy: bitwise duplicable, never moves on assignment.
+    Copy,
+    /// The type is Affine: the default — moves on use, no implicit duplicate.
+    /// `@mark(affine)` exists so users can suppress structural Copy inference
+    /// when a type's members are all Copy but its semantics demand
+    /// move-on-use.
+    Affine,
+    /// The type is Linear: must be explicitly consumed; cannot be silently
+    /// dropped.
+    Linear,
+}
+
+/// Item kinds a marker is applicable to.
+///
+/// Markers may permit structs, enums, or both. Today both posture markers
+/// allow either; the field is forward-looking for future markers (e.g. a
+/// "no-niche" marker that only makes sense on structs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemKinds(u8);
+
+impl ItemKinds {
+    pub const STRUCT: ItemKinds = ItemKinds(0b01);
+    pub const ENUM: ItemKinds = ItemKinds(0b10);
+    pub const STRUCT_OR_ENUM: ItemKinds = ItemKinds(0b11);
+
+    pub fn includes_struct(self) -> bool {
+        (self.0 & Self::STRUCT.0) != 0
+    }
+
+    pub fn includes_enum(self) -> bool {
+        (self.0 & Self::ENUM.0) != 0
+    }
+}
+
+/// Definition of a built-in marker.
+///
+/// Markers are looked up by name (see [`get_builtin_marker`]) when sema
+/// processes `@mark(...)` arguments. The closed list documents what
+/// *exists*; user-defined markers are explicitly out of scope (ADR-0083).
+#[derive(Debug, Clone, Copy)]
+pub struct BuiltinMarker {
+    /// Marker name as it appears inside `@mark(...)` (e.g. "copy").
+    pub name: &'static str,
+    /// What the marker does — a posture today, possibly more later.
+    pub kind: MarkerKind,
+    /// Item kinds the marker is applicable to.
+    pub applicable_to: ItemKinds,
+}
+
+/// All built-in markers recognized by the compiler.
+///
+/// Sema iterates this slice when looking up `@mark(name)` arguments and
+/// when generating "did you mean?" suggestions for typo'd marker names.
+pub static BUILTIN_MARKERS: &[BuiltinMarker] = &[
+    BuiltinMarker {
+        name: "copy",
+        kind: MarkerKind::Posture(Posture::Copy),
+        applicable_to: ItemKinds::STRUCT_OR_ENUM,
+    },
+    BuiltinMarker {
+        name: "affine",
+        kind: MarkerKind::Posture(Posture::Affine),
+        applicable_to: ItemKinds::STRUCT_OR_ENUM,
+    },
+    BuiltinMarker {
+        name: "linear",
+        kind: MarkerKind::Posture(Posture::Linear),
+        applicable_to: ItemKinds::STRUCT_OR_ENUM,
+    },
+];
+
+/// Look up a built-in marker by name.
+pub fn get_builtin_marker(name: &str) -> Option<&'static BuiltinMarker> {
+    BUILTIN_MARKERS.iter().find(|m| m.name == name)
+}
+
+/// All recognized marker names (for diagnostic suggestions).
+pub fn all_marker_names() -> Vec<&'static str> {
+    BUILTIN_MARKERS.iter().map(|m| m.name).collect()
+}
+
+// ============================================================================
 // Built-in Enums (Arch, Os, TypeKind, Ownership)
 // ============================================================================
 //

@@ -187,7 +187,7 @@ exit_code = 1
 [[case]]
 name = "array_is_not_copy"
 spec = ["3.8:2"]
-description = "ADR-0080: arrays are non-Copy regardless of element type — `[i32; 3]` cannot be aliased."
+description = "ADR-0083 (Open Question 1): arrays of Copy elements are themselves Copy and may be aliased — reverts ADR-0080's container/value-type stance."
 source = """
 fn main() -> i32 {
     let arr: [i32; 3] = [1, 2, 3];
@@ -196,8 +196,7 @@ fn main() -> i32 {
     arr2[0] + arr3[1]
 }
 """
-compile_fail = true
-error_contains = "moved value"
+exit_code = 3
 
 [[case]]
 name = "copy_struct_with_copy_fields_ok"
@@ -243,26 +242,37 @@ error_contains = "affine"
 [[case]]
 name = "affine_struct_with_linear_field_rejected"
 spec = ["3.8:30"]
-description = "ADR-0080: an unmarked struct may not contain a linear field — linear must propagate explicitly."
+description = "ADR-0083: under uniform structural inference, an unmarked struct with a linear field propagates linear upward — the host becomes Linear automatically rather than producing an error."
 source = """
 linear struct Resource { value: i32 }
-struct Bad { r: Resource }
-fn main() -> i32 { 0 }
+struct Held { r: Resource }
+fn consume(h: Held) -> i32 { h.r.value }
+fn main() -> i32 {
+    let h = Held { r: Resource { value: 7 } };
+    consume(h)
+}
 """
-compile_fail = true
-error_contains = "linear"
+exit_code = 7
 
 [[case]]
 name = "affine_enum_with_linear_payload_rejected"
 spec = ["3.8:30"]
-description = "ADR-0080: an unmarked enum may not have a linear payload."
+description = "ADR-0083: under uniform structural inference, an unmarked enum with a linear payload becomes Linear automatically."
 source = """
 linear struct Resource { value: i32 }
-enum Bad { Empty, Held(Resource) }
-fn main() -> i32 { 0 }
+enum Held { Empty, Some(Resource) }
+fn consume(h: Held) -> i32 {
+    match h {
+        Held::Empty => 0,
+        Held::Some(r) => r.value,
+    }
+}
+fn main() -> i32 {
+    let h = Held::Some(Resource { value: 9 });
+    consume(h)
+}
 """
-compile_fail = true
-error_contains = "linear"
+exit_code = 9
 
 [[case]]
 name = "linear_enum_with_linear_payload_ok"

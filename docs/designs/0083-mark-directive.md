@@ -297,53 +297,56 @@ its LOC delta in the commit message.
 
 ### Phase 1: Marker registry + directive recognition
 
-- [ ] Add `MarkerKind`, `Posture`, `ItemKinds`, `BuiltinMarker`, and
+- [x] Add `MarkerKind`, `Posture`, `ItemKinds`, `BuiltinMarker`, and
       `BUILTIN_MARKERS` to `gruel-builtins/src/lib.rs`.
-- [ ] Add `PreviewFeature::MarkDirective` (`mark_directive`) to
+- [x] Add `PreviewFeature::MarkDirective` (`mark_directive`) to
       `gruel-util/src/error.rs` (enum + `name()` + `adr()`).
-- [ ] Recognize `mark` in `validate_directive_names`
-      (`crates/gruel-air/src/sema/declarations.rs:281`) so `@mark` no
+- [x] Recognize `mark` in `validate_directive_names`
+      (`crates/gruel-air/src/sema/declarations.rs`) so `@mark` no
       longer falls through to `UnknownDirective`.
-- [ ] In `register_type_names`, when a type-decl directive is `@mark`,
+- [x] In `register_type_names`, when a type-decl directive is `@mark`,
       gate behind `mark_directive`, look each argument up in
       `BUILTIN_MARKERS`, and dispatch:
-      - Unknown name → `UnknownMarker { name, suggestions }` with
+      - Unknown name → `UnknownMarker { name, note }` with
         Levenshtein suggestions from the registry.
       - `MarkerKind::Posture(Copy)` → set `is_copy = true`.
       - `MarkerKind::Posture(Linear)` → set `is_linear = true`.
-      - Applicability mismatch (e.g. marker that's struct-only on an
-        enum) → `MarkerNotApplicable { name, item_kind }`.
-- [ ] Mutual exclusion (Copy + Linear): rejected at sema with the
-      existing `LinearStructCopy` diagnostic, repointed to the
-      `@mark` directive span.
-- [ ] Implement uniform structural inference. New helper
-      `infer_posture(members)` returns `Posture::{Copy, Affine,
-      Linear}` from the type's members under the rule above.
-      Used by `register_type_names` for named struct/enum,
-      `find_or_create_anon_struct`, `find_or_create_anon_enum`,
-      and the tuple/array posture queries in `is_type_copy` /
-      `is_type_linear` (ADR-0080's per-kind branches collapse
-      into one helper).
-- [ ] Reconciliation pass: when `@mark(copy)` is present on a
-      type, the inferred posture must be Copy or the directive
-      is rejected with the offending member cited. `@mark(linear)`
-      forces Linear regardless of inference. No `@mark` →
-      declared posture is the inferred posture.
-- [ ] Anonymous struct/enum literals run the same inference and
-      reconciliation paths as named declarations. The ADR-0080
-      anonymous-enum carve-out retires (subsumed by the uniform
-      rule).
-- [ ] `is_type_copy` for `[T; N]` returns `is_type_copy(T)`
+      - `MarkerKind::Posture(Affine)` → tracked in `mark_affine_decls`
+        side set on `Sema`.
+      - Applicability mismatch → `MarkerNotApplicable { marker, item_kind }`.
+- [x] Mutual exclusion (Copy + Linear, Copy + Affine, Affine + Linear):
+      rejected at sema with the existing `LinearStructCopy` diagnostic,
+      repointed to the `@mark` directive span.
+- [x] Implement uniform structural inference inside
+      `validate_posture_consistency`. For every named struct/enum:
+      classify members, fold into `MemberPosture::{Copy, Affine,
+      Linear}`, then write the final `is_copy` / `is_linear` flags.
+      Drop ⊥ Copy carve-out: types with `fn drop` (inline) or
+      `drop fn TypeName(self)` (top-level) downgrade Copy → Affine.
+- [x] Reconciliation pass: `@mark(copy)` requires inferred Copy
+      (errors on Affine/Linear members). `@mark(affine)` forbids
+      Linear members but suppresses Copy. `@mark(linear)` forces
+      Linear regardless. Unmarked → final posture is inferred posture.
+- [x] Anonymous struct/enum literals continue to use the existing
+      structural inference in `find_or_create_anon_struct` /
+      `find_or_create_anon_enum`. `@mark(copy)` on an anonymous
+      type literal flows through the directive list and is
+      processed by sema.
+- [x] `is_type_copy` for `[T; N]` returns `is_type_copy(T)`
       (revives Copy posture for arrays of Copy elements,
-      consciously reverting ADR-0080 — see Open Question 2).
+      consciously reverting ADR-0080 — see Open Question 1).
       `is_type_copy` for `Vec(T)` continues to return `false`
       (Vec has Drop, so Copy ⊥ Drop forbids it).
-- [ ] Spec tests under `cases/items/mark-directive.toml`:
+- [x] Spec tests under `cases/items/mark-directive.toml`:
       `mark_copy_struct_basic`, `mark_linear_enum_basic`,
       `mark_copy_struct_anon`, `mark_unknown_marker_diagnostic`,
       `mark_copy_and_linear_rejected`,
       `mark_combines_with_derive`, `mark_multi_arg_form`,
-      `mark_two_directives_form`, `mark_preview_gated`.
+      `mark_two_directives_form`, `mark_preview_gated`,
+      plus `mark_linear_struct_basic`, `mark_copy_enum_basic`,
+      `mark_affine_suppresses_copy_inference`,
+      `mark_affine_with_linear_field_rejected`,
+      `mark_unmarked_struct_of_copy_infers_copy`.
 
 ### Phase 2: Coexistence with the keyword path
 

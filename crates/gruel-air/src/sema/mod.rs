@@ -66,7 +66,7 @@ pub use known_symbols::KnownSymbols;
 pub use lang_items::LangItems;
 pub use output::{AnalyzedFunction, InterfaceVtables, SemaOutput};
 
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_rir::Rir;
 use gruel_util::FileId;
@@ -255,6 +255,12 @@ pub struct Sema<'a> {
     /// Defaults to the host target; the driver overrides via
     /// [`Sema::set_target`] when a different `--target` is requested.
     pub(crate) target: gruel_target::Target,
+    /// ADR-0083: names of struct/enum declarations that carry
+    /// `@mark(affine)`. Affine is a Copy *suppressor*: a type whose
+    /// members would otherwise infer Copy is forced to remain Affine.
+    /// Tracked here as a side set because `StructDef.is_copy=false,
+    /// is_linear=false` is the same shape "no declaration" produces.
+    pub(crate) mark_affine_decls: HashSet<Spur>,
 }
 
 impl<'a> Sema<'a> {
@@ -315,6 +321,7 @@ impl<'a> Sema<'a> {
             suppress_comptime_dbg_print: false,
             current_self: None,
             target: gruel_target::Target::host(),
+            mark_affine_decls: HashSet::default(),
         }
     }
 

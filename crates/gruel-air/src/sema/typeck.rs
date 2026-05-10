@@ -74,10 +74,18 @@ impl<'a> Sema<'a> {
                 struct_def.is_copy
             }
             // Note: String is now handled via TypeKind::Struct with is_builtin
-            // ADR-0080: arrays are never Copy — they're containers, not
-            // value types. To get Copy-by-assignment for a fixed-size
-            // bag of Copy values, wrap the array in a `copy struct`.
-            TypeKind::Array(_) => false,
+            // ADR-0083 (Open Question 1): arrays of Copy elements are
+            // themselves Copy, matching Rust's
+            // `impl<T: Copy, const N: usize> Copy for [T; N]`. This
+            // reverts ADR-0080's "arrays are containers, not value
+            // types" stance — uniform structural inference treats
+            // arrays the same as tuples, and code that wants move-on-
+            // assignment for an array can wrap it in a struct marked
+            // `@mark(affine)`. Empty arrays are Copy regardless.
+            TypeKind::Array(array_id) => {
+                let (element_type, length) = self.type_pool.array_def(array_id);
+                length == 0 || self.is_type_copy(element_type)
+            }
             // Module types are Copy (they're just compile-time namespace references)
             TypeKind::Module(_) => true,
             // ComptimeType and ComptimeStr are Copy (only exist at comptime anyway)
