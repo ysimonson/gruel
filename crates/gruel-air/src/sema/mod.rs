@@ -261,6 +261,14 @@ pub struct Sema<'a> {
     /// Tracked here as a side set because `StructDef.is_copy=false,
     /// is_linear=false` is the same shape "no declaration" produces.
     pub(crate) mark_affine_decls: HashSet<Spur>,
+
+    /// ADR-0084: names of struct/enum declarations that carry one of
+    /// the thread-safety override markers (`@mark(unsend)` /
+    /// `@mark(checked_send)` / `@mark(checked_sync)`). Tracked as a
+    /// side map so `validate_consistency` can apply the override after
+    /// computing the structural minimum, mirroring the
+    /// `mark_affine_decls` carve-out for `@mark(affine)`.
+    pub(crate) mark_thread_safety_decls: rustc_hash::FxHashMap<Spur, gruel_builtins::ThreadSafety>,
 }
 
 impl<'a> Sema<'a> {
@@ -322,6 +330,7 @@ impl<'a> Sema<'a> {
             current_self: None,
             target: gruel_target::Target::host(),
             mark_affine_decls: HashSet::default(),
+            mark_thread_safety_decls: rustc_hash::FxHashMap::default(),
         }
     }
 

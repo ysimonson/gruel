@@ -12,7 +12,7 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_builtins::{
-    BUILTIN_MARKERS, ItemKinds, MarkerKind, Posture, get_builtin_marker,
+    BUILTIN_MARKERS, ItemKinds, MarkerKind, Posture, ThreadSafety, get_builtin_marker,
     is_reserved_type_constructor_name,
 };
 use gruel_rir::{InstData, InstRef, RirParamMode};
@@ -53,14 +53,19 @@ impl DeclaredPosture {
     }
 }
 
-/// ADR-0083: outcome of processing the `@mark(...)` directive list on a
-/// type declaration. Each field records whether at least one `@mark`
-/// directive in the list named the corresponding posture marker.
+/// ADR-0083 / ADR-0084: outcome of processing the `@mark(...)` directive
+/// list on a type declaration. Posture markers (`copy`/`affine`/`linear`)
+/// and thread-safety markers (`unsend`/`checked_send`/`checked_sync`)
+/// occupy independent slots — a type may carry one of each.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct MarkOutcome {
     pub copy: bool,
     pub affine: bool,
     pub linear: bool,
+    /// ADR-0084: thread-safety override (`unsend`, `checked_send`,
+    /// `checked_sync`). At most one is permitted per directive list.
+    /// Behind the `thread_safety` preview gate.
+    pub thread_safety_override: Option<ThreadSafety>,
 }
 
 /// Posture observed on a member's type (ADR-0080).
@@ -588,6 +593,16 @@ impl<'a> Sema<'a> {
                         variants,
                         is_copy,
                         is_linear,
+                        // ADR-0084: placeholder. The structural minimum
+                        // and any `@mark(...)` override are folded in
+                        // by `validate_consistency` once fields resolve.
+                        // Defaulting to the user's explicit override (if
+                        // any) lets `is_thread_safety_type` give a sane
+                        // answer in the rare cases that consult the
+                        // field before the inference pass runs.
+                        thread_safety: mark_outcome
+                            .thread_safety_override
+                            .unwrap_or(ThreadSafety::Sync),
                         is_pub: *is_pub,
                         file_id: inst.span.file_id,
                         destructor: None,
@@ -601,6 +616,12 @@ impl<'a> Sema<'a> {
 
                     if mark_outcome.affine {
                         self.mark_affine_decls.insert(*name);
+                    }
+                    // ADR-0084: track thread-safety overrides so
+                    // `validate_consistency` can apply them after
+                    // computing the structural minimum.
+                    if let Some(level) = mark_outcome.thread_safety_override {
+                        self.mark_thread_safety_decls.insert(*name, level);
                     }
                 }
                 InstData::StructDecl {
@@ -669,6 +690,10 @@ impl<'a> Sema<'a> {
                         is_copy,
                         is_clone: false, // Filled in during resolve_declarations after fields known
                         is_linear,
+                        // ADR-0084: see EnumDecl above for rationale.
+                        thread_safety: mark_outcome
+                            .thread_safety_override
+                            .unwrap_or(ThreadSafety::Sync),
                         destructor: None,  // Filled in during resolve_declarations
                         is_builtin: false, // User-defined struct
                         is_pub: *is_pub,
@@ -683,6 +708,11 @@ impl<'a> Sema<'a> {
 
                     if mark_outcome.affine {
                         self.mark_affine_decls.insert(*name);
+                    }
+                    // ADR-0084: track thread-safety overrides — see
+                    // EnumDecl above.
+                    if let Some(level) = mark_outcome.thread_safety_override {
+                        self.mark_thread_safety_decls.insert(*name, level);
                     }
                 }
                 _ => {}
@@ -704,6 +734,9 @@ impl<'a> Sema<'a> {
     /// - Markers not applicable to the host item kind.
     /// - Conflicting posture markers within the same directive list (e.g.
     ///   `@mark(copy)` + `@mark(linear)`).
+    /// - Conflicting thread-safety markers (e.g. `@mark(unsend)` +
+    ///   `@mark(checked_send)`) — ADR-0084.
+    /// - Use of a thread-safety marker without `--preview thread_safety`.
     pub(crate) fn process_mark_directives(
         &self,
         directives_start: u32,
@@ -771,6 +804,25 @@ impl<'a> Sema<'a> {
                     MarkerKind::Posture(Posture::Copy) => outcome.copy = true,
                     MarkerKind::Posture(Posture::Affine) => outcome.affine = true,
                     MarkerKind::Posture(Posture::Linear) => outcome.linear = true,
+                    MarkerKind::ThreadSafety(level) => {
+                        // ADR-0084: thread-safety markers are gated.
+                        self.require_preview(
+                            gruel_util::PreviewFeature::ThreadSafety,
+                            "@mark(unsend) / @mark(checked_send) / @mark(checked_sync)",
+                            directive.span,
+                        )?;
+                        if let Some(prev) = outcome.thread_safety_override
+                            && prev != level
+                        {
+                            return Err(CompileError::new(
+                                ErrorKind::ConflictingThreadSafetyMarkers {
+                                    type_name: item_kind_name.to_string(),
+                                },
+                                span,
+                            ));
+                        }
+                        outcome.thread_safety_override = Some(level);
+                    }
                 }
             }
         }
@@ -832,7 +884,7 @@ impl<'a> Sema<'a> {
         // resolution so member types are populated. Anonymous types are
         // checked at construction time (see `find_or_create_anon_struct`
         // / `find_or_create_anon_enum`).
-        self.validate_posture_consistency()?;
+        self.validate_consistency()?;
         // ADR-0058 sub-phase: resolve every `@derive(D)` directive on a
         // named struct or enum into a binding for the upcoming expansion
         // step. Runs after field-type resolution so the host type is
@@ -1579,7 +1631,15 @@ impl<'a> Sema<'a> {
     /// The walker is one function rather than a struct-validator + enum-
     /// validator pair because the only difference between the two cases is
     /// how members are enumerated; the posture-folding logic is identical.
-    pub(crate) fn validate_posture_consistency(&mut self) -> CompileResult<()> {
+    ///
+    /// ADR-0084: in addition to computing posture, this pass also computes
+    /// the structural minimum thread-safety classification over members
+    /// and applies any `@mark(unsend)` / `@mark(checked_send)` /
+    /// `@mark(checked_sync)` override recorded in
+    /// `mark_thread_safety_decls`. The function was renamed from
+    /// `validate_posture_consistency` when the thread-safety axis was
+    /// added.
+    pub(crate) fn validate_consistency(&mut self) -> CompileResult<()> {
         // ADR-0083 Phase 1: instead of just validating declared posture
         // against members, we run *uniform structural inference* on every
         // named struct/enum. The result reconciles with whatever the user
@@ -1658,7 +1718,23 @@ impl<'a> Sema<'a> {
                     } else {
                         MemberPosture::Affine
                     };
+                    // ADR-0084: structural minimum over fields. Empty
+                    // composites fold to `Sync`, the identity element.
+                    let inferred_thread_safety = self
+                        .type_pool
+                        .struct_def(struct_id)
+                        .fields
+                        .iter()
+                        .map(|f| self.type_pool.is_thread_safety_type(f.ty))
+                        .min()
+                        .unwrap_or(ThreadSafety::Sync);
+                    let thread_safety_override = self.mark_thread_safety_decls.get(name).copied();
                     self.apply_inferred_struct_posture(struct_id, declared, inferred);
+                    self.apply_thread_safety_struct(
+                        struct_id,
+                        inferred_thread_safety,
+                        thread_safety_override,
+                    );
                 }
                 InstData::EnumDecl {
                     name,
@@ -1719,7 +1795,24 @@ impl<'a> Sema<'a> {
                     } else {
                         MemberPosture::Affine
                     };
+                    // ADR-0084: structural minimum across every variant
+                    // payload field. Mirrors the struct branch above.
+                    let inferred_thread_safety = self
+                        .type_pool
+                        .enum_def(enum_id)
+                        .variants
+                        .iter()
+                        .flat_map(|v| v.fields.iter().copied())
+                        .map(|f| self.type_pool.is_thread_safety_type(f))
+                        .min()
+                        .unwrap_or(ThreadSafety::Sync);
+                    let thread_safety_override = self.mark_thread_safety_decls.get(name).copied();
                     self.apply_inferred_enum_posture(enum_id, declared, inferred);
+                    self.apply_thread_safety_enum(
+                        enum_id,
+                        inferred_thread_safety,
+                        thread_safety_override,
+                    );
                 }
                 _ => {}
             }
@@ -1803,6 +1896,34 @@ impl<'a> Sema<'a> {
             MemberPosture::Affine => {}
             MemberPosture::Linear => def.is_linear = true,
         }
+        self.type_pool.update_enum_def(enum_id, def);
+    }
+
+    /// ADR-0084: write the final thread-safety classification on the
+    /// struct's def. The user override (if any) wins, even when it
+    /// contradicts the structurally-inferred value — that's the whole
+    /// point of `@mark(checked_send)` / `@mark(checked_sync)`. The
+    /// `unsend` marker is also accepted regardless of inference (always
+    /// safe to restrict).
+    fn apply_thread_safety_struct(
+        &self,
+        struct_id: StructId,
+        inferred: ThreadSafety,
+        override_: Option<ThreadSafety>,
+    ) {
+        let mut def = self.type_pool.struct_def(struct_id);
+        def.thread_safety = override_.unwrap_or(inferred);
+        self.type_pool.update_struct_def(struct_id, def);
+    }
+
+    fn apply_thread_safety_enum(
+        &self,
+        enum_id: EnumId,
+        inferred: ThreadSafety,
+        override_: Option<ThreadSafety>,
+    ) {
+        let mut def = self.type_pool.enum_def(enum_id);
+        def.thread_safety = override_.unwrap_or(inferred);
         self.type_pool.update_enum_def(enum_id, def);
     }
 

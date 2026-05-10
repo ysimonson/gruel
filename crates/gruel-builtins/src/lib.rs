@@ -170,12 +170,18 @@ pub fn is_reserved_type_constructor_name(name: &str) -> bool {
 // Copy); `linear` overrides inference to declare the type Linear
 // regardless of member postures.
 
-/// What a marker conveys to sema. Today every marker is a posture, but
-/// the kind is wrapped so future markers (e.g. capability tags, layout
-/// hints) can plug in without mixing concerns.
+/// What a marker conveys to sema. Markers fall into independent
+/// "namespaces" — at most one posture marker may attach to a type, and
+/// (separately) at most one thread-safety marker. Future markers (e.g.
+/// capability tags, layout hints) plug in by adding a new variant
+/// without disturbing the existing ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkerKind {
     Posture(Posture),
+    /// ADR-0084: thread-safety classification overrides. `unsend` is the
+    /// always-safe downgrade; `checked_send` and `checked_sync` are
+    /// user-asserted upgrades the compiler cannot verify on its own.
+    ThreadSafety(ThreadSafety),
 }
 
 /// Posture trichotomy carried by `MarkerKind::Posture` (ADR-0080 / ADR-0083).
@@ -191,6 +197,38 @@ pub enum Posture {
     /// The type is Linear: must be explicitly consumed; cannot be silently
     /// dropped.
     Linear,
+}
+
+/// Thread-safety trichotomy (ADR-0084).
+///
+/// Carried by `MarkerKind::ThreadSafety` and stored on every type-bearing
+/// `StructDef` / `EnumDef`. Inference takes the structural minimum over
+/// members; primitives are intrinsically `Sync` and raw pointers are
+/// intrinsically `Unsend`.
+///
+/// The variant order matters: it makes the derived `Ord` impl yield the
+/// chain `Unsend < Send < Sync`, which is what the structural-minimum
+/// inference rule expects.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum ThreadSafety {
+    /// Cannot cross thread boundaries.
+    Unsend,
+    /// Safe to move across threads (transferring ownership).
+    Send,
+    /// Safe to share across threads. Subsumes `Send`.
+    Sync,
+}
+
+impl Default for ThreadSafety {
+    /// `Sync` is the identity for the structural-minimum operation —
+    /// `min(any, Sync) = any`. Defaulting to `Sync` means an
+    /// uninitialized field has no impact when the inference pass folds
+    /// over members.
+    fn default() -> Self {
+        ThreadSafety::Sync
+    }
 }
 
 /// Item kinds a marker is applicable to.
@@ -248,6 +286,25 @@ pub static BUILTIN_MARKERS: &[BuiltinMarker] = &[
     BuiltinMarker {
         name: "linear",
         kind: MarkerKind::Posture(Posture::Linear),
+        applicable_to: ItemKinds::STRUCT_OR_ENUM,
+    },
+    // ADR-0084: thread-safety overrides. `unsend` is an always-safe
+    // downgrade. `checked_send` / `checked_sync` are user-asserted
+    // upgrades the compiler cannot verify; the `checked_` prefix names
+    // them as such (analogous to Rust's `unsafe impl Send`).
+    BuiltinMarker {
+        name: "unsend",
+        kind: MarkerKind::ThreadSafety(ThreadSafety::Unsend),
+        applicable_to: ItemKinds::STRUCT_OR_ENUM,
+    },
+    BuiltinMarker {
+        name: "checked_send",
+        kind: MarkerKind::ThreadSafety(ThreadSafety::Send),
+        applicable_to: ItemKinds::STRUCT_OR_ENUM,
+    },
+    BuiltinMarker {
+        name: "checked_sync",
+        kind: MarkerKind::ThreadSafety(ThreadSafety::Sync),
         applicable_to: ItemKinds::STRUCT_OR_ENUM,
     },
 ];
@@ -529,6 +586,9 @@ pub fn render_reference_markdown() -> String {
             MarkerKind::Posture(Posture::Copy) => "Posture(Copy)",
             MarkerKind::Posture(Posture::Affine) => "Posture(Affine)",
             MarkerKind::Posture(Posture::Linear) => "Posture(Linear)",
+            MarkerKind::ThreadSafety(ThreadSafety::Unsend) => "ThreadSafety(Unsend)",
+            MarkerKind::ThreadSafety(ThreadSafety::Send) => "ThreadSafety(Send)",
+            MarkerKind::ThreadSafety(ThreadSafety::Sync) => "ThreadSafety(Sync)",
         };
         let apply_str = match (
             m.applicable_to.includes_struct(),
@@ -638,6 +698,15 @@ pub fn render_reference_markdown() -> String {
             ),
             MarkerKind::Posture(Posture::Linear) => out.push_str(
                 "Forces the type to be Linear regardless of member postures. Use when the type has linear semantics that are not visible from its fields (e.g. an `i32` handle that is actually a kernel resource ID).\n\n",
+            ),
+            MarkerKind::ThreadSafety(ThreadSafety::Unsend) => out.push_str(
+                "Downgrades the type's thread-safety classification to `Unsend`, even if its members would structurally permit `Send` or `Sync`. Always safe — the marker only restricts. Use when the type has thread-affine state that isn't visible from its fields (e.g. a handle to a thread-local resource).\n\n",
+            ),
+            MarkerKind::ThreadSafety(ThreadSafety::Send) => out.push_str(
+                "Asserts the type is `Send`, even if a member's type would structurally pull it down to `Unsend` (e.g. a raw pointer field). The compiler cannot verify this — the `checked_` prefix flags it as a user assertion (analogous to Rust's `unsafe impl Send`). Mis-applying breaks data-race freedom; the user takes responsibility.\n\n",
+            ),
+            MarkerKind::ThreadSafety(ThreadSafety::Sync) => out.push_str(
+                "Asserts the type is `Sync`, even if its structural minimum would be `Send` or `Unsend`. The compiler cannot verify this — the `checked_` prefix flags it as a user assertion (analogous to Rust's `unsafe impl Sync`). Mis-applying breaks data-race freedom; the user takes responsibility.\n\n",
             ),
         }
     }

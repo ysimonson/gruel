@@ -2,6 +2,8 @@
 //!
 //! Currently very minimal - just i32. Will be extended as the language grows.
 
+use gruel_builtins::ThreadSafety;
+
 /// A unique identifier for a struct definition.
 ///
 /// As of Phase 3 (ADR-0024), the inner value is a pool index into `TypeInternPool`,
@@ -707,6 +709,15 @@ pub struct StructDef {
     pub is_clone: bool,
     /// Whether this struct is a linear type (must be consumed, cannot be dropped)
     pub is_linear: bool,
+    /// ADR-0084: final thread-safety classification (`Unsend < Send < Sync`).
+    /// Computed during `validate_consistency` as the structural minimum
+    /// over fields, then overridden by any `@mark(unsend)` /
+    /// `@mark(checked_send)` / `@mark(checked_sync)` directive on the
+    /// declaration. Until that pass runs, the value reflects only the
+    /// declared override (or `Sync` if none); call
+    /// `TypeInternPool::is_thread_safety_type` for the load-bearing
+    /// query rather than reading this field directly.
+    pub thread_safety: ThreadSafety,
     /// User-defined destructor function name, if any (e.g., "Data.__drop")
     pub destructor: Option<String>,
     /// Whether this is a built-in type (e.g., String) injected by the compiler.
@@ -798,6 +809,9 @@ pub struct EnumDef {
     /// Whether this enum is declared `linear` (ADR-0080). When `true`,
     /// `is_type_linear` returns `true` for this enum directly.
     pub is_linear: bool,
+    /// ADR-0084: final thread-safety classification (mirrors
+    /// `StructDef.thread_safety`).
+    pub thread_safety: ThreadSafety,
     /// Whether this enum is public (visible outside its directory)
     pub is_pub: bool,
     /// File ID this enum was declared in (for visibility checking)
@@ -2148,6 +2162,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -2174,6 +2189,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -2206,6 +2222,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -2223,6 +2240,7 @@ mod tests {
             variants: vec![],
             is_copy: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2238,6 +2256,7 @@ mod tests {
             ],
             is_copy: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2256,6 +2275,7 @@ mod tests {
             ],
             is_copy: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2274,6 +2294,7 @@ mod tests {
             variants: vec![],
             is_copy: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2289,6 +2310,7 @@ mod tests {
             variants: vec![EnumVariantDef::unit("A")],
             is_copy: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2302,6 +2324,7 @@ mod tests {
                 .collect(),
             is_copy: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2319,6 +2342,7 @@ mod tests {
                 .collect(),
             is_copy: false,
             is_linear: false,
+            thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,

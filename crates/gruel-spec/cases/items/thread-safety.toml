@@ -1,0 +1,211 @@
+# ADR-0084: Markers for `Send` and `Sync`
+#
+# Phase 1 spec tests: trichotomy + structural inference. Tests cover
+# built-in facts (primitives → Sync, raw pointers → Unsend), structural
+# minimum across composites, the three thread-safety markers, mutual
+# exclusion, and preview-gating.
+#
+# These tests are gated behind `--preview thread_safety`. Tests that
+# the markers/intrinsic implementation can already pass are flagged
+# `preview_should_pass = true` so CI requires them to remain green
+# while the feature is unstable.
+
+[section]
+id = "items.thread_safety"
+spec_chapter = "3.15"
+name = "Thread-safety markers (ADR-0084)"
+description = "Trichotomy `Unsend < Send < Sync`, structural inference, and the `@mark(unsend)` / `@mark(checked_send)` / `@mark(checked_sync)` overrides."
+
+# =============================================================================
+# Built-in positive facts: primitives are Sync
+# =============================================================================
+#
+# The Phase 1 cut surfaces the classification only via marker mutual
+# exclusion and override behavior — the comptime `@thread_safety(T)`
+# query lands in Phase 3. Phase 1 tests therefore verify the
+# *behavior* of the inference engine indirectly: a type declared with
+# a thread-safety marker compiles, and conflicting markers reject.
+# Direct queries land in the Phase 3 test block.
+
+[[case]]
+name = "checked_sync_on_primitive_struct"
+spec = ["3.15:1", "3.15:2", "3.15:3"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: a struct of all-primitive fields is structurally Sync; @mark(checked_sync) is redundant but accepted. Exercises the trichotomy, the strict ordering, and the primitive Sync rule."
+source = """
+@mark(checked_sync) struct Pair { x: i32, y: i32 }
+fn main() -> i32 {
+    let p = Pair { x: 5, y: 7 };
+    p.x + p.y
+}
+"""
+exit_code = 12
+
+# =============================================================================
+# Built-in negative facts: raw pointers are Unsend
+# =============================================================================
+
+[[case]]
+name = "struct_with_ptr_field_can_be_marked_checked_sync"
+spec = ["3.15:4", "3.15:5"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: a struct holding a MutPtr(T) infers Unsend by structural minimum (raw pointers are intrinsically Unsend, ADR-0084 Decision §Inference), but @mark(checked_sync) overrides that — the user is asserting the type is Sync-safe in practice."
+source = """
+@mark(checked_sync) struct Buffer { len: usize, ptr: MutPtr(u8) }
+fn main() -> i32 { 0 }
+"""
+exit_code = 0
+
+[[case]]
+name = "empty_struct_is_sync"
+spec = ["3.15:6"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: empty composites fold to the Sync identity for the structural-minimum operation; @mark(checked_sync) on an empty struct compiles without conflict."
+source = """
+@mark(checked_sync) struct Empty {}
+fn main() -> i32 { 0 }
+"""
+exit_code = 0
+
+[[case]]
+name = "checked_send_on_primitive_struct"
+spec = ["3.15:1", "3.15:3"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @mark(checked_send) is accepted on a structurally-Sync struct."
+source = """
+@mark(checked_send) struct Counter { value: i32 }
+fn main() -> i32 {
+    let c = Counter { value: 42 };
+    c.value
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "unsend_marker_downgrades_struct"
+spec = ["3.15:8"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @mark(unsend) is always safe — downgrades a structurally-Sync struct."
+source = """
+@mark(unsend) struct ThreadAffine { id: i32 }
+fn main() -> i32 {
+    let h = ThreadAffine { id: 7 };
+    h.id
+}
+"""
+exit_code = 7
+
+# =============================================================================
+# Mutual exclusion: at most one thread-safety marker per type
+# =============================================================================
+
+[[case]]
+name = "mutually_exclusive_unsend_and_checked_send"
+spec = ["3.15:9"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: applying both `unsend` and `checked_send` to the same type is rejected."
+source = """
+@mark(unsend, checked_send) struct Bad { x: i32 }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "conflicting thread-safety markers"
+
+[[case]]
+name = "mutually_exclusive_checked_send_and_checked_sync"
+spec = ["3.15:9"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: applying both `checked_send` and `checked_sync` to the same type is rejected."
+source = """
+@mark(checked_send, checked_sync) struct Bad { x: i32 }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "conflicting thread-safety markers"
+
+[[case]]
+name = "mutually_exclusive_unsend_and_checked_sync"
+spec = ["3.15:9"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: applying both `unsend` and `checked_sync` to the same type is rejected."
+source = """
+@mark(unsend, checked_sync) struct Bad { x: i32 }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "conflicting thread-safety markers"
+
+# =============================================================================
+# Posture and thread-safety axes are independent
+# =============================================================================
+
+[[case]]
+name = "thread_safety_combined_with_posture_marker"
+spec = ["3.15:11", "3.15:12"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: posture markers and thread-safety markers occupy independent namespaces — one of each may appear on the same type."
+source = """
+@mark(linear, checked_sync) struct LockedPool { id: i32 }
+fn release(p: LockedPool) -> i32 {
+    p.id
+}
+fn main() -> i32 {
+    let p = LockedPool { id: 1 };
+    release(p)
+}
+"""
+exit_code = 1
+
+[[case]]
+name = "thread_safety_with_copy_marker"
+spec = ["3.15:11"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: @mark(copy) and @mark(checked_sync) coexist on the same type."
+source = """
+@mark(copy, checked_sync) struct Point { x: i32, y: i32 }
+fn main() -> i32 {
+    let p = Point { x: 3, y: 4 };
+    let q = p;
+    p.x + p.y + q.x + q.y
+}
+"""
+exit_code = 14
+
+# =============================================================================
+# Preview gating
+# =============================================================================
+
+[[case]]
+name = "mark_thread_safety_preview_gated"
+spec = ["3.15:8"]
+description = "ADR-0084: thread-safety markers require --preview thread_safety."
+source = """
+@mark(checked_send) struct Counter { value: i32 }
+fn main() -> i32 {
+    let c = Counter { value: 0 };
+    c.value
+}
+"""
+compile_fail = true
+error_contains = "thread_safety"
+
+[[case]]
+name = "unsend_marker_preview_gated"
+spec = ["3.15:8"]
+description = "ADR-0084: @mark(unsend) also requires the preview gate (the namespace is gated, not just the upgrade markers)."
+source = """
+@mark(unsend) struct ThreadAffine { id: i32 }
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "thread_safety"

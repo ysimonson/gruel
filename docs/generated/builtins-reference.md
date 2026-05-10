@@ -48,6 +48,9 @@ Marker names recognized inside the `@mark(...)` directive (ADR-0083). Markers at
 | `copy` | Posture(Copy) | struct or enum |
 | `affine` | Posture(Affine) | struct or enum |
 | `linear` | Posture(Linear) | struct or enum |
+| `unsend` | ThreadSafety(Unsend) | struct or enum |
+| `checked_send` | ThreadSafety(Send) | struct or enum |
+| `checked_sync` | ThreadSafety(Sync) | struct or enum |
 
 ## Type Constructors
 
@@ -177,4 +180,16 @@ Suppresses Copy inference. A type whose members would otherwise infer Copy is fo
 ### `@mark(linear)`
 
 Forces the type to be Linear regardless of member postures. Use when the type has linear semantics that are not visible from its fields (e.g. an `i32` handle that is actually a kernel resource ID).
+
+### `@mark(unsend)`
+
+Downgrades the type's thread-safety classification to `Unsend`, even if its members would structurally permit `Send` or `Sync`. Always safe — the marker only restricts. Use when the type has thread-affine state that isn't visible from its fields (e.g. a handle to a thread-local resource).
+
+### `@mark(checked_send)`
+
+Asserts the type is `Send`, even if a member's type would structurally pull it down to `Unsend` (e.g. a raw pointer field). The compiler cannot verify this — the `checked_` prefix flags it as a user assertion (analogous to Rust's `unsafe impl Send`). Mis-applying breaks data-race freedom; the user takes responsibility.
+
+### `@mark(checked_sync)`
+
+Asserts the type is `Sync`, even if its structural minimum would be `Send` or `Unsend`. The compiler cannot verify this — the `checked_` prefix flags it as a user assertion (analogous to Rust's `unsafe impl Sync`). Mis-applying breaks data-race freedom; the user takes responsibility.
 

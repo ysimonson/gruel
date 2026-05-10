@@ -593,6 +593,7 @@ impl TypeInternPool {
                 is_copy: false,
                 is_clone: false,
                 is_linear: false,
+                thread_safety: gruel_builtins::ThreadSafety::Sync,
                 destructor: None,
                 is_builtin: false,
                 is_pub: false,
@@ -1273,6 +1274,95 @@ impl TypeInternPool {
         }
     }
 
+    /// ADR-0084: thread-safety classification for any type.
+    ///
+    /// Returns one of `Unsend < Send < Sync`:
+    ///
+    /// - **Built-in negative facts.** Raw pointers (`Ptr(T)` /
+    ///   `MutPtr(T)`) are intrinsically `Unsend` regardless of `T`.
+    /// - **Built-in positive facts.** Primitive integer / float / bool
+    ///   / char / unit / never types are intrinsically `Sync`.
+    /// - **Composites.** Arrays, slices, vectors, references, and
+    ///   pointer-to-`T` chains take the classification of their
+    ///   element/referent. Struct / enum types read the
+    ///   `thread_safety` field on their definition (computed by
+    ///   `validate_consistency` as the structural minimum over members,
+    ///   then optionally overridden by a `@mark(unsend)` /
+    ///   `@mark(checked_send)` / `@mark(checked_sync)` directive).
+    ///
+    /// Module / interface / comptime-only types fall through to
+    /// `Sync` — they have no runtime presence so the classification
+    /// doesn't constrain anything.
+    pub fn is_thread_safety_type(&self, ty: Type) -> gruel_builtins::ThreadSafety {
+        use gruel_builtins::ThreadSafety;
+        match ty.kind() {
+            // Built-in negative facts: raw pointers can't safely cross
+            // a thread boundary on their own. The user can override
+            // with `@mark(checked_send)` / `@mark(checked_sync)` on
+            // the containing struct (ADR-0084 § "checked_" naming).
+            TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => ThreadSafety::Unsend,
+
+            // Built-in positive facts: primitives are intrinsically
+            // Sync. There's no shared mutable state behind a value of
+            // these types.
+            TypeKind::I8
+            | TypeKind::I16
+            | TypeKind::I32
+            | TypeKind::I64
+            | TypeKind::U8
+            | TypeKind::U16
+            | TypeKind::U32
+            | TypeKind::U64
+            | TypeKind::Isize
+            | TypeKind::Usize
+            | TypeKind::F16
+            | TypeKind::F32
+            | TypeKind::F64
+            | TypeKind::Bool
+            | TypeKind::Char
+            | TypeKind::Unit
+            | TypeKind::Never
+            | TypeKind::Error => ThreadSafety::Sync,
+
+            // Composites delegate structurally.
+            TypeKind::Array(array_id) => {
+                let (element_type, _length) = self.array_def(array_id);
+                self.is_thread_safety_type(element_type)
+            }
+            TypeKind::Slice(slice_id) => {
+                let element_type = self.slice_def(slice_id);
+                self.is_thread_safety_type(element_type)
+            }
+            TypeKind::MutSlice(slice_id) => {
+                let element_type = self.mut_slice_def(slice_id);
+                self.is_thread_safety_type(element_type)
+            }
+            TypeKind::Vec(vec_id) => {
+                let element_type = self.vec_def(vec_id);
+                self.is_thread_safety_type(element_type)
+            }
+            TypeKind::Ref(ref_id) => {
+                let referent = self.ref_def(ref_id);
+                self.is_thread_safety_type(referent)
+            }
+            TypeKind::MutRef(ref_id) => {
+                let referent = self.mut_ref_def(ref_id);
+                self.is_thread_safety_type(referent)
+            }
+
+            TypeKind::Struct(struct_id) => self.struct_def(struct_id).thread_safety,
+            TypeKind::Enum(enum_id) => self.enum_def(enum_id).thread_safety,
+
+            // Module / interface / comptime-only types have no runtime
+            // representation; treat as Sync (no constraint on caller).
+            TypeKind::Module(_)
+            | TypeKind::Interface(_)
+            | TypeKind::ComptimeType
+            | TypeKind::ComptimeStr
+            | TypeKind::ComptimeInt => ThreadSafety::Sync,
+        }
+    }
+
     /// Check if a type is linear (must be explicitly consumed, can't be
     /// implicitly dropped — ADR-0008).
     ///
@@ -1865,6 +1955,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -1898,6 +1989,7 @@ mod tests {
             ],
             is_copy: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -1953,6 +2045,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -1981,6 +2074,7 @@ mod tests {
             ],
             is_copy: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2019,6 +2113,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -2055,6 +2150,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -2069,6 +2165,7 @@ mod tests {
             variants: vec![EnumVariantDef::unit("Red")],
             is_copy: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2109,6 +2206,7 @@ mod tests {
             is_copy: true,
             is_clone: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -2145,6 +2243,7 @@ mod tests {
             variants: vec![EnumVariantDef::unit("A"), EnumVariantDef::unit("B")],
             is_copy: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
@@ -2187,6 +2286,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -2220,6 +2320,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -2241,6 +2342,7 @@ mod tests {
                 variants: vec![],
                 is_copy: false,
                 is_linear: false,
+                thread_safety: gruel_builtins::ThreadSafety::Sync,
                 is_pub: false,
                 file_id: gruel_util::FileId::DEFAULT,
                 destructor: None,
@@ -2380,6 +2482,7 @@ mod tests {
                             is_copy: false,
                             is_clone: false,
                             is_linear: false,
+                            thread_safety: gruel_builtins::ThreadSafety::Sync,
                             destructor: None,
                             is_builtin: false,
                             is_pub: false,
@@ -2458,6 +2561,7 @@ mod tests {
             is_copy: false,
             is_clone: false,
             is_linear: false,
+            thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
             is_pub: false,
@@ -2501,6 +2605,7 @@ mod tests {
                 is_copy: false,
                 is_clone: false,
                 is_linear: false,
+                thread_safety: gruel_builtins::ThreadSafety::Sync,
                 destructor: None,
                 is_builtin: false,
                 is_pub: false,

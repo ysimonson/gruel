@@ -137,6 +137,7 @@ impl<'a> GatherOutput<'a> {
             current_self: None,
             target: gruel_target::Target::host(),
             mark_affine_decls: HashSet::default(),
+            mark_thread_safety_decls: rustc_hash::FxHashMap::default(),
         }
     }
 }

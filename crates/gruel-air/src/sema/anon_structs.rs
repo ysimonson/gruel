@@ -112,6 +112,14 @@ impl Sema<'_> {
 
         // Determine if the struct is Copy (all fields are Copy)
         let is_copy = fields.iter().all(|f| f.ty.is_copy_in_pool(&self.type_pool));
+        // ADR-0084: anonymous struct thread-safety is the structural
+        // minimum over field types — primitives → Sync, raw pointers →
+        // Unsend, and so on through composite members.
+        let thread_safety = fields
+            .iter()
+            .map(|f| self.type_pool.is_thread_safety_type(f.ty))
+            .min()
+            .unwrap_or(gruel_builtins::ThreadSafety::Sync);
 
         let struct_def = StructDef {
             name,
@@ -119,6 +127,7 @@ impl Sema<'_> {
             is_copy,
             is_clone: false,
             is_linear: false,
+            thread_safety,
             destructor: None,
             is_builtin: false,
             is_pub: false,                       // Anonymous structs are private
@@ -172,6 +181,14 @@ impl Sema<'_> {
         let name_spur = self.interner.get_or_intern(&name);
 
         let is_copy = fields.iter().all(|f| f.ty.is_copy_in_pool(&self.type_pool));
+        // ADR-0084: anonymous struct thread-safety is the structural
+        // minimum over field types — primitives → Sync, raw pointers →
+        // Unsend, and so on through composite members.
+        let thread_safety = fields
+            .iter()
+            .map(|f| self.type_pool.is_thread_safety_type(f.ty))
+            .min()
+            .unwrap_or(gruel_builtins::ThreadSafety::Sync);
 
         let struct_def = StructDef {
             name,
@@ -179,6 +196,7 @@ impl Sema<'_> {
             is_copy,
             is_clone: false,
             is_linear: false,
+            thread_safety,
             destructor: None,
             is_builtin: false,
             is_pub: false,

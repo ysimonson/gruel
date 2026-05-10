@@ -394,18 +394,18 @@ quotes its LOC delta in the commit message.
 
 ### Phase 1: Trichotomy + structural inference (no enforcement)
 
-- [ ] Add `ThreadSafety` enum to `gruel-builtins/src/lib.rs` with
+- [x] Add `ThreadSafety` enum to `gruel-builtins/src/lib.rs` with
       `#[derive(PartialOrd, Ord)]` so `Unsend < Send < Sync`.
-- [ ] Extend `MarkerKind` with `ThreadSafety(ThreadSafety)`.
-- [ ] Append `unsend`, `checked_send`, `checked_sync` rows to
+- [x] Extend `MarkerKind` with `ThreadSafety(ThreadSafety)`.
+- [x] Append `unsend`, `checked_send`, `checked_sync` rows to
       `BUILTIN_MARKERS`.
-- [ ] Add `PreviewFeature::ThreadSafety` (`thread_safety`) to
+- [x] Add `PreviewFeature::ThreadSafety` (`thread_safety`) to
       `gruel-util/src/error.rs`.
-- [ ] Add `thread_safety: ThreadSafety` field to `StructDef` and
+- [x] Add `thread_safety: ThreadSafety` field to `StructDef` and
       `EnumDef` in `gruel-air`.
-- [ ] Extend `MarkOutcome` with `thread_safety_override:
+- [x] Extend `MarkOutcome` with `thread_safety_override:
       Option<ThreadSafety>`, gated behind `thread_safety`.
-- [ ] Implement `is_thread_safety_type(ty: Type) -> ThreadSafety`
+- [x] Implement `is_thread_safety_type(ty: Type) -> ThreadSafety`
       in `intern_pool.rs`, with built-in facts: primitives → Sync,
       pointers → Unsend, refs/arrays/tuples inherit structurally.
       Prelude container types (`Vec`, `String`, `Option`, etc.)
@@ -413,15 +413,15 @@ quotes its LOC delta in the commit message.
       thread-safety in their own follow-up PRs by adding a
       `comptime if` over `@thread_safety(T)` to their prelude
       definitions.
-- [ ] Implement structural inference for named structs/enums in
+- [x] Implement structural inference for named structs/enums in
       `validate_consistency` (renamed from `validate_posture_consistency`):
       compute the min over members, then apply the override.
-- [ ] Anonymous struct/enum literals get the same min-of-members
+- [x] Anonymous struct/enum literals get the same min-of-members
       treatment in `find_or_create_anon_struct` /
       `find_or_create_anon_enum`.
-- [ ] Mutual exclusion: at most one thread-safety marker per item;
+- [x] Mutual exclusion: at most one thread-safety marker per item;
       conflict produces `ConflictingThreadSafetyMarkers`.
-- [ ] Spec tests under `cases/items/thread-safety.toml`:
+- [x] Spec tests under `cases/items/thread-safety.toml`:
       `i32_is_sync`, `bool_is_sync`, `unit_is_sync`,
       `struct_of_primitives_is_sync`, `struct_with_ptr_is_unsend`,
       `tuple_of_primitives_is_sync`,

@@ -351,6 +351,11 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// ADR-0084: thread-safety markers (`@mark(unsend)` /
+    /// `@mark(checked_send)` / `@mark(checked_sync)`), the
+    /// `@thread_safety(T)` intrinsic, the `JoinHandle(R)` built-in, and
+    /// the `@spawn(fn, arg)` intrinsic.
+    ThreadSafety,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -382,6 +387,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::ThreadSafety => "ADR-0084",
         }
     }
 
@@ -964,6 +970,12 @@ pub enum ErrorKind {
         marker: String,
         item_kind: &'static str,
     },
+    /// More than one thread-safety marker on the same type (ADR-0084).
+    /// At most one of `unsend`, `checked_send`, `checked_sync` is allowed.
+    #[error(
+        "conflicting thread-safety markers on type `{type_name}`: at most one of `unsend`, `checked_send`, `checked_sync` may be applied"
+    )]
+    ConflictingThreadSafetyMarkers { type_name: String },
     /// Duplicate method definition in impl blocks for the same type
     #[error("duplicate method '{method_name}' for type '{type_name}'")]
     DuplicateMethod {
@@ -1286,6 +1298,7 @@ impl ErrorKind {
             ErrorKind::UnknownDirective { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
             ErrorKind::UnknownMarker { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
             ErrorKind::MarkerNotApplicable { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
+            ErrorKind::ConflictingThreadSafetyMarkers { .. } => ErrorCode::UNKNOWN_DIRECTIVE,
             ErrorKind::DuplicateMethod { .. } => ErrorCode::DUPLICATE_METHOD,
             ErrorKind::DeriveDirectFieldAccess { .. } => ErrorCode::DERIVE_DIRECT_FIELD_ACCESS,
             ErrorKind::DeriveNotADerive { .. } => ErrorCode::DERIVE_NOT_A_DERIVE,
@@ -2067,7 +2080,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, thread_safety");
     }
 
     // ========================================================================
