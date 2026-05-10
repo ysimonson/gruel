@@ -272,7 +272,7 @@ preview = "mark_directive"
 preview_should_pass = true
 description = "ADR-0083 Phase 2: `@mark(copy)` on a `copy struct` is redundant-but-consistent — accepted, not an error."
 source = """
-@mark(copy) copy struct Point { x: i32, y: i32 }
+@mark(copy) @mark(copy) struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };
     let q = p;
@@ -288,7 +288,7 @@ preview = "mark_directive"
 preview_should_pass = true
 description = "ADR-0083 Phase 2: `@mark(linear)` on a `linear struct` is redundant-but-consistent."
 source = """
-@mark(linear) linear struct Resource { value: i32 }
+@mark(linear) @mark(linear) struct Resource { value: i32 }
 fn consume(r: Resource) -> i32 { r.value }
 fn main() -> i32 {
     let r = Resource { value: 7 };
@@ -304,7 +304,7 @@ preview = "mark_directive"
 preview_should_pass = true
 description = "ADR-0083 Phase 2: `@mark(copy)` on a `linear struct` is the existing Copy⊥Linear conflict via the directive path."
 source = """
-@mark(copy) linear struct Bad { x: i32 }
+@mark(copy) @mark(linear) struct Bad { x: i32 }
 fn main() -> i32 { 0 }
 """
 compile_fail = true
@@ -316,7 +316,7 @@ preview = "mark_directive"
 preview_should_pass = true
 description = "ADR-0083 Phase 2: `@mark(linear)` on a `copy struct` is the existing Copy⊥Linear conflict via the directive path."
 source = """
-@mark(linear) copy struct Bad { x: i32 }
+@mark(linear) @mark(copy) struct Bad { x: i32 }
 fn main() -> i32 { 0 }
 """
 compile_fail = true

@@ -18,7 +18,13 @@ mod tests {
         let astgen = AstGen::new(&ast, &interner);
         let rir = astgen.generate();
 
-        let sema = Sema::new(&rir, &interner, PreviewFeatures::default());
+        // ADR-0083 Phase 3: enable `mark_directive` so unit tests can use
+        // the `@mark(...)` form alongside the existing `copy`/`linear`
+        // keyword forms during the migration window. Phase 5 retires the
+        // gate and this enable can be removed.
+        let mut preview = PreviewFeatures::default();
+        preview.insert(gruel_util::PreviewFeature::MarkDirective);
+        let sema = Sema::new(&rir, &interner, preview);
         sema.analyze_all()
     }
 
@@ -498,8 +504,8 @@ mod tests {
     fn test_struct_field_type_resolution() {
         // Struct with field of another struct type should resolve correctly
         let output = compile_to_air(
-            "copy struct Inner { x: i32 }
-             copy struct Outer { inner: Inner }
+            "@mark(copy) struct Inner { x: i32 }
+             @mark(copy) struct Outer { inner: Inner }
              fn main() -> i32 {
                 let o = Outer { inner: Inner { x: 42 } };
                 o.inner.x
@@ -516,7 +522,7 @@ mod tests {
     fn test_copy_struct_with_copy_fields() {
         // @derive(Copy) struct with only Copy fields should compile
         let output = compile_to_air(
-            "copy struct Point { x: i32, y: i32 }
+            "@mark(copy) struct Point { x: i32, y: i32 }
              fn main() -> i32 {
                 let p = Point { x: 1, y: 2 };
                 let q = p;  // Copy, not move
@@ -587,7 +593,7 @@ mod tests {
         // declare the struct `linear` (or attach a `fn drop`) to keep it
         // non-Copy. `linear` doesn't require preview gating in this helper.
         let result = compile_to_air(
-            "linear struct NonCopy { x: i32 }
+            "@mark(linear) struct NonCopy { x: i32 }
              fn consume(n: NonCopy) -> i32 { n.x }
              fn main() -> i32 {
                  let n = NonCopy { x: 42 };
@@ -642,7 +648,7 @@ mod tests {
     fn test_copy_type_not_moved() {
         // Copy types should not be moved, allowing multiple uses
         let output = compile_to_air(
-            "copy struct Point { x: i32, y: i32 }
+            "@mark(copy) struct Point { x: i32, y: i32 }
              fn use_point(p: Point) -> i32 { p.x }
              fn main() -> i32 {
                  let p = Point { x: 1, y: 2 };
@@ -817,7 +823,11 @@ mod tests {
         let rir = Box::leak(Box::new(rir));
         let interner = Box::leak(Box::new(interner));
 
-        let mut sema = Sema::new(rir, interner, PreviewFeatures::default());
+        // ADR-0083 Phase 3: same migration-window enable as
+        // `compile_to_air` so test fixtures can use `@mark(...)`.
+        let mut preview = PreviewFeatures::default();
+        preview.insert(gruel_util::PreviewFeature::MarkDirective);
+        let mut sema = Sema::new(rir, interner, preview);
         sema.inject_builtin_types();
         sema.register_type_names().unwrap();
         sema.resolve_declarations().unwrap();
@@ -893,7 +903,7 @@ mod tests {
     #[test]
     fn test_type_pool_copy_struct() {
         let sema = gather_declarations_for_testing(
-            "copy struct Data { value: i32 }
+            "@mark(copy) struct Data { value: i32 }
              fn main() -> i32 { 0 }",
         );
 
@@ -901,7 +911,10 @@ mod tests {
         let pool_data = sema.type_pool.get_struct_by_name(data_name).unwrap();
         let pool_def = sema.type_pool.get_struct_def(pool_data).unwrap();
 
-        assert!(pool_def.is_copy, "Data should be marked as `copy struct`");
+        assert!(
+            pool_def.is_copy,
+            "Data should be marked as `@mark(copy) struct`"
+        );
     }
 
     #[test]
@@ -936,7 +949,7 @@ mod tests {
         let sema = gather_declarations_for_testing(
             "struct Point { x: i32, y: i32 }
              struct Empty {}
-             copy struct Value { v: bool }
+             @mark(copy) struct Value { v: bool }
              enum Status { Ok, Error }
              enum Direction { Up, Down, Left, Right }
              fn main() -> i32 { 0 }",

@@ -15,9 +15,11 @@ description = "Posture keywords on struct and enum declarations: `copy struct`, 
 
 [[case]]
 name = "copy_struct_parses"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:14"]
 source = """
-copy struct Point { x: i32, y: i32 }
+@mark(copy) struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };
     p.x + p.y
@@ -27,9 +29,11 @@ exit_code = 3
 
 [[case]]
 name = "copy_enum_parses"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:14"]
 source = """
-copy enum Color { Red, Green, Blue }
+@mark(copy) enum Color { Red, Green, Blue }
 fn main() -> i32 {
     let c = Color::Red;
     match c {
@@ -43,9 +47,11 @@ exit_code = 1
 
 [[case]]
 name = "linear_enum_parses"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:30"]
 source = """
-linear enum Resource { Open, Closed }
+@mark(linear) enum Resource { Open, Closed }
 fn consume(r: Resource) -> i32 {
     match r {
         Resource::Open => 1,
@@ -99,18 +105,22 @@ exit_code = 42
 
 [[case]]
 name = "linear_copy_struct_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:62"]
 source = """
-linear copy struct Bad { x: i32 }
+linear @mark(copy) struct Bad { x: i32 }
 fn main() -> i32 { 0 }
 """
 compile_fail = true
 
 [[case]]
 name = "copy_linear_struct_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:62"]
 source = """
-copy linear struct Bad { x: i32 }
+copy @mark(linear) struct Bad { x: i32 }
 fn main() -> i32 { 0 }
 """
 compile_fail = true
@@ -121,10 +131,12 @@ compile_fail = true
 
 [[case]]
 name = "copy_struct_is_copy_by_assignment"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:14", "3.8:16"]
 description = "ADR-0080: a `copy struct` is implicitly duplicated on `let b = a`."
 source = """
-copy struct Point { x: i32, y: i32 }
+@mark(copy) struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };
     let q = p;
@@ -135,10 +147,12 @@ exit_code = 6
 
 [[case]]
 name = "copy_enum_is_copy_by_assignment"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:14", "3.8:16"]
 description = "ADR-0080: a `copy enum` is implicitly duplicated on `let b = a`, even with no payloads."
 source = """
-copy enum Color { Red, Green, Blue }
+@mark(copy) enum Color { Red, Green, Blue }
 fn main() -> i32 {
     let c = Color::Red;
     let d = c;
@@ -153,10 +167,12 @@ exit_code = 1
 
 [[case]]
 name = "linear_enum_dropped_without_consume_error"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:30", "3.8:32"]
 description = "ADR-0080: a `linear enum` value must be explicitly consumed."
 source = """
-linear enum Resource { Open, Closed }
+@mark(linear) enum Resource { Open, Closed }
 fn main() -> i32 {
     let r = Resource::Open;
     0
@@ -167,10 +183,12 @@ error_contains = "linear value"
 
 [[case]]
 name = "linear_enum_consumed_by_function"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:30", "3.8:33"]
 description = "ADR-0080: a `linear enum` is consumed by passing to a function."
 source = """
-linear enum Resource { Open, Closed }
+@mark(linear) enum Resource { Open, Closed }
 fn consume(r: Resource) -> i32 {
     match r {
         Resource::Open => 1,
@@ -200,11 +218,13 @@ exit_code = 3
 
 [[case]]
 name = "copy_struct_with_copy_fields_ok"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:14"]
 description = "ADR-0080: a `copy struct` whose fields are all Copy is itself Copy and may be aliased."
 source = """
-copy struct Pair { x: i32, y: i32 }
-copy struct Rect { tl: Pair, br: Pair }
+@mark(copy) struct Pair { x: i32, y: i32 }
+@mark(copy) struct Rect { tl: Pair, br: Pair }
 fn main() -> i32 {
     let r = Rect { tl: Pair { x: 1, y: 2 }, br: Pair { x: 10, y: 20 } };
     let r2 = r;
@@ -219,10 +239,12 @@ exit_code = 33
 
 [[case]]
 name = "copy_struct_with_affine_field_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:18"]
 description = "ADR-0080: a `copy struct` may not contain a non-Copy field."
 source = """
-copy struct Bad { s: String }
+@mark(copy) struct Bad { s: String }
 fn main() -> i32 { 0 }
 """
 compile_fail = true
@@ -230,10 +252,12 @@ error_contains = "affine"
 
 [[case]]
 name = "copy_enum_with_affine_payload_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:18"]
 description = "ADR-0080: a `copy enum` may not have a non-Copy payload."
 source = """
-copy enum Bad { A(String) }
+@mark(copy) enum Bad { A(String) }
 fn main() -> i32 { 0 }
 """
 compile_fail = true
@@ -241,10 +265,12 @@ error_contains = "affine"
 
 [[case]]
 name = "affine_struct_with_linear_field_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:30"]
 description = "ADR-0083: under uniform structural inference, an unmarked struct with a linear field propagates linear upward — the host becomes Linear automatically rather than producing an error."
 source = """
-linear struct Resource { value: i32 }
+@mark(linear) struct Resource { value: i32 }
 struct Held { r: Resource }
 fn consume(h: Held) -> i32 { h.r.value }
 fn main() -> i32 {
@@ -256,10 +282,12 @@ exit_code = 7
 
 [[case]]
 name = "affine_enum_with_linear_payload_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:30"]
 description = "ADR-0083: under uniform structural inference, an unmarked enum with a linear payload becomes Linear automatically."
 source = """
-linear struct Resource { value: i32 }
+@mark(linear) struct Resource { value: i32 }
 enum Held { Empty, Some(Resource) }
 fn consume(h: Held) -> i32 {
     match h {
@@ -276,11 +304,13 @@ exit_code = 9
 
 [[case]]
 name = "linear_enum_with_linear_payload_ok"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:30"]
 description = "ADR-0080: a `linear enum` accepts linear payloads (linear absorbs)."
 source = """
-linear struct Resource { value: i32 }
-linear enum Maybe { Empty, Held(Resource) }
+@mark(linear) struct Resource { value: i32 }
+@mark(linear) enum Maybe { Empty, Held(Resource) }
 fn drain(m: Maybe) -> i32 {
     match m {
         Maybe::Empty => 0,
@@ -296,10 +326,12 @@ exit_code = 7
 
 [[case]]
 name = "copy_struct_with_drop_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:62"]
 description = "ADR-0080: `copy` and `Drop` remain mutually exclusive."
 source = """
-copy struct Bad {
+@mark(copy) struct Bad {
     value: i32,
 
     fn drop(self) {

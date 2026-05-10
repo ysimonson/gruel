@@ -520,6 +520,32 @@ pub fn render_reference_markdown() -> String {
     out.push_str("| `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |\n");
     out.push('\n');
 
+    out.push_str("### Markers\n\n");
+    out.push_str("Marker names recognized inside the `@mark(...)` directive (ADR-0083). Markers attach declaration-time metadata to a struct/enum head; future markers plug in by adding a row to the `BUILTIN_MARKERS` registry.\n\n");
+    out.push_str("| Name | Kind | Applies to |\n");
+    out.push_str("|---|---|---|\n");
+    for m in BUILTIN_MARKERS {
+        let kind_str = match m.kind {
+            MarkerKind::Posture(Posture::Copy) => "Posture(Copy)",
+            MarkerKind::Posture(Posture::Affine) => "Posture(Affine)",
+            MarkerKind::Posture(Posture::Linear) => "Posture(Linear)",
+        };
+        let apply_str = match (
+            m.applicable_to.includes_struct(),
+            m.applicable_to.includes_enum(),
+        ) {
+            (true, true) => "struct or enum",
+            (true, false) => "struct only",
+            (false, true) => "enum only",
+            (false, false) => "(none)",
+        };
+        out.push_str(&format!(
+            "| `{}` | {} | {} |\n",
+            m.name, kind_str, apply_str
+        ));
+    }
+    out.push('\n');
+
     // ---- Type constructors in detail ----
     out.push_str("## Type Constructors\n\n");
     out.push_str("Built-in type constructors are written `Name(arg1, arg2, ...)` in type position. Sema resolves the name against the registry and lowers directly to a `TypeKind` without running the comptime interpreter.\n\n");
@@ -597,6 +623,24 @@ pub fn render_reference_markdown() -> String {
     out.push_str("**Required methods:**\n\n");
     out.push_str("- `fn handle(self: Ref(Self)) -> Self`\n\n");
     out.push_str("**Conformance:** structural (no derive). Defining `fn handle(self: Ref(Self)) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.\n\n");
+
+    // ---- Markers in detail ----
+    out.push_str("## Markers\n\n");
+    out.push_str("Markers are declaration-time-only attributes on struct/enum heads, written inside `@mark(...)` (ADR-0083). The marker set is closed; user-defined markers are out of scope. New markers must go through an ADR.\n\n");
+    for m in BUILTIN_MARKERS {
+        out.push_str(&format!("### `@mark({})`\n\n", m.name));
+        match m.kind {
+            MarkerKind::Posture(Posture::Copy) => out.push_str(
+                "Asserts the type is Copy. Under uniform structural inference, a struct/enum of all-Copy fields would already be Copy without the directive — `@mark(copy)` exists so the user can document intent and turn a silent posture downgrade (adding a non-Copy field later) into a declaration-site error.\n\n",
+            ),
+            MarkerKind::Posture(Posture::Affine) => out.push_str(
+                "Suppresses Copy inference. A type whose members would otherwise infer Copy is forced to remain Affine, so move-on-use semantics are preserved even when bitwise duplication is safe. Has no effect on Linear inference: a Linear member still propagates upward.\n\n",
+            ),
+            MarkerKind::Posture(Posture::Linear) => out.push_str(
+                "Forces the type to be Linear regardless of member postures. Use when the type has linear semantics that are not visible from its fields (e.g. an `i32` handle that is actually a kernel resource ID).\n\n",
+            ),
+        }
+    }
 
     out
 }

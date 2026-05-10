@@ -186,7 +186,7 @@ name = "array_of_copy_struct_moves"
 spec = ["3.8:2", "3.8:16"]
 description = "ADR-0083 (Open Question 1): an array of Copy structs is itself Copy and may be aliased — reverts ADR-0080."
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     let points: [Point; 2] = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
     let p2 = points;
@@ -198,10 +198,12 @@ exit_code = 4
 
 [[case]]
 name = "copy_struct_with_array_field_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:2", "3.8:20"]
 description = "ADR-0083: arrays of Copy elements are Copy under uniform inference, so a `copy struct` may now contain an array of Copy elements."
 source = """
-copy struct Container { values: [i32; 3] }
+@mark(copy) struct Container { values: [i32; 3] }
 fn main() -> i32 {
     let c = Container { values: [1, 2, 3] };
     let d = c;
@@ -212,12 +214,14 @@ exit_code = 3
 
 [[case]]
 name = "copy_struct_with_array_of_non_copy_error"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:18", "3.8:20"]
 description = "@derive(Copy) struct cannot contain array of non-Copy type"
 source = """
 struct Data { value: i32, name: String }
 
-copy struct Container { items: [Data; 2] }
+@mark(copy) struct Container { items: [Data; 2] }
 
 fn main() -> i32 { 0 }
 """
@@ -550,7 +554,7 @@ name = "copy_struct_multiple_uses"
 spec = ["3.8:14", "3.8:15", "3.8:16", "3.8:17"]
 description = "@derive(Copy) struct can be used multiple times without moving"
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };
     let q = p;
@@ -565,7 +569,7 @@ name = "copy_struct_pass_to_function"
 spec = ["3.8:16"]
 description = "@derive(Copy) struct can be passed to function and still used"
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 fn sum(p: Point) -> i32 { p.x + p.y }
 fn main() -> i32 {
     let p = Point { x: 10, y: 20 };
@@ -581,7 +585,7 @@ name = "copy_struct_all_primitive_fields"
 spec = ["3.8:20"]
 description = "@derive(Copy) struct with all primitive Copy fields"
 source = """
-copy struct Data { a: i32, b: bool, c: i64 }
+struct Data { a: i32, b: bool, c: i64 }
 fn main() -> i32 {
     let d = Data { a: 42, b: true, c: 100 };
     let e = d;
@@ -593,12 +597,14 @@ exit_code = 43
 
 [[case]]
 name = "copy_struct_nested_copy"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:20", "3.8:21"]
 description = "@derive(Copy) struct containing other @derive(Copy) structs"
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 
-copy struct Rect { top_left: Point, bottom_right: Point }
+@mark(copy) struct Rect { top_left: Point, bottom_right: Point }
 
 fn main() -> i32 {
     let r = Rect {
@@ -613,14 +619,16 @@ exit_code = 10
 
 [[case]]
 name = "copy_struct_deeply_nested"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:20", "3.8:21"]
 description = "@derive(Copy) struct with 3+ levels of nesting"
 source = """
-copy struct Level0 { value: i32 }
+struct Level0 { value: i32 }
 
-copy struct Level1 { inner: Level0, x: i32 }
+@mark(copy) struct Level1 { inner: Level0, x: i32 }
 
-copy struct Level2 { inner: Level1, y: i32 }
+@mark(copy) struct Level2 { inner: Level1, y: i32 }
 
 fn main() -> i32 {
     let l = Level2 { inner: Level1 { inner: Level0 { value: 1 }, x: 2 }, y: 3 };
@@ -632,12 +640,14 @@ exit_code = 6
 
 [[case]]
 name = "copy_struct_non_copy_field_error"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:18", "3.8:19"]
 description = "@derive(Copy) struct with non-Copy field is a compile error. ADR-0083: keep `Inner` non-Copy with a `String` field."
 source = """
 struct Inner { value: i32, name: String }
 
-copy struct Outer { inner: Inner }
+@mark(copy) struct Outer { inner: Inner }
 
 fn main() -> i32 { 0 }
 """
@@ -646,12 +656,14 @@ error_contains = "affine"
 
 [[case]]
 name = "copy_struct_enum_field"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:20"]
 description = "@derive(Copy) struct with enum field (enums are Copy)"
 source = """
 enum Status { Active, Inactive }
 
-copy struct Data { status: Status, value: i32 }
+@mark(copy) struct Data { status: Status, value: i32 }
 
 fn main() -> i32 {
     let d = Data { status: Status::Active, value: 10 };
@@ -781,10 +793,12 @@ expected_stdout = "99\n"
 
 [[case]]
 name = "linear_struct_consumed"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:30", "3.8:31", "3.8:32", "3.8:33", "3.8:34"]
 description = "Linear struct can be consumed by passing to a function"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn consume(m: MustUse) -> i32 { m.value }
 
@@ -797,10 +811,12 @@ exit_code = 42
 
 [[case]]
 name = "linear_struct_returned"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:32", "3.8:33"]
 description = "Linear struct returned from function transfers responsibility to caller"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn create() -> MustUse { MustUse { value: 10 } }
 fn consume(m: MustUse) -> i32 { m.value }
@@ -814,10 +830,12 @@ exit_code = 10
 
 [[case]]
 name = "linear_struct_dropped_error"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:32", "3.8:35", "3.8:36"]
 description = "Linear value dropped without being consumed is an error"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn main() -> i32 {
     let m = MustUse { value: 1 };
@@ -829,11 +847,13 @@ error_contains = "linear value"
 
 [[case]]
 name = "linear_struct_copy_error"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:37", "3.8:38"]
 description = "ADR-0080: a `linear struct` cannot also be `copy` — the parser rejects the keyword combo, so `@derive(Copy)` is now an unknown derive."
 source = """
 @derive(Copy)
-linear struct Invalid { value: i32 }
+@mark(linear) struct Invalid { value: i32 }
 
 fn main() -> i32 { 0 }
 """
@@ -842,10 +862,12 @@ error_contains = "Copy"
 
 [[case]]
 name = "linear_copy_reverse_order_error"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:37"]
 description = "Linear and @derive(Copy) in reverse order is also an error"
 source = """
-linear struct Invalid { value: i32 }
+@mark(linear) struct Invalid { value: i32 }
 
 fn main() -> i32 { 0 }
 """
@@ -854,10 +876,12 @@ exit_code = 0
 
 [[case]]
 name = "linear_struct_chain_consumed"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:32", "3.8:33"]
 description = "Linear value can be chained through functions"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn transform(m: MustUse) -> MustUse {
     MustUse { value: m.value * 2 }
@@ -874,10 +898,12 @@ exit_code = 42
 
 [[case]]
 name = "linear_in_branch_consumed"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:32"]
 description = "Linear value must be consumed in all branches"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn consume(m: MustUse) -> i32 { m.value }
 
@@ -961,10 +987,12 @@ error_contains = "use of moved value"
 
 [[case]]
 name = "linear_field_access"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:32", "3.8:33"]
-description = "Field access on linear struct counts as move (consuming)"
+description = "Field access on @mark(linear) struct counts as move (consuming)"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn main() -> i32 {
     let m = MustUse { value: 42 };
@@ -1092,10 +1120,12 @@ exit_code = 0
 
 [[case]]
 name = "handle_with_linear"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:49"]
 description = "Linear struct can conform to Handle"
 source = """
-linear struct Transaction {
+@mark(linear) struct Transaction {
     id: i32,
 
     fn handle(self: Ref(Self)) -> Transaction {
@@ -1118,7 +1148,7 @@ name = "copy_struct_implicit_handle_semantics"
 spec = ["3.8:47"]
 description = "@derive(Copy) struct can be duplicated without an explicit .handle() method"
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     let p = Point { x: 1, y: 2 };
@@ -1158,7 +1188,7 @@ name = "copy_posture_accepts_derive_copy_struct"
 spec = ["3.8:60", "3.8:61"]
 description = "ADR-0080: an @ownership Copy guard accepts a `@derive(Copy)` struct."
 source = """
-copy struct Pair { x: i32, y: i32 }
+struct Pair { x: i32, y: i32 }
 
 fn use_copy(comptime T: type, t: T) -> i32 {
     comptime if @ownership(T) != Ownership::Copy {
@@ -1350,10 +1380,12 @@ exit_code = 19
 # ADR-0067: linearity propagates through compound types.
 [[case]]
 name = "linear_array_implicit_drop_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:32"]
 description = "Array of linear elements cannot be implicitly dropped (ADR-0067)"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn main() -> i32 {
     let _arr: [MustUse; 1] = [MustUse { value: 7 }];
@@ -1365,10 +1397,12 @@ error_contains = "linear value"
 
 [[case]]
 name = "linear_array_index_partial_move_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:32"]
 description = "Indexing into an array of linear elements is rejected (partial moves are banned, ADR-0036)"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn consume(m: MustUse) -> i32 { m.value }
 
@@ -1382,10 +1416,12 @@ error_contains = "cannot move out of indexed position"
 
 [[case]]
 name = "linear_zero_array_drop_ok"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.8:32"]
 description = "Empty array of linear elements has no payload — implicit drop OK"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn main() -> i32 {
     let _arr: [MustUse; 0] = [];

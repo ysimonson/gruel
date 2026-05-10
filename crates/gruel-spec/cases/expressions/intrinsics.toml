@@ -1687,7 +1687,7 @@ exit_code = 2
 name = "ownership_copy_struct_is_copy"
 spec = ["4.13:111"]
 source = """
-copy struct Pair { x: i32, y: i32 }
+struct Pair { x: i32, y: i32 }
 
 fn main() -> i32 {
     match @ownership(Pair) {
@@ -1701,9 +1701,11 @@ exit_code = 1
 
 [[case]]
 name = "ownership_linear_struct_is_linear"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["4.13:111"]
 source = """
-linear struct Token { id: i32 }
+@mark(linear) struct Token { id: i32 }
 
 fn consume(t: Token) -> i32 {
     let Token { id } = t;
@@ -1928,7 +1930,7 @@ name = "ownership_derive_copy_struct_is_copy"
 spec = ["4.13:118"]
 description = "ADR-0080: a `@derive(Copy)` struct reports `Ownership::Copy`."
 source = """
-copy struct Pair { x: i32, y: i32 }
+struct Pair { x: i32, y: i32 }
 
 fn main() -> i32 {
     match @ownership(Pair) {

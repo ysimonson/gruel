@@ -846,9 +846,11 @@ error_contains = "must take `self`"
 
 [[case]]
 name = "inline_drop_on_copy_type_error"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.9:36"]
 source = """
-copy struct Pt {
+@mark(copy) struct Pt {
     x: i32,
 
     fn drop(self) {}
@@ -861,9 +863,11 @@ error_contains = "@derive(Copy)"
 
 [[case]]
 name = "inline_drop_on_linear_type_error"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["3.9:36"]
 source = """
-linear struct Token {
+@mark(linear) struct Token {
     id: i32,
 
     fn drop(self) {}

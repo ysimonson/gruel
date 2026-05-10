@@ -39,6 +39,16 @@ Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The c
 | `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |
 | `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |
 
+### Markers
+
+Marker names recognized inside the `@mark(...)` directive (ADR-0083). Markers attach declaration-time metadata to a struct/enum head; future markers plug in by adding a row to the `BUILTIN_MARKERS` registry.
+
+| Name | Kind | Applies to |
+|---|---|---|
+| `copy` | Posture(Copy) | struct or enum |
+| `affine` | Posture(Affine) | struct or enum |
+| `linear` | Posture(Linear) | struct or enum |
+
 ## Type Constructors
 
 Built-in type constructors are written `Name(arg1, arg2, ...)` in type position. Sema resolves the name against the registry and lowers directly to a `TypeKind` without running the comptime interpreter.
@@ -151,4 +161,20 @@ Types that may be explicitly duplicated via `.handle()`, typically because the d
 - `fn handle(self: Ref(Self)) -> Self`
 
 **Conformance:** structural (no derive). Defining `fn handle(self: Ref(Self)) -> Self` on a struct or enum makes it conform — there is no `@derive(Handle)` directive.
+
+## Markers
+
+Markers are declaration-time-only attributes on struct/enum heads, written inside `@mark(...)` (ADR-0083). The marker set is closed; user-defined markers are out of scope. New markers must go through an ADR.
+
+### `@mark(copy)`
+
+Asserts the type is Copy. Under uniform structural inference, a struct/enum of all-Copy fields would already be Copy without the directive — `@mark(copy)` exists so the user can document intent and turn a silent posture downgrade (adding a non-Copy field later) into a declaration-site error.
+
+### `@mark(affine)`
+
+Suppresses Copy inference. A type whose members would otherwise infer Copy is forced to remain Affine, so move-on-use semantics are preserved even when bitwise duplication is safe. Has no effect on Linear inference: a Linear member still propagates upward.
+
+### `@mark(linear)`
+
+Forces the type to be Linear regardless of member postures. Use when the type has linear semantics that are not visible from its fields (e.g. an `i32` handle that is actually a kernel resource ID).
 

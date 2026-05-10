@@ -72,10 +72,12 @@ exit_code = 33
 
 [[case]]
 name = "vec_linear_drained_dispose"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["7.3:9"]
 description = "Vec of linear elements: drain via pop then dispose"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn consume(m: MustUse) -> i32 {
     m.value
@@ -94,10 +96,12 @@ exit_code = 7
 
 [[case]]
 name = "vec_linear_implicit_drop_rejected"
+preview = "mark_directive"
+preview_should_pass = true
 spec = ["7.3:9"]
 description = "Vec(T:Linear) cannot be implicitly dropped at end of scope"
 source = """
-linear struct MustUse { value: i32 }
+@mark(linear) struct MustUse { value: i32 }
 
 fn main() -> i32 {
     let _v: Vec(MustUse) = Vec(MustUse)::new();

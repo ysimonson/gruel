@@ -343,7 +343,7 @@ name = "vec_eq_struct_element"
 spec = ["7.3:10"]
 description = "ADR-0082: `Vec(T).eq` requires `T: Eq` (the prelude body dispatches `==` on each element). Pre-prelude semantics used byte-level `memcmp` on aggregates, which masked the requirement and let users compare `Vec(Pair)` for a Copy struct without an `Eq` impl. The prelude flip surfaces the requirement explicitly. A `Pair` with explicit `eq` and `cmp` methods (matching `Eq` / `Ord`'s structural shape) does compare correctly — see `vec_eq_struct_element_with_eq` below."
 source = """
-copy struct Pair { x: i32, y: i32 }
+struct Pair { x: i32, y: i32 }
 
 fn main() -> i32 {
     let a = @vec(Pair { x: 1, y: 2 }, Pair { x: 3, y: 4 });

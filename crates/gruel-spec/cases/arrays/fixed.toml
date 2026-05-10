@@ -664,7 +664,7 @@ name = "array_of_copy_struct_read"
 spec = ["7.1:26"]
 description = "Array of @derive(Copy) struct allows multiple element reads"
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     let arr: [Point; 2] = [Point { x: 10, y: 20 }, Point { x: 5, y: 7 }];
@@ -683,7 +683,7 @@ exit_code = 25
 name = "array_of_structs_field_access"
 spec = ["7.1:6", "6.2:8"]
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     let arr: [Point; 2] = [Point { x: 10, y: 20 }, Point { x: 5, y: 7 }];
@@ -696,7 +696,7 @@ exit_code = 10
 name = "array_of_structs_field_access_second_element"
 spec = ["7.1:6", "6.2:8"]
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     let arr: [Point; 2] = [Point { x: 10, y: 20 }, Point { x: 5, y: 7 }];
@@ -709,7 +709,7 @@ exit_code = 7
 name = "array_of_structs_sum_fields"
 spec = ["7.1:6", "6.2:8"]
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     let arr: [Point; 2] = [Point { x: 10, y: 20 }, Point { x: 5, y: 7 }];
@@ -722,7 +722,7 @@ exit_code = 42
 name = "array_of_structs_variable_index"
 spec = ["7.1:6", "7.1:10", "6.2:8"]
 source = """
-copy struct Point { x: i32, y: i32 }
+struct Point { x: i32, y: i32 }
 
 fn main() -> i32 {
     let arr: [Point; 2] = [Point { x: 10, y: 20 }, Point { x: 5, y: 7 }];
