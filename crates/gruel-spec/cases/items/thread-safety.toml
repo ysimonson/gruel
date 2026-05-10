@@ -71,6 +71,34 @@ fn main() -> i32 { 0 }
 exit_code = 0
 
 [[case]]
+name = "struct_of_primitives_can_be_marked_checked_sync"
+spec = ["3.15:5"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: a struct whose fields are all primitives infers Sync via the structural minimum; @mark(checked_sync) is accepted (redundant but legal — see Decision § Inference, no diagnostic on legitimate downgrades / matches)."
+source = """
+@mark(checked_sync) struct Vector3 { x: i32, y: i32, z: i32 }
+fn main() -> i32 {
+    let v = Vector3 { x: 1, y: 2, z: 3 };
+    v.x + v.y + v.z
+}
+"""
+exit_code = 6
+
+[[case]]
+name = "nested_struct_with_ptr_can_be_marked_checked_send"
+spec = ["3.15:5"]
+preview = "thread_safety"
+preview_should_pass = true
+description = "ADR-0084: structural minimum propagates through nested struct fields; the outer struct's marker overrides the inferred Unsend."
+source = """
+struct Inner { ptr: MutPtr(u8) }
+@mark(checked_send) struct Outer { tag: i32, inner: Inner }
+fn main() -> i32 { 0 }
+"""
+exit_code = 0
+
+[[case]]
 name = "checked_send_on_primitive_struct"
 spec = ["3.15:1", "3.15:3"]
 preview = "thread_safety"

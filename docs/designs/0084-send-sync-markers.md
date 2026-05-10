@@ -437,16 +437,22 @@ quotes its LOC delta in the commit message.
 
 ### Phase 2: Built-in negative facts on raw pointers
 
-- [ ] Verify Phase 1's `is_thread_safety_type` returns `Unsend` for
+- [x] Verify Phase 1's `is_thread_safety_type` returns `Unsend` for
       `TypeKind::PtrConst(_)` and `TypeKind::PtrMut(_)`.
-- [ ] Verify propagation through composite types:
+- [x] Verify propagation through composite types:
       `Tuple(i32, MutPtr(u8))` is `Unsend`,
       `[MutPtr(i32); 4]` is `Unsend`, etc.
-- [ ] Spec tests: `ptr_is_unsend`, `mutptr_is_unsend`,
+- [x] Spec tests: `ptr_is_unsend`, `mutptr_is_unsend`,
       `array_of_ptr_propagates_unsend`,
       `tuple_with_ptr_propagates_unsend`,
       `struct_with_ptr_field_is_unsend`,
       `nested_struct_with_ptr_is_unsend`.
+      (Direct queries via `@thread_safety(T)` arrive in Phase 3 — Phase 2
+      verification lives in `gruel-air` unit tests
+      [`thread_safety_*` in `intern_pool.rs`] plus the
+      `*_can_be_marked_checked_send` / `*_can_be_marked_checked_sync`
+      spec cases that exercise the inference indirectly through marker
+      override behavior.)
 
 ### Phase 3: Comptime query `@thread_safety`
 

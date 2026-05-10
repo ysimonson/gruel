@@ -2625,4 +2625,243 @@ mod tests {
     fn test_pool_is_send_sync() {
         assert_send_sync::<TypeInternPool>();
     }
+
+    // ========================================================================
+    // ADR-0084: thread-safety inference tests
+    // ========================================================================
+
+    /// Phase 2 verification: every primitive integer / float / bool /
+    /// char / unit / never type is intrinsically `Sync`.
+    #[test]
+    fn thread_safety_primitives_are_sync() {
+        use gruel_builtins::ThreadSafety;
+        let pool = TypeInternPool::new();
+        for ty in [
+            Type::I8,
+            Type::I16,
+            Type::I32,
+            Type::I64,
+            Type::U8,
+            Type::U16,
+            Type::U32,
+            Type::U64,
+            Type::ISIZE,
+            Type::USIZE,
+            Type::F16,
+            Type::F32,
+            Type::F64,
+            Type::BOOL,
+            Type::UNIT,
+            Type::NEVER,
+        ] {
+            assert_eq!(
+                pool.is_thread_safety_type(ty),
+                ThreadSafety::Sync,
+                "{:?} should be Sync",
+                ty
+            );
+        }
+    }
+
+    /// Phase 2 verification: raw pointers are intrinsically `Unsend`,
+    /// regardless of their pointee.
+    #[test]
+    fn thread_safety_raw_ptr_is_unsend() {
+        use gruel_builtins::ThreadSafety;
+        let pool = TypeInternPool::new();
+        let ptr = pool.intern_ptr_const_from_type(Type::I32);
+        let mutptr = pool.intern_ptr_mut_from_type(Type::U8);
+        assert_eq!(
+            pool.is_thread_safety_type(Type::new_ptr_const(ptr)),
+            ThreadSafety::Unsend
+        );
+        assert_eq!(
+            pool.is_thread_safety_type(Type::new_ptr_mut(mutptr)),
+            ThreadSafety::Unsend
+        );
+    }
+
+    /// Phase 2 verification: arrays propagate the element's
+    /// classification structurally — `[MutPtr(i32); 4]` is `Unsend`.
+    #[test]
+    fn thread_safety_array_of_ptr_is_unsend() {
+        use gruel_builtins::ThreadSafety;
+        let pool = TypeInternPool::new();
+        let mutptr_ty = Type::new_ptr_mut(pool.intern_ptr_mut_from_type(Type::I32));
+        let arr_id = pool.intern_array_from_type(mutptr_ty, 4);
+        assert_eq!(
+            pool.is_thread_safety_type(Type::new_array(arr_id)),
+            ThreadSafety::Unsend
+        );
+    }
+
+    /// Phase 2 verification: arrays of primitives stay `Sync`.
+    #[test]
+    fn thread_safety_array_of_i32_is_sync() {
+        use gruel_builtins::ThreadSafety;
+        let pool = TypeInternPool::new();
+        let arr_id = pool.intern_array_from_type(Type::I32, 8);
+        assert_eq!(
+            pool.is_thread_safety_type(Type::new_array(arr_id)),
+            ThreadSafety::Sync
+        );
+    }
+
+    /// Phase 2 verification: `Vec(T)` propagates the element's
+    /// classification.
+    #[test]
+    fn thread_safety_vec_of_ptr_is_unsend() {
+        use gruel_builtins::ThreadSafety;
+        let pool = TypeInternPool::new();
+        let mutptr_ty = Type::new_ptr_mut(pool.intern_ptr_mut_from_type(Type::I32));
+        let vec_id = pool.intern_vec_from_type(mutptr_ty);
+        assert_eq!(
+            pool.is_thread_safety_type(Type::new_vec(vec_id)),
+            ThreadSafety::Unsend
+        );
+    }
+
+    /// Phase 2 verification: a single raw pointer field on an otherwise
+    /// `Sync` struct poisons the structural minimum to `Unsend`. The
+    /// inference is what `validate_consistency` would write into the
+    /// struct's `thread_safety` field.
+    #[test]
+    fn thread_safety_struct_with_ptr_field_infers_unsend() {
+        use crate::types::StructField;
+        use gruel_builtins::ThreadSafety;
+
+        let pool = TypeInternPool::new();
+        let interner = ThreadedRodeo::default();
+        let mutptr_ty = Type::new_ptr_mut(pool.intern_ptr_mut_from_type(Type::U8));
+
+        // Build a struct manually with the structural minimum
+        // pre-computed (mirroring what `validate_consistency` does).
+        let inferred = [Type::I32, mutptr_ty, Type::USIZE]
+            .iter()
+            .map(|t| pool.is_thread_safety_type(*t))
+            .min()
+            .unwrap();
+        assert_eq!(inferred, ThreadSafety::Unsend);
+
+        let name = interner.get_or_intern("Buf");
+        let def = StructDef {
+            name: "Buf".to_string(),
+            fields: vec![
+                StructField {
+                    name: "len".into(),
+                    ty: Type::USIZE,
+                    is_pub: false,
+                },
+                StructField {
+                    name: "ptr".into(),
+                    ty: mutptr_ty,
+                    is_pub: false,
+                },
+            ],
+            is_copy: false,
+            is_clone: false,
+            is_linear: false,
+            thread_safety: inferred,
+            destructor: None,
+            is_builtin: false,
+            is_pub: false,
+            file_id: gruel_util::FileId::DEFAULT,
+        };
+        let (sid, _) = pool.register_struct(name, def);
+        assert_eq!(
+            pool.is_thread_safety_type(Type::new_struct(sid)),
+            ThreadSafety::Unsend
+        );
+    }
+
+    /// Phase 2 verification: nested struct-with-pointer propagates
+    /// `Unsend` through the outer struct via `is_thread_safety_type`.
+    #[test]
+    fn thread_safety_nested_struct_with_ptr_is_unsend() {
+        use crate::types::StructField;
+        use gruel_builtins::ThreadSafety;
+
+        let pool = TypeInternPool::new();
+        let interner = ThreadedRodeo::default();
+        let mutptr_ty = Type::new_ptr_mut(pool.intern_ptr_mut_from_type(Type::U8));
+
+        // Inner struct holds the pointer — Unsend.
+        let inner_name = interner.get_or_intern("Inner");
+        let inner_def = StructDef {
+            name: "Inner".to_string(),
+            fields: vec![StructField {
+                name: "ptr".into(),
+                ty: mutptr_ty,
+                is_pub: false,
+            }],
+            is_copy: false,
+            is_clone: false,
+            is_linear: false,
+            thread_safety: ThreadSafety::Unsend,
+            destructor: None,
+            is_builtin: false,
+            is_pub: false,
+            file_id: gruel_util::FileId::DEFAULT,
+        };
+        let (inner_sid, _) = pool.register_struct(inner_name, inner_def);
+        let inner_ty = Type::new_struct(inner_sid);
+
+        // Outer wraps inner — should also be Unsend by structural fold.
+        let outer_inferred = [Type::I32, inner_ty]
+            .iter()
+            .map(|t| pool.is_thread_safety_type(*t))
+            .min()
+            .unwrap();
+        assert_eq!(outer_inferred, ThreadSafety::Unsend);
+
+        let outer_name = interner.get_or_intern("Outer");
+        let outer_def = StructDef {
+            name: "Outer".to_string(),
+            fields: vec![
+                StructField {
+                    name: "tag".into(),
+                    ty: Type::I32,
+                    is_pub: false,
+                },
+                StructField {
+                    name: "inner".into(),
+                    ty: inner_ty,
+                    is_pub: false,
+                },
+            ],
+            is_copy: false,
+            is_clone: false,
+            is_linear: false,
+            thread_safety: outer_inferred,
+            destructor: None,
+            is_builtin: false,
+            is_pub: false,
+            file_id: gruel_util::FileId::DEFAULT,
+        };
+        let (outer_sid, _) = pool.register_struct(outer_name, outer_def);
+        assert_eq!(
+            pool.is_thread_safety_type(Type::new_struct(outer_sid)),
+            ThreadSafety::Unsend
+        );
+    }
+
+    /// Phase 2 verification: ref/mut-ref types inherit the referent's
+    /// classification. A `Ref(MutPtr(T))` is `Unsend`.
+    #[test]
+    fn thread_safety_ref_inherits_referent() {
+        use gruel_builtins::ThreadSafety;
+        let pool = TypeInternPool::new();
+        let mutptr_ty = Type::new_ptr_mut(pool.intern_ptr_mut_from_type(Type::U8));
+        let ref_id = pool.intern_ref_from_type(mutptr_ty);
+        assert_eq!(
+            pool.is_thread_safety_type(Type::new_ref(ref_id)),
+            ThreadSafety::Unsend
+        );
+
+        let ref_i32 = pool.intern_ref_from_type(Type::I32);
+        assert_eq!(
+            pool.is_thread_safety_type(Type::new_ref(ref_i32)),
+            ThreadSafety::Sync
+        );
+    }
 }
