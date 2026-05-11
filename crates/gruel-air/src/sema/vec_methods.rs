@@ -179,6 +179,18 @@ impl<'a> Sema<'a> {
         // diagnostic. Gate at dispatch so the user-visible error is the
         // one the spec calls for. Future work (per-element clone
         // synthesis) will lift these gates.
+        //
+        // Why this can't live in `prelude/vec.gruel` as a `comptime if
+        // @ownership(T) != Copy { @compile_error }` guard: prelude
+        // struct methods that mention `T` in their signature are
+        // eagerly monomorphized per-T at struct instantiation, so an
+        // `@compile_error` in the body fires for every `Vec(String)`
+        // / `Vec(Token)` — even when the method is never called.
+        // The body-shape specialization in `vec_drop_impl` /
+        // `vec_clear_impl` / `vec_index_write_impl` uses `comptime if
+        // @ownership(T) == Affine { ... }`, which is safe to evaluate
+        // eagerly: the branch only swaps machinery in, it doesn't
+        // tripwire compilation.
         if matches!(
             method_name,
             "clone"
@@ -459,19 +471,29 @@ impl<'a> Sema<'a> {
             ));
         }
         // ADR-0082: route `v[i] = x` through the prelude struct's
-        // `index_write(i, x)` method. The prelude struct always has
-        // the method registered for any Vec(T).
-        let result = self
-            .try_emit_prelude_index_call(
-                air,
-                base_res,
-                elem_ty,
-                "index_write",
-                &[index_res, value_res],
-                Type::UNIT,
+        // `index_write(i, x)` method. For `T: Linear` the prelude
+        // struct's branch omits `index_write` (assignment to a slot
+        // would implicitly drop the displaced linear element); surface
+        // that as `UndefinedMethod` rather than panicking so the user
+        // sees the same shape as `v.clear()` on a linear `T`.
+        let Some(result) = self.try_emit_prelude_index_call(
+            air,
+            base_res,
+            elem_ty,
+            "index_write",
+            &[index_res, value_res],
+            Type::UNIT,
+            span,
+        )?
+        else {
+            return Err(CompileError::new(
+                ErrorKind::UndefinedMethod {
+                    type_name: self.format_type_name(base_res.ty),
+                    method_name: "index_write".to_string(),
+                },
                 span,
-            )?
-            .expect("Vec index_write: prelude method must be registered");
+            ));
+        };
         Ok(Some(result))
     }
 

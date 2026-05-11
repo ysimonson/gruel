@@ -1,12 +1,36 @@
 // ADR-0066 + ADR-0082 + ADR-0084: owned, growable vector — { ptr, len, cap }.
 //
-// Thread-safety (ADR-0084): the marker on the produced struct is
-// chosen by `comptime if @thread_safety(T)`. The same body works for
-// `Sync` / `Send` / `Unsend` `T` because every method delegates to a
-// module-level helper; the in-struct definitions are slim forwarders
-// that just plumb `Self` and `T` through, so adding a new posture
-// branch is one extra `else if` arm of forwarders, not three more
-// copies of every algorithm.
+// The produced struct is selected by a nested `comptime if` on
+// `@thread_safety(T)` × `@ownership(T)` — 3 × 3 = 9 branches. Each
+// combination picks a thread-safety marker and exposes only the
+// methods that are sound for that combination of postures:
+//
+//   - `Copy` T:    full method set (clone, eq, cmp, byte-search, …).
+//   - `Affine` T:  common + `clear` / `index_write`; no Copy-only methods.
+//   - `Linear` T:  common only — no `clear` / `index_write` (would
+//                  implicitly drop linear elements), no Copy-only
+//                  methods.
+//
+// Method bodies still go through the `vec_*_impl` helpers below, which
+// retain a `comptime if @ownership(T) == Affine` guard for the
+// drop / clear / index_write paths so the per-element loop is elided
+// for Copy `T` (dead read) and Linear `T` (unreachable under
+// linear-discipline). The struct subsetting decides whether the
+// method exists at all; the helpers decide what its body does.
+//
+// Thread-safety (ADR-0084): the marker chosen for each branch is
+// `checked_sync` / `checked_send` / `unsend`. Without these
+// overrides, structural inference over `MutPtr(T)` would default to
+// `Unsend` regardless of `T`, defeating the point of inheriting the
+// posture from `T`.
+//
+// Ownership (ADR-0008 / ADR-0067 / ADR-0080): `Vec(T)` is always
+// affine at the marker level (`is_type_copy` hardcodes
+// `TypeKind::Vec(_) => false` in `gruel-air/src/sema/typeck.rs`).
+// Linearity of `Vec(T:Linear)` is propagated via
+// `is_type_linear`'s `TypeKind::Vec(elem)` arm in
+// `gruel-air/src/intern_pool.rs`, not via the prelude struct's
+// `is_linear` flag.
 //
 // `@lang("vec")` binds this declaration to the compiler's vec
 // recognition (drop synthesis, indexing `v[i]`, slice borrow `&v[..]`).
@@ -73,10 +97,16 @@ fn vec_pop_impl(comptime VecT: type, comptime T: type, v: MutRef(VecT)) -> T {
 }
 
 fn vec_clear_impl(comptime VecT: type, comptime T: type, v: MutRef(VecT)) {
-    let mut i: usize = 0;
-    while i < v.len {
-        let _: T = checked { v.ptr.offset(i).read() };
-        i = i + 1;
+    // Copy T has no destructors to invoke; Linear T cannot be
+    // implicitly dropped (the caller would have already hit the
+    // linear-discipline check). Only Affine T needs the per-element
+    // read-and-drop loop.
+    comptime if @ownership(T) == Ownership::Affine {
+        let mut i: usize = 0;
+        while i < v.len {
+            let _: T = checked { v.ptr.offset(i).read() };
+            i = i + 1;
+        }
     }
     v.len = 0;
 }
@@ -138,6 +168,12 @@ fn vec_index_write_impl(
     if i >= v.len {
         @panic("Vec index out of bounds");
     }
+    comptime if @ownership(T) == Ownership::Affine {
+        // Read the displaced element so its destructor runs at scope
+        // exit before the function returns; the new value's bytes
+        // overwrite the slot via the unchecked write below.
+        let _displaced: T = checked { v.ptr.offset(i).read() };
+    }
     checked { v.ptr.offset(i).write(value) };
 }
 
@@ -176,10 +212,18 @@ fn vec_dispose_impl(comptime VecT: type, comptime T: type, v: VecT) {
 }
 
 fn vec_drop_impl(comptime VecT: type, comptime T: type, v: VecT) {
-    let mut i: usize = 0;
-    while i < v.len {
-        let _: T = checked { v.ptr.offset(i).read() };
-        i = i + 1;
+    // Copy T has no per-element destructor — skip the loop.
+    // Linear T should never reach here under linear discipline (the
+    // checker rejects implicit drops of Vec(T:Linear) at the use
+    // site); we omit the loop both because it would silently leak
+    // elements at runtime and because the body must still type-check
+    // for every `T` the prelude struct is instantiated with.
+    comptime if @ownership(T) == Ownership::Affine {
+        let mut i: usize = 0;
+        while i < v.len {
+            let _: T = checked { v.ptr.offset(i).read() };
+            i = i + 1;
+        }
     }
     if v.cap != 0 {
         let elem_size: usize = @size_of(T);
@@ -372,168 +416,336 @@ fn vec_extend_from_slice_impl(
 @lang("vec")
 pub fn Vec(comptime T: type) -> type {
     comptime if @thread_safety(T) == ThreadSafety::Sync {
-        @mark(checked_sync) struct {
-            ptr: MutPtr(T),
-            len: usize,
-            cap: usize,
+        comptime if @ownership(T) == Ownership::Copy {
+            @mark(checked_sync) struct {
+                ptr: MutPtr(T),
+                len: usize,
+                cap: usize,
 
-            pub fn new() -> Self { vec_new_impl(Self, T) }
-            pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
+                pub fn new() -> Self { vec_new_impl(Self, T) }
+                pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
 
-            pub fn len(self: Ref(Self)) -> usize { self.len }
-            pub fn capacity(self: Ref(Self)) -> usize { self.cap }
-            pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
+                pub fn len(self: Ref(Self)) -> usize { self.len }
+                pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+                pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
 
-            pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
-            pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
-            pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
-            pub fn reserve(self: MutRef(Self), additional: usize) {
-                vec_reserve_impl(Self, T, self, additional)
+                pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+                pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+                pub fn reserve(self: MutRef(Self), additional: usize) {
+                    vec_reserve_impl(Self, T, self, additional)
+                }
+                pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
+
+                pub fn index_read(self: Ref(Self), i: usize) -> T {
+                    vec_index_read_impl(Self, T, self, i)
+                }
+                pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+                    vec_index_write_impl(Self, T, self, i, value)
+                }
+
+                pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+                pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+                pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
+                    vec_terminated_ptr_impl(Self, T, self, s)
+                }
+
+                pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+
+                pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
+                pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
+                pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering { vec_cmp_impl(Self, T, self, other) }
+
+                pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
+                    vec_contains_impl(Self, T, self, needle)
+                }
+                pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
+                    vec_starts_with_impl(Self, T, self, prefix)
+                }
+                pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
+                    vec_ends_with_impl(Self, T, self, suffix)
+                }
+                pub fn concat(self, other: Slice(T)) -> Self { vec_concat_impl(Self, T, self, other) }
+                pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
+                    vec_extend_from_slice_impl(Self, T, self, other)
+                }
             }
+        } else if @ownership(T) == Ownership::Affine {
+            @mark(checked_sync) struct {
+                ptr: MutPtr(T),
+                len: usize,
+                cap: usize,
 
-            pub fn index_read(self: Ref(Self), i: usize) -> T {
-                vec_index_read_impl(Self, T, self, i)
-            }
-            pub fn index_write(self: MutRef(Self), i: usize, value: T) {
-                vec_index_write_impl(Self, T, self, i, value)
-            }
+                pub fn new() -> Self { vec_new_impl(Self, T) }
+                pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
 
-            pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
-            pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+                pub fn len(self: Ref(Self)) -> usize { self.len }
+                pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+                pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
 
-            pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
-                vec_terminated_ptr_impl(Self, T, self, s)
-            }
+                pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+                pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+                pub fn reserve(self: MutRef(Self), additional: usize) {
+                    vec_reserve_impl(Self, T, self, additional)
+                }
+                pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
 
-            pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-            pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+                    vec_index_write_impl(Self, T, self, i, value)
+                }
 
-            pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
-            pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
-            pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering { vec_cmp_impl(Self, T, self, other) }
+                pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+                pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
-            pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
-                vec_contains_impl(Self, T, self, needle)
+                pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+                pub fn drop(self) { vec_drop_impl(Self, T, self) }
             }
-            pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
-                vec_starts_with_impl(Self, T, self, prefix)
-            }
-            pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
-                vec_ends_with_impl(Self, T, self, suffix)
-            }
-            pub fn concat(self, other: Slice(T)) -> Self { vec_concat_impl(Self, T, self, other) }
-            pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
-                vec_extend_from_slice_impl(Self, T, self, other)
+        } else {
+            @mark(checked_sync) struct {
+                ptr: MutPtr(T),
+                len: usize,
+                cap: usize,
+
+                pub fn new() -> Self { vec_new_impl(Self, T) }
+                pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
+
+                pub fn len(self: Ref(Self)) -> usize { self.len }
+                pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+                pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
+
+                pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+                pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+                pub fn reserve(self: MutRef(Self), additional: usize) {
+                    vec_reserve_impl(Self, T, self, additional)
+                }
+
+                pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+                pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+
+                pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+                pub fn drop(self) { vec_drop_impl(Self, T, self) }
             }
         }
     } else if @thread_safety(T) == ThreadSafety::Send {
-        @mark(checked_send) struct {
-            ptr: MutPtr(T),
-            len: usize,
-            cap: usize,
+        comptime if @ownership(T) == Ownership::Copy {
+            @mark(checked_send) struct {
+                ptr: MutPtr(T),
+                len: usize,
+                cap: usize,
 
-            pub fn new() -> Self { vec_new_impl(Self, T) }
-            pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
+                pub fn new() -> Self { vec_new_impl(Self, T) }
+                pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
 
-            pub fn len(self: Ref(Self)) -> usize { self.len }
-            pub fn capacity(self: Ref(Self)) -> usize { self.cap }
-            pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
+                pub fn len(self: Ref(Self)) -> usize { self.len }
+                pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+                pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
 
-            pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
-            pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
-            pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
-            pub fn reserve(self: MutRef(Self), additional: usize) {
-                vec_reserve_impl(Self, T, self, additional)
+                pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+                pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+                pub fn reserve(self: MutRef(Self), additional: usize) {
+                    vec_reserve_impl(Self, T, self, additional)
+                }
+                pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
+
+                pub fn index_read(self: Ref(Self), i: usize) -> T {
+                    vec_index_read_impl(Self, T, self, i)
+                }
+                pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+                    vec_index_write_impl(Self, T, self, i, value)
+                }
+
+                pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+                pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+                pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
+                    vec_terminated_ptr_impl(Self, T, self, s)
+                }
+
+                pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+
+                pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
+                pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
+                pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering { vec_cmp_impl(Self, T, self, other) }
+
+                pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
+                    vec_contains_impl(Self, T, self, needle)
+                }
+                pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
+                    vec_starts_with_impl(Self, T, self, prefix)
+                }
+                pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
+                    vec_ends_with_impl(Self, T, self, suffix)
+                }
+                pub fn concat(self, other: Slice(T)) -> Self { vec_concat_impl(Self, T, self, other) }
+                pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
+                    vec_extend_from_slice_impl(Self, T, self, other)
+                }
             }
+        } else if @ownership(T) == Ownership::Affine {
+            @mark(checked_send) struct {
+                ptr: MutPtr(T),
+                len: usize,
+                cap: usize,
 
-            pub fn index_read(self: Ref(Self), i: usize) -> T {
-                vec_index_read_impl(Self, T, self, i)
-            }
-            pub fn index_write(self: MutRef(Self), i: usize, value: T) {
-                vec_index_write_impl(Self, T, self, i, value)
-            }
+                pub fn new() -> Self { vec_new_impl(Self, T) }
+                pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
 
-            pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
-            pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+                pub fn len(self: Ref(Self)) -> usize { self.len }
+                pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+                pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
 
-            pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
-                vec_terminated_ptr_impl(Self, T, self, s)
-            }
+                pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+                pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+                pub fn reserve(self: MutRef(Self), additional: usize) {
+                    vec_reserve_impl(Self, T, self, additional)
+                }
+                pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
 
-            pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-            pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+                    vec_index_write_impl(Self, T, self, i, value)
+                }
 
-            pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
-            pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
-            pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering { vec_cmp_impl(Self, T, self, other) }
+                pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+                pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
-            pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
-                vec_contains_impl(Self, T, self, needle)
+                pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+                pub fn drop(self) { vec_drop_impl(Self, T, self) }
             }
-            pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
-                vec_starts_with_impl(Self, T, self, prefix)
-            }
-            pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
-                vec_ends_with_impl(Self, T, self, suffix)
-            }
-            pub fn concat(self, other: Slice(T)) -> Self { vec_concat_impl(Self, T, self, other) }
-            pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
-                vec_extend_from_slice_impl(Self, T, self, other)
+        } else {
+            @mark(checked_send) struct {
+                ptr: MutPtr(T),
+                len: usize,
+                cap: usize,
+
+                pub fn new() -> Self { vec_new_impl(Self, T) }
+                pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
+
+                pub fn len(self: Ref(Self)) -> usize { self.len }
+                pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+                pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
+
+                pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+                pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+                pub fn reserve(self: MutRef(Self), additional: usize) {
+                    vec_reserve_impl(Self, T, self, additional)
+                }
+
+                pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+                pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+
+                pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+                pub fn drop(self) { vec_drop_impl(Self, T, self) }
             }
         }
     } else {
-        @mark(unsend) struct {
-            ptr: MutPtr(T),
-            len: usize,
-            cap: usize,
+        comptime if @ownership(T) == Ownership::Copy {
+            @mark(unsend) struct {
+                ptr: MutPtr(T),
+                len: usize,
+                cap: usize,
 
-            pub fn new() -> Self { vec_new_impl(Self, T) }
-            pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
+                pub fn new() -> Self { vec_new_impl(Self, T) }
+                pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
 
-            pub fn len(self: Ref(Self)) -> usize { self.len }
-            pub fn capacity(self: Ref(Self)) -> usize { self.cap }
-            pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
+                pub fn len(self: Ref(Self)) -> usize { self.len }
+                pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+                pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
 
-            pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
-            pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
-            pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
-            pub fn reserve(self: MutRef(Self), additional: usize) {
-                vec_reserve_impl(Self, T, self, additional)
+                pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+                pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+                pub fn reserve(self: MutRef(Self), additional: usize) {
+                    vec_reserve_impl(Self, T, self, additional)
+                }
+                pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
+
+                pub fn index_read(self: Ref(Self), i: usize) -> T {
+                    vec_index_read_impl(Self, T, self, i)
+                }
+                pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+                    vec_index_write_impl(Self, T, self, i, value)
+                }
+
+                pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+                pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+                pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
+                    vec_terminated_ptr_impl(Self, T, self, s)
+                }
+
+                pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+
+                pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
+                pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
+                pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering { vec_cmp_impl(Self, T, self, other) }
+
+                pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
+                    vec_contains_impl(Self, T, self, needle)
+                }
+                pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
+                    vec_starts_with_impl(Self, T, self, prefix)
+                }
+                pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
+                    vec_ends_with_impl(Self, T, self, suffix)
+                }
+                pub fn concat(self, other: Slice(T)) -> Self { vec_concat_impl(Self, T, self, other) }
+                pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
+                    vec_extend_from_slice_impl(Self, T, self, other)
+                }
             }
+        } else if @ownership(T) == Ownership::Affine {
+            @mark(unsend) struct {
+                ptr: MutPtr(T),
+                len: usize,
+                cap: usize,
 
-            pub fn index_read(self: Ref(Self), i: usize) -> T {
-                vec_index_read_impl(Self, T, self, i)
-            }
-            pub fn index_write(self: MutRef(Self), i: usize, value: T) {
-                vec_index_write_impl(Self, T, self, i, value)
-            }
+                pub fn new() -> Self { vec_new_impl(Self, T) }
+                pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
 
-            pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
-            pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+                pub fn len(self: Ref(Self)) -> usize { self.len }
+                pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+                pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
 
-            pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
-                vec_terminated_ptr_impl(Self, T, self, s)
-            }
+                pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+                pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+                pub fn reserve(self: MutRef(Self), additional: usize) {
+                    vec_reserve_impl(Self, T, self, additional)
+                }
+                pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
 
-            pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-            pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+                    vec_index_write_impl(Self, T, self, i, value)
+                }
 
-            pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
-            pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
-            pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering { vec_cmp_impl(Self, T, self, other) }
+                pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+                pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
-            pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
-                vec_contains_impl(Self, T, self, needle)
+                pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+                pub fn drop(self) { vec_drop_impl(Self, T, self) }
             }
-            pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
-                vec_starts_with_impl(Self, T, self, prefix)
-            }
-            pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
-                vec_ends_with_impl(Self, T, self, suffix)
-            }
-            pub fn concat(self, other: Slice(T)) -> Self { vec_concat_impl(Self, T, self, other) }
-            pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
-                vec_extend_from_slice_impl(Self, T, self, other)
+        } else {
+            @mark(unsend) struct {
+                ptr: MutPtr(T),
+                len: usize,
+                cap: usize,
+
+                pub fn new() -> Self { vec_new_impl(Self, T) }
+                pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
+
+                pub fn len(self: Ref(Self)) -> usize { self.len }
+                pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+                pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
+
+                pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+                pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+                pub fn reserve(self: MutRef(Self), additional: usize) {
+                    vec_reserve_impl(Self, T, self, additional)
+                }
+
+                pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+                pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+
+                pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+                pub fn drop(self) { vec_drop_impl(Self, T, self) }
             }
         }
     }

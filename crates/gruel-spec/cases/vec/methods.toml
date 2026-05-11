@@ -209,6 +209,51 @@ fn main() -> i32 {
 compile_fail = true
 error_contains = "Vec(T).clone() requires T: Copy"
 
+# The Linear-T struct branch in prelude/vec.gruel omits `clear` —
+# clearing would implicitly drop the linear elements, which the
+# discipline forbids. The dispatcher surfaces this as
+# `UndefinedMethod` ("no method named 'clear' found for type
+# 'Vec(...)'") rather than letting the helper silently set len=0.
+[[case]]
+name = "vec_clear_linear_rejected"
+spec = ["7.3:9"]
+description = "Vec(T:Linear).clear() is not provided — would implicitly drop linear elements"
+source = """
+@mark(linear) struct Token { id: i32 }
+
+fn main() -> i32 {
+    let mut v: Vec(Token) = Vec(Token)::new();
+    v.clear();
+    v.dispose();
+    0
+}
+"""
+compile_fail = true
+error_contains = "no method named 'clear'"
+
+# Same for `v[i] = x` on `Vec(T:Linear)` — assignment would
+# implicitly drop the displaced element. The Linear-T struct branch
+# omits `index_write`; `try_analyze_vec_index_write` surfaces the
+# absence as `UndefinedMethod`.
+[[case]]
+name = "vec_index_write_linear_rejected"
+spec = ["7.3:9"]
+description = "Vec(T:Linear)[i] = x is not provided — would implicitly drop the displaced linear element"
+source = """
+@mark(linear) struct Token { id: i32 }
+
+fn main() -> i32 {
+    let mut v: Vec(Token) = Vec(Token)::new();
+    v.push(Token { id: 1 });
+    v[0] = Token { id: 99 };
+    let _t = v.pop();
+    v.dispose();
+    0
+}
+"""
+compile_fail = true
+error_contains = "no method named 'index_write'"
+
 [[case]]
 name = "vec_string_drop"
 spec = ["7.3:7"]

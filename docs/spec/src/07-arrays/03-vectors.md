@@ -136,8 +136,12 @@ the buffer.
 
 `Vec(T:Linear)::clone` is rejected because linear values do not conform
 to the `Clone` interface (cloning would create a second linear
-obligation). `@vec(...)` and `@vec_repeat(...)` likewise reject linear
-element types.
+obligation). `Vec(T:Linear)::clear` and `v[i] = x` for `Vec(T:Linear)`
+are likewise rejected: both implicitly drop the displaced or cleared
+linear element. The prelude struct produced for `Vec(T:Linear)` omits
+these methods, so the dispatcher reports them as undefined.
+`@vec(...)` and `@vec_repeat(...)` likewise reject linear element
+types.
 
 ## Byte-comparison and search methods
 
