@@ -2672,9 +2672,8 @@ pub enum InstData {
         directives_len: u32,
         /// Whether this struct is public (requires --preview modules)
         is_pub: bool,
-        /// Declared ownership posture (ADR-0080). `Affine` when no
-        /// `copy`/`linear` qualifier is present and no `@mark(...)`
-        /// directive has been processed yet.
+        /// Declared ownership posture (ADR-0080). `Affine` when neither
+        /// `@mark(copy)` nor `@mark(linear)` appears in the directive list.
         posture: Posture,
         /// Struct name
         name: Spur,
@@ -2727,9 +2726,8 @@ pub enum InstData {
     EnumDecl {
         /// Whether this enum is public (requires --preview modules)
         is_pub: bool,
-        /// Declared ownership posture (ADR-0080). `Affine` when no
-        /// `copy`/`linear` qualifier is present and no `@mark(...)`
-        /// directive has been processed yet.
+        /// Declared ownership posture (ADR-0080). `Affine` when neither
+        /// `@mark(copy)` nor `@mark(linear)` appears in the directive list.
         posture: Posture,
         /// Enum name
         name: Spur,

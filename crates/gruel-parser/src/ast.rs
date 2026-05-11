@@ -126,12 +126,12 @@ pub struct ConstDecl {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StructDecl {
-    /// Directives applied to this struct (e.g., @copy)
+    /// Directives applied to this struct (e.g., `@mark(copy)`, `@derive(...)`)
     pub directives: Directives,
     /// Visibility of this struct
     pub visibility: Visibility,
-    /// Declared ownership posture (ADR-0080). `Affine` when the struct
-    /// keyword has no `copy`/`linear` qualifier.
+    /// Declared ownership posture (ADR-0080). `Affine` when neither
+    /// `@mark(copy)` nor `@mark(linear)` appears in the directive list.
     pub posture: Posture,
     /// Struct name
     pub name: Ident,
@@ -176,8 +176,8 @@ pub struct EnumDecl {
     pub directives: Directives,
     /// Visibility of this enum
     pub visibility: Visibility,
-    /// Declared ownership posture (ADR-0080). `Affine` when the enum
-    /// keyword has no `copy`/`linear` qualifier.
+    /// Declared ownership posture (ADR-0080). `Affine` when neither
+    /// `@mark(copy)` nor `@mark(linear)` appears in the directive list.
     pub posture: Posture,
     /// Enum name
     pub name: Ident,
@@ -432,8 +432,8 @@ pub enum TypeExpr {
         /// Directives applied to the struct expression (e.g., `@derive(...)`,
         /// ADR-0058). Parsed before the `struct` keyword.
         directives: Directives,
-        /// Declared ownership posture (ADR-0080). `Affine` when the struct
-        /// keyword has no `copy`/`linear` qualifier.
+        /// Declared ownership posture (ADR-0080). `Affine` when neither
+        /// `@mark(copy)` nor `@mark(linear)` appears in the directive list.
         posture: Posture,
         /// Field declarations (name and type)
         fields: Vec<AnonStructField>,
@@ -447,8 +447,8 @@ pub enum TypeExpr {
     AnonymousEnum {
         /// Directives applied to the enum expression (ADR-0058).
         directives: Directives,
-        /// Declared ownership posture (ADR-0080). `Affine` when the enum
-        /// keyword has no `copy`/`linear` qualifier.
+        /// Declared ownership posture (ADR-0080). `Affine` when neither
+        /// `@mark(copy)` nor `@mark(linear)` appears in the directive list.
         posture: Posture,
         /// Enum variants
         variants: Vec<EnumVariant>,
@@ -1426,8 +1426,8 @@ fn fmt_struct(f: &mut fmt::Formatter<'_>, s: &StructDecl, level: usize) -> fmt::
         write!(f, "@sym:{} ", directive.name.name.into_usize())?;
     }
     match s.posture {
-        Posture::Copy => write!(f, "copy ")?,
-        Posture::Linear => write!(f, "linear ")?,
+        Posture::Copy => write!(f, "@mark(copy) ")?,
+        Posture::Linear => write!(f, "@mark(linear) ")?,
         Posture::Affine => {}
     }
     writeln!(f, "Struct sym:{}", s.name.name.into_usize())?;

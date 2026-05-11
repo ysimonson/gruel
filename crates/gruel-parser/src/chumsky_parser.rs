@@ -2933,7 +2933,10 @@ where
 }
 
 /// Parser for struct definitions with inline methods:
-/// [@directive]* [pub] [copy | linear] struct Name { field: Type, ... fn method(self) { ... } }
+/// [@directive]* [pub] struct Name { field: Type, ... fn method(self) { ... } }
+///
+/// Posture (`copy`/`linear`/`affine`) is declared via `@mark(...)` in the
+/// leading directive list (ADR-0083 Phase 4); there is no head keyword.
 ///
 /// Fields come first (comma-separated), then methods (no separators needed).
 fn struct_parser<'src, I>() -> GruelParser<'src, I, StructDecl>
@@ -3046,7 +3049,10 @@ where
         .boxed()
 }
 
-/// Parser for enum definitions: [pub] [copy | linear] enum Name { Variant1, Variant2, ... fn method(self) { ... } }
+/// Parser for enum definitions: [@directive]* [pub] enum Name { Variant1, Variant2, ... fn method(self) { ... } }
+///
+/// Posture (`copy`/`linear`/`affine`) is declared via `@mark(...)` in the
+/// leading directive list (ADR-0083 Phase 4); there is no head keyword.
 ///
 /// Variants come first (comma-separated), then methods (no separators needed),
 /// mirroring the struct body shape.

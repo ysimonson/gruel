@@ -516,18 +516,19 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         })
                         .collect();
                     let directives = self.rir.get_directives(*directives_start, *directives_len);
-                    let posture_str = match posture {
-                        Posture::Copy => "copy ",
-                        Posture::Linear => "linear ",
-                        Posture::Affine => "",
+                    let posture_dir = match posture {
+                        Posture::Copy => Some("@mark(copy)"),
+                        Posture::Linear => Some("@mark(linear)"),
+                        Posture::Affine => None,
                     };
-                    let directives_str = if directives.is_empty() {
+                    let mut dir_names: Vec<String> =
+                        posture_dir.into_iter().map(|s| s.to_string()).collect();
+                    for d in directives {
+                        dir_names.push(format!("@{}", self.interner.resolve(&d.name)));
+                    }
+                    let directives_str = if dir_names.is_empty() {
                         String::new()
                     } else {
-                        let dir_names: Vec<String> = directives
-                            .iter()
-                            .map(|d| format!("@{}", self.interner.resolve(&d.name)))
-                            .collect();
                         format!("{} ", dir_names.join(" "))
                     };
                     let methods = self.rir.get_inst_refs(*methods_start, *methods_len);
@@ -540,10 +541,9 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     };
                     writeln!(
                         out,
-                        "{}{}{}struct {} {{ {} }}{}",
+                        "{}{}struct {} {{ {} }}{}",
                         directives_str,
                         pub_str,
-                        posture_str,
                         name_str,
                         fields_str.join(", "),
                         methods_str
@@ -602,8 +602,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
                     let posture_str = match posture {
-                        Posture::Copy => "copy ",
-                        Posture::Linear => "linear ",
+                        Posture::Copy => "@mark(copy) ",
+                        Posture::Linear => "@mark(linear) ",
                         Posture::Affine => "",
                     };
                     let name_str = self.interner.resolve(name);
@@ -650,8 +650,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     writeln!(
                         out,
                         "{}{}enum {} {{ {} }}",
-                        pub_str,
                         posture_str,
+                        pub_str,
                         name_str,
                         body_parts.join(", ")
                     )
