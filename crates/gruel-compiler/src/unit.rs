@@ -541,7 +541,7 @@ impl<'src> CompilationUnit<'src> {
                         // Derives (ADR-0058) are validated in Sema; cross-file
                         // duplicate detection follows the interface model.
                     }
-                    Item::DropFn(_) | Item::Const(_) => {
+                    Item::Const(_) => {
                         // Validated in Sema
                     }
                     Item::Error(_) => {

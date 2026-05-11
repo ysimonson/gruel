@@ -128,11 +128,15 @@ name = "array_of_nontrivial_has_destructor"
 spec = ["3.9:14"]
 description = "Array of non-trivially droppable types has a destructor"
 source = """
-struct Data { value: i32 }
+struct Data {
+    value: i32,
 
-drop fn Data(self) {
-    // destructor body
+    fn drop(self) {
+
+        // destructor body
+    }
 }
+
 
 fn main() -> i32 {
     let arr: [Data; 2] = [Data { value: 1 }, Data { value: 2 }];
@@ -147,11 +151,15 @@ name = "array_drop_order_index_order"
 spec = ["3.9:15"]
 description = "Array elements are dropped in index order (element 0 first)"
 source = """
-struct Data { value: i32 }
+struct Data {
+    value: i32,
 
-drop fn Data(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 fn main() -> i32 {
     let arr: [Data; 3] = [Data { value: 1 }, Data { value: 2 }, Data { value: 3 }];
@@ -169,11 +177,12 @@ source = """
 struct Container {
     x: i32,
     y: i32,
+    fn drop(self) {
+
+        @dbg(self.x);
+    }
 }
 
-drop fn Container(self) {
-    @dbg(self.x);
-}
 
 fn main() -> i32 {
     let arr: [Container; 2] = [Container { x: 10, y: 1 }, Container { x: 20, y: 2 }];
@@ -603,11 +612,15 @@ name = "param_dropped_at_function_exit"
 spec = ["3.9:31"]
 description = "Unconsumed by-value parameter is dropped at function exit"
 source = """
-struct Counter { value: i32 }
+struct Counter {
+    value: i32,
 
-drop fn Counter(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 fn ignore(c: Counter) -> i32 {
     0
@@ -626,11 +639,15 @@ name = "param_not_double_dropped"
 spec = ["3.9:31", "3.9:32"]
 description = "Consumed parameter is not dropped again at function exit"
 source = """
-struct Counter { value: i32 }
+struct Counter {
+    value: i32,
 
-drop fn Counter(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 fn consume(c: Counter) -> i32 { c.value }
 
@@ -647,11 +664,15 @@ name = "caller_does_not_drop_moved_arg"
 spec = ["3.9:32"]
 description = "Caller does not drop a local that was passed to a function"
 source = """
-struct Counter { value: i32 }
+struct Counter {
+    value: i32,
 
-drop fn Counter(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 fn ignore(c: Counter) -> i32 { 0 }
 
@@ -669,11 +690,15 @@ name = "param_returned_not_dropped_in_callee"
 spec = ["3.9:31"]
 description = "Returned parameter is not dropped in callee - caller drops it"
 source = """
-struct Counter { value: i32 }
+struct Counter {
+    value: i32,
 
-drop fn Counter(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 fn pass_through(c: Counter) -> Counter { c }
 
@@ -693,12 +718,14 @@ stdout = "5\n5\n"
 [[case]]
 name = "user_defined_destructor_syntax"
 spec = ["3.9:24", "3.9:25"]
-description = "Basic drop fn syntax parses correctly"
+description = "Basic `fn drop(self)` method parses correctly"
 source = """
-struct Data { value: i32 }
+struct Data {
+    value: i32,
 
-drop fn Data(self) {
-    // destructor body
+    fn drop(self) {
+        // destructor body
+    }
 }
 
 fn main() -> i32 {
@@ -713,11 +740,15 @@ name = "user_defined_destructor_with_field_access"
 spec = ["3.9:24", "3.9:25", "3.9:29"]
 description = "User-defined destructor can access fields via self"
 source = """
-struct Counter { value: i32 }
+struct Counter {
+    value: i32,
 
-drop fn Counter(self) {
-    let _ = self.value;
+    fn drop(self) {
+
+        let _ = self.value;
+    }
 }
+
 
 fn main() -> i32 {
     let c = Counter { value: 42 };
@@ -731,11 +762,15 @@ name = "user_defined_destructor_runs_at_scope_exit"
 spec = ["3.9:28"]
 description = "User-defined destructor runs when value goes out of scope"
 source = """
-struct Counter { value: i32 }
+struct Counter {
+    value: i32,
 
-drop fn Counter(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 fn main() -> i32 {
     let c = Counter { value: 99 };
@@ -748,30 +783,19 @@ stdout = "99\n"
 [[case]]
 name = "duplicate_destructor_error"
 spec = ["3.9:26"]
-description = "Duplicate destructors for the same type produce an error"
+description = "Two `fn drop(self)` methods on the same type produce a duplicate-method error."
 source = """
-struct Data { value: i32 }
+struct Data {
+    value: i32,
 
-drop fn Data(self) {}
-
-drop fn Data(self) {}
+    fn drop(self) {}
+    fn drop(self) {}
+}
 
 fn main() -> i32 { 0 }
 """
 compile_fail = true
-error_contains = "duplicate destructor"
-
-[[case]]
-name = "destructor_unknown_type_error"
-spec = ["3.9:27"]
-description = "Destructor for unknown type produces an error"
-source = """
-drop fn UnknownType(self) {}
-
-fn main() -> i32 { 0 }
-"""
-compile_fail = true
-error_contains = "unknown type"
+error_contains = "duplicate"
 
 
 # =============================================================================

@@ -439,11 +439,15 @@ error_contains = "expected 1 argument"
 name = "enum_data_variant_drop_some"
 spec = ["6.3:19"]
 source = """
-struct Tracker { value: i32 }
+struct Tracker {
+    value: i32,
 
-drop fn Tracker(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 enum MaybeTracker { Some(Tracker), None }
 
@@ -459,11 +463,15 @@ stdout = "42\n"
 name = "enum_data_variant_drop_none_no_destructor"
 spec = ["6.3:19"]
 source = """
-struct Tracker { value: i32 }
+struct Tracker {
+    value: i32,
 
-drop fn Tracker(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 enum MaybeTracker { Some(Tracker), None }
 

@@ -2054,10 +2054,6 @@ impl Rir {
                 args_start: *args_start + extra_offset,
                 args_len: *args_len,
             },
-            InstData::DropFnDecl { type_name, body } => InstData::DropFnDecl {
-                type_name: *type_name,
-                body: renumber(*body),
-            },
             InstData::DeriveDecl {
                 name,
                 methods_start,
@@ -2378,7 +2374,6 @@ impl Rir {
                 | InstData::TypeIntrinsic { .. }
                 | InstData::TypeInterfaceIntrinsic { .. }
                 | InstData::InterfaceMethodSig { .. }
-                | InstData::DropFnDecl { .. }
                 | InstData::Comptime { .. }
                 | InstData::ComptimeUnrollFor { .. }
                 | InstData::Checked { .. }
@@ -2889,14 +2884,6 @@ pub enum InstData {
         methods_start: u32,
         /// Number of methods.
         methods_len: u32,
-    },
-
-    /// User-defined destructor declaration: drop fn TypeName(self) { ... }
-    DropFnDecl {
-        /// The struct type this destructor is for
-        type_name: Spur,
-        /// Destructor body instruction ref
-        body: InstRef,
     },
 
     /// Comptime block expression: comptime { expr }
@@ -4398,26 +4385,6 @@ mod tests {
         let printer = RirPrinter::new(&rir, &interner);
         let output = printer.to_string();
         assert!(output.contains("assoc_fn_call Point::new(%0, %1)"));
-    }
-
-    #[test]
-    fn test_printer_drop_fn_decl() {
-        let (mut rir, interner) = create_printer_test_rir();
-        let body = rir.add_inst(Inst {
-            data: InstData::UnitConst,
-            span: Span::new(0, 2),
-        });
-
-        let type_name = interner.get_or_intern("Resource");
-
-        rir.add_inst(Inst {
-            data: InstData::DropFnDecl { type_name, body },
-            span: Span::new(0, 30),
-        });
-
-        let printer = RirPrinter::new(&rir, &interner);
-        let output = printer.to_string();
-        assert!(output.contains("drop fn Resource(self)"));
     }
 
     // Match and pattern tests

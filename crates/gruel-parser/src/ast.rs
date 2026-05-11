@@ -76,7 +76,6 @@ pub enum Item {
     /// Derive declaration (ADR-0058) - a set of method declarations attached
     /// to a host type via `@derive(...)`.
     Derive(DeriveDecl),
-    DropFn(DropFn),
     /// Constant declaration (e.g., `const math = @import("math");`)
     Const(ConstDecl),
     /// Error node for recovered parse errors at item level.
@@ -294,21 +293,6 @@ pub struct DeriveDecl {
     /// Method declarations inside the derive body
     pub methods: Vec<Method>,
     /// Span covering the entire derive item
-    pub span: Span,
-}
-
-/// A user-defined destructor declaration.
-///
-/// Syntax: `drop fn TypeName(self) { body }`
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct DropFn {
-    /// The struct type this destructor is for
-    pub type_name: Ident,
-    /// The self parameter
-    pub self_param: SelfParam,
-    /// Destructor body
-    pub body: Expr,
-    /// Span covering the entire drop fn
     pub span: Span,
 }
 
@@ -1424,7 +1408,6 @@ impl fmt::Display for Ast {
                 Item::Enum(e) => fmt_enum(f, e, 0)?,
                 Item::Interface(i) => fmt_interface(f, i, 0)?,
                 Item::Derive(d) => fmt_derive(f, d, 0)?,
-                Item::DropFn(drop_fn) => fmt_drop_fn(f, drop_fn, 0)?,
                 Item::Const(c) => fmt_const(f, c, 0)?,
                 Item::Error(span) => writeln!(f, "Error({:?})", span)?,
             }
@@ -1525,17 +1508,6 @@ fn fmt_derive(f: &mut fmt::Formatter<'_>, d: &DeriveDecl, level: usize) -> fmt::
     for method in &d.methods {
         fmt_method(f, method, level + 1)?;
     }
-    Ok(())
-}
-
-fn fmt_drop_fn(f: &mut fmt::Formatter<'_>, drop_fn: &DropFn, level: usize) -> fmt::Result {
-    indent(f, level)?;
-    writeln!(
-        f,
-        "DropFn sym:{}(self)",
-        drop_fn.type_name.name.into_usize()
-    )?;
-    fmt_expr(f, &drop_fn.body, level + 1)?;
     Ok(())
 }
 
@@ -2106,11 +2078,6 @@ pub enum NodeTag {
     /// - lhs: index into extra (variant count + variant nodes)
     /// - rhs: 0 (unused)
     EnumDecl,
-
-    /// Drop function: drop fn TypeName(self) { body }
-    /// - lhs: type name identifier
-    /// - rhs: body expression node
-    DropFn,
 
     /// Constant declaration: const name: type = init;
     /// - lhs: type expression node (or NULL_NODE if inferred)

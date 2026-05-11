@@ -7,14 +7,13 @@ use crate::ast::{
     AnonFnExpr, AnonStructField, ArgMode, ArrayLitExpr, AssignStatement, AssignTarget,
     AssocFnCallExpr, Ast, BinaryExpr, BinaryOp, BlockExpr, BoolLit, BreakExpr, CallArg, CallExpr,
     CharLit, CheckedBlockExpr, ComptimeBlockExpr, ComptimeUnrollForExpr, ConstDecl, ContinueExpr,
-    DeriveDecl, Directive, DirectiveArg, Directives, DropFn, EnumDecl, EnumStructLitExpr,
-    EnumVariant, Expr, FieldDecl, FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function,
-    Ident, IfExpr, IndexExpr, IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item,
-    LetStatement, LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, MethodSig, NegIntLit,
-    Param, ParamMode, ParenExpr, PathExpr, PathPattern, Pattern, RangeExpr, ReturnExpr, SelfExpr,
-    SelfParam, SelfReceiverKind, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern,
-    TupleExpr, TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility,
-    WhileExpr,
+    DeriveDecl, Directive, DirectiveArg, Directives, EnumDecl, EnumStructLitExpr, EnumVariant,
+    Expr, FieldDecl, FieldExpr, FieldInit, FieldPattern, FloatLit, ForExpr, Function, Ident,
+    IfExpr, IndexExpr, IntLit, InterfaceDecl, IntrinsicArg, IntrinsicCallExpr, Item, LetStatement,
+    LoopExpr, MatchArm, MatchExpr, Method, MethodCallExpr, MethodSig, NegIntLit, Param, ParamMode,
+    ParenExpr, PathExpr, PathPattern, Pattern, RangeExpr, ReturnExpr, SelfExpr, SelfParam,
+    SelfReceiverKind, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern, TupleExpr,
+    TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
 };
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
@@ -55,9 +54,6 @@ pub struct PrimitiveTypeSpurs {
     pub ref_name: Spur,
     /// `MutRef` identifier (ADR-0076) — likewise for `self : MutRef(Self)`.
     pub mut_ref_name: Spur,
-    /// The identifier "drop" — recognized as a method name to define a destructor
-    /// inside a type body (ADR-0053).
-    pub drop_name: Spur,
     /// The identifier "derive" — accepted as a directive name so users can
     /// write `@derive(Foo)` even though `derive` is also a reserved keyword
     /// for top-level derive items (ADR-0058).
@@ -86,7 +82,6 @@ impl PrimitiveTypeSpurs {
             self_type: interner.get_or_intern("Self"),
             ref_name: interner.get_or_intern("Ref"),
             mut_ref_name: interner.get_or_intern("MutRef"),
-            drop_name: interner.get_or_intern("drop"),
             derive_name: interner.get_or_intern("derive"),
         }
     }
@@ -179,28 +174,16 @@ where
 
 /// Parser that produces Ident for a method name.
 ///
-/// Same as [`ident_parser`] except it also accepts the `drop` keyword,
-/// so that `fn drop(self)` parses as a normal method definition with
-/// name "drop". ADR-0053: the destructor is a specially-named method
-/// rather than its own item form.
+/// Kept as a separate function from `ident_parser` so callers can
+/// document method-position semantics, even though after retiring the
+/// `drop` keyword (it is now a regular identifier — `drop fn TypeName`
+/// at item position is recognized via a state-based ident match) the
+/// two are equivalent.
 fn method_name_parser<'src, I>() -> GruelParser<'src, I, Ident>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
 {
-    select! {
-        TokenKind::Ident(name) = e => Ident {
-            name,
-            span: span_from_extra(e),
-        },
-        TokenKind::Drop = e => {
-            let state: &mut SimpleState<ParserState> = e.state();
-            Ident {
-                name: state.0.syms.drop_name,
-                span: span_from_extra(e),
-            }
-        },
-    }
-    .boxed()
+    ident_parser().boxed()
 }
 
 /// Parser for primitive type keywords: i8, i16, i32, i64, u8, u16, u32, u64, bool
@@ -2183,6 +2166,24 @@ where
         })
     });
 
+    // `Self` used as a value — e.g. `helper(Self, T)` passing the
+    // current struct's type as a comptime argument. The more specific
+    // `Self { ... }` (struct literal), `Self::Variant(...)`
+    // (associated function / enum variant), and `Self { ... }` enum
+    // struct literal forms are parsed earlier in the choice and bind
+    // first; bare `Self` here falls through to a plain type-literal
+    // expression.
+    let self_as_value_expr = just(TokenKind::SelfType).map_with(|_, e| {
+        let span = span_from_extra(e);
+        Expr::TypeLit(TypeLitExpr {
+            type_expr: TypeExpr::Named(Ident {
+                name: e.state().syms.self_type,
+                span,
+            }),
+            span,
+        })
+    });
+
     // Anonymous struct type as expression: struct { field: Type, ... fn method(...) { ... } ... }
     // This enables comptime type construction like:
     //   fn Pair(comptime T: type) -> type { struct { first: T, second: T } }
@@ -2432,6 +2433,11 @@ where
         // ADR-0071: must come before type_lit_expr (which consumes the `char` token alone).
         char_assoc_fn_call.boxed(),
         type_lit_expr.boxed(),
+        // Bare `Self` as a value — the more-specific Self forms above
+        // (`self_type_expr` for `Self { ... }`, `self_assoc_fn_call`
+        // for `Self::method(...)`, etc.) are tried first; this falls
+        // through to it for `Self` followed by `,`, `)`, `;` etc.
+        self_as_value_expr.boxed(),
         call_and_access_parser(expr.clone()),
         paren_expr.boxed(),
     ))
@@ -3181,35 +3187,6 @@ where
         .boxed()
 }
 
-/// Parser for drop fn declarations: drop fn TypeName(self) { body }
-fn drop_fn_parser<'src, I>() -> GruelParser<'src, I, DropFn>
-where
-    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
-{
-    let expr = expr_parser();
-
-    // Parse self parameter — `drop fn` only allows plain `self`, but reuse
-    // the shared receiver parser so the AST shape stays uniform.
-    let self_param = self_param_parser();
-
-    // NOTE: Box after accumulating the head to keep the final MapWith type short.
-    let drop_fn_sig: GruelParser<'src, I, (Ident, SelfParam)> = just(TokenKind::Drop)
-        .ignore_then(just(TokenKind::Fn))
-        .ignore_then(ident_parser())
-        .then(self_param.delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)))
-        .boxed();
-
-    drop_fn_sig
-        .then(block_parser(expr))
-        .map_with(|((type_name, self_param), body), e| DropFn {
-            type_name,
-            self_param,
-            body,
-            span: span_from_extra(e),
-        })
-        .boxed()
-}
-
 /// Parser for const declarations: [pub] const name [: Type] = expr;
 ///
 /// Used for module re-exports:
@@ -3446,7 +3423,6 @@ where
         enum_parser().map(Item::Enum).boxed(),
         interface_parser().map(Item::Interface).boxed(),
         derive_parser().map(Item::Derive).boxed(),
-        drop_fn_parser().map(Item::DropFn).boxed(),
         const_parser().map(Item::Const).boxed(),
     ))
     .boxed()
@@ -3466,7 +3442,6 @@ where
         just(TokenKind::Enum).ignored().boxed(),
         just(TokenKind::Interface).ignored().boxed(),
         just(TokenKind::Derive).ignored().boxed(),
-        just(TokenKind::Drop).ignored().boxed(),
         just(TokenKind::Const).ignored().boxed(),
     ))
     .boxed();
@@ -3735,7 +3710,6 @@ fn validate_item(item: &Item, errors: &mut Vec<CompileError>, v: &AstValidator) 
             }
         }
         Item::Const(c) => validate_expr(&c.init, errors, v),
-        Item::DropFn(d) => validate_expr(&d.body, errors, v),
         Item::Interface(_) => {}
         Item::Derive(d) => {
             for m in &d.methods {
@@ -3994,7 +3968,6 @@ mod tests {
             Item::Enum(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Interface(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Derive(_) => panic!("parse_expr helper should only be used with functions"),
-            Item::DropFn(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Const(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Error(_) => panic!("parse_expr helper should only be used with functions"),
         };
@@ -4025,7 +3998,6 @@ mod tests {
             Item::Enum(_) => panic!("expected Function"),
             Item::Interface(_) => panic!("expected Function"),
             Item::Derive(_) => panic!("expected Function"),
-            Item::DropFn(_) => panic!("expected Function"),
             Item::Const(_) => panic!("expected Function"),
             Item::Error(_) => panic!("expected Function"),
         }
@@ -4097,7 +4069,6 @@ mod tests {
             Item::Enum(_) => panic!("expected Function"),
             Item::Interface(_) => panic!("expected Function"),
             Item::Derive(_) => panic!("expected Function"),
-            Item::DropFn(_) => panic!("expected Function"),
             Item::Const(_) => panic!("expected Function"),
             Item::Error(_) => panic!("expected Function"),
         }

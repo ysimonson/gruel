@@ -2271,7 +2271,6 @@ impl<'a> Sema<'a> {
 
             // ── Declarations are no-ops in comptime context ───────────────────
             InstData::FnDecl { .. }
-            | InstData::DropFnDecl { .. }
             | InstData::ConstDecl { .. }
             | InstData::StructDecl { .. }
             | InstData::EnumDecl { .. } => Ok(ConstValue::Unit),
@@ -3435,9 +3434,20 @@ impl<'a> Sema<'a> {
                         })
                     }
                     Some(IntrinsicId::ThreadSafety) => {
-                        let enum_id = self
-                            .builtin_thread_safety_id
-                            .expect("ThreadSafety enum not injected - internal compiler error");
+                        // The ThreadSafety enum is cached by
+                        // `cache_builtin_enum_ids`, which runs after
+                        // declaration resolution. If the prelude's
+                        // own `Vec(T)` is being eagerly evaluated to
+                        // populate `vec_instance_registry` during
+                        // resolve_declarations (e.g. to handle a method
+                        // signature like `fn f() -> Vec(i32)`), this
+                        // arm fires before the cache is warm. Return
+                        // a non-const result so the caller can fall
+                        // back to a later retry — the lazy populate
+                        // path runs after caching.
+                        let Some(enum_id) = self.builtin_thread_safety_id else {
+                            return Err(not_const(inst_span));
+                        };
                         let variant_idx = self.thread_safety_variant_index(ty);
                         Ok(ConstValue::EnumVariant {
                             enum_id,

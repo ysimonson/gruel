@@ -7,8 +7,8 @@ use lasso::{Spur, ThreadedRodeo};
 
 use gruel_intrinsics::{IntrinsicKind, is_type_intrinsic, lookup_by_name};
 use gruel_parser::ast::{
-    BlockExpr, ConstDecl, DeriveDecl, Directives, DropFn, FieldPattern, Ident, SelfParam,
-    SelfReceiverKind, TupleElemPattern,
+    BlockExpr, ConstDecl, DeriveDecl, Directives, FieldPattern, Ident, SelfParam, SelfReceiverKind,
+    TupleElemPattern,
 };
 use gruel_parser::{
     ArgMode, AssignTarget, Ast, BinaryOp as AstBinOp, CallArg, Directive, DirectiveArg, EnumDecl,
@@ -119,9 +119,6 @@ impl<'a> AstGen<'a> {
             }
             Item::Derive(derive_decl) => {
                 self.gen_derive(derive_decl);
-            }
-            Item::DropFn(drop_fn) => {
-                self.gen_drop_fn(drop_fn);
             }
             Item::Const(const_decl) => {
                 self.gen_const(const_decl);
@@ -485,18 +482,6 @@ impl<'a> AstGen<'a> {
                 init,
             },
             span: const_decl.span,
-        })
-    }
-
-    fn gen_drop_fn(&mut self, drop_fn: &DropFn) -> InstRef {
-        let type_name = drop_fn.type_name.name; // Already a Spur
-
-        // Generate the body expression
-        let body = self.gen_expr(&drop_fn.body);
-
-        self.rir.add_inst(Inst {
-            data: InstData::DropFnDecl { type_name, body },
-            span: drop_fn.span,
         })
     }
 
@@ -2914,30 +2899,6 @@ mod tests {
             _ => false,
         });
         assert!(self_ref.is_some(), "Expected self VarRef instruction");
-    }
-
-    #[test]
-    fn test_gen_drop_fn() {
-        let source = r#"
-            struct Resource { value: i32 }
-            drop fn Resource(self) { () }
-            fn main() -> i32 { 0 }
-        "#;
-        let (rir, interner) = gen_rir(source);
-
-        // Find the DropFnDecl instruction
-        let drop_fn = rir
-            .iter()
-            .find(|(_, inst)| matches!(inst.data, InstData::DropFnDecl { .. }));
-        assert!(drop_fn.is_some(), "Expected DropFnDecl instruction");
-
-        let (_, inst) = drop_fn.unwrap();
-        match &inst.data {
-            InstData::DropFnDecl { type_name, body: _ } => {
-                assert_eq!(interner.resolve(type_name), "Resource");
-            }
-            _ => panic!("expected DropFnDecl"),
-        }
     }
 
     #[test]

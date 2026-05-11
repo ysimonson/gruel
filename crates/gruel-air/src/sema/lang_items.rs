@@ -90,6 +90,14 @@ impl<'a> Sema<'a> {
     /// so a failed prelude evaluation only means the registry stays
     /// empty for that element type. Phase 3's bridge consumers fall
     /// back to the legacy path when the registry has no entry.
+    ///
+    /// Uses the rich comptime interpreter (`evaluate_type_ctor_body`)
+    /// because the prelude `Vec` body is allowed to wrap its struct
+    /// literal in a `comptime if` (ADR-0084 follow-up: thread-safety
+    /// markers per element-type classification). The simpler
+    /// `try_evaluate_const_with_subst` path doesn't handle
+    /// `InstData::Branch`, so it can't see through the conditional to
+    /// the struct underneath.
     pub(crate) fn populate_vec_instance(&mut self, elem_ty: crate::types::Type) {
         // Skip if any existing entry already maps to this element.
         if self.vec_instance_registry.values().any(|t| *t == elem_ty) {
@@ -110,9 +118,57 @@ impl<'a> Sema<'a> {
         type_subst.insert(param_names[0], elem_ty);
         let value_subst: rustc_hash::FxHashMap<lasso::Spur, super::ConstValue> =
             rustc_hash::FxHashMap::default();
+
+        // Build a stub `AnalysisContext` so we can drive the rich
+        // evaluator without an enclosing analysis. Mirrors the stub
+        // built by `evaluate_comptime_top_level` for Phase 2.5
+        // const-initializer evaluation.
+        let empty_params: Vec<crate::sema::context::ParamInfo> = Vec::new();
+        let empty_resolved: rustc_hash::FxHashMap<gruel_rir::InstRef, crate::types::Type> =
+            rustc_hash::FxHashMap::default();
+        let stub = crate::sema::context::AnalysisContext {
+            locals: rustc_hash::FxHashMap::default(),
+            params: &empty_params,
+            next_slot: 0,
+            loop_depth: 0,
+            forbid_break: None,
+            checked_depth: 0,
+            used_locals: rustc_hash::FxHashSet::default(),
+            return_type: crate::types::Type::UNIT,
+            scope_stack: Vec::new(),
+            resolved_types: &empty_resolved,
+            moved_vars: rustc_hash::FxHashMap::default(),
+            warnings: Vec::new(),
+            local_string_table: rustc_hash::FxHashMap::default(),
+            local_strings: Vec::new(),
+            local_bytes: Vec::new(),
+            comptime_type_vars: rustc_hash::FxHashMap::default(),
+            comptime_value_vars: rustc_hash::FxHashMap::default(),
+            referenced_functions: rustc_hash::FxHashSet::default(),
+            referenced_methods: rustc_hash::FxHashSet::default(),
+            borrow_arg_skip_move: None,
+            uninit_handles: rustc_hash::FxHashMap::default(),
+            unroll_arm_bindings: rustc_hash::FxHashMap::default(),
+        };
+
+        // Evaluation may push diagnostics into `pending_anon_eval_errors`
+        // when the body has a sema-level problem (e.g. an empty struct
+        // body). Snapshot the buffer length and rewind on failure so we
+        // don't surface the prelude's evaluation errors to user code —
+        // the legacy `TypeKind::Vec(_)` path is the safety net.
+        let pending_before = self.pending_anon_eval_errors.len();
         let saved_ctor = self.comptime_ctor_fn.replace(vec_fn_sym);
-        let _ = self.try_evaluate_const_with_subst(fn_info.body, &type_subst, &value_subst);
+        // Use the function's declaration span as a fallback diagnostic
+        // anchor; the rich evaluator only consults this on unrecoverable
+        // failures, which we discard.
+        let span = self
+            .functions
+            .get(&vec_fn_sym)
+            .map(|f| self.rir.get(f.body).span)
+            .unwrap_or(gruel_util::Span::new(0, 0));
+        let _ = self.evaluate_type_ctor_body(fn_info.body, &type_subst, &value_subst, &stub, span);
         self.comptime_ctor_fn = saved_ctor;
+        self.pending_anon_eval_errors.truncate(pending_before);
     }
 
     /// ADR-0079: walk every interface and enum declaration in the RIR,

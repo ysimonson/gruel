@@ -64,7 +64,6 @@ mod tests {
         // Methods
         "MethodCall",
         "AssocFnCall",
-        "DropFnDecl",
         "DeriveDecl",
     ];
 

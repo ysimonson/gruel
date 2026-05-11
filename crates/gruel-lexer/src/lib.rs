@@ -37,7 +37,6 @@ pub enum TokenKind {
     Struct,
     Enum,
     Interface,
-    Drop,
     SelfValue,      // self (value, not type)
     SelfType,       // Self (type, not value) - used in methods to refer to the struct type
     Comptime,       // comptime (compile-time evaluation)
@@ -148,7 +147,6 @@ impl TokenKind {
             TokenKind::Struct => "'struct'",
             TokenKind::Enum => "'enum'",
             TokenKind::Interface => "'interface'",
-            TokenKind::Drop => "'drop'",
             TokenKind::SelfValue => "'self'",
             TokenKind::SelfType => "'Self'",
             TokenKind::Comptime => "'comptime'",
@@ -258,7 +256,6 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Struct => write!(f, "STRUCT"),
             TokenKind::Enum => write!(f, "ENUM"),
             TokenKind::Interface => write!(f, "INTERFACE"),
-            TokenKind::Drop => write!(f, "DROP"),
             TokenKind::SelfValue => write!(f, "SELF"),
             TokenKind::SelfType => write!(f, "SELFTYPE"),
             TokenKind::Comptime => write!(f, "COMPTIME"),

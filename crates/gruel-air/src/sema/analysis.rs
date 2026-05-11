@@ -835,33 +835,10 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                 }
             }
 
-            // Also analyze destructors for any structs whose types we've used
-            // (This is necessary because drop is implicitly called)
-            for (_, inst) in sema.rir.iter() {
-                if let InstData::DropFnDecl { type_name, body } = &inst.data {
-                    let type_name_str = sema.interner.resolve(type_name).to_string();
-                    let struct_id = match sema.structs.get(type_name) {
-                        Some(id) => *id,
-                        None => continue,
-                    };
-                    let struct_type = Type::new_struct(struct_id);
-                    let full_name = format!("{}.__drop", type_name_str);
-
-                    match sema.analyze_destructor_function(
-                        &infer_ctx,
-                        &full_name,
-                        *body,
-                        inst.span,
-                        struct_type,
-                    ) {
-                        Ok((analyzed, warnings, local_strings, local_bytes, _, _)) => {
-                            functions_with_strings.push((analyzed, local_strings, local_bytes));
-                            all_warnings.extend(warnings);
-                        }
-                        Err(e) => errors.push(e),
-                    }
-                }
-            }
+            // ADR-0053: destructors are inline `fn drop(self)` methods
+            // declared inside the struct body. They flow through the
+            // regular method-analysis path above; no separate top-level
+            // `drop fn TypeName(self)` form exists.
 
             // ADR-0056 vtable population: every (struct, interface) pair recorded
             // in `interface_vtables_needed` references the conformer's slot
@@ -1866,14 +1843,26 @@ impl<'a> Sema<'a> {
         let self_sym = self.interner.get_or_intern("Self");
         type_subst.insert(self_sym, self_type);
 
-        self.analyze_function_internal(
+        // ADR-0076 follow-up: `Self` in *expression* position (e.g.
+        // `helper(Self, T, self, value)` passing the host type as a
+        // comptime argument) is resolved through `resolve_type` →
+        // `current_self`, not the type-substitution map. Set it for
+        // the duration of body analysis so the receiver and the body
+        // see the same `Self`. The eager method analysis path at
+        // `analyze_function_call` already does this; the
+        // anon-struct/comptime-evaluator path lands here, which used
+        // to leave `current_self` unset.
+        let saved_self = self.current_self.replace(self_type);
+        let result = self.analyze_function_internal(
             infer_ctx,
             return_type,
             params,
             body,
             Some(&type_subst),
             Some(captured_comptime_values),
-        )
+        );
+        self.current_self = saved_self;
+        result
     }
 
     /// Run Hindley-Milner type inference on a function body.
@@ -2401,7 +2390,7 @@ impl<'a> Sema<'a> {
     /// - **Enums**: EnumDecl, EnumVariant
     /// - **Calls**: Call, MethodCall, AssocFnCall
     /// - **Intrinsics**: Intrinsic, TypeIntrinsic
-    /// - **Declarations**: DropFnDecl, FnDecl
+    /// - **Declarations**: FnDecl
     pub(crate) fn analyze_inst(
         &mut self,
         air: &mut Air,
@@ -2504,8 +2493,7 @@ impl<'a> Sema<'a> {
             }
 
             // Declaration no-ops (produce Unit in expression context)
-            InstData::DropFnDecl { .. }
-            | InstData::FnDecl { .. }
+            InstData::FnDecl { .. }
             | InstData::ConstDecl { .. }
             | InstData::InterfaceDecl { .. }
             | InstData::InterfaceMethodSig { .. }
@@ -4044,35 +4032,62 @@ impl<'a> Sema<'a> {
         // path stores the LHS as the synthesized symbol `Ptr(T)`; sema's
         // resolve_type already handles type-call syntax via the
         // BuiltinTypeConstructor registry, so dispatch through there.
-        if let Some((callee_name, _)) = crate::types::parse_type_call_syntax(&type_name_str)
-            && let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name)
-        {
-            // ADR-0066: route Vec(T)::new()/with_capacity(n) through the
-            // Vec dispatcher.
-            if matches!(
-                constructor.kind,
-                gruel_builtins::BuiltinTypeConstructorKind::Vec
-            ) {
-                let vec_ty = self.resolve_type(type_name, span)?;
-                if let Some(result) = self.try_dispatch_vec_static_call(
+        //
+        // Parameterized type calls fall into three buckets handled here:
+        //   1. `Vec(T)::method(...)` — the lang-item Vec dispatcher.
+        //   2. `Ptr(T)::method(...)` / `MutPtr(T)::method(...)` — pointer dispatcher.
+        //   3. `UserType(T)::method(...)` — user-defined `pub fn UserType(...)
+        //      -> type` returning a struct. Resolve the LHS to its synthetic
+        //      `Type`, extract the StructId, and fall through to the regular
+        //      struct method-lookup path below.
+        if let Some((callee_name, _)) = crate::types::parse_type_call_syntax(&type_name_str) {
+            if let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name) {
+                // ADR-0066: route Vec(T)::new()/with_capacity(n) through the
+                // Vec dispatcher.
+                if matches!(
+                    constructor.kind,
+                    gruel_builtins::BuiltinTypeConstructorKind::Vec
+                ) {
+                    let vec_ty = self.resolve_type(type_name, span)?;
+                    if let Some(result) = self.try_dispatch_vec_static_call(
+                        air,
+                        ctx,
+                        vec_ty,
+                        &function_name_str,
+                        &args,
+                        span,
+                    ) {
+                        return result;
+                    }
+                }
+                return self.dispatch_pointer_assoc_fn_call(
                     air,
-                    ctx,
-                    vec_ty,
+                    type_name,
                     &function_name_str,
                     &args,
                     span,
-                ) {
-                    return result;
-                }
+                    ctx,
+                );
             }
-            return self.dispatch_pointer_assoc_fn_call(
-                air,
-                type_name,
-                &function_name_str,
-                &args,
-                span,
-                ctx,
-            );
+            // User-defined parameterized type. Resolve the LHS via the
+            // standard type resolver — that drives the comptime evaluation
+            // of the type-constructor function and produces a synthetic
+            // struct type. From there we fall through to the regular
+            // struct method dispatch below by replacing `struct_id`.
+            if let Ok(resolved_ty) = self.resolve_type(type_name, span)
+                && let TypeKind::Struct(struct_id) = resolved_ty.kind()
+            {
+                return self.analyze_struct_assoc_fn_call(
+                    air,
+                    struct_id,
+                    type_name_str,
+                    function,
+                    function_name_str,
+                    args,
+                    span,
+                    ctx,
+                );
+            }
         }
 
         // Check if this is an enum data variant construction (e.g., IntOption::Some(42)).
@@ -4360,6 +4375,36 @@ impl<'a> Sema<'a> {
                 .ok_or_compile_error(ErrorKind::UnknownType(type_name_str.clone()), span)?
         };
 
+        self.analyze_struct_assoc_fn_call(
+            air,
+            struct_id,
+            type_name_str,
+            function,
+            function_name_str,
+            args,
+            span,
+            ctx,
+        )
+    }
+
+    /// Dispatch a `Type::method(args)` call once the receiver type has
+    /// been resolved to a `StructId`. Shared by:
+    ///
+    /// - The named-struct path (`MyStruct::method(...)`).
+    /// - The user-defined parameterized type path (`MyStruct(T)::method(...)`),
+    ///   where the LHS is comptime-evaluated to a synthetic struct.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn analyze_struct_assoc_fn_call(
+        &mut self,
+        air: &mut Air,
+        struct_id: StructId,
+        type_name_str: String,
+        function: Spur,
+        function_name_str: String,
+        args: Vec<RirCallArg>,
+        span: Span,
+        ctx: &mut AnalysisContext,
+    ) -> CompileResult<AnalysisResult> {
         // ADR-0081: `String::from_utf8` / `String::from_c_str` are now
         // regular associated functions on the prelude struct; they reach
         // the user-method lookup below alongside any other static method.

@@ -12,7 +12,7 @@
 //! - [`analyze_enum_ops`] - EnumDecl, EnumVariant
 //! - [`analyze_call_ops`] - Call, MethodCall, AssocFnCall
 //! - [`analyze_intrinsic_ops`] - Intrinsic, TypeIntrinsic
-//! - [`analyze_decl_noop`] - DropFnDecl (declarations that produce Unit)
+//! - [`analyze_decl_noop`] - declarations that produce Unit
 //!
 //! Binary operations (arithmetic, comparison, logical, bitwise) are handled
 //! by existing helper methods in `analysis.rs`:
@@ -6245,43 +6245,89 @@ impl<'a> Sema<'a> {
                     .or_default()
                     .mark_path_moved(&[], span);
             } else if !self.is_type_copy(field_type) && !projects_through_ref {
-                // ADR-0036: Ban partial field moves. Must destructure instead.
-                // ADR-0048: for tuple-shaped structs, render tuple-syntax names
-                // and suggest tuple destructuring.
+                // ADR-0036: partial field moves are normally banned because
+                // the CFG drops the whole local on scope exit and has no
+                // mechanism to skip moved fields. We carve out a narrow
+                // exception:
+                //
+                //   1. The root being moved is `self` (a by-value receiver
+                //      of a consuming method).
+                //   2. Every other field of `self`'s struct is Copy.
+                //
+                // Under those conditions, moving `self.field` is equivalent
+                // to consuming `self` entirely — the remaining Copy fields
+                // need no drop, and `self` is going out of scope at the
+                // method's return anyway. This makes thin one-field
+                // wrappers (`pub fn dispose(self) { self.inner.dispose() }`)
+                // work without the user writing the destructure form by hand.
+                //
+                // The restriction to `self` is what keeps the rule from
+                // re-introducing the partial-move unsoundness ADR-0036 was
+                // designed to prevent: ordinary `consume(p.a); p.b` still
+                // errors as before.
+                let self_sym = self.interner.get("self");
+                let root_is_self = self_sym == Some(trace.root_var);
                 let parent_struct_def = parent_type
                     .as_struct()
                     .map(|id| self.type_pool.struct_def(id));
-                let is_tuple = parent_struct_def
+                let other_fields_all_copy = parent_struct_def
                     .as_ref()
-                    .map(|def| def.is_tuple_shaped())
-                    .unwrap_or(false);
-                let type_name = parent_struct_def
-                    .as_ref()
-                    .and_then(|def| {
-                        let pool = &self.type_pool;
-                        def.tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
-                            .or_else(|| Some(def.name.clone()))
+                    .map(|def| {
+                        def.fields.iter().all(|f| {
+                            f.name == self.interner.resolve(&field)
+                                || f.ty.is_copy_in_pool(&self.type_pool)
+                        })
                     })
-                    .unwrap_or_else(|| parent_type.name().to_string());
-                let field_name = self.interner.resolve(&field).to_string();
-                let help = if is_tuple {
-                    let arity = parent_struct_def
-                        .as_ref()
-                        .map(|def| def.fields.len())
-                        .unwrap_or(0);
-                    let bindings: Vec<String> = (0..arity).map(|i| format!("x{}", i)).collect();
-                    format!("use destructuring: `let ({}) = ...;`", bindings.join(", "))
+                    .unwrap_or(false);
+
+                if root_is_self && other_fields_all_copy {
+                    // Treat the partial move as a full move of `self`. All
+                    // remaining fields are Copy, so the whole-variable
+                    // drop emitted at function exit is a no-op —
+                    // equivalent to the user writing
+                    // `let SelfType { field, .. } = self;` at the top of
+                    // the method.
+                    ctx.moved_vars
+                        .entry(trace.root_var)
+                        .or_default()
+                        .mark_path_moved(&[], span);
                 } else {
-                    format!("use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`")
-                };
-                return Err(CompileError::new(
-                    ErrorKind::CannotMoveField {
-                        type_name: type_name.clone(),
-                        field: field_name.clone(),
-                    },
-                    span,
-                )
-                .with_help(help));
+                    // ADR-0036: cannot synthesize a partial drop here.
+                    // Surface the explicit-destructure error.
+                    let is_tuple = parent_struct_def
+                        .as_ref()
+                        .map(|def| def.is_tuple_shaped())
+                        .unwrap_or(false);
+                    let type_name = parent_struct_def
+                        .as_ref()
+                        .and_then(|def| {
+                            let pool = &self.type_pool;
+                            def.tuple_display_name(|ty| ty.safe_name_with_pool(Some(pool)))
+                                .or_else(|| Some(def.name.clone()))
+                        })
+                        .unwrap_or_else(|| parent_type.name().to_string());
+                    let field_name = self.interner.resolve(&field).to_string();
+                    let help = if is_tuple {
+                        let arity = parent_struct_def
+                            .as_ref()
+                            .map(|def| def.fields.len())
+                            .unwrap_or(0);
+                        let bindings: Vec<String> = (0..arity).map(|i| format!("x{}", i)).collect();
+                        format!("use destructuring: `let ({}) = ...;`", bindings.join(", "))
+                    } else {
+                        format!(
+                            "use destructuring: `let {type_name} {{ {field_name}, .. }} = ...;`"
+                        )
+                    };
+                    return Err(CompileError::new(
+                        ErrorKind::CannotMoveField {
+                            type_name: type_name.clone(),
+                            field: field_name.clone(),
+                        },
+                        span,
+                    )
+                    .with_help(help));
+                }
             }
 
             // Mark the root variable as used so unused-variable analysis
@@ -7472,17 +7518,59 @@ impl<'a> Sema<'a> {
         // transport modes at interface signature time) with the new
         // construction syntax.
         for (i, (arg, expected_mode)) in args.iter().zip(param_modes.iter()).enumerate() {
-            let arg_is_make_ref_immut = matches!(
-                self.rir.get(arg.value).data,
-                gruel_rir::InstData::MakeRef { is_mut: false, .. }
-            );
-            let arg_is_make_ref_mut = matches!(
-                self.rir.get(arg.value).data,
-                gruel_rir::InstData::MakeRef { is_mut: true, .. }
-            );
+            let arg_inst = &self.rir.get(arg.value).data;
+            let arg_is_make_ref_immut =
+                matches!(arg_inst, gruel_rir::InstData::MakeRef { is_mut: false, .. });
+            let arg_is_make_ref_mut =
+                matches!(arg_inst, gruel_rir::InstData::MakeRef { is_mut: true, .. });
+            // ADR-0076 implicit forwarding: a bare param identifier (or
+            // `&name` / `&mut name` over one) referring to a ref-typed
+            // binding can satisfy a Ref/MutRef-mode callee param without
+            // an explicit borrow keyword. Pairs with the runtime-arg
+            // promotion further down.
+            //
+            // "ref-typed binding" covers both encodings the rest of sema
+            // produces:
+            //   (a) Mode-level: `mode = Ref | MutRef`. Anon-struct `self`
+            //       receivers and `references_type_param`-deferred helper
+            //       params use this — the source `Ref(T)` is squashed into
+            //       the param mode.
+            //   (b) Type-level: `type = Ref(_) | MutRef(_)`, `mode = Normal`.
+            //       Regular `other: Ref(Self)` parameters and named-impl
+            //       `self` receivers use this — the source `Ref(T)` is
+            //       preserved as the concrete param type.
+            // Without recognizing (b), `helper(Self, T, other)` where
+            // `other: Ref(Self)` rejects the bare-name forward and demands
+            // a `borrow` keyword, even though `other` already is the ref.
+            let inner_var_name = match arg_inst {
+                gruel_rir::InstData::VarRef { name } => Some(*name),
+                gruel_rir::InstData::MakeRef { operand, .. } => {
+                    match &self.rir.get(*operand).data {
+                        gruel_rir::InstData::VarRef { name } => Some(*name),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            let inner_param = inner_var_name.and_then(|n| ctx.params.iter().find(|p| p.name == n));
+            let inner_param_mode = inner_param.map(|p| p.mode);
+            let inner_param_ty_is_ref =
+                inner_param.is_some_and(|p| matches!(p.ty.kind(), crate::types::TypeKind::Ref(_)));
+            let inner_param_ty_is_mut_ref = inner_param
+                .is_some_and(|p| matches!(p.ty.kind(), crate::types::TypeKind::MutRef(_)));
+            let implicit_forward_ref = matches!(
+                inner_param_mode,
+                Some(RirParamMode::Ref) | Some(RirParamMode::MutRef)
+            ) || inner_param_ty_is_ref
+                || inner_param_ty_is_mut_ref;
+            let implicit_forward_mut =
+                matches!(inner_param_mode, Some(RirParamMode::MutRef)) || inner_param_ty_is_mut_ref;
             match expected_mode {
                 RirParamMode::MutRef => {
-                    if arg.mode != RirArgMode::MutRef && !arg_is_make_ref_mut {
+                    if arg.mode != RirArgMode::MutRef
+                        && !arg_is_make_ref_mut
+                        && !implicit_forward_mut
+                    {
                         return Err(CompileError::new(
                             ErrorKind::InoutKeywordMissing,
                             self.rir.get(args[i].value).span,
@@ -7490,7 +7578,10 @@ impl<'a> Sema<'a> {
                     }
                 }
                 RirParamMode::Ref => {
-                    if arg.mode != RirArgMode::Ref && !arg_is_make_ref_immut {
+                    if arg.mode != RirArgMode::Ref
+                        && !arg_is_make_ref_immut
+                        && !implicit_forward_ref
+                    {
                         return Err(CompileError::new(
                             ErrorKind::BorrowKeywordMissing,
                             self.rir.get(args[i].value).span,
@@ -7510,6 +7601,7 @@ impl<'a> Sema<'a> {
         let param_types = param_types.to_vec();
         let param_comptime = param_comptime.to_vec();
         let param_names = param_names.to_vec();
+        let param_modes_owned = param_modes.to_vec();
         let return_type_sym = fn_info.return_type_sym;
         let base_return_type = fn_info.return_type;
         let fn_body = fn_info.body;
@@ -7641,35 +7733,76 @@ impl<'a> Sema<'a> {
         let mut args: Vec<RirCallArg> = args.to_vec();
         let mut implicit_borrow_arg: Vec<Option<Spur>> = vec![None; args.len()];
         for (i, param_ty) in param_types.iter().enumerate() {
-            let inner_ty = match param_ty.kind() {
+            // Two ways the callee param "wants a reference":
+            //   (a) Static signature already resolved to `Ref(_)` /
+            //       `MutRef(_)` — the original ADR-0076 case.
+            //   (b) Generic helper whose source signature reads
+            //       `Ref(VecT)` / `MutRef(VecT)` but whose stored
+            //       param type is the `COMPTIME_TYPE` placeholder
+            //       (because of `references_type_param` deferral in
+            //       declarations.rs). Read the intended ref-shape off
+            //       `param_modes[i]` instead — a `Ref` / `MutRef`
+            //       *mode* set on a comptime-deferred param means the
+            //       source wrote `Ref(...)` / `MutRef(...)`. The mode
+            //       arrives via the regular pathway: parser →
+            //       `resolve_param_type` (ADR-0076 Phase 2 normalization)
+            //       → arena `modes` slot.
+            let want_mut = match param_ty.kind() {
+                crate::types::TypeKind::MutRef(_) => true,
+                crate::types::TypeKind::Ref(_) => false,
+                _ => {
+                    if param_ty == &Type::COMPTIME_TYPE
+                        && matches!(param_modes_owned[i], RirParamMode::MutRef)
+                    {
+                        true
+                    } else if param_ty == &Type::COMPTIME_TYPE
+                        && matches!(param_modes_owned[i], RirParamMode::Ref)
+                    {
+                        false
+                    } else {
+                        continue;
+                    }
+                }
+            };
+            let inner_ty_opt = match param_ty.kind() {
                 crate::types::TypeKind::MutRef(id) => Some(self.type_pool.mut_ref_def(id)),
                 crate::types::TypeKind::Ref(id) => Some(self.type_pool.ref_def(id)),
                 _ => None,
             };
-            let Some(inner_ty) = inner_ty else { continue };
             if args[i].mode != gruel_rir::RirArgMode::Normal {
                 continue;
             }
             if let InstData::VarRef { name } = &self.rir.get(args[i].value).data
                 && let Some(p) = ctx.params.iter().find(|p| p.name == *name)
-                && p.ty == inner_ty
+                && (
+                    // Static case: param's resolved type matches the
+                    // callee's resolved inner. The (b) case above
+                    // doesn't have an inner_ty to compare against — the
+                    // type-checker downstream will catch a real mismatch
+                    // when the body is specialized.
+                    inner_ty_opt.map(|t| t == p.ty).unwrap_or(true)
+                )
             {
-                let promoted_mode = match (param_ty.kind(), p.mode) {
-                    (crate::types::TypeKind::MutRef(_), RirParamMode::MutRef) => {
-                        gruel_rir::RirArgMode::MutRef
-                    }
-                    (crate::types::TypeKind::Ref(_), RirParamMode::Ref) => {
-                        gruel_rir::RirArgMode::Ref
-                    }
-                    (crate::types::TypeKind::Ref(_), RirParamMode::MutRef) => {
-                        // A `MutRef(T)` parameter can be re-borrowed as `Ref(T)`
+                // The caller's param is "ref-shaped" if its mode encodes
+                // Ref/MutRef (legacy mode-level convention) OR its type
+                // is Ref(_)/MutRef(_) (ADR-0076 type-level convention).
+                // Either is enough for the implicit forward.
+                let p_is_mut = matches!(p.mode, RirParamMode::MutRef)
+                    || matches!(p.ty.kind(), crate::types::TypeKind::MutRef(_));
+                let p_is_ref = matches!(p.mode, RirParamMode::Ref)
+                    || matches!(p.ty.kind(), crate::types::TypeKind::Ref(_));
+                let promoted_mode = match (want_mut, p_is_mut, p_is_ref) {
+                    (true, true, _) => gruel_rir::RirArgMode::MutRef,
+                    (false, _, true) => gruel_rir::RirArgMode::Ref,
+                    (false, true, _) => {
+                        // A `MutRef(T)` binding can be re-borrowed as `Ref(T)`
                         // (downgrading exclusivity to shared read-only).
                         gruel_rir::RirArgMode::Ref
                     }
                     _ => continue,
                 };
                 args[i].mode = promoted_mode;
-                if matches!(p.mode, RirParamMode::Ref) {
+                if p_is_ref && !p_is_mut {
                     implicit_borrow_arg[i] = Some(*name);
                 }
             }
@@ -7823,12 +7956,27 @@ impl<'a> Sema<'a> {
                 }
             }
 
-            // Determine the actual return type by substituting type parameters
+            // Determine the actual return type by substituting type parameters.
+            // Three cases:
+            //   1. Bare `-> T`: direct hit in `type_subst`.
+            //   2. Compound `-> Ptr(T)` / `-> MutRef(Vec(T))`: the source-
+            //      level return symbol isn't in `type_subst` directly, but
+            //      the substituting resolver walks its inner positions.
+            //   3. Concrete `-> i32`: both lookups miss; keep
+            //      `base_return_type` unchanged.
+            //
+            // Without case 2, the AIR instruction emitted below would carry
+            // `ty: COMPTIME_TYPE`, and the caller's `ret %call` would then
+            // try to return a "type" value from a `Ptr(i32)`-typed function
+            // — surfacing as an LLVM verifier failure instead of a sema
+            // error.
             let return_type = if base_return_type == Type::COMPTIME_TYPE {
-                // Return type is a type parameter - look it up in substitutions
-                *type_subst
-                    .get(&return_type_sym)
-                    .unwrap_or(&base_return_type)
+                if let Some(&concrete) = type_subst.get(&return_type_sym) {
+                    concrete
+                } else {
+                    self.resolve_type_for_comptime_with_subst(return_type_sym, &type_subst)
+                        .unwrap_or(base_return_type)
+                }
             } else {
                 base_return_type
             };
@@ -8197,31 +8345,19 @@ impl<'a> Sema<'a> {
     }
 
     // ========================================================================
-    // Declaration no-ops: DropFnDecl, FnDecl
+    // Declaration no-ops: FnDecl
     // ========================================================================
 
     /// Analyze a declaration that produces Unit in expression context.
-    ///
-    /// Handles: DropFnDecl
     pub(crate) fn analyze_decl_noop(
         &mut self,
-        air: &mut Air,
+        _air: &mut Air,
         inst_ref: InstRef,
         _ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
         let inst = self.rir.get(inst_ref);
 
         match &inst.data {
-            InstData::DropFnDecl { .. } => {
-                // These are processed during collection phase, just return Unit
-                let air_ref = air.add_inst(AirInst {
-                    data: AirInstData::UnitConst,
-                    ty: Type::UNIT,
-                    span: inst.span,
-                });
-                Ok(AnalysisResult::new(air_ref, Type::UNIT))
-            }
-
             InstData::FnDecl { .. } => {
                 // Function declarations are errors in expression context
                 Err(CompileError::new(

@@ -167,7 +167,6 @@ impl RemapSpurs for Item {
             Item::Enum(e) => e.remap_spurs(table),
             Item::Interface(i) => i.remap_spurs(table),
             Item::Derive(d) => d.remap_spurs(table),
-            Item::DropFn(d) => d.remap_spurs(table),
             Item::Const(c) => c.remap_spurs(table),
             Item::Error(_) => {}
         }
@@ -255,14 +254,6 @@ impl RemapSpurs for DeriveDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
         self.name.remap_spurs(table);
         self.methods.remap_spurs(table);
-    }
-}
-
-impl RemapSpurs for DropFn {
-    fn remap_spurs(&mut self, table: &[Spur]) {
-        self.type_name.remap_spurs(table);
-        // body is Expr — see Phase 2b TODO on `Expr` impl below.
-        self.body.remap_spurs(table);
     }
 }
 

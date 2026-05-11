@@ -192,25 +192,29 @@ The distinction between trivially droppable and non-trivially droppable types al
 
 {{ rule(id="3.9:24", cat="syntax") }}
 
-A user-defined destructor is declared using the `drop fn` syntax:
+A user-defined destructor is declared as an inline method named `drop` inside the type's body:
 
 ```gruel
-drop fn TypeName(self) {
-    // cleanup code
+struct TypeName {
+    // fields...
+
+    fn drop(self) {
+        // cleanup code
+    }
 }
 ```
 
 {{ rule(id="3.9:25", cat="normative") }}
 
-A user-defined destructor **MUST** be declared at the top level, outside of any `impl` block. It **MUST** take exactly one parameter named `self` and return nothing (implicit unit type).
+A user-defined destructor **MUST** be declared as a method named `drop` inside its struct's body. It **MUST** take exactly one parameter named `self` (by-value receiver) and return nothing (implicit unit type).
 
 {{ rule(id="3.9:26", cat="legality-rule") }}
 
-Each struct type **MAY** have at most one user-defined destructor. A compile-time error is raised if multiple destructors are declared for the same type.
+Each struct type **MAY** have at most one user-defined destructor. A compile-time error is raised if a `drop` method is declared twice in the same struct body (caught by the standard duplicate-method check).
 
-{{ rule(id="3.9:27", cat="legality-rule") }}
+{{ rule(id="3.9:27", cat="informative") }}
 
-A user-defined destructor can only be declared for a struct type that is defined in the same compilation unit. A compile-time error is raised if the destructor references an unknown type or a non-struct type.
+Because destructors are declared as methods on the host struct, there is no separate "destructor for an unknown type" error category. A `drop` method declared outside of any struct body is rejected by the standard item-position parser.
 
 {{ rule(id="3.9:28", cat="dynamic-semantics") }}
 

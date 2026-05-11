@@ -23,6 +23,7 @@ use lasso::Spur;
 use super::anon_interfaces::decode_receiver_mode;
 use super::{ConstInfo, FunctionInfo, InferenceContext, MethodInfo, Sema};
 use crate::inference::{FunctionSig, MethodSig};
+use crate::types::parse_type_call_syntax;
 use crate::types::{
     EnumDef, EnumId, EnumVariantDef, InterfaceDef, InterfaceId, InterfaceMethodReq, ReceiverMode,
     StructDef, StructField, StructId, Type,
@@ -1896,23 +1897,18 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// ADR-0083: walk the RIR once and collect the names of every
-    /// struct/enum that has a top-level `drop fn TypeName(self)` declaration.
-    /// Used during posture inference to suppress Copy on Drop types.
+    /// ADR-0083 (revised): destructors are `fn drop(self)` methods
+    /// declared inside the struct body. The retired top-level
+    /// `drop fn TypeName(self)` form had its own collection pass; with
+    /// it gone, only `has_inline_drop_method` remains.
     fn collect_types_with_drop(&self) -> HashSet<Spur> {
-        let mut out: HashSet<Spur> = HashSet::default();
-        for (_, inst) in self.rir.iter() {
-            if let InstData::DropFnDecl { type_name, .. } = &inst.data {
-                out.insert(*type_name);
-            }
-        }
-        out
+        // No top-level drop fns; inline `fn drop(self)` is detected via
+        // `has_inline_drop_method` at the per-decl site.
+        HashSet::default()
     }
 
     /// ADR-0080 / ADR-0083: detect whether a struct/enum's inline method
-    /// list contains a `fn drop(self)` declaration. The top-level
-    /// `drop fn TypeName(self)` form is collected separately by
-    /// `collect_types_with_drop`.
+    /// list contains a `fn drop(self)` declaration.
     fn has_inline_drop_method(&self, methods_start: u32, methods_len: u32) -> bool {
         if methods_len == 0 {
             return false;
@@ -2185,10 +2181,6 @@ impl<'a> Sema<'a> {
                     self.collect_enum_methods(*name, *methods_start, *methods_len, inst.span)?;
                 }
 
-                InstData::DropFnDecl { type_name, .. } => {
-                    self.collect_destructor(*type_name, inst.span)?;
-                }
-
                 InstData::FnDecl {
                     is_pub,
                     is_unchecked,
@@ -2234,53 +2226,6 @@ impl<'a> Sema<'a> {
             }
         }
 
-        Ok(())
-    }
-
-    /// Collect a destructor definition and register it with its struct.
-    fn collect_destructor(&mut self, type_name: Spur, span: Span) -> CompileResult<()> {
-        let type_name_str = self.interner.resolve(&type_name).to_string();
-
-        // Verify the struct exists
-        if !self.structs.contains_key(&type_name) {
-            return Err(CompileError::new(
-                ErrorKind::DestructorUnknownType {
-                    type_name: type_name_str,
-                },
-                span,
-            ));
-        }
-
-        // Get the struct ID from the lookup table
-        let struct_id = *self.structs.get(&type_name).ok_or_else(|| {
-            CompileError::new(
-                ErrorKind::InternalError(
-                    ice!(
-                        "struct not found during destructor collection",
-                        phase: "sema/declarations",
-                        details: {
-                            "struct_name" => type_name_str.to_string()
-                        }
-                    )
-                    .to_string(),
-                ),
-                span,
-            )
-        })?;
-
-        let mut struct_def = self.type_pool.struct_def(struct_id);
-        if struct_def.destructor.is_some() {
-            return Err(CompileError::new(
-                ErrorKind::DuplicateDestructor {
-                    type_name: type_name_str,
-                },
-                span,
-            ));
-        }
-
-        let destructor_name = format!("{}.__drop", type_name_str);
-        struct_def.destructor = Some(destructor_name);
-        self.type_pool.update_struct_def(struct_id, struct_def);
         Ok(())
     }
 
@@ -2346,14 +2291,63 @@ impl<'a> Sema<'a> {
         // returned by `resolve_param_type` so `Ref(I)` / `MutRef(I)` lower to
         // the same `(Interface, Borrow|Inout)` shape as legacy `borrow t: I`
         // / `inout t: I`.
+        //
+        // A parameter type "references" a type parameter when bare equality
+        // misses but a substituted resolution succeeds — e.g. `MutRef(Vec(T))`
+        // mentions `T` indirectly. Treat those exactly like the bare-name
+        // case: resolve at specialization, placeholder here. Mirrors the
+        // `references_method_type_param` helper used for inline methods.
+        let references_type_param = |ty_sym: Spur, sema: &mut Self| -> bool {
+            if type_param_names.contains(&ty_sym) {
+                return true;
+            }
+            if type_param_names.is_empty() {
+                return false;
+            }
+            let subst: rustc_hash::FxHashMap<Spur, Type> =
+                type_param_names.iter().map(|&n| (n, Type::I32)).collect();
+            let with_subst = sema.resolve_type_for_comptime_with_subst(ty_sym, &subst);
+            let without_subst =
+                sema.resolve_type_for_comptime_with_subst(ty_sym, &HashMap::default());
+            with_subst.is_some() && without_subst.is_none()
+        };
+
         let mut param_types: Vec<Type> = Vec::with_capacity(params.len());
         let mut param_modes: Vec<RirParamMode> = Vec::with_capacity(params.len());
         for (p, &is_tp) in params.iter().zip(is_type_param.iter()) {
-            let (ty, mode) = if is_tp || type_param_names.contains(&p.ty) {
+            let (ty, mode) = if is_tp || references_type_param(p.ty, self) {
                 // Comptime type parameter, or a parameter whose declared type
-                // is a type parameter (`x: T`). The concrete type is resolved
+                // is (or transitively contains) a type parameter — e.g.
+                // `x: T`, `v: MutRef(Vec(T))`. The concrete type is resolved
                 // at specialization; mode is taken verbatim from RIR.
-                (Type::COMPTIME_TYPE, p.mode)
+                //
+                // ADR-0076 normalization for the deferred case: when the
+                // declared type is `Ref(...)` / `MutRef(...)` wrapping a
+                // type parameter, surface that ref-shape on the param mode.
+                // `resolve_param_type` does this for the eager path (and
+                // for interface inner types); here we do the same shape
+                // detection on the source-level symbol so the implicit-
+                // forwarding logic in `analyze_call` (which can only see
+                // the deferred `COMPTIME_TYPE` placeholder, not the
+                // original `Ref(...)` shape) can still recognize the
+                // reference parameter and promote the arg mode.
+                let normalized_mode = {
+                    let type_name = self.interner.resolve(&p.ty);
+                    if let Some((callee, args)) = parse_type_call_syntax(type_name)
+                        && args.len() == 1
+                        && (callee == "Ref" || callee == "MutRef")
+                        && matches!(p.mode, RirParamMode::Normal)
+                    {
+                        if callee == "MutRef" {
+                            RirParamMode::MutRef
+                        } else {
+                            RirParamMode::Ref
+                        }
+                    } else {
+                        p.mode
+                    }
+                };
+                (Type::COMPTIME_TYPE, normalized_mode)
             } else {
                 self.resolve_param_type(p.ty, p.mode, span)?
             };
@@ -2362,10 +2356,8 @@ impl<'a> Sema<'a> {
         }
         let param_comptime: Vec<bool> = params.iter().map(|p| p.is_comptime).collect();
 
-        // For generic functions, we can't resolve the return type yet if it references
-        // a type parameter. For now, check if it matches any type parameter name.
-        let ret_type = if type_param_names.contains(&return_type_sym) {
-            // Return type is a type parameter - use placeholder
+        // Return type follows the same rule.
+        let ret_type = if references_type_param(return_type_sym, self) {
             Type::COMPTIME_TYPE
         } else {
             self.resolve_type(return_type_sym, span)?

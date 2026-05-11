@@ -1,4 +1,12 @@
-// ADR-0066 + ADR-0082: owned, growable vector — { ptr, len, cap }.
+// ADR-0066 + ADR-0082 + ADR-0084: owned, growable vector — { ptr, len, cap }.
+//
+// Thread-safety (ADR-0084): the marker on the produced struct is
+// chosen by `comptime if @thread_safety(T)`. The same body works for
+// `Sync` / `Send` / `Unsend` `T` because every method delegates to a
+// module-level helper; the in-struct definitions are slim forwarders
+// that just plumb `Self` and `T` through, so adding a new posture
+// branch is one extra `else if` arm of forwarders, not three more
+// copies of every algorithm.
 //
 // `@lang("vec")` binds this declaration to the compiler's vec
 // recognition (drop synthesis, indexing `v[i]`, slice borrow `&v[..]`).
@@ -10,352 +18,523 @@
 // the read produces an owned `T` whose drop runs at scope exit,
 // avoiding a separate `@drop(value)` primitive.
 
+// ──────────────────────────── helpers ────────────────────────────
+
+fn vec_new_impl(comptime VecT: type, comptime T: type) -> VecT {
+    let null_p: MutPtr(T) = checked { MutPtr(T)::null() };
+    VecT { ptr: null_p, len: 0, cap: 0 }
+}
+
+fn vec_with_capacity_impl(comptime VecT: type, comptime T: type, n: usize) -> VecT {
+    if n == 0 {
+        return vec_new_impl(VecT, T);
+    }
+    let bytes: usize = n * @size_of(T);
+    let align: usize = @align_of(T);
+    let p: MutPtr(T) = checked { @alloc(bytes, align) };
+    VecT { ptr: p, len: 0, cap: n }
+}
+
+fn vec_push_impl(comptime VecT: type, comptime T: type, v: MutRef(VecT), value: T) {
+    if v.len == v.cap {
+        let new_cap: usize = if v.cap == 0 { 4 } else { v.cap * 2 };
+        let elem_size: usize = @size_of(T);
+        let align: usize = @align_of(T);
+        let new_bytes: usize = new_cap * elem_size;
+        if v.cap == 0 {
+            let p: MutPtr(T) = checked { @alloc(new_bytes, align) };
+            let mut i: usize = 0;
+            while i < v.len {
+                let x: T = checked { v.ptr.offset(i).read() };
+                checked { p.offset(i).write(x) };
+                i = i + 1;
+            }
+            v.ptr = p;
+            v.cap = new_cap;
+        } else {
+            let old_bytes: usize = v.cap * elem_size;
+            let p: MutPtr(T) = checked {
+                @realloc(v.ptr, old_bytes, new_bytes, align)
+            };
+            v.ptr = p;
+            v.cap = new_cap;
+        }
+    }
+    checked { v.ptr.offset(v.len).write(value) };
+    v.len = v.len + 1;
+}
+
+fn vec_pop_impl(comptime VecT: type, comptime T: type, v: MutRef(VecT)) -> T {
+    if v.len == 0 {
+        @panic("Vec::pop on empty Vec");
+    }
+    v.len = v.len - 1;
+    checked { v.ptr.offset(v.len).read() }
+}
+
+fn vec_clear_impl(comptime VecT: type, comptime T: type, v: MutRef(VecT)) {
+    let mut i: usize = 0;
+    while i < v.len {
+        let _: T = checked { v.ptr.offset(i).read() };
+        i = i + 1;
+    }
+    v.len = 0;
+}
+
+fn vec_reserve_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: MutRef(VecT),
+    additional: usize
+) {
+    let needed: usize = v.len + additional;
+    if needed <= v.cap {
+        return;
+    }
+    let doubled: usize = if v.cap == 0 { 4 } else { v.cap * 2 };
+    let new_cap: usize = if doubled < needed { needed } else { doubled };
+    let elem_size: usize = @size_of(T);
+    let align: usize = @align_of(T);
+    let new_bytes: usize = new_cap * elem_size;
+    if v.cap == 0 {
+        let p: MutPtr(T) = checked { @alloc(new_bytes, align) };
+        let mut i: usize = 0;
+        while i < v.len {
+            let x: T = checked { v.ptr.offset(i).read() };
+            checked { p.offset(i).write(x) };
+            i = i + 1;
+        }
+        v.ptr = p;
+        v.cap = new_cap;
+        return;
+    }
+    let old_bytes: usize = v.cap * elem_size;
+    let p: MutPtr(T) = checked {
+        @realloc(v.ptr, old_bytes, new_bytes, align)
+    };
+    v.ptr = p;
+    v.cap = new_cap;
+}
+
+fn vec_index_read_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: Ref(VecT),
+    i: usize
+) -> T {
+    if i >= v.len {
+        @panic("Vec index out of bounds");
+    }
+    checked { v.ptr.offset(i).read() }
+}
+
+fn vec_index_write_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: MutRef(VecT),
+    i: usize,
+    value: T
+) {
+    if i >= v.len {
+        @panic("Vec index out of bounds");
+    }
+    checked { v.ptr.offset(i).write(value) };
+}
+
+fn vec_terminated_ptr_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: MutRef(VecT),
+    s: T
+) -> Ptr(T) {
+    if v.len == v.cap {
+        let new_cap: usize = if v.cap == 0 { 4 } else { v.cap * 2 };
+        let elem_size: usize = @size_of(T);
+        let align: usize = @align_of(T);
+        let old_bytes: usize = v.cap * elem_size;
+        let new_bytes: usize = new_cap * elem_size;
+        let p: MutPtr(T) = checked {
+            @realloc(v.ptr, old_bytes, new_bytes, align)
+        };
+        v.ptr = p;
+        v.cap = new_cap;
+    }
+    checked { v.ptr.offset(v.len).write(s) };
+    checked { @ptr_cast(v.ptr) }
+}
+
+fn vec_dispose_impl(comptime VecT: type, comptime T: type, v: VecT) {
+    if v.len != 0 {
+        @panic("Vec::dispose called on a non-empty Vec");
+    }
+    if v.cap != 0 {
+        let elem_size: usize = @size_of(T);
+        let align: usize = @align_of(T);
+        let bytes: usize = v.cap * elem_size;
+        checked { @free(v.ptr, bytes, align) };
+    }
+}
+
+fn vec_drop_impl(comptime VecT: type, comptime T: type, v: VecT) {
+    let mut i: usize = 0;
+    while i < v.len {
+        let _: T = checked { v.ptr.offset(i).read() };
+        i = i + 1;
+    }
+    if v.cap != 0 {
+        let elem_size: usize = @size_of(T);
+        let align: usize = @align_of(T);
+        let bytes: usize = v.cap * elem_size;
+        checked { @free(v.ptr, bytes, align) };
+    }
+}
+
+fn vec_clone_impl(comptime VecT: type, comptime T: type, v: Ref(VecT)) -> VecT {
+    if v.len == 0 {
+        return vec_new_impl(VecT, T);
+    }
+    let cap: usize = v.len;
+    let elem_size: usize = @size_of(T);
+    let align: usize = @align_of(T);
+    let bytes: usize = cap * elem_size;
+    let dst: MutPtr(T) = checked { @alloc(bytes, align) };
+    let mut i: usize = 0;
+    while i < v.len {
+        let x: T = checked { v.ptr.offset(i).read() };
+        checked { dst.offset(i).write(x) };
+        i = i + 1;
+    }
+    VecT { ptr: dst, len: v.len, cap: cap }
+}
+
+fn vec_eq_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: Ref(VecT),
+    other: Ref(VecT)
+) -> bool {
+    if v.len != other.len {
+        return false;
+    }
+    let mut i: usize = 0;
+    while i < v.len {
+        let a: T = checked { v.ptr.offset(i).read() };
+        let b: T = checked { other.ptr.offset(i).read() };
+        if !(a == b) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn vec_cmp_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: Ref(VecT),
+    other: Ref(VecT)
+) -> Ordering {
+    let n: usize = if v.len < other.len { v.len } else { other.len };
+    let mut i: usize = 0;
+    while i < n {
+        let a: T = checked { v.ptr.offset(i).read() };
+        let b: T = checked { other.ptr.offset(i).read() };
+        if a < b { return Ordering::Less; }
+        if a > b { return Ordering::Greater; }
+        i = i + 1;
+    }
+    if v.len < other.len { return Ordering::Less; }
+    if v.len > other.len { return Ordering::Greater; }
+    Ordering::Equal
+}
+
+fn vec_contains_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: Ref(VecT),
+    needle: Slice(T)
+) -> bool {
+    let nlen: usize = needle.len();
+    if nlen == 0 { return true; }
+    if nlen > v.len { return false; }
+    let limit: usize = v.len - nlen + 1;
+    let mut i: usize = 0;
+    while i < limit {
+        let mut k: usize = 0;
+        let mut matched: bool = true;
+        while k < nlen {
+            let a: T = checked { v.ptr.offset(i + k).read() };
+            let b: T = needle[k];
+            if !(a == b) {
+                matched = false;
+                k = nlen;
+            } else {
+                k = k + 1;
+            }
+        }
+        if matched { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+fn vec_starts_with_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: Ref(VecT),
+    prefix: Slice(T)
+) -> bool {
+    let plen: usize = prefix.len();
+    if plen > v.len { return false; }
+    let mut i: usize = 0;
+    while i < plen {
+        let a: T = checked { v.ptr.offset(i).read() };
+        let b: T = prefix[i];
+        if !(a == b) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn vec_ends_with_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: Ref(VecT),
+    suffix: Slice(T)
+) -> bool {
+    let slen: usize = suffix.len();
+    if slen > v.len { return false; }
+    let off: usize = v.len - slen;
+    let mut i: usize = 0;
+    while i < slen {
+        let a: T = checked { v.ptr.offset(off + i).read() };
+        let b: T = suffix[i];
+        if !(a == b) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn vec_concat_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: VecT,
+    other: Slice(T)
+) -> VecT {
+    let olen: usize = other.len();
+    let total: usize = v.len + olen;
+    if total == 0 {
+        let _ = v;
+        return vec_new_impl(VecT, T);
+    }
+    let elem_size: usize = @size_of(T);
+    let align: usize = @align_of(T);
+    let bytes: usize = total * elem_size;
+    let dst: MutPtr(T) = checked { @alloc(bytes, align) };
+    let mut i: usize = 0;
+    while i < v.len {
+        let x: T = checked { v.ptr.offset(i).read() };
+        checked { dst.offset(i).write(x) };
+        i = i + 1;
+    }
+    let mut j: usize = 0;
+    while j < olen {
+        let x: T = other[j];
+        checked { dst.offset(v.len + j).write(x) };
+        j = j + 1;
+    }
+    if v.cap != 0 {
+        let old_bytes: usize = v.cap * elem_size;
+        checked { @free(v.ptr, old_bytes, align) };
+    }
+    VecT { ptr: dst, len: total, cap: total }
+}
+
+fn vec_extend_from_slice_impl(
+    comptime VecT: type,
+    comptime T: type,
+    v: MutRef(VecT),
+    other: Slice(T)
+) {
+    let olen: usize = other.len();
+    vec_reserve_impl(VecT, T, v, olen);
+    let mut j: usize = 0;
+    while j < olen {
+        let x: T = other[j];
+        checked { v.ptr.offset(v.len + j).write(x) };
+        j = j + 1;
+    }
+    v.len = v.len + olen;
+}
+
+// ────────────────────────── struct + branches ──────────────────────────
+
 @lang("vec")
 pub fn Vec(comptime T: type) -> type {
-    struct {
-        ptr: MutPtr(T),
-        len: usize,
-        cap: usize,
+    comptime if @thread_safety(T) == ThreadSafety::Sync {
+        @mark(checked_sync) struct {
+            ptr: MutPtr(T),
+            len: usize,
+            cap: usize,
 
-        pub fn new() -> Self {
-            let null_p: MutPtr(T) = checked { MutPtr(T)::null() };
-            Self { ptr: null_p, len: 0, cap: 0 }
-        }
+            pub fn new() -> Self { vec_new_impl(Self, T) }
+            pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
 
-        pub fn with_capacity(n: usize) -> Self {
-            if n == 0 {
-                return Self::new();
+            pub fn len(self: Ref(Self)) -> usize { self.len }
+            pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+            pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
+
+            pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+            pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+            pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
+            pub fn reserve(self: MutRef(Self), additional: usize) {
+                vec_reserve_impl(Self, T, self, additional)
             }
-            let bytes: usize = n * @size_of(T);
-            let align: usize = @align_of(T);
-            let p: MutPtr(T) = checked { @alloc(bytes, align) };
-            Self { ptr: p, len: 0, cap: n }
-        }
 
-        pub fn len(self: Ref(Self)) -> usize { self.len }
-        pub fn capacity(self: Ref(Self)) -> usize { self.cap }
-        pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
-
-        pub fn push(self: MutRef(Self), value: T) {
-            if self.len == self.cap {
-                let new_cap: usize = if self.cap == 0 { 4 } else { self.cap * 2 };
-                let elem_size: usize = @size_of(T);
-                let align: usize = @align_of(T);
-                let new_bytes: usize = new_cap * elem_size;
-                // ADR-0082 / ADR-0072: cap==0 sentinel means the
-                // current buffer is not heap-owned (e.g. string
-                // literal storage). Allocate fresh and copy live
-                // elements rather than calling `@realloc` on a
-                // non-malloc'd pointer.
-                if self.cap == 0 {
-                    let p: MutPtr(T) = checked { @alloc(new_bytes, align) };
-                    let mut i: usize = 0;
-                    while i < self.len {
-                        let v: T = checked { self.ptr.offset(i).read() };
-                        checked { p.offset(i).write(v) };
-                        i = i + 1;
-                    }
-                    self.ptr = p;
-                    self.cap = new_cap;
-                } else {
-                    let old_bytes: usize = self.cap * elem_size;
-                    let p: MutPtr(T) = checked {
-                        @realloc(self.ptr, old_bytes, new_bytes, align)
-                    };
-                    self.ptr = p;
-                    self.cap = new_cap;
-                }
+            pub fn index_read(self: Ref(Self), i: usize) -> T {
+                vec_index_read_impl(Self, T, self, i)
             }
-            checked { self.ptr.offset(self.len).write(value) };
-            self.len = self.len + 1;
-        }
-
-        // v1: panic on empty. ADR-0066 future-work: wrap in Option(T).
-        pub fn pop(self: MutRef(Self)) -> T {
-            if self.len == 0 {
-                @panic("Vec::pop on empty Vec");
+            pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+                vec_index_write_impl(Self, T, self, i, value)
             }
-            self.len = self.len - 1;
-            checked { self.ptr.offset(self.len).read() }
-        }
 
-        // Drop every live element (each `read` consumes the slot, its
-        // drop runs at scope exit), reset len.
-        pub fn clear(self: MutRef(Self)) {
-            let mut i: usize = 0;
-            while i < self.len {
-                let _: T = checked { self.ptr.offset(i).read() };
-                i = i + 1;
+            pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+            pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+
+            pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
+                vec_terminated_ptr_impl(Self, T, self, s)
             }
-            self.len = 0;
-        }
 
-        pub fn reserve(self: MutRef(Self), additional: usize) {
-            let needed: usize = self.len + additional;
-            if needed <= self.cap {
-                return;
+            pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+            pub fn drop(self) { vec_drop_impl(Self, T, self) }
+
+            pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
+            pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
+            pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering { vec_cmp_impl(Self, T, self, other) }
+
+            pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
+                vec_contains_impl(Self, T, self, needle)
             }
-            // Grow at least to needed, doubling if smaller.
-            let doubled: usize = if self.cap == 0 { 4 } else { self.cap * 2 };
-            let new_cap: usize = if doubled < needed { needed } else { doubled };
-            let elem_size: usize = @size_of(T);
-            let align: usize = @align_of(T);
-            let new_bytes: usize = new_cap * elem_size;
-            // ADR-0082 / ADR-0072: `cap == 0` is the sentinel for a
-            // non-heap buffer (string literal: `ptr=<static>, len=N,
-            // cap=0`). Calling `@realloc` on a non-malloc'd pointer is
-            // UB and segfaults. Allocate fresh and copy the live
-            // elements over instead. The static buffer is read-only;
-            // we can't return it to the allocator, but it's also not
-            // ours to free.
-            if self.cap == 0 {
-                let p: MutPtr(T) = checked { @alloc(new_bytes, align) };
-                let mut i: usize = 0;
-                while i < self.len {
-                    let v: T = checked { self.ptr.offset(i).read() };
-                    checked { p.offset(i).write(v) };
-                    i = i + 1;
-                }
-                self.ptr = p;
-                self.cap = new_cap;
-                return;
+            pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
+                vec_starts_with_impl(Self, T, self, prefix)
             }
-            let old_bytes: usize = self.cap * elem_size;
-            let p: MutPtr(T) = checked {
-                @realloc(self.ptr, old_bytes, new_bytes, align)
-            };
-            self.ptr = p;
-            self.cap = new_cap;
-        }
-
-        // Indexing primitives (ADR-0082 §3). Surface forms `v[i]` /
-        // `v[i] = x` route here in Phase 3.
-        pub fn index_read(self: Ref(Self), i: usize) -> T {
-            if i >= self.len {
-                @panic("Vec index out of bounds");
+            pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
+                vec_ends_with_impl(Self, T, self, suffix)
             }
-            checked { self.ptr.offset(i).read() }
-        }
-
-        pub fn index_write(self: MutRef(Self), i: usize, value: T) {
-            if i >= self.len {
-                @panic("Vec index out of bounds");
-            }
-            checked { self.ptr.offset(i).write(value) };
-        }
-
-        // Const view of the buffer. `checked` requirement is wrapped
-        // internally; user call sites do not need their own checked block.
-        pub fn ptr(self: Ref(Self)) -> Ptr(T) {
-            checked { @ptr_cast(self.ptr) }
-        }
-
-        pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) {
-            self.ptr
-        }
-
-        // Write `s` at ptr[len] (growing if cap == len) and return a
-        // const view. Used by FFI handoff (e.g. C-string convention).
-        pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
-            if self.len == self.cap {
-                let new_cap: usize = if self.cap == 0 { 4 } else { self.cap * 2 };
-                let elem_size: usize = @size_of(T);
-                let align: usize = @align_of(T);
-                let old_bytes: usize = self.cap * elem_size;
-                let new_bytes: usize = new_cap * elem_size;
-                let p: MutPtr(T) = checked {
-                    @realloc(self.ptr, old_bytes, new_bytes, align)
-                };
-                self.ptr = p;
-                self.cap = new_cap;
-            }
-            checked { self.ptr.offset(self.len).write(s) };
-            checked { @ptr_cast(self.ptr) }
-        }
-
-        // Explicit-release for linear `T` and explicit drop for non-linear `T`.
-        // Panics if len != 0 (any contained element would otherwise leak).
-        pub fn dispose(self) {
-            if self.len != 0 {
-                @panic("Vec::dispose called on a non-empty Vec");
-            }
-            if self.cap != 0 {
-                let elem_size: usize = @size_of(T);
-                let align: usize = @align_of(T);
-                let bytes: usize = self.cap * elem_size;
-                checked { @free(self.ptr, bytes, align) };
+            pub fn concat(self, other: Slice(T)) -> Self { vec_concat_impl(Self, T, self, other) }
+            pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
+                vec_extend_from_slice_impl(Self, T, self, other)
             }
         }
+    } else if @thread_safety(T) == ThreadSafety::Send {
+        @mark(checked_send) struct {
+            ptr: MutPtr(T),
+            len: usize,
+            cap: usize,
 
-        // Standard drop: drain elements, free buffer if any.
-        pub fn drop(self) {
-            let mut i: usize = 0;
-            while i < self.len {
-                let _: T = checked { self.ptr.offset(i).read() };
-                i = i + 1;
+            pub fn new() -> Self { vec_new_impl(Self, T) }
+            pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
+
+            pub fn len(self: Ref(Self)) -> usize { self.len }
+            pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+            pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
+
+            pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+            pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+            pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
+            pub fn reserve(self: MutRef(Self), additional: usize) {
+                vec_reserve_impl(Self, T, self, additional)
             }
-            if self.cap != 0 {
-                let elem_size: usize = @size_of(T);
-                let align: usize = @align_of(T);
-                let bytes: usize = self.cap * elem_size;
-                checked { @free(self.ptr, bytes, align) };
+
+            pub fn index_read(self: Ref(Self), i: usize) -> T {
+                vec_index_read_impl(Self, T, self, i)
+            }
+            pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+                vec_index_write_impl(Self, T, self, i, value)
+            }
+
+            pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+            pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
+
+            pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
+                vec_terminated_ptr_impl(Self, T, self, s)
+            }
+
+            pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+            pub fn drop(self) { vec_drop_impl(Self, T, self) }
+
+            pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
+            pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
+            pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering { vec_cmp_impl(Self, T, self, other) }
+
+            pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
+                vec_contains_impl(Self, T, self, needle)
+            }
+            pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
+                vec_starts_with_impl(Self, T, self, prefix)
+            }
+            pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
+                vec_ends_with_impl(Self, T, self, suffix)
+            }
+            pub fn concat(self, other: Slice(T)) -> Self { vec_concat_impl(Self, T, self, other) }
+            pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
+                vec_extend_from_slice_impl(Self, T, self, other)
             }
         }
+    } else {
+        @mark(unsend) struct {
+            ptr: MutPtr(T),
+            len: usize,
+            cap: usize,
 
-        // Bitwise clone for `T: Copy` instantiations. The body assumes
-        // copy semantics — instantiating for non-Copy `T` produces a
-        // sema error at the per-element read.
-        pub fn clone(self: Ref(Self)) -> Self {
-            if self.len == 0 {
-                return Self::new();
-            }
-            // Use `len` (not `cap`) as the new buffer's capacity. String
-            // literals come in as `{ ptr=<static>, len=5, cap=0 }` where
-            // `cap=0` is a sentinel meaning "not heap-owned"; allocating
-            // by `cap` would produce a 0-byte buffer and the per-element
-            // write loop would scribble out of bounds.
-            let cap: usize = self.len;
-            let elem_size: usize = @size_of(T);
-            let align: usize = @align_of(T);
-            let bytes: usize = cap * elem_size;
-            let dst: MutPtr(T) = checked { @alloc(bytes, align) };
-            let mut i: usize = 0;
-            while i < self.len {
-                let v: T = checked { self.ptr.offset(i).read() };
-                checked { dst.offset(i).write(v) };
-                i = i + 1;
-            }
-            Self { ptr: dst, len: self.len, cap: cap }
-        }
+            pub fn new() -> Self { vec_new_impl(Self, T) }
+            pub fn with_capacity(n: usize) -> Self { vec_with_capacity_impl(Self, T, n) }
 
-        // ADR-0081 byte-comparison and search methods. `T: Copy`
-        // (enforced per-instantiation by the read in the loop body).
-        // ADR-0082: byte-level memcmp via `@bytes_eq`. Preserves legacy
-        // memcmp semantics for Copy structs without explicit `Eq` impl.
-        pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool {
-            if self.len != other.len {
-                return false;
-            }
-            let mut i: usize = 0;
-            while i < self.len {
-                let a: T = checked { self.ptr.offset(i).read() };
-                let b: T = checked { other.ptr.offset(i).read() };
-                if !(a == b) {
-                    return false;
-                }
-                i = i + 1;
-            }
-            true
-        }
+            pub fn len(self: Ref(Self)) -> usize { self.len }
+            pub fn capacity(self: Ref(Self)) -> usize { self.cap }
+            pub fn is_empty(self: Ref(Self)) -> bool { self.len == 0 }
 
-        pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering {
-            let n: usize = if self.len < other.len { self.len } else { other.len };
-            let mut i: usize = 0;
-            while i < n {
-                let a: T = checked { self.ptr.offset(i).read() };
-                let b: T = checked { other.ptr.offset(i).read() };
-                if a < b { return Ordering::Less; }
-                if a > b { return Ordering::Greater; }
-                i = i + 1;
+            pub fn push(self: MutRef(Self), value: T) { vec_push_impl(Self, T, self, value) }
+            pub fn pop(self: MutRef(Self)) -> T { vec_pop_impl(Self, T, self) }
+            pub fn clear(self: MutRef(Self)) { vec_clear_impl(Self, T, self) }
+            pub fn reserve(self: MutRef(Self), additional: usize) {
+                vec_reserve_impl(Self, T, self, additional)
             }
-            if self.len < other.len { return Ordering::Less; }
-            if self.len > other.len { return Ordering::Greater; }
-            Ordering::Equal
-        }
 
-        pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
-            let nlen: usize = needle.len();
-            if nlen == 0 { return true; }
-            if nlen > self.len { return false; }
-            let limit: usize = self.len - nlen + 1;
-            let mut i: usize = 0;
-            while i < limit {
-                let mut k: usize = 0;
-                let mut matched: bool = true;
-                while k < nlen {
-                    let a: T = checked { self.ptr.offset(i + k).read() };
-                    let b: T = needle[k];
-                    if !(a == b) {
-                        matched = false;
-                        k = nlen;
-                    } else {
-                        k = k + 1;
-                    }
-                }
-                if matched { return true; }
-                i = i + 1;
+            pub fn index_read(self: Ref(Self), i: usize) -> T {
+                vec_index_read_impl(Self, T, self, i)
             }
-            false
-        }
+            pub fn index_write(self: MutRef(Self), i: usize, value: T) {
+                vec_index_write_impl(Self, T, self, i, value)
+            }
 
-        pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
-            let plen: usize = prefix.len();
-            if plen > self.len { return false; }
-            let mut i: usize = 0;
-            while i < plen {
-                let a: T = checked { self.ptr.offset(i).read() };
-                let b: T = prefix[i];
-                if !(a == b) { return false; }
-                i = i + 1;
-            }
-            true
-        }
+            pub fn ptr(self: Ref(Self)) -> Ptr(T) { checked { @ptr_cast(self.ptr) } }
+            pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
-        pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
-            let slen: usize = suffix.len();
-            if slen > self.len { return false; }
-            let off: usize = self.len - slen;
-            let mut i: usize = 0;
-            while i < slen {
-                let a: T = checked { self.ptr.offset(off + i).read() };
-                let b: T = suffix[i];
-                if !(a == b) { return false; }
-                i = i + 1;
+            pub fn terminated_ptr(self: MutRef(Self), s: T) -> Ptr(T) {
+                vec_terminated_ptr_impl(Self, T, self, s)
             }
-            true
-        }
 
-        pub fn concat(self, other: Slice(T)) -> Self {
-            let olen: usize = other.len();
-            let total: usize = self.len + olen;
-            if total == 0 {
-                let _ = self;
-                return Self::new();
-            }
-            let elem_size: usize = @size_of(T);
-            let align: usize = @align_of(T);
-            let bytes: usize = total * elem_size;
-            let dst: MutPtr(T) = checked { @alloc(bytes, align) };
-            let mut i: usize = 0;
-            while i < self.len {
-                let v: T = checked { self.ptr.offset(i).read() };
-                checked { dst.offset(i).write(v) };
-                i = i + 1;
-            }
-            let mut j: usize = 0;
-            while j < olen {
-                let v: T = other[j];
-                checked { dst.offset(self.len + j).write(v) };
-                j = j + 1;
-            }
-            // Free the consumed-self buffer; we already drained it.
-            if self.cap != 0 {
-                let old_bytes: usize = self.cap * elem_size;
-                checked { @free(self.ptr, old_bytes, align) };
-            }
-            Self { ptr: dst, len: total, cap: total }
-        }
+            pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
+            pub fn drop(self) { vec_drop_impl(Self, T, self) }
 
-        pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
-            let olen: usize = other.len();
-            self.reserve(olen);
-            let mut j: usize = 0;
-            while j < olen {
-                let v: T = other[j];
-                checked { self.ptr.offset(self.len + j).write(v) };
-                j = j + 1;
+            pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
+            pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
+            pub fn cmp(self: Ref(Self), other: Ref(Self)) -> Ordering { vec_cmp_impl(Self, T, self, other) }
+
+            pub fn contains(self: Ref(Self), needle: Slice(T)) -> bool {
+                vec_contains_impl(Self, T, self, needle)
             }
-            self.len = self.len + olen;
+            pub fn starts_with(self: Ref(Self), prefix: Slice(T)) -> bool {
+                vec_starts_with_impl(Self, T, self, prefix)
+            }
+            pub fn ends_with(self: Ref(Self), suffix: Slice(T)) -> bool {
+                vec_ends_with_impl(Self, T, self, suffix)
+            }
+            pub fn concat(self, other: Slice(T)) -> Self { vec_concat_impl(Self, T, self, other) }
+            pub fn extend_from_slice(self: MutRef(Self), other: Slice(T)) {
+                vec_extend_from_slice_impl(Self, T, self, other)
+            }
         }
     }
 }

@@ -678,30 +678,70 @@ impl<'a> ConstraintGenerator<'a> {
                         for (i, arg) in args.iter().enumerate() {
                             let arg_info = self.generate(arg.value, ctx);
 
-                            // If this is a comptime parameter, extract the type for substitution
+                            // If this is a comptime parameter, extract the type for substitution.
                             if i < func.param_comptime.len() && func.param_comptime[i] {
+                                let arg_inst = self.rir.get(arg.value);
+                                // A bare comptime type-param identifier (e.g., `T`
+                                // in `helper(Self, T, ...)`) parses as
+                                // `Expr::Ident` and lowers to `VarRef`, not
+                                // `TypeConst`. Its inferred type is the
+                                // substituted concrete type (e.g., `i32`),
+                                // which fails the `COMPTIME_TYPE` check below.
+                                // Look it up in the outer `type_subst` so the
+                                // callee's type parameter gets bound.
+                                if let gruel_rir::InstData::VarRef { name } = &arg_inst.data
+                                    && let Some(subst) = self.type_subst
+                                    && let Some(&forwarded_ty) = subst.get(name)
+                                    && i < func.param_names.len()
+                                {
+                                    type_subst.insert(func.param_names[i], forwarded_ty);
+                                    continue;
+                                }
                                 // The argument should be a TypeConst - extract the concrete type
                                 if let InferType::Concrete(Type::COMPTIME_TYPE) = &arg_info.ty {
                                     // This is a type value - get the actual type from the RIR
-                                    let arg_inst = self.rir.get(arg.value);
                                     if let gruel_rir::InstData::TypeConst { type_name } =
                                         &arg_inst.data
                                     {
-                                        // Resolve type_name to a concrete Type
+                                        // Resolve `type_name` to a concrete Type.
+                                        // Checks (in order):
+                                        //   1. The outer method body's `type_subst`
+                                        //      — covers `Self` and method-level
+                                        //      `comptime T: type` parameters being
+                                        //      forwarded to a callee.
+                                        //   2. Registered structs (`self.structs`)
+                                        //      — covers user-named types passed
+                                        //      directly: `helper(MyStruct)`.
+                                        //   3. A small primitive table — covers
+                                        //      `i32`/`bool`/etc. parsed as
+                                        //      `TypeLit` from primitive keywords,
+                                        //      which never reach
+                                        //      `register_type_names` so they
+                                        //      aren't in `self.structs`.
                                         let type_name_str = self.interner.resolve(type_name);
-                                        let concrete_ty = match type_name_str {
-                                            "i8" => Type::I8,
-                                            "i16" => Type::I16,
-                                            "i32" => Type::I32,
-                                            "i64" => Type::I64,
-                                            "u8" => Type::U8,
-                                            "u16" => Type::U16,
-                                            "u32" => Type::U32,
-                                            "u64" => Type::U64,
-                                            "bool" => Type::BOOL,
-                                            "()" => Type::UNIT,
-                                            _ => Type::ERROR, // Unknown type
-                                        };
+                                        let concrete_ty = self
+                                            .type_subst
+                                            .and_then(|subst| subst.get(type_name).copied())
+                                            .or_else(|| self.structs.get(type_name).copied())
+                                            .unwrap_or(match type_name_str {
+                                                "i8" => Type::I8,
+                                                "i16" => Type::I16,
+                                                "i32" => Type::I32,
+                                                "i64" => Type::I64,
+                                                "isize" => Type::ISIZE,
+                                                "u8" => Type::U8,
+                                                "u16" => Type::U16,
+                                                "u32" => Type::U32,
+                                                "u64" => Type::U64,
+                                                "usize" => Type::USIZE,
+                                                "f16" => Type::F16,
+                                                "f32" => Type::F32,
+                                                "f64" => Type::F64,
+                                                "bool" => Type::BOOL,
+                                                "char" => Type::CHAR,
+                                                "()" => Type::UNIT,
+                                                _ => Type::ERROR,
+                                            });
                                         if i < func.param_names.len() {
                                             type_subst.insert(func.param_names[i], concrete_ty);
                                         }
@@ -713,9 +753,23 @@ impl<'a> ConstraintGenerator<'a> {
                         // Compute the actual return type by substituting type parameters
 
                         if func.return_type == InferType::Concrete(Type::COMPTIME_TYPE) {
-                            // Return type is a type parameter - look it up in substitutions
+                            // Return type position references at least one
+                            // type parameter (declared as `Type::COMPTIME_TYPE`
+                            // in the sig — see `references_type_param` in
+                            // declarations.rs). Two shapes:
+                            //   1. Bare type-param: `-> T` → look up
+                            //      `return_type_sym` ("T") in `type_subst`.
+                            //   2. Compound: `-> Ptr(T)` / `-> MutRef(Vec(T))`
+                            //      → recursively resolve via the local subst
+                            //      so the inner `T` gets bound to the concrete
+                            //      type just gathered from the call's args.
+                            let sym_str = self.interner.resolve(&func.return_type_sym);
                             if let Some(&concrete_ty) = type_subst.get(&func.return_type_sym) {
                                 InferType::Concrete(concrete_ty)
+                            } else if let Some(resolved) =
+                                self.resolve_type_with_local_subst(sym_str, &type_subst)
+                            {
+                                resolved
                             } else {
                                 func.return_type.clone()
                             }
@@ -1705,7 +1759,6 @@ impl<'a> ConstraintGenerator<'a> {
             | InstData::InterfaceDecl { .. }
             | InstData::InterfaceMethodSig { .. }
             | InstData::DeriveDecl { .. }
-            | InstData::DropFnDecl { .. }
             | InstData::ConstDecl { .. } => InferType::Concrete(Type::UNIT),
 
             // ADR-0057: anonymous interface type expressions yield a
@@ -2269,6 +2322,80 @@ impl<'a> ConstraintGenerator<'a> {
                 InferType::Var(var)
             }
         }
+    }
+
+    /// Resolve a type name to an InferType, consulting `local_subst`
+    /// before falling back to the body-level `self.type_subst`.
+    ///
+    /// Used at generic-call sites: the callee's `return_type_sym` may be
+    /// a compound name like `Ptr(T)` where `T` is bound to a concrete
+    /// type only by the per-call substitution map we just built. The
+    /// regular `resolve_type_name` only sees `self.type_subst` (the
+    /// outer body's subst), so it would resolve `T` to `Type::ERROR`
+    /// and the call's return type would never become `Ptr(<concrete>)`.
+    fn resolve_type_with_local_subst(
+        &self,
+        name: &str,
+        local_subst: &rustc_hash::FxHashMap<lasso::Spur, Type>,
+    ) -> Option<InferType> {
+        // Local subst takes precedence — its bindings are call-site-specific.
+        if let Some(name_spur) = self.interner.get(name)
+            && let Some(&ty) = local_subst.get(&name_spur)
+        {
+            return Some(InferType::Concrete(ty));
+        }
+        // For compound names (`Ptr(T)`, `MutRef(T)`, `[T; N]`, …) recurse so
+        // the inner type-arg goes through the same local-first lookup.
+        if let Some((element_type_str, length)) = parse_array_type_syntax(name) {
+            let element_ty = self.resolve_type_with_local_subst(&element_type_str, local_subst)?;
+            return Some(InferType::Array {
+                element: Box::new(element_ty),
+                length,
+            });
+        }
+        if let Some((callee_name, arg_strs)) = parse_type_call_syntax(name)
+            && let Some(constructor) = gruel_builtins::get_builtin_type_constructor(&callee_name)
+            && arg_strs.len() == constructor.arity
+        {
+            let arg_infer = self.resolve_type_with_local_subst(&arg_strs[0], local_subst)?;
+            let arg_ty = match arg_infer {
+                InferType::Concrete(ty) => ty,
+                _ => return None,
+            };
+            let ptr_ty = match constructor.kind {
+                BuiltinTypeConstructorKind::Ptr => {
+                    let id = self.type_pool.intern_ptr_const_from_type(arg_ty);
+                    Type::new_ptr_const(id)
+                }
+                BuiltinTypeConstructorKind::MutPtr => {
+                    let id = self.type_pool.intern_ptr_mut_from_type(arg_ty);
+                    Type::new_ptr_mut(id)
+                }
+                BuiltinTypeConstructorKind::Ref => {
+                    let id = self.type_pool.intern_ref_from_type(arg_ty);
+                    Type::new_ref(id)
+                }
+                BuiltinTypeConstructorKind::MutRef => {
+                    let id = self.type_pool.intern_mut_ref_from_type(arg_ty);
+                    Type::new_mut_ref(id)
+                }
+                BuiltinTypeConstructorKind::Slice => {
+                    let id = self.type_pool.intern_slice_from_type(arg_ty);
+                    Type::new_slice(id)
+                }
+                BuiltinTypeConstructorKind::MutSlice => {
+                    let id = self.type_pool.intern_mut_slice_from_type(arg_ty);
+                    Type::new_mut_slice(id)
+                }
+                BuiltinTypeConstructorKind::Vec => {
+                    let id = self.type_pool.intern_vec_from_type(arg_ty);
+                    Type::new_vec(id)
+                }
+            };
+            return Some(InferType::Concrete(ptr_ty));
+        }
+        // Fall through to the regular resolver for primitives / structs / etc.
+        self.resolve_type_name(name)
     }
 
     /// Resolve a type name to an InferType.

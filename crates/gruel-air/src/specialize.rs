@@ -97,19 +97,24 @@ pub fn specialize(
             .filter(|(k, _)| !name_map.contains_key(k))
             .collect();
 
-        if new_specs.is_empty() {
-            return Ok(accumulated_refs);
-        }
-
         for (k, info) in &new_specs {
             name_map.insert(k.clone(), info.mangled_name);
         }
 
-        // Phase 2: rewrite CallGeneric → Call across every body. Bodies
-        // already rewritten in earlier rounds no longer hold CallGenerics, so
-        // walking them is a cheap no-op.
+        // Phase 2: rewrite CallGeneric → Call across every body. We run this
+        // BEFORE the "no new specs → return" check because the previous
+        // round's Phase 3 may have appended freshly synthesized bodies that
+        // still contain unrewritten CallGenerics. If we returned without
+        // walking them, those CallGenerics would leak past specialization
+        // and panic in CFG building. The walk is cheap on already-rewritten
+        // bodies — they hold no CallGenerics — so doing one final pass
+        // when `new_specs` is empty costs only the linear scan.
         for (func, _, _) in functions_with_strings.iter_mut() {
-            rewrite_call_generic(&mut func.air, &name_map);
+            rewrite_call_generic(&mut func.air, name_map);
+        }
+
+        if new_specs.is_empty() {
+            return Ok(accumulated_refs);
         }
 
         // Phase 3: synthesize the specialized bodies for the new keys.
@@ -436,12 +441,28 @@ fn create_specialized(
     }
 
     // Substitute the return type if it references a type parameter (or
-    // `Self`). Concrete return types (e.g. `i32`) miss the lookup and fall
-    // through to the declared type unchanged.
-    let return_type = type_subst
-        .get(&base.return_type_sym)
-        .copied()
-        .unwrap_or(base.return_type);
+    // `Self`). Three cases:
+    //
+    //   1. Bare type parameter (`-> T`): direct hit in `type_subst`.
+    //   2. Compound type (`-> Ptr(T)`, `-> MutRef(Vec(T))`): the source
+    //      symbol isn't in `type_subst` directly, but the resolver walks
+    //      its inner positions and substitutes there.
+    //   3. Concrete type (`-> i32`): both lookups miss and we keep the
+    //      already-resolved `base.return_type`.
+    //
+    // Without case 2, generic helpers like
+    //   `pub fn vec_ptr(...) -> Ptr(T) { ... }`
+    // get a `COMPTIME_TYPE` return type at specialization, which leaves
+    // body inference unable to fix the result type of `@ptr_cast` (or
+    // any other return-type-inferred intrinsic).
+    let return_type = if let Some(&concrete) = type_subst.get(&base.return_type_sym) {
+        concrete
+    } else if base.return_type == Type::COMPTIME_TYPE {
+        sema.resolve_type_for_comptime_with_subst(base.return_type_sym, &type_subst)
+            .unwrap_or(base.return_type)
+    } else {
+        base.return_type
+    };
 
     // Specialized param list: prepend `self` for methods with a receiver,
     // drop comptime params (erased), substitute `ComptimeType` references.
@@ -501,14 +522,19 @@ fn create_specialized(
 }
 
 /// Resolve a type-parameter reference on `param_name` by walking the RIR to
-/// find the `FnDecl` whose body matches `body`, then looking up the
-/// parameter's source-text type symbol in `type_subst`.
+/// find the `FnDecl` whose body matches `body`, then resolving the
+/// parameter's source-text type symbol under `type_subst`. The substitution-
+/// aware resolver lets compound types (`MutRef(Vec(T))`, `[T; N]`,
+/// `Ptr(T)`, etc.) substitute through their inner positions, not just
+/// the bare-`T` case.
 fn substitute_param_type(
-    sema: &Sema<'_>,
+    sema: &mut Sema<'_>,
     body: InstRef,
     param_name: Spur,
     type_subst: &HashMap<Spur, Type>,
 ) -> Option<Type> {
+    // Find the parameter's declared type symbol.
+    let mut declared_ty: Option<Spur> = None;
     for (_, inst) in sema.rir.iter() {
         if let gruel_rir::InstData::FnDecl {
             body: fn_body,
@@ -520,15 +546,25 @@ fn substitute_param_type(
         {
             let params = sema.rir.get_params(*params_start, *params_len);
             for param in params {
-                if param.name == param_name
-                    && let Some(&concrete) = type_subst.get(&param.ty)
-                {
-                    return Some(concrete);
+                if param.name == param_name {
+                    declared_ty = Some(param.ty);
+                    break;
                 }
+            }
+            if declared_ty.is_some() {
+                break;
             }
         }
     }
-    None
+    let declared_ty = declared_ty?;
+    // Fast path: bare `T` — direct hit.
+    if let Some(&concrete) = type_subst.get(&declared_ty) {
+        return Some(concrete);
+    }
+    // Compound case: `MutRef(Vec(T))`, `Ptr(T)`, etc. Resolve under the
+    // substitution. Uses the same comptime-substitution resolver the
+    // method-side uses for inline `comptime T: type` methods.
+    sema.resolve_type_for_comptime_with_subst(declared_ty, type_subst)
 }
 
 /// Look up the *source-text* type symbol declared for `param_name` in the

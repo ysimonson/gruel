@@ -437,11 +437,15 @@ name = "destructure_wildcard"
 spec = ["5.1:14", "5.1:18"]
 description = "Struct destructuring with wildcard drops the field"
 source = """
-struct Inner { value: i32 }
+struct Inner {
+    value: i32,
 
-drop fn Inner(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 struct Pair { a: Inner, b: Inner }
 
@@ -493,11 +497,15 @@ name = "destructure_no_double_drop"
 spec = ["5.1:14", "5.1:16"]
 description = "Destructured struct fields are dropped exactly once"
 source = """
-struct Inner { value: i32 }
+struct Inner {
+    value: i32,
 
-drop fn Inner(self) {
-    @dbg(self.value);
+    fn drop(self) {
+
+        @dbg(self.value);
+    }
 }
+
 
 struct Pair { a: Inner, b: Inner }
 

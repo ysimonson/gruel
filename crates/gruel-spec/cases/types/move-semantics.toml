@@ -759,11 +759,15 @@ name = "copy_field_access_with_non_copy_sibling"
 spec = ["3.8:28"]
 description = "Copy fields can be read even when sibling fields are non-copy"
 source = """
-struct Inner { x: i32, name: String }
+struct Inner {
+    x: i32, name: String,
 
-drop fn Inner(self) {
-    @dbg(self.x);
+    fn drop(self) {
+
+        @dbg(self.x);
+    }
 }
+
 
 struct Tagged { tag: i32, data: Inner }
 

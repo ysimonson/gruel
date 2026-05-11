@@ -801,13 +801,6 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     .unwrap();
                 }
 
-                // Drop
-                InstData::DropFnDecl { type_name, body } => {
-                    writeln!(out, "drop fn {}(self) {{", self.interner.resolve(type_name)).unwrap();
-                    writeln!(out, "    {}", body).unwrap();
-                    writeln!(out, "}}").unwrap();
-                }
-
                 // Derives (ADR-0058)
                 InstData::DeriveDecl {
                     name,

@@ -108,8 +108,8 @@ pub fn compute_sig_fp(ast: &Ast, interner: &ThreadedRodeo) -> CacheKey {
                 // include them, keyed by their decl name.
                 pub_items.push((interner.resolve(&d.name.name).to_string(), item));
             }
-            // Private items, DropFns, and Error nodes are not part of
-            // the public interface. Skip them.
+            // Private items and Error nodes are not part of the public
+            // interface. Skip them.
             _ => {}
         }
     }
@@ -142,7 +142,7 @@ fn encode_item(h: &mut Hasher, item: &Item, interner: &ThreadedRodeo) {
         Item::Interface(i) => encode_interface(h, i, interner),
         Item::Derive(d) => encode_derive(h, d, interner),
         Item::Const(c) => encode_const(h, c, interner),
-        Item::DropFn(_) | Item::Error(_) => {}
+        Item::Error(_) => {}
     }
 }
 
