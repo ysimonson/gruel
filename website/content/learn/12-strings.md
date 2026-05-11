@@ -138,7 +138,7 @@ fn main() -> i32 {
 
 ## Custom Destructors
 
-If your struct holds a String or other resource that needs cleanup, define a custom destructor by adding a `fn drop(self)` method to the struct body. See [Destructors](@/learn/destructors.md) for details on drop semantics, drop order, and how to write your own.
+If your struct holds a String or other resource that needs cleanup, define a custom destructor by adding a `fn __drop(self)` method to the struct body. See [Destructors](@/learn/destructors.md) for details on drop semantics, drop order, and how to write your own.
 
 ## Pre-allocating Capacity
 

@@ -170,7 +170,7 @@ pub struct Sema<'a> {
     pub(crate) param_arena: ParamArena,
     /// Inline destructor bodies keyed by struct id (ADR-0053).
     ///
-    /// Populated when a struct body contains `fn drop(self)`. The analysis pass
+    /// Populated when a struct body contains `fn __drop(self)`. The analysis pass
     /// looks these up to run `analyze_destructor_function` against the method
     /// body.
     pub(crate) inline_struct_drops: HashMap<StructId, (gruel_rir::InstRef, gruel_util::Span)>,

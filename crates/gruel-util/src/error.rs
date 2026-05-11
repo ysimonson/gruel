@@ -1066,9 +1066,9 @@ pub enum ErrorKind {
     /// Destructor for unknown type
     #[error("unknown type '{type_name}' in destructor")]
     DestructorUnknownType { type_name: String },
-    /// Inline `fn drop(self)` is invalid on this type (wrong signature, `@derive(Copy)`,
+    /// Inline `fn __drop(self)` is invalid on this type (wrong signature, `@derive(Copy)`,
     /// linear, etc). ADR-0053.
-    #[error("invalid `fn drop` on type '{type_name}': {reason}")]
+    #[error("invalid `fn __drop` on type '{type_name}': {reason}")]
     InvalidInlineDrop { type_name: String, reason: String },
 
     // Constant errors

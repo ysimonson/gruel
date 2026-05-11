@@ -6,7 +6,7 @@
 // rather than the literal type name, so renaming any of these
 // interfaces is a one-line change inside the prelude.
 //
-//   - `Drop` (ADR-0059): auto-runs `.drop(self)` at scope end.
+//   - `Drop` (ADR-0059): auto-runs `.__drop(self)` at scope end.
 //     Conformance by method presence — no `@derive(Drop)` directive.
 //   - `Clone` (ADR-0065 / ADR-0079): types tagged via `@derive(Clone)`
 //     get a `clone` method synthesized field-by-field by the prelude
@@ -21,7 +21,7 @@
 
 @lang("drop")
 pub interface Drop {
-    fn drop(self);
+    fn __drop(self);
 }
 
 @lang("clone")

@@ -573,7 +573,7 @@ pub fn render_reference_markdown() -> String {
     out.push_str("Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The compiler keys off these names for hardcoded behaviors (drop glue, `@derive(Clone)` synthesis, `Handle` linearity carve-out). ADR-0080 retired `Copy` from this set: posture is declared on the type with the `copy` keyword and queried via `@ownership(T)`.\n\n");
     out.push_str("| Name | Method | Conformance |\n");
     out.push_str("|---|---|---|\n");
-    out.push_str("| `Drop` | `fn drop(self)` | method presence |\n");
+    out.push_str("| `Drop` | `fn __drop(self)` | method presence |\n");
     out.push_str("| `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |\n");
     out.push_str("| `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |\n");
     out.push('\n');
@@ -671,8 +671,8 @@ pub fn render_reference_markdown() -> String {
     out.push_str("### `Drop`\n\n");
     out.push_str("Types with custom cleanup logic that runs when the value goes out of scope (ADR-0059).\n\n");
     out.push_str("**Required methods:**\n\n");
-    out.push_str("- `fn drop(self)`\n\n");
-    out.push_str("**Conformance:** structural (no derive). Defining `fn drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.\n\n");
+    out.push_str("- `fn __drop(self)`\n\n");
+    out.push_str("**Conformance:** structural (no derive). Defining `fn __drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.\n\n");
 
     out.push_str("### `Clone`\n\n");
     out.push_str("Types that may be explicitly duplicated via `.clone()`. All `Copy` types auto-conform (ADR-0065).\n\n");

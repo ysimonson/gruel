@@ -3142,7 +3142,7 @@ where
         choice((self_then_params.boxed(), just_params.boxed())).boxed();
 
     // Box the method head early to keep subsequent type accumulation short.
-    // Uses method_name_parser so that `fn drop(self)` parses as a method named "drop"
+    // Uses method_name_parser so that `fn __drop(self)` parses as a method named "__drop"
     // (ADR-0053 destructor syntax).
     //
     // ADR-0073: optional `pub` prefix sits between any directives and `fn`.

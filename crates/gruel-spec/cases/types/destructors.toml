@@ -131,7 +131,7 @@ source = """
 struct Data {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
 
         // destructor body
     }
@@ -154,7 +154,7 @@ source = """
 struct Data {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
 
         @dbg(self.value);
     }
@@ -177,7 +177,7 @@ source = """
 struct Container {
     x: i32,
     y: i32,
-    fn drop(self) {
+    fn __drop(self) {
 
         @dbg(self.x);
     }
@@ -186,7 +186,7 @@ struct Container {
 
 fn main() -> i32 {
     let arr: [Container; 2] = [Container { x: 10, y: 1 }, Container { x: 20, y: 2 }];
-    // arr dropped: arr[0].drop() prints 10, arr[1].drop() prints 20
+    // arr dropped: arr[0].__drop() prints 10, arr[1].__drop() prints 20
     0
 }
 """
@@ -615,7 +615,7 @@ source = """
 struct Counter {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
 
         @dbg(self.value);
     }
@@ -642,7 +642,7 @@ source = """
 struct Counter {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
 
         @dbg(self.value);
     }
@@ -667,7 +667,7 @@ source = """
 struct Counter {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
 
         @dbg(self.value);
     }
@@ -693,7 +693,7 @@ source = """
 struct Counter {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
 
         @dbg(self.value);
     }
@@ -718,12 +718,12 @@ stdout = "5\n5\n"
 [[case]]
 name = "user_defined_destructor_syntax"
 spec = ["3.9:24", "3.9:25"]
-description = "Basic `fn drop(self)` method parses correctly"
+description = "Basic `fn __drop(self)` method parses correctly"
 source = """
 struct Data {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
         // destructor body
     }
 }
@@ -743,7 +743,7 @@ source = """
 struct Counter {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
 
         let _ = self.value;
     }
@@ -765,7 +765,7 @@ source = """
 struct Counter {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
 
         @dbg(self.value);
     }
@@ -783,13 +783,13 @@ stdout = "99\n"
 [[case]]
 name = "duplicate_destructor_error"
 spec = ["3.9:26"]
-description = "Two `fn drop(self)` methods on the same type produce a duplicate-method error."
+description = "Two `fn __drop(self)` methods on the same type produce a duplicate-method error."
 source = """
 struct Data {
     value: i32,
 
-    fn drop(self) {}
-    fn drop(self) {}
+    fn __drop(self) {}
+    fn __drop(self) {}
 }
 
 fn main() -> i32 { 0 }
@@ -799,18 +799,18 @@ error_contains = "duplicate"
 
 
 # =============================================================================
-# Inline fn drop(self) (ADR-0053)
+# Inline fn __drop(self) (ADR-0053)
 # =============================================================================
 
 [[case]]
 name = "inline_drop_on_struct"
 spec = ["3.9:34", "3.9:38"]
-description = "Inline `fn drop(self)` runs on scope exit with the same semantics as the top-level form"
+description = "Inline `fn __drop(self)` runs on scope exit with the same semantics as the top-level form"
 source = """
 struct Data {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
         @dbg(self.value);
     }
 }
@@ -830,7 +830,7 @@ source = """
 struct Data {
     value: i32,
 
-    fn drop(self, extra: i32) {}
+    fn __drop(self, extra: i32) {}
 }
 
 fn main() -> i32 { 0 }
@@ -845,7 +845,7 @@ source = """
 struct Data {
     value: i32,
 
-    fn drop(self) -> i32 { 0 }
+    fn __drop(self) -> i32 { 0 }
 }
 
 fn main() -> i32 { 0 }
@@ -860,7 +860,7 @@ source = """
 struct Data {
     value: i32,
 
-    fn drop() {}
+    fn __drop() {}
 }
 
 fn main() -> i32 { 0 }
@@ -875,7 +875,7 @@ source = """
 @mark(copy) struct Pt {
     x: i32,
 
-    fn drop(self) {}
+    fn __drop(self) {}
 }
 
 fn main() -> i32 { 0 }
@@ -890,7 +890,7 @@ source = """
 @mark(linear) struct Token {
     id: i32,
 
-    fn drop(self) {}
+    fn __drop(self) {}
 }
 
 fn consume(t: Token) -> i32 { t.id }
@@ -906,17 +906,17 @@ error_contains = "linear"
 [[case]]
 name = "inline_drop_direct_call_error"
 spec = ["3.9:37"]
-description = "Cannot call `fn drop` directly via method syntax"
+description = "Cannot call `fn __drop` directly via method syntax"
 source = """
 struct Data {
     value: i32,
 
-    fn drop(self) {}
+    fn __drop(self) {}
 }
 
 fn main() -> i32 {
     let d = Data { value: 0 };
-    d.drop();
+    d.__drop();
     0
 }
 """
@@ -926,13 +926,13 @@ error_contains = "drop"
 [[case]]
 name = "inline_drop_on_enum"
 spec = ["3.9:39", "3.9:40"]
-description = "Inline `fn drop(self)` on an enum runs the user destructor on drop"
+description = "Inline `fn __drop(self)` on an enum runs the user destructor on drop"
 source = """
 enum Resource {
     File(i32),
     Unused,
 
-    fn drop(self) {
+    fn __drop(self) {
         @dbg(1);
     }
 }
@@ -953,7 +953,7 @@ source = """
 struct Inner {
     tag: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
         @dbg(self.tag);
     }
 }
@@ -962,7 +962,7 @@ enum E {
     Holds(Inner),
     Empty,
 
-    fn drop(self) {
+    fn __drop(self) {
         @dbg(999);
     }
 }
@@ -981,8 +981,8 @@ spec = ["3.9:38", "3.9:39"]
 source = """
 enum E {
     A,
-    fn drop(self) {}
-    fn drop(self) {}
+    fn __drop(self) {}
+    fn __drop(self) {}
 }
 
 fn main() -> i32 { 0 }
@@ -997,8 +997,8 @@ source = """
 struct Data {
     value: i32,
 
-    fn drop(self) {}
-    fn drop(self) {}
+    fn __drop(self) {}
+    fn __drop(self) {}
 }
 
 fn main() -> i32 { 0 }

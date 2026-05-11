@@ -192,13 +192,13 @@ The distinction between trivially droppable and non-trivially droppable types al
 
 {{ rule(id="3.9:24", cat="syntax") }}
 
-A user-defined destructor is declared as an inline method named `drop` inside the type's body:
+A user-defined destructor is declared as an inline method named `__drop` inside the type's body:
 
 ```gruel
 struct TypeName {
     // fields...
 
-    fn drop(self) {
+    fn __drop(self) {
         // cleanup code
     }
 }
@@ -206,15 +206,15 @@ struct TypeName {
 
 {{ rule(id="3.9:25", cat="normative") }}
 
-A user-defined destructor **MUST** be declared as a method named `drop` inside its struct's body. It **MUST** take exactly one parameter named `self` (by-value receiver) and return nothing (implicit unit type).
+A user-defined destructor **MUST** be declared as a method named `__drop` inside its struct's body. It **MUST** take exactly one parameter named `self` (by-value receiver) and return nothing (implicit unit type).
 
 {{ rule(id="3.9:26", cat="legality-rule") }}
 
-Each struct type **MAY** have at most one user-defined destructor. A compile-time error is raised if a `drop` method is declared twice in the same struct body (caught by the standard duplicate-method check).
+Each struct type **MAY** have at most one user-defined destructor. A compile-time error is raised if a `__drop` method is declared twice in the same struct body (caught by the standard duplicate-method check).
 
 {{ rule(id="3.9:27", cat="informative") }}
 
-Because destructors are declared as methods on the host struct, there is no separate "destructor for an unknown type" error category. A `drop` method declared outside of any struct body is rejected by the standard item-position parser.
+Because destructors are declared as methods on the host struct, there is no separate "destructor for an unknown type" error category. A `__drop` method declared outside of any struct body is rejected by the standard item-position parser.
 
 {{ rule(id="3.9:28", cat="dynamic-semantics") }}
 
@@ -241,13 +241,13 @@ The `drop fn` syntax was chosen because it clearly indicates the purpose of the 
 
 {{ rule(id="3.9:34", cat="syntax") }}
 
-A destructor **MAY** also be declared inline inside a struct body as a method named `drop` with the signature `fn drop(self)`:
+A destructor **MAY** also be declared inline inside a struct body as a method named `__drop` with the signature `fn __drop(self)`:
 
 ```gruel
 struct FileHandle {
     fd: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
         close(self.fd);
     }
 }
@@ -259,11 +259,11 @@ The inline destructor **MUST** take exactly one parameter (`self`) and return th
 
 {{ rule(id="3.9:36", cat="legality-rule") }}
 
-A type declared `copy` or `linear` **MUST NOT** declare `fn drop`. A Copy type would risk a double-free on bitwise copy; `linear` values are never implicitly dropped, so the destructor would be unreachable.
+A type declared `copy` or `linear` **MUST NOT** declare `fn __drop`. A Copy type would risk a double-free on bitwise copy; `linear` values are never implicitly dropped, so the destructor would be unreachable.
 
 {{ rule(id="3.9:37", cat="legality-rule") }}
 
-A method named `drop` **CANNOT** be invoked directly via method-call syntax (`x.drop()`). Destructor invocation is performed solely by drop elaboration. The `drop` keyword in expression position makes such a call ungrammatical.
+A method named `__drop` **CANNOT** be invoked directly via method-call syntax (`x.__drop()`). Destructor invocation is performed solely by drop elaboration.
 
 {{ rule(id="3.9:38", cat="dynamic-semantics") }}
 
@@ -271,7 +271,7 @@ Semantics for the inline form are identical to the top-level `drop fn` form: at 
 
 {{ rule(id="3.9:39", cat="normative") }}
 
-Destructors are permitted on enums using the same `fn drop(self)` syntax. For a value of an enum type with a user destructor, drop elaboration runs the user destructor first, then dispatches on the active variant and drops each owning field of that variant in declaration order.
+Destructors are permitted on enums using the same `fn __drop(self)` syntax. For a value of an enum type with a user destructor, drop elaboration runs the user destructor first, then dispatches on the active variant and drops each owning field of that variant in declaration order.
 
 {{ rule(id="3.9:40", cat="example") }}
 
@@ -281,7 +281,7 @@ enum Resource {
     Socket(i32),
     Unused,
 
-    fn drop(self) {
+    fn __drop(self) {
         match self {
             Resource::File(fd) => close(fd),
             Resource::Socket(fd) => close_socket(fd),

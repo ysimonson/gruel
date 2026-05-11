@@ -248,7 +248,7 @@ impl<'a> Sema<'a> {
     /// Built-in conformance for the `Drop` interface (ADR-0059).
     ///
     /// Affine types (non-`Copy`, non-linear) conform — they all have a
-    /// drop-on-scope-exit, either user-written via `fn drop(self)` or the
+    /// drop-on-scope-exit, either user-written via `fn __drop(self)` or the
     /// compiler-synthesized recursive drop.
     fn check_drop_conformance(
         &self,
@@ -257,10 +257,10 @@ impl<'a> Sema<'a> {
         use_span: Span,
     ) -> CompileResult<ConformanceWitness> {
         if self.is_type_linear(candidate) {
-            return Err(self.iface_method_missing(candidate, interface_id, "drop", use_span));
+            return Err(self.iface_method_missing(candidate, interface_id, "__drop", use_span));
         }
         if self.is_type_copy(candidate) {
-            return Err(self.iface_method_missing(candidate, interface_id, "drop", use_span));
+            return Err(self.iface_method_missing(candidate, interface_id, "__drop", use_span));
         }
         Ok(ConformanceWitness {
             slot_methods: Vec::new(),
@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn conforms_basic() {
-        // Use a non-`drop` method name: `drop` is special-cased as the
+        // Use a non-`__drop` method name: `__drop` is special-cased as the
         // destructor (ADR-0053) and therefore not stored in `Sema::methods`.
         let sema = gather(
             r#"

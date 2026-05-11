@@ -35,7 +35,7 @@ pub fn JoinHandle(comptime R: type) -> type {
         // Drop backstop. Reached only if the linearity check fails
         // to enforce consumption — the linear posture should make
         // this unreachable for well-typed code.
-        fn drop(self) {
+        fn __drop(self) {
             @panic("JoinHandle dropped without join — linearity check escaped")
         }
     }

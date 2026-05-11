@@ -232,7 +232,7 @@ pub struct EnumVariantField {
 ///
 /// ```gruel
 /// interface Drop {
-///     fn drop(self);
+///     fn __drop(self);
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -278,7 +278,7 @@ pub struct MethodSig {
 ///
 /// ```gruel
 /// derive Drop {
-///     fn drop(self) {
+///     fn __drop(self) {
 ///         comptime_unroll for f in @type_info(Self).fields {
 ///             drop(@field(self, f.name));
 ///         }

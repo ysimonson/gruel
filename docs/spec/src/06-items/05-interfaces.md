@@ -45,7 +45,7 @@ signatures with the same name in the same interface are a compile error.
 
 ```gruel
 interface Drop {
-    fn drop(self);
+    fn __drop(self);
 }
 ```
 

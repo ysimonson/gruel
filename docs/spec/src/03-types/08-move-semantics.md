@@ -406,7 +406,7 @@ fn main() -> i32 {
 {{ rule(id="3.8:60", cat="normative") }}
 
 Gruel's three ownership postures (Copy, Affine, Linear) interact with
-the `Drop` interface (`fn drop(self)`). Conformance to `Drop` is computed
+the `Drop` interface (`fn __drop(self)`). Conformance to `Drop` is computed
 by the compiler — built-in types acquire conformance through synthetic
 rules, user types by defining the corresponding inline method.
 
@@ -419,13 +419,13 @@ For every struct or enum `T`:
   Copy type **MUST** be Copy.
 - `T` conforms to `Drop` iff `T` is not `linear` and `T` is not Copy.
   Affine types always conform to `Drop`; their drop body is either
-  user-written via `fn drop(self)` (ADR-0053) or the compiler's
+  user-written via `fn __drop(self)` (ADR-0053) or the compiler's
   recursive field-drop synthesis.
 
 {{ rule(id="3.8:62", cat="legality-rule") }}
 
 Copy and Drop are mutually exclusive: a single type **MUST NOT** be both.
-A `copy` declaration that also defines `fn drop(self)` is rejected at the
+A `copy` declaration that also defines `fn __drop(self)` is rejected at the
 declaration site. Linear types are neither Copy nor Drop.
 
 {{ rule(id="3.8:63", cat="informative") }}

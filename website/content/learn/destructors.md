@@ -66,7 +66,7 @@ When multiple values go out of scope at the same point, they are dropped in **re
 struct Data {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
         @dbg(self.value);
     }
 }
@@ -158,13 +158,13 @@ fn main() -> i32 {
 
 ## Custom Destructors
 
-Define a destructor by adding a `fn drop(self)` method to the struct body. It runs automatically when a value of that type is dropped:
+Define a destructor by adding a `fn __drop(self)` method to the struct body. It runs automatically when a value of that type is dropped:
 
 ```gruel
 struct FileHandle {
     fd: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
         @dbg(self.fd);  // cleanup logic here
     }
 }
@@ -177,7 +177,7 @@ fn main() -> i32 {
 
 A destructor takes exactly one parameter (`self`), returns nothing, and each type can have at most one. The destructor cannot be invoked directly with method-call syntax — only the compiler calls it, when the value goes out of scope.
 
-> **Legacy syntax.** The older top-level form `drop fn TypeName(self) { ... }` still parses for backward compatibility, but new code should prefer the inline `fn drop(self)` method (see [ADR-0053](@/learn/references/adrs/0053-inline-methods-and-drop.md)).
+> **Legacy syntax.** The older top-level form `drop fn TypeName(self) { ... }` still parses for backward compatibility, but new code should prefer the inline `fn __drop(self)` method (see [ADR-0053](@/learn/references/adrs/0053-inline-methods-and-drop.md)).
 
 Linear types (`linear struct`) cannot have destructors. A linear value must be explicitly consumed — the compiler rejects any code where one reaches scope exit unconsumed, so a destructor would never run.
 
@@ -190,7 +190,7 @@ struct Buffer {
     data: String,
     size: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
         @dbg(self.size);
         // After this runs, self.data (a String) is dropped automatically
     }
@@ -212,7 +212,7 @@ Parameters passed by value are owned by the callee. If the parameter isn't moved
 struct Data {
     value: i32,
 
-    fn drop(self) {
+    fn __drop(self) {
         @dbg(self.value);
     }
 }

@@ -835,7 +835,7 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                 }
             }
 
-            // ADR-0053: destructors are inline `fn drop(self)` methods
+            // ADR-0053: destructors are inline `fn __drop(self)` methods
             // declared inside the struct body. They flow through the
             // regular method-analysis path above; no separate top-level
             // `drop fn TypeName(self)` form exists.
@@ -1130,7 +1130,7 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                 }
             }
 
-            // ADR-0053 phase 3 / 3b: also analyze inline `fn drop(self)` destructors
+            // ADR-0053 phase 3 / 3b: also analyze inline `fn __drop(self)` destructors
             // (struct- or enum-body declared) — same as the sequential path. The
             // lazy work queue doesn't reach these because the methods aren't
             // discovered through call dispatch.

@@ -134,7 +134,7 @@ You've learned the fundamentals of Gruel! The next chapters cover more features:
 - [Tuples](/learn/19-tuples/) — fixed-size groupings of heterogeneous values
 - [Slices](/learn/20-slices/) — borrowed views over contiguous elements with runtime length
 - [Interfaces](/learn/21-interfaces/) — structural conformance, derives, and `Copy`/`Drop`
-- [Destructors](/learn/destructors/) — automatic cleanup, drop order, and custom `fn drop`
+- [Destructors](/learn/destructors/) — automatic cleanup, drop order, and custom `fn __drop`
 
 For the complete language reference, read the [Language Specification](/spec/).
 

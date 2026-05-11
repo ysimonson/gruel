@@ -1734,8 +1734,8 @@ impl<'a> Sema<'a> {
         //   (NEW: previously named types were Affine by default; now
         //   structs/enums of all-Copy members infer Copy).
         //
-        // ADR-0080 carve-out: types with `fn drop(self)` are never Copy
-        // (Copy ⊥ Drop). We pre-scan RIR for both inline `fn drop` methods
+        // ADR-0080 carve-out: types with `fn __drop(self)` are never Copy
+        // (Copy ⊥ Drop). We pre-scan RIR for both inline `fn __drop` methods
         // and top-level `drop fn TypeName(self)` declarations and downgrade
         // Copy → Affine when a destructor is present.
         //
@@ -1892,23 +1892,23 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// ADR-0083 (revised): destructors are `fn drop(self)` methods
+    /// ADR-0083 (revised): destructors are `fn __drop(self)` methods
     /// declared inside the struct body. The retired top-level
     /// `drop fn TypeName(self)` form had its own collection pass; with
     /// it gone, only `has_inline_drop_method` remains.
     fn collect_types_with_drop(&self) -> HashSet<Spur> {
-        // No top-level drop fns; inline `fn drop(self)` is detected via
+        // No top-level drop fns; inline `fn __drop(self)` is detected via
         // `has_inline_drop_method` at the per-decl site.
         HashSet::default()
     }
 
     /// ADR-0080 / ADR-0083: detect whether a struct/enum's inline method
-    /// list contains a `fn drop(self)` declaration.
+    /// list contains a `fn __drop(self)` declaration.
     fn has_inline_drop_method(&self, methods_start: u32, methods_len: u32) -> bool {
         if methods_len == 0 {
             return false;
         }
-        let drop_name = self.interner.get("drop");
+        let drop_name = self.interner.get("__drop");
         let Some(drop_name) = drop_name else {
             return false;
         };
@@ -2400,7 +2400,7 @@ impl<'a> Sema<'a> {
             }
         };
         let struct_type = Type::new_struct(struct_id);
-        let drop_name_sym = self.interner.get_or_intern("drop");
+        let drop_name_sym = self.interner.get_or_intern("__drop");
 
         // ADR-0076: bind `Self` to the host struct while resolving method
         // signatures. Errors abort the whole analysis pass so a leak is
@@ -2424,7 +2424,7 @@ impl<'a> Sema<'a> {
             } = &method_inst.data
             {
                 let receiver = decode_receiver_mode(*receiver_mode);
-                // ADR-0053: a method named `drop` is the struct's destructor,
+                // ADR-0053: a method named `__drop` is the struct's destructor,
                 // not a regular method. Route it through the destructor slot.
                 if *method_name == drop_name_sym {
                     self.register_inline_struct_drop(
@@ -2567,9 +2567,9 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Register an inline `fn drop(self)` as a struct's destructor.
+    /// Register an inline `fn __drop(self)` as a struct's destructor.
     ///
-    /// Validates the signature (must be exactly `fn drop(self)`, no extra
+    /// Validates the signature (must be exactly `fn __drop(self)`, no extra
     /// params, returns unit) and the type's copy/linear status (a destructor
     /// is illegal on `@derive(Copy)` and `linear` types per ADR-0053).
     fn register_inline_struct_drop(
@@ -2587,7 +2587,7 @@ impl<'a> Sema<'a> {
         } = sig;
         let type_name_str = self.interner.resolve(&type_name).to_string();
 
-        // Signature check: `fn drop(self)`, no extra params, no non-unit return.
+        // Signature check: `fn __drop(self)`, no extra params, no non-unit return.
         if !has_self {
             return Err(CompileError::new(
                 ErrorKind::InvalidInlineDrop {
@@ -2627,7 +2627,7 @@ impl<'a> Sema<'a> {
                     ErrorKind::InvalidInlineDrop {
                         type_name: type_name_str.clone(),
                         reason:
-                            "`@derive(Copy)` types cannot declare `fn drop` (would double-free on copy)"
+                            "`@derive(Copy)` types cannot declare `fn __drop` (would double-free on copy)"
                                 .into(),
                     },
                     span,
@@ -2637,7 +2637,7 @@ impl<'a> Sema<'a> {
                 return Err(CompileError::new(
                     ErrorKind::InvalidInlineDrop {
                         type_name: type_name_str.clone(),
-                        reason: "`linear` types cannot declare `fn drop` (linear values are never implicitly dropped)".into(),
+                        reason: "`linear` types cannot declare `fn __drop` (linear values are never implicitly dropped)".into(),
                     },
                     span,
                 ));
@@ -2663,10 +2663,10 @@ impl<'a> Sema<'a> {
         Ok(())
     }
 
-    /// Register an inline `fn drop(self)` as an enum's destructor (ADR-0053 phase 3b).
+    /// Register an inline `fn __drop(self)` as an enum's destructor (ADR-0053 phase 3b).
     ///
     /// Mirrors `register_inline_struct_drop`. Validates the signature
-    /// (must be `fn drop(self)` returning unit, only one per type) and
+    /// (must be `fn __drop(self)` returning unit, only one per type) and
     /// stores the destructor metadata in `EnumDef.destructor`.
     fn register_inline_enum_drop(
         &mut self,
@@ -2755,7 +2755,7 @@ impl<'a> Sema<'a> {
             }
         };
         let enum_type = Type::new_enum(enum_id);
-        let drop_name_sym = self.interner.get_or_intern("drop");
+        let drop_name_sym = self.interner.get_or_intern("__drop");
 
         // ADR-0076: bind `Self` to the host enum while resolving method
         // signatures.
@@ -2778,7 +2778,7 @@ impl<'a> Sema<'a> {
             } = &method_inst.data
             {
                 let receiver = decode_receiver_mode(*receiver_mode);
-                // ADR-0053 phase 3b: a method named `drop` is the enum's destructor,
+                // ADR-0053 phase 3b: a method named `__drop` is the enum's destructor,
                 // not a regular method. Route it through the per-enum destructor slot.
                 if *method_name == drop_name_sym {
                     self.register_inline_enum_drop(

@@ -450,7 +450,7 @@ pub fn Vec(comptime T: type) -> type {
                 }
 
                 pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn __drop(self) { vec_drop_impl(Self, T, self) }
 
                 pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
                 pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
@@ -498,7 +498,7 @@ pub fn Vec(comptime T: type) -> type {
                 pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
                 pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn __drop(self) { vec_drop_impl(Self, T, self) }
             }
         } else {
             @mark(checked_sync) struct {
@@ -523,7 +523,7 @@ pub fn Vec(comptime T: type) -> type {
                 pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
                 pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn __drop(self) { vec_drop_impl(Self, T, self) }
             }
         }
     } else if @thread_safety(T) == ThreadSafety::Send {
@@ -561,7 +561,7 @@ pub fn Vec(comptime T: type) -> type {
                 }
 
                 pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn __drop(self) { vec_drop_impl(Self, T, self) }
 
                 pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
                 pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
@@ -609,7 +609,7 @@ pub fn Vec(comptime T: type) -> type {
                 pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
                 pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn __drop(self) { vec_drop_impl(Self, T, self) }
             }
         } else {
             @mark(checked_send) struct {
@@ -634,7 +634,7 @@ pub fn Vec(comptime T: type) -> type {
                 pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
                 pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn __drop(self) { vec_drop_impl(Self, T, self) }
             }
         }
     } else {
@@ -672,7 +672,7 @@ pub fn Vec(comptime T: type) -> type {
                 }
 
                 pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn __drop(self) { vec_drop_impl(Self, T, self) }
 
                 pub fn clone(self: Ref(Self)) -> Self { vec_clone_impl(Self, T, self) }
                 pub fn eq(self: Ref(Self), other: Ref(Self)) -> bool { vec_eq_impl(Self, T, self, other) }
@@ -720,7 +720,7 @@ pub fn Vec(comptime T: type) -> type {
                 pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
                 pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn __drop(self) { vec_drop_impl(Self, T, self) }
             }
         } else {
             @mark(unsend) struct {
@@ -745,7 +745,7 @@ pub fn Vec(comptime T: type) -> type {
                 pub fn ptr_mut(self: MutRef(Self)) -> MutPtr(T) { self.ptr }
 
                 pub fn dispose(self) { vec_dispose_impl(Self, T, self) }
-                pub fn drop(self) { vec_drop_impl(Self, T, self) }
+                pub fn __drop(self) { vec_drop_impl(Self, T, self) }
             }
         }
     }

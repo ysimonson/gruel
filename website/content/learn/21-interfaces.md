@@ -102,13 +102,13 @@ Inside a derive body the host type isn't known yet, so direct field access on `s
 Two built-in interfaces describe ownership posture:
 
 ```gruel
-interface Drop { fn drop(self); }
+interface Drop { fn __drop(self); }
 interface Copy { fn copy(self: Ref(Self)) -> Self; }
 ```
 
 Every struct or enum has exactly one of three postures, determined by which interface it conforms to:
 
-| Conforms to `Copy`? | Has `fn drop`? | Posture |
+| Conforms to `Copy`? | Has `fn __drop`? | Posture |
 |---|---|---|
 | yes | no  | **Copy** — values may be implicitly duplicated |
 | no  | yes | **Affine** — values move on use, dropped at end of scope |
@@ -138,14 +138,14 @@ If any field of the struct isn't `Copy`, `@derive(Copy)` produces a compile-time
 
 ### Custom Destructors
 
-A struct that needs cleanup gets a `Drop` posture by defining `fn drop(self)` (see [Destructors](@/learn/destructors.md)). You don't need to write `@derive(Drop)` — the presence of the method is what makes it conform to the interface.
+A struct that needs cleanup gets a `Drop` posture by defining `fn __drop(self)` (see [Destructors](@/learn/destructors.md)). You don't need to write `@derive(Drop)` — the presence of the method is what makes it conform to the interface.
 
 ## When to Use What
 
 | You want… | Reach for… |
 |----------|-----------|
 | A type that can be freely duplicated | `@derive(Copy)` |
-| A type that owns a resource | Inline `fn drop(self)` |
+| A type that owns a resource | Inline `fn __drop(self)` |
 | Boilerplate methods reused across structs | A `derive` item + `@derive(Name)` |
 | Generic code that takes any type with method `m` | An `interface` + `comptime T: I` |
 

@@ -585,7 +585,7 @@ mod tests {
     fn test_use_after_move_error() {
         // Using a moved value should error. ADR-0083: a struct of all-Copy
         // fields now infers Copy under uniform structural inference, so we
-        // declare the struct `linear` (or attach a `fn drop`) to keep it
+        // declare the struct `linear` (or attach a `fn __drop`) to keep it
         // non-Copy. `linear` doesn't require preview gating in this helper.
         let result = compile_to_air(
             "@mark(linear) struct NonCopy { x: i32 }
@@ -614,11 +614,11 @@ mod tests {
         // ADR-0083: a struct of all-Copy fields now infers Copy under
         // uniform inference. To keep `Inner` non-Copy without making the
         // outer type linear (which short-circuits the partial-move check),
-        // attach a `fn drop` to `Inner`: Drop ⊥ Copy.
+        // attach a `fn __drop` to `Inner`: Drop ⊥ Copy.
         let result = compile_to_air(
             "struct Inner {
                  x: i32,
-                 fn drop(self) { @ignore_unused(self); }
+                 fn __drop(self) { @ignore_unused(self); }
              }
              struct Outer { a: Inner, b: i32 }
              fn consume(i: Inner) -> i32 { i.x }

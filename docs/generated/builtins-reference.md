@@ -36,7 +36,7 @@ Compiler-recognized interfaces are declared in `prelude/interfaces.gruel`. The c
 
 | Name | Method | Conformance |
 |---|---|---|
-| `Drop` | `fn drop(self)` | method presence |
+| `Drop` | `fn __drop(self)` | method presence |
 | `Clone` | `fn clone(self: Ref(Self)) -> Self` | `@derive(Clone)` |
 | `Handle` | `fn handle(self: Ref(Self)) -> Self` | method presence |
 
@@ -150,9 +150,9 @@ Types with custom cleanup logic that runs when the value goes out of scope (ADR-
 
 **Required methods:**
 
-- `fn drop(self)`
+- `fn __drop(self)`
 
-**Conformance:** structural (no derive). Defining `fn drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.
+**Conformance:** structural (no derive). Defining `fn __drop(self)` on a struct or enum makes it conform — there is no `@derive(Drop)` directive.
 
 ### `Clone`
 
