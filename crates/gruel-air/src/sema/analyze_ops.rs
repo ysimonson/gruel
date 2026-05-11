@@ -22,6 +22,7 @@
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
+use gruel_builtins::Posture;
 use gruel_intrinsics::IntrinsicId;
 use gruel_rir::{
     InstData, InstRef, RirArgMode, RirCallArg, RirDestructureField, RirParamMode, RirPattern,
@@ -6211,7 +6212,7 @@ impl<'a> Sema<'a> {
 
             let is_linear = parent_type
                 .as_struct()
-                .map(|id| self.type_pool.struct_def(id).is_linear)
+                .map(|id| self.type_pool.struct_def(id).posture == Posture::Linear)
                 .unwrap_or(false);
 
             // ADR-0081: detect projection through a `Ref(T)` / `MutRef(T)`

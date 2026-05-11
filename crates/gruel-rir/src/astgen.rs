@@ -320,8 +320,7 @@ impl<'a> AstGen<'a> {
                 directives_start,
                 directives_len,
                 is_pub: struct_decl.visibility == Visibility::Public,
-                is_copy: struct_decl.is_copy,
-                is_linear: struct_decl.is_linear,
+                posture: struct_decl.posture,
                 name,
                 fields_start,
                 fields_len,
@@ -373,8 +372,7 @@ impl<'a> AstGen<'a> {
         self.rir.add_inst(Inst {
             data: InstData::EnumDecl {
                 is_pub: enum_decl.visibility == Visibility::Public,
-                is_copy: enum_decl.is_copy,
-                is_linear: enum_decl.is_linear,
+                posture: enum_decl.posture,
                 name,
                 variants_start,
                 variants_len,

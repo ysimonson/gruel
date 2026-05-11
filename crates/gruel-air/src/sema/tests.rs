@@ -4,6 +4,7 @@ mod tests {
     use crate::inst::{AirInstData, AirRef};
     use crate::sema::{Sema, SemaOutput};
     use crate::types::Type;
+    use gruel_builtins::Posture;
     use gruel_lexer::Lexer;
     use gruel_parser::Parser;
     use gruel_rir::AstGen;
@@ -531,7 +532,7 @@ mod tests {
                 .all_struct_ids()
                 .iter()
                 .map(|id| output.type_pool.struct_def(*id))
-                .any(|s| s.name == "Point" && s.is_copy)
+                .any(|s| s.name == "Point" && s.posture == Posture::Copy)
         );
     }
 
@@ -901,8 +902,9 @@ mod tests {
         let pool_data = sema.type_pool.get_struct_by_name(data_name).unwrap();
         let pool_def = sema.type_pool.get_struct_def(pool_data).unwrap();
 
-        assert!(
-            pool_def.is_copy,
+        assert_eq!(
+            pool_def.posture,
+            Posture::Copy,
             "Data should be marked as `@mark(copy) struct`"
         );
     }

@@ -6,6 +6,8 @@
 
 use std::fmt;
 
+use gruel_builtins::Posture;
+
 use crate::inst::{InstData, Rir, RirArgMode, RirCallArg, RirParamMode, RirPattern};
 
 /// Printer for RIR that resolves symbols to their string values.
@@ -493,8 +495,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     directives_start,
                     directives_len,
                     is_pub,
-                    is_copy,
-                    is_linear,
+                    posture,
                     name,
                     fields_start,
                     fields_len,
@@ -515,8 +516,11 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         })
                         .collect();
                     let directives = self.rir.get_directives(*directives_start, *directives_len);
-                    let copy_str = if *is_copy { "copy " } else { "" };
-                    let linear_str = if *is_linear { "linear " } else { "" };
+                    let posture_str = match posture {
+                        Posture::Copy => "copy ",
+                        Posture::Linear => "linear ",
+                        Posture::Affine => "",
+                    };
                     let directives_str = if directives.is_empty() {
                         String::new()
                     } else {
@@ -536,11 +540,10 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     };
                     writeln!(
                         out,
-                        "{}{}{}{}struct {} {{ {} }}{}",
+                        "{}{}{}struct {} {{ {} }}{}",
                         directives_str,
                         pub_str,
-                        copy_str,
-                        linear_str,
+                        posture_str,
                         name_str,
                         fields_str.join(", "),
                         methods_str
@@ -588,8 +591,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                 // Enums
                 InstData::EnumDecl {
                     is_pub,
-                    is_copy,
-                    is_linear,
+                    posture,
                     name,
                     variants_start,
                     variants_len,
@@ -599,8 +601,11 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     directives_len: _,
                 } => {
                     let pub_str = if *is_pub { "pub " } else { "" };
-                    let copy_str = if *is_copy { "copy " } else { "" };
-                    let linear_str = if *is_linear { "linear " } else { "" };
+                    let posture_str = match posture {
+                        Posture::Copy => "copy ",
+                        Posture::Linear => "linear ",
+                        Posture::Affine => "",
+                    };
                     let name_str = self.interner.resolve(name);
                     let variants = self
                         .rir
@@ -644,10 +649,9 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         .collect();
                     writeln!(
                         out,
-                        "{}{}{}enum {} {{ {} }}",
+                        "{}{}enum {} {{ {} }}",
                         pub_str,
-                        copy_str,
-                        linear_str,
+                        posture_str,
                         name_str,
                         body_parts.join(", ")
                     )

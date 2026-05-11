@@ -26,6 +26,7 @@
 
 use std::fmt;
 
+use gruel_builtins::Posture;
 use gruel_util::Span;
 use lasso::{Key, Spur};
 use smallvec::SmallVec;
@@ -129,10 +130,9 @@ pub struct StructDecl {
     pub directives: Directives,
     /// Visibility of this struct
     pub visibility: Visibility,
-    /// Whether this struct is a Copy type (ADR-0080)
-    pub is_copy: bool,
-    /// Whether this struct is a linear type (must be consumed, cannot be dropped)
-    pub is_linear: bool,
+    /// Declared ownership posture (ADR-0080). `Affine` when the struct
+    /// keyword has no `copy`/`linear` qualifier.
+    pub posture: Posture,
     /// Struct name
     pub name: Ident,
     /// Struct fields
@@ -176,10 +176,9 @@ pub struct EnumDecl {
     pub directives: Directives,
     /// Visibility of this enum
     pub visibility: Visibility,
-    /// Whether this enum is a Copy type (ADR-0080)
-    pub is_copy: bool,
-    /// Whether this enum is a linear type (ADR-0080)
-    pub is_linear: bool,
+    /// Declared ownership posture (ADR-0080). `Affine` when the enum
+    /// keyword has no `copy`/`linear` qualifier.
+    pub posture: Posture,
     /// Enum name
     pub name: Ident,
     /// Enum variants
@@ -433,10 +432,9 @@ pub enum TypeExpr {
         /// Directives applied to the struct expression (e.g., `@derive(...)`,
         /// ADR-0058). Parsed before the `struct` keyword.
         directives: Directives,
-        /// Whether this anonymous struct is declared Copy (ADR-0080)
-        is_copy: bool,
-        /// Whether this anonymous struct is declared linear (ADR-0080)
-        is_linear: bool,
+        /// Declared ownership posture (ADR-0080). `Affine` when the struct
+        /// keyword has no `copy`/`linear` qualifier.
+        posture: Posture,
         /// Field declarations (name and type)
         fields: Vec<AnonStructField>,
         /// Method definitions inside the anonymous struct
@@ -449,10 +447,9 @@ pub enum TypeExpr {
     AnonymousEnum {
         /// Directives applied to the enum expression (ADR-0058).
         directives: Directives,
-        /// Whether this anonymous enum is declared Copy (ADR-0080)
-        is_copy: bool,
-        /// Whether this anonymous enum is declared linear (ADR-0080)
-        is_linear: bool,
+        /// Declared ownership posture (ADR-0080). `Affine` when the enum
+        /// keyword has no `copy`/`linear` qualifier.
+        posture: Posture,
         /// Enum variants
         variants: Vec<EnumVariant>,
         /// Method definitions inside the anonymous enum
@@ -1428,11 +1425,10 @@ fn fmt_struct(f: &mut fmt::Formatter<'_>, s: &StructDecl, level: usize) -> fmt::
     for directive in &s.directives {
         write!(f, "@sym:{} ", directive.name.name.into_usize())?;
     }
-    if s.is_copy {
-        write!(f, "copy ")?;
-    }
-    if s.is_linear {
-        write!(f, "linear ")?;
+    match s.posture {
+        Posture::Copy => write!(f, "copy ")?,
+        Posture::Linear => write!(f, "linear ")?,
+        Posture::Affine => {}
     }
     writeln!(f, "Struct sym:{}", s.name.name.into_usize())?;
     for field in &s.fields {

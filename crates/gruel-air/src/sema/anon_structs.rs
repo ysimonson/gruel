@@ -6,6 +6,7 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
+use gruel_builtins::Posture;
 use lasso::Spur;
 
 use crate::sema::context::ConstValue;
@@ -110,8 +111,13 @@ impl Sema<'_> {
         let name = format!("__anon_struct_{}", struct_id.0);
         let name_spur = self.interner.get_or_intern(&name);
 
-        // Determine if the struct is Copy (all fields are Copy)
-        let is_copy = fields.iter().all(|f| f.ty.is_copy_in_pool(&self.type_pool));
+        // Determine the struct's posture: Copy if all fields are Copy,
+        // otherwise Affine. Anonymous structs are never declared Linear.
+        let posture = if fields.iter().all(|f| f.ty.is_copy_in_pool(&self.type_pool)) {
+            Posture::Copy
+        } else {
+            Posture::Affine
+        };
         // ADR-0084: anonymous struct thread-safety is the structural
         // minimum over field types — primitives → Sync, raw pointers →
         // Unsend, and so on through composite members.
@@ -124,9 +130,8 @@ impl Sema<'_> {
         let struct_def = StructDef {
             name,
             fields: fields.to_vec(),
-            is_copy,
+            posture,
             is_clone: false,
-            is_linear: false,
             thread_safety,
             destructor: None,
             is_builtin: false,
@@ -180,7 +185,11 @@ impl Sema<'_> {
         let name = format!("__anon_struct_{}", struct_id.0);
         let name_spur = self.interner.get_or_intern(&name);
 
-        let is_copy = fields.iter().all(|f| f.ty.is_copy_in_pool(&self.type_pool));
+        let posture = if fields.iter().all(|f| f.ty.is_copy_in_pool(&self.type_pool)) {
+            Posture::Copy
+        } else {
+            Posture::Affine
+        };
         // ADR-0084: anonymous struct thread-safety is the structural
         // minimum over field types — primitives → Sync, raw pointers →
         // Unsend, and so on through composite members.
@@ -193,9 +202,8 @@ impl Sema<'_> {
         let struct_def = StructDef {
             name,
             fields: fields.to_vec(),
-            is_copy,
+            posture,
             is_clone: false,
-            is_linear: false,
             thread_safety,
             destructor: None,
             is_builtin: false,

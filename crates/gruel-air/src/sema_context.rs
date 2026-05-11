@@ -31,6 +31,7 @@
 use rustc_hash::FxHashMap as HashMap;
 use std::sync::{PoisonError, RwLock};
 
+use gruel_builtins::Posture;
 use gruel_rir::Rir;
 use gruel_util::PreviewFeatures;
 use lasso::{Spur, ThreadedRodeo};
@@ -483,10 +484,10 @@ impl<'a> SemaContext<'a> {
             | TypeKind::ComptimeType
             | TypeKind::ComptimeStr
             | TypeKind::ComptimeInt => true,
-            // Struct types: check if marked with `@derive(Copy)`
+            // Struct types: check the declared/inferred posture.
             TypeKind::Struct(struct_id) => {
                 let struct_def = self.type_pool.struct_def(struct_id);
-                struct_def.is_copy
+                struct_def.posture == Posture::Copy
             }
             // Arrays are Copy if their element type is Copy
             TypeKind::Array(array_id) => {

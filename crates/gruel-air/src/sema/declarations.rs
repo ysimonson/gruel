@@ -486,8 +486,9 @@ impl<'a> Sema<'a> {
 
                     // ADR-0083 Phase 4: posture is declared exclusively via
                     // the `@mark(...)` directive — the keyword path retired.
-                    // `@mark(affine)` is tracked separately because Affine
-                    // does not have a dedicated `is_*` flag.
+                    // `@mark(affine)` is tracked separately on `MarkOutcome`
+                    // because `Posture::Affine` is the default and the
+                    // marker existing affects later inference suppression.
                     let mark_outcome = self.process_mark_directives(
                         *directives_start,
                         *directives_len,
@@ -496,10 +497,7 @@ impl<'a> Sema<'a> {
                         inst.span,
                     )?;
 
-                    let is_copy = mark_outcome.copy;
-                    let is_linear = mark_outcome.linear;
-
-                    if is_copy && is_linear {
+                    if mark_outcome.copy && mark_outcome.linear {
                         return Err(CompileError::new(
                             ErrorKind::LinearStructCopy(enum_name.clone()),
                             inst.span,
@@ -507,12 +505,19 @@ impl<'a> Sema<'a> {
                     }
                     // ADR-0083: `@mark(affine)` cannot coexist with Copy or
                     // Linear declarations.
-                    if mark_outcome.affine && (is_copy || is_linear) {
+                    if mark_outcome.affine && (mark_outcome.copy || mark_outcome.linear) {
                         return Err(CompileError::new(
                             ErrorKind::LinearStructCopy(enum_name.clone()),
                             inst.span,
                         ));
                     }
+                    let posture = if mark_outcome.copy {
+                        Posture::Copy
+                    } else if mark_outcome.linear {
+                        Posture::Linear
+                    } else {
+                        Posture::Affine
+                    };
 
                     // Check for collision with built-in type constructors
                     // (e.g. Ptr, MutPtr — see ADR-0061). ADR-0081 retired
@@ -592,8 +597,7 @@ impl<'a> Sema<'a> {
                     let enum_def = EnumDef {
                         name: enum_name,
                         variants,
-                        is_copy,
-                        is_linear,
+                        posture,
                         // ADR-0084: placeholder. The structural minimum
                         // and any `@mark(...)` override are folded in
                         // by `validate_consistency` once fields resolve.
@@ -667,30 +671,33 @@ impl<'a> Sema<'a> {
                         inst.span,
                     )?;
 
-                    let is_copy = mark_outcome.copy;
-                    let is_linear = mark_outcome.linear;
-
                     // Linear types cannot be Copy.
-                    if is_linear && is_copy {
+                    if mark_outcome.linear && mark_outcome.copy {
                         return Err(CompileError::new(
                             ErrorKind::LinearStructCopy(struct_name.clone()),
                             inst.span,
                         ));
                     }
-                    if mark_outcome.affine && (is_copy || is_linear) {
+                    if mark_outcome.affine && (mark_outcome.copy || mark_outcome.linear) {
                         return Err(CompileError::new(
                             ErrorKind::LinearStructCopy(struct_name.clone()),
                             inst.span,
                         ));
                     }
+                    let posture = if mark_outcome.copy {
+                        Posture::Copy
+                    } else if mark_outcome.linear {
+                        Posture::Linear
+                    } else {
+                        Posture::Affine
+                    };
 
                     // Create placeholder struct def (fields will be resolved in phase 2)
                     let struct_def = StructDef {
                         name: struct_name,
                         fields: Vec::new(), // Filled in during resolve_declarations
-                        is_copy,
+                        posture,
                         is_clone: false, // Filled in during resolve_declarations after fields known
-                        is_linear,
                         // ADR-0084: see EnumDecl above for rationale.
                         thread_safety: mark_outcome
                             .thread_safety_override
@@ -743,19 +750,16 @@ impl<'a> Sema<'a> {
             span,
         )?;
         let mut def = self.type_pool.struct_def(struct_id);
-        // Posture: a marker overrides the structurally-inferred
-        // is_copy/is_linear that `find_or_create_anon_struct` set.
+        // Posture: a marker overrides the structurally-inferred posture
+        // that `find_or_create_anon_struct` set.
         if outcome.copy {
-            def.is_copy = true;
-            def.is_linear = false;
+            def.posture = Posture::Copy;
         }
         if outcome.linear {
-            def.is_copy = false;
-            def.is_linear = true;
+            def.posture = Posture::Linear;
         }
         if outcome.affine {
-            def.is_copy = false;
-            def.is_linear = false;
+            def.posture = Posture::Affine;
         }
         // Thread-safety: marker wins over the structural minimum the
         // anon-struct constructor pre-computed.
@@ -784,16 +788,13 @@ impl<'a> Sema<'a> {
         )?;
         let mut def = self.type_pool.enum_def(enum_id);
         if outcome.copy {
-            def.is_copy = true;
-            def.is_linear = false;
+            def.posture = Posture::Copy;
         }
         if outcome.linear {
-            def.is_copy = false;
-            def.is_linear = true;
+            def.posture = Posture::Linear;
         }
         if outcome.affine {
-            def.is_copy = false;
-            def.is_linear = false;
+            def.posture = Posture::Affine;
         }
         if let Some(level) = outcome.thread_safety_override {
             def.thread_safety = level;
@@ -807,7 +808,7 @@ impl<'a> Sema<'a> {
     /// Walks the directive list and validates each marker against the
     /// `BUILTIN_MARKERS` registry. Returns a flag-set describing which
     /// posture markers were declared so the caller can fold them into the
-    /// type's `is_copy` / `is_linear` bits (and the `mark_affine_decls`
+    /// type's `posture` field (and the `mark_affine_decls`
     /// side set).
     ///
     /// Errors out on:
@@ -1040,7 +1041,7 @@ impl<'a> Sema<'a> {
             }
             let derive_name = d.args[0];
             // ADR-0059: `@derive(Copy)` on an anonymous host is no-op for
-            // method splicing; the `is_copy` bookkeeping flows through the
+            // method splicing; the posture bookkeeping flows through the
             // existing copy-directive path.
             if self.is_compiler_derive(derive_name) {
                 continue;
@@ -1152,7 +1153,7 @@ impl<'a> Sema<'a> {
         let derive_iface = self.interfaces.get(&derive_name).copied();
         if derive_iface.is_some()
             && derive_iface == self.lang_items.clone()
-            && self.type_pool.struct_def(host_id).is_linear
+            && self.type_pool.struct_def(host_id).posture == Posture::Linear
         {
             let host_str = self.type_pool.struct_def(host_id).name.clone();
             return Err(CompileError::new(
@@ -1416,7 +1417,7 @@ impl<'a> Sema<'a> {
         for r in raw {
             for (derive_name, dir_span) in r.derive_names {
                 // `@derive(Copy)` is compiler-recognized (ADR-0059): the
-                // field-Copy validation already runs via the `is_copy`
+                // field-Copy validation already runs via the posture
                 // bookkeeping, and there is no derive item to look up. Skip
                 // the regular resolution path.
                 if self.is_compiler_derive(derive_name) {
@@ -1754,14 +1755,11 @@ impl<'a> Sema<'a> {
                     };
                     let def = self.type_pool.struct_def(struct_id);
                     let declared_affine = self.mark_affine_decls.contains(name);
-                    let declared = if def.is_linear {
-                        DeclaredPosture::Linear
-                    } else if def.is_copy {
-                        DeclaredPosture::Copy
-                    } else if declared_affine {
-                        DeclaredPosture::Affine
-                    } else {
-                        DeclaredPosture::Unmarked
+                    let declared = match def.posture {
+                        Posture::Linear => DeclaredPosture::Linear,
+                        Posture::Copy => DeclaredPosture::Copy,
+                        Posture::Affine if declared_affine => DeclaredPosture::Affine,
+                        Posture::Affine => DeclaredPosture::Unmarked,
                     };
                     let host_name = def.name.clone();
                     let mut any_linear = false;
@@ -1824,14 +1822,11 @@ impl<'a> Sema<'a> {
                     };
                     let def = self.type_pool.enum_def(enum_id);
                     let declared_affine = self.mark_affine_decls.contains(name);
-                    let declared = if def.is_linear {
-                        DeclaredPosture::Linear
-                    } else if def.is_copy {
-                        DeclaredPosture::Copy
-                    } else if declared_affine {
-                        DeclaredPosture::Affine
-                    } else {
-                        DeclaredPosture::Unmarked
+                    let declared = match def.posture {
+                        Posture::Linear => DeclaredPosture::Linear,
+                        Posture::Copy => DeclaredPosture::Copy,
+                        Posture::Affine if declared_affine => DeclaredPosture::Affine,
+                        Posture::Affine => DeclaredPosture::Unmarked,
                     };
                     let host_name = def.name.clone();
                     let mut any_linear = false;
@@ -1931,10 +1926,10 @@ impl<'a> Sema<'a> {
     }
 
     /// ADR-0083 Phase 1: write the final posture into the struct's
-    /// `is_copy` / `is_linear` flags. If the user declared the posture
-    /// (`copy struct` / `linear struct` / `@mark(...)`), the flags are
-    /// already set in `register_type_names`; we only need to fill them
-    /// in for unmarked types from the inferred posture.
+    /// `posture` field. If the user declared the posture (`copy struct`
+    /// / `linear struct` / `@mark(...)`), the field is already set in
+    /// `register_type_names`; we only need to fill it in for unmarked
+    /// types from the inferred posture.
     fn apply_inferred_struct_posture(
         &mut self,
         struct_id: StructId,
@@ -1945,11 +1940,11 @@ impl<'a> Sema<'a> {
             return;
         }
         let mut def = self.type_pool.struct_def(struct_id);
-        match inferred {
-            MemberPosture::Copy => def.is_copy = true,
-            MemberPosture::Affine => {}
-            MemberPosture::Linear => def.is_linear = true,
-        }
+        def.posture = match inferred {
+            MemberPosture::Copy => Posture::Copy,
+            MemberPosture::Affine => Posture::Affine,
+            MemberPosture::Linear => Posture::Linear,
+        };
         self.type_pool.update_struct_def(struct_id, def);
     }
 
@@ -1963,11 +1958,11 @@ impl<'a> Sema<'a> {
             return;
         }
         let mut def = self.type_pool.enum_def(enum_id);
-        match inferred {
-            MemberPosture::Copy => def.is_copy = true,
-            MemberPosture::Affine => {}
-            MemberPosture::Linear => def.is_linear = true,
-        }
+        def.posture = match inferred {
+            MemberPosture::Copy => Posture::Copy,
+            MemberPosture::Affine => Posture::Affine,
+            MemberPosture::Linear => Posture::Linear,
+        };
         self.type_pool.update_enum_def(enum_id, def);
     }
 
@@ -2626,25 +2621,28 @@ impl<'a> Sema<'a> {
         // `linear` structs cannot either — they are never implicitly dropped, so
         // a destructor would be unreachable.
         let struct_def_snapshot = self.type_pool.struct_def(struct_id);
-        if struct_def_snapshot.is_copy {
-            return Err(CompileError::new(
-                ErrorKind::InvalidInlineDrop {
-                    type_name: type_name_str.clone(),
-                    reason:
-                        "`@derive(Copy)` types cannot declare `fn drop` (would double-free on copy)"
-                            .into(),
-                },
-                span,
-            ));
-        }
-        if struct_def_snapshot.is_linear {
-            return Err(CompileError::new(
-                ErrorKind::InvalidInlineDrop {
-                    type_name: type_name_str.clone(),
-                    reason: "`linear` types cannot declare `fn drop` (linear values are never implicitly dropped)".into(),
-                },
-                span,
-            ));
+        match struct_def_snapshot.posture {
+            Posture::Copy => {
+                return Err(CompileError::new(
+                    ErrorKind::InvalidInlineDrop {
+                        type_name: type_name_str.clone(),
+                        reason:
+                            "`@derive(Copy)` types cannot declare `fn drop` (would double-free on copy)"
+                                .into(),
+                    },
+                    span,
+                ));
+            }
+            Posture::Linear => {
+                return Err(CompileError::new(
+                    ErrorKind::InvalidInlineDrop {
+                        type_name: type_name_str.clone(),
+                        reason: "`linear` types cannot declare `fn drop` (linear values are never implicitly dropped)".into(),
+                    },
+                    span,
+                ));
+            }
+            Posture::Affine => {}
         }
 
         // Only one destructor per type.

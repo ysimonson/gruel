@@ -2,7 +2,7 @@
 //!
 //! Currently very minimal - just i32. Will be extended as the language grows.
 
-use gruel_builtins::ThreadSafety;
+use gruel_builtins::{Posture, ThreadSafety};
 
 /// A unique identifier for a struct definition.
 ///
@@ -700,15 +700,17 @@ pub struct StructDef {
     pub name: String,
     /// Fields in declaration order
     pub fields: Vec<StructField>,
-    /// Whether this struct conforms to the `Copy` interface via `@derive(Copy)` (ADR-0059).
-    pub is_copy: bool,
+    /// Final ownership posture (ADR-0080). Decides whether values of this
+    /// struct are Copy, Affine (default — move on use, implicit drop), or
+    /// Linear (must be explicitly consumed). Set by `register_type_names`
+    /// from the declared keyword/`@mark(...)`, then filled in from
+    /// structural inference for unmarked types.
+    pub posture: Posture,
     /// Whether this struct is marked with @derive(Clone) (compiler-synthesized
-    /// recursive clone). ADR-0065. Mutually compatible with `is_copy` because
-    /// every Copy type is automatically Clone, but `@derive(Clone)` can also
-    /// be applied to affine types whose fields are all `Clone`.
+    /// recursive clone). ADR-0065. Independent of `posture`: every Copy type
+    /// is automatically Clone, but `@derive(Clone)` can also be applied to
+    /// affine types whose fields are all `Clone`.
     pub is_clone: bool,
-    /// Whether this struct is a linear type (must be consumed, cannot be dropped)
-    pub is_linear: bool,
     /// ADR-0084: final thread-safety classification (`Unsend < Send < Sync`).
     /// Computed during `validate_consistency` as the structural minimum
     /// over fields, then overridden by any `@mark(unsend)` /
@@ -803,12 +805,11 @@ pub struct EnumDef {
     pub name: String,
     /// Variants in declaration order
     pub variants: Vec<EnumVariantDef>,
-    /// Whether this enum is declared `copy` (ADR-0080). When `true`,
-    /// `is_type_copy` returns `true` for this enum directly.
-    pub is_copy: bool,
-    /// Whether this enum is declared `linear` (ADR-0080). When `true`,
-    /// `is_type_linear` returns `true` for this enum directly.
-    pub is_linear: bool,
+    /// Final ownership posture (ADR-0080). `Copy` makes `is_type_copy`
+    /// return `true` for this enum directly; `Linear` makes `is_type_linear`
+    /// return `true` directly. `Affine` (the default) lets variant-payload
+    /// inference decide the practical posture.
+    pub posture: Posture,
     /// ADR-0084: final thread-safety classification (mirrors
     /// `StructDef.thread_safety`).
     pub thread_safety: ThreadSafety,
@@ -1336,10 +1337,10 @@ impl Type {
     /// - Never type and Error type (for convenience in error recovery)
     ///
     /// Non-Copy types (move types) are:
-    /// - Struct types (unless marked `@derive(Copy)`, checked via StructDef.is_copy)
+    /// - Struct types (unless declared Copy, checked via StructDef.posture)
     /// - Array types (unless element type is Copy, checked via Sema.is_type_copy)
     ///
-    /// Note: This method can't check struct's is_copy attribute or array element
+    /// Note: This method can't check struct's posture or array element
     /// types since it doesn't have access to StructDefs or array type information.
     /// Use Sema.is_type_copy() for full checking.
     pub fn is_copy(&self) -> bool {
@@ -1367,7 +1368,7 @@ impl Type {
     /// should be Copy based on its field types.
     pub fn is_copy_in_pool(&self, type_pool: &crate::intern_pool::TypeInternPool) -> bool {
         if let Some(struct_id) = self.as_struct() {
-            type_pool.struct_def(struct_id).is_copy
+            type_pool.struct_def(struct_id).posture == Posture::Copy
         } else {
             self.is_copy()
         }
@@ -2159,9 +2160,8 @@ mod tests {
                     is_pub: true,
                 },
             ],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2186,9 +2186,8 @@ mod tests {
         let empty = StructDef {
             name: "Empty".to_string(),
             fields: vec![],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2219,9 +2218,8 @@ mod tests {
                     is_pub: true,
                 },
             ],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2238,8 +2236,7 @@ mod tests {
         let empty = EnumDef {
             name: "Empty".to_string(),
             variants: vec![],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2254,8 +2251,7 @@ mod tests {
                 EnumVariantDef::unit("Green"),
                 EnumVariantDef::unit("Blue"),
             ],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2273,8 +2269,7 @@ mod tests {
                 EnumVariantDef::unit("Green"),
                 EnumVariantDef::unit("Blue"),
             ],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2292,8 +2287,7 @@ mod tests {
         let empty = EnumDef {
             name: "Empty".to_string(),
             variants: vec![],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2308,8 +2302,7 @@ mod tests {
         let small = EnumDef {
             name: "Small".to_string(),
             variants: vec![EnumVariantDef::unit("A")],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2322,8 +2315,7 @@ mod tests {
             variants: (0..256)
                 .map(|i| EnumVariantDef::unit(format!("V{}", i)))
                 .collect(),
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2340,8 +2332,7 @@ mod tests {
             variants: (0..257)
                 .map(|i| EnumVariantDef::unit(format!("V{}", i)))
                 .collect(),
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,

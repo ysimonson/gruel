@@ -262,8 +262,8 @@ pub struct Sema<'a> {
     /// ADR-0083: names of struct/enum declarations that carry
     /// `@mark(affine)`. Affine is a Copy *suppressor*: a type whose
     /// members would otherwise infer Copy is forced to remain Affine.
-    /// Tracked here as a side set because `StructDef.is_copy=false,
-    /// is_linear=false` is the same shape "no declaration" produces.
+    /// Tracked here as a side set because `StructDef.posture =
+    /// Posture::Affine` is the same shape "no declaration" produces.
     pub(crate) mark_affine_decls: HashSet<Spur>,
 
     /// ADR-0084: names of struct/enum declarations that carry one of

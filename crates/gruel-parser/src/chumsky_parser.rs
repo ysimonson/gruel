@@ -19,6 +19,7 @@ use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
 use chumsky::prelude::*;
 use chumsky::recovery::via_parser;
 use chumsky::recursive::Direct;
+use gruel_builtins::Posture;
 use gruel_lexer::TokenKind;
 use gruel_util::{CompileError, CompileErrors, ErrorKind, MultiErrorResult, PreviewFeatures};
 use gruel_util::{FileId, Span};
@@ -390,8 +391,7 @@ where
                 .then_ignore(just(TokenKind::RBrace))
                 .map_with(|fields, e| TypeExpr::AnonymousStruct {
                     directives: Directives::new(),
-                    is_copy: false,
-                    is_linear: false,
+                    posture: Posture::Affine,
                     fields,
                     methods: vec![],
                     span: span_from_extra(e),
@@ -2210,10 +2210,10 @@ where
     let anon_struct_method = anon_struct_method_parser(expr.clone());
 
     // ADR-0083 Phase 4: posture is now declared exclusively via the
-    // `@mark(...)` directive. The `is_copy` / `is_linear` flags on the
-    // AST nodes survive only as the directive-derived storage; sema
-    // populates them from the directive list at registration time. No
-    // posture keyword is parsed here.
+    // `@mark(...)` directive. The `posture` field on the AST nodes survives
+    // only as the directive-derived storage; sema populates it from the
+    // directive list at registration time. No posture keyword is parsed
+    // here.
     let anon_struct_header: GruelParser<'src, I, (Directives, Vec<AnonStructField>, Vec<Method>)> =
         directives_parser()
             .then_ignore(just(TokenKind::Struct))
@@ -2233,8 +2233,7 @@ where
             Expr::TypeLit(TypeLitExpr {
                 type_expr: TypeExpr::AnonymousStruct {
                     directives,
-                    is_copy: false,
-                    is_linear: false,
+                    posture: Posture::Affine,
                     fields,
                     methods,
                     span,
@@ -2287,8 +2286,7 @@ where
             Expr::TypeLit(TypeLitExpr {
                 type_expr: TypeExpr::AnonymousEnum {
                     directives,
-                    is_copy: false,
-                    is_linear: false,
+                    posture: Posture::Affine,
                     variants,
                     methods,
                     span,
@@ -2970,8 +2968,7 @@ where
             |((directives, visibility, name), (fields, methods)), e| StructDecl {
                 directives,
                 visibility,
-                is_copy: false,
-                is_linear: false,
+                posture: Posture::Affine,
                 name,
                 fields,
                 methods,
@@ -3079,8 +3076,7 @@ where
             |(((directives, visibility), name), (variants, methods)), e| EnumDecl {
                 directives,
                 visibility,
-                is_copy: false,
-                is_linear: false,
+                posture: Posture::Affine,
                 name,
                 variants,
                 methods,

@@ -185,7 +185,7 @@ pub enum MarkerKind {
 }
 
 /// Posture trichotomy carried by `MarkerKind::Posture` (ADR-0080 / ADR-0083).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Posture {
     /// The type is Copy: bitwise duplicable, never moves on assignment.
     Copy,

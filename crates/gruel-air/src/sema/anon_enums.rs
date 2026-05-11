@@ -6,6 +6,7 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
+use gruel_builtins::Posture;
 use lasso::Spur;
 
 use crate::sema::context::ConstValue;
@@ -118,6 +119,13 @@ impl Sema<'_> {
         let all_copy = variants
             .iter()
             .all(|v| v.fields.iter().all(|f| self.is_type_copy(*f)));
+        let posture = if any_linear {
+            Posture::Linear
+        } else if all_copy {
+            Posture::Copy
+        } else {
+            Posture::Affine
+        };
         // ADR-0084: anonymous enums (Option / Result and similar
         // generics) inherit the structural minimum of every variant
         // payload. Empty enums fold to `Sync` (the identity), matching
@@ -131,8 +139,7 @@ impl Sema<'_> {
         let enum_def = EnumDef {
             name,
             variants: variants.to_vec(),
-            is_copy: !any_linear && all_copy,
-            is_linear: any_linear,
+            posture,
             thread_safety,
             is_pub: false,
             file_id: gruel_util::FileId::new(0),

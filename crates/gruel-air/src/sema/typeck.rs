@@ -2,10 +2,11 @@
 //!
 //! This module contains helper functions for:
 //! - Resolving type symbols to concrete types
-//! - Type checking (is_copy, format_type_name)
+//! - Type checking (is_type_copy, format_type_name)
 //! - ABI slot calculations
 //! - Type conversions between AIR types and inference types
 
+use gruel_builtins::Posture;
 use gruel_util::Span;
 use gruel_util::{CompileError, CompileResult, ErrorKind};
 use lasso::Spur;
@@ -45,33 +46,33 @@ impl<'a> Sema<'a> {
             | TypeKind::Bool
             | TypeKind::Char
             | TypeKind::Unit => true,
-            // ADR-0080: enums are Copy iff `EnumDef.is_copy` is set,
-            // which is filled either by the `copy enum` keyword or by
-            // the structural inference inside `find_or_create_anon_enum`
-            // for anonymous literals (parallel to tuples).
+            // ADR-0080: enums are Copy iff `EnumDef.posture` is `Copy`,
+            // which is set either by the `copy enum` keyword or by the
+            // structural inference inside `find_or_create_anon_enum` for
+            // anonymous literals (parallel to tuples).
             TypeKind::Enum(enum_id) => {
                 let def = self.type_pool.enum_def(enum_id);
-                if def.is_copy {
-                    return true;
+                match def.posture {
+                    Posture::Copy => true,
+                    Posture::Linear => false,
+                    Posture::Affine => {
+                        // Transitional fallback for tests/snippets that build
+                        // enums via test fixtures without going through
+                        // `find_or_create_anon_enum`.
+                        !def.variants
+                            .iter()
+                            .any(|v| v.fields.iter().any(|f| self.is_type_linear(*f)))
+                    }
                 }
-                if def.is_linear {
-                    return false;
-                }
-                // Transitional fallback for tests/snippets that build
-                // enums via test fixtures without going through
-                // `find_or_create_anon_enum`.
-                !def.variants
-                    .iter()
-                    .any(|v| v.fields.iter().any(|f| self.is_type_linear(*f)))
             }
             // ComptimeInt is Copy (like ComptimeStr)
             TypeKind::ComptimeInt => true,
             // Never and Error are Copy for convenience
             TypeKind::Never | TypeKind::Error => true,
-            // Struct types: check if marked with @derive(Copy)
+            // Struct types: check if declared Copy.
             TypeKind::Struct(struct_id) => {
                 let struct_def = self.type_pool.struct_def(struct_id);
-                struct_def.is_copy
+                struct_def.posture == Posture::Copy
             }
             // Note: String is now handled via TypeKind::Struct with is_builtin
             // ADR-0083 (Open Question 1): arrays of Copy elements are

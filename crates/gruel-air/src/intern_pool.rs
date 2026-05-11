@@ -38,6 +38,7 @@
 use rustc_hash::FxHashMap as HashMap;
 use std::sync::{PoisonError, RwLock};
 
+use gruel_builtins::Posture;
 use lasso::Spur;
 
 use crate::layout::Layout;
@@ -590,9 +591,8 @@ impl TypeInternPool {
             def: StructDef {
                 name: String::new(),
                 fields: vec![],
-                is_copy: false,
+                posture: Posture::Affine,
                 is_clone: false,
-                is_linear: false,
                 thread_safety: gruel_builtins::ThreadSafety::Sync,
                 destructor: None,
                 is_builtin: false,
@@ -1374,7 +1374,7 @@ impl TypeInternPool {
     /// - All other types are non-linear.
     pub fn is_type_linear(&self, ty: Type) -> bool {
         match ty.kind() {
-            TypeKind::Struct(struct_id) => self.struct_def(struct_id).is_linear,
+            TypeKind::Struct(struct_id) => self.struct_def(struct_id).posture == Posture::Linear,
             TypeKind::Array(array_id) => {
                 let (element_type, length) = self.array_def(array_id);
                 length > 0 && self.is_type_linear(element_type)
@@ -1386,14 +1386,14 @@ impl TypeInternPool {
             // ADR-0080: enums declared `linear` are linear directly.
             // For anonymous enums with no keyword (Option / Result and
             // similar generic helpers), `find_or_create_anon_enum`
-            // infers `is_linear` from members; this method then sees
+            // infers the posture from members; this method then sees
             // it set. The propagation fallback below covers
             // pre-specialization paths where method bodies are
             // type-checked before the host enum has been constructed
             // through that codepath.
             TypeKind::Enum(enum_id) => {
                 let def = self.enum_def(enum_id);
-                def.is_linear
+                def.posture == Posture::Linear
                     || def
                         .variants
                         .iter()
@@ -1952,9 +1952,8 @@ mod tests {
         let def = StructDef {
             name: "Point".to_string(),
             fields: vec![],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -1987,8 +1986,7 @@ mod tests {
                 EnumVariantDef::unit("Green"),
                 EnumVariantDef::unit("Blue"),
             ],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2042,9 +2040,8 @@ mod tests {
         let def = StructDef {
             name: "Point".to_string(),
             fields: vec![],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2072,8 +2069,7 @@ mod tests {
                 EnumVariantDef::unit("Active"),
                 EnumVariantDef::unit("Inactive"),
             ],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2110,9 +2106,8 @@ mod tests {
         let struct_def = StructDef {
             name: "Point".to_string(),
             fields: vec![],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2147,9 +2142,8 @@ mod tests {
         let struct_def = StructDef {
             name: "Point".to_string(),
             fields: vec![],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2163,8 +2157,7 @@ mod tests {
         let enum_def = EnumDef {
             name: "Color".to_string(),
             variants: vec![EnumVariantDef::unit("Red")],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2203,9 +2196,8 @@ mod tests {
         let def = StructDef {
             name: "Point".to_string(),
             fields: vec![],
-            is_copy: true,
+            posture: Posture::Copy,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2217,7 +2209,7 @@ mod tests {
         // Test the new Phase 3 struct_def() method that takes StructId directly
         let retrieved = pool.struct_def(struct_id);
         assert_eq!(retrieved.name, def.name);
-        assert_eq!(retrieved.is_copy, def.is_copy);
+        assert_eq!(retrieved.posture, def.posture);
 
         // Test the old get_struct_def() that takes InternedType
         let interned = pool.struct_id_to_interned(struct_id);
@@ -2241,8 +2233,7 @@ mod tests {
         let def = EnumDef {
             name: "Status".to_string(),
             variants: vec![EnumVariantDef::unit("A"), EnumVariantDef::unit("B")],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
@@ -2283,9 +2274,8 @@ mod tests {
         let def = StructDef {
             name: "X".to_string(),
             fields: vec![],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2317,9 +2307,8 @@ mod tests {
         let def = StructDef {
             name: "S1".to_string(),
             fields: vec![],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2340,8 +2329,7 @@ mod tests {
             EnumDef {
                 name: "E1".to_string(),
                 variants: vec![],
-                is_copy: false,
-                is_linear: false,
+                posture: Posture::Affine,
                 thread_safety: gruel_builtins::ThreadSafety::Sync,
                 is_pub: false,
                 file_id: gruel_util::FileId::DEFAULT,
@@ -2479,9 +2467,8 @@ mod tests {
                         let def = StructDef {
                             name: format!("Type{}", idx),
                             fields: vec![],
-                            is_copy: false,
+                            posture: Posture::Affine,
                             is_clone: false,
-                            is_linear: false,
                             thread_safety: gruel_builtins::ThreadSafety::Sync,
                             destructor: None,
                             is_builtin: false,
@@ -2558,9 +2545,8 @@ mod tests {
         let def = StructDef {
             name: name_str.clone(),
             fields: vec![],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -2602,9 +2588,8 @@ mod tests {
             let def = StructDef {
                 name: name_str,
                 fields: vec![],
-                is_copy: false,
+                posture: Posture::Affine,
                 is_clone: false,
-                is_linear: false,
                 thread_safety: gruel_builtins::ThreadSafety::Sync,
                 destructor: None,
                 is_builtin: false,
@@ -2758,9 +2743,8 @@ mod tests {
                     is_pub: false,
                 },
             ],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: inferred,
             destructor: None,
             is_builtin: false,
@@ -2794,9 +2778,8 @@ mod tests {
                 ty: mutptr_ty,
                 is_pub: false,
             }],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: ThreadSafety::Unsend,
             destructor: None,
             is_builtin: false,
@@ -2829,9 +2812,8 @@ mod tests {
                     is_pub: false,
                 },
             ],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: outer_inferred,
             destructor: None,
             is_builtin: false,

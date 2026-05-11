@@ -381,6 +381,7 @@ fn align_up(value: u64, align: u64) -> u64 {
 mod tests {
     use super::*;
     use crate::{EnumVariantDef, StructDef, StructField};
+    use gruel_builtins::Posture;
     use gruel_util::FileId;
     use lasso::Rodeo;
 
@@ -417,8 +418,7 @@ mod tests {
                 EnumVariantDef::unit("B"),
                 EnumVariantDef::unit("C"),
             ],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: FileId::DEFAULT,
@@ -494,9 +494,8 @@ mod tests {
                     is_pub: true,
                 },
             ],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -520,8 +519,7 @@ mod tests {
         let def = crate::EnumDef {
             name: name.to_string(),
             variants: vec![EnumVariantDef::unit("None"), some],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: FileId::DEFAULT,
@@ -578,8 +576,7 @@ mod tests {
         let mid_def = crate::EnumDef {
             name: "OptOptB".into(),
             variants: vec![EnumVariantDef::unit("None"), some_mid],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: FileId::DEFAULT,
@@ -593,8 +590,7 @@ mod tests {
         let outer_def = crate::EnumDef {
             name: "OptOptOptB".into(),
             variants: vec![EnumVariantDef::unit("None"), some_outer],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: FileId::DEFAULT,
@@ -631,9 +627,8 @@ mod tests {
                     is_pub: true,
                 },
             ],
-            is_copy: false,
+            posture: Posture::Affine,
             is_clone: false,
-            is_linear: false,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             destructor: None,
             is_builtin: false,
@@ -666,8 +661,7 @@ mod tests {
                 EnumVariantDef::unit("G"),
                 EnumVariantDef::unit("B"),
             ],
-            is_copy: false,
-            is_linear: false,
+            posture: Posture::Affine,
             thread_safety: gruel_builtins::ThreadSafety::Sync,
             is_pub: false,
             file_id: FileId::DEFAULT,

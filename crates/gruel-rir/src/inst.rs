@@ -5,6 +5,7 @@
 
 use std::fmt;
 
+use gruel_builtins::Posture;
 use gruel_util::{BinOp, Span, UnaryOp};
 use lasso::{Key, Spur};
 
@@ -1910,8 +1911,7 @@ impl Rir {
                 directives_start,
                 directives_len,
                 is_pub,
-                is_copy,
-                is_linear,
+                posture,
                 name,
                 fields_start,
                 fields_len,
@@ -1921,8 +1921,7 @@ impl Rir {
                 directives_start: *directives_start + extra_offset,
                 directives_len: *directives_len,
                 is_pub: *is_pub,
-                is_copy: *is_copy,
-                is_linear: *is_linear,
+                posture: *posture,
                 name: *name,
                 fields_start: *fields_start + extra_offset,
                 fields_len: *fields_len,
@@ -1987,8 +1986,7 @@ impl Rir {
             // Enum operations
             InstData::EnumDecl {
                 is_pub,
-                is_copy,
-                is_linear,
+                posture,
                 name,
                 variants_start,
                 variants_len,
@@ -1998,8 +1996,7 @@ impl Rir {
                 directives_len,
             } => InstData::EnumDecl {
                 is_pub: *is_pub,
-                is_copy: *is_copy,
-                is_linear: *is_linear,
+                posture: *posture,
                 name: *name,
                 variants_start: *variants_start + extra_offset,
                 variants_len: *variants_len,
@@ -2675,10 +2672,10 @@ pub enum InstData {
         directives_len: u32,
         /// Whether this struct is public (requires --preview modules)
         is_pub: bool,
-        /// Whether this struct is declared `copy` (ADR-0080)
-        is_copy: bool,
-        /// Whether this struct is a linear type (must be consumed)
-        is_linear: bool,
+        /// Declared ownership posture (ADR-0080). `Affine` when no
+        /// `copy`/`linear` qualifier is present and no `@mark(...)`
+        /// directive has been processed yet.
+        posture: Posture,
         /// Struct name
         name: Spur,
         /// Index into extra data where fields start
@@ -2730,10 +2727,10 @@ pub enum InstData {
     EnumDecl {
         /// Whether this enum is public (requires --preview modules)
         is_pub: bool,
-        /// Whether this enum is declared `copy` (ADR-0080)
-        is_copy: bool,
-        /// Whether this enum is declared `linear` (ADR-0080)
-        is_linear: bool,
+        /// Declared ownership posture (ADR-0080). `Affine` when no
+        /// `copy`/`linear` qualifier is present and no `@mark(...)`
+        /// directive has been processed yet.
+        posture: Posture,
         /// Enum name
         name: Spur,
         /// Index into extra data where variants start
@@ -3886,8 +3883,7 @@ mod tests {
                 directives_start,
                 directives_len,
                 is_pub: false,
-                is_copy: false,
-                is_linear: false,
+                posture: Posture::Affine,
                 name,
                 fields_start,
                 fields_len,
@@ -3923,8 +3919,7 @@ mod tests {
                 directives_start,
                 directives_len,
                 is_pub: false,
-                is_copy: false,
-                is_linear: false,
+                posture: Posture::Affine,
                 name,
                 fields_start,
                 fields_len,
@@ -4034,8 +4029,7 @@ mod tests {
         rir.add_inst(Inst {
             data: InstData::EnumDecl {
                 is_pub: false,
-                is_copy: false,
-                is_linear: false,
+                posture: Posture::Affine,
                 name,
                 variants_start,
                 variants_len,
@@ -4066,8 +4060,7 @@ mod tests {
         rir.add_inst(Inst {
             data: InstData::EnumDecl {
                 is_pub: false,
-                is_copy: false,
-                is_linear: false,
+                posture: Posture::Affine,
                 name,
                 variants_start,
                 variants_len,
@@ -4228,8 +4221,7 @@ mod tests {
                 directives_start,
                 directives_len,
                 is_pub: false,
-                is_copy: false,
-                is_linear: false,
+                posture: Posture::Affine,
                 name: struct_name,
                 fields_start,
                 fields_len,
