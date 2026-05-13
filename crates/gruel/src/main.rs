@@ -980,6 +980,9 @@ fn handle_emit_multi_file(
                         interface_defs: &state.interface_defs,
                         interface_vtables: &state.interface_vtables,
                         target: &options.target,
+                        // ADR-0085: --emit asm shows IR pre-link; library
+                        // flags are linker-only so they don't matter here.
+                        extra_link_libraries: &[],
                     };
                     match generate_llvm_ir(&inputs, options.opt_level) {
                         Ok(ir) => print!("{}", ir),

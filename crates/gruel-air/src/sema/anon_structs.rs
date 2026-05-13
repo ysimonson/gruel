@@ -135,8 +135,9 @@ impl Sema<'_> {
             thread_safety,
             destructor: None,
             is_builtin: false,
-            is_pub: false,                       // Anonymous structs are private
-            file_id: gruel_util::FileId::new(0), // Anonymous, no source file
+            is_pub: false, // Anonymous structs are private
+            file_id: gruel_util::FileId::new(0),
+            is_c_layout: false, // Anonymous, no source file
         };
 
         // Complete the registration with the final name
@@ -209,6 +210,7 @@ impl Sema<'_> {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::new(0),
+            is_c_layout: false,
         };
 
         self.type_pool

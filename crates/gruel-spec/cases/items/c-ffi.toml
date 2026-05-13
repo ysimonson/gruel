@@ -229,3 +229,145 @@ fn main() -> i32 {
 }
 """
 exit_code = 42
+
+# -----------------------------------------------------------------------------
+# FFI type validation
+# -----------------------------------------------------------------------------
+
+[[case]]
+name = "link_extern_struct_param_rejected"
+spec = ["10.2:2"]
+preview = "c_ffi"
+preview_should_pass = true
+description = "Non-`@mark(c)` struct passed by value to an extern fn is rejected."
+source = """
+struct Plain { x: i32 }
+link_extern("c") {
+    fn takes_plain(p: Plain) -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "FFI"
+
+[[case]]
+name = "mark_c_struct_with_non_c_field_rejected"
+spec = ["10.1:3"]
+preview = "c_ffi"
+preview_should_pass = true
+description = "Field whose type is not C-compatible disqualifies the host struct."
+source = """
+struct Plain { x: i32 }
+@mark(c) struct Outer { inner: Plain }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "FFI"
+
+[[case]]
+name = "mark_c_struct_nested_c_struct_ok"
+spec = ["10.1:3"]
+preview = "c_ffi"
+preview_should_pass = true
+description = "Nested `@mark(c) struct` field is permitted."
+source = """
+@mark(c) struct Inner { x: i32, y: i32 }
+@mark(c) struct Outer { p: Inner, scale: i32 }
+
+fn main() -> i32 {
+    let inner = Inner { x: 3, y: 4 };
+    let o = Outer { p: inner, scale: 2 };
+    o.p.x + o.p.y + o.scale
+}
+"""
+exit_code = 9
+
+[[case]]
+name = "link_name_without_c_abi_rejected"
+spec = ["10.2:8"]
+preview = "c_ffi"
+preview_should_pass = true
+description = "`@link_name` on a non-C-ABI function is rejected."
+source = """
+@link_name("renamed") fn ordinary() -> i32 { 0 }
+
+fn main() -> i32 { ordinary() }
+"""
+compile_fail = true
+error_contains = "link_name"
+
+[[case]]
+name = "ffi_struct_roundtrip_gruel"
+spec = ["10.1:3"]
+preview = "c_ffi"
+preview_should_pass = true
+description = "Gruel ↔ Gruel `@mark(c) struct` round-trip through a `@mark(c)` export fn."
+source = """
+@mark(c) struct Point { x: i32, y: i32 }
+@mark(c) fn translate(p: Point, dx: i32, dy: i32) -> Point {
+    Point { x: p.x + dx, y: p.y + dy }
+}
+
+fn main() -> i32 {
+    let p = Point { x: 10, y: 20 };
+    let q = translate(p, 1, 2);
+    q.x + q.y
+}
+"""
+exit_code = 33
+
+[[case]]
+name = "link_extern_libm_sqrt"
+spec = ["10.2:7"]
+preview = "c_ffi"
+preview_should_pass = true
+description = "End-to-end: link against libm, call `sqrt`, verify the `-lm` flag reaches the linker."
+source = """
+link_extern("m") {
+    fn sqrt(x: f64) -> f64;
+}
+
+fn main() -> i32 {
+    let r = sqrt(16.0);
+    let i: i32 = @cast(r);
+    i
+}
+"""
+exit_code = 4
+
+[[case]]
+name = "mark_c_struct_drop_rejected"
+spec = ["10.1:3"]
+preview = "c_ffi"
+preview_should_pass = true
+description = "`@mark(c) struct` cannot declare `fn __drop` in v1."
+source = """
+@mark(c) struct Resource {
+    handle: i32,
+
+    fn __drop(self) {}
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "cannot declare"
+
+[[case]]
+name = "link_extern_duplicate_import_rejected"
+spec = ["10.2:1"]
+preview = "c_ffi"
+preview_should_pass = true
+description = "Declaring the same extern symbol twice is a compile error."
+source = """
+link_extern("c") {
+    fn abs(x: i32) -> i32;
+    fn abs(x: i32) -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "abs"

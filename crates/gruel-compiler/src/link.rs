@@ -108,6 +108,7 @@ pub(crate) fn link_system_with_warnings(
     object_files: &[Vec<u8>],
     linker_cmd: &str,
     warnings: &[CompileWarning],
+    extra_link_libraries: &[String],
 ) -> MultiErrorResult<CompileOutput> {
     let _span = info_span!("linker", mode = "system", command = linker_cmd).entered();
 
@@ -142,6 +143,11 @@ pub(crate) fn link_system_with_warnings(
 
     if options.target.is_macho() {
         cmd.arg("-lSystem");
+    }
+
+    // ADR-0085: emit `-l<name>` for each user-declared library.
+    for lib in extra_link_libraries {
+        cmd.arg(format!("-l{}", lib));
     }
 
     let output = cmd.output().map_err(|e| {

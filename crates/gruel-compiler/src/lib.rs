@@ -697,6 +697,10 @@ pub struct BackendInputs<'a> {
     pub interface_defs: &'a [gruel_air::InterfaceDef],
     pub interface_vtables: &'a gruel_air::InterfaceVtables,
     pub target: &'a Target,
+    /// ADR-0085: deduplicated library names from every `link_extern("…")`
+    /// block. Linker emits a `-l<name>` flag for each, in the order they
+    /// appear in the slice.
+    pub extra_link_libraries: &'a [String],
 }
 
 impl<'a> BackendInputs<'a> {
@@ -1308,7 +1312,13 @@ fn generate_llvm_objects_and_link(
         LinkerMode::System(cmd) => cmd.clone(),
         LinkerMode::Internal => "cc".to_string(),
     };
-    link_system_with_warnings(options, &object_files, &linker_cmd, warnings)
+    link_system_with_warnings(
+        options,
+        &object_files,
+        &linker_cmd,
+        warnings,
+        inputs.extra_link_libraries,
+    )
 }
 
 /// Generate LLVM textual IR from analyzed functions.
@@ -1484,6 +1494,7 @@ mod tests {
             interface_defs: &state.interface_defs,
             interface_vtables: &state.interface_vtables,
             target: &aarch64,
+            extra_link_libraries: &[],
         };
         let ir = generate_llvm_ir(&inputs, OptLevel::O3).unwrap();
         // After full optimization, main folds to a single `ret i32 2`
@@ -1513,6 +1524,7 @@ mod tests {
             interface_defs: &state.interface_defs,
             interface_vtables: &state.interface_vtables,
             target: &target,
+            extra_link_libraries: &[],
         };
         // -O1 forces a TargetMachine to be created (the only path that
         // applies the triple to the module's metadata via set_triple).

@@ -152,6 +152,11 @@ struct DropSignature {
 struct FnFlags {
     is_pub: bool,
     is_unchecked: bool,
+    /// Index into the extra array where this fn's directives start
+    /// (ADR-0085: used to detect `@mark(c)` / `@link_name(...)`).
+    directives_start: u32,
+    /// Number of directives.
+    directives_len: u32,
 }
 
 impl<'a> Sema<'a> {
@@ -710,6 +715,8 @@ impl<'a> Sema<'a> {
                         is_builtin: false, // User-defined struct
                         is_pub: *is_pub,
                         file_id: inst.span.file_id,
+                        // ADR-0085: track whether `@mark(c)` was applied.
+                        is_c_layout: mark_outcome.c_layout,
                     };
 
                     // Register in type pool and get pool-based StructId
@@ -2102,6 +2109,20 @@ impl<'a> Sema<'a> {
 
                 // Update the struct definition in the pool with resolved fields
                 let mut struct_def = self.type_pool.struct_def(struct_id);
+                // ADR-0085: validate `@mark(c)` struct fields recursively.
+                // Any non-C field on a C-layout struct is rejected.
+                if struct_def.is_c_layout {
+                    for f in &resolved_fields {
+                        self.validate_ffi_type(
+                            f.ty,
+                            &format!(
+                                "as the type of field `{}` on `@mark(c) struct {}`",
+                                f.name, struct_def.name
+                            ),
+                            inst.span,
+                        )?;
+                    }
+                }
                 struct_def.fields = resolved_fields;
                 self.type_pool.update_struct_def(struct_id, struct_def);
             }
@@ -2193,6 +2214,8 @@ impl<'a> Sema<'a> {
                 }
 
                 InstData::FnDecl {
+                    directives_start,
+                    directives_len,
                     is_pub,
                     is_unchecked,
                     name,
@@ -2223,6 +2246,8 @@ impl<'a> Sema<'a> {
                         FnFlags {
                             is_pub: *is_pub,
                             is_unchecked: *is_unchecked,
+                            directives_start: *directives_start,
+                            directives_len: *directives_len,
                         },
                     )?;
                 }
@@ -2242,6 +2267,68 @@ impl<'a> Sema<'a> {
         self.collect_extern_fn_signatures()?;
 
         Ok(())
+    }
+
+    /// ADR-0085: validate that a `Type` is allowed at the FFI boundary.
+    ///
+    /// Allowed: numeric primitives, `bool`, `()`, `Ptr(T)`, `MutPtr(T)`,
+    /// and `@mark(c) struct T`. Enums are rejected entirely in v1 — see
+    /// the deferred enum-FFI follow-up. `&T` / `&mut T`, slices, owned
+    /// containers, and non-C-layout aggregates are rejected here.
+    fn validate_ffi_type(&self, ty: Type, position: &str, span: Span) -> CompileResult<()> {
+        // Scalar primitives and unit pass.
+        if matches!(
+            ty,
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::ISIZE
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+                | Type::USIZE
+                | Type::F32
+                | Type::F64
+                | Type::BOOL
+                | Type::UNIT
+        ) {
+            return Ok(());
+        }
+
+        // Raw pointers (ADR-0061) cross the boundary as `const T*`/`T*`.
+        if ty.is_ptr_const() || ty.is_ptr_mut() {
+            return Ok(());
+        }
+
+        // `@mark(c) struct T` is allowed by value.
+        if let Some(struct_id) = ty.as_struct() {
+            let def = self.type_pool.struct_def(struct_id);
+            if def.is_c_layout {
+                return Ok(());
+            }
+            return Err(CompileError::new(
+                ErrorKind::CFfi(format!(
+                    "type `{}` cannot cross the FFI boundary {}: \
+                     non-`@mark(c)` struct (or container) types are not \
+                     C-ABI compatible",
+                    def.name, position
+                )),
+                span,
+            ));
+        }
+
+        // Everything else is rejected.
+        Err(CompileError::new(
+            ErrorKind::CFfi(format!(
+                "this type cannot cross the FFI boundary {}: \
+                 only numeric primitives, `bool`, `()`, `Ptr(T)`, `MutPtr(T)`, \
+                 and `@mark(c) struct` types are permitted",
+                position
+            )),
+            span,
+        ))
     }
 
     /// ADR-0085: register every C extern fn declared in `link_extern` blocks.
@@ -2305,11 +2392,13 @@ impl<'a> Sema<'a> {
                     ));
                 }
                 let (ty, mode) = self.resolve_param_type(p.ty, p.mode, ext.span)?;
+                self.validate_ffi_type(ty, "as a parameter type", ext.span)?;
                 param_types.push(ty);
                 param_modes.push(mode);
                 param_comptime.push(false);
             }
             let ret_type = self.resolve_type(ext.return_type, ext.span)?;
+            self.validate_ffi_type(ret_type, "as a return type", ext.span)?;
             let params_range =
                 self.param_arena
                     .alloc(param_names, param_types, param_modes, param_comptime);
@@ -2410,7 +2499,60 @@ impl<'a> Sema<'a> {
         let FnFlags {
             is_pub,
             is_unchecked,
+            directives_start,
+            directives_len,
         } = flags;
+
+        // ADR-0085: scan directives for `@mark(c)` (C ABI export) and
+        // `@link_name("…")` (symbol override). Other markers and
+        // directives are handled by their own passes; this is just the
+        // C-FFI subset.
+        let mut is_c_abi = false;
+        let mut link_name_override: Option<Spur> = None;
+        let directives = self.rir.get_directives(directives_start, directives_len);
+        for d in directives.iter() {
+            let dir_name = self.interner.resolve(&d.name).to_string();
+            match dir_name.as_str() {
+                "mark" => {
+                    for arg in &d.args {
+                        let marker_name = self.interner.resolve(arg);
+                        if marker_name == "c" {
+                            self.require_preview(
+                                PreviewFeature::CFfi,
+                                "the `c` ABI marker",
+                                d.span,
+                            )?;
+                            is_c_abi = true;
+                        }
+                    }
+                }
+                "link_name" => {
+                    if d.args.len() != 1 {
+                        return Err(CompileError::new(
+                            ErrorKind::CFfi(
+                                "`@link_name(\"…\")` takes exactly one string argument".to_string(),
+                            ),
+                            d.span,
+                        ));
+                    }
+                    link_name_override = Some(d.args[0]);
+                }
+                _ => {}
+            }
+        }
+
+        // ADR-0085: `@link_name` is only valid on C-ABI fns (extern
+        // declarations or `@mark(c)` exports).
+        if link_name_override.is_some() && !is_c_abi {
+            return Err(CompileError::new(
+                ErrorKind::CFfi(
+                    "`@link_name(\"…\")` is only valid on `@mark(c)` functions \
+                     or extern fns inside `link_extern`"
+                        .to_string(),
+                ),
+                span,
+            ));
+        }
         let params = self.rir.get_params(params_start, params_len);
 
         let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
@@ -2536,6 +2678,16 @@ impl<'a> Sema<'a> {
             self.param_arena
                 .alloc(param_names, param_types, param_modes, param_comptime);
 
+        // ADR-0085: validate FFI types for `@mark(c)` exports — params
+        // and return type must all be C-ABI compatible. Skipped for
+        // regular Gruel fns.
+        if is_c_abi {
+            for ty in self.param_arena.types(params_range) {
+                self.validate_ffi_type(*ty, "as a parameter type", span)?;
+            }
+            self.validate_ffi_type(ret_type, "as a return type", span)?;
+        }
+
         self.functions.insert(
             name,
             FunctionInfo {
@@ -2550,9 +2702,9 @@ impl<'a> Sema<'a> {
                 file_id: span.file_id,
                 canonical_name: None,
                 link_library: None,
-                link_name: None,
+                link_name: link_name_override,
                 is_extern: false,
-                is_c_abi: false,
+                is_c_abi,
             },
         );
         Ok(())
@@ -2820,6 +2972,21 @@ impl<'a> Sema<'a> {
                 ));
             }
             Posture::Affine => {}
+        }
+
+        // ADR-0085: `fn __drop` on `@mark(c)` structs is forbidden in
+        // v1. The C side owns cross-boundary cleanup discipline; mixing
+        // Gruel destructor semantics with raw extern calls is left to a
+        // future ADR with defined cross-boundary semantics.
+        if struct_def_snapshot.is_c_layout {
+            return Err(CompileError::new(
+                ErrorKind::CFfi(format!(
+                    "`@mark(c) struct {}` cannot declare `fn __drop`; manual cleanup is required \
+                     through raw pointer discipline",
+                    type_name_str
+                )),
+                span,
+            ));
         }
 
         // Only one destructor per type.

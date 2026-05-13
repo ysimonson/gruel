@@ -598,6 +598,7 @@ impl TypeInternPool {
                 is_builtin: false,
                 is_pub: false,
                 file_id: gruel_util::FileId::DEFAULT,
+                is_c_layout: false,
             },
         }));
 
@@ -1959,6 +1960,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
 
         let (struct_id, is_new) = pool.register_struct(name, def.clone());
@@ -2047,6 +2049,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
 
         let (struct_id, _) = pool.register_struct(name, def);
@@ -2113,6 +2116,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         let (struct_id, _) = pool.register_struct(struct_name, struct_def);
         let struct_ty = pool.struct_id_to_interned(struct_id);
@@ -2149,6 +2153,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         let (struct_id, _) = pool.register_struct(struct_name, struct_def);
         let struct_ty = pool.struct_id_to_interned(struct_id);
@@ -2203,6 +2208,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         let (struct_id, _) = pool.register_struct(name, def.clone());
 
@@ -2281,6 +2287,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         let (struct_id, _) = pool.register_struct(name, def);
         let struct_ty = pool.struct_id_to_interned(struct_id);
@@ -2314,6 +2321,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         pool.register_struct(s1, def.clone());
         pool.register_struct(
@@ -2474,6 +2482,7 @@ mod tests {
                             is_builtin: false,
                             is_pub: false,
                             file_id: gruel_util::FileId::DEFAULT,
+                            is_c_layout: false,
                         };
                         pool.register_struct(name, def);
                     }
@@ -2552,6 +2561,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
 
         // Complete registration
@@ -2595,6 +2605,7 @@ mod tests {
                 is_builtin: false,
                 is_pub: false,
                 file_id: gruel_util::FileId::DEFAULT,
+                is_c_layout: false,
             };
             pool.complete_struct_registration(id, name, def);
         }
@@ -2750,6 +2761,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         let (sid, _) = pool.register_struct(name, def);
         assert_eq!(
@@ -2785,6 +2797,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         let (inner_sid, _) = pool.register_struct(inner_name, inner_def);
         let inner_ty = Type::new_struct(inner_sid);
@@ -2819,6 +2832,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         let (outer_sid, _) = pool.register_struct(outer_name, outer_def);
         assert_eq!(

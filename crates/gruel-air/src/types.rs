@@ -731,6 +731,12 @@ pub struct StructDef {
     pub is_pub: bool,
     /// File ID this struct was declared in (for visibility checking)
     pub file_id: gruel_util::FileId,
+    /// ADR-0085: whether `@mark(c)` was applied — selects C layout
+    /// (declaration-order fields, natural alignment, niche optimisation
+    /// disabled) and makes the type eligible to cross the FFI boundary
+    /// by value.
+    #[serde(default)]
+    pub is_c_layout: bool,
 }
 
 /// A field in a struct definition.
@@ -2167,6 +2173,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
 
         let (idx, field) = def.find_field("x").unwrap();
@@ -2193,6 +2200,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         assert_eq!(empty.field_count(), 0);
 
@@ -2225,6 +2233,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
+            is_c_layout: false,
         };
         assert_eq!(with_fields.field_count(), 3);
     }

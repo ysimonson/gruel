@@ -28,6 +28,20 @@ use lasso::ThreadedRodeo;
 use rayon::prelude::*;
 use tracing::{info, info_span};
 
+/// ADR-0085: collect the deduplicated, lex-sorted set of library names
+/// declared via `link_extern("…")` blocks. Each contributes one
+/// `-l<name>` flag at the linker step.
+fn collect_extern_link_libraries(rir: &gruel_rir::Rir, interner: &ThreadedRodeo) -> Vec<String> {
+    let mut libs = std::collections::BTreeSet::new();
+    for ext in rir.extern_fns() {
+        libs.insert(interner.resolve(&ext.library).to_string());
+    }
+    for (lib, _) in rir.empty_link_extern_blocks() {
+        libs.insert(interner.resolve(lib).to_string());
+    }
+    libs.into_iter().collect()
+}
+
 use crate::{
     AnalyzedFunction, Ast, AstGen, Cfg, CfgBuilder, CompileError, CompileErrors, CompileOptions,
     CompileOutput, CompileWarning, ErrorKind, FunctionWithCfg, Lexer, MultiErrorResult, OptLevel,
@@ -794,6 +808,12 @@ impl<'src> CompilationUnit<'src> {
             .interface_vtables
             .as_ref()
             .unwrap_or(&empty_iface_vtables);
+        // ADR-0085: collect the deduplicated, lex-sorted set of library
+        // names declared by `link_extern("…")` blocks (including empty
+        // ones). Linker turns each into a `-l<name>` flag.
+        let rir = self.rir.as_ref().expect("compile() called before lower()");
+        let extra_link_libraries = collect_extern_link_libraries(rir, interner);
+
         let inputs = crate::BackendInputs {
             functions,
             type_pool,
@@ -803,6 +823,7 @@ impl<'src> CompilationUnit<'src> {
             interface_defs,
             interface_vtables,
             target: &self.options.target,
+            extra_link_libraries: &extra_link_libraries,
         };
 
         // ADR-0074 Phase 5: bitcode cache. If the AIR cache is configured
@@ -880,6 +901,7 @@ impl<'src> CompilationUnit<'src> {
             &object_files,
             &linker_cmd,
             &self.warnings,
+            inputs.extra_link_libraries,
         )
     }
 

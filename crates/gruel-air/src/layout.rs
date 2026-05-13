@@ -501,6 +501,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: FileId::DEFAULT,
+            is_c_layout: false,
         };
         let (sid, _) = p.register_struct(name, def);
         let ty = Type::new_struct(sid);
@@ -634,6 +635,7 @@ mod tests {
             is_builtin: false,
             is_pub: false,
             file_id: FileId::DEFAULT,
+            is_c_layout: false,
         };
         let (sid, _) = p.register_struct(name, def);
         let layout = layout_of(&p, Type::new_struct(sid));
