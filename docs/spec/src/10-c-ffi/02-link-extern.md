@@ -39,5 +39,5 @@ link_extern("c") {
 {{ rule(id="10.2:8", cat="normative") }}
 The `@link_name("…")` directive overrides the linker symbol name of an extern declaration. Without `@link_name`, the symbol equals the Gruel identifier.
 
-{{ rule(id="10.2:9", cat="legality-rule") }}
-Use of `link_extern` requires the `c_ffi` preview feature.
+{{ rule(id="10.2:9", cat="normative") }}
+Library names from every `link_extern("…")` block across the compilation are deduplicated and contribute a single `-l<name>` flag to the link command in lexicographic order.

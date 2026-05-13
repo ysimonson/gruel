@@ -1,6 +1,6 @@
 # ADR-0085: C foreign function interface via `@mark(c)` and `link_extern` blocks.
 #
-# Phase 1 spec tests cover parsing surface and preview gating.
+# Stable as of ADR-0085 Phase 5; tests no longer require `--preview c_ffi`.
 
 [section]
 id = "items.c_ffi"
@@ -9,46 +9,12 @@ name = "C foreign function interface (ADR-0085)"
 description = "C ABI marker, `link_extern` blocks, and `@link_name`."
 
 # -----------------------------------------------------------------------------
-# Preview gating
-# -----------------------------------------------------------------------------
-
-[[case]]
-name = "link_extern_requires_preview"
-spec = ["10.2:9"]
-description = "Using `link_extern` without `--preview c_ffi` is rejected."
-source = """
-link_extern("c") {
-    fn abs(x: i32) -> i32;
-}
-
-fn main() -> i32 {
-    abs(-5)
-}
-"""
-compile_fail = true
-error_contains = "requires preview feature"
-
-[[case]]
-name = "mark_c_struct_requires_preview"
-spec = ["10.1:5"]
-description = "Using `@mark(c)` on a struct without `--preview c_ffi` is rejected."
-source = """
-@mark(c) struct Point { x: i32, y: i32 }
-
-fn main() -> i32 { 0 }
-"""
-compile_fail = true
-error_contains = "requires preview feature"
-
-# -----------------------------------------------------------------------------
 # `link_extern` block: positive cases
 # -----------------------------------------------------------------------------
 
 [[case]]
 name = "link_extern_single_fn"
 spec = ["10.2:1", "10.2:2", "10.2:7"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "A `link_extern` block with one fn declaration; the fn is implicitly extern (10.2:2)."
 source = """
 link_extern("c") {
@@ -64,8 +30,6 @@ exit_code = 5
 [[case]]
 name = "link_extern_multiple_fns"
 spec = ["10.2:7"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "A `link_extern` block with multiple fn declarations."
 source = """
 link_extern("c") {
@@ -82,8 +46,6 @@ exit_code = 7
 [[case]]
 name = "link_extern_empty_block"
 spec = ["10.2:1"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "An empty `link_extern` block is permitted; it adds the `-l` flag without declaring any symbols."
 source = """
 link_extern("c") {}
@@ -95,8 +57,6 @@ exit_code = 42
 [[case]]
 name = "link_extern_link_name_override"
 spec = ["10.2:8"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "`@link_name(\"…\")` overrides the linker symbol."
 source = """
 link_extern("c") {
@@ -116,8 +76,6 @@ exit_code = 12
 [[case]]
 name = "body_less_fn_outside_link_extern"
 spec = ["10.2:3"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "Body-less fn declarations at top level are rejected."
 source = """
 fn abs(x: i32) -> i32;
@@ -130,8 +88,6 @@ error_contains = "expected"
 [[case]]
 name = "link_extern_item_with_body"
 spec = ["10.2:4"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "A fn with a body inside `link_extern` is a parse error."
 source = """
 link_extern("c") {
@@ -146,8 +102,6 @@ error_contains = "expected"
 [[case]]
 name = "link_extern_nested_rejected"
 spec = ["10.2:6"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "Nested `link_extern` blocks are not part of the grammar."
 source = """
 link_extern("c") {
@@ -164,8 +118,6 @@ error_contains = "expected"
 [[case]]
 name = "link_extern_empty_library_name_rejected"
 spec = ["10.2:5"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "Empty library name `link_extern(\"\")` is rejected."
 source = """
 link_extern("") {
@@ -184,8 +136,6 @@ error_contains = "library name"
 [[case]]
 name = "mark_c_on_enum_rejected"
 spec = ["10.1:1"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "`@mark(c)` is not yet valid on enums; the diagnostic points to the future enum-FFI ADR."
 source = """
 @mark(c) enum FileKind { Unknown, Regular, Directory }
@@ -202,8 +152,6 @@ error_contains = "applicable"
 [[case]]
 name = "mark_c_struct_basic"
 spec = ["10.1:3", "10.1:4"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "`@mark(c)` on a struct is accepted under the preview gate."
 source = """
 @mark(c) struct Point { x: i32, y: i32 }
@@ -218,8 +166,6 @@ exit_code = 7
 [[case]]
 name = "mark_c_fn_basic"
 spec = ["10.1:2", "10.1:4"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "`@mark(c)` on a top-level fn (export) is accepted under the preview gate."
 source = """
 @mark(c) fn my_callback(x: i32) -> i32 { x + 1 }
@@ -237,8 +183,6 @@ exit_code = 42
 [[case]]
 name = "link_extern_struct_param_rejected"
 spec = ["10.2:2"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "Non-`@mark(c)` struct passed by value to an extern fn is rejected."
 source = """
 struct Plain { x: i32 }
@@ -254,8 +198,6 @@ error_contains = "FFI"
 [[case]]
 name = "mark_c_struct_with_non_c_field_rejected"
 spec = ["10.1:3"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "Field whose type is not C-compatible disqualifies the host struct."
 source = """
 struct Plain { x: i32 }
@@ -269,8 +211,6 @@ error_contains = "FFI"
 [[case]]
 name = "mark_c_struct_nested_c_struct_ok"
 spec = ["10.1:3"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "Nested `@mark(c) struct` field is permitted."
 source = """
 @mark(c) struct Inner { x: i32, y: i32 }
@@ -287,8 +227,6 @@ exit_code = 9
 [[case]]
 name = "link_name_without_c_abi_rejected"
 spec = ["10.2:8"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "`@link_name` on a non-C-ABI function is rejected."
 source = """
 @link_name("renamed") fn ordinary() -> i32 { 0 }
@@ -301,8 +239,6 @@ error_contains = "link_name"
 [[case]]
 name = "ffi_struct_roundtrip_gruel"
 spec = ["10.1:3"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "Gruel ↔ Gruel `@mark(c) struct` round-trip through a `@mark(c)` export fn."
 source = """
 @mark(c) struct Point { x: i32, y: i32 }
@@ -320,9 +256,7 @@ exit_code = 33
 
 [[case]]
 name = "link_extern_libm_sqrt"
-spec = ["10.2:7"]
-preview = "c_ffi"
-preview_should_pass = true
+spec = ["10.2:7", "10.2:9"]
 description = "End-to-end: link against libm, call `sqrt`, verify the `-lm` flag reaches the linker."
 source = """
 link_extern("m") {
@@ -339,9 +273,7 @@ exit_code = 4
 
 [[case]]
 name = "mark_c_struct_drop_rejected"
-spec = ["10.1:3"]
-preview = "c_ffi"
-preview_should_pass = true
+spec = ["10.1:5"]
 description = "`@mark(c) struct` cannot declare `fn __drop` in v1."
 source = """
 @mark(c) struct Resource {
@@ -358,8 +290,6 @@ error_contains = "cannot declare"
 [[case]]
 name = "link_extern_duplicate_import_rejected"
 spec = ["10.2:1"]
-preview = "c_ffi"
-preview_should_pass = true
 description = "Declaring the same extern symbol twice is a compile error."
 source = """
 link_extern("c") {

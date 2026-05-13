@@ -17,7 +17,7 @@ use gruel_builtins::{
 };
 use gruel_rir::{InstData, InstRef, RirParamMode};
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature, ice};
+use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
 use lasso::Spur;
 
 use super::anon_interfaces::decode_receiver_mode;
@@ -320,7 +320,12 @@ impl<'a> Sema<'a> {
             }
             for directive in self.rir.get_directives(start, len) {
                 let name = self.interner.resolve(&directive.name).to_string();
-                if name == "allow" || name == "derive" || name == "lang" || name == "mark" {
+                if name == "allow"
+                    || name == "derive"
+                    || name == "lang"
+                    || name == "mark"
+                    || name == "link_name"
+                {
                     continue;
                 }
                 let note = directive_diagnosis_note(&name);
@@ -913,15 +918,9 @@ impl<'a> Sema<'a> {
                         outcome.thread_safety_override = Some(level);
                     }
                     MarkerKind::Abi(Abi::C) => {
-                        // ADR-0085: gated on `c_ffi` preview. Reaching
-                        // this point means the marker is already known
-                        // to be applicable to the host item kind; the
-                        // preview gate is checked once per use.
-                        self.require_preview(
-                            PreviewFeature::CFfi,
-                            "the `c` ABI marker",
-                            directive.span,
-                        )?;
+                        // ADR-0085: marker is already known to be
+                        // applicable to the host item kind by this
+                        // point. C FFI is stable as of ADR-0085 Phase 5.
                         outcome.c_layout = true;
                     }
                 }
@@ -2345,14 +2344,8 @@ impl<'a> Sema<'a> {
         }
         // ADR-0085: any `link_extern` block fires the c_ffi preview gate.
         // Pick the first block-span we see for the diagnostic anchor.
-        let first_span = extern_fns
-            .first()
-            .map(|e| e.block_span)
-            .or_else(|| empty_blocks.first().map(|(_, span)| *span))
-            .expect("checked non-empty above");
-        self.require_preview(PreviewFeature::CFfi, "the `link_extern` block", first_span)?;
-
         // ADR-0085: validate library names — non-empty per spec 10.2:5.
+        // (C FFI is stable as of ADR-0085 Phase 5; no preview gate.)
         for ext in &extern_fns {
             if self.interner.resolve(&ext.library).is_empty() {
                 return Err(CompileError::new(
@@ -2517,11 +2510,6 @@ impl<'a> Sema<'a> {
                     for arg in &d.args {
                         let marker_name = self.interner.resolve(arg);
                         if marker_name == "c" {
-                            self.require_preview(
-                                PreviewFeature::CFfi,
-                                "the `c` ABI marker",
-                                d.span,
-                            )?;
                             is_c_abi = true;
                         }
                     }

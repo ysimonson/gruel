@@ -22,5 +22,5 @@ On a struct declaration, `@mark(c)` selects C-compatible field layout: field ord
 @mark(c) struct Point { x: i32, y: i32 }
 ```
 
-{{ rule(id="10.1:5", cat="legality-rule") }}
-Use of `@mark(c)` requires the `c_ffi` preview feature.
+{{ rule(id="10.1:5", cat="normative") }}
+A `@mark(c)` struct may not declare an inline `fn __drop` destructor: cross-boundary destructor semantics are not defined in this revision.

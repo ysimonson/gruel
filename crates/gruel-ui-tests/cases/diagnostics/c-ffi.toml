@@ -1,0 +1,125 @@
+[section]
+id = "diagnostics.c-ffi"
+name = "C FFI diagnostic quality (ADR-0085)"
+description = "Quality of diagnostics emitted for `@mark(c)` and `link_extern` mistakes."
+
+# =============================================================================
+# Body-less fn outside `link_extern` parses cleanly but produces a useful error.
+# =============================================================================
+
+[[case]]
+name = "body_less_fn_outside_block_parse_error"
+source = """
+fn abs(x: i32) -> i32;
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["expected"]
+
+# =============================================================================
+# `@mark(c)` on enum points at the marker, not the whole declaration.
+# =============================================================================
+
+[[case]]
+name = "mark_c_on_enum_diagnostic"
+source = """
+@mark(c) enum Color { Red, Green, Blue }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["c", "enum"]
+
+# =============================================================================
+# FFI type rejection identifies the offending parameter and the position.
+# =============================================================================
+
+[[case]]
+name = "link_extern_non_c_struct_param_diagnostic"
+source = """
+struct Plain { x: i32 }
+link_extern("c") {
+    fn takes_plain(p: Plain) -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["FFI", "parameter"]
+
+[[case]]
+name = "mark_c_struct_non_c_field_diagnostic"
+source = """
+struct Plain { x: i32 }
+@mark(c) struct Outer { inner: Plain }
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["FFI", "field"]
+
+# =============================================================================
+# `@link_name` placement diagnostic spells out the constraint.
+# =============================================================================
+
+[[case]]
+name = "link_name_on_ordinary_fn_diagnostic"
+source = """
+@link_name("renamed") fn ordinary() -> i32 { 0 }
+
+fn main() -> i32 { ordinary() }
+"""
+compile_fail = true
+error_contains = ["@link_name", "mark(c)"]
+
+# =============================================================================
+# Duplicate symbol diagnostic names the symbol.
+# =============================================================================
+
+[[case]]
+name = "duplicate_extern_symbol_diagnostic"
+source = """
+link_extern("c") {
+    fn abs(x: i32) -> i32;
+    fn abs(x: i32) -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["function `abs`"]
+
+# =============================================================================
+# Empty library name diagnostic gives the right hint.
+# =============================================================================
+
+[[case]]
+name = "empty_library_name_diagnostic"
+source = """
+link_extern("") {
+    fn abs(x: i32) -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["library name", "empty"]
+
+# =============================================================================
+# `fn __drop` on a `@mark(c)` struct points at the struct.
+# =============================================================================
+
+[[case]]
+name = "mark_c_struct_drop_diagnostic"
+source = """
+@mark(c) struct Resource {
+    handle: i32,
+
+    fn __drop(self) {}
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = ["Resource", "cannot declare"]
