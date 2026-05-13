@@ -182,6 +182,17 @@ pub enum MarkerKind {
     /// always-safe downgrade; `checked_send` and `checked_sync` are
     /// user-asserted upgrades the compiler cannot verify on its own.
     ThreadSafety(ThreadSafety),
+    /// ADR-0085: ABI markers — C ABI on fns, C layout on structs.
+    Abi(Abi),
+}
+
+/// ABI marker variants (ADR-0085). C is the only ABI in v1; future
+/// values (`system`, `stdcall`, `vectorcall`, eventually `rust`) extend
+/// this enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Abi {
+    /// C ABI: C calling convention on fns, C layout on structs.
+    C,
 }
 
 /// Posture trichotomy carried by `MarkerKind::Posture` (ADR-0080 / ADR-0083).
@@ -240,9 +251,11 @@ impl Default for ThreadSafety {
 pub struct ItemKinds(u8);
 
 impl ItemKinds {
-    pub const STRUCT: ItemKinds = ItemKinds(0b01);
-    pub const ENUM: ItemKinds = ItemKinds(0b10);
-    pub const STRUCT_OR_ENUM: ItemKinds = ItemKinds(0b11);
+    pub const STRUCT: ItemKinds = ItemKinds(0b001);
+    pub const ENUM: ItemKinds = ItemKinds(0b010);
+    pub const FUNCTION: ItemKinds = ItemKinds(0b100);
+    pub const STRUCT_OR_ENUM: ItemKinds = ItemKinds(0b011);
+    pub const FN_OR_STRUCT: ItemKinds = ItemKinds(0b101);
 
     pub fn includes_struct(self) -> bool {
         (self.0 & Self::STRUCT.0) != 0
@@ -250,6 +263,10 @@ impl ItemKinds {
 
     pub fn includes_enum(self) -> bool {
         (self.0 & Self::ENUM.0) != 0
+    }
+
+    pub fn includes_function(self) -> bool {
+        (self.0 & Self::FUNCTION.0) != 0
     }
 }
 
@@ -306,6 +323,15 @@ pub static BUILTIN_MARKERS: &[BuiltinMarker] = &[
         name: "checked_sync",
         kind: MarkerKind::ThreadSafety(ThreadSafety::Sync),
         applicable_to: ItemKinds::STRUCT_OR_ENUM,
+    },
+    // ADR-0085: C FFI. Applied to fns selects the C calling convention;
+    // applied to structs selects C layout (field order, alignment,
+    // niches disabled). Enums are gated on a follow-up ADR that adds
+    // `c_int` (the C enum discriminant type).
+    BuiltinMarker {
+        name: "c",
+        kind: MarkerKind::Abi(Abi::C),
+        applicable_to: ItemKinds::FN_OR_STRUCT,
     },
 ];
 
@@ -590,15 +616,19 @@ pub fn render_reference_markdown() -> String {
             MarkerKind::ThreadSafety(ThreadSafety::Unsend) => "ThreadSafety(Unsend)",
             MarkerKind::ThreadSafety(ThreadSafety::Send) => "ThreadSafety(Send)",
             MarkerKind::ThreadSafety(ThreadSafety::Sync) => "ThreadSafety(Sync)",
+            MarkerKind::Abi(Abi::C) => "Abi(C)",
         };
         let apply_str = match (
             m.applicable_to.includes_struct(),
             m.applicable_to.includes_enum(),
+            m.applicable_to.includes_function(),
         ) {
-            (true, true) => "struct or enum",
-            (true, false) => "struct only",
-            (false, true) => "enum only",
-            (false, false) => "(none)",
+            (true, true, false) => "struct or enum",
+            (true, false, false) => "struct only",
+            (false, true, false) => "enum only",
+            (true, false, true) => "fn or struct",
+            (false, false, true) => "fn only",
+            _ => "(none)",
         };
         out.push_str(&format!(
             "| `{}` | {} | {} |\n",
@@ -709,6 +739,9 @@ pub fn render_reference_markdown() -> String {
             ),
             MarkerKind::ThreadSafety(ThreadSafety::Sync) => out.push_str(
                 "Asserts the type is `Sync`, even if its structural minimum would be `Send` or `Unsend`. The compiler cannot verify this — the `checked_` prefix flags it as a user assertion (analogous to Rust's `unsafe impl Sync`). Mis-applying breaks data-race freedom; the user takes responsibility.\n\n",
+            ),
+            MarkerKind::Abi(Abi::C) => out.push_str(
+                "Selects the C ABI / C layout (ADR-0085). On a function, uses the platform C calling convention and suppresses Gruel name mangling. On a struct, switches to C field layout (declaration order, natural alignment, no reordering, niches disabled), making the type eligible to cross the FFI boundary by value.\n\n",
             ),
         }
     }

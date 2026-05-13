@@ -46,6 +46,7 @@ pub enum TokenKind {
     Const,          // const declaration (module system re-exports)
     Checked,        // checked { } block for unchecked operations
     Unchecked,      // unchecked fn modifier
+    LinkExtern,     // link_extern("…") { … } FFI block (ADR-0085)
 
     // Type keywords
     I8,
@@ -156,6 +157,7 @@ impl TokenKind {
             TokenKind::Const => "'const'",
             TokenKind::Checked => "'checked'",
             TokenKind::Unchecked => "'unchecked'",
+            TokenKind::LinkExtern => "'link_extern'",
             TokenKind::I8 => "type 'i8'",
             TokenKind::I16 => "type 'i16'",
             TokenKind::I32 => "type 'i32'",
@@ -265,6 +267,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Const => write!(f, "CONST"),
             TokenKind::Checked => write!(f, "CHECKED"),
             TokenKind::Unchecked => write!(f, "UNCHECKED"),
+            TokenKind::LinkExtern => write!(f, "LINK_EXTERN"),
             TokenKind::I8 => write!(f, "TYPE(i8)"),
             TokenKind::I16 => write!(f, "TYPE(i16)"),
             TokenKind::I32 => write!(f, "TYPE(i32)"),

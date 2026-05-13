@@ -336,6 +336,11 @@ pub enum LogosTokenKind {
     Checked,
     #[token("unchecked")]
     Unchecked,
+    /// ADR-0085: introduces an extern-declaration block linked against the
+    /// named library. Recognised as a keyword unconditionally; sema gates
+    /// usage behind the `c_ffi` preview feature.
+    #[token("link_extern")]
+    LinkExtern,
 
     // Type keywords
     #[token("i8")]
@@ -523,6 +528,7 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::Const => TokenKind::Const,
             LogosTokenKind::Checked => TokenKind::Checked,
             LogosTokenKind::Unchecked => TokenKind::Unchecked,
+            LogosTokenKind::LinkExtern => TokenKind::LinkExtern,
             LogosTokenKind::I8 => TokenKind::I8,
             LogosTokenKind::I16 => TokenKind::I16,
             LogosTokenKind::I32 => TokenKind::I32,

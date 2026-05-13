@@ -387,6 +387,12 @@ pub fn merge_symbols(program: ParsedProgram) -> MultiErrorResult<MergedProgram> 
                     // Const declarations are validated in Sema; cross-file
                     // duplicate detection happens in the declarations phase.
                 }
+                Item::LinkExtern(_) => {
+                    // ADR-0085: extern fn declarations live on the RIR
+                    // side-table; cross-file duplicate detection happens
+                    // in sema (the registered symbol-name set there is
+                    // the source of truth across the whole compilation).
+                }
                 Item::Error(_) => {
                     // Error nodes from parser recovery are skipped - errors were already reported
                 }
@@ -557,6 +563,12 @@ pub fn validate_and_generate_rir_parallel(
                 }
                 Item::Const(_) => {
                     // Validated in Sema
+                }
+                Item::LinkExtern(_) => {
+                    // ADR-0085: extern fn declarations live on the RIR
+                    // side-table; cross-file duplicate detection happens
+                    // in sema (the registered symbol-name set there is
+                    // the source of truth across the whole compilation).
                 }
                 Item::Error(_) => {
                     // Error nodes from parser recovery are skipped

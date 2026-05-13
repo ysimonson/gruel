@@ -39,6 +39,23 @@ pub struct FunctionInfo {
     /// (which is what's actually defined in the binary). For
     /// non-aliased entries this is `None`.
     pub canonical_name: Option<Spur>,
+    /// ADR-0085: when this entry is a C extern (declared inside a
+    /// `link_extern("…") { … }` block), this is the library name. None
+    /// for regular Gruel fns and C exports.
+    pub link_library: Option<Spur>,
+    /// ADR-0085: when this entry is a C extern or `@mark(c) fn` export
+    /// and an explicit `@link_name("…")` directive overrides the
+    /// emitted symbol, this is the override. None means the symbol
+    /// equals the Gruel identifier.
+    pub link_name: Option<Spur>,
+    /// ADR-0085: true iff this entry came from inside a `link_extern`
+    /// block — the body field is meaningless and codegen must emit a
+    /// declaration only.
+    pub is_extern: bool,
+    /// ADR-0085: true iff the host is a top-level `@mark(c) fn …{ … }`
+    /// or an extern fn — both use the platform C calling convention
+    /// and suppress Gruel name mangling at the emitted symbol.
+    pub is_c_abi: bool,
 }
 
 /// Information about a method in an impl block.

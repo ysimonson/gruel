@@ -544,6 +544,11 @@ impl<'src> CompilationUnit<'src> {
                     Item::Const(_) => {
                         // Validated in Sema
                     }
+                    Item::LinkExtern(_) => {
+                        // ADR-0085: extern fn declarations live on the
+                        // RIR side-table; cross-file duplicate detection
+                        // happens in sema.
+                    }
                     Item::Error(_) => {
                         // Error nodes from parser recovery are skipped
                     }

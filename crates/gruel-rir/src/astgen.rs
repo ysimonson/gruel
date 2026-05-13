@@ -123,8 +123,57 @@ impl<'a> AstGen<'a> {
             Item::Const(const_decl) => {
                 self.gen_const(const_decl);
             }
+            Item::LinkExtern(block) => {
+                self.gen_link_extern(block);
+            }
             // Error nodes from parser recovery are skipped - errors were already reported
             Item::Error(_) => {}
+        }
+    }
+
+    /// ADR-0085: lower a `link_extern("libname") { fn …; … }` block to a
+    /// set of [`RirExternFn`] entries on the side table.
+    fn gen_link_extern(&mut self, block: &gruel_parser::ast::LinkExternBlock) {
+        if block.items.is_empty() {
+            // ADR-0085: empty blocks still contribute a library to the
+            // link line; track them so sema can validate the library
+            // name and codegen can emit `-l<lib>`.
+            self.rir
+                .add_empty_link_extern_block(block.library.value, block.span);
+            return;
+        }
+        for item in &block.items {
+            let directives = self.convert_directives(&item.directives);
+            let (directives_start, directives_len) = self.rir.add_directives(&directives);
+
+            let params: Vec<_> = item
+                .params
+                .iter()
+                .map(|p| RirParam {
+                    name: p.name.name,
+                    ty: self.intern_type(&p.ty),
+                    mode: self.convert_param_mode(p.mode),
+                    is_comptime: p.is_comptime,
+                })
+                .collect();
+            let (params_start, params_len) = self.rir.add_params(&params);
+
+            let return_type = match &item.return_type {
+                Some(ty) => self.intern_type(ty),
+                None => self.interner.get_or_intern("()"),
+            };
+
+            self.rir.add_extern_fn(crate::inst::RirExternFn {
+                library: block.library.value,
+                name: item.name.name,
+                directives_start,
+                directives_len,
+                params_start,
+                params_len,
+                return_type,
+                span: item.span,
+                block_span: block.span,
+            });
         }
     }
 

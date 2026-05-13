@@ -12,12 +12,12 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use gruel_builtins::{
-    BUILTIN_MARKERS, ItemKinds, MarkerKind, Posture, ThreadSafety, get_builtin_marker,
+    Abi, BUILTIN_MARKERS, ItemKinds, MarkerKind, Posture, ThreadSafety, get_builtin_marker,
     is_reserved_type_constructor_name,
 };
 use gruel_rir::{InstData, InstRef, RirParamMode};
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
+use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature, ice};
 use lasso::Spur;
 
 use super::anon_interfaces::decode_receiver_mode;
@@ -67,6 +67,10 @@ pub(crate) struct MarkOutcome {
     /// `checked_sync`). At most one is permitted per directive list.
     /// Behind the `thread_safety` preview gate.
     pub thread_safety_override: Option<ThreadSafety>,
+    /// ADR-0085: C ABI / C layout marker (`@mark(c)`). On a struct,
+    /// switches layout to C rules and makes the type eligible to cross
+    /// the FFI boundary by value. Behind the `c_ffi` preview gate.
+    pub c_layout: bool,
 }
 
 /// Posture observed on a member's type (ADR-0080).
@@ -900,6 +904,18 @@ impl<'a> Sema<'a> {
                             ));
                         }
                         outcome.thread_safety_override = Some(level);
+                    }
+                    MarkerKind::Abi(Abi::C) => {
+                        // ADR-0085: gated on `c_ffi` preview. Reaching
+                        // this point means the marker is already known
+                        // to be applicable to the host item kind; the
+                        // preview gate is checked once per use.
+                        self.require_preview(
+                            PreviewFeature::CFfi,
+                            "the `c` ABI marker",
+                            directive.span,
+                        )?;
+                        outcome.c_layout = true;
                     }
                 }
             }
@@ -2221,6 +2237,163 @@ impl<'a> Sema<'a> {
             }
         }
 
+        // ADR-0085: register every fn declared inside a `link_extern("…") { … }`
+        // block. Gated behind the `c_ffi` preview feature.
+        self.collect_extern_fn_signatures()?;
+
+        Ok(())
+    }
+
+    /// ADR-0085: register every C extern fn declared in `link_extern` blocks.
+    ///
+    /// Each entry on `Rir::extern_fns()` becomes a `FunctionInfo` with
+    /// `is_extern = true`, `is_c_abi = true`, and `link_library = Some(...)`.
+    /// The body slot is filled with a sentinel `InstRef`; codegen sees the
+    /// `is_extern` flag and emits a declaration only.
+    fn collect_extern_fn_signatures(&mut self) -> CompileResult<()> {
+        let extern_fns: Vec<_> = self.rir.extern_fns().to_vec();
+        let empty_blocks: Vec<_> = self.rir.empty_link_extern_blocks().to_vec();
+        if extern_fns.is_empty() && empty_blocks.is_empty() {
+            return Ok(());
+        }
+        // ADR-0085: any `link_extern` block fires the c_ffi preview gate.
+        // Pick the first block-span we see for the diagnostic anchor.
+        let first_span = extern_fns
+            .first()
+            .map(|e| e.block_span)
+            .or_else(|| empty_blocks.first().map(|(_, span)| *span))
+            .expect("checked non-empty above");
+        self.require_preview(PreviewFeature::CFfi, "the `link_extern` block", first_span)?;
+
+        // ADR-0085: validate library names — non-empty per spec 10.2:5.
+        for ext in &extern_fns {
+            if self.interner.resolve(&ext.library).is_empty() {
+                return Err(CompileError::new(
+                    ErrorKind::CFfi(
+                        "`link_extern(\"…\")` library name must not be empty".to_string(),
+                    ),
+                    ext.block_span,
+                ));
+            }
+        }
+        for (lib, block_span) in &empty_blocks {
+            if self.interner.resolve(lib).is_empty() {
+                return Err(CompileError::new(
+                    ErrorKind::CFfi(
+                        "`link_extern(\"…\")` library name must not be empty".to_string(),
+                    ),
+                    *block_span,
+                ));
+            }
+        }
+
+        for ext in &extern_fns {
+            let params = self.rir.get_params(ext.params_start, ext.params_len);
+            let param_names: Vec<Spur> = params.iter().map(|p| p.name).collect();
+            let mut param_types = Vec::with_capacity(params.len());
+            let mut param_modes = Vec::with_capacity(params.len());
+            let mut param_comptime = Vec::with_capacity(params.len());
+            for p in &params {
+                if p.is_comptime {
+                    return Err(CompileError::new(
+                        ErrorKind::CFfi(
+                            "extern fns inside `link_extern` must not declare \
+                             comptime parameters"
+                                .to_string(),
+                        ),
+                        ext.span,
+                    ));
+                }
+                let (ty, mode) = self.resolve_param_type(p.ty, p.mode, ext.span)?;
+                param_types.push(ty);
+                param_modes.push(mode);
+                param_comptime.push(false);
+            }
+            let ret_type = self.resolve_type(ext.return_type, ext.span)?;
+            let params_range =
+                self.param_arena
+                    .alloc(param_names, param_types, param_modes, param_comptime);
+
+            // ADR-0085: process directives on the extern fn. Today the only
+            // supported one is `@link_name("…")`.
+            let directives = self
+                .rir
+                .get_directives(ext.directives_start, ext.directives_len);
+            let mut link_name_override: Option<Spur> = None;
+            for d in directives.iter() {
+                let dir_name = self.interner.resolve(&d.name).to_string();
+                match dir_name.as_str() {
+                    "link_name" => {
+                        if d.args.len() != 1 {
+                            return Err(CompileError::new(
+                                ErrorKind::CFfi(
+                                    "`@link_name(\"…\")` takes exactly one string argument"
+                                        .to_string(),
+                                ),
+                                d.span,
+                            ));
+                        }
+                        link_name_override = Some(d.args[0]);
+                    }
+                    "mark" => {
+                        // ADR-0085: redundant `@mark(c)` inside a
+                        // `link_extern` block is permitted. Other marker
+                        // names are rejected.
+                        for arg in &d.args {
+                            let name = self.interner.resolve(arg);
+                            if name != "c" {
+                                return Err(CompileError::new(
+                                    ErrorKind::CFfi(format!(
+                                        "marker `{}` is not valid on extern fns inside `link_extern`",
+                                        name
+                                    )),
+                                    d.span,
+                                ));
+                            }
+                        }
+                    }
+                    other => {
+                        return Err(CompileError::new(
+                            ErrorKind::CFfi(format!(
+                                "directive `@{}` is not valid on extern fns inside `link_extern`",
+                                other
+                            )),
+                            d.span,
+                        ));
+                    }
+                }
+            }
+
+            if self.functions.contains_key(&ext.name) {
+                let name_str = self.interner.resolve(&ext.name).to_string();
+                return Err(CompileError::new(
+                    ErrorKind::DuplicateTypeDefinition {
+                        type_name: format!("function `{}`", name_str),
+                    },
+                    ext.span,
+                ));
+            }
+
+            self.functions.insert(
+                ext.name,
+                FunctionInfo {
+                    params: params_range,
+                    return_type: ret_type,
+                    return_type_sym: ext.return_type,
+                    body: InstRef::from_raw(u32::MAX),
+                    span: ext.span,
+                    is_generic: false,
+                    is_pub: true,
+                    is_unchecked: false,
+                    file_id: ext.span.file_id,
+                    canonical_name: None,
+                    link_library: Some(ext.library),
+                    link_name: link_name_override,
+                    is_extern: true,
+                    is_c_abi: true,
+                },
+            );
+        }
         Ok(())
     }
 
@@ -2376,6 +2549,10 @@ impl<'a> Sema<'a> {
                 is_unchecked,
                 file_id: span.file_id,
                 canonical_name: None,
+                link_library: None,
+                link_name: None,
+                is_extern: false,
+                is_c_abi: false,
             },
         );
         Ok(())

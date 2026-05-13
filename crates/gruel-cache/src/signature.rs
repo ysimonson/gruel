@@ -133,6 +133,7 @@ const TAG_ENUM: u8 = 3;
 const TAG_INTERFACE: u8 = 4;
 const TAG_DERIVE: u8 = 5;
 const TAG_CONST: u8 = 6;
+const TAG_LINK_EXTERN: u8 = 7;
 
 fn encode_item(h: &mut Hasher, item: &Item, interner: &ThreadedRodeo) {
     match item {
@@ -142,7 +143,23 @@ fn encode_item(h: &mut Hasher, item: &Item, interner: &ThreadedRodeo) {
         Item::Interface(i) => encode_interface(h, i, interner),
         Item::Derive(d) => encode_derive(h, d, interner),
         Item::Const(c) => encode_const(h, c, interner),
+        Item::LinkExtern(b) => encode_link_extern(h, b, interner),
         Item::Error(_) => {}
+    }
+}
+
+fn encode_link_extern(
+    h: &mut Hasher,
+    block: &gruel_parser::ast::LinkExternBlock,
+    interner: &ThreadedRodeo,
+) {
+    h.update(&[TAG_LINK_EXTERN]);
+    h.update(interner.resolve(&block.library.value).as_bytes());
+    h.update(&[0]);
+    for item in &block.items {
+        encode_ident(h, &item.name, interner);
+        encode_params(h, &item.params, interner);
+        encode_return_type(h, item.return_type.as_ref(), interner);
     }
 }
 

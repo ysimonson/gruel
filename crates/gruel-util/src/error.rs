@@ -178,6 +178,12 @@ impl ErrorCode {
     pub const PREVIEW_FEATURE_REQUIRED: Self = Self(1100);
 
     // ========================================================================
+    // C FFI errors (ADR-0085) (E1500-E1599)
+    // ========================================================================
+    /// ADR-0085: any C-FFI-related diagnostic without a dedicated code.
+    pub const C_FFI: Self = Self(1500);
+
+    // ========================================================================
     // Interface conformance errors (ADR-0056) (E1400-E1499)
     // ========================================================================
     pub const INTERFACE_METHOD_MISSING: Self = Self(1400);
@@ -351,6 +357,9 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// ADR-0085: C foreign function interface via `@mark(c)` and
+    /// `link_extern("…") { … }` blocks.
+    CFfi,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -382,6 +391,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::CFfi => "ADR-0085",
         }
     }
 
@@ -867,6 +877,13 @@ pub enum ErrorKind {
     /// Used for parser-generated errors that don't fit the "expected X, found Y" pattern.
     #[error("{0}")]
     ParseError(String),
+
+    /// ADR-0085: any C-FFI-related diagnostic that doesn't have its own
+    /// specific variant. Holds a free-form message; specific shapes
+    /// (`LinkExternDuplicateImport`, `FfiTypeNotAllowed`, etc.) get
+    /// dedicated variants as the surface grows.
+    #[error("{0}")]
+    CFfi(String),
 
     // Semantic errors
     #[error("no main function found")]
@@ -1416,6 +1433,9 @@ impl ErrorKind {
             ErrorKind::ComptimeArgNotConst { .. } => ErrorCode::COMPTIME_ARG_NOT_CONST,
             ErrorKind::ComptimeUserError(_) => ErrorCode::COMPTIME_USER_ERROR,
             ErrorKind::InvalidLangItem { .. } => ErrorCode::INVALID_LANG_ITEM,
+
+            // C FFI errors (E1500-E1599) — ADR-0085.
+            ErrorKind::CFfi(_) => ErrorCode::C_FFI,
 
             // Internal compiler errors (E9000-E9999)
             ErrorKind::InternalError(_) => ErrorCode::INTERNAL_ERROR,
@@ -2113,7 +2133,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, c_ffi");
     }
 
     // ========================================================================

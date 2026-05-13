@@ -3415,6 +3415,64 @@ where
         .boxed()
 }
 
+/// Parser for a single body-less fn declaration inside a `link_extern`
+/// block (ADR-0085).
+///
+/// Shape: `[@directive]* fn name(params) [-> type] ;`
+///
+/// Bodies are forbidden here; sema rejects any fn with a body inside a
+/// `link_extern` block. `pub` / `unchecked` are also rejected — the
+/// extern scope establishes both.
+fn extern_fn_parser<'src, I>() -> GruelParser<'src, I, crate::ast::ExternFn>
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    directives_parser()
+        .then(just(TokenKind::Fn).ignore_then(ident_parser()))
+        .then(params_parser().delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)))
+        .then(just(TokenKind::Arrow).ignore_then(type_parser()).or_not())
+        .then_ignore(just(TokenKind::Semi))
+        .map_with(
+            |(((directives, name), params), return_type), e| crate::ast::ExternFn {
+                directives,
+                name,
+                params,
+                return_type,
+                span: span_from_extra(e),
+            },
+        )
+        .boxed()
+}
+
+/// Parser for a `link_extern("libname") { … }` block (ADR-0085).
+fn link_extern_parser<'src, I>() -> GruelParser<'src, I, crate::ast::LinkExternBlock>
+where
+    I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
+{
+    let library = select! {
+        TokenKind::String(s) = e => StringLit {
+            value: s,
+            span: span_from_extra(e),
+        },
+    }
+    .boxed();
+
+    just(TokenKind::LinkExtern)
+        .ignore_then(library.delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)))
+        .then(
+            extern_fn_parser()
+                .repeated()
+                .collect::<Vec<_>>()
+                .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
+        )
+        .map_with(|(library, items), e| crate::ast::LinkExternBlock {
+            library,
+            items,
+            span: span_from_extra(e),
+        })
+        .boxed()
+}
+
 fn item_parser<'src, I>() -> GruelParser<'src, I, Item>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -3426,6 +3484,7 @@ where
         interface_parser().map(Item::Interface).boxed(),
         derive_parser().map(Item::Derive).boxed(),
         const_parser().map(Item::Const).boxed(),
+        link_extern_parser().map(Item::LinkExtern).boxed(),
     ))
     .boxed()
 }
@@ -3445,6 +3504,7 @@ where
         just(TokenKind::Interface).ignored().boxed(),
         just(TokenKind::Derive).ignored().boxed(),
         just(TokenKind::Const).ignored().boxed(),
+        just(TokenKind::LinkExtern).ignored().boxed(),
     ))
     .boxed();
     let item_start_b: GruelParser<'src, I, ()> = choice((
@@ -3718,6 +3778,9 @@ fn validate_item(item: &Item, errors: &mut Vec<CompileError>, v: &AstValidator) 
                 validate_expr(&m.body, errors, v);
             }
         }
+        Item::LinkExtern(_) => {
+            // Body-less extern declarations have no expressions to validate.
+        }
         Item::Error(_) => {}
     }
 }
@@ -3971,6 +4034,9 @@ mod tests {
             Item::Interface(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Derive(_) => panic!("parse_expr helper should only be used with functions"),
             Item::Const(_) => panic!("parse_expr helper should only be used with functions"),
+            Item::LinkExtern(_) => {
+                panic!("parse_expr helper should only be used with functions")
+            }
             Item::Error(_) => panic!("parse_expr helper should only be used with functions"),
         };
         Ok(ExprResult { expr, interner })
@@ -4001,6 +4067,7 @@ mod tests {
             Item::Interface(_) => panic!("expected Function"),
             Item::Derive(_) => panic!("expected Function"),
             Item::Const(_) => panic!("expected Function"),
+            Item::LinkExtern(_) => panic!("expected Function"),
             Item::Error(_) => panic!("expected Function"),
         }
     }
@@ -4072,6 +4139,7 @@ mod tests {
             Item::Interface(_) => panic!("expected Function"),
             Item::Derive(_) => panic!("expected Function"),
             Item::Const(_) => panic!("expected Function"),
+            Item::LinkExtern(_) => panic!("expected Function"),
             Item::Error(_) => panic!("expected Function"),
         }
     }

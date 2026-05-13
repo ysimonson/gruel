@@ -795,6 +795,35 @@ impl<'a> RirFunctionView<'a> {
     }
 }
 
+/// ADR-0085: a body-less extern fn declared inside a `link_extern("…") { … }`
+/// block.
+///
+/// These are tracked as a side-set on the [`Rir`] rather than as
+/// `FnDecl` instructions because their lowering pipeline diverges from
+/// regular fns: no body to translate, no Gruel mangling, library name
+/// to thread through to the linker.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RirExternFn {
+    /// Library name (interned, as written in the `link_extern("…")` head).
+    pub library: Spur,
+    /// Function name (as it appears in Gruel source).
+    pub name: Spur,
+    /// Index into the extra array where this fn's directives start.
+    pub directives_start: u32,
+    /// Number of directives.
+    pub directives_len: u32,
+    /// Index into the extra array where this fn's params start.
+    pub params_start: u32,
+    /// Number of parameters.
+    pub params_len: u32,
+    /// Return type as a `Spur` (defaults to `()` when omitted in source).
+    pub return_type: Spur,
+    /// Span of the fn declaration.
+    pub span: Span,
+    /// Span of the enclosing `link_extern(...)` block.
+    pub block_span: Span,
+}
+
 /// The complete RIR for a source file.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Rir {
@@ -804,6 +833,12 @@ pub struct Rir {
     extra: Vec<u32>,
     /// Function boundaries for per-function analysis
     function_spans: Vec<FunctionSpan>,
+    /// ADR-0085: body-less extern fns declared in `link_extern(...)` blocks.
+    extern_fns: Vec<RirExternFn>,
+    /// ADR-0085: `link_extern("lib") { }` blocks with no items. Tracked
+    /// separately so sema can validate the library name and emit the
+    /// `-l<lib>` flag even when no symbols are declared.
+    empty_link_extern_blocks: Vec<(Spur, Span)>,
 }
 
 impl Rir {
@@ -1559,6 +1594,29 @@ impl Rir {
     // ===== Function span methods =====
 
     /// Add a function span to track function boundaries.
+    /// ADR-0085: append an extern fn declaration (from inside a `link_extern`
+    /// block).
+    pub fn add_extern_fn(&mut self, extern_fn: RirExternFn) {
+        self.extern_fns.push(extern_fn);
+    }
+
+    /// ADR-0085: read-only view over all extern fns declared in this file.
+    pub fn extern_fns(&self) -> &[RirExternFn] {
+        &self.extern_fns
+    }
+
+    /// ADR-0085: append an empty `link_extern("lib") { }` block.
+    pub fn add_empty_link_extern_block(&mut self, library: Spur, span: Span) {
+        self.empty_link_extern_blocks.push((library, span));
+    }
+
+    /// ADR-0085: read-only view over `link_extern` blocks that declared
+    /// no symbols. Sema validates the library name and emits the
+    /// corresponding `-l<lib>` link flag.
+    pub fn empty_link_extern_blocks(&self) -> &[(Spur, Span)] {
+        &self.empty_link_extern_blocks
+    }
+
     pub fn add_function_span(&mut self, span: FunctionSpan) {
         self.function_spans.push(span);
     }
@@ -1621,6 +1679,8 @@ impl Rir {
                 instructions: rirs[0].instructions.clone(),
                 extra: rirs[0].extra.clone(),
                 function_spans: rirs[0].function_spans.clone(),
+                extern_fns: rirs[0].extern_fns.clone(),
+                empty_link_extern_blocks: rirs[0].empty_link_extern_blocks.clone(),
             };
         }
 
@@ -1628,11 +1688,15 @@ impl Rir {
         let total_instructions: usize = rirs.iter().map(|r| r.instructions.len()).sum();
         let total_extra: usize = rirs.iter().map(|r| r.extra.len()).sum();
         let total_functions: usize = rirs.iter().map(|r| r.function_spans.len()).sum();
+        let total_extern: usize = rirs.iter().map(|r| r.extern_fns.len()).sum();
+        let total_empty_blocks: usize = rirs.iter().map(|r| r.empty_link_extern_blocks.len()).sum();
 
         let mut merged = Rir {
             instructions: Vec::with_capacity(total_instructions),
             extra: Vec::with_capacity(total_extra),
             function_spans: Vec::with_capacity(total_functions),
+            extern_fns: Vec::with_capacity(total_extern),
+            empty_link_extern_blocks: Vec::with_capacity(total_empty_blocks),
         };
 
         // Track offsets as we merge each RIR
@@ -1666,6 +1730,30 @@ impl Rir {
                     decl: InstRef::from_raw(fn_span.decl.as_u32() + inst_offset),
                 });
             }
+
+            // ADR-0085: extern fns live in the side table; their
+            // directive/params indices reference the extra array, so we
+            // need to shift them by the merged-file offset.
+            for ext in &rir.extern_fns {
+                merged.extern_fns.push(RirExternFn {
+                    library: ext.library,
+                    name: ext.name,
+                    directives_start: ext.directives_start + extra_offset,
+                    directives_len: ext.directives_len,
+                    params_start: ext.params_start + extra_offset,
+                    params_len: ext.params_len,
+                    return_type: ext.return_type,
+                    span: ext.span,
+                    block_span: ext.block_span,
+                });
+            }
+
+            // ADR-0085: empty `link_extern` blocks need their own
+            // pass-through to preserve `-l<lib>` flags when the block
+            // declares no symbols.
+            merged
+                .empty_link_extern_blocks
+                .extend_from_slice(&rir.empty_link_extern_blocks);
 
             // Update offsets for the next RIR
             inst_offset += rir.instructions.len() as u32;

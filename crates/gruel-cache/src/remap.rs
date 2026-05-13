@@ -168,8 +168,27 @@ impl RemapSpurs for Item {
             Item::Interface(i) => i.remap_spurs(table),
             Item::Derive(d) => d.remap_spurs(table),
             Item::Const(c) => c.remap_spurs(table),
+            Item::LinkExtern(b) => b.remap_spurs(table),
             Item::Error(_) => {}
         }
+    }
+}
+
+impl RemapSpurs for gruel_parser::ast::LinkExternBlock {
+    fn remap_spurs(&mut self, table: &[Spur]) {
+        self.library.remap_spurs(table);
+        for item in &mut self.items {
+            item.remap_spurs(table);
+        }
+    }
+}
+
+impl RemapSpurs for gruel_parser::ast::ExternFn {
+    fn remap_spurs(&mut self, table: &[Spur]) {
+        self.directives.remap_spurs(table);
+        self.name.remap_spurs(table);
+        self.params.remap_spurs(table);
+        self.return_type.remap_spurs(table);
     }
 }
 

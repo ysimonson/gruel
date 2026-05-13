@@ -52,6 +52,7 @@ Marker names recognized inside the `@mark(...)` directive (ADR-0083). Markers at
 | `unsend` | ThreadSafety(Unsend) | struct or enum |
 | `checked_send` | ThreadSafety(Send) | struct or enum |
 | `checked_sync` | ThreadSafety(Sync) | struct or enum |
+| `c` | Abi(C) | fn or struct |
 
 ## Type Constructors
 
@@ -201,4 +202,8 @@ Asserts the type is `Send`, even if a member's type would structurally pull it d
 ### `@mark(checked_sync)`
 
 Asserts the type is `Sync`, even if its structural minimum would be `Send` or `Unsend`. The compiler cannot verify this — the `checked_` prefix flags it as a user assertion (analogous to Rust's `unsafe impl Sync`). Mis-applying breaks data-race freedom; the user takes responsibility.
+
+### `@mark(c)`
+
+Selects the C ABI / C layout (ADR-0085). On a function, uses the platform C calling convention and suppresses Gruel name mangling. On a struct, switches to C field layout (declaration order, natural alignment, no reordering, niches disabled), making the type eligible to cross the FFI boundary by value.
 

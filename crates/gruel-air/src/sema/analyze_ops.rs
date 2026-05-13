@@ -7485,7 +7485,12 @@ impl<'a> Sema<'a> {
         // here on so the emitted `Call` targets the actual function
         // definition, and so the lazy work queue tracks the right
         // identifier.
-        let name = fn_info.canonical_name.unwrap_or(name);
+        //
+        // ADR-0085: extern fns and `@mark(c)` exports may further
+        // override the emitted symbol via `@link_name("…")`. Symbol
+        // override takes precedence over alias canonicalization since
+        // the override is what the linker sees.
+        let name = fn_info.link_name.or(fn_info.canonical_name).unwrap_or(name);
 
         // Track this function as referenced (for lazy analysis)
         ctx.referenced_functions.insert(name);

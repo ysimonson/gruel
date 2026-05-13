@@ -79,9 +79,48 @@ pub enum Item {
     Derive(DeriveDecl),
     /// Constant declaration (e.g., `const math = @import("math");`)
     Const(ConstDecl),
+    /// ADR-0085: `link_extern("libname") { … }` — a block of extern C
+    /// function declarations linked against the named library.
+    LinkExtern(LinkExternBlock),
     /// Error node for recovered parse errors at item level.
     /// Used by error recovery to continue parsing after a syntax error.
     Error(Span),
+}
+
+/// ADR-0085: a `link_extern("libname") { … }` block.
+///
+/// Each item inside the block is an extern fn declaration (body-less,
+/// implicit `@mark(c)`). The library name contributes `-l<libname>` to
+/// the link line.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LinkExternBlock {
+    /// Library name as written in source (the contents of the string
+    /// literal between the parentheses).
+    pub library: StringLit,
+    /// Body-less fn declarations inside the block.
+    pub items: Vec<ExternFn>,
+    /// Span covering the entire `link_extern(...) { ... }` form.
+    pub span: Span,
+}
+
+/// ADR-0085: a body-less fn declaration that appears inside a
+/// `link_extern` block.
+///
+/// Bodies are forbidden here (the symbol is resolved at link time, not
+/// emitted from this compilation unit). Directives like `@link_name`
+/// still attach per-declaration.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ExternFn {
+    /// Directives attached to this declaration (e.g. `@link_name(...)`).
+    pub directives: Directives,
+    /// Function name as it appears in Gruel source.
+    pub name: Ident,
+    /// Parameters; comptime params are rejected by sema.
+    pub params: Vec<Param>,
+    /// Return type (`None` means implicit unit `()`).
+    pub return_type: Option<TypeExpr>,
+    /// Span covering the whole `fn …;` declaration.
+    pub span: Span,
 }
 
 /// A constant declaration.
@@ -1406,6 +1445,7 @@ impl fmt::Display for Ast {
                 Item::Interface(i) => fmt_interface(f, i, 0)?,
                 Item::Derive(d) => fmt_derive(f, d, 0)?,
                 Item::Const(c) => fmt_const(f, c, 0)?,
+                Item::LinkExtern(b) => fmt_link_extern(f, b, 0)?,
                 Item::Error(span) => writeln!(f, "Error({:?})", span)?,
             }
         }
@@ -1503,6 +1543,34 @@ fn fmt_derive(f: &mut fmt::Formatter<'_>, d: &DeriveDecl, level: usize) -> fmt::
     writeln!(f, "Derive sym:{}", d.name.name.into_usize())?;
     for method in &d.methods {
         fmt_method(f, method, level + 1)?;
+    }
+    Ok(())
+}
+
+fn fmt_link_extern(
+    f: &mut fmt::Formatter<'_>,
+    block: &LinkExternBlock,
+    level: usize,
+) -> fmt::Result {
+    indent(f, level)?;
+    writeln!(f, "LinkExtern sym:{}", block.library.value.into_usize())?;
+    for item in &block.items {
+        indent(f, level + 1)?;
+        for directive in &item.directives {
+            write!(f, "@sym:{} ", directive.name.name.into_usize())?;
+        }
+        write!(f, "ExternFn sym:{}(", item.name.name.into_usize())?;
+        for (i, param) in item.params.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            fmt_param(f, param)?;
+        }
+        write!(f, ")")?;
+        if let Some(ref ret) = item.return_type {
+            write!(f, " -> {}", ret)?;
+        }
+        writeln!(f)?;
     }
     Ok(())
 }

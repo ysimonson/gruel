@@ -24,7 +24,7 @@ use std::process::ExitCode;
 
 use gruel_intrinsics::lookup_by_name;
 
-const KNOWN_DIRECTIVES: &[&str] = &["allow", "derive", "lang", "mark"];
+const KNOWN_DIRECTIVES: &[&str] = &["allow", "derive", "lang", "link_name", "mark"];
 
 /// Per-file allowlist for names the spec deliberately documents but which
 /// are not real builtins. Path is relative to the spec root.
