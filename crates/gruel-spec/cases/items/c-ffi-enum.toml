@@ -74,24 +74,50 @@ error_contains = "c_ffi_extras"
 # =============================================================================
 
 [[case]]
-name = "data_carrying_mark_c_enum_rejected_at_ffi"
+name = "data_carrying_mark_c_enum_accepted_at_ffi"
 spec = ["10.4:5"]
 preview = "c_ffi_extras"
 preview_should_pass = true
 source = """
 @mark(c) enum Event {
     Quit,
-    KeyPress(i32),
+    KeyPress(c_int),
+}
+
+@mark(c) fn pick() -> Event {
+    Event::Quit
+}
+
+fn main() -> i32 {
+    let e: Event = pick();
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "data_carrying_mark_c_enum_non_ffi_payload_rejected"
+spec = ["10.4:5"]
+preview = "c_ffi_extras"
+preview_should_pass = true
+source = """
+struct NonC {
+    x: i32,
+}
+
+@mark(c) enum Bad {
+    Quit,
+    Has(NonC),
 }
 
 link_extern("foo") {
-    fn get_event() -> Event;
+    fn bad() -> Bad;
 }
 
 fn main() -> i32 { 0 }
 """
 compile_fail = true
-error_contains = "data-carrying"
+error_contains = "non-FFI type"
 
 # =============================================================================
 # Non-@mark(c) enum is still rejected at the FFI boundary

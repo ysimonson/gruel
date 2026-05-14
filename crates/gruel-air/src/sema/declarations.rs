@@ -2350,23 +2350,34 @@ impl<'a> Sema<'a> {
         }
 
         // ADR-0086: `@mark(c) enum E` is allowed by value. Field-less
-        // enums lower to a bare `c_int`; data-carrying enums are
-        // rejected in Phase 2 (will be permitted by Phase 3 with the
-        // tagged-union layout). Non-`@mark(c)` enums stay rejected.
+        // enums lower to a bare `c_int`; data-carrying enums use the
+        // C tagged-union layout `{ tag: c_int; payload: union<…> }`.
+        // Variant payload fields must themselves be C-FFI types.
+        // Non-`@mark(c)` enums stay rejected.
         if let Some(enum_id) = ty.as_enum() {
             let def = self.type_pool.enum_def(enum_id);
             if def.is_c_layout {
-                if def.has_data_variants() {
-                    return Err(CompileError::new(
-                        ErrorKind::CFfi(format!(
-                            "data-carrying `@mark(c) enum` types are not yet \
-                             permitted at the FFI boundary {} — only field-less \
-                             enums are supported in this phase (ADR-0086 Phase 3 \
-                             will add the C tagged-union layout)",
-                            position
-                        )),
-                        span,
-                    ));
+                let enum_name = def.name.clone();
+                let variants = def.variants.clone();
+                // Recursively validate each variant payload field — it
+                // must itself be an FFI-compatible type. Mirrors the
+                // recursion the @mark(c) struct path uses.
+                for variant in &variants {
+                    for &field_ty in &variant.fields {
+                        if let Err(mut e) = self.validate_ffi_type(field_ty, position, span) {
+                            // Wrap the inner diagnostic so the user
+                            // sees which enum variant payload field
+                            // is at fault.
+                            if let ErrorKind::CFfi(inner) = &e.kind {
+                                e.kind = ErrorKind::CFfi(format!(
+                                    "variant `{}` of `@mark(c) enum {}` payload field has \
+                                     a non-FFI type: {}",
+                                    variant.name, enum_name, inner
+                                ));
+                            }
+                            return Err(e);
+                        }
+                    }
                 }
                 return Ok(());
             }

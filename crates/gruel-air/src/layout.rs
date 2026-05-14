@@ -275,15 +275,15 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
 fn enum_layout_separate(pool: &TypeInternPool, def: &EnumDef) -> Layout {
     let discrim_layout = layout_of(pool, def.discriminant_type());
     let tag_width = discrim_layout.size as u8;
-    let strategy = DiscriminantStrategy::Separate {
-        tag_offset: 0,
-        tag_width,
-        payload_offset: discrim_layout.size as u32,
-    };
     if def.is_unit_only() {
         // Unit-only enum: the storage holds the discriminant directly.
         // Discriminant values >= variant_count are forbidden bit patterns,
         // exposed as a niche so an enclosing enum (Phase 5+) can re-niche us.
+        let strategy = DiscriminantStrategy::Separate {
+            tag_offset: 0,
+            tag_width,
+            payload_offset: discrim_layout.size as u32,
+        };
         let variant_count = def.variants.len() as u128;
         let max = NicheRange::max_for_width(tag_width);
         let niches = if variant_count > 0 && variant_count <= max {
@@ -303,7 +303,55 @@ fn enum_layout_separate(pool: &TypeInternPool, def: &EnumDef) -> Layout {
             discriminant: Some(strategy),
         };
     }
-    // Tagged union { discrim, [max_payload x i8] }
+
+    // ADR-0086: data-carrying `@mark(c) enum` follows the C tagged-union
+    // layout. Discriminant at offset 0; payload starts at
+    // max(alignof(c_int), max alignof of any variant field); payload size
+    // is the max variant size (sum of field sizes, treating each variant
+    // as a packed payload — LLVM's struct alignment forces the enum
+    // alignment via the high-alignment element of the payload array).
+    if def.is_c_layout {
+        let max_variant_align: u64 = def
+            .variants
+            .iter()
+            .flat_map(|v| v.fields.iter())
+            .map(|f| layout_of(pool, *f).align)
+            .max()
+            .unwrap_or(1);
+        let enum_align = discrim_layout.align.max(max_variant_align);
+        let payload_offset = align_up(discrim_layout.size, enum_align);
+        let max_payload: u64 = def
+            .variants
+            .iter()
+            .map(|v| {
+                v.fields
+                    .iter()
+                    .map(|f| layout_of(pool, *f).size)
+                    .sum::<u64>()
+            })
+            .max()
+            .unwrap_or(0);
+        let strategy = DiscriminantStrategy::Separate {
+            tag_offset: 0,
+            tag_width,
+            payload_offset: payload_offset as u32,
+        };
+        let total_payload = align_up(max_payload, enum_align);
+        let size = align_up(payload_offset + total_payload, enum_align);
+        return Layout {
+            size,
+            align: enum_align,
+            niches: Vec::new(),
+            discriminant: Some(strategy),
+        };
+    }
+
+    // Non-C enum: keep the legacy `{ discrim, [max_payload x i8] }` shape.
+    let strategy = DiscriminantStrategy::Separate {
+        tag_offset: 0,
+        tag_width,
+        payload_offset: discrim_layout.size as u32,
+    };
     let max_payload: u64 = def
         .variants
         .iter()

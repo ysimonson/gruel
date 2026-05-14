@@ -167,6 +167,43 @@ pub fn gruel_type_to_llvm<'ctx>(
                         // All variants happen to have empty payloads (shouldn't happen for
                         // has_data_variants() == true, but handle gracefully).
                         Some(discrim_llvm)
+                    } else if def.is_c_layout {
+                        // ADR-0086 C tagged-union layout: the payload's
+                        // element type forces enum alignment. Pick the
+                        // widest aligned element ≤ max variant alignment
+                        // so LLVM emits proper padding between the
+                        // discriminant and the payload.
+                        let max_variant_align: u64 = def
+                            .variants
+                            .iter()
+                            .flat_map(|v| v.fields.iter())
+                            .map(|f| layout_of(type_pool, *f).align)
+                            .max()
+                            .unwrap_or(1);
+                        let (payload_elem, payload_elem_size): (
+                            inkwell::types::BasicTypeEnum,
+                            u64,
+                        ) = if max_variant_align >= 8 {
+                            (ctx.i64_type().into(), 8)
+                        } else if max_variant_align >= 4 {
+                            (ctx.i32_type().into(), 4)
+                        } else if max_variant_align >= 2 {
+                            (ctx.i16_type().into(), 2)
+                        } else {
+                            (ctx.i8_type().into(), 1)
+                        };
+                        // Round up to the next multiple of payload_elem_size.
+                        let elem_count = max_payload.div_ceil(payload_elem_size);
+                        let payload_arr = match payload_elem {
+                            inkwell::types::BasicTypeEnum::IntType(t) => {
+                                t.array_type(elem_count as u32)
+                            }
+                            _ => unreachable!("payload_elem is always an int type"),
+                        };
+                        Some(
+                            ctx.struct_type(&[discrim_llvm, payload_arr.into()], false)
+                                .into(),
+                        )
                     } else {
                         let byte_arr = ctx.i8_type().array_type(max_payload as u32);
                         Some(

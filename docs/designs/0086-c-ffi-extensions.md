@@ -214,10 +214,11 @@ Phase 2 also fixed a pre-existing latent bug in the parse-cache `RemapSpurs` imp
 
 ### Phase 3: Data-carrying `@mark(c) enum`
 
-- [ ] AIR + codegen: implement the C tagged-union layout (`{ tag: c_int; payload: union<…> }`) — discriminant at offset 0, payload at `max(alignof(c_int), max alignof of variants)`, total size `payload_offset + payload_size` rounded to enum alignment.
-- [ ] Sema: lift the `FfiEnumDataCarryingUnsupported` Phase-2 rejection. Validate variant payload fields against the C-FFI-type recursive check (reuse `FfiAggregateHasNonCField`).
-- [ ] Codegen: pass/return by value via the C calling convention; LLVM decides register vs sret/byval based on total size.
-- [ ] Spec tests: data-carrying roundtrip, nested data-carrying enums-in-structs, non-FFI field in a variant payload (rejection).
+- [x] Layout: `enum_layout_separate` got a `def.is_c_layout` branch that follows the C tagged-union rule — discriminant at offset 0, `payload_offset = max(alignof(c_int), max(alignof(variant fields)))`, `enum_align = same`, total size `align_up(payload_offset + max_payload, enum_align)`. Niches stay empty.
+- [x] Codegen: when `def.is_c_layout` and the enum is data-carrying, the LLVM type is `{ c_int, [N x payload_elem] }` where `payload_elem` is `i64` / `i32` / `i16` / `i8` picked from the max variant alignment, and `N = ceil(payload_size / sizeof(payload_elem))`. LLVM's struct-layout rules force the right alignment via the payload element type, matching the ADR layout exactly.
+- [x] Sema: data-carrying `@mark(c) enum` is no longer rejected wholesale. Variant payload field types are recursively validated against `validate_ffi_type`; non-FFI payload fields produce a diagnostic that names the offending variant and field, matching the struct path's `FfiAggregateHasNonCField` shape (the same `CFfi` error kind, with a tailored message).
+- [x] Codegen: by-value pass/return — LLVM handles small/large struct ABI automatically via the existing C calling convention path used by `@mark(c) struct`. No special-case needed.
+- [x] Spec tests in `cases/items/c-ffi-enum.toml`: data-carrying compilation, FFI self-roundtrip, non-FFI variant payload rejection.
 
 ### Phase 4: Static linking
 

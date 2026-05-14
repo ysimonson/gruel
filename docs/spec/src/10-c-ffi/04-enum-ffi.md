@@ -19,25 +19,25 @@ A field-less `@mark(c) enum` (every variant is a unit variant) lowers to a bare 
 A field-less `@mark(c) enum` is permitted at the FFI boundary as a parameter or return type of any `@mark(c)` fn or `link_extern` item declaration.
 
 {{ rule(id="10.4:5", cat="normative") }}
-Data-carrying `@mark(c) enum` types (at least one variant carries fields) are not permitted in this revision. They are reserved for the next ADR-0086 phase, which will introduce a C tagged-union layout. Until then, such enums are rejected at the FFI boundary with a compile-time diagnostic.
+A data-carrying `@mark(c) enum` (at least one variant carries fields) uses the C tagged-union layout: the discriminant of type `c_int` sits at offset 0, followed by a payload region. The payload region starts at offset `max(alignof(c_int), max(alignof(variant_i)))` and is sized to `max(size(variant_i))`. Total enum size is `payload_offset + payload_size`, rounded up to enum alignment = `max(alignof(c_int), max(alignof(variant_i)))`. Niche optimisation is disabled. Each variant payload field must itself satisfy the C-FFI-type rules from §10.1 — non-FFI fields are rejected with a diagnostic that names the offending variant and field.
 
 {{ rule(id="10.4:6", cat="normative") }}
 A non-`@mark(c)` enum cannot cross the FFI boundary by value. The diagnostic surfaces the type name and the FFI position.
 
 {{ rule(id="10.4:7", cat="example") }}
 ```gruel
-@mark(c) enum Color {
-    Red,
-    Green,
-    Blue,
+@mark(c) enum Event {
+    Quit,
+    KeyPress(c_int),
+    MouseMove { x: c_int, y: c_int },
 }
 
 link_extern("foo") {
-    fn translate(c: Color) -> Color;
+    fn poll_event() -> Event;
 }
 
 fn main() -> i32 {
-    let red: Color = Color::Red;
+    let red: Event = Event::Quit;
     0
 }
 ```
