@@ -341,6 +341,10 @@ pub enum LogosTokenKind {
     /// usage behind the `c_ffi` preview feature.
     #[token("link_extern")]
     LinkExtern,
+    /// ADR-0086: `static_link_extern("foo") { … }` — sibling to
+    /// `link_extern` that requests static linkage.
+    #[token("static_link_extern")]
+    StaticLinkExtern,
 
     // Type keywords
     #[token("i8")]
@@ -529,6 +533,7 @@ impl From<LogosTokenKind> for TokenKind {
             LogosTokenKind::Checked => TokenKind::Checked,
             LogosTokenKind::Unchecked => TokenKind::Unchecked,
             LogosTokenKind::LinkExtern => TokenKind::LinkExtern,
+            LogosTokenKind::StaticLinkExtern => TokenKind::StaticLinkExtern,
             LogosTokenKind::I8 => TokenKind::I8,
             LogosTokenKind::I16 => TokenKind::I16,
             LogosTokenKind::I32 => TokenKind::I32,

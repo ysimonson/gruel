@@ -87,7 +87,20 @@ pub enum Item {
     Error(Span),
 }
 
-/// ADR-0085: a `link_extern("libname") { … }` block.
+/// ADR-0086: dynamic vs static link mode for a `link_extern` block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum LinkMode {
+    /// `link_extern("name") { … }` — dynamic linkage (`-l<name>`).
+    Dynamic,
+    /// `static_link_extern("name") { … }` — static linkage. On ELF
+    /// the linker emits `-Wl,-Bstatic -l<name> -Wl,-Bdynamic`; on
+    /// Mach-O it emits `-Wl,-search_paths_first -l<name>` and falls
+    /// back to dynamic if no `.a` is on the search path.
+    Static,
+}
+
+/// ADR-0085: a `link_extern("libname") { … }` block (or, per ADR-0086,
+/// `static_link_extern("libname") { … }`).
 ///
 /// Each item inside the block is an extern fn declaration (body-less,
 /// implicit `@mark(c)`). The library name contributes `-l<libname>` to
@@ -99,8 +112,15 @@ pub struct LinkExternBlock {
     pub library: StringLit,
     /// Body-less fn declarations inside the block.
     pub items: Vec<ExternFn>,
+    /// ADR-0086: dynamic (`link_extern`) or static (`static_link_extern`).
+    #[serde(default = "default_link_mode")]
+    pub link_mode: LinkMode,
     /// Span covering the entire `link_extern(...) { ... }` form.
     pub span: Span,
+}
+
+fn default_link_mode() -> LinkMode {
+    LinkMode::Dynamic
 }
 
 /// ADR-0085: a body-less fn declaration that appears inside a

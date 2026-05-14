@@ -1,0 +1,103 @@
+[section]
+id = "items.c_ffi_static"
+spec_chapter = "10.5"
+name = "static_link_extern keyword"
+description = "ADR-0086 Phase 4: static_link_extern requests static linkage from the system linker; conflict detection and preview gating verified."
+
+# =============================================================================
+# Preview gating
+# =============================================================================
+
+[[case]]
+name = "static_link_extern_requires_preview"
+spec = ["10.5:1"]
+source = """
+static_link_extern("foo") {
+    fn alpha() -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "c_ffi_extras"
+
+# =============================================================================
+# Conflict detection
+# =============================================================================
+
+[[case]]
+name = "mixed_linkage_for_same_library_rejected"
+spec = ["10.5:2"]
+preview = "c_ffi_extras"
+preview_should_pass = true
+source = """
+link_extern("foo") {
+    fn alpha() -> i32;
+}
+
+static_link_extern("foo") {
+    fn beta() -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "both `link_extern` (dynamic) and `static_link_extern`"
+
+[[case]]
+name = "mixed_linkage_empty_blocks_rejected"
+spec = ["10.5:2"]
+preview = "c_ffi_extras"
+preview_should_pass = true
+source = """
+link_extern("foo") {}
+static_link_extern("foo") {}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "both `link_extern` (dynamic) and `static_link_extern`"
+
+# =============================================================================
+# Same-mode dedup is permitted (two static_link_extern blocks on same lib OK)
+# =============================================================================
+
+[[case]]
+name = "two_static_link_extern_same_library_ok"
+spec = ["10.5:1", "10.5:3", "10.5:4"]
+preview = "c_ffi_extras"
+preview_should_pass = true
+source = """
+static_link_extern("m") {
+    fn sin(x: f64) -> f64;
+}
+
+static_link_extern("m") {
+    fn cos(x: f64) -> f64;
+}
+
+fn main() -> i32 {
+    let _x: f64 = sin(0.0);
+    let _y: f64 = cos(0.0);
+    0
+}
+"""
+exit_code = 0
+
+# =============================================================================
+# Nesting is rejected (same as link_extern nesting from ADR-0085)
+# =============================================================================
+
+[[case]]
+name = "static_link_extern_inside_link_extern_rejected"
+spec = ["10.5:5"]
+preview = "c_ffi_extras"
+preview_should_pass = true
+source = """
+link_extern("foo") {
+    static_link_extern("bar") {}
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true

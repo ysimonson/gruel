@@ -697,10 +697,12 @@ pub struct BackendInputs<'a> {
     pub interface_defs: &'a [gruel_air::InterfaceDef],
     pub interface_vtables: &'a gruel_air::InterfaceVtables,
     pub target: &'a Target,
-    /// ADR-0085: deduplicated library names from every `link_extern("…")`
-    /// block. Linker emits a `-l<name>` flag for each, in the order they
-    /// appear in the slice.
-    pub extra_link_libraries: &'a [String],
+    /// ADR-0085 + ADR-0086: deduplicated library names from every
+    /// `link_extern("…")` / `static_link_extern("…")` block, paired
+    /// with the per-library linkage mode. Linker emits `-l<name>` for
+    /// dynamic libs and `-Wl,-Bstatic … -Wl,-Bdynamic` (ELF) /
+    /// `-Wl,-search_paths_first -l<name>` (Mach-O) for static libs.
+    pub extra_link_libraries: &'a [(String, crate::link::LinkMode)],
 }
 
 impl<'a> BackendInputs<'a> {

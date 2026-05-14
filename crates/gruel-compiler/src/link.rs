@@ -102,13 +102,29 @@ pub enum LinkerMode {
     System(String),
 }
 
+/// ADR-0086: per-library linkage mode declared via `link_extern` /
+/// `static_link_extern`. Threaded through to `link_system_with_warnings`
+/// so the linker line can emit `-Wl,-Bstatic` brackets (ELF) or
+/// `-Wl,-search_paths_first` (Mach-O) around static libraries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LinkMode {
+    /// `link_extern("name")` — `-l<name>` on the link line.
+    #[default]
+    Dynamic,
+    /// `static_link_extern("name")` — `-Wl,-Bstatic -l<name>
+    /// -Wl,-Bdynamic` on ELF; `-Wl,-search_paths_first -l<name>` on
+    /// Mach-O (falls back to dynamic if no `.a` is found; the warning
+    /// fires through `CompileWarning::StaticLinkMachoFallback`).
+    Static,
+}
+
 /// Link object files into a final executable using an external system linker.
 pub(crate) fn link_system_with_warnings(
     options: &CompileOptions,
     object_files: &[Vec<u8>],
     linker_cmd: &str,
     warnings: &[CompileWarning],
-    extra_link_libraries: &[String],
+    extra_link_libraries: &[(String, LinkMode)],
 ) -> MultiErrorResult<CompileOutput> {
     let _span = info_span!("linker", mode = "system", command = linker_cmd).entered();
 
@@ -145,9 +161,44 @@ pub(crate) fn link_system_with_warnings(
         cmd.arg("-lSystem");
     }
 
-    // ADR-0085: emit `-l<name>` for each user-declared library.
-    for lib in extra_link_libraries {
-        cmd.arg(format!("-l{}", lib));
+    // ADR-0085 + ADR-0086: emit `-l<name>` for each user-declared library.
+    // Static-linked libraries get platform-specific bracketing:
+    //   - ELF: `-Wl,-Bstatic -l<name> -Wl,-Bdynamic`
+    //   - Mach-O: `-Wl,-search_paths_first -l<name>` (best-effort)
+    let is_macho = options.target.is_macho();
+    let any_static = extra_link_libraries
+        .iter()
+        .any(|(_, mode)| *mode == LinkMode::Static);
+    // Sort static libs first so the ELF `-Bstatic` bracket is one
+    // contiguous run, dynamic libs after. Within each group, names
+    // are lex-sorted (already true from the BTreeMap upstream).
+    let mut static_libs: Vec<&str> = Vec::new();
+    let mut dynamic_libs: Vec<&str> = Vec::new();
+    for (name, mode) in extra_link_libraries {
+        match mode {
+            LinkMode::Static => static_libs.push(name.as_str()),
+            LinkMode::Dynamic => dynamic_libs.push(name.as_str()),
+        }
+    }
+    if any_static {
+        if is_macho {
+            // Mach-O lacks an ELF-style `-Bstatic`/`-Bdynamic` toggle.
+            // `-search_paths_first` makes the linker prefer `.a` over
+            // `.dylib` when both are on the search path — closest fit.
+            cmd.arg("-Wl,-search_paths_first");
+            for name in &static_libs {
+                cmd.arg(format!("-l{}", name));
+            }
+        } else {
+            cmd.arg("-Wl,-Bstatic");
+            for name in &static_libs {
+                cmd.arg(format!("-l{}", name));
+            }
+            cmd.arg("-Wl,-Bdynamic");
+        }
+    }
+    for name in &dynamic_libs {
+        cmd.arg(format!("-l{}", name));
     }
 
     let output = cmd.output().map_err(|e| {

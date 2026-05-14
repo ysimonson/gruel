@@ -28,16 +28,30 @@ use lasso::ThreadedRodeo;
 use rayon::prelude::*;
 use tracing::{info, info_span};
 
-/// ADR-0085: collect the deduplicated, lex-sorted set of library names
-/// declared via `link_extern("…")` blocks. Each contributes one
-/// `-l<name>` flag at the linker step.
-fn collect_extern_link_libraries(rir: &gruel_rir::Rir, interner: &ThreadedRodeo) -> Vec<String> {
-    let mut libs = std::collections::BTreeSet::new();
+/// ADR-0085 + ADR-0086: collect the deduplicated, lex-sorted set of
+/// library names declared via `link_extern("…")` / `static_link_extern("…")`
+/// blocks. Each contributes one `-l<name>` flag at the linker step.
+/// ADR-0086: the per-library `LinkMode` controls whether the linker
+/// gets `-Wl,-Bstatic` bracketing (ELF) or `-Wl,-search_paths_first`
+/// (Mach-O) around the `-l<name>`.
+fn collect_extern_link_libraries(
+    rir: &gruel_rir::Rir,
+    interner: &ThreadedRodeo,
+) -> Vec<(String, crate::link::LinkMode)> {
+    use crate::link::LinkMode;
+    use gruel_rir::inst::RirLinkMode;
+    let mut libs: std::collections::BTreeMap<String, LinkMode> = std::collections::BTreeMap::new();
+    let convert = |m: RirLinkMode| match m {
+        RirLinkMode::Dynamic => LinkMode::Dynamic,
+        RirLinkMode::Static => LinkMode::Static,
+    };
     for ext in rir.extern_fns() {
-        libs.insert(interner.resolve(&ext.library).to_string());
+        let lib = interner.resolve(&ext.library).to_string();
+        libs.insert(lib, convert(ext.link_mode));
     }
-    for (lib, _) in rir.empty_link_extern_blocks() {
-        libs.insert(interner.resolve(lib).to_string());
+    for (lib, link_mode, _) in rir.empty_link_extern_blocks() {
+        let name = interner.resolve(lib).to_string();
+        libs.insert(name, convert(*link_mode));
     }
     libs.into_iter().collect()
 }

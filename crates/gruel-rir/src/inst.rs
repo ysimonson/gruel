@@ -822,6 +822,20 @@ pub struct RirExternFn {
     pub span: Span,
     /// Span of the enclosing `link_extern(...)` block.
     pub block_span: Span,
+    /// ADR-0086: dynamic (`link_extern`) vs static (`static_link_extern`).
+    #[serde(default = "default_rir_link_mode")]
+    pub link_mode: RirLinkMode,
+}
+
+/// ADR-0086: mirrors `gruel_parser::ast::LinkMode` after astgen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum RirLinkMode {
+    Dynamic,
+    Static,
+}
+
+fn default_rir_link_mode() -> RirLinkMode {
+    RirLinkMode::Dynamic
 }
 
 /// The complete RIR for a source file.
@@ -838,7 +852,8 @@ pub struct Rir {
     /// ADR-0085: `link_extern("lib") { }` blocks with no items. Tracked
     /// separately so sema can validate the library name and emit the
     /// `-l<lib>` flag even when no symbols are declared.
-    empty_link_extern_blocks: Vec<(Spur, Span)>,
+    /// ADR-0086 widened the tuple to `(library, link_mode, span)`.
+    empty_link_extern_blocks: Vec<(Spur, RirLinkMode, Span)>,
 }
 
 impl Rir {
@@ -1606,14 +1621,20 @@ impl Rir {
     }
 
     /// ADR-0085: append an empty `link_extern("lib") { }` block.
-    pub fn add_empty_link_extern_block(&mut self, library: Spur, span: Span) {
-        self.empty_link_extern_blocks.push((library, span));
+    pub fn add_empty_link_extern_block(
+        &mut self,
+        library: Spur,
+        link_mode: RirLinkMode,
+        span: Span,
+    ) {
+        self.empty_link_extern_blocks
+            .push((library, link_mode, span));
     }
 
     /// ADR-0085: read-only view over `link_extern` blocks that declared
     /// no symbols. Sema validates the library name and emits the
     /// corresponding `-l<lib>` link flag.
-    pub fn empty_link_extern_blocks(&self) -> &[(Spur, Span)] {
+    pub fn empty_link_extern_blocks(&self) -> &[(Spur, RirLinkMode, Span)] {
         &self.empty_link_extern_blocks
     }
 
@@ -1745,6 +1766,7 @@ impl Rir {
                     return_type: ext.return_type,
                     span: ext.span,
                     block_span: ext.block_span,
+                    link_mode: ext.link_mode,
                 });
             }
 

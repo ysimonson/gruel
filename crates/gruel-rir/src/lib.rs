@@ -11,13 +11,13 @@
 //! Inspired by Zig's ZIR (Zig Intermediate Representation).
 
 mod astgen;
-mod inst;
+pub mod inst;
 mod print;
 
 pub use astgen::AstGen;
 pub use inst::{
     FunctionSpan, Inst, InstData, InstRef, Rir, RirArgMode, RirCallArg, RirDestructureField,
-    RirDirective, RirFunctionView, RirParam, RirParamMode, RirPattern, RirPatternBinding,
-    RirStructPatternBinding,
+    RirDirective, RirFunctionView, RirLinkMode, RirParam, RirParamMode, RirPattern,
+    RirPatternBinding, RirStructPatternBinding,
 };
 pub use print::RirPrinter;

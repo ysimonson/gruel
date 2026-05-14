@@ -134,12 +134,16 @@ impl<'a> AstGen<'a> {
     /// ADR-0085: lower a `link_extern("libname") { fn …; … }` block to a
     /// set of [`RirExternFn`] entries on the side table.
     fn gen_link_extern(&mut self, block: &gruel_parser::ast::LinkExternBlock) {
+        let link_mode = match block.link_mode {
+            gruel_parser::ast::LinkMode::Dynamic => crate::inst::RirLinkMode::Dynamic,
+            gruel_parser::ast::LinkMode::Static => crate::inst::RirLinkMode::Static,
+        };
         if block.items.is_empty() {
             // ADR-0085: empty blocks still contribute a library to the
             // link line; track them so sema can validate the library
             // name and codegen can emit `-l<lib>`.
             self.rir
-                .add_empty_link_extern_block(block.library.value, block.span);
+                .add_empty_link_extern_block(block.library.value, link_mode, block.span);
             return;
         }
         for item in &block.items {
@@ -173,6 +177,7 @@ impl<'a> AstGen<'a> {
                 return_type,
                 span: item.span,
                 block_span: block.span,
+                link_mode,
             });
         }
     }

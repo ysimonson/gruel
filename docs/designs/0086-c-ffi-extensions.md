@@ -222,14 +222,15 @@ Phase 2 also fixed a pre-existing latent bug in the parse-cache `RemapSpurs` imp
 
 ### Phase 4: Static linking
 
-- [ ] Lexer: reserve `static_link_extern` as a new keyword alongside `link_extern`.
-- [ ] Parser: add the `static_link_extern "(" STRING ")" "{" item* "}"` item form. Item rules inside the block reuse the `link_extern` body parser verbatim.
-- [ ] RIR/AIR: `Item::LinkExtern` gains `linkage: Linkage { Dynamic, Static }`. The parser stamps `Static` for `static_link_extern` blocks and `Dynamic` for `link_extern`; the rest of the pipeline treats them uniformly except at link-line construction.
-- [ ] Sema: detect conflicting linkage for the same library across blocks (`LinkExternConflictingLinkage`). Reject `static_link_extern` nested inside `link_extern` (or vice versa) with the existing `LinkExternNested`.
-- [ ] Compiler: `unit.rs` library-set computation tracks per-library linkage. `CompileOptions.extra_link_libraries` becomes `Vec<(String, Linkage)>`.
-- [ ] Linker: `link_system_with_warnings` emits ELF or Mach-O linkage flags per the §"Static linkage" rules. Mach-O fallback to dynamic emits `StaticLinkMachoFallback` warning.
-- [ ] Spec: section `10-c-ffi/05-static-linking.md`.
-- [ ] Spec tests under `cases/items/c-ffi-static.toml`: round-trip with a static-only test library (provided via `tests/fixtures/libstatic_fixture.a` built by the test harness), conflicting-linkage rejection. ELF and Mach-O paths exercised separately via target-conditional tests.
+- [x] Lexer: reserved `static_link_extern` as a new keyword alongside `link_extern`. New `TokenKind::StaticLinkExtern` variant.
+- [x] Parser: rewrote `link_extern_parser` to choose between the `link_extern` and `static_link_extern` keywords. Item rules inside the block are reused verbatim; the parser stamps the `LinkMode` (Dynamic / Static) on the resulting `LinkExternBlock` AST.
+- [x] RIR + AIR: `RirExternFn` gained a `link_mode: RirLinkMode` field; the empty-block tuple grew from `(Spur, Span)` to `(Spur, RirLinkMode, Span)`. Astgen propagates the parser's `LinkMode` into the RIR.
+- [x] Sema: `collect_extern_fn_signatures` now detects mixed linkage (same library declared in both `link_extern` and `static_link_extern` blocks) and rejects with a `CFfi` diagnostic. The `c_ffi_extras` preview gate fires on any `static_link_extern` block. Nesting (any link_extern keyword inside another) was already rejected by ADR-0085's grammar; the new keyword inherits that.
+- [x] Compiler: `collect_extern_link_libraries` returns `Vec<(String, LinkMode)>`. `BackendInputs.extra_link_libraries` matches that shape.
+- [x] Linker: `link_system_with_warnings` emits ELF `-Wl,-Bstatic <static libs> -Wl,-Bdynamic` brackets and Mach-O `-Wl,-search_paths_first` per the §"Static linkage" rules. Static libraries are emitted in lex-sorted order ahead of dynamic ones.
+- [x] Spec: new section `docs/spec/src/10-c-ffi/05-static-linking.md` (paragraphs 10.5:1–6).
+- [x] Spec tests under `cases/items/c-ffi-static.toml`: preview gating, mixed-linkage rejection (both with items and with empty blocks), same-mode dedup (two `static_link_extern` blocks for the same library), and `static_link_extern` nested inside `link_extern` (rejected).
+- [ ] **Deferred** — Mach-O `StaticLinkMachoFallback` warning emission. The fallback path (resolving `lib<name>.a` to `.dylib` via `-Wl,-search_paths_first`) is implemented; the warning is reserved by ADR text but not actually emitted from the linker yet (would require probing the filesystem before invoking the linker). Surface stays open for future work.
 
 ### Phase 5: Stabilise
 

@@ -3444,7 +3444,8 @@ where
         .boxed()
 }
 
-/// Parser for a `link_extern("libname") { … }` block (ADR-0085).
+/// Parser for a `link_extern("libname") { … }` or
+/// `static_link_extern("libname") { … }` block (ADR-0085 + ADR-0086).
 fn link_extern_parser<'src, I>() -> GruelParser<'src, I, crate::ast::LinkExternBlock>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -3457,17 +3458,24 @@ where
     }
     .boxed();
 
-    just(TokenKind::LinkExtern)
-        .ignore_then(library.delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)))
+    let mode_keyword = choice((
+        just(TokenKind::LinkExtern).to(crate::ast::LinkMode::Dynamic),
+        just(TokenKind::StaticLinkExtern).to(crate::ast::LinkMode::Static),
+    ))
+    .boxed();
+
+    mode_keyword
+        .then(library.delimited_by(just(TokenKind::LParen), just(TokenKind::RParen)))
         .then(
             extern_fn_parser()
                 .repeated()
                 .collect::<Vec<_>>()
                 .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
         )
-        .map_with(|(library, items), e| crate::ast::LinkExternBlock {
+        .map_with(|((link_mode, library), items), e| crate::ast::LinkExternBlock {
             library,
             items,
+            link_mode,
             span: span_from_extra(e),
         })
         .boxed()
