@@ -52,7 +52,7 @@ Marker names recognized inside the `@mark(...)` directive (ADR-0083). Markers at
 | `unsend` | ThreadSafety(Unsend) | struct or enum |
 | `checked_send` | ThreadSafety(Send) | struct or enum |
 | `checked_sync` | ThreadSafety(Sync) | struct or enum |
-| `c` | Abi(C) | fn or struct |
+| `c` | Abi(C) | (none) |
 
 ## Type Constructors
 

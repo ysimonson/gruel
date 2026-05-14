@@ -223,6 +223,13 @@ impl RemapSpurs for FieldDecl {
 
 impl RemapSpurs for EnumDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
+        // ADR-0086: enums can now carry directives (notably `@mark(c)`).
+        // Pre-ADR-0086 the parser produced empty directives for enums,
+        // so omitting this remap was harmless. With `@mark(c) enum`
+        // permitted, stale Spurs leaked into sema and were mis-resolved
+        // against the build-shared interner — typically showing up as
+        // a phantom `@lang("drop")` directive on user enums.
+        self.directives.remap_spurs(table);
         self.name.remap_spurs(table);
         self.variants.remap_spurs(table);
         self.methods.remap_spurs(table);

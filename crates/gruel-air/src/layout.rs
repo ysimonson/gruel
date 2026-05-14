@@ -437,6 +437,7 @@ mod tests {
             is_pub: false,
             file_id: FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         let (eid, _) = p.register_enum(name, def);
         let layout = layout_of(&p, Type::new_enum(eid));
@@ -539,6 +540,7 @@ mod tests {
             is_pub: false,
             file_id: FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         let (eid, _) = p.register_enum(s, def);
         Type::new_enum(eid)
@@ -596,6 +598,7 @@ mod tests {
             is_pub: false,
             file_id: FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         let (mid_eid, _) = p.register_enum(mid_name, mid_def);
         let mid = Type::new_enum(mid_eid);
@@ -610,6 +613,7 @@ mod tests {
             is_pub: false,
             file_id: FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         let (outer_eid, _) = p.register_enum(outer_name, outer_def);
         let outer = Type::new_enum(outer_eid);
@@ -682,6 +686,7 @@ mod tests {
             is_pub: false,
             file_id: FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         let (eid, _) = p.register_enum(name, def);
         let ty = Type::new_enum(eid);

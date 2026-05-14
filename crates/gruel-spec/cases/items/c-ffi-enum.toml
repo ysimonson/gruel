@@ -1,0 +1,119 @@
+[section]
+id = "items.c_ffi_enum"
+spec_chapter = "10.4"
+name = "Field-less @mark(c) enum"
+description = "ADR-0086 Phase 2: @mark(c) enum on field-less enums lowers to a c_int discriminant."
+
+# =============================================================================
+# Field-less @mark(c) enum: declaration + FFI roundtrip
+# =============================================================================
+
+[[case]]
+name = "field_less_enum_compiles"
+spec = ["10.4:1", "10.4:2", "10.4:3"]
+preview = "c_ffi_extras"
+preview_should_pass = true
+source = """
+@mark(c) enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+fn main() -> i32 {
+    let c: Color = Color::Red;
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "field_less_enum_ffi_roundtrip"
+spec = ["10.4:4"]
+preview = "c_ffi_extras"
+preview_should_pass = true
+source = """
+@mark(c) enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+@mark(c) fn first() -> Color {
+    Color::Red
+}
+
+fn main() -> i32 {
+    let c: Color = first();
+    0
+}
+"""
+exit_code = 0
+
+# =============================================================================
+# Preview gating
+# =============================================================================
+
+[[case]]
+name = "mark_c_on_enum_requires_preview"
+spec = ["10.4:1"]
+source = """
+@mark(c) enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "c_ffi_extras"
+
+# =============================================================================
+# Data-carrying rejection (Phase 2 — Phase 3 will permit)
+# =============================================================================
+
+[[case]]
+name = "data_carrying_mark_c_enum_rejected_at_ffi"
+spec = ["10.4:5"]
+preview = "c_ffi_extras"
+preview_should_pass = true
+source = """
+@mark(c) enum Event {
+    Quit,
+    KeyPress(i32),
+}
+
+link_extern("foo") {
+    fn get_event() -> Event;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "data-carrying"
+
+# =============================================================================
+# Non-@mark(c) enum is still rejected at the FFI boundary
+# =============================================================================
+
+[[case]]
+name = "plain_enum_rejected_at_ffi"
+spec = ["10.4:6"]
+preview = "c_ffi_extras"
+preview_should_pass = true
+source = """
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+link_extern("foo") {
+    fn pick() -> Color;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "non-`@mark(c)` enum"

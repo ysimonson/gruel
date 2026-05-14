@@ -144,6 +144,9 @@ impl Sema<'_> {
             is_pub: false,
             file_id: gruel_util::FileId::new(0),
             destructor: None,
+            // ADR-0086: anonymous enums are not C-layout; only an explicit
+            // `@mark(c) enum` flips this on.
+            is_c_layout: false,
         };
 
         let (enum_id, _) = self.type_pool.register_enum(name_spur, enum_def);

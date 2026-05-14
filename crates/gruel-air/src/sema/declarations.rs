@@ -17,7 +17,7 @@ use gruel_builtins::{
 };
 use gruel_rir::{InstData, InstRef, RirParamMode};
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
+use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature, ice};
 use lasso::Spur;
 
 use super::anon_interfaces::decode_receiver_mode;
@@ -625,6 +625,9 @@ impl<'a> Sema<'a> {
                         is_pub: *is_pub,
                         file_id: inst.span.file_id,
                         destructor: None,
+                        // ADR-0086: `@mark(c)` flag flows from the
+                        // directive walker via `mark_outcome.c_layout`.
+                        is_c_layout: mark_outcome.c_layout,
                     };
 
                     // Register in type pool and get pool-based EnumId
@@ -921,6 +924,19 @@ impl<'a> Sema<'a> {
                         // ADR-0085: marker is already known to be
                         // applicable to the host item kind by this
                         // point. C FFI is stable as of ADR-0085 Phase 5.
+                        //
+                        // ADR-0086: `@mark(c)` on an enum widens the
+                        // applicable set to FN_STRUCT_OR_ENUM. The
+                        // enum-side use is gated behind the
+                        // `c_ffi_extras` preview feature; fn / struct
+                        // use stays ungated (stable since ADR-0085).
+                        if item_kind == ItemKinds::ENUM {
+                            self.require_preview(
+                                PreviewFeature::CFfiExtras,
+                                "`@mark(c)` on an enum",
+                                directive.span,
+                            )?;
+                        }
                         outcome.c_layout = true;
                     }
                 }
@@ -2327,6 +2343,37 @@ impl<'a> Sema<'a> {
                     "type `{}` cannot cross the FFI boundary {}: \
                      non-`@mark(c)` struct (or container) types are not \
                      C-ABI compatible",
+                    def.name, position
+                )),
+                span,
+            ));
+        }
+
+        // ADR-0086: `@mark(c) enum E` is allowed by value. Field-less
+        // enums lower to a bare `c_int`; data-carrying enums are
+        // rejected in Phase 2 (will be permitted by Phase 3 with the
+        // tagged-union layout). Non-`@mark(c)` enums stay rejected.
+        if let Some(enum_id) = ty.as_enum() {
+            let def = self.type_pool.enum_def(enum_id);
+            if def.is_c_layout {
+                if def.has_data_variants() {
+                    return Err(CompileError::new(
+                        ErrorKind::CFfi(format!(
+                            "data-carrying `@mark(c) enum` types are not yet \
+                             permitted at the FFI boundary {} — only field-less \
+                             enums are supported in this phase (ADR-0086 Phase 3 \
+                             will add the C tagged-union layout)",
+                            position
+                        )),
+                        span,
+                    ));
+                }
+                return Ok(());
+            }
+            return Err(CompileError::new(
+                ErrorKind::CFfi(format!(
+                    "type `{}` cannot cross the FFI boundary {}: \
+                     non-`@mark(c)` enum types are not C-ABI compatible",
                     def.name, position
                 )),
                 span,

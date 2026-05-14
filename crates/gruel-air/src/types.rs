@@ -905,6 +905,12 @@ pub struct EnumDef {
     /// User-defined destructor function name, if any (e.g., "Resource.__drop").
     /// ADR-0053 phase 3b. Mirrors `StructDef.destructor`.
     pub destructor: Option<String>,
+    /// ADR-0086: whether `@mark(c)` was applied. C-layout enums use
+    /// `c_int` as their discriminant type (regardless of variant count),
+    /// disable niche optimisation, and are eligible to cross the FFI
+    /// boundary by value.
+    #[serde(default)]
+    pub is_c_layout: bool,
 }
 
 impl EnumDef {
@@ -929,8 +935,15 @@ impl EnumDef {
     }
 
     /// Get the discriminant type for this enum.
-    /// Returns the smallest unsigned integer type that can hold all variant indices.
+    ///
+    /// ADR-0086: `@mark(c) enum` types use `c_int` as their discriminant
+    /// (matching C's default `enum` representation), regardless of variant
+    /// count. Other enums use the smallest unsigned integer that fits the
+    /// variant index.
     pub fn discriminant_type(&self) -> Type {
+        if self.is_c_layout {
+            return Type::C_INT;
+        }
         let count = self.variants.len();
         if count == 0 {
             Type::NEVER // Zero-variant enum is uninhabited
@@ -2387,6 +2400,7 @@ mod tests {
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         assert_eq!(empty.variant_count(), 0);
 
@@ -2402,6 +2416,7 @@ mod tests {
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         assert_eq!(color.variant_count(), 3);
     }
@@ -2420,6 +2435,7 @@ mod tests {
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
 
         assert_eq!(color.find_variant("Red"), Some(0));
@@ -2438,6 +2454,7 @@ mod tests {
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         assert_eq!(empty.discriminant_type(), Type::NEVER);
     }
@@ -2453,6 +2470,7 @@ mod tests {
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         assert_eq!(small.discriminant_type(), Type::U8);
 
@@ -2466,6 +2484,7 @@ mod tests {
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         assert_eq!(max_u8.discriminant_type(), Type::U8);
     }
@@ -2483,6 +2502,7 @@ mod tests {
             is_pub: false,
             file_id: gruel_util::FileId::DEFAULT,
             destructor: None,
+            is_c_layout: false,
         };
         assert_eq!(medium.discriminant_type(), Type::U16);
     }

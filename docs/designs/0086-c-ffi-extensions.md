@@ -202,13 +202,15 @@ The ADR-0085 set (`FfiTypeNotAllowed`, `FfiAggregateHasNonCField`, `FfiAggregate
 
 ### Phase 2: Field-less `@mark(c) enum`
 
-- [ ] Widen `BUILTIN_MARKERS` entry for `c` from `FN_OR_STRUCT` to `FN_STRUCT_OR_ENUM`. Add `ItemKinds::FN_STRUCT_OR_ENUM = 0b111` constant.
-- [ ] Sema: when `@mark(c)` applies to an `EnumDef`, set discriminant type to `c_int`. Reject data-carrying variants in this phase (`FfiEnumDataCarryingUnsupported` — a temporary phase-2-only error retired in Phase 3).
-- [ ] Sema: validate explicit discriminants fit `c_int` (`FfiEnumDiscriminantOverflow`).
-- [ ] AIR + codegen: `@mark(c) enum` lowers to a bare `c_int`. Niches disabled. Layout = `c_int` width + alignment.
-- [ ] FFI type validation: `@mark(c) enum` permitted on params/returns of `@mark(c)` fns. Non-`@mark(c)` enums continue to be rejected.
-- [ ] Spec: section `10-c-ffi/04-enum-ffi.md` covers field-less case.
-- [ ] Spec tests under `cases/items/c-ffi-enum.toml`: roundtrip with libc-style enum (e.g. SDL_SCANCODE-style constants), explicit discriminant, FFI export of a Gruel `@mark(c) enum`-returning fn called from a Gruel `link_extern("c")` caller (self-roundtrip), discriminant-overflow rejection.
+- [x] Widened `BUILTIN_MARKERS` entry for `c` from `FN_OR_STRUCT` to `FN_STRUCT_OR_ENUM`. Added `ItemKinds::FN_STRUCT_OR_ENUM = 0b111` constant.
+- [x] Sema fires `c_ffi_extras` preview gate when `@mark(c)` applies to an enum (the fn / struct paths stay ungated from ADR-0085). `mark_outcome.c_layout` flows into `EnumDef.is_c_layout` via the gather pass. `EnumDef.discriminant_type()` returns `c_int` when `is_c_layout` is set, regardless of variant count.
+- [x] AIR + codegen: existing `is_unit_only` codegen path already lowers field-less enums to their discriminant integer — switching the discriminant to `c_int` automatically produces the bare-`c_int` lowering. Niche / layout machinery already consults `EnumDef.is_c_layout` indirectly through `discriminant_type`. (Niche optimisation suppression for c-layout enums is layered in via the existing `discriminant_strategy` plumbing — field-less enums never get a niche-encoded enum layout because they're 1-byte today / `c_int`-wide now and the niche-encoded path is opt-in.)
+- [x] FFI type validation in `validate_ffi_type`: `@mark(c) enum` types are now accepted at parameter / return positions. Field-less variants pass; data-carrying variants are rejected with a Phase-2-only diagnostic that names ADR-0086 Phase 3 as the lift point. Non-`@mark(c)` enums continue to be rejected.
+- [x] Spec: new section `docs/spec/src/10-c-ffi/04-enum-ffi.md` (paragraphs 10.4:1–7) covering applicability, discriminant type, field-less layout, FFI permission, the data-carrying deferral, and the non-`@mark(c)` rejection.
+- [x] Spec tests under `cases/items/c-ffi-enum.toml`: field-less enum declaration, FFI self-roundtrip, preview gating, data-carrying rejection, non-`@mark(c)` enum rejection. 5 spec tests, all gated on `c_ffi_extras`.
+- [ ] **Deferred** — explicit discriminant values (`Red = 1`) and `FfiEnumDiscriminantOverflow`. Gruel's enum surface doesn't currently support user-specified discriminant values; this Phase-2 sub-task is naturally bundled with that future feature rather than landed here.
+
+Phase 2 also fixed a pre-existing latent bug in the parse-cache `RemapSpurs` impl for `EnumDecl`: `directives` weren't being remapped, which was invisible until ADR-0086 made directives on enums reachable. The fix lives in `crates/gruel-cache/src/remap.rs` and unblocks every directive on every enum — surfaced as a phantom `@lang("drop")` diagnostic before the fix.
 
 ### Phase 3: Data-carrying `@mark(c) enum`
 

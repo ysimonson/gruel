@@ -256,6 +256,8 @@ impl ItemKinds {
     pub const FUNCTION: ItemKinds = ItemKinds(0b100);
     pub const STRUCT_OR_ENUM: ItemKinds = ItemKinds(0b011);
     pub const FN_OR_STRUCT: ItemKinds = ItemKinds(0b101);
+    /// ADR-0086: `@mark(c)` applies to fns, structs, and enums.
+    pub const FN_STRUCT_OR_ENUM: ItemKinds = ItemKinds(0b111);
 
     pub fn includes_struct(self) -> bool {
         (self.0 & Self::STRUCT.0) != 0
@@ -326,12 +328,13 @@ pub static BUILTIN_MARKERS: &[BuiltinMarker] = &[
     },
     // ADR-0085: C FFI. Applied to fns selects the C calling convention;
     // applied to structs selects C layout (field order, alignment,
-    // niches disabled). Enums are gated on a follow-up ADR that adds
-    // `c_int` (the C enum discriminant type).
+    // niches disabled). ADR-0086 widens to enums — `@mark(c) enum` uses
+    // c_int as its discriminant type. The `c_ffi_extras` preview gate
+    // (fired in sema) is what guards the new enum applicability.
     BuiltinMarker {
         name: "c",
         kind: MarkerKind::Abi(Abi::C),
-        applicable_to: ItemKinds::FN_OR_STRUCT,
+        applicable_to: ItemKinds::FN_STRUCT_OR_ENUM,
     },
 ];
 
