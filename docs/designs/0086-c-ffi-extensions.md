@@ -1,12 +1,12 @@
 ---
 id: 0086
 title: C FFI extensions — C named primitives, enum FFI, static linking
-status: proposal
+status: implemented
 tags: [ffi, types, codegen, linker, grammar]
 feature-flag: c_ffi_extras
 created: 2026-05-13
-accepted:
-implemented:
+accepted: 2026-05-14
+implemented: 2026-05-14
 spec-sections: ["10.3", "10.4", "10.5"]
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented (stable as of Phase 5).
 
 ## Summary
 
@@ -234,9 +234,10 @@ Phase 2 also fixed a pre-existing latent bug in the parse-cache `RemapSpurs` imp
 
 ### Phase 5: Stabilise
 
-- [ ] Remove `PreviewFeature::CFfiExtras`; strip `preview = "c_ffi_extras"` from spec tests.
-- [ ] ADR status → `implemented`; record spec sections in frontmatter.
-- [ ] ADR-0087 (successor) owns all `__gruel_*` runtime cleanup, including the libc-shim symbols. This ADR neither modifies the runtime nor introduces an implicit-link mechanism.
+- [x] Removed `PreviewFeature::CFfiExtras` from the closed enum, dropped every `require_preview(CFfiExtras, …)` callsite in sema (4 sites: resolve_type's 13 type-name arms collapsed into a single set; analyze_alloc's let-annotation gate; declarations.rs's `@mark(c)` on enum gate; collect_extern_fn_signatures' static_link_extern gate).
+- [x] Stripped `preview = "c_ffi_extras"` and `preview_should_pass = true` from all three ADR-0086 spec test files (`cases/types/c_named.toml`, `cases/items/c-ffi-enum.toml`, `cases/items/c-ffi-static.toml`). Removed the three preview-gating-specific test cases (`c_int_requires_preview`, `c_void_requires_preview`, `mark_c_on_enum_requires_preview`, `static_link_extern_requires_preview`) — they tested a gate that no longer exists.
+- [x] ADR status → `implemented`; spec sections 10.3–10.5 recorded in frontmatter.
+- [x] ADR-0087 (successor) owns all `__gruel_*` runtime cleanup, including the libc-shim symbols. This ADR neither modifies the runtime nor introduces an implicit-link mechanism.
 
 ## Consequences
 

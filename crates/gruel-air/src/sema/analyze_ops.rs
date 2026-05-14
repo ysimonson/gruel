@@ -30,7 +30,7 @@ use gruel_rir::{
 };
 use gruel_util::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
-    PreviewFeature, WarningKind,
+    WarningKind,
 };
 use lasso::Spur;
 
@@ -3969,32 +3969,10 @@ impl<'a> Sema<'a> {
         let init_result = self.analyze_inst(air, init, ctx)?;
         let var_type = init_result.ty;
 
-        // ADR-0086: re-validate let-annotation types that the inference
-        // pass accepted leniently. Inference's `resolve_type_name`
-        // doesn't have access to the preview-feature checks or the
-        // `c_void` value-position restriction, so the check happens
-        // here, after the inferred var_type is known.
-        if matches!(
-            var_type,
-            Type::C_SCHAR
-                | Type::C_SHORT
-                | Type::C_INT
-                | Type::C_LONG
-                | Type::C_LONGLONG
-                | Type::C_UCHAR
-                | Type::C_USHORT
-                | Type::C_UINT
-                | Type::C_ULONG
-                | Type::C_ULONGLONG
-                | Type::C_FLOAT
-                | Type::C_DOUBLE
-        ) {
-            self.require_preview(
-                PreviewFeature::CFfiExtras,
-                &format!("the `{}` type", var_type.name()),
-                span,
-            )?;
-        }
+        // ADR-0086: reject `let x: c_void = …` after inference. The
+        // inference layer accepts `c_void` leniently so a mismatch
+        // error can fire; this check turns that into a clear "bare
+        // c_void in value position" diagnostic.
         if var_type == Type::C_VOID {
             return Err(CompileError::new(
                 ErrorKind::CFfi(

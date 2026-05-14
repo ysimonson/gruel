@@ -37,16 +37,16 @@ pub enum TokenKind {
     Struct,
     Enum,
     Interface,
-    SelfValue,      // self (value, not type)
-    SelfType,       // Self (type, not value) - used in methods to refer to the struct type
-    Comptime,       // comptime (compile-time evaluation)
-    ComptimeUnroll, // comptime_unroll (compile-time loop unrolling)
-    Derive,         // derive (user-defined derive items, ADR-0058)
-    Pub,            // pub visibility modifier (module system)
-    Const,          // const declaration (module system re-exports)
-    Checked,        // checked { } block for unchecked operations
-    Unchecked,      // unchecked fn modifier
-    LinkExtern,     // link_extern("…") { … } FFI block (ADR-0085)
+    SelfValue,        // self (value, not type)
+    SelfType,         // Self (type, not value) - used in methods to refer to the struct type
+    Comptime,         // comptime (compile-time evaluation)
+    ComptimeUnroll,   // comptime_unroll (compile-time loop unrolling)
+    Derive,           // derive (user-defined derive items, ADR-0058)
+    Pub,              // pub visibility modifier (module system)
+    Const,            // const declaration (module system re-exports)
+    Checked,          // checked { } block for unchecked operations
+    Unchecked,        // unchecked fn modifier
+    LinkExtern,       // link_extern("…") { … } FFI block (ADR-0085)
     StaticLinkExtern, // static_link_extern("…") { … } FFI block (ADR-0086)
 
     // Type keywords

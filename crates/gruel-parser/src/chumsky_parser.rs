@@ -3472,12 +3472,14 @@ where
                 .collect::<Vec<_>>()
                 .delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
         )
-        .map_with(|((link_mode, library), items), e| crate::ast::LinkExternBlock {
-            library,
-            items,
-            link_mode,
-            span: span_from_extra(e),
-        })
+        .map_with(
+            |((link_mode, library), items), e| crate::ast::LinkExternBlock {
+                library,
+                items,
+                link_mode,
+                span: span_from_extra(e),
+            },
+        )
         .boxed()
 }
 

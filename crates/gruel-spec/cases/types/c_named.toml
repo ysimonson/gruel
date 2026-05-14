@@ -2,7 +2,7 @@
 id = "types.c_named"
 spec_chapter = "10.3"
 name = "C named primitive types"
-description = "ADR-0086 C named primitive types: c_schar/c_uchar/c_short/c_ushort/c_int/c_uint/c_long/c_ulong/c_longlong/c_ulonglong/c_float/c_double/c_void."
+description = "ADR-0086 C named primitive types: c_schar/c_uchar/c_short/c_ushort/c_int/c_uint/c_long/c_ulong/c_longlong/c_ulonglong/c_float/c_double/c_void. Stable as of ADR-0086 Phase 5."
 
 # =============================================================================
 # Basic resolution and literal coercion
@@ -11,8 +11,6 @@ description = "ADR-0086 C named primitive types: c_schar/c_uchar/c_short/c_ushor
 [[case]]
 name = "c_int_return_literal"
 spec = ["10.3:1", "10.3:2", "10.3:4"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: c_int = 42;
@@ -24,8 +22,6 @@ exit_code = 0
 [[case]]
 name = "c_long_return_literal"
 spec = ["10.3:1", "10.3:2", "10.3:4"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: c_long = 1234;
@@ -37,8 +33,6 @@ exit_code = 0
 [[case]]
 name = "c_uint_return_literal"
 spec = ["10.3:1", "10.3:2", "10.3:4"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: c_uint = 9;
@@ -50,8 +44,6 @@ exit_code = 0
 [[case]]
 name = "c_double_return_literal"
 spec = ["10.3:1", "10.3:2", "10.3:4"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 fn main() -> i32 {
     let x: c_double = 1.5;
@@ -61,42 +53,12 @@ fn main() -> i32 {
 exit_code = 0
 
 # =============================================================================
-# Preview gating
-# =============================================================================
-
-[[case]]
-name = "c_int_requires_preview"
-spec = ["10.3:1"]
-source = """
-fn main() -> i32 {
-    let x: c_int = 42;
-    0
-}
-"""
-compile_fail = true
-error_contains = "c_ffi_extras"
-
-[[case]]
-name = "c_void_requires_preview"
-spec = ["10.3:1"]
-source = """
-link_extern("c") {
-    fn free(p: MutPtr(c_void)) -> ();
-}
-fn main() -> i32 { 0 }
-"""
-compile_fail = true
-error_contains = "c_ffi_extras"
-
-# =============================================================================
 # c_void pointer-only use
 # =============================================================================
 
 [[case]]
 name = "mut_ptr_c_void_allowed_in_ffi"
 spec = ["10.3:6", "10.3:7"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 link_extern("c") {
     fn malloc(size: usize) -> MutPtr(c_void);
@@ -113,8 +75,6 @@ exit_code = 0
 [[case]]
 name = "c_void_rejected_in_return_position"
 spec = ["10.3:6"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 fn make() -> c_void {
     0
@@ -127,8 +87,6 @@ error_contains = "c_void"
 [[case]]
 name = "c_void_rejected_in_param_position"
 spec = ["10.3:6"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 fn take(x: c_void) -> i32 { 0 }
 fn main() -> i32 { 0 }
@@ -143,8 +101,6 @@ error_contains = "c_void"
 [[case]]
 name = "c_int_libc_abs"
 spec = ["10.3:5"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 link_extern("c") {
     fn abs(x: c_int) -> c_int;
@@ -164,8 +120,6 @@ exit_code = 0
 [[case]]
 name = "i32_not_assignable_to_c_int"
 spec = ["10.3:3"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 fn take(x: c_int) -> i32 { 0 }
 fn main() -> i32 {
@@ -179,8 +133,6 @@ error_contains = "i32"
 [[case]]
 name = "c_int_not_assignable_to_i32"
 spec = ["10.3:3"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 fn take(x: i32) -> i32 { 0 }
 fn main() -> i32 {
@@ -194,8 +146,6 @@ error_contains = "c_int"
 [[case]]
 name = "c_long_distinct_from_c_longlong"
 spec = ["10.3:3"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 fn take(x: c_long) -> i32 { 0 }
 fn main() -> i32 {

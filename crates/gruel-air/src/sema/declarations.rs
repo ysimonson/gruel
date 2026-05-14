@@ -17,7 +17,7 @@ use gruel_builtins::{
 };
 use gruel_rir::{InstData, InstRef, RirParamMode};
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature, ice};
+use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
 use lasso::Spur;
 
 use super::anon_interfaces::decode_receiver_mode;
@@ -921,22 +921,10 @@ impl<'a> Sema<'a> {
                         outcome.thread_safety_override = Some(level);
                     }
                     MarkerKind::Abi(Abi::C) => {
-                        // ADR-0085: marker is already known to be
-                        // applicable to the host item kind by this
-                        // point. C FFI is stable as of ADR-0085 Phase 5.
-                        //
-                        // ADR-0086: `@mark(c)` on an enum widens the
-                        // applicable set to FN_STRUCT_OR_ENUM. The
-                        // enum-side use is gated behind the
-                        // `c_ffi_extras` preview feature; fn / struct
-                        // use stays ungated (stable since ADR-0085).
-                        if item_kind == ItemKinds::ENUM {
-                            self.require_preview(
-                                PreviewFeature::CFfiExtras,
-                                "`@mark(c)` on an enum",
-                                directive.span,
-                            )?;
-                        }
+                        // ADR-0085 stabilised `@mark(c)` on fns / structs;
+                        // ADR-0086 stabilised it on enums. The marker is
+                        // already known to be applicable to the host item
+                        // kind by this point.
                         outcome.c_layout = true;
                     }
                 }
@@ -2448,14 +2436,10 @@ impl<'a> Sema<'a> {
         use gruel_rir::inst::RirLinkMode;
         use rustc_hash::FxHashMap;
         let mut linkage_by_lib: FxHashMap<Spur, (RirLinkMode, Span)> = FxHashMap::default();
-        let mut seen_static = None;
         for ext in &extern_fns {
-            let entry = linkage_by_lib.entry(ext.library).or_insert_with(|| {
-                if ext.link_mode == RirLinkMode::Static {
-                    seen_static.get_or_insert(ext.block_span);
-                }
-                (ext.link_mode, ext.block_span)
-            });
+            let entry = linkage_by_lib
+                .entry(ext.library)
+                .or_insert((ext.link_mode, ext.block_span));
             if entry.0 != ext.link_mode {
                 let lib_name = self.interner.resolve(&ext.library).to_string();
                 return Err(CompileError::new(
@@ -2468,14 +2452,11 @@ impl<'a> Sema<'a> {
                     ext.block_span,
                 ));
             }
-            if ext.link_mode == RirLinkMode::Static {
-                seen_static.get_or_insert(ext.block_span);
-            }
         }
         for (lib, link_mode, block_span) in &empty_blocks {
             let entry = linkage_by_lib
                 .entry(*lib)
-                .or_insert_with(|| (*link_mode, *block_span));
+                .or_insert((*link_mode, *block_span));
             if entry.0 != *link_mode {
                 let lib_name = self.interner.resolve(lib).to_string();
                 return Err(CompileError::new(
@@ -2488,16 +2469,6 @@ impl<'a> Sema<'a> {
                     *block_span,
                 ));
             }
-            if *link_mode == RirLinkMode::Static {
-                seen_static.get_or_insert(*block_span);
-            }
-        }
-        if let Some(static_span) = seen_static {
-            self.require_preview(
-                PreviewFeature::CFfiExtras,
-                "the `static_link_extern` keyword",
-                static_span,
-            )?;
         }
 
         for ext in &extern_fns {

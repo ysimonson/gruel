@@ -11,8 +11,6 @@ description = "ADR-0086 Phase 2: @mark(c) enum on field-less enums lowers to a c
 [[case]]
 name = "field_less_enum_compiles"
 spec = ["10.4:1", "10.4:2", "10.4:3"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 @mark(c) enum Color {
     Red,
@@ -30,8 +28,6 @@ exit_code = 0
 [[case]]
 name = "field_less_enum_ffi_roundtrip"
 spec = ["10.4:4"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 @mark(c) enum Color {
     Red,
@@ -51,33 +47,12 @@ fn main() -> i32 {
 exit_code = 0
 
 # =============================================================================
-# Preview gating
-# =============================================================================
-
-[[case]]
-name = "mark_c_on_enum_requires_preview"
-spec = ["10.4:1"]
-source = """
-@mark(c) enum Color {
-    Red,
-    Green,
-    Blue,
-}
-
-fn main() -> i32 { 0 }
-"""
-compile_fail = true
-error_contains = "c_ffi_extras"
-
-# =============================================================================
-# Data-carrying rejection (Phase 2 — Phase 3 will permit)
+# Data-carrying enums (Phase 3)
 # =============================================================================
 
 [[case]]
 name = "data_carrying_mark_c_enum_accepted_at_ffi"
 spec = ["10.4:5"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 @mark(c) enum Event {
     Quit,
@@ -98,8 +73,6 @@ exit_code = 0
 [[case]]
 name = "data_carrying_mark_c_enum_non_ffi_payload_rejected"
 spec = ["10.4:5"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 struct NonC {
     x: i32,
@@ -126,8 +99,6 @@ error_contains = "non-FFI type"
 [[case]]
 name = "plain_enum_rejected_at_ffi"
 spec = ["10.4:6"]
-preview = "c_ffi_extras"
-preview_should_pass = true
 source = """
 enum Color {
     Red,

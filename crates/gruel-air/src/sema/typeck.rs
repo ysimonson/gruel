@@ -8,7 +8,7 @@
 
 use gruel_builtins::Posture;
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature};
+use gruel_util::{CompileError, CompileResult, ErrorKind};
 use lasso::Spur;
 
 use super::Sema;
@@ -350,61 +350,22 @@ impl<'a> Sema<'a> {
             "!" => return Ok(Type::NEVER),
             // The type of types - used for comptime type parameters
             "type" => return Ok(Type::COMPTIME_TYPE),
-            // ADR-0086 C named primitive types. Resolved as plain
-            // identifiers (no dedicated lexer tokens), gated behind the
-            // `c_ffi_extras` preview feature.
-            "c_schar" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_schar` type", span)?;
-                return Ok(Type::C_SCHAR);
-            }
-            "c_short" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_short` type", span)?;
-                return Ok(Type::C_SHORT);
-            }
-            "c_int" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_int` type", span)?;
-                return Ok(Type::C_INT);
-            }
-            "c_long" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_long` type", span)?;
-                return Ok(Type::C_LONG);
-            }
-            "c_longlong" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_longlong` type", span)?;
-                return Ok(Type::C_LONGLONG);
-            }
-            "c_uchar" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_uchar` type", span)?;
-                return Ok(Type::C_UCHAR);
-            }
-            "c_ushort" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_ushort` type", span)?;
-                return Ok(Type::C_USHORT);
-            }
-            "c_uint" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_uint` type", span)?;
-                return Ok(Type::C_UINT);
-            }
-            "c_ulong" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_ulong` type", span)?;
-                return Ok(Type::C_ULONG);
-            }
-            "c_ulonglong" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_ulonglong` type", span)?;
-                return Ok(Type::C_ULONGLONG);
-            }
-            "c_float" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_float` type", span)?;
-                return Ok(Type::C_FLOAT);
-            }
-            "c_double" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_double` type", span)?;
-                return Ok(Type::C_DOUBLE);
-            }
-            "c_void" => {
-                self.require_preview(PreviewFeature::CFfiExtras, "the `c_void` type", span)?;
-                return Ok(Type::C_VOID);
-            }
+            // ADR-0086 C named primitive types. Stable after ADR-0086
+            // Phase 5; resolved as plain identifiers (no dedicated
+            // lexer tokens).
+            "c_schar" => return Ok(Type::C_SCHAR),
+            "c_short" => return Ok(Type::C_SHORT),
+            "c_int" => return Ok(Type::C_INT),
+            "c_long" => return Ok(Type::C_LONG),
+            "c_longlong" => return Ok(Type::C_LONGLONG),
+            "c_uchar" => return Ok(Type::C_UCHAR),
+            "c_ushort" => return Ok(Type::C_USHORT),
+            "c_uint" => return Ok(Type::C_UINT),
+            "c_ulong" => return Ok(Type::C_ULONG),
+            "c_ulonglong" => return Ok(Type::C_ULONGLONG),
+            "c_float" => return Ok(Type::C_FLOAT),
+            "c_double" => return Ok(Type::C_DOUBLE),
+            "c_void" => return Ok(Type::C_VOID),
             _ => {}
         }
 
