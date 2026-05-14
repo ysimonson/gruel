@@ -149,13 +149,13 @@ No new permanent diagnostics. Phases 2 / 3 / 4 each may temporarily fire a `Intr
 
 ### Phase 4: Migrate heap + retire `__gruel_exit`
 
-- [ ] Add prelude fns: `alloc(size: usize, align: usize) -> MutPtr(u8)`, `free(p: MutPtr(u8), size: usize, align: usize)`, `realloc(p: MutPtr(u8), old: usize, new: usize, align: usize) -> MutPtr(u8)`. The libc bindings are already in Phase 1's `link_extern("c")` block.
-- [ ] Update `prelude/vec.gruel` callers: bracket each `alloc`/`realloc`/`free` call with `@ptr_cast` to convert between `MutPtr(T)` and `MutPtr(u8)` (the type inference that `@alloc`/`@realloc` carried inside the intrinsic is now caller-side).
-- [ ] Sema/codegen: remove `IntrinsicId::Alloc`, `IntrinsicId::Free`, `IntrinsicId::Realloc`.
-- [ ] Lexer/parser: `@alloc`/`@free`/`@realloc` stop parsing.
-- [ ] Update in-tree user-facing `@alloc`/`@free`/`@realloc` callers (mostly inside `checked` blocks in tests) to the bare fn names plus surrounding `@ptr_cast` where the test cared about pointee type.
-- [ ] Codegen: switch main-return from emitting `call __gruel_exit(code)` to emitting `call exit(code)` against the libc symbol. Reuse the existing `noreturn` attribute attachment.
-- [ ] Runtime: delete `__gruel_alloc`, `__gruel_free`, `__gruel_realloc`, `__gruel_exit`.
+- [x] Add prelude fns: `mem_alloc(size: usize, align: usize) -> MutPtr(u8)`, `mem_free(p: MutPtr(u8), size: usize, align: usize)`, `mem_realloc(p: MutPtr(u8), old: usize, new: usize, align: usize) -> MutPtr(u8)`. Deviation from the ADR's sketched names (`alloc` / `free` / `realloc`): Gruel doesn't mangle user-fn names at the LLVM level, so a prelude `free` emits an LLVM symbol `free` and collides with the libc binding's `@link_name("free")`. The `mem_` prefix breaks the collision; OQ4's longer-qualified name supersedes it once a module system lands. The libc bindings are already in Phase 1's `link_extern("c")` block.
+- [x] Update `prelude/vec.gruel` callers: bracket each `mem_alloc`/`mem_realloc`/`mem_free` call with `@ptr_cast` to convert between `MutPtr(T)` and `MutPtr(u8)`.
+- [x] Sema/codegen: remove `IntrinsicId::Alloc`, `IntrinsicId::Free`, `IntrinsicId::Realloc`. The corresponding sema helpers (`analyze_alloc_intrinsic`, `analyze_realloc_intrinsic`, `analyze_free_intrinsic`, `require_usize`) and codegen helpers (`translate_alloc`, `translate_realloc`, `translate_free`, `vec_realloc_fn`) are deleted along with them.
+- [x] Lexer/parser: `@alloc`/`@free`/`@realloc` stop parsing (registry-driven; falls out of removing the rows).
+- [x] Update in-tree user-facing `@alloc`/`@free`/`@realloc` callers — only `crates/gruel-spec/cases/intrinsics/memory.toml` had them. Rewritten to use `mem_alloc` / `mem_free` / `mem_realloc` bracketed by `@ptr_cast`. The `alloc_outside_checked_rejected` case is reframed as `ptr_cast_outside_checked_rejected` since `mem_alloc` itself doesn't require `checked` — the `@ptr_cast` does.
+- [x] Codegen: switched main-return from `call __gruel_exit(code)` to `call exit(code)`. `get_or_declare_exit_fn` now declares the LLVM symbol as `exit` and keeps the `noreturn` attribute. The codegen-emitted heap calls inside `@spawn`'s thunk synthesis (the only remaining codegen-side users of `vec_alloc_fn` / `vec_free_fn`) now resolve to libc `malloc` / `free` directly — the `__gruel_alloc(size, align)` shim's `align` parameter is dropped at the call site.
+- [x] Runtime: deleted `__gruel_alloc` / `__gruel_free` / `__gruel_realloc` (the FFI entry points; in-crate Rust helpers `heap::alloc` / `heap::free` / `heap::realloc` stay because `__gruel_cstr_to_vec` in `utf8.rs` still uses them) and `__gruel_exit` (codegen no longer emits a call to it; main-return targets libc `exit` directly).
 
 ### Phase 5: Stabilise
 

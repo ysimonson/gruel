@@ -1,10 +1,12 @@
 //! Program entry points and exit handling.
 //!
-//! This module provides:
-//! - Platform-specific `_start` / `_main` entry points
-//! - `__gruel_exit` function called when main() returns
-//! - Panic handler for no_std environments
+//! ADR-0087 Phase 4 retired the `__gruel_exit` shim — main-return
+//! codegen now emits a direct call to libc `exit` (declared with a
+//! `noreturn` LLVM attribute the same way `__gruel_exit` was). This
+//! module still hosts the platform-specific `_start` / `_main`
+//! entry points and the `#![no_std]` panic handler.
 
+#[cfg(not(test))]
 use crate::platform;
 
 /// Panic handler for `#![no_std]` environments.
@@ -87,14 +89,6 @@ pub unsafe extern "C" fn _start() -> ! {
         );
     }
     platform::exit(exit_code)
-}
-
-/// Exit the process with the given status code.
-///
-/// Called by Gruel-generated code when `main()` returns.
-#[unsafe(no_mangle)]
-pub extern "C" fn __gruel_exit(status: i32) -> ! {
-    platform::exit(status)
 }
 
 #[cfg(test)]

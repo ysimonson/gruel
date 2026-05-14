@@ -1,15 +1,19 @@
-# ADR-0082: Gruel-callable memory intrinsics
-#
-# `@alloc(size, align) -> MutPtr(T)` / `@realloc(p, old, new, align) -> MutPtr(T)`
-# / `@free(p, size, align)` / `@ptr_cast(p) -> MutPtr(T)/Ptr(T)` are thin
-# wrappers over the existing `__gruel_alloc` / `__gruel_realloc` /
-# `__gruel_free` runtime symbols. Each requires a `checked` block.
+# ADR-0087 Phase 4 retired the `@alloc` / `@realloc` / `@free`
+# intrinsics. The user-facing surface is now the prelude fns
+# `mem_alloc(size, align) -> MutPtr(u8)`,
+# `mem_realloc(p, old, new, align) -> MutPtr(u8)`, and
+# `mem_free(p, size, align)`. Callers wrap with `@ptr_cast` to
+# recover the typed pointer (the pointee-type inference that the
+# old intrinsics carried inline now lives caller-side). The
+# behaviour roundtrips below verify the prelude wrappers; they
+# don't cite normative spec paragraphs because the surface is
+# library code, not a language intrinsic.
 
 [section]
 id = "intrinsics.memory"
 spec_chapter = "8.4"
-name = "Memory Intrinsics (ADR-0082)"
-description = "Roundtrip alloc + write + read + free, plus the prelude Vec dispatch flip."
+name = "Heap (ADR-0087)"
+description = "Roundtrip mem_alloc + write + read + mem_free, plus the prelude Vec dispatch flip."
 
 # =============================================================================
 # Roundtrip: alloc + write + read + free
@@ -17,13 +21,12 @@ description = "Roundtrip alloc + write + read + free, plus the prelude Vec dispa
 
 [[case]]
 name = "alloc_write_read_free"
-spec = ["8.4:1"]
 source = """
 fn main() -> i32 {
     let n: usize = 4;
     let size: usize = n * @size_of(i32);
     let align: usize = @align_of(i32);
-    let p: MutPtr(i32) = checked { @alloc(size, align) };
+    let p: MutPtr(i32) = checked { @ptr_cast(mem_alloc(size, align)) };
     checked {
         p.offset(0).write(10);
         p.offset(1).write(20);
@@ -31,7 +34,10 @@ fn main() -> i32 {
         p.offset(3).write(42);
     };
     let last: i32 = checked { p.offset(3).read() };
-    checked { @free(p, size, align) };
+    checked {
+        let raw: MutPtr(u8) = @ptr_cast(p);
+        mem_free(raw, size, align)
+    };
     last
 }
 """
@@ -43,21 +49,22 @@ exit_code = 42
 
 [[case]]
 name = "realloc_grows_buffer"
-spec = ["8.4:1"]
 source = """
 fn main() -> i32 {
     let align: usize = @align_of(i32);
-    let one: usize = 1;
     let two: usize = 2;
     let four: usize = 4;
     let old_bytes: usize = two * @size_of(i32);
     let new_bytes: usize = four * @size_of(i32);
-    let p: MutPtr(i32) = checked { @alloc(old_bytes, align) };
+    let p: MutPtr(i32) = checked { @ptr_cast(mem_alloc(old_bytes, align)) };
     checked {
         p.offset(0).write(7);
         p.offset(1).write(35);
     };
-    let p2: MutPtr(i32) = checked { @realloc(p, old_bytes, new_bytes, align) };
+    let p2: MutPtr(i32) = checked {
+        let raw: MutPtr(u8) = @ptr_cast(p);
+        @ptr_cast(mem_realloc(raw, old_bytes, new_bytes, align))
+    };
     checked {
         p2.offset(2).write(0);
         p2.offset(3).write(0);
@@ -65,7 +72,10 @@ fn main() -> i32 {
     let total: i32 = checked {
         p2.offset(0).read() + p2.offset(1).read()
     };
-    checked { @free(p2, new_bytes, align) };
+    checked {
+        let raw: MutPtr(u8) = @ptr_cast(p2);
+        mem_free(raw, new_bytes, align)
+    };
     total
 }
 """
@@ -77,33 +87,35 @@ exit_code = 42
 
 [[case]]
 name = "ptr_cast_retypes_pointer"
-spec = ["8.4:1"]
 source = """
 fn main() -> i32 {
     let n: usize = 1;
     let size: usize = n * @size_of(i32);
     let align: usize = @align_of(i32);
-    let p: MutPtr(i32) = checked { @alloc(size, align) };
+    let p: MutPtr(i32) = checked { @ptr_cast(mem_alloc(size, align)) };
     checked { p.offset(0).write(42) };
     // Cast MutPtr(i32) → Ptr(i32) (read-only view).
     let pc: Ptr(i32) = checked { @ptr_cast(p) };
     let v: i32 = checked { pc.offset(0).read() };
-    checked { @free(p, size, align) };
+    checked {
+        let raw: MutPtr(u8) = @ptr_cast(p);
+        mem_free(raw, size, align)
+    };
     v
 }
 """
 exit_code = 42
 
 # =============================================================================
-# `checked` block requirement (ADR-0028)
+# @ptr_cast still requires `checked` (ADR-0028)
 # =============================================================================
 
 [[case]]
-name = "alloc_outside_checked_rejected"
-spec = ["8.4:1"]
+name = "ptr_cast_outside_checked_rejected"
 source = """
 fn main() -> i32 {
-    let p: MutPtr(i32) = @alloc(4, 4);
+    let raw: MutPtr(u8) = mem_alloc(4, 4);
+    let p: MutPtr(i32) = @ptr_cast(raw);
     0
 }
 """
@@ -119,7 +131,6 @@ error_contains = "checked"
 
 [[case]]
 name = "prelude_vec_file_does_not_break_build"
-spec = ["8.4:1"]
 source = """
 fn main() -> i32 {
     42
@@ -129,7 +140,6 @@ exit_code = 42
 
 [[case]]
 name = "vec_flip_push_pop_indexing"
-spec = ["8.4:1"]
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -146,7 +156,6 @@ exit_code = 42
 
 [[case]]
 name = "vec_flip_dispose_panics_when_nonempty"
-spec = ["8.4:1"]
 source = """
 fn main() -> i32 {
     let mut v: Vec(i32) = Vec(i32)::new();
@@ -159,7 +168,6 @@ exit_code = 101
 
 [[case]]
 name = "vec_flip_with_capacity_len"
-spec = ["8.4:1"]
 source = """
 fn main() -> i32 {
     let v: Vec(i32) = Vec(i32)::with_capacity(8);

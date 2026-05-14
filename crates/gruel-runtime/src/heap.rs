@@ -1,13 +1,15 @@
-//! Heap allocation for Gruel programs.
+//! Heap allocation helpers for the Gruel runtime itself.
 //!
-//! Thin wrappers around libc's malloc/free/realloc. The actual allocator
-//! implementation comes from whatever libc is linked (musl, glibc, etc.).
-//!
-//! The `__gruel_alloc` / `__gruel_free` / `__gruel_realloc` extern symbols
-//! are the FFI entry points that `gruel-codegen-llvm` calls from `Vec(T)`'s
-//! inline lowerings (push, reserve, clone, …); the in-crate Rust functions
-//! `alloc`/`free`/`realloc` exist so the rest of the runtime can call into
-//! the same pool without going through the FFI boundary.
+//! ADR-0087 Phase 4 retired the `__gruel_alloc` / `__gruel_free` /
+//! `__gruel_realloc` FFI entry points — the user-facing surface is
+//! now the `mem_alloc` / `mem_free` / `mem_realloc` Gruel prelude
+//! fns (see `prelude/runtime_wrappers.gruel`), which call libc
+//! `malloc` / `free` / `realloc` directly via Phase 1's
+//! `link_extern("c")` block. The in-crate Rust helpers below stay
+//! because the runtime still needs to allocate from its own code
+//! (the `@spawn` thunk for the arg/return boxes, primarily); those
+//! callers go through `platform::malloc` etc., not the deleted
+//! `__gruel_*` shims.
 
 use crate::platform;
 
@@ -44,31 +46,4 @@ pub fn realloc(ptr: *mut u8, _old_size: u64, new_size: u64, _align: u64) -> *mut
         return core::ptr::null_mut();
     }
     unsafe { platform::realloc(ptr, new_size as usize) }
-}
-
-// =============================================================================
-// FFI entry points
-// =============================================================================
-
-/// Allocate memory from the heap. Called by `Vec(T)`'s codegen.
-#[unsafe(no_mangle)]
-pub extern "C" fn __gruel_alloc(size: u64, align: u64) -> *mut u8 {
-    alloc(size, align)
-}
-
-/// Free memory previously allocated by `__gruel_alloc`.
-#[unsafe(no_mangle)]
-pub extern "C" fn __gruel_free(ptr: *mut u8, size: u64, align: u64) {
-    free(ptr, size, align)
-}
-
-/// Reallocate memory to a new size.
-#[unsafe(no_mangle)]
-pub extern "C" fn __gruel_realloc(
-    ptr: *mut u8,
-    old_size: u64,
-    new_size: u64,
-    align: u64,
-) -> *mut u8 {
-    realloc(ptr, old_size, new_size, align)
 }

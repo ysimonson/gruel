@@ -823,9 +823,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         ptr
     }
 
-    /// Get or declare `__gruel_exit(i32) -> !`.
+    /// ADR-0087 Phase 4: main-return calls libc `exit(c_int) -> !`
+    /// directly. The `__gruel_exit` runtime shim is gone; libc
+    /// `exit` is declared `void exit(int)` in `<stdlib.h>` and is
+    /// effectively `noreturn`, so the LLVM-level attribute is still
+    /// attached here.
     fn get_or_declare_exit_fn(&self) -> FunctionValue<'ctx> {
-        const NAME: &str = "__gruel_exit";
+        const NAME: &str = "exit";
         if let Some(f) = self.module.get_function(NAME) {
             return f;
         }
@@ -3438,7 +3442,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                     }
                     let arg_ty = self.cfg.get_inst(arg_val).ty;
                     match arg_ty.kind() {
-                        TypeKind::I8 | TypeKind::I16 | TypeKind::I32 | TypeKind::I64 => {
+                        TypeKind::I8
+                        | TypeKind::I16
+                        | TypeKind::I32
+                        | TypeKind::I64
+                        | TypeKind::Isize => {
                             let v = self.get_value(arg_val).into_int_value();
                             let v64 = if v.get_type().get_bit_width() < 64 {
                                 self.builder.build_int_s_extend(v, i64_ty, "sext").unwrap()
@@ -3451,7 +3459,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                             });
                             self.builder.build_call(f, &[v64.into()], "").unwrap();
                         }
-                        TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64 => {
+                        TypeKind::U8
+                        | TypeKind::U16
+                        | TypeKind::U32
+                        | TypeKind::U64
+                        | TypeKind::Usize => {
                             let v = self.get_value(arg_val).into_int_value();
                             let v64 = if v.get_type().get_bit_width() < 64 {
                                 self.builder.build_int_z_extend(v, i64_ty, "zext").unwrap()
@@ -4004,17 +4016,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             // via sret, return the Vec(u8) aggregate.
             IntrinsicId::CStrToVec => Some(self.translate_cstr_to_vec(args)),
 
-            // ADR-0082: Gruel-callable wrappers for the existing
-            // __gruel_alloc / __gruel_realloc / __gruel_free runtime
-            // symbols. The Sema-side type tracking is what makes the
-            // returned pointer carry a typed pointee; LLVM sees opaque
-            // pointers either way, so codegen is a thin direct call.
-            IntrinsicId::Alloc => Some(self.translate_alloc(args)),
-            IntrinsicId::Realloc => Some(self.translate_realloc(args)),
-            IntrinsicId::Free => {
-                self.translate_free(args);
-                None
-            }
+            // ADR-0087 Phase 4: @alloc / @realloc / @free retired —
+            // codegen arms and translate_alloc / translate_realloc /
+            // translate_free deleted. The prelude `mem_alloc` /
+            // `mem_realloc` / `mem_free` fns call libc directly.
+
             // @ptr_cast(p) is identity at the LLVM level (pointers are
             // opaque). Sema already swapped the result type; just pass
             // through.
@@ -4028,56 +4034,11 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         }
     }
 
-    /// Codegen for `@alloc(size, align) -> MutPtr(T)` (ADR-0082). Direct
-    /// call to `__gruel_alloc(size, align)`.
-    fn translate_alloc(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
-        let size = self.get_value(args[0]).into_int_value();
-        let align = self.get_value(args[1]).into_int_value();
-        let size = self.zext_to_i64(size);
-        let align = self.zext_to_i64(align);
-        let alloc_fn = self.vec_alloc_fn();
-        self.builder
-            .build_call(alloc_fn, &[size.into(), align.into()], "alloc")
-            .unwrap()
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-    }
-
-    /// Codegen for `@realloc(p, old_size, new_size, align) -> MutPtr(T)` (ADR-0082).
-    fn translate_realloc(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
-        let p = self.get_value(args[0]).into_pointer_value();
-        let old_size = self.get_value(args[1]).into_int_value();
-        let new_size = self.get_value(args[2]).into_int_value();
-        let align = self.get_value(args[3]).into_int_value();
-        let old_size = self.zext_to_i64(old_size);
-        let new_size = self.zext_to_i64(new_size);
-        let align = self.zext_to_i64(align);
-        let realloc_fn = self.vec_realloc_fn();
-        self.builder
-            .build_call(
-                realloc_fn,
-                &[p.into(), old_size.into(), new_size.into(), align.into()],
-                "realloc",
-            )
-            .unwrap()
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-    }
-
-    /// Codegen for `@free(p, size, align)` (ADR-0082).
-    fn translate_free(&mut self, args: &[CfgValue]) {
-        let p = self.get_value(args[0]).into_pointer_value();
-        let size = self.get_value(args[1]).into_int_value();
-        let align = self.get_value(args[2]).into_int_value();
-        let size = self.zext_to_i64(size);
-        let align = self.zext_to_i64(align);
-        let free_fn = self.vec_free_fn();
-        self.builder
-            .build_call(free_fn, &[p.into(), size.into(), align.into()], "")
-            .unwrap();
-    }
+    // ADR-0087 Phase 4: translate_alloc / translate_realloc /
+    // translate_free deleted along with the corresponding intrinsics.
+    // The prelude `mem_alloc` / `mem_realloc` / `mem_free` fns
+    // express the calls to libc `malloc` / `realloc` / `free` in
+    // ordinary Gruel.
 
     /// Codegen for `@spawn(fn, arg) -> JoinHandle(R)` (ADR-0084).
     ///
@@ -4122,13 +4083,12 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         } else {
             let alloc_fn = self.vec_alloc_fn();
             let size_v = i64_ty.const_int(arg_layout.size, false);
-            let align_v = i64_ty.const_int(arg_layout.align.max(1), false);
             self.builder
-                .build_call(alloc_fn, &[size_v.into(), align_v.into()], "spawn_arg_buf")
+                .build_call(alloc_fn, &[size_v.into()], "spawn_arg_buf")
                 .unwrap()
                 .try_as_basic_value()
                 .basic()
-                .expect("__gruel_alloc returns ptr")
+                .expect("malloc returns ptr")
                 .into_pointer_value()
         };
 
@@ -4270,14 +4230,8 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         // Free the arg slot before the worker runs (we own it).
         if arg_layout.size > 0 {
             let free_fn = self.vec_free_fn();
-            let size_v = i64_ty.const_int(arg_layout.size, false);
-            let align_v = i64_ty.const_int(arg_layout.align.max(1), false);
             self.builder
-                .build_call(
-                    free_fn,
-                    &[arg_buf.into(), size_v.into(), align_v.into()],
-                    "",
-                )
+                .build_call(free_fn, &[arg_buf.into()], "")
                 .unwrap();
         }
 
@@ -4305,14 +4259,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         let ret_buf = if ret_layout.size > 0 {
             let alloc_fn = self.vec_alloc_fn();
             let size_v = i64_ty.const_int(ret_layout.size, false);
-            let align_v = i64_ty.const_int(ret_layout.align.max(1), false);
             let ret_buf = self
                 .builder
-                .build_call(alloc_fn, &[size_v.into(), align_v.into()], "ret_buf")
+                .build_call(alloc_fn, &[size_v.into()], "ret_buf")
                 .unwrap()
                 .try_as_basic_value()
                 .basic()
-                .expect("__gruel_alloc returns ptr")
+                .expect("malloc returns ptr")
                 .into_pointer_value();
             if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                 self.builder.build_store(ret_buf, ret_val).unwrap();
@@ -4408,38 +4361,29 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         }
     }
 
-    /// `__gruel_alloc(size, align) -> *u8`.
+    /// ADR-0087 Phase 4: libc `malloc(size)` for codegen-emitted heap
+    /// uses (currently the `@spawn` thunk's arg/return slots). The
+    /// `__gruel_alloc(size, align)` runtime shim and its align
+    /// parameter are gone — libc `malloc` is max-aligned.
     fn vec_alloc_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
         let i64_ty = self.ctx.i64_type();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let fn_ty = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
+        let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
         self.module
-            .get_function("__gruel_alloc")
-            .unwrap_or_else(|| self.module.add_function("__gruel_alloc", fn_ty, None))
+            .get_function("malloc")
+            .unwrap_or_else(|| self.module.add_function("malloc", fn_ty, None))
     }
 
-    fn vec_realloc_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
-        let i64_ty = self.ctx.i64_type();
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let fn_ty = ptr_ty.fn_type(
-            &[ptr_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()],
-            false,
-        );
-        self.module
-            .get_function("__gruel_realloc")
-            .unwrap_or_else(|| self.module.add_function("__gruel_realloc", fn_ty, None))
-    }
+    // ADR-0087 Phase 4: vec_realloc_fn deleted along with the
+    // `@realloc` intrinsic codegen (its only caller). Prelude
+    // `mem_realloc` binds libc `realloc` itself.
 
     fn vec_free_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
-        let i64_ty = self.ctx.i64_type();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let fn_ty = self
-            .ctx
-            .void_type()
-            .fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false);
+        let fn_ty = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
         self.module
-            .get_function("__gruel_free")
-            .unwrap_or_else(|| self.module.add_function("__gruel_free", fn_ty, None))
+            .get_function("free")
+            .unwrap_or_else(|| self.module.add_function("free", fn_ty, None))
     }
 
     fn zext_to_i64(&self, v: inkwell::values::IntValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
@@ -4464,11 +4408,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .builder
             .build_int_mul(n_val, elem_size, "lit_bytes")
             .unwrap();
-        let align = i64_ty.const_int(8, false);
         let alloc_fn = self.vec_alloc_fn();
         let buf = self
             .builder
-            .build_call(alloc_fn, &[bytes.into(), align.into()], "vec_lit_alloc")
+            .build_call(alloc_fn, &[bytes.into()], "vec_lit_alloc")
             .unwrap()
             .try_as_basic_value()
             .basic()
@@ -4503,11 +4446,10 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .builder
             .build_int_mul(n, elem_size, "rep_bytes")
             .unwrap();
-        let align = i64_ty.const_int(8, false);
         let alloc_fn = self.vec_alloc_fn();
         let buf = self
             .builder
-            .build_call(alloc_fn, &[bytes.into(), align.into()], "vec_rep_alloc")
+            .build_call(alloc_fn, &[bytes.into()], "vec_rep_alloc")
             .unwrap()
             .try_as_basic_value()
             .basic()
@@ -4590,17 +4532,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             self.emit_vec_drop_loop(buf, len, elem_ty);
         }
 
-        // Free the buffer.
-        let elem_size = self.vec_elem_size(vec_ty);
-        let bytes = self
-            .builder
-            .build_int_mul(cap, elem_size, "drop_bytes")
-            .unwrap();
-        let align = i64_ty.const_int(8, false);
+        // Free the buffer. libc `free` ignores the size — kept around
+        // here only because the codegen had it from the old
+        // `__gruel_free(p, size, align)` shim.
+        let _ = self.vec_elem_size(vec_ty);
+        let _ = cap;
         let free_fn = self.vec_free_fn();
-        self.builder
-            .build_call(free_fn, &[buf.into(), bytes.into(), align.into()], "")
-            .unwrap();
+        self.builder.build_call(free_fn, &[buf.into()], "").unwrap();
         self.builder.build_unconditional_branch(after_bb).unwrap();
         self.builder.position_at_end(after_bb);
     }

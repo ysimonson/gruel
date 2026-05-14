@@ -190,14 +190,9 @@ impl<'a> Sema<'a> {
             IntrinsicId::CStrToVec => {
                 self.analyze_cstr_to_vec_intrinsic(air, &args, span, ctx)
             }
-            // ADR-0082: Gruel-callable memory intrinsics.
-            IntrinsicId::Alloc => {
-                self.analyze_alloc_intrinsic(air, inst_ref, &args, span, ctx)
-            }
-            IntrinsicId::Realloc => {
-                self.analyze_realloc_intrinsic(air, &args, span, ctx)
-            }
-            IntrinsicId::Free => self.analyze_free_intrinsic(air, &args, span, ctx),
+            // ADR-0087 Phase 4: @alloc / @realloc / @free retired —
+            // surface is now the `mem_alloc` / `mem_realloc` /
+            // `mem_free` prelude fns.
             IntrinsicId::PtrCast => {
                 self.analyze_ptr_cast_intrinsic(air, inst_ref, &args, span, ctx)
             }
@@ -264,168 +259,11 @@ impl<'a> Sema<'a> {
     // ADR-0087 Phase 3: analyze_utf8_validate_intrinsic deleted —
     // surface is now the `utf8_validate(s: Slice(u8))` prelude fn.
 
-    /// Analyze `@alloc(size: usize, align: usize) -> MutPtr(T)` (ADR-0082).
-    /// Result type is inferred from the binding context (HM inference) and
-    /// must be a `MutPtr(_)`.
-    fn analyze_alloc_intrinsic(
-        &mut self,
-        air: &mut Air,
-        inst_ref: InstRef,
-        args: &[RirCallArg],
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        if args.len() != 2 {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicWrongArgCount {
-                    name: "alloc".to_string(),
-                    expected: 2,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-        let size = self.analyze_inst(air, args[0].value, ctx)?;
-        let align = self.analyze_inst(air, args[1].value, ctx)?;
-        Self::require_usize(self, "alloc", "size", size.ty, span)?;
-        Self::require_usize(self, "alloc", "align", align.ty, span)?;
-
-        let result_type = Self::get_resolved_type(ctx, inst_ref, span, "@alloc intrinsic")?;
-        if !matches!(result_type.kind(), TypeKind::PtrMut(_)) && !result_type.is_error() {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
-                    name: "alloc".to_string(),
-                    expected: "MutPtr(T) (inferred from context)".to_string(),
-                    found: self.format_type_name(result_type),
-                })),
-                span,
-            ));
-        }
-
-        let args_start = air.add_extra(&[size.air_ref.as_u32(), align.air_ref.as_u32()]);
-        let name = self.interner.get_or_intern_static("alloc");
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Intrinsic {
-                name,
-                args_start,
-                args_len: 2,
-            },
-            ty: result_type,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, result_type))
-    }
-
-    /// Analyze `@realloc(p: MutPtr(T), old_size, new_size, align) -> MutPtr(T)` (ADR-0082).
-    fn analyze_realloc_intrinsic(
-        &mut self,
-        air: &mut Air,
-        args: &[RirCallArg],
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        if args.len() != 4 {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicWrongArgCount {
-                    name: "realloc".to_string(),
-                    expected: 4,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-        let p = self.analyze_inst(air, args[0].value, ctx)?;
-        let old_size = self.analyze_inst(air, args[1].value, ctx)?;
-        let new_size = self.analyze_inst(air, args[2].value, ctx)?;
-        let align = self.analyze_inst(air, args[3].value, ctx)?;
-
-        if !matches!(p.ty.kind(), TypeKind::PtrMut(_)) && !p.ty.is_error() {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
-                    name: "realloc".to_string(),
-                    expected: "MutPtr(T)".to_string(),
-                    found: self.format_type_name(p.ty),
-                })),
-                span,
-            ));
-        }
-        Self::require_usize(self, "realloc", "old_size", old_size.ty, span)?;
-        Self::require_usize(self, "realloc", "new_size", new_size.ty, span)?;
-        Self::require_usize(self, "realloc", "align", align.ty, span)?;
-
-        // Result pointer has the same pointee type as the input.
-        let result_type = p.ty;
-        let args_start = air.add_extra(&[
-            p.air_ref.as_u32(),
-            old_size.air_ref.as_u32(),
-            new_size.air_ref.as_u32(),
-            align.air_ref.as_u32(),
-        ]);
-        let name = self.interner.get_or_intern_static("realloc");
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Intrinsic {
-                name,
-                args_start,
-                args_len: 4,
-            },
-            ty: result_type,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, result_type))
-    }
-
-    /// Analyze `@free(p: MutPtr(T), size: usize, align: usize)` (ADR-0082).
-    fn analyze_free_intrinsic(
-        &mut self,
-        air: &mut Air,
-        args: &[RirCallArg],
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        if args.len() != 3 {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicWrongArgCount {
-                    name: "free".to_string(),
-                    expected: 3,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-        let p = self.analyze_inst(air, args[0].value, ctx)?;
-        let size = self.analyze_inst(air, args[1].value, ctx)?;
-        let align = self.analyze_inst(air, args[2].value, ctx)?;
-
-        if !matches!(p.ty.kind(), TypeKind::PtrMut(_)) && !p.ty.is_error() {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
-                    name: "free".to_string(),
-                    expected: "MutPtr(T)".to_string(),
-                    found: self.format_type_name(p.ty),
-                })),
-                span,
-            ));
-        }
-        Self::require_usize(self, "free", "size", size.ty, span)?;
-        Self::require_usize(self, "free", "align", align.ty, span)?;
-
-        let args_start = air.add_extra(&[
-            p.air_ref.as_u32(),
-            size.air_ref.as_u32(),
-            align.air_ref.as_u32(),
-        ]);
-        let name = self.interner.get_or_intern_static("free");
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Intrinsic {
-                name,
-                args_start,
-                args_len: 3,
-            },
-            ty: Type::UNIT,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, Type::UNIT))
-    }
+    // ADR-0087 Phase 4: analyze_alloc_intrinsic /
+    // analyze_realloc_intrinsic / analyze_free_intrinsic deleted —
+    // surface is now the `mem_alloc` / `mem_realloc` / `mem_free`
+    // prelude fns (sema reaches their bodies via the normal Call
+    // path). `require_usize` went with them.
 
     /// Analyze `@ptr_cast(p) -> MutPtr(T)` / `Ptr(T)` (ADR-0082). Result type
     /// is inferred from the binding context.
@@ -486,28 +324,6 @@ impl<'a> Sema<'a> {
             span,
         });
         Ok(AnalysisResult::new(air_ref, result_type))
-    }
-
-    /// Helper: ensure `arg_ty` is `usize` (or error/never), else surface a
-    /// typed argument-type-mismatch error.
-    fn require_usize(
-        sema: &Sema<'_>,
-        intrinsic: &str,
-        arg_label: &str,
-        arg_ty: Type,
-        span: Span,
-    ) -> CompileResult<()> {
-        if arg_ty == Type::USIZE || arg_ty.is_error() || arg_ty.is_never() {
-            return Ok(());
-        }
-        Err(CompileError::new(
-            ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
-                name: intrinsic.to_string(),
-                expected: format!("{} of type usize", arg_label),
-                found: sema.format_type_name(arg_ty),
-            })),
-            span,
-        ))
     }
 
     // Helper methods for intrinsic analysis (delegated from analyze_intrinsic_impl)

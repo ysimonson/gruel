@@ -106,15 +106,10 @@ pub enum IntrinsicId {
     CStrToVec,
 
     // ---- ADR-0082 memory intrinsics (require checked) ----
-    /// `@alloc(size, align) -> MutPtr(T)`: allocate `size` bytes with the
-    /// given alignment. Return type is inferred from context.
-    Alloc,
-    /// `@realloc(p, old_size, new_size, align) -> MutPtr(T)`: resize an
-    /// existing allocation. Return type matches the input pointer's type.
-    Realloc,
-    /// `@free(p, size, align)`: free an allocation produced by `@alloc`/
-    /// `@realloc`.
-    Free,
+    // ADR-0087 Phase 4: `@alloc` / `@realloc` / `@free` retired in
+    // favour of the prelude `mem_alloc` / `mem_realloc` / `mem_free`
+    // fns (named with the `mem_` prefix to avoid LLVM-symbol
+    // collisions with libc `free` / `realloc`).
     /// `@ptr_cast(p) -> MutPtr(T)` / `Ptr(T)`: reinterpret the pointer as
     /// the inferred target pointer type. Result type comes from HM
     /// inference (let-annotation or call context).
@@ -943,48 +938,12 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
     // ADR-0087 Phase 3: `@utf8_validate` retired — replaced by the
     // prelude `utf8_validate(s: Slice(u8)) -> bool` fn. Runtime helper
     // `__gruel_utf8_validate` stays.
-    // ADR-0082: Gruel-callable wrappers for the existing
-    // `__gruel_alloc` / `__gruel_realloc` / `__gruel_free` runtime
-    // symbols. These let prelude collection types (Vec, future
-    // HashMap, etc.) express their allocation logic in Gruel rather
-    // than codegen-inline LLVM. Gated to `checked` blocks because
-    // raw memory ops can leak / double-free / alias.
-    IntrinsicDef {
-        id: IntrinsicId::Alloc,
-        name: "alloc",
-        kind: IntrinsicKind::Expr,
-        category: Category::Pointer,
-        requires_unchecked: true,
-        preview: None,
-        runtime_fn: Some("__gruel_alloc"),
-        summary: "Allocate a raw heap buffer (ADR-0082).",
-        description: "`@alloc(size: usize, align: usize) -> MutPtr(T)` allocates `size` bytes with alignment `align` and returns a raw pointer. The result type is inferred from the binding context (e.g. `let p: MutPtr(T) = checked { @alloc(...) };`). Lowers to `__gruel_alloc(size, align)`. Requires a `checked` block.",
-        examples: &["checked { @alloc(@size_of(T) * n, @align_of(T)) }"],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::Realloc,
-        name: "realloc",
-        kind: IntrinsicKind::Expr,
-        category: Category::Pointer,
-        requires_unchecked: true,
-        preview: None,
-        runtime_fn: Some("__gruel_realloc"),
-        summary: "Resize a raw heap allocation (ADR-0082).",
-        description: "`@realloc(p, old_size, new_size, align) -> MutPtr(T)` resizes the allocation referenced by `p`. The pointee type of the result matches the input. Lowers to `__gruel_realloc(p, old, new, align)`. Requires a `checked` block.",
-        examples: &["checked { @realloc(p, old_b, new_b, @align_of(T)) }"],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::Free,
-        name: "free",
-        kind: IntrinsicKind::Expr,
-        category: Category::Pointer,
-        requires_unchecked: true,
-        preview: None,
-        runtime_fn: Some("__gruel_free"),
-        summary: "Free a raw heap allocation (ADR-0082).",
-        description: "`@free(p, size, align)` releases the buffer at `p`. Lowers to `__gruel_free(p, size, align)`. Requires a `checked` block.",
-        examples: &["checked { @free(p, n * @size_of(T), @align_of(T)) }"],
-    },
+    // ADR-0087 Phase 4: `@alloc` / `@realloc` / `@free` retired —
+    // replaced by the prelude `mem_alloc` / `mem_realloc` /
+    // `mem_free` fns. The runtime symbols (`__gruel_alloc` etc.)
+    // are also gone; the prelude wrappers call libc `malloc` /
+    // `realloc` / `free` directly via Phase 1's `link_extern("c")`
+    // block.
     IntrinsicDef {
         id: IntrinsicId::PtrCast,
         name: "ptr_cast",
@@ -1527,9 +1486,6 @@ mod tests {
                 | IntrinsicId::FieldSet
                 | IntrinsicId::VariantUninit
                 | IntrinsicId::VariantField
-                | IntrinsicId::Alloc
-                | IntrinsicId::Realloc
-                | IntrinsicId::Free
                 | IntrinsicId::PtrCast
                 | IntrinsicId::ThreadJoin => {}
             }

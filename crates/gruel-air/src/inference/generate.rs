@@ -1059,20 +1059,13 @@ impl<'a> ConstraintGenerator<'a> {
                         let vec_id = self.type_pool.intern_vec_from_type(Type::U8);
                         InferType::Concrete(Type::new_vec(vec_id))
                     }
-                    // ADR-0082: memory intrinsics. `@alloc` and `@ptr_cast`
-                    // return MutPtr(T)/Ptr(T) inferred from context (fresh
-                    // var). `@realloc` returns the same pointer type as its
-                    // first argument — also a fresh var pinned by sema.
-                    // `@free` returns unit.
-                    Some(IntrinsicId::Alloc)
-                    | Some(IntrinsicId::Realloc)
-                    | Some(IntrinsicId::PtrCast) => {
+                    // ADR-0087 Phase 4: @alloc / @realloc / @free retired —
+                    // see prelude `mem_alloc` / `mem_realloc` / `mem_free`
+                    // fns. `@ptr_cast` remains and still infers its result
+                    // from the binding context.
+                    Some(IntrinsicId::PtrCast) => {
                         visit_args(self, ctx);
                         InferType::Var(self.fresh_var())
-                    }
-                    Some(IntrinsicId::Free) => {
-                        visit_args(self, ctx);
-                        InferType::Concrete(Type::UNIT)
                     }
                     // ADR-0087 Phase 3: @bytes_eq retired — see prelude
                     // `bytes_eq(a, b, n)` fn.

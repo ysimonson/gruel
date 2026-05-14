@@ -37,7 +37,12 @@
 // Phase 3 of ADR-0082 routes those surfaces through this declaration
 // rather than a built-in `TypeKind::Vec` variant.
 //
-// Allocations come from `@alloc` / `@realloc` / `@free` (ADR-0082).
+// Allocations come from prelude `mem_alloc` / `mem_realloc` /
+// `mem_free` fns (ADR-0082; ADR-0087 Phase 4 moved them from
+// intrinsics to prelude wrappers). The wrappers return
+// `MutPtr(u8)`, so each call site brackets with `@ptr_cast` to
+// recover the typed pointer. The `align` argument is currently
+// ignored — libc `malloc` is max-aligned.
 // Per-element drop is expressed via `self.ptr.offset(i).read()` —
 // the read produces an owned `T` whose drop runs at scope exit,
 // avoiding a separate `@drop(value)` primitive.
@@ -55,7 +60,7 @@ fn vec_with_capacity_impl(comptime VecT: type, comptime T: type, n: usize) -> Ve
     }
     let bytes: usize = n * @size_of(T);
     let align: usize = @align_of(T);
-    let p: MutPtr(T) = checked { @alloc(bytes, align) };
+    let p: MutPtr(T) = checked { @ptr_cast(mem_alloc(bytes, align)) };
     VecT { ptr: p, len: 0, cap: n }
 }
 
@@ -66,7 +71,7 @@ fn vec_push_impl(comptime VecT: type, comptime T: type, v: MutRef(VecT), value: 
         let align: usize = @align_of(T);
         let new_bytes: usize = new_cap * elem_size;
         if v.cap == 0 {
-            let p: MutPtr(T) = checked { @alloc(new_bytes, align) };
+            let p: MutPtr(T) = checked { @ptr_cast(mem_alloc(new_bytes, align)) };
             let mut i: usize = 0;
             while i < v.len {
                 let x: T = checked { v.ptr.offset(i).read() };
@@ -78,7 +83,8 @@ fn vec_push_impl(comptime VecT: type, comptime T: type, v: MutRef(VecT), value: 
         } else {
             let old_bytes: usize = v.cap * elem_size;
             let p: MutPtr(T) = checked {
-                @realloc(v.ptr, old_bytes, new_bytes, align)
+                let raw: MutPtr(u8) = @ptr_cast(v.ptr);
+                @ptr_cast(mem_realloc(raw, old_bytes, new_bytes, align))
             };
             v.ptr = p;
             v.cap = new_cap;
@@ -127,7 +133,7 @@ fn vec_reserve_impl(
     let align: usize = @align_of(T);
     let new_bytes: usize = new_cap * elem_size;
     if v.cap == 0 {
-        let p: MutPtr(T) = checked { @alloc(new_bytes, align) };
+        let p: MutPtr(T) = checked { @ptr_cast(mem_alloc(new_bytes, align)) };
         let mut i: usize = 0;
         while i < v.len {
             let x: T = checked { v.ptr.offset(i).read() };
@@ -140,7 +146,8 @@ fn vec_reserve_impl(
     }
     let old_bytes: usize = v.cap * elem_size;
     let p: MutPtr(T) = checked {
-        @realloc(v.ptr, old_bytes, new_bytes, align)
+        let raw: MutPtr(u8) = @ptr_cast(v.ptr);
+        @ptr_cast(mem_realloc(raw, old_bytes, new_bytes, align))
     };
     v.ptr = p;
     v.cap = new_cap;
@@ -190,7 +197,8 @@ fn vec_terminated_ptr_impl(
         let old_bytes: usize = v.cap * elem_size;
         let new_bytes: usize = new_cap * elem_size;
         let p: MutPtr(T) = checked {
-            @realloc(v.ptr, old_bytes, new_bytes, align)
+            let raw: MutPtr(u8) = @ptr_cast(v.ptr);
+            @ptr_cast(mem_realloc(raw, old_bytes, new_bytes, align))
         };
         v.ptr = p;
         v.cap = new_cap;
@@ -207,7 +215,10 @@ fn vec_dispose_impl(comptime VecT: type, comptime T: type, v: VecT) {
         let elem_size: usize = @size_of(T);
         let align: usize = @align_of(T);
         let bytes: usize = v.cap * elem_size;
-        checked { @free(v.ptr, bytes, align) };
+        checked {
+            let raw: MutPtr(u8) = @ptr_cast(v.ptr);
+            mem_free(raw, bytes, align)
+        };
     }
 }
 
@@ -229,7 +240,10 @@ fn vec_drop_impl(comptime VecT: type, comptime T: type, v: VecT) {
         let elem_size: usize = @size_of(T);
         let align: usize = @align_of(T);
         let bytes: usize = v.cap * elem_size;
-        checked { @free(v.ptr, bytes, align) };
+        checked {
+            let raw: MutPtr(u8) = @ptr_cast(v.ptr);
+            mem_free(raw, bytes, align)
+        };
     }
 }
 
@@ -241,7 +255,7 @@ fn vec_clone_impl(comptime VecT: type, comptime T: type, v: Ref(VecT)) -> VecT {
     let elem_size: usize = @size_of(T);
     let align: usize = @align_of(T);
     let bytes: usize = cap * elem_size;
-    let dst: MutPtr(T) = checked { @alloc(bytes, align) };
+    let dst: MutPtr(T) = checked { @ptr_cast(mem_alloc(bytes, align)) };
     let mut i: usize = 0;
     while i < v.len {
         let x: T = checked { v.ptr.offset(i).read() };
@@ -374,7 +388,7 @@ fn vec_concat_impl(
     let elem_size: usize = @size_of(T);
     let align: usize = @align_of(T);
     let bytes: usize = total * elem_size;
-    let dst: MutPtr(T) = checked { @alloc(bytes, align) };
+    let dst: MutPtr(T) = checked { @ptr_cast(mem_alloc(bytes, align)) };
     let mut i: usize = 0;
     while i < v.len {
         let x: T = checked { v.ptr.offset(i).read() };
@@ -389,7 +403,10 @@ fn vec_concat_impl(
     }
     if v.cap != 0 {
         let old_bytes: usize = v.cap * elem_size;
-        checked { @free(v.ptr, old_bytes, align) };
+        checked {
+            let raw: MutPtr(u8) = @ptr_cast(v.ptr);
+            mem_free(raw, old_bytes, align)
+        };
     }
     VecT { ptr: dst, len: total, cap: total }
 }

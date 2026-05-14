@@ -56,9 +56,6 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@ptr_copy` | expr | Raw Pointers | — | yes | Bulk copy between pointers (internal). |
 | `@raw` | expr | Raw Pointers | — | yes | Take a const pointer to an lvalue (internal). |
 | `@raw_mut` | expr | Raw Pointers | — | yes | Take a mutable pointer to an lvalue (internal). |
-| `@alloc` | expr | Raw Pointers | — | yes | Allocate a raw heap buffer (ADR-0082). |
-| `@realloc` | expr | Raw Pointers | — | yes | Resize a raw heap allocation (ADR-0082). |
-| `@free` | expr | Raw Pointers | — | yes | Free a raw heap allocation (ADR-0082). |
 | `@ptr_cast` | expr | Raw Pointers | — | yes | Reinterpret a pointer as another pointer type (ADR-0082). |
 | `@syscall` | expr | System Calls | — | yes | Direct OS system call. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
@@ -543,45 +540,6 @@ Internal lowering target for `Ptr(T)::from(&x)` (ADR-0063).
 Internal lowering target for `MutPtr(T)::from(&mut x)` (ADR-0063).
 
 - **Requires:** `checked { ... }` block
-
-### `@alloc`
-
-`@alloc(size: usize, align: usize) -> MutPtr(T)` allocates `size` bytes with alignment `align` and returns a raw pointer. The result type is inferred from the binding context (e.g. `let p: MutPtr(T) = checked { @alloc(...) };`). Lowers to `__gruel_alloc(size, align)`. Requires a `checked` block.
-
-- **Runtime symbol:** `__gruel_alloc`
-- **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { @alloc(@size_of(T) * n, @align_of(T)) }
-```
-
-### `@realloc`
-
-`@realloc(p, old_size, new_size, align) -> MutPtr(T)` resizes the allocation referenced by `p`. The pointee type of the result matches the input. Lowers to `__gruel_realloc(p, old, new, align)`. Requires a `checked` block.
-
-- **Runtime symbol:** `__gruel_realloc`
-- **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { @realloc(p, old_b, new_b, @align_of(T)) }
-```
-
-### `@free`
-
-`@free(p, size, align)` releases the buffer at `p`. Lowers to `__gruel_free(p, size, align)`. Requires a `checked` block.
-
-- **Runtime symbol:** `__gruel_free`
-- **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { @free(p, n * @size_of(T), @align_of(T)) }
-```
 
 ### `@ptr_cast`
 

@@ -137,3 +137,35 @@ pub fn bytes_eq(a: Ptr(u8), b: Ptr(u8), n: usize) -> bool {
     let r: c_int = libc_memcmp(a, b, n);
     r == 0
 }
+
+// ─────────────────────── Heap (Phase 4) ─────────────────────
+//
+// `mem_alloc` / `mem_free` / `mem_realloc` used to be intrinsics
+// (`@alloc` / `@free` / `@realloc`) that carried pointee-type
+// inference. The migrated prelude fns return `MutPtr(u8)`; callers
+// that want a typed pointer wrap with `@ptr_cast`. The `align`
+// parameter is currently ignored — libc `malloc` / `realloc` are
+// max-aligned, which covers every alignment we currently need;
+// revisit if/when alignment-> 16 use cases appear (see ADR-0087
+// OQ2).
+//
+// Naming deviation from the ADR: the ADR sketched `alloc` /
+// `free` / `realloc` as the user-facing names. Gruel doesn't
+// mangle user-fn names at the LLVM level, so a prelude `free`
+// would emit an LLVM symbol named `free` — colliding with the
+// libc `free` symbol the prelude's own `libc_free` binding pulls
+// in via `@link_name("free")`. The `mem_*` prefix avoids the
+// collision; the longer-qualified name from ADR-0087 OQ4
+// supersedes it once a module system lands.
+
+pub fn mem_alloc(size: usize, align: usize) -> MutPtr(u8) {
+    libc_malloc(size)
+}
+
+pub fn mem_free(p: MutPtr(u8), size: usize, align: usize) {
+    libc_free(p)
+}
+
+pub fn mem_realloc(p: MutPtr(u8), old: usize, new: usize, align: usize) -> MutPtr(u8) {
+    libc_realloc(p, new)
+}
