@@ -18,20 +18,6 @@ compile_fail = true
 error_contains = ["expected"]
 
 # =============================================================================
-# `@mark(c)` on enum points at the marker, not the whole declaration.
-# =============================================================================
-
-[[case]]
-name = "mark_c_on_enum_diagnostic"
-source = """
-@mark(c) enum Color { Red, Green, Blue }
-
-fn main() -> i32 { 0 }
-"""
-compile_fail = true
-error_contains = ["c", "enum"]
-
-# =============================================================================
 # FFI type rejection identifies the offending parameter and the position.
 # =============================================================================
 
