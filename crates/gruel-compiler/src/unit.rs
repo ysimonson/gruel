@@ -34,6 +34,14 @@ use tracing::{info, info_span};
 /// ADR-0086: the per-library `LinkMode` controls whether the linker
 /// gets `-Wl,-Bstatic` bracketing (ELF) or `-Wl,-search_paths_first`
 /// (Mach-O) around the `-l<name>`.
+///
+/// ADR-0087: `link_extern("gruel_runtime")` is the prelude's way of
+/// declaring extern fn signatures against the Rust runtime archive.
+/// The archive itself is linked by absolute path (see
+/// `link_system_with_warnings`), so emitting `-lgruel_runtime` would
+/// cause the linker to search for a separate copy and fail. Skip
+/// the name from the library-set; the source-level declaration is
+/// still load-bearing for sema's binding resolution.
 fn collect_extern_link_libraries(
     rir: &gruel_rir::Rir,
     interner: &ThreadedRodeo,
@@ -45,12 +53,19 @@ fn collect_extern_link_libraries(
         RirLinkMode::Dynamic => LinkMode::Dynamic,
         RirLinkMode::Static => LinkMode::Static,
     };
+    let is_skipped = |name: &str| name == "gruel_runtime";
     for ext in rir.extern_fns() {
         let lib = interner.resolve(&ext.library).to_string();
+        if is_skipped(&lib) {
+            continue;
+        }
         libs.insert(lib, convert(ext.link_mode));
     }
     for (lib, link_mode, _) in rir.empty_link_extern_blocks() {
         let name = interner.resolve(lib).to_string();
+        if is_skipped(&name) {
+            continue;
+        }
         libs.insert(name, convert(*link_mode));
     }
     libs.into_iter().collect()

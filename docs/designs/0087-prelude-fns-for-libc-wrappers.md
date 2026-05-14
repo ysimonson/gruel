@@ -174,12 +174,11 @@ No new permanent diagnostics. Phases 2 / 3 / 4 / 5 / 6 each may temporarily fire
 
 ### Phase 1: Prelude crate + linkage scaffolding
 
-- [ ] Add a `prelude` module (or set of modules) in `gruel-builtins`.
-- [ ] Establish injection: the compiler walks prelude fns the same way it walks `String`/`Vec(T)` synthetic structs today (see ADR-0020).
-- [ ] Add the prelude's `link_extern("c") { … }` block (libc bindings used by every Phase 2–5 migration: `write`, `read`, `exit`, `malloc`, `free`, `realloc`, `memcmp`). Ordinary source `link_extern`; no compiler-side implicit-link machinery.
-- [ ] Add the prelude's `link_extern("gruel_runtime") { … }` block declaring the surviving `__gruel_*` symbols (`__gruel_parse_*`, `__gruel_random_*`, `__gruel_utf8_*`, `__gruel_cstr_to_vec`) and, until Phase 3 retires them, the `__gruel_dbg_*` symbols. Verify the library-set walker emits the runtime archive on the link line (it already does today; the prelude declaration is what makes the binding source-visible rather than codegen-magic).
-- [ ] Pthread library-naming: emit the prelude's pthread block as `link_extern("pthread")` on glibc Linux, fold the symbols into `link_extern("c")` on musl and Darwin. Implemented as part of the prelude-emission step that runs per target.
-- [ ] Verify the prelude fn name namespace doesn't clash with anything in existing spec tests.
+- [x] New file `prelude/runtime.gruel` carries the link bindings. The existing `_prelude.gruel` manifest gains `@import("runtime.gruel")` as its first entry; `PRELUDE_SUBMODULE_ORDER` in `gruel-compiler/src/prelude_source.rs` lists `runtime.gruel` first so the bindings are visible to every subsequent prelude module. No new injection mechanism — the `String`/`Vec(T)` path already covers prelude source files (`unit.rs` stages every prelude file as a parsed AST with a prelude `FileId`).
+- [x] Prelude `link_extern("c") { … }` block declares `write`, `read`, `exit`, `malloc`, `free`, `realloc`, `memcmp` — the libc bindings every Phase 2–6 migration needs. Ordinary source FFI; the library-set walker emits `-lc`. (No callers yet — Phases 2+ wire them.)
+- [x] Prelude `link_extern("gruel_runtime") { … }` block declares the surviving `__gruel_*` algorithmic helpers (`__gruel_parse_{i32,i64,u32,u64}`, `__gruel_random_{u32,u64}`, `__gruel_utf8_validate`). `collect_extern_link_libraries` special-cases `"gruel_runtime"` and skips its `-l` emission — the archive is already linked by absolute path (`link_system_with_warnings` adds it before user libs); the source-level declaration is purely for sema's binding resolution. (`__gruel_cstr_to_vec` declared in `cstr_to_vec` callers in Phase 4 when it lands; `__gruel_dbg_*` declared in Phase 3 when the dbg migration adds them.)
+- [ ] **Deferred** — Pthread library-naming target-conditional. Pthread bindings are only needed for Phase 5 (threads) which is itself deferred per the user's "push through, defer Phase 5 if it blocks" decision. The block will land alongside Phase 5.
+- [x] Verified prelude fn name namespace doesn't clash — Phase 1 adds zero prelude fns (just the `link_extern` declarations). Phase 2+ introduce names; namespace conflicts surface there per phase.
 
 ### Phase 2: Migrate the panic family
 

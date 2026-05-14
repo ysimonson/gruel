@@ -39,6 +39,9 @@ const PRELUDE_ROOT_REL: &str = "_prelude.gruel";
 /// order; any unlisted `.gruel` files under `prelude/` are loaded
 /// alphabetically after the listed ones.
 const PRELUDE_SUBMODULE_ORDER: &[&str] = &[
+    // ADR-0087: extern bindings to libc and the Gruel runtime archive.
+    // Loaded first so other prelude modules can reference the bindings.
+    "runtime.gruel",
     "interfaces.gruel",
     "target.gruel",
     "type_info.gruel",

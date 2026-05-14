@@ -1,0 +1,48 @@
+// ADR-0087: prelude bindings to libc and the Gruel runtime archive.
+//
+// This file declares extern fn signatures that subsequent ADR-0087
+// phases will use to host prelude bodies for what used to be intrinsics
+// (panic, alloc, parse_*, etc.). Phase 1 only adds the declarations —
+// they have no callers yet, so the link line picks up a `-lc` flag but
+// no Gruel symbols actually reference these signatures until Phase 2+.
+//
+// The `gruel_runtime` library name is special-cased in the
+// library-set walker (see `collect_extern_link_libraries` in
+// `gruel-compiler/src/unit.rs`): it does not get a `-l` flag because
+// the runtime archive is already linked by absolute path. The
+// declaration is purely a name-binding contract for sema.
+
+// ──────────────────────────── libc ────────────────────────────────
+//
+// Bindings used by Phases 2–6: write (panic / dbg), read (read_line),
+// exit (panic / main-return), malloc / free / realloc (heap), memcmp
+// (Vec.eq). pthread_create / pthread_join (Phase 5 threads) live in a
+// separate target-conditional block — deferred until Phase 5 lands.
+
+link_extern("c") {
+    fn write(fd: c_int, buf: Ptr(u8), n: usize) -> isize;
+    fn read(fd: c_int, buf: MutPtr(u8), n: usize) -> isize;
+    fn exit(code: c_int) -> ();
+    fn malloc(size: usize) -> MutPtr(u8);
+    fn free(p: MutPtr(u8)) -> ();
+    fn realloc(p: MutPtr(u8), n: usize) -> MutPtr(u8);
+    fn memcmp(a: Ptr(u8), b: Ptr(u8), n: usize) -> c_int;
+}
+
+// ────────────────────── Gruel runtime archive ───────────────────────
+//
+// Surviving Rust-runtime helpers whose bodies are real algorithmic
+// work (parse_*, random_*, utf8_validate, cstr_to_vec). Phase 4 wraps
+// these in Gruel prelude fns. The dbg_* symbols stay here until
+// Phase 3 retires them — they're listed so the prelude can still
+// route @dbg through them during the migration window.
+
+link_extern("gruel_runtime") {
+    fn __gruel_parse_i32(buf: Ptr(u8), len: usize) -> i32;
+    fn __gruel_parse_i64(buf: Ptr(u8), len: usize) -> i64;
+    fn __gruel_parse_u32(buf: Ptr(u8), len: usize) -> u32;
+    fn __gruel_parse_u64(buf: Ptr(u8), len: usize) -> u64;
+    fn __gruel_random_u32() -> u32;
+    fn __gruel_random_u64() -> u64;
+    fn __gruel_utf8_validate(buf: Ptr(u8), len: usize) -> u8;
+}

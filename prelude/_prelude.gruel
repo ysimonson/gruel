@@ -1,5 +1,11 @@
 // ADR-0079: prelude root. Auto-loaded; siblings are imported by name.
 
+// ADR-0087: libc + Gruel-runtime extern fn bindings. Declared early so
+// every subsequent prelude module can use them. The block contributes
+// `-lc` to the link line; `gruel_runtime` is special-cased and emits
+// no `-l` flag (the runtime archive is linked by absolute path).
+const __runtime = @import("runtime.gruel");
+
 const __interfaces = @import("interfaces.gruel");
 pub const Drop = __interfaces.Drop;
 pub const Clone = __interfaces.Clone;
