@@ -7,7 +7,7 @@ template = "spec/page.html"
 # `@mark(c)` marker (ADR-0085)
 
 {{ rule(id="10.1:1", cat="normative") }}
-The `@mark(c)` marker applies to function and struct declarations. Applying it to an enum is a compile-time error in v1; future ADRs may lift the restriction once a `c_int`-shaped type is available.
+The `@mark(c)` marker applies to function, struct, and enum declarations. (ADR-0086 widened the applicability set to include enums; the enum case is documented in section [10.4](@/10-c-ffi/04-enum-ffi.md).)
 
 {{ rule(id="10.1:2", cat="normative") }}
 On a function declaration, `@mark(c)` selects the platform C calling convention and suppresses Gruel name mangling on the emitted symbol. Such a function is callable from C using its Gruel identifier as the symbol name unless overridden by `@link_name("…")`.
