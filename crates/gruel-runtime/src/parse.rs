@@ -1,7 +1,11 @@
-//! Integer parsing intrinsics
+//! Integer parsing helpers.
 //!
-//! This module implements the `@parse_i32`, `@parse_i64`, `@parse_u32`, and
-//! `@parse_u64` intrinsics for parsing strings into integers.
+//! ADR-0087 Phase 3 retired the `@parse_i32` / `@parse_i64` /
+//! `@parse_u32` / `@parse_u64` intrinsics; the user-facing surface is
+//! now the prelude fns `parse_i32(&s)` etc. (see
+//! `prelude/runtime_wrappers.gruel`). The wrappers still call the
+//! `__gruel_parse_*` symbols this module exports — the runtime carries
+//! the algorithmic work; the prelude carries the transport.
 
 use crate::platform;
 

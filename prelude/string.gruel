@@ -107,13 +107,16 @@ pub struct String {
         bytes
     }
 
-    // ADR-0072: validated UTF-8 conversions.
+    // ADR-0072: validated UTF-8 conversions. ADR-0087 Phase 3 retired
+    // `@utf8_validate` in favour of a prelude fn; the call site keeps
+    // its `checked` block because the `@parts_to_slice` constructor
+    // remains a checked-only operation.
     pub fn from_utf8(v: Vec(u8)) -> Result(String, Utf8DecodeError) {
         let valid: bool = checked {
             let p = v.ptr();
             let n = v.len();
             let s: Slice(u8) = @parts_to_slice(p, n);
-            @utf8_validate(s)
+            utf8_validate(s)
         };
         if valid {
             let s: String = checked { String::from_utf8_unchecked(v) };

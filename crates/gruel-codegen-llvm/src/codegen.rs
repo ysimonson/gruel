@@ -3372,37 +3372,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
         };
         match id {
-            // ---- Random number generation ----
-            IntrinsicId::RandomU32 => {
-                let runtime_fn = lookup_by_name("random_u32")
-                    .and_then(|d| d.runtime_fn)
-                    .expect("random_u32 has a runtime symbol");
-                let fn_ty = self.ctx.i32_type().fn_type(&[], false);
-                let f = self
-                    .module
-                    .get_function(runtime_fn)
-                    .unwrap_or_else(|| self.module.add_function(runtime_fn, fn_ty, None));
-                self.builder
-                    .build_call(f, &[], "rand")
-                    .unwrap()
-                    .try_as_basic_value()
-                    .basic()
-            }
-            IntrinsicId::RandomU64 => {
-                let runtime_fn = lookup_by_name("random_u64")
-                    .and_then(|d| d.runtime_fn)
-                    .expect("random_u64 has a runtime symbol");
-                let fn_ty = self.ctx.i64_type().fn_type(&[], false);
-                let f = self
-                    .module
-                    .get_function(runtime_fn)
-                    .unwrap_or_else(|| self.module.add_function(runtime_fn, fn_ty, None));
-                self.builder
-                    .build_call(f, &[], "rand")
-                    .unwrap()
-                    .try_as_basic_value()
-                    .basic()
-            }
+            // ADR-0087 Phase 3: @random_u32 / @random_u64 retired —
+            // codegen arms removed. User-facing surface is now the
+            // `random_u32()` / `random_u64()` prelude fns.
 
             // ---- User-triggered panic ----
             IntrinsicId::Panic => {
@@ -3721,79 +3693,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                 }
             }
 
-            // ---- String parsing intrinsics ----
-            IntrinsicId::ParseI32
-            | IntrinsicId::ParseI64
-            | IntrinsicId::ParseU32
-            | IntrinsicId::ParseU64 => {
-                // @parse_*(s: String) -> integer
-                // Extract ptr and len from the String struct, then call __gruel_parse_*.
-                // The runtime symbol comes from the registry (def.runtime_fn).
-                let runtime_fn = lookup_by_name(name_str)
-                    .and_then(|d| d.runtime_fn)
-                    .expect("parse_* intrinsics declare a runtime symbol");
-                let is_32_bit = matches!(id, IntrinsicId::ParseI32 | IntrinsicId::ParseU32);
-                let str_val = self.get_value(args[0]);
-                let (ptr, len) = self.extract_str_ptr_len(str_val);
-                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                let i64_ty = self.ctx.i64_type();
-                let fn_ty_ret = if is_32_bit {
-                    self.ctx
-                        .i32_type()
-                        .fn_type(&[ptr_ty.into(), i64_ty.into()], false)
-                } else {
-                    i64_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false)
-                };
-                let f = self
-                    .module
-                    .get_function(runtime_fn)
-                    .unwrap_or_else(|| self.module.add_function(runtime_fn, fn_ty_ret, None));
-                let result = self
-                    .builder
-                    .build_call(f, &[ptr.into(), len.into()], "parsed")
-                    .unwrap();
-                result.try_as_basic_value().basic()
-            }
-
-            // ---- Read line from stdin ----
-            IntrinsicId::ReadLine => {
-                // @read_line() -> String
-                // Allocate space for the String struct on the stack, call __gruel_read_line(out_ptr),
-                // then load the resulting struct.
-                let str_llvm_ty = gruel_type_to_llvm(ty, self.ctx, self.type_pool)
-                    .expect("read_line must return String (non-void)")
-                    .into_struct_type();
-
-                // Alloca in the entry block.
-                let entry_bb = self.llvm_blocks[0];
-                let current_bb = self.builder.get_insert_block();
-                match entry_bb.get_first_instruction() {
-                    Some(first) => self.builder.position_before(&first),
-                    None => self.builder.position_at_end(entry_bb),
-                }
-                let sret_ptr = self.builder.build_alloca(str_llvm_ty, "rl_sret").unwrap();
-                if let Some(bb) = current_bb {
-                    self.builder.position_at_end(bb);
-                }
-
-                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                let fn_ty = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
-                let runtime_fn = lookup_by_name("read_line")
-                    .and_then(|d| d.runtime_fn)
-                    .expect("read_line has a runtime symbol");
-                let f = self
-                    .module
-                    .get_function(runtime_fn)
-                    .unwrap_or_else(|| self.module.add_function(runtime_fn, fn_ty, None));
-                self.builder.build_call(f, &[sret_ptr.into()], "").unwrap();
-
-                // Load the String struct from the sret alloca.
-                Some(
-                    self.builder
-                        .build_load(str_llvm_ty, sret_ptr, "rl_str")
-                        .unwrap(),
-                )
-            }
+            // ADR-0087 Phase 3: @parse_* / @read_line retired —
+            // user-facing surface is the `parse_i32(&s)` / `read_line()`
+            // prelude fns. Codegen arms removed.
 
             // ---- Raw syscall ----
             IntrinsicId::Syscall => {
@@ -4094,9 +3996,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             IntrinsicId::VecRepeat => Some(self.translate_vec_repeat(args, ty)),
             IntrinsicId::PartsToVec => Some(self.translate_parts_to_vec(args, ty)),
 
-            // ADR-0072: @utf8_validate(s) — call __gruel_utf8_validate(ptr, len) -> u8,
-            // convert to bool.
-            IntrinsicId::Utf8Validate => Some(self.translate_utf8_validate(args)),
+            // ADR-0087 Phase 3: @utf8_validate retired — codegen arm
+            // removed. The prelude `utf8_validate(s)` fn wraps
+            // `__gruel_utf8_validate` directly.
 
             // ADR-0072: @cstr_to_vec(p) — call __gruel_cstr_to_vec(out, p)
             // via sret, return the Vec(u8) aggregate.
@@ -4117,37 +4019,13 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             // opaque). Sema already swapped the result type; just pass
             // through.
             IntrinsicId::PtrCast => Some(self.get_value(args[0])),
-            // @bytes_eq(a, b, n): call memcmp and convert the i32 result
-            // to a bool (0 → true, non-zero → false).
-            IntrinsicId::BytesEq => Some(self.translate_bytes_eq(args)),
+            // ADR-0087 Phase 3: @bytes_eq retired — codegen arm and
+            // translate_bytes_eq deleted. The prelude `bytes_eq` fn
+            // calls libc memcmp directly.
 
             // ---- Fallback: return zero value for unimplemented intrinsics ----
             _ => gruel_type_to_llvm(ty, self.ctx, self.type_pool).map(|t| t.const_zero()),
         }
-    }
-
-    /// Codegen for `@bytes_eq(a, b, n) -> bool` (ADR-0082). Calls
-    /// `__gruel_memcmp` and returns true iff the result is 0.
-    fn translate_bytes_eq(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
-        let a = self.get_value(args[0]).into_pointer_value();
-        let b = self.get_value(args[1]).into_pointer_value();
-        let n = self.get_value(args[2]).into_int_value();
-        let memcmp_fn = self.memcmp_fn();
-        let ret = self
-            .builder
-            .build_call(memcmp_fn, &[a.into(), b.into(), n.into()], "bytes_eq_cmp")
-            .unwrap();
-        let ret_val = ret
-            .try_as_basic_value()
-            .basic()
-            .expect("memcmp returns i32")
-            .into_int_value();
-        let zero = self.ctx.i32_type().const_zero();
-        let eq = self
-            .builder
-            .build_int_compare(inkwell::IntPredicate::EQ, ret_val, zero, "bytes_eq_ok")
-            .unwrap();
-        eq.into()
     }
 
     /// Codegen for `@alloc(size, align) -> MutPtr(T)` (ADR-0082). Direct
@@ -4478,48 +4356,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             .unwrap()
     }
 
-    /// Codegen for `@utf8_validate(s: borrow Slice(u8)) -> bool` (ADR-0072).
-    /// Extracts (ptr, len) from the slice and calls
-    /// `__gruel_utf8_validate(ptr, len) -> u8`, then truncates to i1.
-    fn translate_utf8_validate(&mut self, args: &[CfgValue]) -> BasicValueEnum<'ctx> {
-        let slice_val = self.get_value(args[0]).into_struct_value();
-        let ptr = self
-            .builder
-            .build_extract_value(slice_val, 0, "u8v_ptr")
-            .unwrap()
-            .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(slice_val, 1, "u8v_len")
-            .unwrap()
-            .into_int_value();
-        let i64_ty = self.ctx.i64_type();
-        let i8_ty = self.ctx.i8_type();
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let fn_ty = i8_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-        let callee = self
-            .module
-            .get_function("__gruel_utf8_validate")
-            .unwrap_or_else(|| {
-                self.module
-                    .add_function("__gruel_utf8_validate", fn_ty, None)
-            });
-        let result = self
-            .builder
-            .build_call(callee, &[ptr.into(), len.into()], "utf8_valid")
-            .unwrap()
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-            .into_int_value();
-        // u8 → bool (i1): nonzero is true.
-        let zero = i8_ty.const_zero();
-        let cmp = self
-            .builder
-            .build_int_compare(IntPredicate::NE, result, zero, "u8v_b")
-            .unwrap();
-        cmp.into()
-    }
+    // ADR-0087 Phase 3: translate_utf8_validate deleted — the prelude
+    // `utf8_validate(s: Slice(u8)) -> bool` fn calls
+    // `__gruel_utf8_validate(ptr, len)` directly and compares to 0.
 
     /// Element type from a `Vec(T)` value.
     fn vec_element_type(&self, vec_ty: Type) -> Type {
@@ -4848,16 +4687,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
         self.vec_pack(p, len, cap)
     }
 
-    /// `memcmp(a, b, n)` declaration — libc symbol returning `i32`.
-    fn memcmp_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
-        let i64_ty = self.ctx.i64_type();
-        let i32_ty = self.ctx.i32_type();
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let fn_ty = i32_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
-        self.module
-            .get_function("memcmp")
-            .unwrap_or_else(|| self.module.add_function("memcmp", fn_ty, None))
-    }
+    // ADR-0087 Phase 3: `memcmp_fn` deleted — the prelude `bytes_eq`
+    // fn binds libc `memcmp` itself via `link_extern("c")` and the
+    // last codegen caller (`translate_bytes_eq`) is gone.
 
     /// Translate a CFG terminator into LLVM control flow.
     fn translate_terminator(&mut self, term: Terminator) -> CompileResult<()> {

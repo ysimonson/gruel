@@ -12,13 +12,6 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@panic` | expr | Debug & Diagnostics | — | — | Abort the program with an optional message. |
 | `@assert` | expr | Debug & Diagnostics | — | — | Check a boolean condition; panic if false. |
 | `@cast` | expr | Type Casts | — | — | Numeric type conversion. |
-| `@read_line` | expr | I/O | — | — | Read one line from stdin. |
-| `@parse_i32` | expr | String Parsing | — | — | Parse a String into i32. |
-| `@parse_i64` | expr | String Parsing | — | — | Parse a String into i64. |
-| `@parse_u32` | expr | String Parsing | — | — | Parse a String into u32. |
-| `@parse_u64` | expr | String Parsing | — | — | Parse a String into u64. |
-| `@random_u32` | expr | Random Numbers | — | — | Uniform random 32-bit integer. |
-| `@random_u64` | expr | Random Numbers | — | — | Uniform random 64-bit integer. |
 | `@compile_error` | expr | Compile-time Reflection | — | — | Emit a compile-time error. |
 | `@size_of` | type | Compile-time Reflection | — | — | Size of a type in bytes. |
 | `@align_of` | type | Compile-time Reflection | — | — | Alignment of a type in bytes. |
@@ -67,11 +60,9 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 | `@realloc` | expr | Raw Pointers | — | yes | Resize a raw heap allocation (ADR-0082). |
 | `@free` | expr | Raw Pointers | — | yes | Free a raw heap allocation (ADR-0082). |
 | `@ptr_cast` | expr | Raw Pointers | — | yes | Reinterpret a pointer as another pointer type (ADR-0082). |
-| `@bytes_eq` | expr | Raw Pointers | — | yes | Byte-level equality of two memory regions (ADR-0082). |
 | `@syscall` | expr | System Calls | — | yes | Direct OS system call. |
 | `@test_preview_gate` | expr | Preview / Meta | test_infra | — | Test hook for the preview-feature gate. |
 | `@cstr_to_vec` | expr | Preview / Meta | — | yes | Copy a NUL-terminated C string into a fresh Vec(u8). |
-| `@utf8_validate` | expr | Preview / Meta | — | — | Check whether a byte slice is well-formed UTF-8. |
 
 ## Debug & Diagnostics
 
@@ -119,96 +110,6 @@ This page documents every `@intrinsic` the Gruel compiler recognizes. It is gene
 
 ```gruel
 let y: i64 = @cast(x);
-```
-
-## I/O
-
-### `@read_line`
-
-`@read_line()` returns a `String` containing the next line from standard input, without the trailing newline.
-
-- **Runtime symbol:** `__gruel_read_line`
-
-**Examples:**
-
-```gruel
-let line = @read_line();
-```
-
-## String Parsing
-
-### `@parse_i32`
-
-`@parse_i32(s)` parses `s` as a signed 32-bit integer. Panics on invalid input.
-
-- **Runtime symbol:** `__gruel_parse_i32`
-
-**Examples:**
-
-```gruel
-let n: i32 = @parse_i32(line);
-```
-
-### `@parse_i64`
-
-`@parse_i64(s)` parses `s` as a signed 64-bit integer. Panics on invalid input.
-
-- **Runtime symbol:** `__gruel_parse_i64`
-
-**Examples:**
-
-```gruel
-let n: i64 = @parse_i64(line);
-```
-
-### `@parse_u32`
-
-`@parse_u32(s)` parses `s` as an unsigned 32-bit integer. Panics on invalid input.
-
-- **Runtime symbol:** `__gruel_parse_u32`
-
-**Examples:**
-
-```gruel
-let n: u32 = @parse_u32(line);
-```
-
-### `@parse_u64`
-
-`@parse_u64(s)` parses `s` as an unsigned 64-bit integer. Panics on invalid input.
-
-- **Runtime symbol:** `__gruel_parse_u64`
-
-**Examples:**
-
-```gruel
-let n: u64 = @parse_u64(line);
-```
-
-## Random Numbers
-
-### `@random_u32`
-
-`@random_u32()` returns a uniformly distributed `u32` from the runtime PRNG.
-
-- **Runtime symbol:** `__gruel_random_u32`
-
-**Examples:**
-
-```gruel
-let r = @random_u32();
-```
-
-### `@random_u64`
-
-`@random_u64()` returns a uniformly distributed `u64` from the runtime PRNG.
-
-- **Runtime symbol:** `__gruel_random_u64`
-
-**Examples:**
-
-```gruel
-let r = @random_u64();
 ```
 
 ## Compile-time Reflection
@@ -694,19 +595,6 @@ checked { @free(p, n * @size_of(T), @align_of(T)) }
 let p: MutPtr(T) = checked { @ptr_cast(p_u8) };
 ```
 
-### `@bytes_eq`
-
-`@bytes_eq(a, b, n) -> bool` returns `true` iff the `n` bytes at `a` and `b` are equal. `a` and `b` must be `Ptr(_)` / `MutPtr(_)` values. Used by the prelude `Vec.eq` body so a `Vec(T)` over a Copy struct `T` (without an `Eq` impl) compares element-wise via `memcmp`. Requires a `checked` block.
-
-- **Runtime symbol:** `__gruel_memcmp`
-- **Requires:** `checked { ... }` block
-
-**Examples:**
-
-```gruel
-checked { @bytes_eq(p1, p2, n) }
-```
-
 ## System Calls
 
 ### `@syscall`
@@ -740,17 +628,5 @@ checked { let ret = @syscall(1, 1, buf, n); }
 
 ```gruel
 @cstr_to_vec(p)
-```
-
-### `@utf8_validate`
-
-`@utf8_validate(s: borrow Slice(u8)) -> bool` returns `true` iff the bytes in `s` form a valid UTF-8 sequence. Used by `String::from_utf8` (ADR-0072).
-
-- **Runtime symbol:** `__gruel_utf8_validate`
-
-**Examples:**
-
-```gruel
-@utf8_validate(&v[..])
 ```
 

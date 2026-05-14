@@ -1,7 +1,10 @@
-//! Random number generation intrinsics
+//! Random number generation helpers.
 //!
-//! This module implements the `@random_u32` and `@random_u64` intrinsics for
-//! generating cryptographically-secure random numbers.
+//! ADR-0087 Phase 3 retired the `@random_u32` / `@random_u64`
+//! intrinsics; the user-facing surface is now the prelude fns
+//! `random_u32()` / `random_u64()` (see
+//! `prelude/runtime_wrappers.gruel`). The wrappers still call the
+//! `__gruel_random_*` symbols this module exports.
 
 use crate::platform;
 

@@ -63,3 +63,77 @@ pub fn dbg_space() {
 pub fn dbg_newline() {
     __gruel_dbg_newline();
 }
+
+// ─────────────────────── IO + algorithmic (Phase 3) ─────────────────────
+//
+// `read_line` reads bytes from stdin one byte at a time until a newline
+// or EOF, building up a `Vec(u8)`. Callers that want a `String` wrap
+// with `String::from_utf8` / `from_utf8_unchecked`. Differs from the
+// pre-ADR-0087 `@read_line()` intrinsic which returned `String`
+// directly: the migration commits to handing back raw bytes so the
+// trailing-newline behaviour and the UTF-8 invariant are concerns the
+// caller owns.
+//
+// `parse_*` forward to the runtime archive's `__gruel_parse_*`
+// helpers, which take `(ptr, len)`. The Gruel wrappers extract
+// `(s.bytes.ptr(), s.bytes.len())` directly (field-projection
+// pattern) rather than going through `String::ptr()` / `String::len()`
+// — method dispatch on a `Ref(String)` param trips
+// `MoveOutOfBorrow` in today's sema; field projection works because
+// `analyze_inst_for_projection` handles ref-typed bases.
+//
+// `random_*` and `utf8_validate` are equally thin; `bytes_eq` wraps
+// libc `memcmp` (compared to `0`).
+
+pub fn read_line() -> Vec(u8) {
+    let mut buf: Vec(u8) = Vec(u8)::new();
+    let mut byte: u8 = 0;
+    let newline: u8 = 10;
+    loop {
+        let p: MutPtr(u8) = checked { MutPtr(u8)::from(&mut byte) };
+        let n: isize = libc_read(0, p, 1);
+        if n <= 0 {
+            break;
+        }
+        if byte == newline {
+            break;
+        }
+        buf.push(byte);
+    }
+    buf
+}
+
+pub fn parse_i32(s: Ref(String)) -> i32 {
+    __gruel_parse_i32(s.bytes.ptr(), s.bytes.len())
+}
+
+pub fn parse_i64(s: Ref(String)) -> i64 {
+    __gruel_parse_i64(s.bytes.ptr(), s.bytes.len())
+}
+
+pub fn parse_u32(s: Ref(String)) -> u32 {
+    __gruel_parse_u32(s.bytes.ptr(), s.bytes.len())
+}
+
+pub fn parse_u64(s: Ref(String)) -> u64 {
+    __gruel_parse_u64(s.bytes.ptr(), s.bytes.len())
+}
+
+pub fn random_u32() -> u32 {
+    __gruel_random_u32()
+}
+
+pub fn random_u64() -> u64 {
+    __gruel_random_u64()
+}
+
+pub fn utf8_validate(s: Slice(u8)) -> bool {
+    // `s.ptr()` lowers to `@slice_ptr` which requires `checked`.
+    let r: u8 = checked { __gruel_utf8_validate(s.ptr(), s.len()) };
+    r != 0
+}
+
+pub fn bytes_eq(a: Ptr(u8), b: Ptr(u8), n: usize) -> bool {
+    let r: c_int = libc_memcmp(a, b, n);
+    r == 0
+}

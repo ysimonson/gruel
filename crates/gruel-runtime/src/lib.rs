@@ -87,7 +87,8 @@ pub mod heap;
 pub mod debug;
 pub mod entry;
 pub mod error;
-pub mod io;
+// ADR-0087 Phase 3: `io` module retired — the prelude `read_line()`
+// fn drives libc `read` directly. `__gruel_read_line` is gone.
 pub mod parse;
 pub mod random;
 // ADR-0084: pthread-backed @spawn / JoinHandle::join.

@@ -87,20 +87,14 @@ impl<'a> Sema<'a> {
             IntrinsicId::TestPreviewGate => {
                 self.analyze_test_preview_gate_intrinsic(air, &args, span)
             }
-            IntrinsicId::ReadLine => self.analyze_read_line_intrinsic(air, name, &args, span),
-            IntrinsicId::ParseI32
-            | IntrinsicId::ParseI64
-            | IntrinsicId::ParseU32
-            | IntrinsicId::ParseU64 => {
-                self.analyze_parse_intrinsic(air, name, def.name, &args, span, ctx)
-            }
+            // ADR-0087 Phase 3: @read_line / @parse_* / @random_*
+            // retired in favour of prelude fns (`read_line()`,
+            // `parse_i32(&s)`, `random_u32()` etc.).
             IntrinsicId::Cast => self.analyze_cast_intrinsic(air, inst_ref, &args, span, ctx),
             IntrinsicId::Panic => self.analyze_panic_intrinsic(air, &args, span, ctx),
             IntrinsicId::Assert => self.analyze_assert_intrinsic(air, &args, span, ctx),
             IntrinsicId::Import => self.analyze_import_intrinsic(air, &args, span),
             IntrinsicId::EmbedFile => self.analyze_embed_file_intrinsic(air, &args, span, ctx),
-            IntrinsicId::RandomU32 => self.analyze_random_u32_intrinsic(air, name, &args, span),
-            IntrinsicId::RandomU64 => self.analyze_random_u64_intrinsic(air, name, &args, span),
             IntrinsicId::PtrRead | IntrinsicId::PtrReadVolatile => {
                 self.analyze_ptr_read_intrinsic(air, name, &args, span, ctx)
             }
@@ -190,10 +184,8 @@ impl<'a> Sema<'a> {
             IntrinsicId::VecLiteral => self.analyze_vec_literal_intrinsic(air, &args, span, ctx),
             IntrinsicId::VecRepeat => self.analyze_vec_repeat_intrinsic(air, &args, span, ctx),
             IntrinsicId::PartsToVec => self.analyze_parts_to_vec_intrinsic(air, &args, span, ctx),
-            // ADR-0072: validate UTF-8 of a borrowed Slice(u8). Returns bool.
-            IntrinsicId::Utf8Validate => {
-                self.analyze_utf8_validate_intrinsic(air, &args, span, ctx)
-            }
+            // ADR-0087 Phase 3: @utf8_validate retired — see prelude
+            // `utf8_validate(s: Slice(u8)) -> bool` fn.
             // ADR-0072: copy a NUL-terminated C string into a fresh Vec(u8).
             IntrinsicId::CStrToVec => {
                 self.analyze_cstr_to_vec_intrinsic(air, &args, span, ctx)
@@ -209,9 +201,8 @@ impl<'a> Sema<'a> {
             IntrinsicId::PtrCast => {
                 self.analyze_ptr_cast_intrinsic(air, inst_ref, &args, span, ctx)
             }
-            IntrinsicId::BytesEq => {
-                self.analyze_bytes_eq_intrinsic(air, &args, span, ctx)
-            }
+            // ADR-0087 Phase 3: @bytes_eq retired — see prelude
+            // `bytes_eq(a, b, n)` fn (wraps libc memcmp).
             // ADR-0084: spawn a worker thread.
             IntrinsicId::Spawn => self.analyze_spawn_intrinsic(air, &args, span, ctx),
             // ADR-0084: prelude-internal wrapper around __gruel_thread_join.
@@ -222,57 +213,9 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// Analyze `@bytes_eq(a, b, n: usize) -> bool` (ADR-0082).
-    fn analyze_bytes_eq_intrinsic(
-        &mut self,
-        air: &mut Air,
-        args: &[RirCallArg],
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        Self::require_checked_for_intrinsic(ctx, "bytes_eq", span)?;
-        if args.len() != 3 {
-            return Err(CompileError::new(
-                ErrorKind::WrongArgumentCount {
-                    expected: 3,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-        let a = self.analyze_inst(air, args[0].value, ctx)?;
-        let b = self.analyze_inst(air, args[1].value, ctx)?;
-        let n = self.analyze_inst(air, args[2].value, ctx)?;
-        // Accept any Ptr/MutPtr for a and b — caller will have already
-        // narrowed via @ptr_cast if needed. Reject obvious mismatches.
-        let a_ok = matches!(a.ty.kind(), TypeKind::PtrConst(_) | TypeKind::PtrMut(_));
-        let b_ok = matches!(b.ty.kind(), TypeKind::PtrConst(_) | TypeKind::PtrMut(_));
-        if (!a_ok && !a.ty.is_error()) || (!b_ok && !b.ty.is_error()) {
-            return Err(CompileError::type_mismatch(
-                "Ptr(_) or MutPtr(_)".to_string(),
-                format!(
-                    "{} and {}",
-                    self.format_type_name(a.ty),
-                    self.format_type_name(b.ty)
-                ),
-                span,
-            ));
-        }
-        Self::require_usize(self, "bytes_eq", "n", n.ty, span)?;
-        let args_start =
-            air.add_extra(&[a.air_ref.as_u32(), b.air_ref.as_u32(), n.air_ref.as_u32()]);
-        let name = self.interner.get_or_intern_static("bytes_eq");
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Intrinsic {
-                name,
-                args_start,
-                args_len: 3,
-            },
-            ty: Type::BOOL,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, Type::BOOL))
-    }
+    // ADR-0087 Phase 3: analyze_bytes_eq_intrinsic deleted — surface
+    // is now the `bytes_eq(a, b, n)` prelude fn that wraps libc
+    // memcmp.
 
     /// Analyze `@cstr_to_vec(p: Ptr(u8)) -> Vec(u8)` (ADR-0072).
     fn analyze_cstr_to_vec_intrinsic(
@@ -318,46 +261,8 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, vec_ty))
     }
 
-    /// Analyze `@utf8_validate(s: borrow Slice(u8)) -> bool` (ADR-0072).
-    fn analyze_utf8_validate_intrinsic(
-        &mut self,
-        air: &mut Air,
-        args: &[RirCallArg],
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        if args.len() != 1 {
-            return Err(CompileError::new(
-                ErrorKind::WrongArgumentCount {
-                    expected: 1,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-        let s = self.analyze_inst(air, args[0].value, ctx)?;
-        // Accept either `Slice(u8)` or `&v[..]` (already a Slice(u8)).
-        let is_slice_u8 = matches!(s.ty.kind(), TypeKind::Slice(_) | TypeKind::MutSlice(_));
-        if !is_slice_u8 && !s.ty.is_error() {
-            return Err(CompileError::type_mismatch(
-                "Slice(u8)".to_string(),
-                self.format_type_name(s.ty),
-                span,
-            ));
-        }
-        let args_start = air.add_extra(&[s.air_ref.as_u32()]);
-        let name = self.interner.get_or_intern_static("utf8_validate");
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Intrinsic {
-                name,
-                args_start,
-                args_len: 1,
-            },
-            ty: Type::BOOL,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, Type::BOOL))
-    }
+    // ADR-0087 Phase 3: analyze_utf8_validate_intrinsic deleted —
+    // surface is now the `utf8_validate(s: Slice(u8))` prelude fn.
 
     /// Analyze `@alloc(size: usize, align: usize) -> MutPtr(T)` (ADR-0082).
     /// Result type is inferred from the binding context (HM inference) and
@@ -1063,170 +968,12 @@ impl<'a> Sema<'a> {
         Ok(AnalysisResult::new(air_ref, field_ty))
     }
 
-    /// Analyze @read_line intrinsic.
-    fn analyze_read_line_intrinsic(
-        &mut self,
-        air: &mut Air,
-        name: Spur,
-        args: &[RirCallArg],
-        span: Span,
-    ) -> CompileResult<AnalysisResult> {
-        // @read_line() - reads a line from stdin and returns it as a String.
-        // Takes no arguments, returns String.
-        if !args.is_empty() {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicWrongArgCount {
-                    name: "read_line".to_string(),
-                    expected: 0,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-
-        // Get the String type
-        let string_type = self.builtin_string_type();
-
-        // Create the intrinsic instruction that returns String
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Intrinsic {
-                name,
-                args_start: 0, // No args
-                args_len: 0,
-            },
-            ty: string_type,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, string_type))
-    }
-
-    /// Analyze @parse_i32, @parse_i64, @parse_u32, @parse_u64 intrinsics.
-    fn analyze_parse_intrinsic(
-        &mut self,
-        air: &mut Air,
-        name: Spur,
-        intrinsic_name_str: &str,
-        args: &[RirCallArg],
-        span: Span,
-        ctx: &mut AnalysisContext,
-    ) -> CompileResult<AnalysisResult> {
-        // Expects exactly one argument
-        if args.len() != 1 {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicWrongArgCount {
-                    name: intrinsic_name_str.to_string(),
-                    expected: 1,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-
-        // Analyze the argument - String borrows are handled by
-        // analyze_inst_for_projection to avoid consuming the String
-        let arg_result = self.analyze_inst_for_projection(air, args[0].value, ctx)?;
-        let arg_type = arg_result.ty;
-
-        // Argument must be a String
-        if !self.is_builtin_string(arg_type) {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicTypeMismatch(Box::new(IntrinsicTypeMismatchError {
-                    name: format!("@{}", intrinsic_name_str),
-                    expected: "String".to_string(),
-                    found: arg_type.name().to_string(),
-                })),
-                span,
-            ));
-        }
-
-        // Determine the return type based on the intrinsic name
-        let return_type = match intrinsic_name_str {
-            "parse_i32" => Type::I32,
-            "parse_i64" => Type::I64,
-            "parse_u32" => Type::U32,
-            "parse_u64" => Type::U64,
-            _ => unreachable!(),
-        };
-
-        // Encode args into extra array
-        let args_start = air.add_extra(&[arg_result.air_ref.as_u32()]);
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Intrinsic {
-                name,
-                args_start,
-                args_len: 1,
-            },
-            ty: return_type,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, return_type))
-    }
-
-    /// Analyze @random_u32 intrinsic.
-    fn analyze_random_u32_intrinsic(
-        &mut self,
-        air: &mut Air,
-        name: Spur,
-        args: &[RirCallArg],
-        span: Span,
-    ) -> CompileResult<AnalysisResult> {
-        // @random_u32() - takes no arguments, returns u32
-        if !args.is_empty() {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicWrongArgCount {
-                    name: "random_u32".to_string(),
-                    expected: 0,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-
-        // Create the intrinsic instruction that returns u32
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Intrinsic {
-                name,
-                args_start: 0, // No args
-                args_len: 0,
-            },
-            ty: Type::U32,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, Type::U32))
-    }
-
-    /// Analyze @random_u64 intrinsic.
-    fn analyze_random_u64_intrinsic(
-        &mut self,
-        air: &mut Air,
-        name: Spur,
-        args: &[RirCallArg],
-        span: Span,
-    ) -> CompileResult<AnalysisResult> {
-        // @random_u64() - takes no arguments, returns u64
-        if !args.is_empty() {
-            return Err(CompileError::new(
-                ErrorKind::IntrinsicWrongArgCount {
-                    name: "random_u64".to_string(),
-                    expected: 0,
-                    found: args.len(),
-                },
-                span,
-            ));
-        }
-
-        // Create the intrinsic instruction that returns u64
-        let air_ref = air.add_inst(AirInst {
-            data: AirInstData::Intrinsic {
-                name,
-                args_start: 0, // No args
-                args_len: 0,
-            },
-            ty: Type::U64,
-            span,
-        });
-        Ok(AnalysisResult::new(air_ref, Type::U64))
-    }
+    // ADR-0087 Phase 3: analyze_read_line_intrinsic /
+    // analyze_parse_intrinsic / analyze_random_u32_intrinsic /
+    // analyze_random_u64_intrinsic deleted with the corresponding
+    // intrinsic ids — the user-facing surface is now the
+    // `read_line()` / `parse_i32(&s)` / `random_u32()` prelude fns
+    // (sema reaches their bodies via the normal Call path).
 
     /// Analyze @import intrinsic.
     ///

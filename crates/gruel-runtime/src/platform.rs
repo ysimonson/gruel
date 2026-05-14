@@ -11,12 +11,6 @@
 // We declare just the libc functions we need rather than depending on the libc
 // crate, because the runtime is compiled directly by rustc (not through Cargo).
 
-// Opaque FILE type — we only use it as a pointer.
-#[repr(C)]
-pub(crate) struct File {
-    _opaque: [u8; 0],
-}
-
 unsafe extern "C" {
     fn write(fd: i32, buf: *const u8, count: usize) -> isize;
     fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
@@ -27,20 +21,13 @@ unsafe extern "C" {
     pub(crate) fn malloc(size: usize) -> *mut u8;
     pub(crate) fn realloc(ptr: *mut u8, size: usize) -> *mut u8;
     pub(crate) fn free(ptr: *mut u8);
-    pub(crate) fn getline(lineptr: *mut *mut u8, n: *mut usize, stream: *mut File) -> isize;
 }
 
-// stdin symbol name differs by platform.
-#[cfg(target_os = "linux")]
-unsafe extern "C" {
-    pub(crate) static stdin: *mut File;
-}
-
-#[cfg(target_os = "macos")]
-unsafe extern "C" {
-    #[link_name = "__stdinp"]
-    pub(crate) static stdin: *mut File;
-}
+// ADR-0087 Phase 3: the runtime's `__gruel_read_line` (which used
+// libc `getline` + the `stdin` FILE*) is gone — the prelude
+// `read_line()` fn drives libc `read(0, …)` directly, so the
+// `File` / `getline` / `stdin` extern declarations and platform
+// symbol-name shim no longer have a caller in the runtime.
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {

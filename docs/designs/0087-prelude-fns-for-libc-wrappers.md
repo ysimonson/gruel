@@ -140,12 +140,12 @@ No new permanent diagnostics. Phases 2 / 3 / 4 each may temporarily fire a `Intr
 
 ### Phase 3: Migrate IO + algorithmic wrappers
 
-- [ ] Add `String::ptr(self: Ref(Self)) -> Ptr(u8) { checked { self.bytes.ptr() } }` to `prelude/string.gruel`.
-- [ ] Add prelude fns: `read_line() -> Vec(u8)`, `parse_i32(s: Ref(String)) -> i32` (and i64/u32/u64), `random_u32() -> u32`, `random_u64() -> u64`, `utf8_validate(s: Slice(u8)) -> bool`, `bytes_eq(a: Ptr(u8), b: Ptr(u8), n: usize) -> bool`.
-- [ ] Sema/codegen: remove the corresponding `IntrinsicId::*` variants and arms (`ReadLine`, `ParseI32`/`I64`/`U32`/`U64`, `RandomU32`/`U64`, `Utf8Validate`, `BytesEq`).
-- [ ] Lexer/parser: the `@`-prefixed names stop parsing.
-- [ ] Update in-tree callers (mostly Vec methods that use `@bytes_eq`/`@utf8_validate`, plus spec tests for parse/random/read_line) — note `@parse_i32(s)` becomes `parse_i32(&s)` (explicit borrow rather than the intrinsic's implicit projection).
-- [ ] Runtime: keep `__gruel_parse_*`, `__gruel_random_*`, `__gruel_utf8_validate` (the prelude fns wrap them); delete `__gruel_read_line` after the prelude fn is in.
+- [x] Add `String::ptr(self: Ref(Self)) -> Ptr(u8) { self.bytes.ptr() }` to `prelude/string.gruel`. (Done in Phase 2; the body uses field access rather than the `checked { … }` wrapper sketched in the original ADR — `Vec(T)::ptr` already returns a typed `Ptr(T)` so no `@ptr_cast` is needed.)
+- [x] Add prelude fns: `read_line() -> Vec(u8)`, `parse_i32(s: Ref(String)) -> i32` (and i64/u32/u64), `random_u32() -> u32`, `random_u64() -> u64`, `utf8_validate(s: Slice(u8)) -> bool`, `bytes_eq(a: Ptr(u8), b: Ptr(u8), n: usize) -> bool`.
+- [x] Sema/codegen: remove the corresponding `IntrinsicId::*` variants and arms (`ReadLine`, `ParseI32`/`I64`/`U32`/`U64`, `RandomU32`/`U64`, `Utf8Validate`, `BytesEq`). Their helper methods (`analyze_*_intrinsic`, `translate_*`, `memcmp_fn`) are deleted along with them.
+- [x] Lexer/parser: the `@`-prefixed names stop parsing. (Falls out naturally — the registry no longer has those rows, so the existing `lookup_by_name` returns `None` and the user gets an `UnknownIntrinsic` diagnostic.)
+- [x] Update in-tree callers: `prelude/string.gruel`'s `from_utf8` now calls the prelude `utf8_validate(s)` fn (still inside its `checked` block because `@parts_to_slice` is checked-only). No Vec callers needed updating; the `Vec(T)::eq` body uses `==` per-element, not `@bytes_eq`. Spec tests for `@read_line` / `@parse_*` / `@random_*` are deleted along with the spec paragraphs they cited; the prelude fns are library code and don't need normative spec entries (`docs/spec/src/04-expressions/13-intrinsics.md` keeps only the table/sections for the surviving intrinsics).
+- [x] Runtime: keep `__gruel_parse_*`, `__gruel_random_*`, `__gruel_utf8_validate` (the prelude fns wrap them); deleted `__gruel_read_line` + its `crates/gruel-runtime/src/io.rs` host + the `File` / `getline` / `stdin` extern declarations + the `stdin` symbol-name shim from `platform.rs`. The new `read_line` prelude body drives libc `read(0, …)` directly.
 
 ### Phase 4: Migrate heap + retire `__gruel_exit`
 

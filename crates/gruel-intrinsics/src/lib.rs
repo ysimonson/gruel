@@ -34,15 +34,11 @@ pub enum IntrinsicId {
     Cast,
 
     // ---- I/O ----
-    ReadLine,
-    ParseI32,
-    ParseI64,
-    ParseU32,
-    ParseU64,
-
-    // ---- Random ----
-    RandomU32,
-    RandomU64,
+    // ADR-0087 Phase 3: `@read_line`, `@parse_*`, `@random_*` retired
+    // here — replaced by prelude fns `read_line()`, `parse_i32(s)`
+    // etc. in `prelude/runtime_wrappers.gruel`. The runtime helpers
+    // (`__gruel_parse_*`, `__gruel_random_*`) remain; the prelude fns
+    // wrap them.
 
     // ---- Comptime / reflection ----
     SizeOf,
@@ -103,7 +99,10 @@ pub enum IntrinsicId {
     PartsToVec,
 
     // ---- ADR-0072 String / Vec(u8) bridge ----
-    Utf8Validate,
+    // ADR-0087 Phase 3: `@utf8_validate` retired in favour of the
+    // `utf8_validate(s: Slice(u8)) -> bool` prelude fn. The runtime
+    // helper `__gruel_utf8_validate` remains. `@cstr_to_vec` stays
+    // (blocked on whole-aggregate `@uninit` per ADR-0087).
     CStrToVec,
 
     // ---- ADR-0082 memory intrinsics (require checked) ----
@@ -120,11 +119,8 @@ pub enum IntrinsicId {
     /// the inferred target pointer type. Result type comes from HM
     /// inference (let-annotation or call context).
     PtrCast,
-    /// `@bytes_eq(a, b, n) -> bool`: byte-level equality of two pointers.
-    /// Lowered to `__gruel_memcmp`. Used by the prelude `Vec.eq` body so
-    /// `Vec(T)` for a Copy struct `T` (e.g. `Pair { x: i32, y: i32 }`)
-    /// compares correctly without requiring `T: Eq`.
-    BytesEq,
+    // ADR-0087 Phase 3: `@bytes_eq` retired in favour of the prelude
+    // `bytes_eq(a, b, n) -> bool` fn (wraps libc `memcmp`).
 
     // ---- ADR-0079 Phase 2b: derive-construction primitives ----
     /// `@uninit(T) -> Uninit(T)`: handle to T-sized storage. Drop is
@@ -347,90 +343,12 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         description: "`@cast(x)` converts between integer and/or float types. The target type is inferred from context.",
         examples: &["let y: i64 = @cast(x);"],
     },
-    IntrinsicDef {
-        id: IntrinsicId::ReadLine,
-        name: "read_line",
-        kind: IntrinsicKind::Expr,
-        category: Category::Io,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: Some("__gruel_read_line"),
-        summary: "Read one line from stdin.",
-        description: "`@read_line()` returns a `String` containing the next line from standard input, without the trailing newline.",
-        examples: &["let line = @read_line();"],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::ParseI32,
-        name: "parse_i32",
-        kind: IntrinsicKind::Expr,
-        category: Category::Parse,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: Some("__gruel_parse_i32"),
-        summary: "Parse a String into i32.",
-        description: "`@parse_i32(s)` parses `s` as a signed 32-bit integer. Panics on invalid input.",
-        examples: &["let n: i32 = @parse_i32(line);"],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::ParseI64,
-        name: "parse_i64",
-        kind: IntrinsicKind::Expr,
-        category: Category::Parse,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: Some("__gruel_parse_i64"),
-        summary: "Parse a String into i64.",
-        description: "`@parse_i64(s)` parses `s` as a signed 64-bit integer. Panics on invalid input.",
-        examples: &["let n: i64 = @parse_i64(line);"],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::ParseU32,
-        name: "parse_u32",
-        kind: IntrinsicKind::Expr,
-        category: Category::Parse,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: Some("__gruel_parse_u32"),
-        summary: "Parse a String into u32.",
-        description: "`@parse_u32(s)` parses `s` as an unsigned 32-bit integer. Panics on invalid input.",
-        examples: &["let n: u32 = @parse_u32(line);"],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::ParseU64,
-        name: "parse_u64",
-        kind: IntrinsicKind::Expr,
-        category: Category::Parse,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: Some("__gruel_parse_u64"),
-        summary: "Parse a String into u64.",
-        description: "`@parse_u64(s)` parses `s` as an unsigned 64-bit integer. Panics on invalid input.",
-        examples: &["let n: u64 = @parse_u64(line);"],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::RandomU32,
-        name: "random_u32",
-        kind: IntrinsicKind::Expr,
-        category: Category::Random,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: Some("__gruel_random_u32"),
-        summary: "Uniform random 32-bit integer.",
-        description: "`@random_u32()` returns a uniformly distributed `u32` from the runtime PRNG.",
-        examples: &["let r = @random_u32();"],
-    },
-    IntrinsicDef {
-        id: IntrinsicId::RandomU64,
-        name: "random_u64",
-        kind: IntrinsicKind::Expr,
-        category: Category::Random,
-        requires_unchecked: false,
-        preview: None,
-        runtime_fn: Some("__gruel_random_u64"),
-        summary: "Uniform random 64-bit integer.",
-        description: "`@random_u64()` returns a uniformly distributed `u64` from the runtime PRNG.",
-        examples: &["let r = @random_u64();"],
-    },
+    // ADR-0087 Phase 3: read_line, parse_*, random_* moved to prelude
+    // fns in `prelude/runtime_wrappers.gruel`. The user-facing surface
+    // is now `read_line()`, `parse_i32(&s)`, `random_u32()` etc. (no
+    // `@` prefix). The runtime helpers (`__gruel_parse_*`,
+    // `__gruel_random_*`) remain; `__gruel_read_line` is deleted —
+    // the new `read_line` prelude body loops over libc `read`.
     IntrinsicDef {
         id: IntrinsicId::SizeOf,
         name: "size_of",
@@ -1022,22 +940,9 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         description: "`@cstr_to_vec(p: Ptr(u8)) -> Vec(u8)` runs `strlen(p)`, allocates `cap >= len` bytes, and copies. Used by `String::from_c_str` (ADR-0072).",
         examples: &["@cstr_to_vec(p)"],
     },
-    IntrinsicDef {
-        id: IntrinsicId::Utf8Validate,
-        name: "utf8_validate",
-        kind: IntrinsicKind::Expr,
-        category: Category::Meta,
-        requires_unchecked: false,
-        // Implementation-detail intrinsic invoked by the prelude
-        // `String::from_utf8` body. The user-visible gate is on
-        // `String::from_utf8` itself (ADR-0072), so this stays ungated to
-        // allow eager prelude analysis without `--preview string_vec_bridge`.
-        preview: None,
-        runtime_fn: Some("__gruel_utf8_validate"),
-        summary: "Check whether a byte slice is well-formed UTF-8.",
-        description: "`@utf8_validate(s: borrow Slice(u8)) -> bool` returns `true` iff the bytes in `s` form a valid UTF-8 sequence. Used by `String::from_utf8` (ADR-0072).",
-        examples: &["@utf8_validate(&v[..])"],
-    },
+    // ADR-0087 Phase 3: `@utf8_validate` retired — replaced by the
+    // prelude `utf8_validate(s: Slice(u8)) -> bool` fn. Runtime helper
+    // `__gruel_utf8_validate` stays.
     // ADR-0082: Gruel-callable wrappers for the existing
     // `__gruel_alloc` / `__gruel_realloc` / `__gruel_free` runtime
     // symbols. These let prelude collection types (Vec, future
@@ -1092,18 +997,8 @@ pub const INTRINSICS: &[IntrinsicDef] = &[
         description: "`@ptr_cast(p) -> MutPtr(T)` / `Ptr(T)` reinterprets the raw pointer `p` as a pointer of the target type, where the target is inferred from the binding context (HM inference, like `@cast`). Both source and target must be `MutPtr(_)` / `Ptr(_)`. The cast is a no-op at the LLVM level (pointers are opaque); only the Gruel-side type tracking changes. Requires a `checked` block.",
         examples: &["let p: MutPtr(T) = checked { @ptr_cast(p_u8) };"],
     },
-    IntrinsicDef {
-        id: IntrinsicId::BytesEq,
-        name: "bytes_eq",
-        kind: IntrinsicKind::Expr,
-        category: Category::Pointer,
-        requires_unchecked: true,
-        preview: None,
-        runtime_fn: Some("__gruel_memcmp"),
-        summary: "Byte-level equality of two memory regions (ADR-0082).",
-        description: "`@bytes_eq(a, b, n) -> bool` returns `true` iff the `n` bytes at `a` and `b` are equal. `a` and `b` must be `Ptr(_)` / `MutPtr(_)` values. Used by the prelude `Vec.eq` body so a `Vec(T)` over a Copy struct `T` (without an `Eq` impl) compares element-wise via `memcmp`. Requires a `checked` block.",
-        examples: &["checked { @bytes_eq(p1, p2, n) }"],
-    },
+    // ADR-0087 Phase 3: `@bytes_eq` retired — replaced by the prelude
+    // `bytes_eq(a, b, n) -> bool` fn (wraps libc `memcmp`).
 ];
 
 // ============================================================================
@@ -1587,13 +1482,6 @@ mod tests {
                 | IntrinsicId::Assert
                 | IntrinsicId::CompileError
                 | IntrinsicId::Cast
-                | IntrinsicId::ReadLine
-                | IntrinsicId::ParseI32
-                | IntrinsicId::ParseI64
-                | IntrinsicId::ParseU32
-                | IntrinsicId::ParseU64
-                | IntrinsicId::RandomU32
-                | IntrinsicId::RandomU64
                 | IntrinsicId::SizeOf
                 | IntrinsicId::AlignOf
                 | IntrinsicId::TypeName
@@ -1633,7 +1521,6 @@ mod tests {
                 | IntrinsicId::PartsToVec
                 | IntrinsicId::TestPreviewGate
                 | IntrinsicId::Spawn
-                | IntrinsicId::Utf8Validate
                 | IntrinsicId::CStrToVec
                 | IntrinsicId::Uninit
                 | IntrinsicId::Finalize
@@ -1644,7 +1531,6 @@ mod tests {
                 | IntrinsicId::Realloc
                 | IntrinsicId::Free
                 | IntrinsicId::PtrCast
-                | IntrinsicId::BytesEq
                 | IntrinsicId::ThreadJoin => {}
             }
         }

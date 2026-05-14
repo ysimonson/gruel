@@ -922,35 +922,9 @@ impl<'a> ConstraintGenerator<'a> {
                         }
                         InferType::Var(self.fresh_var())
                     }
-                    Some(IntrinsicId::ReadLine) => {
-                        if let Some(string_spur) = self.interner.get("String") {
-                            if let Some(&string_ty) = self.structs.get(&string_spur) {
-                                InferType::Concrete(string_ty)
-                            } else {
-                                InferType::Concrete(Type::ERROR)
-                            }
-                        } else {
-                            InferType::Concrete(Type::ERROR)
-                        }
-                    }
-                    Some(IntrinsicId::ParseI32) => {
-                        visit_args(self, ctx);
-                        InferType::Concrete(Type::I32)
-                    }
-                    Some(IntrinsicId::ParseI64) => {
-                        visit_args(self, ctx);
-                        InferType::Concrete(Type::I64)
-                    }
-                    Some(IntrinsicId::ParseU32) => {
-                        visit_args(self, ctx);
-                        InferType::Concrete(Type::U32)
-                    }
-                    Some(IntrinsicId::ParseU64) => {
-                        visit_args(self, ctx);
-                        InferType::Concrete(Type::U64)
-                    }
-                    Some(IntrinsicId::RandomU32) => InferType::Concrete(Type::U32),
-                    Some(IntrinsicId::RandomU64) => InferType::Concrete(Type::U64),
+                    // ADR-0087 Phase 3: @read_line / @parse_* / @random_*
+                    // intrinsics retired in favour of prelude fns. Their
+                    // inference arms went with them.
                     Some(IntrinsicId::Syscall) => {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::I64)
@@ -1077,11 +1051,8 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::NEVER)
                     }
-                    Some(IntrinsicId::Utf8Validate) => {
-                        // ADR-0072: returns bool.
-                        visit_args(self, ctx);
-                        InferType::Concrete(Type::BOOL)
-                    }
+                    // ADR-0087 Phase 3: @utf8_validate retired — see prelude
+                    // `utf8_validate(s)` fn.
                     Some(IntrinsicId::CStrToVec) => {
                         // ADR-0072: returns Vec(u8).
                         visit_args(self, ctx);
@@ -1103,10 +1074,8 @@ impl<'a> ConstraintGenerator<'a> {
                         visit_args(self, ctx);
                         InferType::Concrete(Type::UNIT)
                     }
-                    Some(IntrinsicId::BytesEq) => {
-                        visit_args(self, ctx);
-                        InferType::Concrete(Type::BOOL)
-                    }
+                    // ADR-0087 Phase 3: @bytes_eq retired — see prelude
+                    // `bytes_eq(a, b, n)` fn.
                     // ADR-0079 Phase 2b: `@field_set` is a unit-yielding side
                     // effect on an uninit handle. `@finalize` returns the
                     // host type — but at HM time we don't yet know the
