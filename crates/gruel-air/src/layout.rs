@@ -180,6 +180,20 @@ fn compute_layout(pool: &TypeInternPool, ty: Type) -> Layout {
         },
         // Pointer-sized: 64-bit target.
         TypeKind::Isize | TypeKind::Usize => Layout::scalar(8, 8),
+        // ADR-0086: C named arithmetic primitive types. Sizes match the
+        // underlying Gruel type on every blessed LP64 target.
+        TypeKind::CSchar | TypeKind::CUchar => Layout::scalar(1, 1),
+        TypeKind::CShort | TypeKind::CUshort => Layout::scalar(2, 2),
+        TypeKind::CInt | TypeKind::CUint => Layout::scalar(4, 4),
+        TypeKind::CLong | TypeKind::CUlong | TypeKind::CLonglong | TypeKind::CUlonglong => {
+            Layout::scalar(8, 8)
+        }
+        TypeKind::CFloat => Layout::scalar(4, 4),
+        TypeKind::CDouble => Layout::scalar(8, 8),
+        // ADR-0086: c_void is an incomplete type with no values. Treated
+        // as zero-sized for layout purposes — sema rejects c_void in any
+        // value-bearing position before this query runs.
+        TypeKind::CVoid => Layout::zero_sized(),
         TypeKind::PtrConst(_) | TypeKind::PtrMut(_) => Layout::scalar(8, 8),
         TypeKind::Ref(_) | TypeKind::MutRef(_) => Layout::scalar(8, 8),
         // Slice: fat pointer { ptr, i64 } — 16 bytes, 8-byte aligned.

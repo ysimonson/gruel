@@ -98,7 +98,23 @@ impl InternedType {
     /// ADR-0071: Unicode scalar value (`char`).
     pub const CHAR: InternedType = InternedType(20);
 
-    const PRIMITIVE_COUNT: u32 = 21;
+    // ADR-0086: C named primitive types. Slot numbers match the `Type` tag
+    // encoding for these variants (21-33).
+    pub const C_SCHAR: InternedType = InternedType(21);
+    pub const C_SHORT: InternedType = InternedType(22);
+    pub const C_INT: InternedType = InternedType(23);
+    pub const C_LONG: InternedType = InternedType(24);
+    pub const C_LONGLONG: InternedType = InternedType(25);
+    pub const C_UCHAR: InternedType = InternedType(26);
+    pub const C_USHORT: InternedType = InternedType(27);
+    pub const C_UINT: InternedType = InternedType(28);
+    pub const C_ULONG: InternedType = InternedType(29);
+    pub const C_ULONGLONG: InternedType = InternedType(30);
+    pub const C_FLOAT: InternedType = InternedType(31);
+    pub const C_DOUBLE: InternedType = InternedType(32);
+    pub const C_VOID: InternedType = InternedType(33);
+
+    const PRIMITIVE_COUNT: u32 = 34;
 
     /// Check if this is a primitive type (no pool lookup needed).
     #[inline]
@@ -1323,7 +1339,24 @@ impl TypeInternPool {
             | TypeKind::Char
             | TypeKind::Unit
             | TypeKind::Never
-            | TypeKind::Error => ThreadSafety::Sync,
+            | TypeKind::Error
+            // ADR-0086: C named primitive types are Sync — same reasoning
+            // as the native primitives. `c_void` is an incomplete type with
+            // no runtime values, but classifying it as Sync is harmless
+            // because no value of it can exist to cross a thread boundary.
+            | TypeKind::CSchar
+            | TypeKind::CShort
+            | TypeKind::CInt
+            | TypeKind::CLong
+            | TypeKind::CLonglong
+            | TypeKind::CUchar
+            | TypeKind::CUshort
+            | TypeKind::CUint
+            | TypeKind::CUlong
+            | TypeKind::CUlonglong
+            | TypeKind::CFloat
+            | TypeKind::CDouble
+            | TypeKind::CVoid => ThreadSafety::Sync,
 
             // Composites delegate structurally.
             TypeKind::Array(array_id) => {
@@ -1488,6 +1521,20 @@ impl TypeInternPool {
             TypeKind::Unit => InternedType::UNIT,
             TypeKind::Never => InternedType::NEVER,
             TypeKind::Error => InternedType::ERROR,
+            // ADR-0086 C named primitive types.
+            TypeKind::CSchar => InternedType::C_SCHAR,
+            TypeKind::CShort => InternedType::C_SHORT,
+            TypeKind::CInt => InternedType::C_INT,
+            TypeKind::CLong => InternedType::C_LONG,
+            TypeKind::CLonglong => InternedType::C_LONGLONG,
+            TypeKind::CUchar => InternedType::C_UCHAR,
+            TypeKind::CUshort => InternedType::C_USHORT,
+            TypeKind::CUint => InternedType::C_UINT,
+            TypeKind::CUlong => InternedType::C_ULONG,
+            TypeKind::CUlonglong => InternedType::C_ULONGLONG,
+            TypeKind::CFloat => InternedType::C_FLOAT,
+            TypeKind::CDouble => InternedType::C_DOUBLE,
+            TypeKind::CVoid => InternedType::C_VOID,
             TypeKind::Struct(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::Enum(id) => InternedType::from_pool_index(id.pool_index()),
             TypeKind::Array(id) => InternedType::from_pool_index(id.pool_index()),
@@ -1640,6 +1687,20 @@ impl TypeInternPool {
             TypeKind::Unit => Some(InternedType::UNIT),
             TypeKind::Never => Some(InternedType::NEVER),
             TypeKind::Error => Some(InternedType::ERROR),
+            // ADR-0086 C named primitive types.
+            TypeKind::CSchar => Some(InternedType::C_SCHAR),
+            TypeKind::CShort => Some(InternedType::C_SHORT),
+            TypeKind::CInt => Some(InternedType::C_INT),
+            TypeKind::CLong => Some(InternedType::C_LONG),
+            TypeKind::CLonglong => Some(InternedType::C_LONGLONG),
+            TypeKind::CUchar => Some(InternedType::C_UCHAR),
+            TypeKind::CUshort => Some(InternedType::C_USHORT),
+            TypeKind::CUint => Some(InternedType::C_UINT),
+            TypeKind::CUlong => Some(InternedType::C_ULONG),
+            TypeKind::CUlonglong => Some(InternedType::C_ULONGLONG),
+            TypeKind::CFloat => Some(InternedType::C_FLOAT),
+            TypeKind::CDouble => Some(InternedType::C_DOUBLE),
+            TypeKind::CVoid => Some(InternedType::C_VOID),
             // Struct, enum, array, pointer, and module require pool lookup by ID - we need the name
             // to find the interned type. This conversion is not straightforward
             // without additional context. Return None to indicate we can't convert.
@@ -1688,6 +1749,20 @@ impl TypeInternPool {
             15 => Type::NEVER,
             16 => Type::ERROR,
             20 => Type::CHAR,
+            // ADR-0086 C named primitive types.
+            21 => Type::C_SCHAR,
+            22 => Type::C_SHORT,
+            23 => Type::C_INT,
+            24 => Type::C_LONG,
+            25 => Type::C_LONGLONG,
+            26 => Type::C_UCHAR,
+            27 => Type::C_USHORT,
+            28 => Type::C_UINT,
+            29 => Type::C_ULONG,
+            30 => Type::C_ULONGLONG,
+            31 => Type::C_FLOAT,
+            32 => Type::C_DOUBLE,
+            33 => Type::C_VOID,
             _ => return None,
         })
     }
@@ -1749,6 +1824,20 @@ impl TypeInternPool {
             TypeKind::Unit => "()".to_string(),
             TypeKind::Never => "!".to_string(),
             TypeKind::Error => "<error>".to_string(),
+            // ADR-0086 C named primitive types.
+            TypeKind::CSchar => "c_schar".to_string(),
+            TypeKind::CShort => "c_short".to_string(),
+            TypeKind::CInt => "c_int".to_string(),
+            TypeKind::CLong => "c_long".to_string(),
+            TypeKind::CLonglong => "c_longlong".to_string(),
+            TypeKind::CUchar => "c_uchar".to_string(),
+            TypeKind::CUshort => "c_ushort".to_string(),
+            TypeKind::CUint => "c_uint".to_string(),
+            TypeKind::CUlong => "c_ulong".to_string(),
+            TypeKind::CUlonglong => "c_ulonglong".to_string(),
+            TypeKind::CFloat => "c_float".to_string(),
+            TypeKind::CDouble => "c_double".to_string(),
+            TypeKind::CVoid => "c_void".to_string(),
             TypeKind::ComptimeType => "type".to_string(),
             TypeKind::ComptimeStr => "comptime_str".to_string(),
             TypeKind::ComptimeInt => "comptime_int".to_string(),

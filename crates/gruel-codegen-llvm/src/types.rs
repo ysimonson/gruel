@@ -42,6 +42,22 @@ pub fn gruel_type_to_llvm<'ctx>(
         TypeKind::F32 => Some(ctx.f32_type().into()),
         TypeKind::F64 => Some(ctx.f64_type().into()),
 
+        // ADR-0086 C named arithmetic primitive types. Widths match the
+        // underlying native Gruel type on every blessed LP64 target.
+        TypeKind::CSchar | TypeKind::CUchar => Some(ctx.i8_type().into()),
+        TypeKind::CShort | TypeKind::CUshort => Some(ctx.i16_type().into()),
+        TypeKind::CInt | TypeKind::CUint => Some(ctx.i32_type().into()),
+        TypeKind::CLong | TypeKind::CUlong | TypeKind::CLonglong | TypeKind::CUlonglong => {
+            Some(ctx.i64_type().into())
+        }
+        TypeKind::CFloat => Some(ctx.f32_type().into()),
+        TypeKind::CDouble => Some(ctx.f64_type().into()),
+        // ADR-0086 c_void is an incomplete type: no LLVM representation.
+        // Sema rejects c_void in value-bearing positions, so reaching this
+        // arm means the caller is asking for a representation of a type
+        // that has none — treat the same as Unit / Never.
+        TypeKind::CVoid => None,
+
         // Booleans are i1 in LLVM IR.
         TypeKind::Bool => Some(ctx.bool_type().into()),
 

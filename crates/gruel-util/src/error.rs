@@ -357,6 +357,12 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// ADR-0086 C FFI extensions: thirteen C named primitive types
+    /// (`c_schar`/`c_uchar`/`c_short`/`c_ushort`/`c_int`/`c_uint`/
+    /// `c_long`/`c_ulong`/`c_longlong`/`c_ulonglong`/`c_float`/`c_double`/
+    /// `c_void`), `@mark(c) enum` (field-less + data-carrying), and
+    /// `static_link_extern` keyword.
+    CFfiExtras,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -388,6 +394,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::CFfiExtras => "ADR-0086",
         }
     }
 
@@ -2129,7 +2136,7 @@ mod tests {
     fn test_preview_feature_all_names() {
         let names = PreviewFeature::all_names();
         // Order follows the enum declaration order via strum::EnumIter.
-        assert_eq!(names, "test_infra");
+        assert_eq!(names, "test_infra, c_ffi_extras");
     }
 
     // ========================================================================

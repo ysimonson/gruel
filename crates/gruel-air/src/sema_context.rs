@@ -469,7 +469,22 @@ impl<'a> SemaContext<'a> {
             | TypeKind::F64
             | TypeKind::Bool
             | TypeKind::Char
-            | TypeKind::Unit => true,
+            | TypeKind::Unit
+            // ADR-0086 C named arithmetic primitive types are all Copy.
+            | TypeKind::CSchar
+            | TypeKind::CShort
+            | TypeKind::CInt
+            | TypeKind::CLong
+            | TypeKind::CLonglong
+            | TypeKind::CUchar
+            | TypeKind::CUshort
+            | TypeKind::CUint
+            | TypeKind::CUlong
+            | TypeKind::CUlonglong
+            | TypeKind::CFloat
+            | TypeKind::CDouble => true,
+            // ADR-0086: c_void is incomplete; sema rejects value-bearing uses.
+            TypeKind::CVoid => false,
             // Enum types are Copy (they're small discriminant values), unless
             // any payload is linear (ADR-0067).
             TypeKind::Enum(enum_id) => {

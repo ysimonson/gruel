@@ -45,7 +45,24 @@ impl<'a> Sema<'a> {
             | TypeKind::F64
             | TypeKind::Bool
             | TypeKind::Char
-            | TypeKind::Unit => true,
+            | TypeKind::Unit
+            // ADR-0086 C named arithmetic primitive types are all Copy.
+            | TypeKind::CSchar
+            | TypeKind::CShort
+            | TypeKind::CInt
+            | TypeKind::CLong
+            | TypeKind::CLonglong
+            | TypeKind::CUchar
+            | TypeKind::CUshort
+            | TypeKind::CUint
+            | TypeKind::CUlong
+            | TypeKind::CUlonglong
+            | TypeKind::CFloat
+            | TypeKind::CDouble => true,
+            // ADR-0086: c_void is an incomplete type — no values exist; the
+            // Copy question is vacuous. Sema rejects c_void in value-bearing
+            // positions before is_type_copy is consulted.
+            TypeKind::CVoid => false,
             // ADR-0080: enums are Copy iff `EnumDef.posture` is `Copy`,
             // which is set either by the `copy enum` keyword or by the
             // structural inference inside `find_or_create_anon_enum` for
@@ -776,14 +793,30 @@ impl<'a> Sema<'a> {
             | TypeKind::F64
             | TypeKind::Bool
             | TypeKind::Char
-            | TypeKind::Error => 1,
+            | TypeKind::Error
+            // ADR-0086 C named arithmetic primitives each occupy one ABI slot.
+            | TypeKind::CSchar
+            | TypeKind::CShort
+            | TypeKind::CInt
+            | TypeKind::CLong
+            | TypeKind::CLonglong
+            | TypeKind::CUchar
+            | TypeKind::CUshort
+            | TypeKind::CUint
+            | TypeKind::CUlong
+            | TypeKind::CUlonglong
+            | TypeKind::CFloat
+            | TypeKind::CDouble => 1,
             // Zero-sized types use 0 slots
             // ComptimeType/ComptimeStr/ComptimeInt are comptime-only and use 0 runtime slots
             TypeKind::Unit
             | TypeKind::Never
             | TypeKind::ComptimeType
             | TypeKind::ComptimeStr
-            | TypeKind::ComptimeInt => 0,
+            | TypeKind::ComptimeInt
+            // ADR-0086 c_void is an incomplete type; pass-by-value is rejected
+            // by sema, so this arm is only reached on the error path.
+            | TypeKind::CVoid => 0,
             // Enums are represented as their discriminant type (a scalar), so 1 slot
             TypeKind::Enum(_) => 1,
             // Struct uses sum of all field slots (includes builtin String with 3 fields)

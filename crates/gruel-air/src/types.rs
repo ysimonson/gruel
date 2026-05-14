@@ -286,6 +286,37 @@ pub enum TypeKind {
     Char,
     /// The unit type (for functions that don't return a value)
     Unit,
+    /// ADR-0086: C `signed char` — target-resolved (8-bit signed on every blessed target).
+    CSchar,
+    /// ADR-0086: C `short` — target-resolved (16-bit signed on every blessed target).
+    CShort,
+    /// ADR-0086: C `int` — target-resolved (32-bit signed on every blessed target).
+    /// Canonical discriminant type for `@mark(c) enum`.
+    CInt,
+    /// ADR-0086: C `long` — target-resolved (64-bit signed on every blessed LP64 target;
+    /// 32-bit on hypothetical LLP64 targets like Windows).
+    CLong,
+    /// ADR-0086: C `long long` — target-resolved (64-bit signed on every blessed target).
+    CLonglong,
+    /// ADR-0086: C `unsigned char` — target-resolved (8-bit unsigned on every blessed target).
+    CUchar,
+    /// ADR-0086: C `unsigned short` — target-resolved (16-bit unsigned on every blessed target).
+    CUshort,
+    /// ADR-0086: C `unsigned int` — target-resolved (32-bit unsigned on every blessed target).
+    CUint,
+    /// ADR-0086: C `unsigned long` — target-resolved (64-bit unsigned on every blessed LP64 target).
+    CUlong,
+    /// ADR-0086: C `unsigned long long` — target-resolved (64-bit unsigned on every blessed target).
+    CUlonglong,
+    /// ADR-0086: C `float` — IEEE 754 binary32 on every blessed target.
+    CFloat,
+    /// ADR-0086: C `double` — IEEE 754 binary64 on every blessed target.
+    CDouble,
+    /// ADR-0086: C `void` — incomplete type. No values, no size, no alignment.
+    /// Only usable through `Ptr(c_void)` / `MutPtr(c_void)`. Cannot appear in
+    /// value-bearing positions (let, return, parameter by value, struct/enum field
+    /// by value). Use `()` (unit) for C `void` return types.
+    CVoid,
     /// User-defined struct type
     Struct(StructId),
     /// User-defined enum type
@@ -332,9 +363,15 @@ pub enum TypeKind {
 /// # Encoding
 ///
 /// The u32 value uses a tag-based encoding:
-/// - Primitives (0-18): I8=0, I16=1, I32=2, I64=3, U8=4, U16=5, U32=6, U64=7,
+/// - Primitives (0-20): I8=0, I16=1, I32=2, I64=3, U8=4, U16=5, U32=6, U64=7,
 ///   Isize=8, Usize=9, F16=10, F32=11, F64=12,
-///   Bool=13, Unit=14, Error=15, Never=16, ComptimeType=17, ComptimeStr=18, ComptimeInt=19
+///   Bool=13, Unit=14, Error=15, Never=16, ComptimeType=17, ComptimeStr=18,
+///   ComptimeInt=19, Char=20.
+/// - ADR-0086 C named primitives (21-33): CSchar=21, CShort=22, CInt=23,
+///   CLong=24, CLonglong=25, CUchar=26, CUshort=27, CUint=28, CUlong=29,
+///   CUlonglong=30, CFloat=31, CDouble=32, CVoid=33. Signed integers are
+///   contiguous at 21–25, unsigned at 26–30, floats at 31–32, the incomplete
+///   `c_void` at 33.
 /// - Composites: low byte is tag (TAG_STRUCT, TAG_ENUM, TAG_ARRAY, TAG_MODULE),
 ///   high 24 bits are the ID
 ///
@@ -392,6 +429,19 @@ impl std::fmt::Debug for Type {
             TypeKind::ComptimeType => write!(f, "Type::COMPTIME_TYPE"),
             TypeKind::ComptimeStr => write!(f, "Type::COMPTIME_STR"),
             TypeKind::ComptimeInt => write!(f, "Type::COMPTIME_INT"),
+            TypeKind::CSchar => write!(f, "Type::C_SCHAR"),
+            TypeKind::CShort => write!(f, "Type::C_SHORT"),
+            TypeKind::CInt => write!(f, "Type::C_INT"),
+            TypeKind::CLong => write!(f, "Type::C_LONG"),
+            TypeKind::CLonglong => write!(f, "Type::C_LONGLONG"),
+            TypeKind::CUchar => write!(f, "Type::C_UCHAR"),
+            TypeKind::CUshort => write!(f, "Type::C_USHORT"),
+            TypeKind::CUint => write!(f, "Type::C_UINT"),
+            TypeKind::CUlong => write!(f, "Type::C_ULONG"),
+            TypeKind::CUlonglong => write!(f, "Type::C_ULONGLONG"),
+            TypeKind::CFloat => write!(f, "Type::C_FLOAT"),
+            TypeKind::CDouble => write!(f, "Type::C_DOUBLE"),
+            TypeKind::CVoid => write!(f, "Type::C_VOID"),
             TypeKind::Struct(id) => write!(f, "Type::new_struct(StructId({}))", id.0),
             TypeKind::Enum(id) => write!(f, "Type::new_enum(EnumId({}))", id.0),
             TypeKind::Array(id) => write!(f, "Type::new_array(ArrayTypeId({}))", id.0),
@@ -468,6 +518,35 @@ impl Type {
     pub const COMPTIME_INT: Type = Type(19);
     /// Unicode scalar value (ADR-0071)
     pub const CHAR: Type = Type(20);
+
+    // ADR-0086 C named primitive types. Signed integers are tags 21-25,
+    // unsigned 26-30, floats 31-32, the incomplete `c_void` at 33.
+    /// C `signed char` (ADR-0086)
+    pub const C_SCHAR: Type = Type(21);
+    /// C `short` (ADR-0086)
+    pub const C_SHORT: Type = Type(22);
+    /// C `int` (ADR-0086) — canonical `@mark(c) enum` discriminant
+    pub const C_INT: Type = Type(23);
+    /// C `long` (ADR-0086)
+    pub const C_LONG: Type = Type(24);
+    /// C `long long` (ADR-0086)
+    pub const C_LONGLONG: Type = Type(25);
+    /// C `unsigned char` (ADR-0086)
+    pub const C_UCHAR: Type = Type(26);
+    /// C `unsigned short` (ADR-0086)
+    pub const C_USHORT: Type = Type(27);
+    /// C `unsigned int` (ADR-0086)
+    pub const C_UINT: Type = Type(28);
+    /// C `unsigned long` (ADR-0086)
+    pub const C_ULONG: Type = Type(29);
+    /// C `unsigned long long` (ADR-0086)
+    pub const C_ULONGLONG: Type = Type(30);
+    /// C `float` (ADR-0086)
+    pub const C_FLOAT: Type = Type(31);
+    /// C `double` (ADR-0086)
+    pub const C_DOUBLE: Type = Type(32);
+    /// C `void` (ADR-0086) — incomplete type, pointer-only use
+    pub const C_VOID: Type = Type(33);
 }
 
 // Composite type constructors
@@ -933,7 +1012,8 @@ impl Type {
             panic!(
                 "invalid Type encoding: raw value {:#010x} (tag={}, id={}). \
                  This indicates data corruption or a bug in Type construction. \
-                 Valid tags are 0-18 (primitives) or 100-105 (composites).",
+                 Valid tags are 0-33 (primitives, including ADR-0086 C named types) \
+                 or 100-111 (composites).",
                 self.0,
                 self.0 & 0xFF,
                 self.0 >> 8
@@ -983,6 +1063,19 @@ impl Type {
             18 => Some(TypeKind::ComptimeStr),
             19 => Some(TypeKind::ComptimeInt),
             20 => Some(TypeKind::Char),
+            21 => Some(TypeKind::CSchar),
+            22 => Some(TypeKind::CShort),
+            23 => Some(TypeKind::CInt),
+            24 => Some(TypeKind::CLong),
+            25 => Some(TypeKind::CLonglong),
+            26 => Some(TypeKind::CUchar),
+            27 => Some(TypeKind::CUshort),
+            28 => Some(TypeKind::CUint),
+            29 => Some(TypeKind::CUlong),
+            30 => Some(TypeKind::CUlonglong),
+            31 => Some(TypeKind::CFloat),
+            32 => Some(TypeKind::CDouble),
+            33 => Some(TypeKind::CVoid),
             TAG_STRUCT => Some(TypeKind::Struct(StructId(self.0 >> 8))),
             TAG_ENUM => Some(TypeKind::Enum(EnumId(self.0 >> 8))),
             TAG_ARRAY => Some(TypeKind::Array(ArrayTypeId(self.0 >> 8))),
@@ -1037,6 +1130,19 @@ impl Type {
             TypeKind::ComptimeType => "type",
             TypeKind::ComptimeStr => "comptime_str",
             TypeKind::ComptimeInt => "comptime_int",
+            TypeKind::CSchar => "c_schar",
+            TypeKind::CShort => "c_short",
+            TypeKind::CInt => "c_int",
+            TypeKind::CLong => "c_long",
+            TypeKind::CLonglong => "c_longlong",
+            TypeKind::CUchar => "c_uchar",
+            TypeKind::CUshort => "c_ushort",
+            TypeKind::CUint => "c_uint",
+            TypeKind::CUlong => "c_ulong",
+            TypeKind::CUlonglong => "c_ulonglong",
+            TypeKind::CFloat => "c_float",
+            TypeKind::CDouble => "c_double",
+            TypeKind::CVoid => "c_void",
         }
     }
 
@@ -1080,10 +1186,12 @@ impl Type {
     }
 
     /// Check if this type is an integer type.
-    /// Optimized: checks tag range directly (0-9 are integer types: i8..u64, isize/usize).
+    /// Optimized: checks tag range directly. Native integers occupy tags 0-9
+    /// (i8..u64, isize/usize); ADR-0086 C named integers occupy tags 21-30
+    /// (CSchar..CUlonglong).
     #[inline]
     pub fn is_integer(&self) -> bool {
-        self.0 <= 9
+        self.0 <= 9 || (self.0 >= 21 && self.0 <= 30)
     }
 
     /// Check if this is an error type.
@@ -1314,23 +1422,25 @@ impl Type {
     }
 
     /// Check if this is a signed integer type.
-    /// Signed integers: I8=0, I16=1, I32=2, I64=3, Isize=8.
+    /// Native signed integers: I8=0, I16=1, I32=2, I64=3, Isize=8.
+    /// ADR-0086 C named signed integers: CSchar=21..=CLonglong=25.
     #[inline]
     pub fn is_signed(&self) -> bool {
-        self.0 <= 3 || self.0 == 8
+        self.0 <= 3 || self.0 == 8 || (self.0 >= 21 && self.0 <= 25)
     }
 
     /// Check if this is a floating-point type.
-    /// Float types: F16=10, F32=11, F64=12.
+    /// Native float types: F16=10, F32=11, F64=12.
+    /// ADR-0086 C named float types: CFloat=31, CDouble=32.
     #[inline]
     pub fn is_float(&self) -> bool {
-        self.0 >= 10 && self.0 <= 12
+        (self.0 >= 10 && self.0 <= 12) || self.0 == 31 || self.0 == 32
     }
 
     /// Check if this is a numeric type (integer or float).
     #[inline]
     pub fn is_numeric(&self) -> bool {
-        self.0 <= 12
+        self.0 <= 12 || (self.0 >= 21 && self.0 <= 32)
     }
 
     /// Check if this is a Copy type (can be implicitly duplicated).
@@ -1356,6 +1466,14 @@ impl Type {
             0..=14 => true,
             // Error, Never, ComptimeType, ComptimeStr, ComptimeInt are Copy for convenience
             15..=19 => true,
+            // Char is Copy (it's a 32-bit Unicode scalar value).
+            20 => true,
+            // ADR-0086 C named arithmetic types (CSchar..CDouble = 21..=32) are all Copy.
+            21..=32 => true,
+            // ADR-0086 c_void (tag 33) is an incomplete type — no values exist, so Copy
+            // is vacuously inapplicable. Returning false matches the spirit of
+            // "can this type be implicitly duplicated"; pointer-only use is enforced in sema.
+            33 => false,
             // Enum types are Copy (they're small discriminant values)
             TAG_ENUM => true,
             // Module types are Copy (they're just compile-time namespace references)
@@ -1405,11 +1523,12 @@ impl Type {
     }
 
     /// Check if this is an unsigned integer type.
-    /// Unsigned integers: U8=4, U16=5, U32=6, U64=7, Usize=9.
+    /// Native unsigned integers: U8=4, U16=5, U32=6, U64=7, Usize=9.
+    /// ADR-0086 C named unsigned integers: CUchar=26..=CUlonglong=30.
     #[inline]
     #[must_use]
     pub fn is_unsigned(&self) -> bool {
-        (self.0 >= 4 && self.0 <= 7) || self.0 == 9
+        (self.0 >= 4 && self.0 <= 7) || self.0 == 9 || (self.0 >= 26 && self.0 <= 30)
     }
 
     /// Check if a u64 value fits within the range of this integer type.
@@ -1432,6 +1551,18 @@ impl Type {
             7 => true,                     // U64 - Any u64 value fits
             8 => value <= i64::MAX as u64, // Isize - 64-bit signed on current targets
             9 => true,                     // Usize - 64-bit unsigned on current targets
+            // ADR-0086 C named integers — widths match their underlying Gruel type on
+            // every blessed (LP64) target.
+            21 => value <= i8::MAX as u64,  // CSchar
+            22 => value <= i16::MAX as u64, // CShort
+            23 => value <= i32::MAX as u64, // CInt
+            24 => value <= i64::MAX as u64, // CLong (LP64)
+            25 => value <= i64::MAX as u64, // CLonglong
+            26 => value <= u8::MAX as u64,  // CUchar
+            27 => value <= u16::MAX as u64, // CUshort
+            28 => value <= u32::MAX as u64, // CUint
+            29 => true,                     // CUlong (LP64) - any u64 fits
+            30 => true,                     // CUlonglong - any u64 fits
             _ => false,
         }
     }
@@ -1448,6 +1579,12 @@ impl Type {
             2 => value <= (i32::MIN as i64).unsigned_abs(), // I32
             3 => value <= (i64::MIN).unsigned_abs(),        // I64
             8 => value <= (i64::MIN).unsigned_abs(),        // Isize - 64-bit on current targets
+            // ADR-0086 C named signed integers — same width as their underlying type.
+            21 => value <= (i8::MIN as i64).unsigned_abs(), // CSchar
+            22 => value <= (i16::MIN as i64).unsigned_abs(), // CShort
+            23 => value <= (i32::MIN as i64).unsigned_abs(), // CInt
+            24 => value <= (i64::MIN).unsigned_abs(),       // CLong (LP64)
+            25 => value <= (i64::MIN).unsigned_abs(),       // CLonglong
             _ => false,
         }
     }
