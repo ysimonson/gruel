@@ -1,12 +1,12 @@
 ---
 id: 0087
 title: Prelude fns for libc-wrapper intrinsics
-status: proposal
+status: implemented
 tags: [intrinsics, prelude, ffi, runtime, refactor]
 feature-flag:
 created: 2026-05-13
-accepted:
-implemented:
+accepted: 2026-05-14
+implemented: 2026-05-14
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal — successor to [ADR-0086](0086-c-ffi-extensions.md). Phase 1 (scaffolding) implemented; later phases pending.
+Implemented — successor to [ADR-0086](0086-c-ffi-extensions.md). All five phases shipped; the registry contracted by retiring the `@read_line`, `@parse_*`, `@random_*`, `@utf8_validate`, `@bytes_eq`, `@alloc`, `@realloc`, `@free` rows in favour of prelude fns in `prelude/runtime_wrappers.gruel` and updating `@dbg`'s lowering to route through prelude `dbg_*` wrappers.
 
 ## Summary
 
@@ -159,9 +159,9 @@ No new permanent diagnostics. Phases 2 / 3 / 4 each may temporarily fire a `Intr
 
 ### Phase 5: Stabilise
 
-- [ ] Confirm the intrinsics registry contracts as described: `IntrinsicId::ReadLine`, `Parse*`, `Random*`, `Utf8Validate`, `BytesEq`, `Alloc`, `Free`, `Realloc`, and the `Dbg*` runtime-symbol arms are gone; `IntrinsicId::Panic` (and the runtime-error panic variants), `IntrinsicId::ThreadSpawn`, `IntrinsicId::ThreadJoin`, `IntrinsicId::CStrToVec`, and `IntrinsicId::Dbg` remain — each documented with its prerequisite (string-slice type / comptime-`@mark(c)`-fn synthesis / aggregate uninit / comptime kind-dispatch).
-- [ ] Document the new "intrinsics carry compiler magic, not transport" rule in the `gruel-intrinsics` crate's module docs and in ADR-0050's open-questions section (cross-ref).
-- [ ] ADR status → `implemented`.
+- [x] Confirmed: `IntrinsicId::ReadLine`, `ParseI32` / `ParseI64` / `ParseU32` / `ParseU64`, `RandomU32` / `RandomU64`, `Utf8Validate`, `BytesEq`, `Alloc`, `Realloc`, `Free` are gone from the enum and `INTRINSICS` table. The `Dbg` row stays but its codegen arm no longer references the `__gruel_dbg_*` runtime symbols directly — those are reached via the prelude `dbg_*` wrappers. The four prerequisite-blocked rows (`Panic` family, `Spawn` / `ThreadJoin`, `CStrToVec`, `Dbg`) remain with the ADR's documented prerequisites.
+- [x] Documented the "intrinsics carry compiler magic, not transport" rule in `gruel-intrinsics`'s crate-level docs and added the cross-reference to ADR-0050's Open Questions section.
+- [x] ADR status → `implemented` (this checklist is the witness).
 
 ## Consequences
 

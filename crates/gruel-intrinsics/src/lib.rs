@@ -11,7 +11,34 @@
 //! Stages dispatch on the stable [`IntrinsicId`] enum rather than matching
 //! strings.
 //!
-//! See [ADR-0050](../../docs/designs/0050-intrinsics-crate.md).
+//! ## What earns a place in this registry
+//!
+//! ADR-0087 commits to the rule: **intrinsics carry compiler magic, not
+//! transport.** A row earns its place in `IntrinsicId` / [`INTRINSICS`] if it
+//! does at least one of:
+//!
+//! 1. **Codegen-emitted lowering** of a language feature (e.g. `@vec(...)`
+//!    constructs a `Vec(T)` aggregate; pointer ops emit a typed `load` /
+//!    `store`; `@spawn` synthesises a `@mark(c)` thunk per `(arg, ret, fn)`
+//!    triple).
+//! 2. **Compile-time type / kind dispatch** on heterogeneous arguments (e.g.
+//!    `@dbg(42, true, "hi")` routes per arg type; `@type_info(T)`).
+//! 3. **Compile-time evaluation** with no runtime presence (e.g. `@size_of`,
+//!    `@align_of`, `@target_arch`, `@compile_error`).
+//! 4. A row is **blocked on a missing language feature** that would otherwise
+//!    let it move to the prelude (ADR-0087 currently tracks four such rows —
+//!    `@panic` family, `@spawn` / `@thread_join`, `@cstr_to_vec`, `@dbg` —
+//!    each with a documented prerequisite).
+//!
+//! Rows that exist only because "there is a libc function we want to call"
+//! and have an expressible Gruel signature today do NOT belong here. ADR-0087
+//! migrated the original wave of those rows (`@read_line`, `@parse_*`,
+//! `@random_*`, `@utf8_validate`, `@bytes_eq`, `@alloc` / `@free` /
+//! `@realloc`) to prelude fns in `prelude/runtime_wrappers.gruel`; future
+//! additions of similar shape should land there first.
+//!
+//! See [ADR-0050](../../docs/designs/0050-intrinsics-crate.md) and
+//! [ADR-0087](../../docs/designs/0087-prelude-fns-for-libc-wrappers.md).
 
 use gruel_util::PreviewFeature;
 
