@@ -30,7 +30,7 @@ use gruel_rir::{
 };
 use gruel_util::{
     CompileError, CompileResult, CompileWarning, ErrorKind, MissingFieldsError, OptionExt,
-    WarningKind,
+    PreviewFeature, WarningKind,
 };
 use lasso::Spur;
 
@@ -3968,6 +3968,44 @@ impl<'a> Sema<'a> {
         // Analyze the initializer
         let init_result = self.analyze_inst(air, init, ctx)?;
         let var_type = init_result.ty;
+
+        // ADR-0086: re-validate let-annotation types that the inference
+        // pass accepted leniently. Inference's `resolve_type_name`
+        // doesn't have access to the preview-feature checks or the
+        // `c_void` value-position restriction, so the check happens
+        // here, after the inferred var_type is known.
+        if matches!(
+            var_type,
+            Type::C_SCHAR
+                | Type::C_SHORT
+                | Type::C_INT
+                | Type::C_LONG
+                | Type::C_LONGLONG
+                | Type::C_UCHAR
+                | Type::C_USHORT
+                | Type::C_UINT
+                | Type::C_ULONG
+                | Type::C_ULONGLONG
+                | Type::C_FLOAT
+                | Type::C_DOUBLE
+        ) {
+            self.require_preview(
+                PreviewFeature::CFfiExtras,
+                &format!("the `{}` type", var_type.name()),
+                span,
+            )?;
+        }
+        if var_type == Type::C_VOID {
+            return Err(CompileError::new(
+                ErrorKind::CFfi(
+                    "`c_void` cannot appear as the type of a `let` binding — \
+                     it is an incomplete type with no values; wrap it in \
+                     `Ptr(c_void)` / `MutPtr(c_void)`"
+                        .to_string(),
+                ),
+                span,
+            ));
+        }
 
         // If name is None, this is a wildcard pattern `_` that discards the value
         let Some(name) = name else {

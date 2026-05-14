@@ -2292,11 +2292,26 @@ impl<'a> Sema<'a> {
                 | Type::F64
                 | Type::BOOL
                 | Type::UNIT
+                // ADR-0086 C named arithmetic primitive types.
+                | Type::C_SCHAR
+                | Type::C_SHORT
+                | Type::C_INT
+                | Type::C_LONG
+                | Type::C_LONGLONG
+                | Type::C_UCHAR
+                | Type::C_USHORT
+                | Type::C_UINT
+                | Type::C_ULONG
+                | Type::C_ULONGLONG
+                | Type::C_FLOAT
+                | Type::C_DOUBLE
         ) {
             return Ok(());
         }
 
         // Raw pointers (ADR-0061) cross the boundary as `const T*`/`T*`.
+        // ADR-0086: `Ptr(c_void)` / `MutPtr(c_void)` are also permitted —
+        // c_void is allowed inside pointer types but rejected as a value.
         if ty.is_ptr_const() || ty.is_ptr_mut() {
             return Ok(());
         }

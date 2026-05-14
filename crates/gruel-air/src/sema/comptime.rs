@@ -366,6 +366,23 @@ impl<'a> Sema<'a> {
                     "char" => Type::CHAR,
                     "()" => Type::UNIT,
                     "!" => Type::NEVER,
+                    // ADR-0086 C named primitive types — used here as
+                    // comptime type values. The preview gate fires at
+                    // resolve_type when these names appear in a regular
+                    // type expression; the gate is not re-fired here.
+                    "c_schar" => Type::C_SCHAR,
+                    "c_short" => Type::C_SHORT,
+                    "c_int" => Type::C_INT,
+                    "c_long" => Type::C_LONG,
+                    "c_longlong" => Type::C_LONGLONG,
+                    "c_uchar" => Type::C_UCHAR,
+                    "c_ushort" => Type::C_USHORT,
+                    "c_uint" => Type::C_UINT,
+                    "c_ulong" => Type::C_ULONG,
+                    "c_ulonglong" => Type::C_ULONGLONG,
+                    "c_float" => Type::C_FLOAT,
+                    "c_double" => Type::C_DOUBLE,
+                    "c_void" => Type::C_VOID,
                     _ => {
                         // Check for struct types
                         if let Some(&struct_id) = self.structs.get(type_name) {
@@ -402,6 +419,23 @@ impl<'a> Sema<'a> {
                     "char" => Type::CHAR,
                     "()" => Type::UNIT,
                     "!" => Type::NEVER,
+                    // ADR-0086 C named primitive types — used here as
+                    // comptime type values. The preview gate fires at
+                    // resolve_type when these names appear in a regular
+                    // type expression; the gate is not re-fired here.
+                    "c_schar" => Type::C_SCHAR,
+                    "c_short" => Type::C_SHORT,
+                    "c_int" => Type::C_INT,
+                    "c_long" => Type::C_LONG,
+                    "c_longlong" => Type::C_LONGLONG,
+                    "c_uchar" => Type::C_UCHAR,
+                    "c_ushort" => Type::C_USHORT,
+                    "c_uint" => Type::C_UINT,
+                    "c_ulong" => Type::C_ULONG,
+                    "c_ulonglong" => Type::C_ULONGLONG,
+                    "c_float" => Type::C_FLOAT,
+                    "c_double" => Type::C_DOUBLE,
+                    "c_void" => Type::C_VOID,
                     _ => {
                         // Check for struct types
                         if let Some(&struct_id) = self.structs.get(name) {
@@ -865,6 +899,23 @@ impl<'a> Sema<'a> {
                     "char" => Type::CHAR,
                     "()" => Type::UNIT,
                     "!" => Type::NEVER,
+                    // ADR-0086 C named primitive types — used here as
+                    // comptime type values. The preview gate fires at
+                    // resolve_type when these names appear in a regular
+                    // type expression; the gate is not re-fired here.
+                    "c_schar" => Type::C_SCHAR,
+                    "c_short" => Type::C_SHORT,
+                    "c_int" => Type::C_INT,
+                    "c_long" => Type::C_LONG,
+                    "c_longlong" => Type::C_LONGLONG,
+                    "c_uchar" => Type::C_UCHAR,
+                    "c_ushort" => Type::C_USHORT,
+                    "c_uint" => Type::C_UINT,
+                    "c_ulong" => Type::C_ULONG,
+                    "c_ulonglong" => Type::C_ULONGLONG,
+                    "c_float" => Type::C_FLOAT,
+                    "c_double" => Type::C_DOUBLE,
+                    "c_void" => Type::C_VOID,
                     _ => {
                         if let Some(&struct_id) = self.structs.get(type_name) {
                             Type::new_struct(struct_id)
@@ -910,6 +961,23 @@ impl<'a> Sema<'a> {
                     "char" => Type::CHAR,
                     "()" => Type::UNIT,
                     "!" => Type::NEVER,
+                    // ADR-0086 C named primitive types — used here as
+                    // comptime type values. The preview gate fires at
+                    // resolve_type when these names appear in a regular
+                    // type expression; the gate is not re-fired here.
+                    "c_schar" => Type::C_SCHAR,
+                    "c_short" => Type::C_SHORT,
+                    "c_int" => Type::C_INT,
+                    "c_long" => Type::C_LONG,
+                    "c_longlong" => Type::C_LONGLONG,
+                    "c_uchar" => Type::C_UCHAR,
+                    "c_ushort" => Type::C_USHORT,
+                    "c_uint" => Type::C_UINT,
+                    "c_ulong" => Type::C_ULONG,
+                    "c_ulonglong" => Type::C_ULONGLONG,
+                    "c_float" => Type::C_FLOAT,
+                    "c_double" => Type::C_DOUBLE,
+                    "c_void" => Type::C_VOID,
                     _ => {
                         if let Some(&struct_id) = self.structs.get(name) {
                             Type::new_struct(struct_id)

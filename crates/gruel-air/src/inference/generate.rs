@@ -2513,6 +2513,25 @@ impl<'a> ConstraintGenerator<'a> {
             "f64" => Type::F64,
             "bool" => Type::BOOL,
             "()" => Type::UNIT,
+            // ADR-0086: C named arithmetic primitive types. Resolved
+            // identically to native primitives at the inference layer —
+            // sema's resolve_type fires the preview gate before
+            // inference runs. `c_void` is also recognised here (so the
+            // resulting constraint can flag a mismatch) but downstream
+            // sema rejects c_void in any value-bearing position.
+            "c_schar" => Type::C_SCHAR,
+            "c_short" => Type::C_SHORT,
+            "c_int" => Type::C_INT,
+            "c_long" => Type::C_LONG,
+            "c_longlong" => Type::C_LONGLONG,
+            "c_uchar" => Type::C_UCHAR,
+            "c_ushort" => Type::C_USHORT,
+            "c_uint" => Type::C_UINT,
+            "c_ulong" => Type::C_ULONG,
+            "c_ulonglong" => Type::C_ULONGLONG,
+            "c_float" => Type::C_FLOAT,
+            "c_double" => Type::C_DOUBLE,
+            "c_void" => Type::C_VOID,
             _ => {
                 // Check for struct types (including builtin String)
                 if let Some(name_spur) = self.interner.get(name) {

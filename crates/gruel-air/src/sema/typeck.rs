@@ -8,7 +8,7 @@
 
 use gruel_builtins::Posture;
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, ErrorKind};
+use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature};
 use lasso::Spur;
 
 use super::Sema;
@@ -272,7 +272,34 @@ impl<'a> Sema<'a> {
     /// Resolve a type symbol to a Type.
     ///
     /// Handles array types with the syntax "[T; N]".
+    ///
+    /// ADR-0086: `c_void` is an incomplete type — it can only appear inside
+    /// `Ptr(_)` / `MutPtr(_)`. This wrapper rejects bare `c_void` at the
+    /// top-level resolution. The internal `resolve_type_allow_void` is what
+    /// the `Ptr`/`MutPtr` constructor arms call for their inner-type argument;
+    /// every other constructor (and every external caller) goes through this
+    /// rejecting wrapper.
     pub(crate) fn resolve_type(&mut self, type_sym: Spur, span: Span) -> CompileResult<Type> {
+        let ty = self.resolve_type_allow_void(type_sym, span)?;
+        if ty == Type::C_VOID {
+            let type_name = self.interner.resolve(&type_sym).to_string();
+            return Err(CompileError::new(
+                ErrorKind::CFfi(format!(
+                    "`{}` (the C `void` type) cannot appear as a value type — \
+                     wrap it in `Ptr(c_void)` or `MutPtr(c_void)`",
+                    type_name
+                )),
+                span,
+            ));
+        }
+        Ok(ty)
+    }
+
+    pub(crate) fn resolve_type_allow_void(
+        &mut self,
+        type_sym: Spur,
+        span: Span,
+    ) -> CompileResult<Type> {
         let type_name = self.interner.resolve(&type_sym);
 
         // ADR-0076: pervasive `Self`. Substitute the literal symbol `Self`
@@ -323,6 +350,61 @@ impl<'a> Sema<'a> {
             "!" => return Ok(Type::NEVER),
             // The type of types - used for comptime type parameters
             "type" => return Ok(Type::COMPTIME_TYPE),
+            // ADR-0086 C named primitive types. Resolved as plain
+            // identifiers (no dedicated lexer tokens), gated behind the
+            // `c_ffi_extras` preview feature.
+            "c_schar" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_schar` type", span)?;
+                return Ok(Type::C_SCHAR);
+            }
+            "c_short" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_short` type", span)?;
+                return Ok(Type::C_SHORT);
+            }
+            "c_int" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_int` type", span)?;
+                return Ok(Type::C_INT);
+            }
+            "c_long" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_long` type", span)?;
+                return Ok(Type::C_LONG);
+            }
+            "c_longlong" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_longlong` type", span)?;
+                return Ok(Type::C_LONGLONG);
+            }
+            "c_uchar" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_uchar` type", span)?;
+                return Ok(Type::C_UCHAR);
+            }
+            "c_ushort" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_ushort` type", span)?;
+                return Ok(Type::C_USHORT);
+            }
+            "c_uint" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_uint` type", span)?;
+                return Ok(Type::C_UINT);
+            }
+            "c_ulong" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_ulong` type", span)?;
+                return Ok(Type::C_ULONG);
+            }
+            "c_ulonglong" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_ulonglong` type", span)?;
+                return Ok(Type::C_ULONGLONG);
+            }
+            "c_float" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_float` type", span)?;
+                return Ok(Type::C_FLOAT);
+            }
+            "c_double" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_double` type", span)?;
+                return Ok(Type::C_DOUBLE);
+            }
+            "c_void" => {
+                self.require_preview(PreviewFeature::CFfiExtras, "the `c_void` type", span)?;
+                return Ok(Type::C_VOID);
+            }
             _ => {}
         }
 
@@ -360,10 +442,22 @@ impl<'a> Sema<'a> {
                         span,
                     ));
                 }
+                // ADR-0086: `Ptr(c_void)` / `MutPtr(c_void)` are the only
+                // contexts where `c_void` is permitted; every other
+                // constructor (Ref, Slice, MutSlice, Vec) rejects c_void
+                // via the outer `resolve_type` wrapper.
+                let allow_void = matches!(
+                    constructor.kind,
+                    BuiltinTypeConstructorKind::Ptr | BuiltinTypeConstructorKind::MutPtr
+                );
                 let mut arg_types: Vec<Type> = Vec::with_capacity(arg_strs.len());
                 for arg_str in &arg_strs {
                     let arg_sym = self.interner.get_or_intern(arg_str);
-                    let arg_ty = self.resolve_type(arg_sym, span)?;
+                    let arg_ty = if allow_void {
+                        self.resolve_type_allow_void(arg_sym, span)?
+                    } else {
+                        self.resolve_type(arg_sym, span)?
+                    };
                     arg_types.push(arg_ty);
                 }
                 return match constructor.kind {
@@ -488,15 +582,17 @@ impl<'a> Sema<'a> {
                 let array_type_id = self.get_or_create_array_type(element_ty, length);
                 Ok(Type::new_array(array_type_id))
             } else if let Some(pointee_type_str) = type_name.strip_prefix("ptr const ") {
-                // Pointer type syntax: ptr const T
+                // Pointer type syntax: ptr const T. ADR-0086 allows
+                // `c_void` as the pointee, same as `Ptr(c_void)`.
                 let pointee_sym = self.interner.get_or_intern(pointee_type_str);
-                let pointee_ty = self.resolve_type(pointee_sym, span)?;
+                let pointee_ty = self.resolve_type_allow_void(pointee_sym, span)?;
                 let ptr_type_id = self.type_pool.intern_ptr_const_from_type(pointee_ty);
                 Ok(Type::new_ptr_const(ptr_type_id))
             } else if let Some(pointee_type_str) = type_name.strip_prefix("ptr mut ") {
-                // Pointer type syntax: ptr mut T
+                // Pointer type syntax: ptr mut T. ADR-0086 allows
+                // `c_void` as the pointee, same as `MutPtr(c_void)`.
                 let pointee_sym = self.interner.get_or_intern(pointee_type_str);
-                let pointee_ty = self.resolve_type(pointee_sym, span)?;
+                let pointee_ty = self.resolve_type_allow_void(pointee_sym, span)?;
                 let ptr_type_id = self.type_pool.intern_ptr_mut_from_type(pointee_ty);
                 Ok(Type::new_ptr_mut(ptr_type_id))
             } else if let Some(elems) = parse_tuple_type_syntax(type_name) {
