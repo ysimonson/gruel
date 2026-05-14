@@ -19,23 +19,35 @@
 // (Vec.eq). pthread_create / pthread_join (Phase 5 threads) live in a
 // separate target-conditional block — deferred until Phase 5 lands.
 
+// The Gruel-level identifiers carry a `libc_` prefix so that programs
+// declaring their own `fn read(...)` / `fn malloc(...)` etc. don't
+// fire a duplicate-definition error against these prelude bindings.
+// `@link_name("…")` pins each binding to the actual libc symbol, so
+// the prelude bodies (Phases 2–4) calling `libc_read` etc. still
+// link against the real C symbols. Adding a `libc_*`-prefixed name
+// of your own in user code would still collide at the LLVM symbol
+// layer if both your code and a prelude wrapper that calls the
+// binding end up in the same compilation; that's a known
+// pre-module-system limitation noted in ADR-0087's Open Questions.
 link_extern("c") {
-    fn write(fd: c_int, buf: Ptr(u8), n: usize) -> isize;
-    fn read(fd: c_int, buf: MutPtr(u8), n: usize) -> isize;
-    fn exit(code: c_int) -> ();
-    fn malloc(size: usize) -> MutPtr(u8);
-    fn free(p: MutPtr(u8)) -> ();
-    fn realloc(p: MutPtr(u8), n: usize) -> MutPtr(u8);
-    fn memcmp(a: Ptr(u8), b: Ptr(u8), n: usize) -> c_int;
+    @link_name("write")   fn libc_write(fd: c_int, buf: Ptr(u8), n: usize) -> isize;
+    @link_name("read")    fn libc_read(fd: c_int, buf: MutPtr(u8), n: usize) -> isize;
+    @link_name("exit")    fn libc_exit(code: c_int) -> ();
+    @link_name("malloc")  fn libc_malloc(size: usize) -> MutPtr(u8);
+    @link_name("free")    fn libc_free(p: MutPtr(u8)) -> ();
+    @link_name("realloc") fn libc_realloc(p: MutPtr(u8), n: usize) -> MutPtr(u8);
+    @link_name("memcmp")  fn libc_memcmp(a: Ptr(u8), b: Ptr(u8), n: usize) -> c_int;
 }
 
 // ────────────────────── Gruel runtime archive ───────────────────────
 //
 // Surviving Rust-runtime helpers whose bodies are real algorithmic
-// work (parse_*, random_*, utf8_validate, cstr_to_vec). Phase 4 wraps
-// these in Gruel prelude fns. The dbg_* symbols stay here until
-// Phase 3 retires them — they're listed so the prelude can still
-// route @dbg through them during the migration window.
+// work (parse_*, random_*, utf8_validate, cstr_to_vec) plus the
+// per-type `__gruel_dbg_*` formatting helpers used by `@dbg`'s
+// intrinsic dispatch. Phase 2 of ADR-0087 wraps the dbg helpers in
+// Gruel prelude fns (`prelude/runtime_wrappers.gruel`) and reroutes
+// `@dbg`'s codegen arm through those wrappers. Phases 3–4 do the
+// same migration for IO and heap helpers.
 
 link_extern("gruel_runtime") {
     fn __gruel_parse_i32(buf: Ptr(u8), len: usize) -> i32;
@@ -45,4 +57,14 @@ link_extern("gruel_runtime") {
     fn __gruel_random_u32() -> u32;
     fn __gruel_random_u64() -> u64;
     fn __gruel_utf8_validate(buf: Ptr(u8), len: usize) -> u8;
+    fn __gruel_dbg_i64(x: i64);
+    fn __gruel_dbg_u64(x: u64);
+    fn __gruel_dbg_bool(b: i64);
+    fn __gruel_dbg_str(p: Ptr(u8), n: usize);
+    fn __gruel_dbg_i64_noln(x: i64);
+    fn __gruel_dbg_u64_noln(x: u64);
+    fn __gruel_dbg_bool_noln(b: i64);
+    fn __gruel_dbg_str_noln(p: Ptr(u8), n: usize);
+    fn __gruel_dbg_space();
+    fn __gruel_dbg_newline();
 }

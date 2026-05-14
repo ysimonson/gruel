@@ -41,6 +41,23 @@ const __string = @import("string.gruel");
 pub const String = __string.String;
 pub const Utf8DecodeError = __string.Utf8DecodeError;
 
+// ADR-0087: prelude wrappers over the surviving Rust-runtime helpers.
+// Imported after `string.gruel` because the wrapper signatures
+// reference `String`. Phase 2 ships the `@dbg`-lowered-target
+// wrappers; Phases 3+ extend this module with the IO / parse /
+// random / heap wrappers as their intrinsic rows retire.
+const __runtime_wrappers = @import("runtime_wrappers.gruel");
+pub const dbg_i64 = __runtime_wrappers.dbg_i64;
+pub const dbg_u64 = __runtime_wrappers.dbg_u64;
+pub const dbg_bool = __runtime_wrappers.dbg_bool;
+pub const dbg_str = __runtime_wrappers.dbg_str;
+pub const dbg_i64_noln = __runtime_wrappers.dbg_i64_noln;
+pub const dbg_u64_noln = __runtime_wrappers.dbg_u64_noln;
+pub const dbg_bool_noln = __runtime_wrappers.dbg_bool_noln;
+pub const dbg_str_noln = __runtime_wrappers.dbg_str_noln;
+pub const dbg_space = __runtime_wrappers.dbg_space;
+pub const dbg_newline = __runtime_wrappers.dbg_newline;
+
 // ADR-0084: linear handle returned by @spawn. Preview-gated by the
 // thread_safety feature flag — the import is harmless without the
 // flag (the body never executes), but @mark(checked_send) requires

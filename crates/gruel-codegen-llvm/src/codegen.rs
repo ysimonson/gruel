@@ -3439,23 +3439,27 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
             }
 
             // ---- Debug print ----
+            // ADR-0087 Phase 2: per-argument dispatch goes through the
+            // Gruel prelude wrappers (`dbg_i64_noln`, `dbg_u64_noln`,
+            // `dbg_bool_noln`, `dbg_str_noln`, `dbg_space`,
+            // `dbg_newline`) rather than the `__gruel_dbg_*` runtime
+            // symbols directly. The wrappers are thin one-liners that
+            // forward to the runtime; the indirection moves @dbg's
+            // libc-wrapper layer out of the intrinsics registry.
+            // `@dbg` itself stays as an intrinsic because the
+            // per-argument type dispatch below is compile-time work.
             IntrinsicId::Dbg => {
                 let i64_ty = self.ctx.i64_type();
+                let bool_ty = self.ctx.bool_type();
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let void_noarg_ty = self.ctx.void_type().fn_type(&[], false);
                 let space_fn = self
                     .module
-                    .get_function("__gruel_dbg_space")
-                    .unwrap_or_else(|| {
-                        self.module
-                            .add_function("__gruel_dbg_space", void_noarg_ty, None)
-                    });
-                let newline_fn = self
-                    .module
-                    .get_function("__gruel_dbg_newline")
-                    .unwrap_or_else(|| {
-                        self.module
-                            .add_function("__gruel_dbg_newline", void_noarg_ty, None)
-                    });
+                    .get_function("dbg_space")
+                    .unwrap_or_else(|| self.module.add_function("dbg_space", void_noarg_ty, None));
+                let newline_fn = self.module.get_function("dbg_newline").unwrap_or_else(|| {
+                    self.module.add_function("dbg_newline", void_noarg_ty, None)
+                });
                 for (i, arg_val) in args.iter().copied().enumerate() {
                     if i > 0 {
                         self.builder.build_call(space_fn, &[], "").unwrap();
@@ -3470,13 +3474,9 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 v
                             };
                             let fn_ty = self.ctx.void_type().fn_type(&[i64_ty.into()], false);
-                            let f = self
-                                .module
-                                .get_function("__gruel_dbg_i64_noln")
-                                .unwrap_or_else(|| {
-                                    self.module
-                                        .add_function("__gruel_dbg_i64_noln", fn_ty, None)
-                                });
+                            let f = self.module.get_function("dbg_i64_noln").unwrap_or_else(|| {
+                                self.module.add_function("dbg_i64_noln", fn_ty, None)
+                            });
                             self.builder.build_call(f, &[v64.into()], "").unwrap();
                         }
                         TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64 => {
@@ -3487,46 +3487,37 @@ impl<'ctx, 'a> FnCodegen<'ctx, 'a> {
                                 v
                             };
                             let fn_ty = self.ctx.void_type().fn_type(&[i64_ty.into()], false);
-                            let f = self
-                                .module
-                                .get_function("__gruel_dbg_u64_noln")
-                                .unwrap_or_else(|| {
-                                    self.module
-                                        .add_function("__gruel_dbg_u64_noln", fn_ty, None)
-                                });
+                            let f = self.module.get_function("dbg_u64_noln").unwrap_or_else(|| {
+                                self.module.add_function("dbg_u64_noln", fn_ty, None)
+                            });
                             self.builder.build_call(f, &[v64.into()], "").unwrap();
                         }
                         TypeKind::Bool => {
+                            // Prelude `dbg_bool_noln(b: bool)` takes an i1 — no zext needed.
                             let v = self.get_value(arg_val).into_int_value();
-                            let v64 = self.builder.build_int_z_extend(v, i64_ty, "zext").unwrap();
-                            let fn_ty = self.ctx.void_type().fn_type(&[i64_ty.into()], false);
-                            let f = self
-                                .module
-                                .get_function("__gruel_dbg_bool_noln")
-                                .unwrap_or_else(|| {
-                                    self.module
-                                        .add_function("__gruel_dbg_bool_noln", fn_ty, None)
-                                });
-                            self.builder.build_call(f, &[v64.into()], "").unwrap();
+                            let fn_ty = self.ctx.void_type().fn_type(&[bool_ty.into()], false);
+                            let f =
+                                self.module
+                                    .get_function("dbg_bool_noln")
+                                    .unwrap_or_else(|| {
+                                        self.module.add_function("dbg_bool_noln", fn_ty, None)
+                                    });
+                            self.builder.build_call(f, &[v.into()], "").unwrap();
                         }
                         _ if self.is_builtin_string(arg_ty) => {
+                            // Prelude `dbg_str_noln(s: Ref(String))` takes a
+                            // pointer to a String aggregate. Materialise the
+                            // arg value into a stack slot and pass its
+                            // address.
                             let str_val = self.get_value(arg_val);
-                            let (ptr, len) = self.extract_str_ptr_len(str_val);
-                            let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                            let fn_ty = self
-                                .ctx
-                                .void_type()
-                                .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-                            let f = self
-                                .module
-                                .get_function("__gruel_dbg_str_noln")
-                                .unwrap_or_else(|| {
-                                    self.module
-                                        .add_function("__gruel_dbg_str_noln", fn_ty, None)
-                                });
-                            self.builder
-                                .build_call(f, &[ptr.into(), len.into()], "")
-                                .unwrap();
+                            let str_llvm_ty = str_val.get_type();
+                            let slot = self.build_entry_alloca(str_llvm_ty, "dbg_str_slot");
+                            self.builder.build_store(slot, str_val).unwrap();
+                            let fn_ty = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+                            let f = self.module.get_function("dbg_str_noln").unwrap_or_else(|| {
+                                self.module.add_function("dbg_str_noln", fn_ty, None)
+                            });
+                            self.builder.build_call(f, &[slot.into()], "").unwrap();
                         }
                         _ => {
                             unreachable!("@dbg: unsupported type {:?}", arg_ty.kind());

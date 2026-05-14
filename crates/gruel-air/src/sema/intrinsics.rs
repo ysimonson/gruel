@@ -615,6 +615,21 @@ impl<'a> Sema<'a> {
         span: Span,
         ctx: &mut AnalysisContext,
     ) -> CompileResult<AnalysisResult> {
+        // ADR-0087 Phase 2: `@dbg` lowers to per-argument calls into the
+        // Gruel prelude wrappers (`dbg_i64_noln`, `dbg_u64_noln`,
+        // `dbg_bool_noln`, `dbg_str_noln`, `dbg_space`, `dbg_newline`)
+        // rather than to the `__gruel_dbg_*` runtime symbols
+        // directly. Register the wrappers as referenced here so the
+        // lazy work queue includes them — codegen's @dbg arm builds
+        // the calls but doesn't go through the regular call path.
+        let always_referenced = [
+            self.interner.get_or_intern("dbg_space"),
+            self.interner.get_or_intern("dbg_newline"),
+        ];
+        for sym in always_referenced {
+            ctx.referenced_functions.insert(sym);
+        }
+
         let mut arg_air_refs = Vec::with_capacity(args.len());
         for arg in args {
             // @dbg observes its arguments without consuming them: if the arg
@@ -660,6 +675,29 @@ impl<'a> Sema<'a> {
                     })),
                     span,
                 ));
+            }
+
+            // ADR-0087 Phase 2: register the prelude wrapper that
+            // codegen will dispatch to for this arg's type. Signed
+            // integers route to `dbg_i64_noln`, unsigned to
+            // `dbg_u64_noln`, `bool` to `dbg_bool_noln`, and `String`
+            // (the only struct currently accepted) to `dbg_str_noln`.
+            let wrapper_name: Option<&'static str> = if arg_type.is_integer() {
+                if arg_type.is_signed() {
+                    Some("dbg_i64_noln")
+                } else {
+                    Some("dbg_u64_noln")
+                }
+            } else if arg_type == Type::BOOL {
+                Some("dbg_bool_noln")
+            } else if self.is_builtin_string(arg_type) {
+                Some("dbg_str_noln")
+            } else {
+                None
+            };
+            if let Some(name) = wrapper_name {
+                let sym = self.interner.get_or_intern(name);
+                ctx.referenced_functions.insert(sym);
             }
 
             arg_air_refs.push(arg_result.air_ref.as_u32());

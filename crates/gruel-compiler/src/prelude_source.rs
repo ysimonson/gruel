@@ -51,6 +51,10 @@ const PRELUDE_SUBMODULE_ORDER: &[&str] = &[
     "char.gruel",
     "vec.gruel",
     "string.gruel",
+    // ADR-0087: thin Gruel wrappers over the surviving Rust-runtime
+    // helpers. Loaded after `string.gruel` because the wrapper
+    // signatures (e.g. `dbg_str(s: Ref(String))`) reference `String`.
+    "runtime_wrappers.gruel",
 ];
 
 /// One source file with its path and content.

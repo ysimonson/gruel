@@ -1151,9 +1151,24 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                     drop_span,
                     struct_type,
                 ) {
-                    Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                    Ok((analyzed, warnings, local_strings, local_bytes, ref_fns, ref_meths)) => {
                         functions_with_strings.push((analyzed, local_strings, local_bytes));
                         all_warnings.extend(warnings);
+                        // ADR-0087 Phase 2: destructor bodies may reference
+                        // prelude wrappers (e.g. via `@dbg`'s lowered targets
+                        // — `dbg_i64_noln`, `dbg_newline`, …). Feed the
+                        // refs back into the work queue so the wrapper fns
+                        // get analyzed and emitted.
+                        for fname in ref_fns {
+                            if !analyzed_functions.contains(&fname) {
+                                pending_functions.push(fname);
+                            }
+                        }
+                        for mref in ref_meths {
+                            if !analyzed_methods.contains(&mref) {
+                                pending_methods.push(mref);
+                            }
+                        }
                     }
                     Err(e) => errors.push(e),
                 }
@@ -1171,9 +1186,21 @@ pub(crate) fn analyze_all_function_bodies(mut sema: Sema<'_>) -> MultiErrorResul
                 match sema
                     .analyze_destructor_function(&infer_ctx, &full_name, body, drop_span, enum_type)
                 {
-                    Ok((analyzed, warnings, local_strings, local_bytes, _ref_fns, _ref_meths)) => {
+                    Ok((analyzed, warnings, local_strings, local_bytes, ref_fns, ref_meths)) => {
                         functions_with_strings.push((analyzed, local_strings, local_bytes));
                         all_warnings.extend(warnings);
+                        // ADR-0087 Phase 2: see comment on the struct-drops
+                        // loop above.
+                        for fname in ref_fns {
+                            if !analyzed_functions.contains(&fname) {
+                                pending_functions.push(fname);
+                            }
+                        }
+                        for mref in ref_meths {
+                            if !analyzed_methods.contains(&mref) {
+                                pending_methods.push(mref);
+                            }
+                        }
                     }
                     Err(e) => errors.push(e),
                 }

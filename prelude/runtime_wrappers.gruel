@@ -1,0 +1,65 @@
+// ADR-0087: thin Gruel wrappers over the surviving Rust-runtime helpers.
+//
+// Each fn here is a one-line forward to the matching `__gruel_*` symbol
+// declared in `prelude/runtime.gruel`. The point of the migration is
+// not to change behaviour — it's to move the call site for these
+// libc-wrapper helpers out of the intrinsics registry (where they
+// don't earn their place; they're transport, not compiler magic) and
+// into ordinary prelude code. The intrinsic registry contracts as
+// each phase lands.
+//
+// Phase 2 (this file's initial contents): `@dbg`'s per-type lowered
+// targets — `dbg_i64`, `dbg_u64`, `dbg_bool`, `dbg_str`, their
+// `_noln` variants, plus `dbg_space` / `dbg_newline`. `@dbg`'s
+// codegen arm rewires to call these wrappers per-argument instead of
+// the runtime symbols directly. `@dbg` itself stays as an intrinsic
+// (compile-time heterogeneous-arg dispatch — see ADR-0087's "Rows
+// that stay").
+//
+// The `dbg_*` wrappers are public so user code can call them
+// directly if it wants raw per-type print; they are also the
+// targets that `@dbg`'s codegen arm now lowers to.
+
+// ───────────────────────── @dbg lowered targets ─────────────────────────
+
+pub fn dbg_i64(x: i64) {
+    __gruel_dbg_i64(x);
+}
+
+pub fn dbg_u64(x: u64) {
+    __gruel_dbg_u64(x);
+}
+
+pub fn dbg_bool(b: bool) {
+    let v: i64 = if b { 1 } else { 0 };
+    __gruel_dbg_bool(v);
+}
+
+pub fn dbg_str(s: Ref(String)) {
+    __gruel_dbg_str(s.bytes.ptr(), s.bytes.len());
+}
+
+pub fn dbg_i64_noln(x: i64) {
+    __gruel_dbg_i64_noln(x);
+}
+
+pub fn dbg_u64_noln(x: u64) {
+    __gruel_dbg_u64_noln(x);
+}
+
+pub fn dbg_bool_noln(b: bool) {
+    let v: i64 = if b { 1 } else { 0 };
+    __gruel_dbg_bool_noln(v);
+}
+
+pub fn dbg_str_noln(s: Ref(String)) {
+    __gruel_dbg_str_noln(s.bytes.ptr(), s.bytes.len());
+}
+
+pub fn dbg_space() {
+    __gruel_dbg_space();
+}
+
+pub fn dbg_newline() {
+    __gruel_dbg_newline();
+}

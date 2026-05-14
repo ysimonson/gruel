@@ -28,6 +28,12 @@ pub struct String {
     pub fn bytes_len(self: Ref(Self)) -> usize { self.bytes.len() }
     pub fn bytes_capacity(self: Ref(Self)) -> usize { self.bytes.capacity() }
 
+    // ADR-0087: byte-pointer accessor used by the prelude runtime-wrapper
+    // fns (`parse_*`, `dbg_str`) that need to hand the underlying `(ptr,
+    // len)` pair to the Rust runtime archive without crossing the
+    // non-pub `bytes` field's privacy boundary from outside this file.
+    pub fn ptr(self: Ref(Self)) -> Ptr(u8) { self.bytes.ptr() }
+
     pub fn clone(self: Ref(Self)) -> Self {
         Self { bytes: self.bytes.clone() }
     }

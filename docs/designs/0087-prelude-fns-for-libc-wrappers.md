@@ -132,10 +132,11 @@ No new permanent diagnostics. Phases 2 / 3 / 4 each may temporarily fire a `Intr
 
 ### Phase 2: Migrate `@dbg`'s lowered targets
 
-- [ ] Extend `prelude/runtime.gruel`'s `link_extern("gruel_runtime")` block with `__gruel_dbg_i64`, `__gruel_dbg_u64`, `__gruel_dbg_bool`, `__gruel_dbg_str`, `_noln` variants, `__gruel_dbg_space`, `__gruel_dbg_newline`.
-- [ ] Add prelude fns: `dbg_i64(x: i64)`, `dbg_u64(x: u64)`, `dbg_bool(b: bool)`, `dbg_str(s: Ref(String))`, `_noln` variants, `dbg_space()`, `dbg_newline()`. Each is a one-line wrapper around the corresponding `__gruel_*` symbol.
-- [ ] `@dbg`'s codegen arm rewrites to call the new prelude fns per-argument.
-- [ ] `@dbg` *itself* stays as an intrinsic (compile-time type dispatch — see "Rows that stay").
+- [x] Extend `prelude/runtime.gruel`'s `link_extern("gruel_runtime")` block with `__gruel_dbg_i64`, `__gruel_dbg_u64`, `__gruel_dbg_bool`, `__gruel_dbg_str`, `_noln` variants, `__gruel_dbg_space`, `__gruel_dbg_newline`.
+- [x] Add prelude fns: `dbg_i64(x: i64)`, `dbg_u64(x: u64)`, `dbg_bool(b: bool)`, `dbg_str(s: Ref(String))`, `_noln` variants, `dbg_space()`, `dbg_newline()`. Each is a one-line wrapper around the corresponding `__gruel_*` symbol. (Bodies live in a new `prelude/runtime_wrappers.gruel` module loaded after `string.gruel` so `Ref(String)` resolves.)
+- [x] `@dbg`'s codegen arm rewrites to call the new prelude fns per-argument. Sema-side `analyze_dbg_intrinsic` now also seeds the lazy work queue with the wrappers it dispatches to per arg type — and the post-processing destructor-analysis loop feeds back the `referenced_functions` of each destructor body so a `fn __drop(self) { @dbg(...); }` keeps the wrappers reachable.
+- [x] `@dbg` *itself* stays as an intrinsic (compile-time type dispatch — see "Rows that stay").
+- [x] Renamed the `link_extern("c")` bindings in `prelude/runtime.gruel` to a `libc_*` prefix (with `@link_name("…")` to bind to the real libc symbols). Bug discovered while running Phase 2's `make test`: the un-prefixed names from Phase 1 (`read`, `write`, `exit`, `malloc`, `free`, `realloc`, `memcmp`) clash with user-written `fn read(…)` etc. and fired `DuplicateTypeDefinition`. The rename is Gruel-side only — the LLVM symbol names still match libc.
 
 ### Phase 3: Migrate IO + algorithmic wrappers
 
