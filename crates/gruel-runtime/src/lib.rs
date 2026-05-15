@@ -84,13 +84,19 @@ pub mod platform;
 pub mod heap;
 
 // Runtime modules
-pub mod debug;
+//
+// ADR-0087's follow-up inlining pass deleted the `debug`, `io`,
+// `parse`, and `random` runtime modules — their FFI entry points
+// (`__gruel_dbg_*`, `__gruel_read_line`, `__gruel_parse_*`,
+// `__gruel_random_*`) and the `__gruel_utf8_validate` symbol from
+// `utf8.rs` were all replaced by pure Gruel implementations in
+// `prelude/runtime_wrappers.gruel`. What remains here is what
+// genuinely needs Rust: stack-touching entry handling, panic /
+// error infrastructure, the heap helpers used by the spawn thunk
+// and `__gruel_cstr_to_vec`, pthread shims, and the surviving
+// `__gruel_cstr_to_vec` (still tied to the not-yet-migratable
+// `@cstr_to_vec` intrinsic).
 pub mod entry;
 pub mod error;
-// ADR-0087 Phase 3: `io` module retired — the prelude `read_line()`
-// fn drives libc `read` directly. `__gruel_read_line` is gone.
-pub mod parse;
-pub mod random;
-// ADR-0084: pthread-backed @spawn / JoinHandle::join.
 pub mod thread;
 pub mod utf8;

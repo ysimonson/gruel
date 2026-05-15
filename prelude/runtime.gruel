@@ -1,34 +1,29 @@
-// ADR-0087: prelude bindings to libc and the Gruel runtime archive.
+// ADR-0087: prelude bindings to libc. The original Phase 1 also
+// declared a `link_extern("gruel_runtime")` block forwarding to the
+// `__gruel_*` Rust shims that hosted parse_* / random_* /
+// utf8_validate / dbg_* — those have all been inlined into the
+// prelude itself (`prelude/runtime_wrappers.gruel`), so only the
+// libc surface remains.
 //
-// This file declares extern fn signatures that subsequent ADR-0087
-// phases will use to host prelude bodies for what used to be intrinsics
-// (panic, alloc, parse_*, etc.). Phase 1 only adds the declarations —
-// they have no callers yet, so the link line picks up a `-lc` flag but
-// no Gruel symbols actually reference these signatures until Phase 2+.
+// The Gruel-level identifiers carry a `libc_` prefix so that user
+// programs declaring their own `fn read(...)` / `fn malloc(...)`
+// don't fire a duplicate-definition error against these bindings.
+// `@link_name("…")` pins each binding to the actual libc symbol.
 //
-// The `gruel_runtime` library name is special-cased in the
-// library-set walker (see `collect_extern_link_libraries` in
-// `gruel-compiler/src/unit.rs`): it does not get a `-l` flag because
-// the runtime archive is already linked by absolute path. The
-// declaration is purely a name-binding contract for sema.
+// Adding a `libc_*`-prefixed name of your own in user code would
+// still collide at the LLVM symbol layer if both your code and a
+// prelude wrapper that calls the binding end up in the same
+// compilation; that's a known pre-module-system limitation
+// (ADR-0087 OQ4).
 
-// ──────────────────────────── libc ────────────────────────────────
+// ──────────────────────────── libc (POSIX) ──────────────────────────
 //
-// Bindings used by Phases 2–6: write (panic / dbg), read (read_line),
-// exit (panic / main-return), malloc / free / realloc (heap), memcmp
-// (Vec.eq). pthread_create / pthread_join (Phase 5 threads) live in a
-// separate target-conditional block — deferred until Phase 5 lands.
+// Universal libc bindings — present on macOS and Linux without
+// further conditioning. `write` / `read` drive stdin/stdout I/O.
+// `exit` is the main-return target. `malloc` / `free` / `realloc`
+// back the `mem_*` heap wrappers (and the `@spawn` thunk slot
+// allocation in codegen). `memcmp` backs `bytes_eq`.
 
-// The Gruel-level identifiers carry a `libc_` prefix so that programs
-// declaring their own `fn read(...)` / `fn malloc(...)` etc. don't
-// fire a duplicate-definition error against these prelude bindings.
-// `@link_name("…")` pins each binding to the actual libc symbol, so
-// the prelude bodies (Phases 2–4) calling `libc_read` etc. still
-// link against the real C symbols. Adding a `libc_*`-prefixed name
-// of your own in user code would still collide at the LLVM symbol
-// layer if both your code and a prelude wrapper that calls the
-// binding end up in the same compilation; that's a known
-// pre-module-system limitation noted in ADR-0087's Open Questions.
 link_extern("c") {
     @link_name("write")   fn libc_write(fd: c_int, buf: Ptr(u8), n: usize) -> isize;
     @link_name("read")    fn libc_read(fd: c_int, buf: MutPtr(u8), n: usize) -> isize;
@@ -39,32 +34,16 @@ link_extern("c") {
     @link_name("memcmp")  fn libc_memcmp(a: Ptr(u8), b: Ptr(u8), n: usize) -> c_int;
 }
 
-// ────────────────────── Gruel runtime archive ───────────────────────
+// ──────────────────────────── libc (entropy) ──────────────────────────
 //
-// Surviving Rust-runtime helpers whose bodies are real algorithmic
-// work (parse_*, random_*, utf8_validate, cstr_to_vec) plus the
-// per-type `__gruel_dbg_*` formatting helpers used by `@dbg`'s
-// intrinsic dispatch. Phase 2 of ADR-0087 wraps the dbg helpers in
-// Gruel prelude fns (`prelude/runtime_wrappers.gruel`) and reroutes
-// `@dbg`'s codegen arm through those wrappers. Phases 3–4 do the
-// same migration for IO and heap helpers.
+// `random_u32` / `random_u64` dispatch on `@target_os()`. Both
+// bindings are declared unconditionally so the comptime `if` in the
+// prelude has every name resolved at sema time — only the branch
+// matching the current target's `Os` actually emits a call, so the
+// unused side is dead-code-eliminated and never reaches the link
+// line as an unresolved symbol on the wrong platform.
 
-link_extern("gruel_runtime") {
-    fn __gruel_parse_i32(buf: Ptr(u8), len: usize) -> i32;
-    fn __gruel_parse_i64(buf: Ptr(u8), len: usize) -> i64;
-    fn __gruel_parse_u32(buf: Ptr(u8), len: usize) -> u32;
-    fn __gruel_parse_u64(buf: Ptr(u8), len: usize) -> u64;
-    fn __gruel_random_u32() -> u32;
-    fn __gruel_random_u64() -> u64;
-    fn __gruel_utf8_validate(buf: Ptr(u8), len: usize) -> u8;
-    fn __gruel_dbg_i64(x: i64);
-    fn __gruel_dbg_u64(x: u64);
-    fn __gruel_dbg_bool(b: i64);
-    fn __gruel_dbg_str(p: Ptr(u8), n: usize);
-    fn __gruel_dbg_i64_noln(x: i64);
-    fn __gruel_dbg_u64_noln(x: u64);
-    fn __gruel_dbg_bool_noln(b: i64);
-    fn __gruel_dbg_str_noln(p: Ptr(u8), n: usize);
-    fn __gruel_dbg_space();
-    fn __gruel_dbg_newline();
+link_extern("c") {
+    @link_name("getentropy") fn libc_getentropy(buf: MutPtr(u8), n: usize) -> c_int;
+    @link_name("getrandom")  fn libc_getrandom(buf: MutPtr(u8), n: usize, flags: c_uint) -> isize;
 }

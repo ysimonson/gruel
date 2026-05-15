@@ -1,13 +1,14 @@
-//! UTF-8 validation and C-string ingestion FFI helpers.
+//! C-string ingestion FFI helper.
 //!
-//! After ADR-0081's runtime collapse, the only String-adjacent runtime code
-//! that remains is the SIMD-optional UTF-8 validator (called from the
-//! prelude `String::from_utf8` body via `@utf8_validate`) and the
-//! `strlen + alloc + memcpy` helper that ingests a NUL-terminated C string
-//! into a fresh `Vec(u8)` (called from `String::from_c_str(_unchecked)` via
-//! `@cstr_to_vec`). Everything else — equality, comparisons, mutation,
-//! cloning, allocation — moved to inline Vec(T) lowerings or is composed
-//! in Gruel inside `prelude/string.gruel`.
+//! ADR-0087's follow-up pass inlined `__gruel_utf8_validate` into the
+//! prelude (`utf8_validate(s: Slice(u8)) -> bool` in
+//! `prelude/runtime_wrappers.gruel`), so the only remaining
+//! String-adjacent runtime symbol is `__gruel_cstr_to_vec` — the
+//! `strlen + alloc + memcpy` helper that ingests a NUL-terminated C
+//! string into a fresh `Vec(u8)`, called by `String::from_c_str`
+//! via `@cstr_to_vec`. `@cstr_to_vec` stays as an intrinsic
+//! pending whole-aggregate `@uninit` (see ADR-0087 "Rows that
+//! stay").
 
 use crate::heap;
 
@@ -31,72 +32,6 @@ const _: () = {
     assert!(core::mem::size_of::<VecU8Result>() == 24);
     assert!(core::mem::align_of::<VecU8Result>() == 8);
 };
-
-/// ADR-0072: validate that `[ptr..ptr+len]` is a well-formed UTF-8 byte
-/// sequence. Returns `1` if valid, `0` otherwise. Uses raw pointer reads
-/// to avoid the bounds-check panics that slice indexing would emit
-/// (this crate is `no_std` with no unwinder).
-#[unsafe(no_mangle)]
-pub extern "C" fn __gruel_utf8_validate(ptr: *const u8, len: u64) -> u8 {
-    if len == 0 {
-        return 1;
-    }
-    let len_us = len as usize;
-    let mut i = 0usize;
-    while i < len_us {
-        let b = unsafe { *ptr.add(i) };
-        let n = if b < 0x80 {
-            1usize
-        } else if b & 0xE0 == 0xC0 {
-            if b < 0xC2 {
-                return 0; // overlong 2-byte
-            }
-            2usize
-        } else if b & 0xF0 == 0xE0 {
-            3usize
-        } else if b & 0xF8 == 0xF0 {
-            if b > 0xF4 {
-                return 0; // codepoint > 0x10FFFF
-            }
-            4usize
-        } else {
-            return 0;
-        };
-        if i + n > len_us {
-            return 0;
-        }
-        // Continuation bytes must be 10xxxxxx.
-        let mut k = 1usize;
-        while k < n {
-            let c = unsafe { *ptr.add(i + k) };
-            if c & 0xC0 != 0x80 {
-                return 0;
-            }
-            k += 1;
-        }
-        if n == 3 {
-            let b1 = unsafe { *ptr.add(i + 1) };
-            let b2 = unsafe { *ptr.add(i + 2) };
-            let cp = ((b as u32 & 0x0F) << 12) | ((b1 as u32 & 0x3F) << 6) | (b2 as u32 & 0x3F);
-            if cp < 0x800 || (0xD800..=0xDFFF).contains(&cp) {
-                return 0;
-            }
-        } else if n == 4 {
-            let b1 = unsafe { *ptr.add(i + 1) };
-            let b2 = unsafe { *ptr.add(i + 2) };
-            let b3 = unsafe { *ptr.add(i + 3) };
-            let cp = ((b as u32 & 0x07) << 18)
-                | ((b1 as u32 & 0x3F) << 12)
-                | ((b2 as u32 & 0x3F) << 6)
-                | (b3 as u32 & 0x3F);
-            if !(0x10000..=0x10FFFF).contains(&cp) {
-                return 0;
-            }
-        }
-        i += n;
-    }
-    1
-}
 
 /// ADR-0072: ingest a NUL-terminated C string into a fresh `Vec(u8)` with
 /// strlen + alloc + memcpy. Used by `String::from_c_str(_unchecked)`.

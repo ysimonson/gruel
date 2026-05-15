@@ -1,89 +1,150 @@
-// ADR-0087: thin Gruel wrappers over the surviving Rust-runtime helpers.
+// ADR-0087: the prelude carries the user-facing surface that the
+// retired `@`-prefixed intrinsics used to expose. The wrappers here
+// drive libc directly (or, where the algorithm is non-trivial, host
+// the algorithm itself in Gruel). The `__gruel_*` Rust shims those
+// rows used to delegate to are gone.
+
+// ────────────────────────── itoa helpers ──────────────────────────
 //
-// Each fn here is a one-line forward to the matching `__gruel_*` symbol
-// declared in `prelude/runtime.gruel`. The point of the migration is
-// not to change behaviour — it's to move the call site for these
-// libc-wrapper helpers out of the intrinsics registry (where they
-// don't earn their place; they're transport, not compiler magic) and
-// into ordinary prelude code. The intrinsic registry contracts as
-// each phase lands.
-//
-// Phase 2 (this file's initial contents): `@dbg`'s per-type lowered
-// targets — `dbg_i64`, `dbg_u64`, `dbg_bool`, `dbg_str`, their
-// `_noln` variants, plus `dbg_space` / `dbg_newline`. `@dbg`'s
-// codegen arm rewires to call these wrappers per-argument instead of
-// the runtime symbols directly. `@dbg` itself stays as an intrinsic
-// (compile-time heterogeneous-arg dispatch — see ADR-0087's "Rows
-// that stay").
-//
-// The `dbg_*` wrappers are public so user code can call them
-// directly if it wants raw per-type print; they are also the
-// targets that `@dbg`'s codegen arm now lowers to.
+// Format an unsigned / signed 64-bit integer into a 32-byte stack
+// buffer, return the number of bytes written. 20 digits cover
+// u64::MAX, plus one for a leading `-`; 32 gives slack and rounds up.
+
+fn zeroed_itoa_buf() -> [u8; 32] {
+    let z: u8 = 0;
+    [z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z,
+     z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z]
+}
+
+fn u64_to_decimal(value: u64, buf: MutRef([u8; 32])) -> usize {
+    if value == 0 {
+        buf[0] = 48;
+        return 1;
+    }
+    // Build digits in reverse in a local buffer, then copy in proper
+    // order into `buf` (avoids reading from `buf` through the MutRef).
+    let mut tmp: [u8; 32] = zeroed_itoa_buf();
+    let mut v: u64 = value;
+    let mut i: usize = 0;
+    while v != 0 {
+        let d: u8 = @cast(v % 10);
+        tmp[i] = d + 48;
+        v = v / 10;
+        i = i + 1;
+    }
+    let n: usize = i;
+    let mut j: usize = 0;
+    while j < n {
+        buf[j] = tmp[n - 1 - j];
+        j = j + 1;
+    }
+    n
+}
+
+fn i64_to_decimal(value: i64, buf: MutRef([u8; 32])) -> usize {
+    if value >= 0 {
+        let m: u64 = @cast(value);
+        return u64_to_decimal(m, buf);
+    }
+    buf[0] = 45;
+    // Magnitude: for value > i64::MIN, `-value` fits in i64 and casts
+    // safely to u64. For value == i64::MIN, `-(value + 1)` fits, then
+    // `+ 1` in u64 gives the correct magnitude (i64::MIN's absolute
+    // value, 2^63, doesn't fit in i64 but fits in u64).
+    let i64_min: i64 = -9223372036854775807 - 1;
+    let mag: u64 = if value == i64_min {
+        9223372036854775808
+    } else {
+        @cast(-value)
+    };
+    // Write magnitude into a temp, then copy into buf at offset 1.
+    let mut tmp: [u8; 32] = zeroed_itoa_buf();
+    let digits: usize = u64_to_decimal(mag, &mut tmp);
+    let mut j: usize = 0;
+    while j < digits {
+        buf[j + 1] = tmp[j];
+        j = j + 1;
+    }
+    digits + 1
+}
 
 // ───────────────────────── @dbg lowered targets ─────────────────────────
-
-pub fn dbg_i64(x: i64) {
-    __gruel_dbg_i64(x);
-}
-
-pub fn dbg_u64(x: u64) {
-    __gruel_dbg_u64(x);
-}
-
-pub fn dbg_bool(b: bool) {
-    let v: i64 = if b { 1 } else { 0 };
-    __gruel_dbg_bool(v);
-}
-
-pub fn dbg_str(s: Ref(String)) {
-    __gruel_dbg_str(s.bytes.ptr(), s.bytes.len());
-}
-
-pub fn dbg_i64_noln(x: i64) {
-    __gruel_dbg_i64_noln(x);
-}
-
-pub fn dbg_u64_noln(x: u64) {
-    __gruel_dbg_u64_noln(x);
-}
-
-pub fn dbg_bool_noln(b: bool) {
-    let v: i64 = if b { 1 } else { 0 };
-    __gruel_dbg_bool_noln(v);
-}
-
-pub fn dbg_str_noln(s: Ref(String)) {
-    __gruel_dbg_str_noln(s.bytes.ptr(), s.bytes.len());
-}
+//
+// All `dbg_*` fns write to stdout (fd 1) via libc `write`. The
+// `_noln` variants omit the trailing newline. `@dbg`'s codegen arm
+// dispatches per arg type and lowers to these.
 
 pub fn dbg_space() {
-    __gruel_dbg_space();
+    let space: [u8; 1] = [32];
+    let s: Slice(u8) = &space[..];
+    let _ = checked { libc_write(1, s.ptr(), s.len()) };
 }
 
 pub fn dbg_newline() {
-    __gruel_dbg_newline();
+    let nl: [u8; 1] = [10];
+    let s: Slice(u8) = &nl[..];
+    let _ = checked { libc_write(1, s.ptr(), s.len()) };
 }
 
-// ─────────────────────── IO + algorithmic (Phase 3) ─────────────────────
+pub fn dbg_str_noln(s: Ref(String)) {
+    let _ = checked { libc_write(1, s.bytes.ptr(), s.bytes.len()) };
+}
+
+pub fn dbg_str(s: Ref(String)) {
+    dbg_str_noln(s);
+    dbg_newline();
+}
+
+pub fn dbg_bool_noln(b: bool) {
+    if b {
+        let buf: [u8; 4] = [116, 114, 117, 101];
+        let s: Slice(u8) = &buf[..];
+        let _ = checked { libc_write(1, s.ptr(), s.len()) };
+    } else {
+        let buf: [u8; 5] = [102, 97, 108, 115, 101];
+        let s: Slice(u8) = &buf[..];
+        let _ = checked { libc_write(1, s.ptr(), s.len()) };
+    }
+}
+
+pub fn dbg_bool(b: bool) {
+    dbg_bool_noln(b);
+    dbg_newline();
+}
+
+pub fn dbg_i64_noln(x: i64) {
+    let mut buf: [u8; 32] = zeroed_itoa_buf();
+    let n: usize = i64_to_decimal(x, &mut buf);
+    let s: Slice(u8) = &buf[..];
+    let _ = checked { libc_write(1, s.ptr(), n) };
+}
+
+pub fn dbg_i64(x: i64) {
+    dbg_i64_noln(x);
+    dbg_newline();
+}
+
+pub fn dbg_u64_noln(x: u64) {
+    let mut buf: [u8; 32] = zeroed_itoa_buf();
+    let n: usize = u64_to_decimal(x, &mut buf);
+    let s: Slice(u8) = &buf[..];
+    let _ = checked { libc_write(1, s.ptr(), n) };
+}
+
+pub fn dbg_u64(x: u64) {
+    dbg_u64_noln(x);
+    dbg_newline();
+}
+
+// ─────────────────────────── stdin / read_line ──────────────────────────
 //
-// `read_line` reads bytes from stdin one byte at a time until a newline
-// or EOF, building up a `Vec(u8)`. Callers that want a `String` wrap
-// with `String::from_utf8` / `from_utf8_unchecked`. Differs from the
+// Reads bytes from stdin one byte at a time until a newline or EOF,
+// building up a `Vec(u8)`. Callers that want a `String` wrap with
+// `String::from_utf8` / `from_utf8_unchecked`. Differs from the
 // pre-ADR-0087 `@read_line()` intrinsic which returned `String`
 // directly: the migration commits to handing back raw bytes so the
-// trailing-newline behaviour and the UTF-8 invariant are concerns the
-// caller owns.
-//
-// `parse_*` forward to the runtime archive's `__gruel_parse_*`
-// helpers, which take `(ptr, len)`. The Gruel wrappers extract
-// `(s.bytes.ptr(), s.bytes.len())` directly (field-projection
-// pattern) rather than going through `String::ptr()` / `String::len()`
-// — method dispatch on a `Ref(String)` param trips
-// `MoveOutOfBorrow` in today's sema; field projection works because
-// `analyze_inst_for_projection` handles ref-typed bases.
-//
-// `random_*` and `utf8_validate` are equally thin; `bytes_eq` wraps
-// libc `memcmp` (compared to `0`).
+// trailing-newline behaviour and the UTF-8 invariant are concerns
+// the caller owns.
 
 pub fn read_line() -> Vec(u8) {
     let mut buf: Vec(u8) = Vec(u8)::new();
@@ -103,34 +164,199 @@ pub fn read_line() -> Vec(u8) {
     buf
 }
 
-pub fn parse_i32(s: Ref(String)) -> i32 {
-    __gruel_parse_i32(s.bytes.ptr(), s.bytes.len())
+// ──────────────────────────── integer parsing ───────────────────────────
+//
+// Hand-rolled decimal parser. Panics on empty input, non-digit
+// bytes, or overflow.
+
+fn parse_u64_inner(p: Ptr(u8), len: usize) -> u64 {
+    if len == 0 {
+        @panic("parse error");
+    }
+    let mut i: usize = 0;
+    let mut acc: u64 = 0;
+    let max_div_10: u64 = 1844674407370955161;
+    let max_mod_10: u8 = 5;
+    while i < len {
+        let b: u8 = checked { p.offset(i).read() };
+        if b < 48 || b > 57 {
+            @panic("parse error");
+        }
+        let digit_byte: u8 = b - 48;
+        if acc > max_div_10 || (acc == max_div_10 && digit_byte > max_mod_10) {
+            @panic("parse error");
+        }
+        let digit: u64 = @cast(digit_byte);
+        acc = acc * 10 + digit;
+        i = i + 1;
+    }
+    acc
+}
+
+fn parse_i64_inner(p: Ptr(u8), len: usize) -> i64 {
+    if len == 0 {
+        @panic("parse error");
+    }
+    let first: u8 = checked { p.offset(0).read() };
+    let negative: bool = first == 45;
+    let start: usize = if negative { 1 } else { 0 };
+    if start >= len {
+        @panic("parse error");
+    }
+    let abs_len: usize = len - start;
+    let abs_p: Ptr(u8) = checked { p.offset(start) };
+    let mag: u64 = parse_u64_inner(abs_p, abs_len);
+    if negative {
+        // |i64::MIN| = 9223372036854775808 fits in u64 but not in i64.
+        let i64_min_mag: u64 = 9223372036854775808;
+        if mag > i64_min_mag {
+            @panic("parse error");
+        }
+        if mag == i64_min_mag {
+            // i64::MIN literal trick: -i64::MAX - 1.
+            return -9223372036854775807 - 1;
+        }
+        let v: i64 = @cast(mag);
+        return -v;
+    }
+    let i64_max: u64 = 9223372036854775807;
+    if mag > i64_max {
+        @panic("parse error");
+    }
+    @cast(mag)
 }
 
 pub fn parse_i64(s: Ref(String)) -> i64 {
-    __gruel_parse_i64(s.bytes.ptr(), s.bytes.len())
-}
-
-pub fn parse_u32(s: Ref(String)) -> u32 {
-    __gruel_parse_u32(s.bytes.ptr(), s.bytes.len())
+    parse_i64_inner(s.bytes.ptr(), s.bytes.len())
 }
 
 pub fn parse_u64(s: Ref(String)) -> u64 {
-    __gruel_parse_u64(s.bytes.ptr(), s.bytes.len())
+    parse_u64_inner(s.bytes.ptr(), s.bytes.len())
+}
+
+pub fn parse_i32(s: Ref(String)) -> i32 {
+    let v: i64 = parse_i64_inner(s.bytes.ptr(), s.bytes.len());
+    let i32_min: i64 = -2147483648;
+    let i32_max: i64 = 2147483647;
+    if v < i32_min || v > i32_max {
+        @panic("parse error");
+    }
+    @cast(v)
+}
+
+pub fn parse_u32(s: Ref(String)) -> u32 {
+    let v: u64 = parse_u64_inner(s.bytes.ptr(), s.bytes.len());
+    let u32_max: u64 = 4294967295;
+    if v > u32_max {
+        @panic("parse error");
+    }
+    @cast(v)
+}
+
+// ─────────────────────────────── entropy ──────────────────────────────
+//
+// `random_u32` / `random_u64` read directly from the platform
+// entropy pool. macOS: libc `getentropy(buf, len) -> 0|-1`. Linux:
+// libc `getrandom(buf, len, flags=0) -> ssize_t`. Both write `len`
+// raw bytes; we then little-endian decode into the integer.
+
+fn fill_entropy(p: MutPtr(u8), n: usize) {
+    comptime if @target_os() == Os::Macos {
+        let r: c_int = libc_getentropy(p, n);
+        if r != 0 {
+            @panic("entropy source failure");
+        }
+    } else {
+        let want: isize = @cast(n);
+        let written: isize = libc_getrandom(p, n, 0);
+        if written != want {
+            @panic("entropy source failure");
+        }
+    }
 }
 
 pub fn random_u32() -> u32 {
-    __gruel_random_u32()
+    let mut buf: [u8; 4] = [0, 0, 0, 0];
+    let p: MutPtr(u8) = checked { MutPtr(u8)::from(&mut buf[0]) };
+    fill_entropy(p, 4);
+    let b0: u32 = @cast(buf[0]);
+    let b1: u32 = @cast(buf[1]);
+    let b2: u32 = @cast(buf[2]);
+    let b3: u32 = @cast(buf[3]);
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
 }
 
 pub fn random_u64() -> u64 {
-    __gruel_random_u64()
+    let mut buf: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+    let p: MutPtr(u8) = checked { MutPtr(u8)::from(&mut buf[0]) };
+    fill_entropy(p, 8);
+    let mut acc: u64 = 0;
+    let mut i: usize = 0;
+    while i < 8 {
+        let b: u64 = @cast(buf[i]);
+        let shift: u64 = @cast(i * 8);
+        acc = acc | (b << shift);
+        i = i + 1;
+    }
+    acc
 }
 
+// ──────────────────────────── UTF-8 validation ────────────────────────────
+//
+// Returns `true` iff `s` decodes as well-formed UTF-8 — Unicode 15
+// conformance: 1/2/3/4-byte sequences with the canonical
+// continuation patterns, no surrogates, no overlong, no codepoints
+// above U+10FFFF.
+
 pub fn utf8_validate(s: Slice(u8)) -> bool {
-    // `s.ptr()` lowers to `@slice_ptr` which requires `checked`.
-    let r: u8 = checked { __gruel_utf8_validate(s.ptr(), s.len()) };
-    r != 0
+    let n: usize = s.len();
+    let mut i: usize = 0;
+    while i < n {
+        let b0: u8 = s[i];
+        if b0 < 128 {
+            i = i + 1;
+        } else if b0 < 194 {
+            // Stray continuation byte (0x80..=0xBF) or overlong 2-byte
+            // head (0xC0..=0xC1).
+            return false;
+        } else if b0 < 224 {
+            // 2-byte: 0xC2..=0xDF + 1 continuation.
+            if i + 2 > n { return false; }
+            let b1: u8 = s[i + 1];
+            if b1 < 128 || b1 > 191 { return false; }
+            i = i + 2;
+        } else if b0 < 240 {
+            // 3-byte: 0xE0..=0xEF + 2 continuations. Tighten the b1
+            // range to reject overlong (E0:A0-BF) and surrogates
+            // (ED:80-9F).
+            if i + 3 > n { return false; }
+            let b1: u8 = s[i + 1];
+            let b2: u8 = s[i + 2];
+            let lo: u8 = if b0 == 224 { 160 } else { 128 };
+            let hi: u8 = if b0 == 237 { 159 } else { 191 };
+            if b1 < lo || b1 > hi { return false; }
+            if b2 < 128 || b2 > 191 { return false; }
+            i = i + 3;
+        } else if b0 < 245 {
+            // 4-byte: 0xF0..=0xF4 + 3 continuations. Tighten the b1
+            // range to reject overlong (F0:90-BF) and codepoints
+            // above U+10FFFF (F4:80-8F).
+            if i + 4 > n { return false; }
+            let b1: u8 = s[i + 1];
+            let b2: u8 = s[i + 2];
+            let b3: u8 = s[i + 3];
+            let lo: u8 = if b0 == 240 { 144 } else { 128 };
+            let hi: u8 = if b0 == 244 { 143 } else { 191 };
+            if b1 < lo || b1 > hi { return false; }
+            if b2 < 128 || b2 > 191 { return false; }
+            if b3 < 128 || b3 > 191 { return false; }
+            i = i + 4;
+        } else {
+            // 0xF5..=0xFF: invalid lead byte.
+            return false;
+        }
+    }
+    true
 }
 
 pub fn bytes_eq(a: Ptr(u8), b: Ptr(u8), n: usize) -> bool {
@@ -140,23 +366,20 @@ pub fn bytes_eq(a: Ptr(u8), b: Ptr(u8), n: usize) -> bool {
 
 // ─────────────────────── Heap (Phase 4) ─────────────────────
 //
-// `mem_alloc` / `mem_free` / `mem_realloc` used to be intrinsics
-// (`@alloc` / `@free` / `@realloc`) that carried pointee-type
-// inference. The migrated prelude fns return `MutPtr(u8)`; callers
-// that want a typed pointer wrap with `@ptr_cast`. The `align`
-// parameter is currently ignored — libc `malloc` / `realloc` are
-// max-aligned, which covers every alignment we currently need;
-// revisit if/when alignment-> 16 use cases appear (see ADR-0087
+// `mem_alloc` / `mem_free` / `mem_realloc` are thin libc wrappers
+// preserved at the Gruel layer so callers don't have to thread libc
+// names directly. The wrappers return `MutPtr(u8)`; callers that
+// want a typed pointer wrap with `@ptr_cast`. The `align` parameter
+// is currently ignored — libc `malloc` / `realloc` are max-aligned
+// (revisit if/when alignment-> 16 use cases appear; see ADR-0087
 // OQ2).
 //
 // Naming deviation from the ADR: the ADR sketched `alloc` /
-// `free` / `realloc` as the user-facing names. Gruel doesn't
-// mangle user-fn names at the LLVM level, so a prelude `free`
-// would emit an LLVM symbol named `free` — colliding with the
-// libc `free` symbol the prelude's own `libc_free` binding pulls
-// in via `@link_name("free")`. The `mem_*` prefix avoids the
-// collision; the longer-qualified name from ADR-0087 OQ4
-// supersedes it once a module system lands.
+// `free` / `realloc` as the user-facing names. Gruel doesn't mangle
+// user-fn names at the LLVM level, so a prelude `free` would emit
+// an LLVM symbol named `free` — colliding with libc `free`. The
+// `mem_*` prefix breaks the collision; the longer-qualified name
+// from ADR-0087 OQ4 supersedes it once a module system lands.
 
 pub fn mem_alloc(size: usize, align: usize) -> MutPtr(u8) {
     libc_malloc(size)

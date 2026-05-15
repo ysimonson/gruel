@@ -6807,6 +6807,11 @@ impl<'a> Sema<'a> {
                 .with_help("use explicit methods like swap() or take() to remove elements"));
             }
 
+            // Mark the root variable as used so unused-variable analysis
+            // accounts for array indexing (matches the field-projection
+            // path at the top of `analyze_field_read`).
+            ctx.used_locals.insert(trace.root_var);
+
             // Emit PlaceRead instruction
             let place_ref = Self::build_place_ref(air, &trace);
             let air_ref = air.add_inst(AirInst {
