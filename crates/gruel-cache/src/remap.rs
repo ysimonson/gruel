@@ -139,14 +139,22 @@ impl RemapSpurs for Ast {
 
 impl RemapSpurs for Ident {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
+        // Exhaustive destructuring: adding a field to Ident becomes a
+        // compile error here until the new field is handled. The same
+        // pattern repeats below for every struct in this file (ADR-0088
+        // follow-up).
+        let Ident { name, span } = self;
+        name.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for Directive {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.args.remap_spurs(table);
+        let Directive { name, args, span } = self;
+        name.remap_spurs(table);
+        args.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -176,28 +184,56 @@ impl RemapSpurs for Item {
 
 impl RemapSpurs for gruel_parser::ast::LinkExternBlock {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.library.remap_spurs(table);
-        for item in &mut self.items {
-            item.remap_spurs(table);
-        }
+        let gruel_parser::ast::LinkExternBlock {
+            library,
+            items,
+            link_mode,
+            span,
+        } = self;
+        library.remap_spurs(table);
+        items.remap_spurs(table);
+        link_mode.remap_spurs(table);
+        span.remap_spurs(table);
     }
+}
+
+impl RemapSpurs for gruel_parser::ast::LinkMode {
+    fn remap_spurs(&mut self, _table: &[Spur]) {}
 }
 
 impl RemapSpurs for gruel_parser::ast::ExternFn {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.directives.remap_spurs(table);
-        self.name.remap_spurs(table);
-        self.params.remap_spurs(table);
-        self.return_type.remap_spurs(table);
+        let gruel_parser::ast::ExternFn {
+            directives,
+            name,
+            params,
+            return_type,
+            span,
+        } = self;
+        directives.remap_spurs(table);
+        name.remap_spurs(table);
+        params.remap_spurs(table);
+        return_type.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for ConstDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.directives.remap_spurs(table);
-        self.name.remap_spurs(table);
-        self.ty.remap_spurs(table);
-        self.init.remap_spurs(table);
+        let ConstDecl {
+            directives,
+            visibility,
+            name,
+            ty,
+            init,
+            span,
+        } = self;
+        directives.remap_spurs(table);
+        visibility.remap_spurs(table);
+        name.remap_spurs(table);
+        ty.remap_spurs(table);
+        init.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -205,41 +241,76 @@ impl RemapSpurs for Visibility {
     fn remap_spurs(&mut self, _table: &[Spur]) {}
 }
 
+impl RemapSpurs for gruel_builtins::Posture {
+    fn remap_spurs(&mut self, _table: &[Spur]) {}
+}
+
 impl RemapSpurs for StructDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.directives.remap_spurs(table);
-        self.name.remap_spurs(table);
-        self.fields.remap_spurs(table);
-        self.methods.remap_spurs(table);
+        let StructDecl {
+            directives,
+            visibility,
+            posture,
+            name,
+            fields,
+            methods,
+            span,
+        } = self;
+        directives.remap_spurs(table);
+        visibility.remap_spurs(table);
+        posture.remap_spurs(table);
+        name.remap_spurs(table);
+        fields.remap_spurs(table);
+        methods.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for FieldDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.ty.remap_spurs(table);
+        let FieldDecl {
+            visibility,
+            name,
+            ty,
+            span,
+        } = self;
+        visibility.remap_spurs(table);
+        name.remap_spurs(table);
+        ty.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for EnumDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
         // ADR-0086: enums can now carry directives (notably `@mark(c)`).
-        // Pre-ADR-0086 the parser produced empty directives for enums,
-        // so omitting this remap was harmless. With `@mark(c) enum`
-        // permitted, stale Spurs leaked into sema and were mis-resolved
-        // against the build-shared interner — typically showing up as
-        // a phantom `@lang("drop")` directive on user enums.
-        self.directives.remap_spurs(table);
-        self.name.remap_spurs(table);
-        self.variants.remap_spurs(table);
-        self.methods.remap_spurs(table);
+        // ADR-0088 follow-up: destructuring catches future-added fields
+        // at compile time.
+        let EnumDecl {
+            directives,
+            visibility,
+            posture,
+            name,
+            variants,
+            methods,
+            span,
+        } = self;
+        directives.remap_spurs(table);
+        visibility.remap_spurs(table);
+        posture.remap_spurs(table);
+        name.remap_spurs(table);
+        variants.remap_spurs(table);
+        methods.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for EnumVariant {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.kind.remap_spurs(table);
+        let EnumVariant { name, kind, span } = self;
+        name.remap_spurs(table);
+        kind.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -255,49 +326,105 @@ impl RemapSpurs for EnumVariantKind {
 
 impl RemapSpurs for EnumVariantField {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.ty.remap_spurs(table);
+        let EnumVariantField {
+            visibility,
+            name,
+            ty,
+            span,
+        } = self;
+        visibility.remap_spurs(table);
+        name.remap_spurs(table);
+        ty.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for InterfaceDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.methods.remap_spurs(table);
+        // ADR-0088 follow-up: the previous impl didn't remap
+        // `directives`, which would have leaked the same way
+        // `MethodSig` did once we add a directive to an interface
+        // head. Explicit destructuring forces every field to be
+        // handled.
+        let InterfaceDecl {
+            directives,
+            visibility,
+            name,
+            methods,
+            span,
+        } = self;
+        directives.remap_spurs(table);
+        visibility.remap_spurs(table);
+        name.remap_spurs(table);
+        methods.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for MethodSig {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.directives.remap_spurs(table);
-        self.name.remap_spurs(table);
-        self.receiver.remap_spurs(table);
-        self.params.remap_spurs(table);
-        self.return_type.remap_spurs(table);
+        let MethodSig {
+            directives,
+            is_unchecked,
+            name,
+            receiver,
+            params,
+            return_type,
+            span,
+        } = self;
+        directives.remap_spurs(table);
+        is_unchecked.remap_spurs(table);
+        name.remap_spurs(table);
+        receiver.remap_spurs(table);
+        params.remap_spurs(table);
+        return_type.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for DeriveDecl {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.methods.remap_spurs(table);
+        let DeriveDecl {
+            name,
+            methods,
+            span,
+        } = self;
+        name.remap_spurs(table);
+        methods.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for Method {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.directives.remap_spurs(table);
-        self.name.remap_spurs(table);
-        self.receiver.remap_spurs(table);
-        self.params.remap_spurs(table);
-        self.return_type.remap_spurs(table);
-        self.body.remap_spurs(table);
+        let Method {
+            directives,
+            visibility,
+            is_unchecked,
+            name,
+            receiver,
+            params,
+            return_type,
+            body,
+            span,
+        } = self;
+        directives.remap_spurs(table);
+        visibility.remap_spurs(table);
+        is_unchecked.remap_spurs(table);
+        name.remap_spurs(table);
+        receiver.remap_spurs(table);
+        params.remap_spurs(table);
+        return_type.remap_spurs(table);
+        body.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for SelfParam {
-    fn remap_spurs(&mut self, _table: &[Spur]) {
-        // SelfParam contains only a SelfReceiverKind (no Spurs) and a Span.
+    fn remap_spurs(&mut self, table: &[Spur]) {
+        let SelfParam { kind, span } = self;
+        kind.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -307,11 +434,24 @@ impl RemapSpurs for SelfReceiverKind {
 
 impl RemapSpurs for Function {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.directives.remap_spurs(table);
-        self.name.remap_spurs(table);
-        self.params.remap_spurs(table);
-        self.return_type.remap_spurs(table);
-        self.body.remap_spurs(table);
+        let Function {
+            directives,
+            visibility,
+            is_unchecked,
+            name,
+            params,
+            return_type,
+            body,
+            span,
+        } = self;
+        directives.remap_spurs(table);
+        visibility.remap_spurs(table);
+        is_unchecked.remap_spurs(table);
+        name.remap_spurs(table);
+        params.remap_spurs(table);
+        return_type.remap_spurs(table);
+        body.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -321,8 +461,18 @@ impl RemapSpurs for ParamMode {
 
 impl RemapSpurs for Param {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.ty.remap_spurs(table);
+        let Param {
+            is_comptime,
+            mode,
+            name,
+            ty,
+            span,
+        } = self;
+        is_comptime.remap_spurs(table);
+        mode.remap_spurs(table);
+        name.remap_spurs(table);
+        ty.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -364,8 +514,10 @@ impl RemapSpurs for TypeExpr {
 
 impl RemapSpurs for AnonStructField {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.ty.remap_spurs(table);
+        let AnonStructField { name, ty, span } = self;
+        name.remap_spurs(table);
+        ty.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -422,55 +574,97 @@ impl RemapSpurs for ArgMode {
 // StringLit carries a Spur for its interned string contents.
 impl RemapSpurs for StringLit {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.value.remap_spurs(table);
+        let StringLit { value, span } = self;
+        value.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for BinaryExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.left.remap_spurs(table);
-        self.right.remap_spurs(table);
+        let BinaryExpr {
+            left,
+            op,
+            right,
+            span,
+        } = self;
+        left.remap_spurs(table);
+        op.remap_spurs(table);
+        right.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for UnaryExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.operand.remap_spurs(table);
+        let UnaryExpr { op, operand, span } = self;
+        op.remap_spurs(table);
+        operand.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for ParenExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.inner.remap_spurs(table);
+        let ParenExpr { inner, span } = self;
+        inner.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for BlockExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.statements.remap_spurs(table);
-        self.expr.remap_spurs(table);
+        let BlockExpr {
+            statements,
+            expr,
+            span,
+        } = self;
+        statements.remap_spurs(table);
+        expr.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for IfExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.cond.remap_spurs(table);
-        self.then_block.remap_spurs(table);
-        self.else_block.remap_spurs(table);
+        let IfExpr {
+            cond,
+            then_block,
+            else_block,
+            span,
+            is_comptime,
+        } = self;
+        cond.remap_spurs(table);
+        then_block.remap_spurs(table);
+        else_block.remap_spurs(table);
+        span.remap_spurs(table);
+        is_comptime.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for MatchExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.scrutinee.remap_spurs(table);
-        self.arms.remap_spurs(table);
+        let MatchExpr {
+            scrutinee,
+            arms,
+            span,
+        } = self;
+        scrutinee.remap_spurs(table);
+        arms.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for MatchArm {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.pattern.remap_spurs(table);
-        self.body.remap_spurs(table);
+        let MatchArm {
+            pattern,
+            body,
+            span,
+        } = self;
+        pattern.remap_spurs(table);
+        body.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -533,29 +727,49 @@ impl RemapSpurs for TupleElemPattern {
 
 impl RemapSpurs for FieldPattern {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.field_name.remap_spurs(table);
-        self.sub.remap_spurs(table);
+        let FieldPattern {
+            field_name,
+            sub,
+            is_mut,
+            span,
+        } = self;
+        field_name.remap_spurs(table);
+        sub.remap_spurs(table);
+        is_mut.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for PathPattern {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.base.remap_spurs(table);
-        self.type_name.remap_spurs(table);
-        self.variant.remap_spurs(table);
+        let PathPattern {
+            base,
+            type_name,
+            variant,
+            span,
+        } = self;
+        base.remap_spurs(table);
+        type_name.remap_spurs(table);
+        variant.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for CallArg {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.expr.remap_spurs(table);
+        let CallArg { mode, expr, span } = self;
+        mode.remap_spurs(table);
+        expr.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for CallExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.args.remap_spurs(table);
+        let CallExpr { name, args, span } = self;
+        name.remap_spurs(table);
+        args.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -570,158 +784,254 @@ impl RemapSpurs for IntrinsicArg {
 
 impl RemapSpurs for IntrinsicCallExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.args.remap_spurs(table);
+        let IntrinsicCallExpr { name, args, span } = self;
+        name.remap_spurs(table);
+        args.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for StructLitExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.base.remap_spurs(table);
-        self.name.remap_spurs(table);
-        self.fields.remap_spurs(table);
+        let StructLitExpr {
+            base,
+            name,
+            fields,
+            span,
+        } = self;
+        base.remap_spurs(table);
+        name.remap_spurs(table);
+        fields.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for FieldInit {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.name.remap_spurs(table);
-        self.value.remap_spurs(table);
+        let FieldInit { name, value, span } = self;
+        name.remap_spurs(table);
+        value.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for TupleExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.elems.remap_spurs(table);
+        let TupleExpr { elems, span } = self;
+        elems.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for AnonFnExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.params.remap_spurs(table);
-        self.return_type.remap_spurs(table);
-        self.body.remap_spurs(table);
+        let AnonFnExpr {
+            params,
+            return_type,
+            body,
+            span,
+        } = self;
+        params.remap_spurs(table);
+        return_type.remap_spurs(table);
+        body.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for TupleIndexExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.base.remap_spurs(table);
+        let TupleIndexExpr {
+            base,
+            index,
+            span,
+            index_span,
+        } = self;
+        base.remap_spurs(table);
+        index.remap_spurs(table);
+        span.remap_spurs(table);
+        index_span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for FieldExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.base.remap_spurs(table);
-        self.field.remap_spurs(table);
+        let FieldExpr { base, field, span } = self;
+        base.remap_spurs(table);
+        field.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for MethodCallExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.receiver.remap_spurs(table);
-        self.method.remap_spurs(table);
-        self.args.remap_spurs(table);
+        let MethodCallExpr {
+            receiver,
+            method,
+            args,
+            span,
+        } = self;
+        receiver.remap_spurs(table);
+        method.remap_spurs(table);
+        args.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for ArrayLitExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.elements.remap_spurs(table);
+        let ArrayLitExpr { elements, span } = self;
+        elements.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for IndexExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.base.remap_spurs(table);
-        self.index.remap_spurs(table);
+        let IndexExpr { base, index, span } = self;
+        base.remap_spurs(table);
+        index.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for RangeExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.lo.remap_spurs(table);
-        self.hi.remap_spurs(table);
+        let RangeExpr { lo, hi, span } = self;
+        lo.remap_spurs(table);
+        hi.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for PathExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.base.remap_spurs(table);
-        self.type_name.remap_spurs(table);
-        self.variant.remap_spurs(table);
+        let PathExpr {
+            base,
+            type_name,
+            variant,
+            span,
+        } = self;
+        base.remap_spurs(table);
+        type_name.remap_spurs(table);
+        variant.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for EnumStructLitExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.base.remap_spurs(table);
-        self.type_name.remap_spurs(table);
-        self.variant.remap_spurs(table);
-        self.fields.remap_spurs(table);
+        let EnumStructLitExpr {
+            base,
+            type_name,
+            variant,
+            fields,
+            span,
+        } = self;
+        base.remap_spurs(table);
+        type_name.remap_spurs(table);
+        variant.remap_spurs(table);
+        fields.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for AssocFnCallExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.base.remap_spurs(table);
-        self.type_name.remap_spurs(table);
-        self.type_args.remap_spurs(table);
-        self.function.remap_spurs(table);
-        self.args.remap_spurs(table);
+        let AssocFnCallExpr {
+            base,
+            type_name,
+            type_args,
+            function,
+            args,
+            span,
+        } = self;
+        base.remap_spurs(table);
+        type_name.remap_spurs(table);
+        type_args.remap_spurs(table);
+        function.remap_spurs(table);
+        args.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for ComptimeBlockExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.expr.remap_spurs(table);
+        let ComptimeBlockExpr { expr, span } = self;
+        expr.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for ComptimeUnrollForExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.binding.remap_spurs(table);
-        self.iterable.remap_spurs(table);
-        self.body.remap_spurs(table);
+        let ComptimeUnrollForExpr {
+            binding,
+            iterable,
+            body,
+            span,
+        } = self;
+        binding.remap_spurs(table);
+        iterable.remap_spurs(table);
+        body.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for CheckedBlockExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.expr.remap_spurs(table);
+        let CheckedBlockExpr { expr, span } = self;
+        expr.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for TypeLitExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.type_expr.remap_spurs(table);
+        let TypeLitExpr { type_expr, span } = self;
+        type_expr.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for WhileExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.cond.remap_spurs(table);
-        self.body.remap_spurs(table);
+        let WhileExpr { cond, body, span } = self;
+        cond.remap_spurs(table);
+        body.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for ForExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.binding.remap_spurs(table);
-        self.iterable.remap_spurs(table);
-        self.body.remap_spurs(table);
+        let ForExpr {
+            binding,
+            is_mut,
+            iterable,
+            body,
+            span,
+        } = self;
+        binding.remap_spurs(table);
+        is_mut.remap_spurs(table);
+        iterable.remap_spurs(table);
+        body.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for LoopExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.body.remap_spurs(table);
+        let LoopExpr { body, span } = self;
+        body.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for ReturnExpr {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.value.remap_spurs(table);
+        let ReturnExpr { value, span } = self;
+        value.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
@@ -778,17 +1088,33 @@ impl RemapSpurs for Statement {
 
 impl RemapSpurs for LetStatement {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.directives.remap_spurs(table);
-        self.pattern.remap_spurs(table);
-        self.ty.remap_spurs(table);
-        self.init.remap_spurs(table);
+        let LetStatement {
+            directives,
+            is_mut,
+            pattern,
+            ty,
+            init,
+            span,
+        } = self;
+        directives.remap_spurs(table);
+        is_mut.remap_spurs(table);
+        pattern.remap_spurs(table);
+        ty.remap_spurs(table);
+        init.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 
 impl RemapSpurs for AssignStatement {
     fn remap_spurs(&mut self, table: &[Spur]) {
-        self.target.remap_spurs(table);
-        self.value.remap_spurs(table);
+        let AssignStatement {
+            target,
+            value,
+            span,
+        } = self;
+        target.remap_spurs(table);
+        value.remap_spurs(table);
+        span.remap_spurs(table);
     }
 }
 

@@ -153,39 +153,74 @@ fn encode_link_extern(
     block: &gruel_parser::ast::LinkExternBlock,
     interner: &ThreadedRodeo,
 ) {
+    // ADR-0088 follow-up: destructure for exhaustiveness — adding a
+    // field to LinkExternBlock fails to compile here until it's
+    // explicitly handled (or `_`-bound).
+    let gruel_parser::ast::LinkExternBlock {
+        library,
+        items,
+        link_mode: _,
+        span: _,
+    } = block;
     h.update(&[TAG_LINK_EXTERN]);
-    h.update(interner.resolve(&block.library.value).as_bytes());
+    h.update(interner.resolve(&library.value).as_bytes());
     h.update(&[0]);
-    for item in &block.items {
-        encode_ident(h, &item.name, interner);
-        encode_params(h, &item.params, interner);
-        encode_return_type(h, item.return_type.as_ref(), interner);
+    for item in items {
+        let gruel_parser::ast::ExternFn {
+            directives: _,
+            name,
+            params,
+            return_type,
+            span: _,
+        } = item;
+        encode_ident(h, name, interner);
+        encode_params(h, params, interner);
+        encode_return_type(h, return_type.as_ref(), interner);
     }
 }
 
 fn encode_function(h: &mut Hasher, f: &Function, interner: &ThreadedRodeo) {
+    let Function {
+        directives: _,
+        visibility: _,
+        is_unchecked,
+        name,
+        params,
+        return_type,
+        body: _,
+        span: _,
+    } = f;
     h.update(&[TAG_FN]);
-    encode_ident(h, &f.name, interner);
-    h.update(&[u8::from(f.is_unchecked)]);
-    encode_params(h, &f.params, interner);
-    encode_return_type(h, f.return_type.as_ref(), interner);
+    encode_ident(h, name, interner);
+    h.update(&[u8::from(*is_unchecked)]);
+    encode_params(h, params, interner);
+    encode_return_type(h, return_type.as_ref(), interner);
 }
 
 fn encode_struct(h: &mut Hasher, s: &StructDecl, interner: &ThreadedRodeo) {
+    let StructDecl {
+        directives: _,
+        visibility: _,
+        posture: _,
+        name,
+        fields,
+        methods,
+        span: _,
+    } = s;
     h.update(&[TAG_STRUCT]);
-    encode_ident(h, &s.name, interner);
+    encode_ident(h, name, interner);
 
     // Public fields contribute to the signature. Private fields don't
     // (ADR-0073: a private field is invisible to importers, so a
     // change to it doesn't change the public interface).
-    let pub_fields: Vec<&FieldDecl> = s.fields.iter().filter(|f| is_pub(&f.visibility)).collect();
+    let pub_fields: Vec<&FieldDecl> = fields.iter().filter(|f| is_pub(&f.visibility)).collect();
     h.update_u64(pub_fields.len() as u64);
     for field in pub_fields {
         encode_field(h, field, interner);
     }
 
     // Public methods contribute their signatures (NOT bodies).
-    let pub_methods: Vec<&Method> = s.methods.iter().filter(|m| is_pub(&m.visibility)).collect();
+    let pub_methods: Vec<&Method> = methods.iter().filter(|m| is_pub(&m.visibility)).collect();
     h.update_u64(pub_methods.len() as u64);
     for method in pub_methods {
         encode_method_sig_from_method(h, method, interner);
@@ -193,15 +228,24 @@ fn encode_struct(h: &mut Hasher, s: &StructDecl, interner: &ThreadedRodeo) {
 }
 
 fn encode_enum(h: &mut Hasher, e: &EnumDecl, interner: &ThreadedRodeo) {
+    let EnumDecl {
+        directives: _,
+        visibility: _,
+        posture: _,
+        name,
+        variants,
+        methods,
+        span: _,
+    } = e;
     h.update(&[TAG_ENUM]);
-    encode_ident(h, &e.name, interner);
+    encode_ident(h, name, interner);
 
-    h.update_u64(e.variants.len() as u64);
-    for variant in &e.variants {
+    h.update_u64(variants.len() as u64);
+    for variant in variants {
         encode_variant(h, variant, interner);
     }
 
-    let pub_methods: Vec<&Method> = e.methods.iter().filter(|m| is_pub(&m.visibility)).collect();
+    let pub_methods: Vec<&Method> = methods.iter().filter(|m| is_pub(&m.visibility)).collect();
     h.update_u64(pub_methods.len() as u64);
     for method in pub_methods {
         encode_method_sig_from_method(h, method, interner);
@@ -209,27 +253,47 @@ fn encode_enum(h: &mut Hasher, e: &EnumDecl, interner: &ThreadedRodeo) {
 }
 
 fn encode_interface(h: &mut Hasher, i: &InterfaceDecl, interner: &ThreadedRodeo) {
+    let InterfaceDecl {
+        directives: _,
+        visibility: _,
+        name,
+        methods,
+        span: _,
+    } = i;
     h.update(&[TAG_INTERFACE]);
-    encode_ident(h, &i.name, interner);
-    h.update_u64(i.methods.len() as u64);
-    for method_sig in &i.methods {
+    encode_ident(h, name, interner);
+    h.update_u64(methods.len() as u64);
+    for method_sig in methods {
         encode_method_sig(h, method_sig, interner);
     }
 }
 
 fn encode_derive(h: &mut Hasher, d: &DeriveDecl, interner: &ThreadedRodeo) {
+    let DeriveDecl {
+        name,
+        methods,
+        span: _,
+    } = d;
     h.update(&[TAG_DERIVE]);
-    encode_ident(h, &d.name, interner);
-    h.update_u64(d.methods.len() as u64);
-    for method in &d.methods {
+    encode_ident(h, name, interner);
+    h.update_u64(methods.len() as u64);
+    for method in methods {
         encode_method_sig_from_method(h, method, interner);
     }
 }
 
 fn encode_const(h: &mut Hasher, c: &ConstDecl, interner: &ThreadedRodeo) {
+    let ConstDecl {
+        directives: _,
+        visibility: _,
+        name,
+        ty,
+        init: _,
+        span: _,
+    } = c;
     h.update(&[TAG_CONST]);
-    encode_ident(h, &c.name, interner);
-    encode_type_opt(h, c.ty.as_ref(), interner);
+    encode_ident(h, name, interner);
+    encode_type_opt(h, ty.as_ref(), interner);
     // Const initializer expressions are part of the public-interface
     // because they're inlined at use sites (ADR-0026 module re-exports
     // are the main case). Encode the canonical text form via the same
@@ -356,18 +420,26 @@ fn encode_type(h: &mut Hasher, ty: &TypeExpr, interner: &ThreadedRodeo) {
 }
 
 fn encode_field(h: &mut Hasher, field: &FieldDecl, interner: &ThreadedRodeo) {
-    encode_ident(h, &field.name, interner);
-    encode_type(h, &field.ty, interner);
+    let FieldDecl {
+        visibility: _,
+        name,
+        ty,
+        span: _,
+    } = field;
+    encode_ident(h, name, interner);
+    encode_type(h, ty, interner);
 }
 
 fn encode_anon_field(h: &mut Hasher, field: &AnonStructField, interner: &ThreadedRodeo) {
-    encode_ident(h, &field.name, interner);
-    encode_type(h, &field.ty, interner);
+    let AnonStructField { name, ty, span: _ } = field;
+    encode_ident(h, name, interner);
+    encode_type(h, ty, interner);
 }
 
 fn encode_variant(h: &mut Hasher, v: &EnumVariant, interner: &ThreadedRodeo) {
-    encode_ident(h, &v.name, interner);
-    match &v.kind {
+    let EnumVariant { name, kind, span: _ } = v;
+    encode_ident(h, name, interner);
+    match kind {
         EnumVariantKind::Unit => {
             h.update(&[0]);
         }
@@ -389,37 +461,67 @@ fn encode_variant(h: &mut Hasher, v: &EnumVariant, interner: &ThreadedRodeo) {
 }
 
 fn encode_variant_field(h: &mut Hasher, f: &EnumVariantField, interner: &ThreadedRodeo) {
-    encode_ident(h, &f.name, interner);
-    encode_type(h, &f.ty, interner);
+    let EnumVariantField {
+        visibility: _,
+        name,
+        ty,
+        span: _,
+    } = f;
+    encode_ident(h, name, interner);
+    encode_type(h, ty, interner);
 }
 
 fn encode_method_sig(h: &mut Hasher, m: &MethodSig, interner: &ThreadedRodeo) {
-    encode_ident(h, &m.name, interner);
-    encode_self_param(h, &m.receiver);
-    encode_params(h, &m.params, interner);
-    encode_return_type(h, m.return_type.as_ref(), interner);
+    let MethodSig {
+        directives: _,
+        is_unchecked,
+        name,
+        receiver,
+        params,
+        return_type,
+        span: _,
+    } = m;
+    encode_ident(h, name, interner);
+    encode_self_param(h, receiver);
+    encode_params(h, params, interner);
+    encode_return_type(h, return_type.as_ref(), interner);
     // ADR-0088: `@mark(unchecked)` on an interface method signature
     // is part of the conformance signature — flip the bit and any
     // implementor stops conforming. Hash it explicitly so changing
     // it on a pub interface invalidates downstream AIR caches.
-    h.update(&[m.is_unchecked as u8]);
+    h.update(&[*is_unchecked as u8]);
 }
 
 fn encode_method_sig_from_method(h: &mut Hasher, m: &Method, interner: &ThreadedRodeo) {
-    encode_ident(h, &m.name, interner);
-    h.update(&[match &m.receiver {
+    let Method {
+        directives: _,
+        visibility: _,
+        is_unchecked,
+        name,
+        receiver,
+        params,
+        return_type,
+        body: _,
+        span: _,
+    } = m;
+    encode_ident(h, name, interner);
+    h.update(&[match receiver {
         None => 0,
         Some(_) => 1,
     }]);
-    if let Some(r) = &m.receiver {
+    if let Some(r) = receiver {
         encode_self_param(h, r);
     }
-    encode_params(h, &m.params, interner);
-    encode_return_type(h, m.return_type.as_ref(), interner);
+    encode_params(h, params, interner);
+    encode_return_type(h, return_type.as_ref(), interner);
+    // ADR-0088: mirror `encode_method_sig` so the unchecked-ness of a
+    // pub struct/enum method is part of the signature fingerprint.
+    h.update(&[*is_unchecked as u8]);
 }
 
 fn encode_self_param(h: &mut Hasher, p: &SelfParam) {
-    let tag = match p.kind {
+    let SelfParam { kind, span: _ } = p;
+    let tag = match kind {
         SelfReceiverKind::ByValue => 0,
         SelfReceiverKind::MutRef => 1,
         SelfReceiverKind::Ref => 2,
@@ -458,7 +560,7 @@ mod tests {
         // Golden hex — bumping this requires bumping SIG_FP_VERSION.
         assert_eq!(
             key.hex(),
-            "f599052f3420e02c499f8a582fe7ee597f2e53f31c6f34c424322b9b280b7219",
+            "0e8506853418e7be8ee126da8f4b8289e925f0013189221330ab27c85cac23f7",
         );
     }
 

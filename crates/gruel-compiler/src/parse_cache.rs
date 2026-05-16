@@ -245,6 +245,98 @@ mod tests {
         );
     }
 
+    /// ADR-0088 regression test: ensures every Spur in a re-loaded AST
+    /// is correctly remapped into the build interner.
+    ///
+    /// The original bug was that `RemapSpurs for MethodSig` didn't walk
+    /// the `directives` field, so cached directive-arg Spurs leaked
+    /// through with their cached numbering. The leak only manifested
+    /// when the build interner already contained *other* strings (e.g.
+    /// the prelude was loaded first) — the un-remapped Spur then
+    /// resolved to whichever build-interner string happened to occupy
+    /// that slot. To reproduce: pre-warm a build interner with strings
+    /// the cached file doesn't contain, then parse-load the cached AST
+    /// into it, and verify that resolving the cached directive's args
+    /// yields the *source* spelling, not whatever happened to be at the
+    /// collision index.
+    #[test]
+    fn cached_ast_remaps_directives_into_warmed_build_interner() {
+        let tmp = TempDir::new().unwrap();
+        let cache = CacheStore::open(tmp.path().join("cache")).unwrap();
+        let build_fp = fake_build_fp();
+
+        // Build a file whose only directive arg is the unique token
+        // "totally_unique_marker_name". If RemapSpurs misses any field,
+        // the warm reload's resolved arg will land on whatever the
+        // un-remapped Spur happens to point at in the pre-warmed
+        // build interner — almost certainly NOT this string.
+        let src = r#"
+interface Bad {
+    @mark(totally_unique_marker_name) fn foo(self) -> i32;
+}
+fn main() -> i32 { 0 }
+"#;
+        let sources = vec![SourceFile::new("bad.gruel", src, FileId::new(1))];
+
+        // Cold parse — populates the cache.
+        let _ = parse_all_files_cached(&sources, &PreviewFeatures::default(), &cache, &build_fp)
+            .expect("cold parse should succeed");
+
+        // Warm path: pre-warm a fresh build interner with unrelated
+        // strings (simulating the prelude having been parsed first),
+        // then load the cached AST into it via `parse_files_into`.
+        let build_interner = ThreadedRodeo::new();
+        for s in [
+            "prelude_padding_0",
+            "prelude_padding_1",
+            "prelude_padding_2",
+            "prelude_padding_3",
+            "prelude_padding_4",
+            "prelude_padding_5",
+            "prelude_padding_6",
+            "prelude_padding_7",
+            "prelude_padding_8",
+            "prelude_padding_9",
+        ] {
+            build_interner.get_or_intern(s);
+        }
+
+        let (warm_files, stats) = parse_files_into(
+            &build_interner,
+            &sources,
+            &PreviewFeatures::default(),
+            &cache,
+            &build_fp,
+        )
+        .expect("warm parse should succeed");
+        assert_eq!(stats.hits, 1);
+
+        // Drill down: Interface → first MethodSig → first directive →
+        // first arg. After RemapSpurs walks the cached MethodSig's
+        // directives list, this arg must resolve to the source spelling
+        // in the warmed build interner.
+        let item = &warm_files[0].ast.items[0];
+        let iface = match item {
+            gruel_parser::ast::Item::Interface(i) => i,
+            other => panic!("expected Interface, got {:?}", other),
+        };
+        let sig = &iface.methods[0];
+        assert_eq!(sig.directives.len(), 1, "expected one @mark directive");
+        let d = &sig.directives[0];
+        assert_eq!(build_interner.resolve(&d.name.name), "mark");
+        assert_eq!(d.args.len(), 1, "expected one directive arg");
+        match &d.args[0] {
+            gruel_parser::ast::DirectiveArg::Ident(i) => {
+                assert_eq!(
+                    build_interner.resolve(&i.name),
+                    "totally_unique_marker_name",
+                    "cached directive arg leaked unremapped Spur into the warmed build interner"
+                );
+            }
+            other => panic!("expected Ident arg, got {:?}", other),
+        }
+    }
+
     #[test]
     fn editing_source_invalidates_only_changed_file() {
         let tmp = TempDir::new().unwrap();
