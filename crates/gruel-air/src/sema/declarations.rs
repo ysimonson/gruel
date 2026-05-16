@@ -17,7 +17,7 @@ use gruel_builtins::{
 };
 use gruel_rir::{InstData, InstRef, RirParamMode};
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
+use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature, ice};
 use lasso::Spur;
 
 use super::anon_interfaces::decode_receiver_mode;
@@ -282,13 +282,8 @@ impl<'a> Sema<'a> {
     /// unknowns get an edit-distance suggestion when there's a near-match.
     pub(crate) fn validate_directives(&self) -> CompileResult<()> {
         for (_, inst) in self.rir.iter() {
-            let (start, len) = match &inst.data {
+            let (start, len, is_fn_decl) = match &inst.data {
                 InstData::StructDecl {
-                    directives_start,
-                    directives_len,
-                    ..
-                }
-                | InstData::FnDecl {
                     directives_start,
                     directives_len,
                     ..
@@ -312,7 +307,12 @@ impl<'a> Sema<'a> {
                     directives_start,
                     directives_len,
                     ..
-                } => (*directives_start, *directives_len),
+                } => (*directives_start, *directives_len, false),
+                InstData::FnDecl {
+                    directives_start,
+                    directives_len,
+                    ..
+                } => (*directives_start, *directives_len, true),
                 _ => continue,
             };
             if len == 0 {
@@ -326,6 +326,29 @@ impl<'a> Sema<'a> {
                     || name == "mark"
                     || name == "link_name"
                 {
+                    // ADR-0088: gate `@mark(unchecked)` at the directive
+                    // site. The gate fires on every fn-like declaration
+                    // that carries the directive — top-level fn, method
+                    // (in struct/enum/anon-struct), and interface
+                    // method signature (parsed as FnDecl analogues).
+                    // The legacy `unchecked` keyword path is not gated;
+                    // only the directive form is.
+                    //
+                    // Prelude code is exempt: the stdlib carries
+                    // `@mark(unchecked)` unconditionally so user code
+                    // that doesn't enable the preview still sees a
+                    // consistent prelude surface.
+                    if is_fn_decl && name == "mark" && !self.is_prelude_file(inst.span.file_id) {
+                        for arg in &directive.args {
+                            if self.interner.resolve(arg) == "unchecked" {
+                                self.require_preview(
+                                    PreviewFeature::UncheckedFnExtensions,
+                                    "`@mark(unchecked)` directive",
+                                    directive.span,
+                                )?;
+                            }
+                        }
+                    }
                     continue;
                 }
                 let note = directive_diagnosis_note(&name);
@@ -926,6 +949,21 @@ impl<'a> Sema<'a> {
                         // already known to be applicable to the host item
                         // kind by this point.
                         outcome.c_layout = true;
+                    }
+                    MarkerKind::Unchecked => {
+                        // ADR-0088: `@mark(unchecked)` only applies to
+                        // fn-like declarations. The marker registry's
+                        // `applicable_to` field already filters this out
+                        // for struct/enum decls, but if we get here on a
+                        // non-fn item we surface the not-applicable
+                        // error rather than silently dropping it.
+                        return Err(CompileError::new(
+                            ErrorKind::MarkerNotApplicable {
+                                marker: marker.name.to_string(),
+                                item_kind: item_kind_name,
+                            },
+                            directive.span,
+                        ));
                     }
                 }
             }
@@ -2502,10 +2540,15 @@ impl<'a> Sema<'a> {
 
             // ADR-0085: process directives on the extern fn. Today the only
             // supported one is `@link_name("…")`.
+            // ADR-0088: extern fns also accept `@mark(unchecked)` and,
+            // under the `unchecked_fn_extensions` preview gate, are
+            // required to carry it. The gate fires below after the
+            // directive scan completes.
             let directives = self
                 .rir
                 .get_directives(ext.directives_start, ext.directives_len);
             let mut link_name_override: Option<Spur> = None;
+            let mut has_unchecked_mark = false;
             for d in directives.iter() {
                 let dir_name = self.interner.resolve(&d.name).to_string();
                 match dir_name.as_str() {
@@ -2523,11 +2566,17 @@ impl<'a> Sema<'a> {
                     }
                     "mark" => {
                         // ADR-0085: redundant `@mark(c)` inside a
-                        // `link_extern` block is permitted. Other marker
-                        // names are rejected.
+                        // `link_extern` block is permitted. ADR-0088:
+                        // `@mark(unchecked)` is the required form for
+                        // every extern fn (gated by preview). Other
+                        // marker names are rejected.
                         for arg in &d.args {
                             let name = self.interner.resolve(arg);
-                            if name != "c" {
+                            if name == "c" {
+                                // accepted, no-op
+                            } else if name == "unchecked" {
+                                has_unchecked_mark = true;
+                            } else {
                                 return Err(CompileError::new(
                                     ErrorKind::CFfi(format!(
                                         "marker `{}` is not valid on extern fns inside `link_extern`",
@@ -2550,6 +2599,30 @@ impl<'a> Sema<'a> {
                 }
             }
 
+            // ADR-0088: under the `unchecked_fn_extensions` preview
+            // gate, every extern fn must carry `@mark(unchecked)`.
+            // Without the gate (legacy ADR-0085 behaviour), the
+            // directive is optional for user code. The gate makes the
+            // requirement mandatory during the migration window;
+            // stabilisation removes the conditional.
+            //
+            // Prelude `link_extern` blocks always require the directive
+            // — the stdlib commits to ADR-0088's discipline up front so
+            // its raw-pointer surface is uniformly gated. Prelude
+            // callers wrap every libc call in `checked { }`.
+            let preview_enabled = self.preview_features.contains(
+                &gruel_util::PreviewFeature::UncheckedFnExtensions,
+            );
+            let in_prelude = self.is_prelude_file(ext.span.file_id);
+            if !has_unchecked_mark && (preview_enabled || in_prelude) {
+                let fn_name = self.interner.resolve(&ext.name).to_string();
+                let library = self.interner.resolve(&ext.library).to_string();
+                return Err(CompileError::new(
+                    ErrorKind::ExternFnMissingUnchecked { fn_name, library },
+                    ext.span,
+                ));
+            }
+
             if self.functions.contains_key(&ext.name) {
                 let name_str = self.interner.resolve(&ext.name).to_string();
                 return Err(CompileError::new(
@@ -2570,7 +2643,11 @@ impl<'a> Sema<'a> {
                     span: ext.span,
                     is_generic: false,
                     is_pub: true,
-                    is_unchecked: false,
+                    // ADR-0088: every extern fn that carries
+                    // `@mark(unchecked)` is treated as unchecked at
+                    // call sites — every call must sit inside a
+                    // `checked { }` block.
+                    is_unchecked: has_unchecked_mark,
                     file_id: ext.span.file_id,
                     canonical_name: None,
                     link_library: Some(ext.library),
@@ -2604,6 +2681,11 @@ impl<'a> Sema<'a> {
         // `@link_name("…")` (symbol override). Other markers and
         // directives are handled by their own passes; this is just the
         // C-FFI subset.
+        //
+        // ADR-0088: `@mark(unchecked)` on a fn / method is gated by the
+        // `UncheckedFnExtensions` preview feature; the gate fires
+        // centrally in `validate_directives`. The legacy `unchecked`
+        // keyword path is unaffected.
         let mut is_c_abi = false;
         let mut link_name_override: Option<Spur> = None;
         let directives = self.rir.get_directives(directives_start, directives_len);
@@ -2841,10 +2923,26 @@ impl<'a> Sema<'a> {
                 body,
                 has_self,
                 receiver_mode,
+                directives_start,
+                directives_len,
                 ..
             } = &method_inst.data
             {
                 let receiver = decode_receiver_mode(*receiver_mode);
+
+                // ADR-0088: reject `@mark(unchecked) fn __drop`. Drop
+                // glue runs implicitly at scope exit; there is no
+                // caller `checked { }` to gate it. The preview gate
+                // itself fires centrally in `validate_directives`.
+                if *method_name == drop_name_sym
+                    && self.directives_have_mark_unchecked(*directives_start, *directives_len)
+                {
+                    return Err(CompileError::new(
+                        ErrorKind::UncheckedDestructor,
+                        method_inst.span,
+                    ));
+                }
+
                 // ADR-0053: a method named `__drop` is the struct's destructor,
                 // not a regular method. Route it through the destructor slot.
                 if *method_name == drop_name_sym {
@@ -3210,10 +3308,23 @@ impl<'a> Sema<'a> {
                 body,
                 has_self,
                 receiver_mode,
+                directives_start,
+                directives_len,
                 ..
             } = &method_inst.data
             {
                 let receiver = decode_receiver_mode(*receiver_mode);
+
+                // ADR-0088: reject `@mark(unchecked) fn __drop`.
+                if *method_name == drop_name_sym
+                    && self.directives_have_mark_unchecked(*directives_start, *directives_len)
+                {
+                    return Err(CompileError::new(
+                        ErrorKind::UncheckedDestructor,
+                        method_inst.span,
+                    ));
+                }
+
                 // ADR-0053 phase 3b: a method named `__drop` is the enum's destructor,
                 // not a regular method. Route it through the per-enum destructor slot.
                 if *method_name == drop_name_sym {

@@ -1,0 +1,201 @@
+# ADR-0088: `@mark(unchecked)` directive on top-level fns, methods, and
+# interface method signatures.
+#
+# These tests cover Phase 1 of ADR-0088: the directive form replaces
+# the legacy `unchecked` keyword on top-level fns and extends the
+# unchecked surface to methods. Both surfaces are gated by the
+# `unchecked_fn_extensions` preview feature during the migration window.
+
+[section]
+id = "items.unchecked-methods"
+spec_chapter = "9.2"
+name = "Unchecked methods via @mark(unchecked)"
+description = "Tests for the @mark(unchecked) directive on top-level fns and struct/enum methods."
+
+# =============================================================================
+# @mark(unchecked) on top-level fn
+# =============================================================================
+
+[[case]]
+name = "mark_unchecked_fn_basic"
+spec = ["9.2:1"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+@mark(unchecked)
+fn dangerous_op() -> i32 { 42 }
+
+fn main() -> i32 {
+    checked { dangerous_op() }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "mark_unchecked_fn_outside_checked"
+spec = ["9.2:1"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+@mark(unchecked)
+fn dangerous_op() -> i32 { 42 }
+
+fn main() -> i32 {
+    dangerous_op()
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+[[case]]
+name = "mark_unchecked_fn_requires_preview"
+spec = ["9.2:1"]
+source = """
+@mark(unchecked)
+fn dangerous_op() -> i32 { 42 }
+
+fn main() -> i32 {
+    checked { dangerous_op() }
+}
+"""
+compile_fail = true
+error_contains = "requires preview feature"
+
+# =============================================================================
+# @mark(unchecked) on struct methods
+# =============================================================================
+
+[[case]]
+name = "mark_unchecked_method_basic"
+spec = ["9.2:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn dangerous(self) -> i32 { self.val }
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    checked { f.dangerous() }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "mark_unchecked_method_outside_checked"
+spec = ["9.2:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn dangerous(self) -> i32 { self.val }
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    f.dangerous()
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+[[case]]
+name = "mark_unchecked_assoc_fn_basic"
+spec = ["9.2:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn make(n: i32) -> Self { Self { val: n } }
+}
+
+fn main() -> i32 {
+    let f = checked { Foo::make(42) };
+    f.val
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "mark_unchecked_method_requires_preview"
+spec = ["9.2:2"]
+source = """
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn dangerous(self) -> i32 { self.val }
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    checked { f.dangerous() }
+}
+"""
+compile_fail = true
+error_contains = "requires preview feature"
+
+# =============================================================================
+# @mark(unchecked) on fn __drop is rejected (no caller-side checked block)
+# =============================================================================
+
+[[case]]
+name = "mark_unchecked_drop_rejected"
+spec = ["9.2:3"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    fn __drop(self) {}
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    0
+}
+"""
+compile_fail = true
+error_contains = "is not allowed on `fn __drop`"
+
+# =============================================================================
+# @mark(unchecked) on enum methods
+# =============================================================================
+
+[[case]]
+name = "mark_unchecked_enum_method"
+spec = ["9.2:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+enum E {
+    A,
+    B,
+
+    @mark(unchecked)
+    pub fn raw(self) -> i32 {
+        match self {
+            E::A => 1,
+            E::B => 2,
+        }
+    }
+}
+
+fn main() -> i32 {
+    let e = E::A;
+    checked { e.raw() } + 41
+}
+"""
+exit_code = 42

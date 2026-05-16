@@ -1,0 +1,102 @@
+# ADR-0088: FFI imports must carry `@mark(unchecked)` under the
+# `unchecked_fn_extensions` preview gate.
+#
+# Phase 2 of ADR-0088 makes the directive mandatory at every extern fn
+# declaration inside `link_extern` / `static_link_extern`. The legacy
+# directive-less form continues to parse without the preview gate so
+# existing FFI tests (in `c-ffi.toml`, `c-ffi-enum.toml`,
+# `c-ffi-static.toml`) compile unchanged; the gate fires the missing
+# directive as an error under `--preview unchecked_fn_extensions`.
+
+[section]
+id = "items.ffi-unchecked"
+spec_chapter = "10.2"
+name = "FFI imports require @mark(unchecked)"
+description = "ADR-0088 Phase 2: every extern fn declaration must carry @mark(unchecked) under the preview gate."
+
+[[case]]
+name = "ffi_unchecked_directive_accepted"
+spec = ["10.2:1", "10.2:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+link_extern("m") {
+    @mark(unchecked) fn cos(x: f64) -> f64;
+}
+
+fn main() -> i32 {
+    let _r: f64 = checked { cos(0.0) };
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "ffi_missing_unchecked_rejected_under_preview"
+spec = ["10.2:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+link_extern("m") {
+    fn cos(x: f64) -> f64;
+}
+
+fn main() -> i32 {
+    let _r: f64 = checked { cos(0.0) };
+    0
+}
+"""
+compile_fail = true
+error_contains = "must be declared `@mark(unchecked)"
+
+[[case]]
+name = "ffi_call_outside_checked_rejected"
+spec = ["10.2:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+link_extern("m") {
+    @mark(unchecked) fn cos(x: f64) -> f64;
+}
+
+fn main() -> i32 {
+    let _r: f64 = cos(0.0);
+    0
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+[[case]]
+name = "ffi_unchecked_with_link_name"
+spec = ["10.2:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+link_extern("c") {
+    @mark(unchecked) @link_name("abs") fn my_abs(x: i32) -> i32;
+}
+
+fn main() -> i32 {
+    checked { my_abs(-7) }
+}
+"""
+exit_code = 7
+
+[[case]]
+name = "ffi_unchecked_static_link_extern"
+spec = ["10.2:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+description = "`static_link_extern` accepts `@mark(unchecked)` the same way as `link_extern`."
+source = """
+static_link_extern("m") {
+    @mark(unchecked) fn tan(x: f64) -> f64;
+}
+
+fn main() -> i32 {
+    let _r: f64 = checked { tan(0.0) };
+    0
+}
+"""
+exit_code = 0

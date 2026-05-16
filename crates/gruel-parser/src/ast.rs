@@ -361,6 +361,9 @@ pub struct Method {
     pub directives: Directives,
     /// Visibility (ADR-0073). Defaults to `Private` when `pub` is absent.
     pub visibility: Visibility,
+    /// ADR-0088: whether this method is marked `@mark(unchecked)` —
+    /// caller must wrap every call in a `checked { }` block.
+    pub is_unchecked: bool,
     /// Method name
     pub name: Ident,
     /// Whether this method takes self (None = associated function, Some = method with receiver)
@@ -1597,6 +1600,9 @@ fn fmt_link_extern(
 
 fn fmt_method(f: &mut fmt::Formatter<'_>, method: &Method, level: usize) -> fmt::Result {
     indent(f, level)?;
+    if method.is_unchecked {
+        write!(f, "unchecked ")?;
+    }
     write!(f, "Method sym:{}", method.name.name.into_usize())?;
     write!(f, "(")?;
     if method.receiver.is_some() {

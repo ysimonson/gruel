@@ -25,13 +25,13 @@
 // allocation in codegen). `memcmp` backs `bytes_eq`.
 
 link_extern("c") {
-    @link_name("write")   fn libc_write(fd: c_int, buf: Ptr(u8), n: usize) -> isize;
-    @link_name("read")    fn libc_read(fd: c_int, buf: MutPtr(u8), n: usize) -> isize;
-    @link_name("exit")    fn libc_exit(code: c_int) -> ();
-    @link_name("malloc")  fn libc_malloc(size: usize) -> MutPtr(u8);
-    @link_name("free")    fn libc_free(p: MutPtr(u8)) -> ();
-    @link_name("realloc") fn libc_realloc(p: MutPtr(u8), n: usize) -> MutPtr(u8);
-    @link_name("memcmp")  fn libc_memcmp(a: Ptr(u8), b: Ptr(u8), n: usize) -> c_int;
+    @mark(unchecked) @link_name("write")   fn libc_write(fd: c_int, buf: Ptr(u8), n: usize) -> isize;
+    @mark(unchecked) @link_name("read")    fn libc_read(fd: c_int, buf: MutPtr(u8), n: usize) -> isize;
+    @mark(unchecked) @link_name("exit")    fn libc_exit(code: c_int) -> ();
+    @mark(unchecked) @link_name("malloc")  fn libc_malloc(size: usize) -> MutPtr(u8);
+    @mark(unchecked) @link_name("free")    fn libc_free(p: MutPtr(u8)) -> ();
+    @mark(unchecked) @link_name("realloc") fn libc_realloc(p: MutPtr(u8), n: usize) -> MutPtr(u8);
+    @mark(unchecked) @link_name("memcmp")  fn libc_memcmp(a: Ptr(u8), b: Ptr(u8), n: usize) -> c_int;
 }
 
 // ──────────────────────────── libc (entropy) ──────────────────────────
@@ -44,6 +44,6 @@ link_extern("c") {
 // line as an unresolved symbol on the wrong platform.
 
 link_extern("c") {
-    @link_name("getentropy") fn libc_getentropy(buf: MutPtr(u8), n: usize) -> c_int;
-    @link_name("getrandom")  fn libc_getrandom(buf: MutPtr(u8), n: usize, flags: c_uint) -> isize;
+    @mark(unchecked) @link_name("getentropy") fn libc_getentropy(buf: MutPtr(u8), n: usize) -> c_int;
+    @mark(unchecked) @link_name("getrandom")  fn libc_getrandom(buf: MutPtr(u8), n: usize, flags: c_uint) -> isize;
 }

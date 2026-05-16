@@ -164,4 +164,22 @@ impl<'a> Sema<'a> {
         }
         Ok(())
     }
+
+    /// ADR-0088: returns true if the given directive list contains
+    /// `@mark(unchecked)`. Used to fire the
+    /// `UncheckedFnExtensions` preview gate at method declaration sites
+    /// and to detect FFI imports missing the directive.
+    pub(crate) fn directives_have_mark_unchecked(
+        &self,
+        directives_start: u32,
+        directives_len: u32,
+    ) -> bool {
+        let directives = self.rir.get_directives(directives_start, directives_len);
+        directives.iter().any(|d| {
+            self.interner.resolve(&d.name) == "mark"
+                && d.args
+                    .iter()
+                    .any(|a| self.interner.resolve(a) == "unchecked")
+        })
+    }
 }

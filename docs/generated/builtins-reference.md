@@ -53,6 +53,7 @@ Marker names recognized inside the `@mark(...)` directive (ADR-0083). Markers at
 | `checked_send` | ThreadSafety(Send) | struct or enum |
 | `checked_sync` | ThreadSafety(Sync) | struct or enum |
 | `c` | Abi(C) | (none) |
+| `unchecked` | Unchecked | fn only |
 
 ## Type Constructors
 
@@ -206,4 +207,8 @@ Asserts the type is `Sync`, even if its structural minimum would be `Send` or `U
 ### `@mark(c)`
 
 Selects the C ABI / C layout (ADR-0085). On a function, uses the platform C calling convention and suppresses Gruel name mangling. On a struct, switches to C field layout (declaration order, natural alignment, no reordering, niches disabled), making the type eligible to cross the FFI boundary by value.
+
+### `@mark(unchecked)`
+
+Declares a fn (top-level, method, interface method, or FFI import) as unchecked (ADR-0088). Every caller must wrap the call in a `checked { }` block; the body's soundness rests on a caller-asserted precondition the type system can't verify. Replaces the legacy `unchecked` keyword and extends the surface to methods, interface method signatures, and FFI imports under a single uniform spelling.
 

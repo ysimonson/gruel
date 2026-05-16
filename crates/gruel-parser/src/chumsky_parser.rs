@@ -59,6 +59,14 @@ pub struct PrimitiveTypeSpurs {
     /// write `@derive(Foo)` even though `derive` is also a reserved keyword
     /// for top-level derive items (ADR-0058).
     pub derive_name: Spur,
+    /// The identifier "mark" — used to detect `@mark(unchecked)` in a
+    /// function/method directive list without a string compare.
+    pub mark_name: Spur,
+    /// The identifier "unchecked" — argument to `@mark(...)` recognised
+    /// at parse time so the parsed `Function::is_unchecked` /
+    /// `Method::is_unchecked` flag captures the directive form alongside
+    /// the legacy `unchecked` keyword (ADR-0088).
+    pub unchecked_name: Spur,
 }
 
 impl PrimitiveTypeSpurs {
@@ -84,8 +92,27 @@ impl PrimitiveTypeSpurs {
             ref_name: interner.get_or_intern("Ref"),
             mut_ref_name: interner.get_or_intern("MutRef"),
             derive_name: interner.get_or_intern("derive"),
+            mark_name: interner.get_or_intern("mark"),
+            unchecked_name: interner.get_or_intern("unchecked"),
         }
     }
+}
+
+/// ADR-0088: scan a directive list for `@mark(unchecked)`. Returns true
+/// if any directive in the list is `@mark(...)` with `unchecked` as one
+/// of its arguments. The lookup is by interned Spur, not string compare.
+pub(crate) fn directives_have_mark_unchecked(
+    directives: &Directives,
+    mark_name: Spur,
+    unchecked_name: Spur,
+) -> bool {
+    directives.iter().any(|d| {
+        d.name.name == mark_name
+            && d.args.iter().any(|a| match a {
+                DirectiveArg::Ident(ident) => ident.name == unchecked_name,
+                DirectiveArg::String(_) => false,
+            })
+    })
 }
 
 /// Parser state containing primitive type symbols and file ID.
@@ -579,12 +606,29 @@ where
     // ADR-0083: `@mark(...)` directive args. After Phase 4 retired
     // `TokenKind::Linear`, both `copy` and `linear` are regular
     // identifiers and fall through to `ident_parser`.
+    //
+    // ADR-0088: `unchecked` remains a reserved keyword during the
+    // migration window (it still gates top-level `unchecked fn ...`),
+    // so it isn't an ordinary identifier. Accept its token form
+    // explicitly here so `@mark(unchecked)` parses cleanly. The map
+    // produces an `Ident` whose `name` is the interned spelling, which
+    // downstream sema matches by string compare.
     let directive_arg = choice((
         select! {
             TokenKind::String(s) = e => DirectiveArg::String(StringLit {
                 value: s,
                 span: span_from_extra(e),
             }),
+        }
+        .boxed(),
+        select! {
+            TokenKind::Unchecked = e => {
+                let state: &mut SimpleState<ParserState> = e.state();
+                DirectiveArg::Ident(Ident {
+                    name: state.0.syms.unchecked_name,
+                    span: span_from_extra(e),
+                })
+            },
         }
         .boxed(),
         ident_parser().map(DirectiveArg::Ident).boxed(),
@@ -2916,11 +2960,14 @@ where
         .then(just(TokenKind::Arrow).ignore_then(type_parser()).or_not())
         .then(block_parser(expr))
         .map_with(
-            |((((directives, visibility, is_unchecked), (name, params)), return_type), body), e| {
+            |((((directives, visibility, kw_unchecked), (name, params)), return_type), body), e| {
+                let syms = e.state().0.syms;
+                let dir_unchecked =
+                    directives_have_mark_unchecked(&directives, syms.mark_name, syms.unchecked_name);
                 Function {
                     directives,
                     visibility,
-                    is_unchecked,
+                    is_unchecked: kw_unchecked || dir_unchecked,
                     name,
                     params,
                     return_type,
@@ -3174,9 +3221,16 @@ where
         .then(block_parser(expr))
         .map_with(
             |((((directives, visibility, name), (receiver, params)), return_type), body), e| {
+                let syms = e.state().0.syms;
+                let is_unchecked = directives_have_mark_unchecked(
+                    &directives,
+                    syms.mark_name,
+                    syms.unchecked_name,
+                );
                 Method {
                     directives,
                     visibility,
+                    is_unchecked,
                     name,
                     receiver,
                     params,

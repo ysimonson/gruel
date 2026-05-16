@@ -152,7 +152,7 @@ pub fn read_line() -> Vec(u8) {
     let newline: u8 = 10;
     loop {
         let p: MutPtr(u8) = checked { MutPtr(u8)::from(&mut byte) };
-        let n: isize = libc_read(0, p, 1);
+        let n: isize = checked { libc_read(0, p, 1) };
         if n <= 0 {
             break;
         }
@@ -262,13 +262,13 @@ pub fn parse_u32(s: Ref(String)) -> u32 {
 
 fn fill_entropy(p: MutPtr(u8), n: usize) {
     comptime if @target_os() == Os::Macos {
-        let r: c_int = libc_getentropy(p, n);
+        let r: c_int = checked { libc_getentropy(p, n) };
         if r != 0 {
             @panic("entropy source failure");
         }
     } else {
         let want: isize = @cast(n);
-        let written: isize = libc_getrandom(p, n, 0);
+        let written: isize = checked { libc_getrandom(p, n, 0) };
         if written != want {
             @panic("entropy source failure");
         }
@@ -360,7 +360,7 @@ pub fn utf8_validate(s: Slice(u8)) -> bool {
 }
 
 pub fn bytes_eq(a: Ptr(u8), b: Ptr(u8), n: usize) -> bool {
-    let r: c_int = libc_memcmp(a, b, n);
+    let r: c_int = checked { libc_memcmp(a, b, n) };
     r == 0
 }
 
@@ -382,13 +382,13 @@ pub fn bytes_eq(a: Ptr(u8), b: Ptr(u8), n: usize) -> bool {
 // from ADR-0087 OQ4 supersedes it once a module system lands.
 
 pub fn mem_alloc(size: usize, align: usize) -> MutPtr(u8) {
-    libc_malloc(size)
+    checked { libc_malloc(size) }
 }
 
 pub fn mem_free(p: MutPtr(u8), size: usize, align: usize) {
-    libc_free(p)
+    checked { libc_free(p) }
 }
 
 pub fn mem_realloc(p: MutPtr(u8), old: usize, new: usize, align: usize) -> MutPtr(u8) {
-    libc_realloc(p, new)
+    checked { libc_realloc(p, new) }
 }

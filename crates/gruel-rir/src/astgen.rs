@@ -579,15 +579,16 @@ impl<'a> AstGen<'a> {
         // Emit methods as FnDecl instructions with has_self flag.
         // Sema uses has_self to add the implicit self parameter for methods.
         // ADR-0073: methods carry their own `pub` flag, propagated from the
-        // parsed `Method::visibility`. Methods cannot be marked unchecked
-        // (that's a function-level modifier).
+        // parsed `Method::visibility`.
+        // ADR-0088: methods may carry `@mark(unchecked)`; the parser
+        // recognises the directive and sets `Method::is_unchecked`.
         let is_pub = method.visibility == gruel_parser::ast::Visibility::Public;
         let decl = self.rir.add_inst(Inst {
             data: InstData::FnDecl {
                 directives_start,
                 directives_len,
                 is_pub,
-                is_unchecked: false,
+                is_unchecked: method.is_unchecked,
                 name,
                 params_start,
                 params_len,
@@ -1493,6 +1494,7 @@ impl<'a> AstGen<'a> {
                 let synth_method = Method {
                     directives: Directives::new(),
                     visibility: gruel_parser::ast::Visibility::Public,
+                    is_unchecked: false,
                     name: call_ident,
                     receiver: Some(SelfParam {
                         kind: gruel_parser::ast::SelfReceiverKind::ByValue,

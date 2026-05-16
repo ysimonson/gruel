@@ -130,6 +130,10 @@ impl ErrorCode {
     pub const CONTINUE_OUTSIDE_LOOP: Self = Self(501);
     pub const INTRINSIC_REQUIRES_CHECKED: Self = Self(502);
     pub const UNCHECKED_CALL_REQUIRES_CHECKED: Self = Self(503);
+    /// ADR-0088: `@mark(unchecked) fn __drop` rejected.
+    pub const UNCHECKED_DESTRUCTOR: Self = Self(504);
+    /// ADR-0088: extern fn lacks `@mark(unchecked)`.
+    pub const EXTERN_FN_MISSING_UNCHECKED: Self = Self(505);
 
     // ========================================================================
     // Match errors (E0600-E0699)
@@ -357,6 +361,12 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
+    /// ADR-0088: `@mark(unchecked)` directive on methods, interface
+    /// method signatures, and FFI imports, plus the requirement that
+    /// every FFI import carry the directive. The legacy `unchecked`
+    /// keyword on top-level fns continues to work without the gate
+    /// during the migration window.
+    UncheckedFnExtensions,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -388,6 +398,7 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
+            PreviewFeature::UncheckedFnExtensions => "ADR-0088",
         }
     }
 
@@ -1155,6 +1166,19 @@ pub enum ErrorKind {
     IntrinsicRequiresChecked(String),
     #[error("call to unchecked function '{0}' can only be used inside a `checked` block")]
     UncheckedCallRequiresChecked(String),
+    /// ADR-0088: drop glue runs implicitly at scope exit; there is no
+    /// caller `checked { }` to gate it, so `@mark(unchecked) fn __drop`
+    /// is forbidden.
+    #[error(
+        "`@mark(unchecked)` is not allowed on `fn __drop`; drop glue runs implicitly at scope exit and cannot be gated by `checked {{ }}`"
+    )]
+    UncheckedDestructor,
+    /// ADR-0088: an FFI import inside `link_extern` /
+    /// `static_link_extern` must carry `@mark(unchecked)`.
+    #[error(
+        "extern fn `{fn_name}` in `link_extern(\"{library}\")` must be declared `@mark(unchecked) fn …`; FFI imports are unverified from the Gruel side"
+    )]
+    ExternFnMissingUnchecked { fn_name: String, library: String },
 
     // Match errors
     //
@@ -1382,6 +1406,8 @@ impl ErrorKind {
             ErrorKind::UncheckedCallRequiresChecked(_) => {
                 ErrorCode::UNCHECKED_CALL_REQUIRES_CHECKED
             }
+            ErrorKind::UncheckedDestructor => ErrorCode::UNCHECKED_DESTRUCTOR,
+            ErrorKind::ExternFnMissingUnchecked { .. } => ErrorCode::EXTERN_FN_MISSING_UNCHECKED,
 
             // Match errors (E0600-E0699)
             ErrorKind::NonExhaustiveMatch { .. } => ErrorCode::NON_EXHAUSTIVE_MATCH,

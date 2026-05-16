@@ -184,6 +184,11 @@ pub enum MarkerKind {
     ThreadSafety(ThreadSafety),
     /// ADR-0085: ABI markers — C ABI on fns, C layout on structs.
     Abi(Abi),
+    /// ADR-0088: marks a fn as unchecked — caller must wrap every call
+    /// in a `checked { }` block. Replaces the legacy `unchecked` keyword
+    /// (ADR-0028) and extends the unchecked surface to methods, interface
+    /// method signatures, and FFI imports under a single uniform spelling.
+    Unchecked,
 }
 
 /// ABI marker variants (ADR-0085). C is the only ABI in v1; future
@@ -335,6 +340,16 @@ pub static BUILTIN_MARKERS: &[BuiltinMarker] = &[
         name: "c",
         kind: MarkerKind::Abi(Abi::C),
         applicable_to: ItemKinds::FN_STRUCT_OR_ENUM,
+    },
+    // ADR-0088: declares a fn (top-level, method, interface method, or
+    // FFI import) as unchecked — every caller must wrap the call in
+    // `checked { }`. Legal positions are fn-like; the registry knows
+    // the marker as "function-applicable", and sema applies a finer
+    // position check (e.g. forbids `@mark(unchecked) fn __drop`).
+    BuiltinMarker {
+        name: "unchecked",
+        kind: MarkerKind::Unchecked,
+        applicable_to: ItemKinds::FUNCTION,
     },
 ];
 
@@ -620,6 +635,7 @@ pub fn render_reference_markdown() -> String {
             MarkerKind::ThreadSafety(ThreadSafety::Send) => "ThreadSafety(Send)",
             MarkerKind::ThreadSafety(ThreadSafety::Sync) => "ThreadSafety(Sync)",
             MarkerKind::Abi(Abi::C) => "Abi(C)",
+            MarkerKind::Unchecked => "Unchecked",
         };
         let apply_str = match (
             m.applicable_to.includes_struct(),
@@ -745,6 +761,9 @@ pub fn render_reference_markdown() -> String {
             ),
             MarkerKind::Abi(Abi::C) => out.push_str(
                 "Selects the C ABI / C layout (ADR-0085). On a function, uses the platform C calling convention and suppresses Gruel name mangling. On a struct, switches to C field layout (declaration order, natural alignment, no reordering, niches disabled), making the type eligible to cross the FFI boundary by value.\n\n",
+            ),
+            MarkerKind::Unchecked => out.push_str(
+                "Declares a fn (top-level, method, interface method, or FFI import) as unchecked (ADR-0088). Every caller must wrap the call in a `checked { }` block; the body's soundness rests on a caller-asserted precondition the type system can't verify. Replaces the legacy `unchecked` keyword and extends the surface to methods, interface method signatures, and FFI imports under a single uniform spelling.\n\n",
             ),
         }
     }
