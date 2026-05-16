@@ -2086,6 +2086,8 @@ impl Rir {
                 return_type,
                 receiver_mode,
                 is_unchecked,
+                directives_start,
+                directives_len,
             } => InstData::InterfaceMethodSig {
                 name: *name,
                 params_start: *params_start + extra_offset,
@@ -2093,6 +2095,12 @@ impl Rir {
                 return_type: *return_type,
                 receiver_mode: *receiver_mode,
                 is_unchecked: *is_unchecked,
+                directives_start: if *directives_len == 0 {
+                    *directives_start
+                } else {
+                    *directives_start + extra_offset
+                },
+                directives_len: *directives_len,
             },
 
             // Enum operations
@@ -2977,6 +2985,12 @@ pub enum InstData {
         receiver_mode: u8,
         /// ADR-0088: whether this signature was declared `@mark(unchecked)`.
         is_unchecked: bool,
+        /// ADR-0088: start of the signature's directive list in the
+        /// extra-array, kept so sema can reject non-applicable markers
+        /// (e.g. `@mark(c)`) at validation time.
+        directives_start: u32,
+        /// Number of directives.
+        directives_len: u32,
     },
 
     /// Derive declaration (ADR-0058): `derive Name { fn ... }`.

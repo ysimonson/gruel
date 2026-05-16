@@ -21,7 +21,8 @@ description = "Unchecked functions, checked blocks, and raw pointer types for lo
 name = "unchecked_fn_basic"
 spec = ["9.1:1", "9.1:2"]
 source = """
-unchecked fn dangerous_op() -> i32 { 42 }
+@mark(unchecked)
+fn dangerous_op() -> i32 { 42 }
 fn main() -> i32 { 0 }
 """
 exit_code = 0
@@ -30,7 +31,8 @@ exit_code = 0
 name = "unchecked_fn_with_params"
 spec = ["9.1:1"]
 source = """
-unchecked fn read_memory(addr: i32) -> i32 { addr }
+@mark(unchecked)
+fn read_memory(addr: i32) -> i32 { addr }
 fn main() -> i32 { 0 }
 """
 exit_code = 0
@@ -39,7 +41,8 @@ exit_code = 0
 name = "pub_unchecked_fn"
 spec = ["9.1:1"]
 source = """
-pub unchecked fn public_dangerous() -> i32 { 0 }
+@mark(unchecked)
+pub fn public_dangerous() -> i32 { 0 }
 fn main() -> i32 { 0 }
 """
 exit_code = 0
@@ -52,7 +55,8 @@ exit_code = 0
 name = "unchecked_fn_call_in_checked"
 spec = ["9.1:3", "9.1:5"]
 source = """
-unchecked fn dangerous_op() -> i32 { 42 }
+@mark(unchecked)
+fn dangerous_op() -> i32 { 42 }
 fn main() -> i32 {
     checked { dangerous_op() }
 }
@@ -63,7 +67,8 @@ exit_code = 42
 name = "unchecked_fn_call_outside_checked"
 spec = ["9.1:3"]
 source = """
-unchecked fn dangerous_op() -> i32 { 42 }
+@mark(unchecked)
+fn dangerous_op() -> i32 { 42 }
 fn main() -> i32 {
     dangerous_op()
 }
@@ -75,8 +80,10 @@ error_contains = "can only be used inside a `checked` block"
 name = "unchecked_fn_call_nested_checked"
 spec = ["9.1:3", "9.1:5"]
 source = """
-unchecked fn inner() -> i32 { 10 }
-unchecked fn outer() -> i32 {
+@mark(unchecked)
+fn inner() -> i32 { 10 }
+@mark(unchecked)
+fn outer() -> i32 {
     checked { inner() }
 }
 fn main() -> i32 {

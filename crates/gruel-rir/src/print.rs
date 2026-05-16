@@ -777,6 +777,8 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     return_type,
                     receiver_mode,
                     is_unchecked,
+                    directives_start: _,
+                    directives_len: _,
                 } => {
                     let params = self.rir.get_params(*params_start, *params_len);
                     let params_str: Vec<String> = params

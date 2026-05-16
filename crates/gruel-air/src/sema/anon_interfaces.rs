@@ -63,6 +63,8 @@ impl<'a> Sema<'a> {
                 return_type,
                 receiver_mode,
                 is_unchecked,
+                directives_start: _,
+                directives_len: _,
             } = &m.data
             else {
                 return Err(CompileError::new(

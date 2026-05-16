@@ -61,12 +61,12 @@ name = "mut_ptr_c_void_allowed_in_ffi"
 spec = ["10.3:6", "10.3:7"]
 source = """
 link_extern("c") {
-    fn malloc(size: usize) -> MutPtr(c_void);
-    fn free(p: MutPtr(c_void)) -> ();
+    @mark(unchecked) fn malloc(size: usize) -> MutPtr(c_void);
+    @mark(unchecked) fn free(p: MutPtr(c_void)) -> ();
 }
 fn main() -> i32 {
-    let p: MutPtr(c_void) = malloc(64);
-    free(p);
+    let p: MutPtr(c_void) = checked { malloc(64) };
+    checked { free(p) };
     0
 }
 """
@@ -103,11 +103,11 @@ name = "c_int_libc_abs"
 spec = ["10.3:5"]
 source = """
 link_extern("c") {
-    fn abs(x: c_int) -> c_int;
+    @mark(unchecked) fn abs(x: c_int) -> c_int;
 }
 fn main() -> i32 {
     let x: c_int = 7;
-    let y: c_int = abs(x);
+    let y: c_int = checked { abs(x) };
     0
 }
 """

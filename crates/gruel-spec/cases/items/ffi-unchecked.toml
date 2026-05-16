@@ -1,24 +1,18 @@
-# ADR-0088: FFI imports must carry `@mark(unchecked)` under the
-# `unchecked_fn_extensions` preview gate.
+# ADR-0088: FFI imports must carry `@mark(unchecked)`.
 #
-# Phase 2 of ADR-0088 makes the directive mandatory at every extern fn
-# declaration inside `link_extern` / `static_link_extern`. The legacy
-# directive-less form continues to parse without the preview gate so
-# existing FFI tests (in `c-ffi.toml`, `c-ffi-enum.toml`,
-# `c-ffi-static.toml`) compile unchanged; the gate fires the missing
-# directive as an error under `--preview unchecked_fn_extensions`.
+# Every fn declaration inside `link_extern` / `static_link_extern`
+# must carry `@mark(unchecked)`; missing-directive is a compile error.
+# Stabilised — these tests run without a preview flag.
 
 [section]
 id = "items.ffi-unchecked"
 spec_chapter = "10.2"
 name = "FFI imports require @mark(unchecked)"
-description = "ADR-0088 Phase 2: every extern fn declaration must carry @mark(unchecked) under the preview gate."
+description = "ADR-0088: every extern fn declaration must carry @mark(unchecked)."
 
 [[case]]
 name = "ffi_unchecked_directive_accepted"
 spec = ["10.2:10", "10.2:11"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 link_extern("m") {
     @mark(unchecked) fn cos(x: f64) -> f64;
@@ -32,10 +26,8 @@ fn main() -> i32 {
 exit_code = 0
 
 [[case]]
-name = "ffi_missing_unchecked_rejected_under_preview"
+name = "ffi_missing_unchecked_rejected"
 spec = ["10.2:10"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 link_extern("m") {
     fn cos(x: f64) -> f64;
@@ -52,8 +44,6 @@ error_contains = "must be declared `@mark(unchecked)"
 [[case]]
 name = "ffi_call_outside_checked_rejected"
 spec = ["10.2:10"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 link_extern("m") {
     @mark(unchecked) fn cos(x: f64) -> f64;
@@ -70,8 +60,6 @@ error_contains = "can only be used inside a `checked` block"
 [[case]]
 name = "ffi_unchecked_with_link_name"
 spec = ["10.2:10"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 link_extern("c") {
     @mark(unchecked) @link_name("abs") fn my_abs(x: i32) -> i32;
@@ -86,8 +74,6 @@ exit_code = 7
 [[case]]
 name = "ffi_unchecked_static_link_extern"
 spec = ["10.2:10"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 description = "`static_link_extern` accepts `@mark(unchecked)` the same way as `link_extern`."
 source = """
 static_link_extern("m") {

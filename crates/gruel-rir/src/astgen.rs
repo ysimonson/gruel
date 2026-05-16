@@ -465,6 +465,9 @@ impl<'a> AstGen<'a> {
                     .collect();
                 let (params_start, params_len) = self.rir.add_params(&params);
 
+                let directives = self.convert_directives(&sig.directives);
+                let (directives_start, directives_len) = self.rir.add_directives(&directives);
+
                 let receiver_mode = encode_self_receiver_kind(sig.receiver.kind);
                 self.rir.add_inst(Inst {
                     data: InstData::InterfaceMethodSig {
@@ -474,6 +477,8 @@ impl<'a> AstGen<'a> {
                         return_type,
                         receiver_mode,
                         is_unchecked: sig.is_unchecked,
+                        directives_start,
+                        directives_len,
                     },
                     span: sig.span,
                 })
@@ -1332,6 +1337,9 @@ impl<'a> AstGen<'a> {
                                     })
                                     .collect();
                                 let (params_start, params_len) = self.rir.add_params(&params);
+                                let directives = self.convert_directives(&sig.directives);
+                                let (directives_start, directives_len) =
+                                    self.rir.add_directives(&directives);
                                 let receiver_mode = encode_self_receiver_kind(sig.receiver.kind);
                                 self.rir.add_inst(Inst {
                                     data: InstData::InterfaceMethodSig {
@@ -1341,6 +1349,8 @@ impl<'a> AstGen<'a> {
                                         return_type,
                                         receiver_mode,
                                         is_unchecked: sig.is_unchecked,
+                                        directives_start,
+                                        directives_len,
                                     },
                                     span: sig.span,
                                 })

@@ -18,11 +18,11 @@ spec = ["10.2:1", "10.2:2", "10.2:7"]
 description = "A `link_extern` block with one fn declaration; the fn is implicitly extern (10.2:2)."
 source = """
 link_extern("c") {
-    fn abs(x: i32) -> i32;
+    @mark(unchecked) fn abs(x: i32) -> i32;
 }
 
 fn main() -> i32 {
-    abs(-5)
+    checked { abs(-5) }
 }
 """
 exit_code = 5
@@ -33,12 +33,12 @@ spec = ["10.2:7"]
 description = "A `link_extern` block with multiple fn declarations."
 source = """
 link_extern("c") {
-    fn abs(x: i32) -> i32;
-    fn labs(x: i64) -> i64;
+    @mark(unchecked) fn abs(x: i32) -> i32;
+    @mark(unchecked) fn labs(x: i64) -> i64;
 }
 
 fn main() -> i32 {
-    abs(-3) + abs(-4)
+    checked { abs(-3) + abs(-4) }
 }
 """
 exit_code = 7
@@ -60,11 +60,11 @@ spec = ["10.2:8"]
 description = "`@link_name(\"…\")` overrides the linker symbol."
 source = """
 link_extern("c") {
-    @link_name("abs") fn my_abs(x: i32) -> i32;
+    @mark(unchecked) @link_name("abs") fn my_abs(x: i32) -> i32;
 }
 
 fn main() -> i32 {
-    my_abs(-12)
+    checked { my_abs(-12) }
 }
 """
 exit_code = 12
@@ -171,7 +171,7 @@ description = "Non-`@mark(c)` struct passed by value to an extern fn is rejected
 source = """
 struct Plain { x: i32 }
 link_extern("c") {
-    fn takes_plain(p: Plain) -> i32;
+    @mark(unchecked) fn takes_plain(p: Plain) -> i32;
 }
 
 fn main() -> i32 { 0 }
@@ -244,11 +244,11 @@ spec = ["10.2:7", "10.2:9"]
 description = "End-to-end: link against libm, call `sqrt`, verify the `-lm` flag reaches the linker."
 source = """
 link_extern("m") {
-    fn sqrt(x: f64) -> f64;
+    @mark(unchecked) fn sqrt(x: f64) -> f64;
 }
 
 fn main() -> i32 {
-    let r = sqrt(16.0);
+    let r = checked { sqrt(16.0) };
     let i: i32 = @cast(r);
     i
 }
@@ -277,8 +277,8 @@ spec = ["10.2:1"]
 description = "Declaring the same extern symbol twice is a compile error."
 source = """
 link_extern("c") {
-    fn abs(x: i32) -> i32;
-    fn abs(x: i32) -> i32;
+    @mark(unchecked) fn abs(x: i32) -> i32;
+    @mark(unchecked) fn abs(x: i32) -> i32;
 }
 
 fn main() -> i32 { 0 }

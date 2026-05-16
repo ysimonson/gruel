@@ -17,7 +17,7 @@ use gruel_builtins::{
 };
 use gruel_rir::{InstData, InstRef, RirParamMode};
 use gruel_util::Span;
-use gruel_util::{CompileError, CompileResult, ErrorKind, PreviewFeature, ice};
+use gruel_util::{CompileError, CompileResult, ErrorKind, ice};
 use lasso::Spur;
 
 use super::anon_interfaces::decode_receiver_mode;
@@ -281,26 +281,8 @@ impl<'a> Sema<'a> {
     /// directives (`@handle`, `@copy`) get a targeted retirement note; other
     /// unknowns get an edit-distance suggestion when there's a near-match.
     pub(crate) fn validate_directives(&self) -> CompileResult<()> {
-        // ADR-0088: gate `@mark(unchecked)` on interface method signatures
-        // first. The directive is not stored in extras for
-        // InterfaceMethodSig — it is parsed into the `is_unchecked` bool
-        // — so we gate based on the bool alone. Prelude interfaces are
-        // exempt for the same reason as fn declarations.
         for (_, inst) in self.rir.iter() {
-            if let InstData::InterfaceMethodSig {
-                is_unchecked: true, ..
-            } = &inst.data
-                && !self.is_prelude_file(inst.span.file_id)
-            {
-                self.require_preview(
-                    PreviewFeature::UncheckedFnExtensions,
-                    "`@mark(unchecked)` directive on interface method signatures",
-                    inst.span,
-                )?;
-            }
-        }
-        for (_, inst) in self.rir.iter() {
-            let (start, len, is_fn_decl) = match &inst.data {
+            let (start, len, _is_fn_decl) = match &inst.data {
                 InstData::StructDecl {
                     directives_start,
                     directives_len,
@@ -344,29 +326,6 @@ impl<'a> Sema<'a> {
                     || name == "mark"
                     || name == "link_name"
                 {
-                    // ADR-0088: gate `@mark(unchecked)` at the directive
-                    // site. The gate fires on every fn-like declaration
-                    // that carries the directive — top-level fn, method
-                    // (in struct/enum/anon-struct), and interface
-                    // method signature (parsed as FnDecl analogues).
-                    // The legacy `unchecked` keyword path is not gated;
-                    // only the directive form is.
-                    //
-                    // Prelude code is exempt: the stdlib carries
-                    // `@mark(unchecked)` unconditionally so user code
-                    // that doesn't enable the preview still sees a
-                    // consistent prelude surface.
-                    if is_fn_decl && name == "mark" && !self.is_prelude_file(inst.span.file_id) {
-                        for arg in &directive.args {
-                            if self.interner.resolve(arg) == "unchecked" {
-                                self.require_preview(
-                                    PreviewFeature::UncheckedFnExtensions,
-                                    "`@mark(unchecked)` directive",
-                                    directive.span,
-                                )?;
-                            }
-                        }
-                    }
                     continue;
                 }
                 let note = directive_diagnosis_note(&name);
@@ -422,10 +381,33 @@ impl<'a> Sema<'a> {
                 name,
                 methods_start,
                 methods_len,
-                directives_start: _,
-                directives_len: _,
+                directives_start,
+                directives_len,
             } = &inst.data
             {
+                // ADR-0088: `@mark(...)` is not legal on interface
+                // declaration heads. Interfaces don't carry ABI
+                // (`@mark(c)`), posture (`@mark(copy|affine|linear)`),
+                // thread-safety overrides, or per-fn `@mark(unchecked)`
+                // — those all attach to fn / struct / enum
+                // declarations. `@lang("…")` is the only directive
+                // currently legal on an interface head.
+                let directives = self.rir.get_directives(*directives_start, *directives_len);
+                for d in directives.iter() {
+                    if self.interner.resolve(&d.name) != "mark" {
+                        continue;
+                    }
+                    for arg in &d.args {
+                        let arg_name = self.interner.resolve(arg);
+                        return Err(CompileError::new(
+                            ErrorKind::MarkerNotApplicable {
+                                marker: arg_name.to_string(),
+                                item_kind: "interface",
+                            },
+                            d.span,
+                        ));
+                    }
+                }
                 let method_refs = self.rir.get_inst_refs(*methods_start, *methods_len);
                 let mut seen: HashSet<Spur> = HashSet::default();
                 let mut methods = Vec::new();
@@ -438,6 +420,8 @@ impl<'a> Sema<'a> {
                         return_type,
                         receiver_mode,
                         is_unchecked,
+                        directives_start,
+                        directives_len,
                     } = &m.data
                     {
                         if !seen.insert(*method_name) {
@@ -450,6 +434,29 @@ impl<'a> Sema<'a> {
                                 },
                                 m.span,
                             ));
+                        }
+
+                        // ADR-0088: only `@mark(unchecked)` is legal on
+                        // interface method signatures. Reject any other
+                        // marker (e.g. `@mark(c)`, `@mark(copy)`).
+                        let method_directives =
+                            self.rir.get_directives(*directives_start, *directives_len);
+                        for d in method_directives.iter() {
+                            if self.interner.resolve(&d.name) != "mark" {
+                                continue;
+                            }
+                            for arg in &d.args {
+                                let arg_name = self.interner.resolve(arg);
+                                if arg_name != "unchecked" {
+                                    return Err(CompileError::new(
+                                        ErrorKind::MarkerNotApplicable {
+                                            marker: arg_name.to_string(),
+                                            item_kind: "interface method",
+                                        },
+                                        d.span,
+                                    ));
+                                }
+                            }
                         }
                         let params = self
                             .rir
@@ -2623,22 +2630,12 @@ impl<'a> Sema<'a> {
                 }
             }
 
-            // ADR-0088: under the `unchecked_fn_extensions` preview
-            // gate, every extern fn must carry `@mark(unchecked)`.
-            // Without the gate (legacy ADR-0085 behaviour), the
-            // directive is optional for user code. The gate makes the
-            // requirement mandatory during the migration window;
-            // stabilisation removes the conditional.
-            //
-            // Prelude `link_extern` blocks always require the directive
-            // — the stdlib commits to ADR-0088's discipline up front so
-            // its raw-pointer surface is uniformly gated. Prelude
-            // callers wrap every libc call in `checked { }`.
-            let preview_enabled = self.preview_features.contains(
-                &gruel_util::PreviewFeature::UncheckedFnExtensions,
-            );
-            let in_prelude = self.is_prelude_file(ext.span.file_id);
-            if !has_unchecked_mark && (preview_enabled || in_prelude) {
+            // ADR-0088: every extern fn must carry `@mark(unchecked)`.
+            // FFI imports are unverified from the Gruel side by
+            // construction; the marker makes the call-site discipline
+            // visible — every caller must wrap the call in a
+            // `checked { }` block.
+            if !has_unchecked_mark {
                 let fn_name = self.interner.resolve(&ext.name).to_string();
                 let library = self.interner.resolve(&ext.library).to_string();
                 return Err(CompileError::new(

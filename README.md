@@ -19,7 +19,7 @@ Theme: Build upon Rue's bones, keeping a lot of the broad ideas but making break
 - Anonymous functions (ADR-0055)
 - Go-like structurally typed interfaces (ADR-0056, ADR-0057, ADR-0060)
 - Rust-like `@derive` for structs and enums that takes advantage of comptime capacities (ADR-0058)
-- `@mark` as a substitute for Rust's marker traits, with `copy`, `linear`, `affine`, `unsend`, `checked_send`, `checked_sync`, etc. (ADR-0083, ADR-0084)
+- `@mark` as a substitute for Rust's marker traits, with `copy`, `linear`, `affine`, `unsend`, `checked_send`, `checked_sync`, etc. (ADR-0083, ADR-0084, ADR-0088)
 - C FFI (ADR-0085, ADR-0086)
 - Reworked pointers and references to a less keyword-driven syntax to accomodate the growing number of variants (ADR-0061, ADR-0062, ADR-0063)
 - Stabilized anonymous struct methods (ADR-0029)

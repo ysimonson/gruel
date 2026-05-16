@@ -45,7 +45,6 @@ pub enum TokenKind {
     Pub,              // pub visibility modifier (module system)
     Const,            // const declaration (module system re-exports)
     Checked,          // checked { } block for unchecked operations
-    Unchecked,        // unchecked fn modifier
     LinkExtern,       // link_extern("…") { … } FFI block (ADR-0085)
     StaticLinkExtern, // static_link_extern("…") { … } FFI block (ADR-0086)
 
@@ -157,7 +156,6 @@ impl TokenKind {
             TokenKind::Pub => "'pub'",
             TokenKind::Const => "'const'",
             TokenKind::Checked => "'checked'",
-            TokenKind::Unchecked => "'unchecked'",
             TokenKind::LinkExtern => "'link_extern'",
             TokenKind::StaticLinkExtern => "'static_link_extern'",
             TokenKind::I8 => "type 'i8'",
@@ -268,7 +266,6 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Pub => write!(f, "PUB"),
             TokenKind::Const => write!(f, "CONST"),
             TokenKind::Checked => write!(f, "CHECKED"),
-            TokenKind::Unchecked => write!(f, "UNCHECKED"),
             TokenKind::LinkExtern => write!(f, "LINK_EXTERN"),
             TokenKind::StaticLinkExtern => write!(f, "STATIC_LINK_EXTERN"),
             TokenKind::I8 => write!(f, "TYPE(i8)"),

@@ -363,12 +363,6 @@ pub enum PreviewFeature {
     /// Testing infrastructure feature - permanently unstable.
     /// Used to verify the preview feature gating mechanism works.
     TestInfra,
-    /// ADR-0088: `@mark(unchecked)` directive on methods, interface
-    /// method signatures, and FFI imports, plus the requirement that
-    /// every FFI import carry the directive. The legacy `unchecked`
-    /// keyword on top-level fns continues to work without the gate
-    /// during the migration window.
-    UncheckedFnExtensions,
 }
 
 /// Boxed payload for [`ErrorKind::InterfaceMethodMissing`] (ADR-0056).
@@ -400,7 +394,6 @@ impl PreviewFeature {
     pub fn adr(&self) -> &'static str {
         match *self {
             PreviewFeature::TestInfra => "ADR-0005",
-            PreviewFeature::UncheckedFnExtensions => "ADR-0088",
         }
     }
 

@@ -12,26 +12,31 @@ This section describes the syntax for unchecked code constructs.
 
 {{ rule(id="9.1:1", cat="normative") }}
 
-A function **MAY** be marked with the `unchecked` modifier to indicate that calling it requires a `checked` block.
+A function **MAY** be marked with the `@mark(unchecked)` directive to
+indicate that calling it requires a `checked` block (ADR-0088). The
+legacy `unchecked` hard-keyword spelling has been retired.
 
 {{ rule(id="9.1:2", cat="syntax") }}
 
 ```ebnf
-function = [ "pub" ] [ "unchecked" ] "fn" IDENT "(" [ params ] ")" [ "->" type ] "{" block "}" ;
+function = directive* [ "pub" ] "fn" IDENT "(" [ params ] ")" [ "->" type ] "{" block "}" ;
 ```
 
 {{ rule(id="9.1:3", cat="legality-rule") }}
 
-A call to an `unchecked` function is a compile-time error unless it appears inside a `checked` block.
+A call to an `@mark(unchecked)` function is a compile-time error
+unless it appears inside a `checked` block.
 
 {{ rule(id="9.1:4", cat="example") }}
 
 ```gruel
-unchecked fn dangerous_operation() -> i32 {
+@mark(unchecked)
+fn dangerous_operation() -> i32 {
     42
 }
 
-pub unchecked fn public_dangerous() -> i32 {
+@mark(unchecked)
+pub fn public_dangerous() -> i32 {
     0
 }
 ```
@@ -94,5 +99,6 @@ ptr_type = ( "Ptr" | "MutPtr" ) "(" type ")" ;
 ```gruel
 fn takes_ptr(p: Ptr(i32)) -> i32 { 0 }
 fn takes_mut_ptr(p: MutPtr(i32)) -> i32 { 0 }
-unchecked fn get_ptr() -> Ptr(i32) { @panic() }
+@mark(unchecked)
+fn get_ptr() -> Ptr(i32) { @panic() }
 ```

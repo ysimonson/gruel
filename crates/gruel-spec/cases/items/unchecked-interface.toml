@@ -14,8 +14,6 @@ description = "Tests for @mark(unchecked) on interface method signatures and exa
 [[case]]
 name = "checked_iface_checked_impl"
 spec = ["6.5:24"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 interface Reader {
     fn read(self) -> i32;
@@ -45,8 +43,6 @@ exit_code = 42
 [[case]]
 name = "unchecked_iface_unchecked_impl"
 spec = ["6.5:24"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 interface UnsafeReader {
     @mark(unchecked) fn read(self) -> i32;
@@ -77,8 +73,6 @@ exit_code = 42
 [[case]]
 name = "unchecked_iface_checked_impl_rejected"
 spec = ["6.5:25"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 interface UnsafeReader {
     @mark(unchecked) fn read(self) -> i32;
@@ -109,8 +103,6 @@ error_contains = "does not conform"
 [[case]]
 name = "checked_iface_unchecked_impl_rejected"
 spec = ["6.5:25"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 interface Reader {
     fn read(self) -> i32;
@@ -142,8 +134,6 @@ error_contains = "does not conform"
 [[case]]
 name = "unchecked_iface_dyn_dispatch"
 spec = ["6.5:24"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 interface UnsafeReader {
     @mark(unchecked) fn read(self) -> i32;
@@ -170,8 +160,6 @@ exit_code = 42
 [[case]]
 name = "unchecked_iface_dyn_dispatch_no_checked"
 spec = ["6.5:24"]
-preview = "unchecked_fn_extensions"
-preview_should_pass = true
 source = """
 interface UnsafeReader {
     @mark(unchecked) fn read(self) -> i32;
@@ -197,18 +185,46 @@ compile_fail = true
 error_contains = "can only be used inside a `checked` block"
 
 # =============================================================================
-# Preview gate fires on interface method directive
+# @mark(c) and other non-applicable markers rejected on interface methods
 # =============================================================================
 
 [[case]]
-name = "unchecked_iface_requires_preview"
+name = "iface_method_mark_c_rejected"
 spec = ["6.5:24"]
 source = """
-interface UnsafeReader {
-    @mark(unchecked) fn read(self) -> i32;
+interface Bad {
+    @mark(c) fn foo(self) -> i32;
 }
 
 fn main() -> i32 { 0 }
 """
 compile_fail = true
-error_contains = "requires preview feature"
+error_contains = "not applicable to interface method"
+
+[[case]]
+name = "iface_method_mark_copy_rejected"
+spec = ["6.5:24"]
+source = """
+interface Bad {
+    @mark(copy) fn foo(self) -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "not applicable to interface method"
+
+[[case]]
+name = "iface_head_mark_c_rejected"
+spec = ["6.5:24"]
+source = """
+@mark(c)
+interface Bad {
+    fn foo(self) -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "not applicable to interface"
+

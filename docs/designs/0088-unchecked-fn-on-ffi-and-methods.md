@@ -1,13 +1,13 @@
 ---
 id: 0088
 title: `@mark(unchecked)` on methods and mandatory on FFI imports
-status: proposal
+status: implemented
 tags: [ffi, safety, syntax, stdlib]
 feature-flag: unchecked_fn_extensions
 created: 2026-05-14
-accepted:
-implemented:
-spec-sections: ["9.2", "10.1"]
+accepted: 2026-05-16
+implemented: 2026-05-16
+spec-sections: ["6.5", "9.1", "9.2", "10.2"]
 superseded-by:
 ---
 
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal.
+Implemented.
 
 ## Summary
 
@@ -288,7 +288,7 @@ Existing diagnostics that no longer fire:
 
 - [x] **Phase 5: Spec + tests** — New spec section under `docs/spec/src/09-unchecked-code/` for the `@mark(unchecked)` directive surface (paragraphs 9.2:X–Y), a new paragraph in `docs/spec/src/10-c-ffi/01-c-ffi-overview.md` (or 10.1's existing extern-fn section) requiring `@mark(unchecked)` on FFI imports, an addition to §6.5 (interfaces) defining `@mark(unchecked)` on interface method signatures and its role in conformance, and updates to §9.1/§9.2 listing which `Ptr(T)`/`MutPtr(T)` methods are `@mark(unchecked)` (matching the principle table). Update ADR-0083's BUILTIN_MARKERS reference list. Add `spec = [...]` traceability to every Phase 1–4 test. UI tests for diagnostic quality on `ExternFnMissingUnchecked`, `UncheckedDestructor`, `InterfaceMethodUncheckedMismatch`, and the method-level `UncheckedFnRequiresChecked` path. Run `make test` to confirm normative coverage stays at 100%.
 
-- [ ] **Phase 6: Stabilise** — Remove `PreviewFeature::UncheckedFnExtensions`; strip `preview = "unchecked_fn_extensions"` from spec tests. Make the FFI `@mark(unchecked)` requirement unconditional. Make the interface-method `is_unchecked` field a permanent part of `InterfaceMethodReq` (no longer gated). Make the pointer-method `is_unchecked` table the permanent disposition (delete any remaining `requires_checked` references). Remove the legacy `unchecked` hard keyword from `gruel-lexer` and the `unchecked_fn_parser` slot from `gruel-parser`. ADR status → `implemented`. Update ADR-0028, ADR-0056, ADR-0060, ADR-0063, and ADR-0085's "Open Questions"/"Future Work" sections to point at this ADR as the resolution. Sweep prelude `link_extern` blocks to add `@mark(unchecked)` on every import (the preview gate would have caught them in CI, so this should be empty by Phase 6).
+- [x] **Phase 6: Stabilise** — Remove `PreviewFeature::UncheckedFnExtensions`; strip `preview = "unchecked_fn_extensions"` from spec tests. Make the FFI `@mark(unchecked)` requirement unconditional. Make the interface-method `is_unchecked` field a permanent part of `InterfaceMethodReq` (no longer gated). Make the pointer-method `is_unchecked` table the permanent disposition (delete any remaining `requires_checked` references). Remove the legacy `unchecked` hard keyword from `gruel-lexer` and the `unchecked_fn_parser` slot from `gruel-parser`. ADR status → `implemented`. Update ADR-0028, ADR-0056, ADR-0060, ADR-0063, and ADR-0085's "Open Questions"/"Future Work" sections to point at this ADR as the resolution. Sweep prelude `link_extern` blocks to add `@mark(unchecked)` on every import (the preview gate would have caught them in CI, so this should be empty by Phase 6).
 
 ## Consequences
 

@@ -369,11 +369,20 @@ None — all resolved.
 
 ## Future Work
 
-- **FFI**: Calling C functions, `extern` declarations
+- **FFI**: Calling C functions, `extern` declarations — landed in ADR-0085 (C FFI) and ADR-0088 made `@mark(unchecked)` mandatory at every FFI import.
 - **Inline assembly**: For performance-critical code or hardware access
 - **Platform abstraction layer**: `std.os.linux`, `std.os.macos` with typed syscall wrappers
 - **Non-null pointers**: `ptr! mut T` that's guaranteed non-null
 - **Volatile operations**: For memory-mapped I/O
+
+## Subsequent Changes
+
+ADR-0088 retired the `unchecked fn` hard-keyword introduced here in
+favour of the `@mark(unchecked)` directive (ADR-0083 style) and
+extended the unchecked surface to methods, interface method
+signatures, and FFI imports under a single uniform spelling. The
+call-site rule (every call must sit in a `checked { }` block) is
+unchanged.
 
 ## References
 

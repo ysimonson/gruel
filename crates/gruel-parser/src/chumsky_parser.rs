@@ -605,30 +605,14 @@ where
 
     // ADR-0083: `@mark(...)` directive args. After Phase 4 retired
     // `TokenKind::Linear`, both `copy` and `linear` are regular
-    // identifiers and fall through to `ident_parser`.
-    //
-    // ADR-0088: `unchecked` remains a reserved keyword during the
-    // migration window (it still gates top-level `unchecked fn ...`),
-    // so it isn't an ordinary identifier. Accept its token form
-    // explicitly here so `@mark(unchecked)` parses cleanly. The map
-    // produces an `Ident` whose `name` is the interned spelling, which
-    // downstream sema matches by string compare.
+    // identifiers and fall through to `ident_parser`. ADR-0088
+    // Phase 6 retired `TokenKind::Unchecked` similarly.
     let directive_arg = choice((
         select! {
             TokenKind::String(s) = e => DirectiveArg::String(StringLit {
                 value: s,
                 span: span_from_extra(e),
             }),
-        }
-        .boxed(),
-        select! {
-            TokenKind::Unchecked = e => {
-                let state: &mut SimpleState<ParserState> = e.state();
-                DirectiveArg::Ident(Ident {
-                    name: state.0.syms.unchecked_name,
-                    span: span_from_extra(e),
-                })
-            },
         }
         .boxed(),
         ident_parser().map(DirectiveArg::Ident).boxed(),
@@ -2927,7 +2911,10 @@ where
         .boxed()
 }
 
-/// Parser for function definitions: [@directive]* [pub] [unchecked] fn name(params) -> Type { body }
+/// Parser for function definitions: [@directive]* [pub] fn name(params) -> Type { body }
+///
+/// ADR-0088 Phase 6 retired the `unchecked` hard keyword in favour
+/// of the `@mark(unchecked)` directive.
 fn function_parser<'src, I>() -> GruelParser<'src, I, Function>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -2943,12 +2930,8 @@ where
         }
     });
 
-    // Box after 2 thens to keep the accumulated type short.
-    let fn_head: GruelParser<I, (Directives, Visibility, bool)> = directives_parser()
-        .then(visibility)
-        .then(just(TokenKind::Unchecked).or_not())
-        .map(|((d, v), u)| (d, v, u.is_some()))
-        .boxed();
+    let fn_head: GruelParser<I, (Directives, Visibility)> =
+        directives_parser().then(visibility).boxed();
 
     let fn_sig: GruelParser<I, (Ident, Vec<Param>)> = just(TokenKind::Fn)
         .ignore_then(ident_parser())
@@ -2960,14 +2943,17 @@ where
         .then(just(TokenKind::Arrow).ignore_then(type_parser()).or_not())
         .then(block_parser(expr))
         .map_with(
-            |((((directives, visibility, kw_unchecked), (name, params)), return_type), body), e| {
+            |((((directives, visibility), (name, params)), return_type), body), e| {
                 let syms = e.state().0.syms;
-                let dir_unchecked =
-                    directives_have_mark_unchecked(&directives, syms.mark_name, syms.unchecked_name);
+                let is_unchecked = directives_have_mark_unchecked(
+                    &directives,
+                    syms.mark_name,
+                    syms.unchecked_name,
+                );
                 Function {
                     directives,
                     visibility,
-                    is_unchecked: kw_unchecked || dir_unchecked,
+                    is_unchecked,
                     name,
                     params,
                     return_type,
@@ -3587,7 +3573,6 @@ where
     .boxed();
     let item_start_b: GruelParser<'src, I, ()> = choice((
         just(TokenKind::Pub).ignored().boxed(),
-        just(TokenKind::Unchecked).ignored().boxed(),
         just(TokenKind::At).ignored().boxed(), // For @directives
     ))
     .boxed();

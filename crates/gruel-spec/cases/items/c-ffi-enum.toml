@@ -84,7 +84,7 @@ struct NonC {
 }
 
 link_extern("foo") {
-    fn bad() -> Bad;
+    @mark(unchecked) fn bad() -> Bad;
 }
 
 fn main() -> i32 { 0 }
@@ -107,7 +107,7 @@ enum Color {
 }
 
 link_extern("foo") {
-    fn pick() -> Color;
+    @mark(unchecked) fn pick() -> Color;
 }
 
 fn main() -> i32 { 0 }
