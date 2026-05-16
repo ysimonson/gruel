@@ -16,7 +16,7 @@ description = "ADR-0088 Phase 2: every extern fn declaration must carry @mark(un
 
 [[case]]
 name = "ffi_unchecked_directive_accepted"
-spec = ["10.2:1", "10.2:2"]
+spec = ["10.2:10", "10.2:11"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -33,7 +33,7 @@ exit_code = 0
 
 [[case]]
 name = "ffi_missing_unchecked_rejected_under_preview"
-spec = ["10.2:2"]
+spec = ["10.2:10"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -51,7 +51,7 @@ error_contains = "must be declared `@mark(unchecked)"
 
 [[case]]
 name = "ffi_call_outside_checked_rejected"
-spec = ["10.2:2"]
+spec = ["10.2:10"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -69,7 +69,7 @@ error_contains = "can only be used inside a `checked` block"
 
 [[case]]
 name = "ffi_unchecked_with_link_name"
-spec = ["10.2:2"]
+spec = ["10.2:10"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -85,7 +85,7 @@ exit_code = 7
 
 [[case]]
 name = "ffi_unchecked_static_link_extern"
-spec = ["10.2:2"]
+spec = ["10.2:10"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 description = "`static_link_extern` accepts `@mark(unchecked)` the same way as `link_extern`."

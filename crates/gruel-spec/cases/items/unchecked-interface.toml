@@ -13,7 +13,7 @@ description = "Tests for @mark(unchecked) on interface method signatures and exa
 
 [[case]]
 name = "checked_iface_checked_impl"
-spec = ["6.5:1"]
+spec = ["6.5:24"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -44,7 +44,7 @@ exit_code = 42
 
 [[case]]
 name = "unchecked_iface_unchecked_impl"
-spec = ["6.5:2"]
+spec = ["6.5:24"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -76,7 +76,7 @@ exit_code = 42
 
 [[case]]
 name = "unchecked_iface_checked_impl_rejected"
-spec = ["6.5:3"]
+spec = ["6.5:25"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -108,7 +108,7 @@ error_contains = "does not conform"
 
 [[case]]
 name = "checked_iface_unchecked_impl_rejected"
-spec = ["6.5:3"]
+spec = ["6.5:25"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -141,7 +141,7 @@ error_contains = "does not conform"
 
 [[case]]
 name = "unchecked_iface_dyn_dispatch"
-spec = ["6.5:4"]
+spec = ["6.5:24"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -169,7 +169,7 @@ exit_code = 42
 
 [[case]]
 name = "unchecked_iface_dyn_dispatch_no_checked"
-spec = ["6.5:4"]
+spec = ["6.5:24"]
 preview = "unchecked_fn_extensions"
 preview_should_pass = true
 source = """
@@ -202,7 +202,7 @@ error_contains = "can only be used inside a `checked` block"
 
 [[case]]
 name = "unchecked_iface_requires_preview"
-spec = ["6.5:5"]
+spec = ["6.5:24"]
 source = """
 interface UnsafeReader {
     @mark(unchecked) fn read(self) -> i32;

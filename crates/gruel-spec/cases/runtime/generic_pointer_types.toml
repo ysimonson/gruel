@@ -51,8 +51,11 @@ exit_code = 42
 [[case]]
 name = "ptr_generic_param"
 spec = ["9.1:12"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
 source = """
-unchecked fn deref(p: Ptr(i32)) -> i32 {
+@mark(unchecked)
+fn deref(p: Ptr(i32)) -> i32 {
     checked { p.read() }
 }
 

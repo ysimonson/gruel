@@ -58,3 +58,55 @@ fn main() -> i32 {
     checked { dangerous_op() + f.raw_get() }
 }
 ```
+
+## Built-in pointer methods classified by the unchecked rule
+
+{{ rule(id="9.2:5", cat="normative") }}
+
+The methods and associated functions on `Ptr(T)` and `MutPtr(T)`
+(ADR-0063, ADR-0088) are classified by the unchecked rule:
+
+| Surface | `is_unchecked` |
+|---|---|
+| `p.read()`, `p.read_volatile()` | true |
+| `p.write(v)`, `p.write_volatile(v)` (`MutPtr` only) | true |
+| `p.offset(n)` | true |
+| `p.copy_from(src, n)` (`MutPtr` only) | true |
+| `p.is_null()` | false |
+| `p.to_int()` | false |
+| `Ptr(T)::from(&r)`, `MutPtr(T)::from(&mut r)` | false |
+| `Ptr(T)::null()`, `MutPtr(T)::null()` | false |
+| `Ptr(T)::from_int(addr)`, `MutPtr(T)::from_int(addr)` | false |
+
+{{ rule(id="9.2:6", cat="legality-rule") }}
+
+An opaque-token operation (`is_null`, `to_int`) does not require a
+`checked { }` block: the body reads the address as a number or
+compares it against null, with no dependency on the pointer pointing
+to anything valid.
+
+{{ rule(id="9.2:7", cat="legality-rule") }}
+
+A constructor that does not itself dereference (`from`, `null`,
+`from_int`) does not require a `checked { }` block. Caller-side
+hazards (use-after-free, OOB) are gated at the eventual `read` /
+`write` / `offset` / `copy_from` call site, all of which are
+`@mark(unchecked)`.
+
+{{ rule(id="9.2:8", cat="legality-rule") }}
+
+An unchecked pointer method (`read`, `read_volatile`, `write`,
+`write_volatile`, `offset`, `copy_from`) outside a `checked { }`
+block is a compile-time error. The diagnostic shape is the same as
+for any other `@mark(unchecked)` method call.
+
+## `char::from_u32_unchecked`
+
+{{ rule(id="9.2:9", cat="normative") }}
+
+The compiler-recognised `char::from_u32_unchecked(n: u32) -> char`
+is `@mark(unchecked)`. The caller asserts that `n` is a valid
+Unicode scalar value (in 0..=0x10FFFF, excluding the surrogate
+range 0xD800..=0xDFFF). The validating variant
+`char::from_u32(n: u32) -> Result(char, u32)` is the checked
+default for u32-to-char conversion.

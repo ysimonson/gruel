@@ -1,0 +1,151 @@
+[section]
+id = "diagnostics.unchecked-fn-extensions"
+name = "Unchecked fn / FFI / interface diagnostics (ADR-0088)"
+description = "Quality of diagnostics emitted for @mark(unchecked) misuse, FFI missing the directive, destructor with the directive, and interface conformance mismatch."
+
+# =============================================================================
+# `@mark(unchecked) fn __drop` — destructor rejection
+# =============================================================================
+
+[[case]]
+name = "unchecked_destructor_error_quality"
+source = """
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    fn __drop(self) {}
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+error_contains = [
+    "is not allowed on `fn __drop`",
+    "scope exit",
+]
+
+# =============================================================================
+# FFI import missing `@mark(unchecked)`
+# =============================================================================
+
+[[case]]
+name = "extern_fn_missing_unchecked_quality"
+source = """
+link_extern("m") {
+    fn sin(x: f64) -> f64;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+error_contains = [
+    "sin",
+    "link_extern",
+    "@mark(unchecked)",
+]
+
+# =============================================================================
+# Interface method `is_unchecked` mismatch — interface unchecked, impl checked
+# =============================================================================
+
+[[case]]
+name = "iface_unchecked_impl_checked_quality"
+source = """
+interface UnsafeReader {
+    @mark(unchecked) fn read(self) -> i32;
+}
+
+struct Foo {
+    val: i32,
+
+    pub fn read(self) -> i32 { self.val }
+}
+
+fn copy_unchecked(comptime T: UnsafeReader, r: T) -> i32 {
+    checked { r.read() }
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    copy_unchecked(Foo, f)
+}
+"""
+compile_fail = true
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+error_contains = [
+    "does not conform",
+    "UnsafeReader",
+    "Foo",
+    "read",
+]
+
+# =============================================================================
+# Interface method `is_unchecked` mismatch — interface checked, impl unchecked
+# =============================================================================
+
+[[case]]
+name = "iface_checked_impl_unchecked_quality"
+source = """
+interface Reader {
+    fn read(self) -> i32;
+}
+
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn read(self) -> i32 { self.val }
+}
+
+fn copy_all(comptime T: Reader, r: T) -> i32 {
+    r.read()
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    copy_all(Foo, f)
+}
+"""
+compile_fail = true
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+error_contains = [
+    "does not conform",
+    "Reader",
+    "Foo",
+    "read",
+]
+
+# =============================================================================
+# Method-level UncheckedCallRequiresChecked diagnostic
+# =============================================================================
+
+[[case]]
+name = "unchecked_method_no_checked_quality"
+source = """
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn read(self) -> i32 { self.val }
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    f.read()
+}
+"""
+compile_fail = true
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+error_contains = [
+    "unchecked function",
+    "Foo.read",
+    "checked",
+]

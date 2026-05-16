@@ -262,3 +262,39 @@ struct Buf {
     fn read(self) -> i32 { 0 }
 }
 ```
+
+## `@mark(unchecked)` on interface method signatures (ADR-0088)
+
+{{ rule(id="6.5:24", cat="normative") }}
+
+An interface method signature **MAY** carry `@mark(unchecked)` in
+its directive list. The directive declares that every call to the
+method must wrap the call in a `checked { }` block, identical to
+the `@mark(unchecked)` rule on regular fn / method declarations
+(9.2:1, 9.2:2).
+
+{{ rule(id="6.5:25", cat="legality-rule") }}
+
+Conformance is strict on `@mark(unchecked)`: a candidate method's
+`@mark(unchecked)` status must match the interface signature's
+exactly. A checked interface method may not be satisfied by an
+`@mark(unchecked)` implementation, and vice versa.
+
+{{ rule(id="6.5:26", cat="example") }}
+
+```gruel
+interface UnsafeReader {
+    @mark(unchecked) fn read(self: Ref(Self)) -> i32;
+}
+
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn read(self: Ref(Self)) -> i32 { self.val }
+}
+
+fn copy_unchecked(comptime T: UnsafeReader, r: T) -> i32 {
+    checked { r.read() }
+}
+```

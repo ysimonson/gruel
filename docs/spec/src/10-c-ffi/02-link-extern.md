@@ -41,3 +41,18 @@ The `@link_name("…")` directive overrides the linker symbol name of an extern 
 
 {{ rule(id="10.2:9", cat="normative") }}
 Library names from every `link_extern("…")` block across the compilation are deduplicated and contribute a single `-l<name>` flag to the link command in lexicographic order.
+
+{{ rule(id="10.2:10", cat="normative") }}
+Every fn declared inside a `link_extern` or `static_link_extern` block must carry `@mark(unchecked)` in its directive list (ADR-0088). Imported C symbols are unverified from the Gruel side by construction; the marker makes the call-site discipline visible — every caller must wrap the call in a `checked { }` block.
+
+{{ rule(id="10.2:11", cat="example") }}
+```gruel
+link_extern("m") {
+    @mark(unchecked) fn sin(x: f64) -> f64;
+    @mark(unchecked) fn cos(x: f64) -> f64;
+}
+
+fn compute(x: f64) -> f64 {
+    checked { sin(x) + cos(x) }
+}
+```
