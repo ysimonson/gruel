@@ -3626,12 +3626,11 @@ impl<'a> Sema<'a> {
             span,
         )?;
 
-        // ADR-0072 + ADR-0081: the prelude `String` has a `checked`-only
-        // bridge surface (`push_byte`, `terminated_ptr`,
-        // `from_utf8_unchecked`, `from_c_str_unchecked`). The registry-
-        // driven method dispatch is gone, so apply the same name-based
-        // gates here.
-        self.check_string_vec_bridge_method_gates(&struct_def.name, &method_name_str, ctx, span)?;
+        // ADR-0088: the previous ADR-0072 by-name gate
+        // (`check_string_vec_bridge_method_gates`) retired in favour of
+        // the per-method `@mark(unchecked)` directive carried by the
+        // prelude declarations themselves. The unchecked gate fires via
+        // the standard `MethodInfo::is_unchecked` check below.
 
         // ADR-0062: a `&self` / `&mut self` receiver is sugar for a borrow
         // (immutable / mutable). The receiver expression's `analyze_inst`
@@ -4489,11 +4488,11 @@ impl<'a> Sema<'a> {
             span,
         )?;
 
-        // ADR-0072 + ADR-0081: the prelude `String` has a `checked`-only
-        // bridge surface for static constructors (`from_utf8_unchecked`,
-        // `from_c_str_unchecked`). The registry-driven dispatch is gone,
-        // so apply the same name-based gates here.
-        self.check_string_vec_bridge_method_gates(&struct_def.name, &function_name_str, ctx, span)?;
+        // ADR-0088: the previous ADR-0072 by-name gate
+        // (`check_string_vec_bridge_method_gates`) retired in favour of
+        // the per-method `@mark(unchecked)` directive carried by the
+        // prelude declarations themselves. The unchecked gate fires via
+        // the standard `MethodInfo::is_unchecked` check below.
 
         // Check if calling an unchecked associated function requires a checked block
         if method_info.is_unchecked && ctx.checked_depth == 0 {

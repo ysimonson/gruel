@@ -134,22 +134,30 @@ pub struct String {
         String::from_utf8(v)
     }
 
-    // ADR-0072 escape hatches. Sema gates these to `checked` blocks by
-    // name (see `check_string_vec_bridge_method_gates`); the language
-    // doesn't yet expose `unchecked fn` syntax inside struct method
-    // declarations.
+    // ADR-0072 / ADR-0088 escape hatches. The unverified callers
+    // wrap each call in `checked { }`; the `@mark(unchecked)`
+    // directive at the declaration is what gates that requirement
+    // (ADR-0088 retired the hardcoded `check_string_vec_bridge_method_gates`
+    // table).
+    @mark(unchecked)
     pub fn from_utf8_unchecked(v: Vec(u8)) -> Self {
         Self { bytes: v }
     }
 
+    @mark(unchecked)
     pub fn from_c_str_unchecked(p: Ptr(u8)) -> Self {
-        Self::from_utf8_unchecked(@cstr_to_vec(p))
+        Self::from_utf8_unchecked(checked { @cstr_to_vec(p) })
     }
 
+    @mark(unchecked)
     pub fn push_byte(self: MutRef(Self), byte: u8) {
         self.bytes.push(byte);
     }
 
+    // ADR-0088: `terminated_ptr` is no longer unchecked. The body
+    // writes the terminator inside `checked { }` and returns a
+    // pointer that's valid at return time; caller-side deref hazards
+    // are gated at the deref site by the existing rule.
     pub fn terminated_ptr(self: MutRef(Self)) -> Ptr(u8) {
         let zero: u8 = 0;
         checked {

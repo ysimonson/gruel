@@ -704,6 +704,13 @@ impl<'a> Sema<'a> {
     /// - `char::from_u32(n: u32) -> Result(char, u32)` — calls into the
     ///   prelude function `char__from_u32`, which performs the range check
     ///   and constructs the Result.
+    ///
+    /// ADR-0088 unified the unchecked-fn gate around the `is_unchecked`
+    /// flag on the resolved fn/method; the dispatch on `char::from_u32_unchecked`
+    /// participates in the same gating discipline (the caller must wrap
+    /// the call in `checked { }`). `char` doesn't have a struct
+    /// `MethodInfo` slot because it's a primitive, so the check is
+    /// inline here rather than going through `MethodInfo::is_unchecked`.
     pub(crate) fn dispatch_char_assoc_fn_call(
         &mut self,
         air: &mut Air,
@@ -714,7 +721,10 @@ impl<'a> Sema<'a> {
     ) -> CompileResult<AnalysisResult> {
         match function_name {
             "from_u32_unchecked" => {
-                // Must be inside a `checked` block.
+                // ADR-0088: the same `UncheckedCallRequiresChecked` path
+                // that fires for `@mark(unchecked)` methods. `char` is
+                // a primitive (no struct method table), so the gate
+                // is applied inline.
                 if ctx.checked_depth == 0 {
                     return Err(CompileError::new(
                         ErrorKind::UncheckedCallRequiresChecked(

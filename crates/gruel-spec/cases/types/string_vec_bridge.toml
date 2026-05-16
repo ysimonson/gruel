@@ -184,9 +184,14 @@ fn main() -> i32 {
 exit_code = 1
 
 # ---- 7.4:9 C interop ----
+#
+# ADR-0088 reclassified `terminated_ptr`: it is no longer
+# `@mark(unchecked)`. The body writes the terminator inside `checked { }`
+# and returns a pointer that is valid at return time; caller-side deref
+# hazards are gated at the deref site (ADR-0028's existing rule).
 
 [[case]]
-name = "terminated_ptr_requires_checked"
+name = "terminated_ptr_call_does_not_require_checked"
 spec = ["7.4:9"]
 source = """
 fn main() -> i32 {
@@ -195,8 +200,7 @@ fn main() -> i32 {
     0
 }
 """
-compile_fail = true
-error_contains = "checked"
+exit_code = 0
 
 [[case]]
 name = "terminated_ptr_in_checked_block"

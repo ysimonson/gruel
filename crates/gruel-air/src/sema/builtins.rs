@@ -140,31 +140,6 @@ impl<'a> Sema<'a> {
         }
     }
 
-    /// ADR-0072: enforce `checked`-block gating for the String / Vec(u8)
-    /// bridge surface. Hardcoded by name; the surface is small enough
-    /// that a per-method gate annotation isn't worth the indirection.
-    pub(crate) fn check_string_vec_bridge_method_gates(
-        &self,
-        type_name: &str,
-        method_name: &str,
-        ctx: &super::context::AnalysisContext,
-        span: gruel_util::Span,
-    ) -> gruel_util::CompileResult<()> {
-        if type_name != "String" {
-            return Ok(());
-        }
-        // Subset that requires a `checked` block (caller assumes UTF-8
-        // invariant or raw-pointer responsibility).
-        let checked_gated = matches!(
-            method_name,
-            "from_utf8_unchecked" | "from_c_str_unchecked" | "push_byte" | "terminated_ptr"
-        );
-        if checked_gated {
-            Self::require_checked_for_intrinsic(ctx, method_name, span)?;
-        }
-        Ok(())
-    }
-
     /// ADR-0088: returns true if the given directive list contains
     /// `@mark(unchecked)`. Used to fire the
     /// `UncheckedFnExtensions` preview gate at method declaration sites
