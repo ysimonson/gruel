@@ -44,4 +44,8 @@ pub use wire_air::CachedAirOutput;
 ///
 /// History:
 /// - 1: initial layout (parse, air, llvm-ir).
-pub const CACHE_SCHEMA_VERSION: u32 = 1;
+/// - 2: ADR-0088 added `directives` + `is_unchecked` to `MethodSig` and
+///   `directives_start`/`directives_len` to `InterfaceMethodSig` RIR;
+///   `MethodSig::remap_spurs` had to learn to walk the new directive
+///   list, and signature-fp encoding now includes the unchecked flag.
+pub const CACHE_SCHEMA_VERSION: u32 = 2;

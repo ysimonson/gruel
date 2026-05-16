@@ -63,7 +63,7 @@ use crate::fingerprint::{CacheKey, Hasher};
 /// Bumped any time the canonical encoding changes. Mixed into every
 /// `sig_fp` so old caches (which used a different encoding) are
 /// invalidated even if the file content matches.
-pub const SIG_FP_VERSION: u32 = 1;
+pub const SIG_FP_VERSION: u32 = 2;
 
 /// Compute `sig_fp` for a single file's AST.
 ///
@@ -398,6 +398,11 @@ fn encode_method_sig(h: &mut Hasher, m: &MethodSig, interner: &ThreadedRodeo) {
     encode_self_param(h, &m.receiver);
     encode_params(h, &m.params, interner);
     encode_return_type(h, m.return_type.as_ref(), interner);
+    // ADR-0088: `@mark(unchecked)` on an interface method signature
+    // is part of the conformance signature — flip the bit and any
+    // implementor stops conforming. Hash it explicitly so changing
+    // it on a pub interface invalidates downstream AIR caches.
+    h.update(&[m.is_unchecked as u8]);
 }
 
 fn encode_method_sig_from_method(h: &mut Hasher, m: &Method, interner: &ThreadedRodeo) {

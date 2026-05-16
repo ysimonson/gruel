@@ -397,7 +397,9 @@ impl<'a> Sema<'a> {
                     if self.interner.resolve(&d.name) != "mark" {
                         continue;
                     }
-                    for arg in &d.args {
+                    // Any `@mark(arg)` on an interface head is rejected
+                    // — surface the first arg's name in the diagnostic.
+                    if let Some(arg) = d.args.first() {
                         let arg_name = self.interner.resolve(arg);
                         return Err(CompileError::new(
                             ErrorKind::MarkerNotApplicable {

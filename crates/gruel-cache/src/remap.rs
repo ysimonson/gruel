@@ -269,6 +269,7 @@ impl RemapSpurs for InterfaceDecl {
 
 impl RemapSpurs for MethodSig {
     fn remap_spurs(&mut self, table: &[Spur]) {
+        self.directives.remap_spurs(table);
         self.name.remap_spurs(table);
         self.receiver.remap_spurs(table);
         self.params.remap_spurs(table);
