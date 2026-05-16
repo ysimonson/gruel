@@ -20,7 +20,7 @@ use gruel_util::{
 use lasso::Spur;
 
 use super::Sema;
-use crate::types::{IfaceTy, InterfaceId, StructId, Type, TypeKind};
+use crate::types::{IfaceTy, InterfaceId, InterfaceMethodReq, StructId, Type, TypeKind};
 
 /// Witness that a concrete type conforms to an interface.
 ///
@@ -153,6 +153,20 @@ impl<'a> Sema<'a> {
                     interface_id,
                     &req.name,
                     &self.format_concrete_method_sig(&method_info),
+                    use_span,
+                ));
+            }
+
+            // ADR-0088: the implementor's `is_unchecked` must match the
+            // interface signature's `is_unchecked` exactly. Mismatch
+            // means generic code can't reason about whether a
+            // `checked { }` block is required at the call site.
+            if method_info.is_unchecked != req.is_unchecked {
+                return Err(self.iface_method_unchecked_mismatch(
+                    candidate,
+                    interface_id,
+                    req,
+                    method_info.is_unchecked,
                     use_span,
                 ));
             }
@@ -305,6 +319,32 @@ impl<'a> Sema<'a> {
                     found_signature: found_signature.to_string(),
                 },
             )),
+            span,
+        )
+    }
+
+    /// ADR-0088: emit the dedicated mismatch diagnostic when an
+    /// interface method's `is_unchecked` flag doesn't match the
+    /// implementor's. The hint differs based on which side carried
+    /// the directive: missing on the implementor → suggest adding it;
+    /// missing on the interface → suggest encapsulating internally.
+    fn iface_method_unchecked_mismatch(
+        &self,
+        candidate: Type,
+        interface_id: InterfaceId,
+        req: &InterfaceMethodReq,
+        actual_unchecked: bool,
+        span: Span,
+    ) -> CompileError {
+        let iface_def = &self.interface_defs[interface_id.0 as usize];
+        CompileError::new(
+            ErrorKind::InterfaceMethodUncheckedMismatch {
+                type_name: self.format_type_name(candidate),
+                interface_name: iface_def.name.clone(),
+                method_name: req.name.clone(),
+                expected_unchecked: req.is_unchecked,
+                actual_unchecked,
+            },
             span,
         )
     }

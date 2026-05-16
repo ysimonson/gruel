@@ -281,6 +281,24 @@ impl<'a> Sema<'a> {
     /// directives (`@handle`, `@copy`) get a targeted retirement note; other
     /// unknowns get an edit-distance suggestion when there's a near-match.
     pub(crate) fn validate_directives(&self) -> CompileResult<()> {
+        // ADR-0088: gate `@mark(unchecked)` on interface method signatures
+        // first. The directive is not stored in extras for
+        // InterfaceMethodSig — it is parsed into the `is_unchecked` bool
+        // — so we gate based on the bool alone. Prelude interfaces are
+        // exempt for the same reason as fn declarations.
+        for (_, inst) in self.rir.iter() {
+            if let InstData::InterfaceMethodSig {
+                is_unchecked: true, ..
+            } = &inst.data
+                && !self.is_prelude_file(inst.span.file_id)
+            {
+                self.require_preview(
+                    PreviewFeature::UncheckedFnExtensions,
+                    "`@mark(unchecked)` directive on interface method signatures",
+                    inst.span,
+                )?;
+            }
+        }
         for (_, inst) in self.rir.iter() {
             let (start, len, is_fn_decl) = match &inst.data {
                 InstData::StructDecl {
@@ -391,6 +409,9 @@ impl<'a> Sema<'a> {
             params: Vec<(Spur, Spur)>, // (param_name, type_symbol)
             return_type_sym: Spur,
             receiver: ReceiverMode,
+            /// ADR-0088: whether this interface method signature is
+            /// `@mark(unchecked)`.
+            is_unchecked: bool,
             span: Span,
         }
 
@@ -416,6 +437,7 @@ impl<'a> Sema<'a> {
                         params_len,
                         return_type,
                         receiver_mode,
+                        is_unchecked,
                     } = &m.data
                     {
                         if !seen.insert(*method_name) {
@@ -445,6 +467,7 @@ impl<'a> Sema<'a> {
                             params,
                             return_type_sym: *return_type,
                             receiver,
+                            is_unchecked: *is_unchecked,
                             span: m.span,
                         });
                     }
@@ -491,6 +514,7 @@ impl<'a> Sema<'a> {
                     receiver: m.receiver,
                     param_types,
                     return_type,
+                    is_unchecked: m.is_unchecked,
                 });
             }
 

@@ -316,6 +316,13 @@ pub struct InterfaceDecl {
 /// No body and no associated functions (no-`self`) are allowed in MVP.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MethodSig {
+    /// Directives applied to this signature (e.g. `@mark(unchecked)`).
+    pub directives: Directives,
+    /// ADR-0088: whether this signature is marked `@mark(unchecked)`.
+    /// Implementors must match this flag exactly (conformance is
+    /// strict — checked impls must match a checked sig, unchecked
+    /// impls must match an unchecked sig).
+    pub is_unchecked: bool,
     /// Method name
     pub name: Ident,
     /// The receiver. Required (associated functions are not yet allowed in

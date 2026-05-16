@@ -776,6 +776,7 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                     params_len,
                     return_type,
                     receiver_mode,
+                    is_unchecked,
                 } => {
                     let params = self.rir.get_params(*params_start, *params_len);
                     let params_str: Vec<String> = params
@@ -793,9 +794,11 @@ impl<'a, 'b> RirPrinter<'a, 'b> {
                         2 => "borrow self",
                         _ => "self",
                     };
+                    let unchecked_str = if *is_unchecked { "unchecked " } else { "" };
                     writeln!(
                         out,
-                        "interface_method_sig {}({}{}{}) -> {}",
+                        "{}interface_method_sig {}({}{}{}) -> {}",
+                        unchecked_str,
                         self.interner.resolve(name),
                         recv,
                         if params.is_empty() { "" } else { ", " },

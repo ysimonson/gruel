@@ -3364,9 +3364,10 @@ where
 }
 
 /// Parser for top-level items (functions, structs, enums, drop fns, and consts)
-/// Parser for interface method signatures: `fn name([recv] self [, params]) [-> Type];`
+/// Parser for interface method signatures: `[directives]* fn name([recv] self [, params]) [-> Type];`
 ///
 /// `recv` is one of `inout` / `borrow`, or omitted for a by-value receiver.
+/// ADR-0088: signatures accept `@mark(unchecked)` in the directive list.
 fn interface_method_sig_parser<'src, I>() -> GruelParser<'src, I, MethodSig>
 where
     I: ValueInput<'src, Token = TokenKind, Span = SimpleSpan>,
@@ -3383,18 +3384,31 @@ where
         .delimited_by(just(TokenKind::LParen), just(TokenKind::RParen))
         .boxed();
 
-    just(TokenKind::Fn)
-        .ignore_then(method_name_parser())
+    directives_parser()
+        .then_ignore(just(TokenKind::Fn))
+        .then(method_name_parser())
         .then(receiver_and_params)
         .then(just(TokenKind::Arrow).ignore_then(type_parser()).or_not())
         .then_ignore(just(TokenKind::Semi))
-        .map_with(|((name, (receiver, params)), return_type), e| MethodSig {
-            name,
-            receiver,
-            params,
-            return_type,
-            span: span_from_extra(e),
-        })
+        .map_with(
+            |(((directives, name), (receiver, params)), return_type), e| {
+                let syms = e.state().0.syms;
+                let is_unchecked = directives_have_mark_unchecked(
+                    &directives,
+                    syms.mark_name,
+                    syms.unchecked_name,
+                );
+                MethodSig {
+                    directives,
+                    is_unchecked,
+                    name,
+                    receiver,
+                    params,
+                    return_type,
+                    span: span_from_extra(e),
+                }
+            },
+        )
         .boxed()
 }
 

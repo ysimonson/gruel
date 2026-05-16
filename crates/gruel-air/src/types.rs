@@ -759,6 +759,14 @@ pub struct InterfaceMethodReq {
     pub param_types: Vec<IfaceTy>,
     /// Resolved return slot.
     pub return_type: IfaceTy,
+    /// ADR-0088: whether this signature is `@mark(unchecked)`. Conformance
+    /// requires the implementor's method `is_unchecked` to match this
+    /// field exactly. Call sites that resolve through the interface
+    /// signature (comptime-T monomorphisation via `comptime T: I` after
+    /// specialization, or fat-pointer dispatch via `Ref(I)` / `MutRef(I)`)
+    /// read this flag to decide whether a `checked { }` block is required.
+    #[serde(default)]
+    pub is_unchecked: bool,
 }
 
 impl InterfaceDef {

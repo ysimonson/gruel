@@ -2085,12 +2085,14 @@ impl Rir {
                 params_len,
                 return_type,
                 receiver_mode,
+                is_unchecked,
             } => InstData::InterfaceMethodSig {
                 name: *name,
                 params_start: *params_start + extra_offset,
                 params_len: *params_len,
                 return_type: *return_type,
                 receiver_mode: *receiver_mode,
+                is_unchecked: *is_unchecked,
             },
 
             // Enum operations
@@ -2973,6 +2975,8 @@ pub enum InstData {
         return_type: Spur,
         /// Receiver mode encoded as `RirParamMode` (ADR-0060).
         receiver_mode: u8,
+        /// ADR-0088: whether this signature was declared `@mark(unchecked)`.
+        is_unchecked: bool,
     },
 
     /// Derive declaration (ADR-0058): `derive Name { fn ... }`.

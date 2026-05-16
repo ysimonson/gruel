@@ -134,6 +134,8 @@ impl ErrorCode {
     pub const UNCHECKED_DESTRUCTOR: Self = Self(504);
     /// ADR-0088: extern fn lacks `@mark(unchecked)`.
     pub const EXTERN_FN_MISSING_UNCHECKED: Self = Self(505);
+    /// ADR-0088: interface method `is_unchecked` mismatch.
+    pub const INTERFACE_METHOD_UNCHECKED_MISMATCH: Self = Self(506);
 
     // ========================================================================
     // Match errors (E0600-E0699)
@@ -1179,6 +1181,22 @@ pub enum ErrorKind {
         "extern fn `{fn_name}` in `link_extern(\"{library}\")` must be declared `@mark(unchecked) fn …`; FFI imports are unverified from the Gruel side"
     )]
     ExternFnMissingUnchecked { fn_name: String, library: String },
+    /// ADR-0088: implementor's `is_unchecked` flag on a method does
+    /// not match the interface signature's. Conformance is strict —
+    /// a checked interface method may not be satisfied by an
+    /// `@mark(unchecked)` impl, and vice versa.
+    #[error(
+        "method `{method_name}` on type `{type_name}` does not conform to interface `{interface_name}`: interface declares it as {} but implementor declares it as {}",
+        if *expected_unchecked { "`@mark(unchecked)`" } else { "checked" },
+        if *actual_unchecked { "`@mark(unchecked)`" } else { "checked" },
+    )]
+    InterfaceMethodUncheckedMismatch {
+        type_name: String,
+        interface_name: String,
+        method_name: String,
+        expected_unchecked: bool,
+        actual_unchecked: bool,
+    },
 
     // Match errors
     //
@@ -1408,6 +1426,9 @@ impl ErrorKind {
             }
             ErrorKind::UncheckedDestructor => ErrorCode::UNCHECKED_DESTRUCTOR,
             ErrorKind::ExternFnMissingUnchecked { .. } => ErrorCode::EXTERN_FN_MISSING_UNCHECKED,
+            ErrorKind::InterfaceMethodUncheckedMismatch { .. } => {
+                ErrorCode::INTERFACE_METHOD_UNCHECKED_MISMATCH
+            }
 
             // Match errors (E0600-E0699)
             ErrorKind::NonExhaustiveMatch { .. } => ErrorCode::NON_EXHAUSTIVE_MATCH,

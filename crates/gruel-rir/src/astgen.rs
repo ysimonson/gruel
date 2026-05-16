@@ -473,6 +473,7 @@ impl<'a> AstGen<'a> {
                         params_len,
                         return_type,
                         receiver_mode,
+                        is_unchecked: sig.is_unchecked,
                     },
                     span: sig.span,
                 })
@@ -1339,6 +1340,7 @@ impl<'a> AstGen<'a> {
                                         params_len,
                                         return_type,
                                         receiver_mode,
+                                        is_unchecked: sig.is_unchecked,
                                     },
                                     span: sig.span,
                                 })

@@ -1,0 +1,214 @@
+# ADR-0088: `@mark(unchecked)` on interface method signatures and the
+# conformance rule that implementors must match exactly.
+
+[section]
+id = "items.unchecked-interface"
+spec_chapter = "6.5"
+name = "Unchecked interface methods"
+description = "Tests for @mark(unchecked) on interface method signatures and exact-match conformance."
+
+# =============================================================================
+# Checked interface — checked implementor conforms
+# =============================================================================
+
+[[case]]
+name = "checked_iface_checked_impl"
+spec = ["6.5:1"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+interface Reader {
+    fn read(self) -> i32;
+}
+
+struct Foo {
+    val: i32,
+
+    pub fn read(self) -> i32 { self.val }
+}
+
+fn copy_all(comptime T: Reader, r: T) -> i32 {
+    r.read()
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    copy_all(Foo, f)
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Unchecked interface — unchecked implementor conforms
+# =============================================================================
+
+[[case]]
+name = "unchecked_iface_unchecked_impl"
+spec = ["6.5:2"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+interface UnsafeReader {
+    @mark(unchecked) fn read(self) -> i32;
+}
+
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn read(self) -> i32 { self.val }
+}
+
+fn copy_unchecked(comptime T: UnsafeReader, r: T) -> i32 {
+    checked { r.read() }
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    copy_unchecked(Foo, f)
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Mismatch: unchecked interface, checked implementor — rejected
+# =============================================================================
+
+[[case]]
+name = "unchecked_iface_checked_impl_rejected"
+spec = ["6.5:3"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+interface UnsafeReader {
+    @mark(unchecked) fn read(self) -> i32;
+}
+
+struct Foo {
+    val: i32,
+
+    pub fn read(self) -> i32 { self.val }
+}
+
+fn copy_unchecked(comptime T: UnsafeReader, r: T) -> i32 {
+    checked { r.read() }
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    copy_unchecked(Foo, f)
+}
+"""
+compile_fail = true
+error_contains = "does not conform"
+
+# =============================================================================
+# Mismatch: checked interface, unchecked implementor — rejected
+# =============================================================================
+
+[[case]]
+name = "checked_iface_unchecked_impl_rejected"
+spec = ["6.5:3"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+interface Reader {
+    fn read(self) -> i32;
+}
+
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn read(self) -> i32 { self.val }
+}
+
+fn copy_all(comptime T: Reader, r: T) -> i32 {
+    r.read()
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    copy_all(Foo, f)
+}
+"""
+compile_fail = true
+error_contains = "does not conform"
+
+# =============================================================================
+# Runtime dispatch through Ref(I) when interface method is unchecked
+# =============================================================================
+
+[[case]]
+name = "unchecked_iface_dyn_dispatch"
+spec = ["6.5:4"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+interface UnsafeReader {
+    @mark(unchecked) fn read(self) -> i32;
+}
+
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn read(self) -> i32 { self.val }
+}
+
+fn dyn_call(r: Ref(UnsafeReader)) -> i32 {
+    checked { r.read() }
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    dyn_call(&f)
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "unchecked_iface_dyn_dispatch_no_checked"
+spec = ["6.5:4"]
+preview = "unchecked_fn_extensions"
+preview_should_pass = true
+source = """
+interface UnsafeReader {
+    @mark(unchecked) fn read(self) -> i32;
+}
+
+struct Foo {
+    val: i32,
+
+    @mark(unchecked)
+    pub fn read(self) -> i32 { self.val }
+}
+
+fn dyn_call(r: Ref(UnsafeReader)) -> i32 {
+    r.read()
+}
+
+fn main() -> i32 {
+    let f = Foo { val: 42 };
+    dyn_call(&f)
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+# =============================================================================
+# Preview gate fires on interface method directive
+# =============================================================================
+
+[[case]]
+name = "unchecked_iface_requires_preview"
+spec = ["6.5:5"]
+source = """
+interface UnsafeReader {
+    @mark(unchecked) fn read(self) -> i32;
+}
+
+fn main() -> i32 { 0 }
+"""
+compile_fail = true
+error_contains = "requires preview feature"

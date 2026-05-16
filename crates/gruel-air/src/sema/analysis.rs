@@ -3393,6 +3393,21 @@ impl<'a> Sema<'a> {
                     span,
                 )?;
 
+            // ADR-0088: if the interface method signature is
+            // `@mark(unchecked)`, the call site needs to sit inside a
+            // `checked { }` block. Conformance enforces that every
+            // implementor's `is_unchecked` matches the interface's, so
+            // the gate decision is fully determined here.
+            if req.is_unchecked && ctx.checked_depth == 0 {
+                return Err(CompileError::new(
+                    ErrorKind::UncheckedCallRequiresChecked(format!(
+                        "{}.{}",
+                        iface_def.name, req.name
+                    )),
+                    span,
+                ));
+            }
+
             // Argument count check.
             if args.len() != req.param_types.len() {
                 return Err(CompileError::new(

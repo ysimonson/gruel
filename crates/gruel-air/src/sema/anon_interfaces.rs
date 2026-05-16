@@ -62,6 +62,7 @@ impl<'a> Sema<'a> {
                 params_len,
                 return_type,
                 receiver_mode,
+                is_unchecked,
             } = &m.data
             else {
                 return Err(CompileError::new(
@@ -78,6 +79,7 @@ impl<'a> Sema<'a> {
             let params_len = *params_len;
             let return_type_sym = *return_type;
             let receiver = decode_receiver_mode(*receiver_mode);
+            let is_unchecked = *is_unchecked;
 
             let name_str = self.interner.resolve(&name).to_string();
             if !seen.insert(name_str.clone()) {
@@ -106,6 +108,7 @@ impl<'a> Sema<'a> {
                 receiver,
                 param_types,
                 return_type,
+                is_unchecked,
             });
         }
         Ok(out)
