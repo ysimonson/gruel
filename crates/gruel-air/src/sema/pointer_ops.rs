@@ -673,8 +673,19 @@ impl<'a> Sema<'a> {
                 )
             })?;
 
-        if entry.requires_checked {
-            Self::require_checked_for_intrinsic(ctx, entry.intrinsic_name, span)?;
+        // ADR-0088: pointer-method gating flows through the unified
+        // `UncheckedCallRequiresChecked` path, matching user-declared
+        // `@mark(unchecked)` methods. The registry's `is_unchecked` flag
+        // is the only source of truth.
+        if entry.is_unchecked && ctx.checked_depth == 0 {
+            return Err(CompileError::new(
+                ErrorKind::UncheckedCallRequiresChecked(format!(
+                    "{}::{}",
+                    pointer_kind_name(entry.kind),
+                    function_name
+                )),
+                span,
+            ));
         }
 
         let intrinsic_name_sym = self.interner.get_or_intern(entry.intrinsic_name);
@@ -952,8 +963,18 @@ impl<'a> Sema<'a> {
                 )
             })?;
 
-        if entry.requires_checked {
-            Self::require_checked_for_intrinsic(ctx, entry.intrinsic_name, span)?;
+        // ADR-0088: pointer methods declared `is_unchecked = true` go
+        // through the unified `UncheckedCallRequiresChecked` gate, same
+        // as user-declared `@mark(unchecked)` methods.
+        if entry.is_unchecked && ctx.checked_depth == 0 {
+            return Err(CompileError::new(
+                ErrorKind::UncheckedCallRequiresChecked(format!(
+                    "{}::{}",
+                    pointer_kind_name(entry.kind),
+                    method_name
+                )),
+                span,
+            ));
         }
 
         let intrinsic_name_sym = self.interner.get_or_intern(entry.intrinsic_name);

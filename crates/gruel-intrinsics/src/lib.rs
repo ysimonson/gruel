@@ -1033,9 +1033,16 @@ pub struct PointerMethod {
     pub intrinsic: IntrinsicId,
     /// Symbol the AIR `Intrinsic` instruction is tagged with.
     pub intrinsic_name: &'static str,
-    /// Whether the lowering requires a `checked` block (mirrors what the
-    /// legacy `@…` registry entry would have had).
-    pub requires_checked: bool,
+    /// ADR-0088: whether this op is unchecked. After Phase 3c the
+    /// table reflects the body-side principle: only ops whose body
+    /// dereferences a caller-supplied pointer or does
+    /// provenance-sensitive arithmetic on one are unchecked
+    /// (`read`, `read_volatile`, `write`, `write_volatile`, `offset`,
+    /// `copy_from`). The opaque-token ops (`is_null`, `to_int`) and
+    /// the constructors that don't themselves dereference (`from`,
+    /// `null`, `from_int`) drop their gate — the deref-time gate at
+    /// the eventual `read` / `write` call site handles the hazard.
+    pub is_unchecked: bool,
 }
 
 /// Closed registry of every pointer method / associated function (ADR-0063).
@@ -1051,7 +1058,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrRead,
         intrinsic_name: "ptr_read",
-        requires_checked: true,
+        is_unchecked: true,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
@@ -1059,7 +1066,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrReadVolatile,
         intrinsic_name: "ptr_read_volatile",
-        requires_checked: true,
+        is_unchecked: true,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
@@ -1067,7 +1074,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrOffset,
         intrinsic_name: "ptr_offset",
-        requires_checked: true,
+        is_unchecked: true,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
@@ -1075,7 +1082,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::IsNull,
         intrinsic_name: "is_null",
-        requires_checked: true,
+        is_unchecked: false,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
@@ -1083,7 +1090,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrToInt,
         intrinsic_name: "ptr_to_int",
-        requires_checked: true,
+        is_unchecked: false,
     },
     // ---- Associated fns on Ptr(T) ----
     PointerMethod {
@@ -1092,7 +1099,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::Raw,
         intrinsic_name: "raw",
-        requires_checked: true,
+        is_unchecked: false,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
@@ -1100,7 +1107,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::NullPtr,
         intrinsic_name: "null_ptr",
-        requires_checked: true,
+        is_unchecked: false,
     },
     PointerMethod {
         kind: PointerKind::Ptr,
@@ -1108,7 +1115,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::IntToPtr,
         intrinsic_name: "int_to_ptr",
-        requires_checked: true,
+        is_unchecked: false,
     },
     // ---- Methods on MutPtr(T) ----
     PointerMethod {
@@ -1117,7 +1124,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrRead,
         intrinsic_name: "ptr_read",
-        requires_checked: true,
+        is_unchecked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
@@ -1125,7 +1132,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrReadVolatile,
         intrinsic_name: "ptr_read_volatile",
-        requires_checked: true,
+        is_unchecked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
@@ -1133,7 +1140,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrWrite,
         intrinsic_name: "ptr_write",
-        requires_checked: true,
+        is_unchecked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
@@ -1141,7 +1148,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrWriteVolatile,
         intrinsic_name: "ptr_write_volatile",
-        requires_checked: true,
+        is_unchecked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
@@ -1149,7 +1156,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrOffset,
         intrinsic_name: "ptr_offset",
-        requires_checked: true,
+        is_unchecked: true,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
@@ -1157,7 +1164,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::IsNull,
         intrinsic_name: "is_null",
-        requires_checked: true,
+        is_unchecked: false,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
@@ -1165,7 +1172,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrToInt,
         intrinsic_name: "ptr_to_int",
-        requires_checked: true,
+        is_unchecked: false,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
@@ -1173,7 +1180,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::Method,
         intrinsic: IntrinsicId::PtrCopy,
         intrinsic_name: "ptr_copy",
-        requires_checked: true,
+        is_unchecked: true,
     },
     // ---- Associated fns on MutPtr(T) ----
     PointerMethod {
@@ -1182,7 +1189,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::RawMut,
         intrinsic_name: "raw_mut",
-        requires_checked: true,
+        is_unchecked: false,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
@@ -1190,7 +1197,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::NullPtr,
         intrinsic_name: "null_ptr",
-        requires_checked: true,
+        is_unchecked: false,
     },
     PointerMethod {
         kind: PointerKind::MutPtr,
@@ -1198,7 +1205,7 @@ pub const POINTER_METHODS: &[PointerMethod] = &[
         form: PointerOpForm::AssocFn,
         intrinsic: IntrinsicId::IntToPtr,
         intrinsic_name: "int_to_ptr",
-        requires_checked: true,
+        is_unchecked: false,
     },
 ];
 

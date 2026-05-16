@@ -1,0 +1,142 @@
+# ADR-0088 Phase 3c: pointer-method gating rebalanced. Only the
+# pointer operations whose bodies dereference a caller-supplied
+# pointer or do provenance-sensitive arithmetic are `is_unchecked`
+# (read, read_volatile, write, write_volatile, offset, copy_from).
+# Opaque-token operations (is_null, to_int) and constructors that
+# don't themselves dereference (from, null, from_int) drop their
+# gate.
+
+[section]
+id = "runtime.pointer_methods_unchecked"
+spec_chapter = "9.2"
+name = "Pointer-method unchecked gate (ADR-0088 Phase 3c)"
+description = "Tests for the rebalanced pointer-method is_unchecked table."
+
+# =============================================================================
+# Opaque-token operations do NOT require `checked { }`.
+# =============================================================================
+
+[[case]]
+name = "ptr_is_null_outside_checked"
+spec = ["9.2:6"]
+source = """
+fn main() -> i32 {
+    let p = Ptr(i32)::null();
+    if p.is_null() { 42 } else { 0 }
+}
+"""
+exit_code = 42
+
+[[case]]
+name = "ptr_to_int_outside_checked"
+spec = ["9.2:6"]
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    let p = Ptr(i32)::from(&x);
+    let a: u64 = p.to_int();
+    if a == 0 { 0 } else { 42 }
+}
+"""
+exit_code = 42
+
+# =============================================================================
+# Constructors that don't dereference do NOT require `checked { }`.
+# =============================================================================
+
+[[case]]
+name = "ptr_from_outside_checked"
+spec = ["9.2:7"]
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    let _p = Ptr(i32)::from(&x);
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "ptr_null_outside_checked"
+spec = ["9.2:7"]
+source = """
+fn main() -> i32 {
+    let _p = Ptr(i32)::null();
+    0
+}
+"""
+exit_code = 0
+
+[[case]]
+name = "ptr_from_int_outside_checked"
+spec = ["9.2:7"]
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 42;
+    let addr: u64 = MutPtr(i32)::from(&mut x).to_int();
+    let _p = MutPtr(i32)::from_int(addr);
+    0
+}
+"""
+exit_code = 0
+
+# =============================================================================
+# Unchecked operations STILL require `checked { }`.
+# =============================================================================
+
+[[case]]
+name = "ptr_read_outside_checked_rejected"
+spec = ["9.2:8"]
+source = """
+fn main() -> i32 {
+    let x: i32 = 42;
+    let p = Ptr(i32)::from(&x);
+    p.read()
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+[[case]]
+name = "ptr_offset_outside_checked_rejected"
+spec = ["9.2:8"]
+source = """
+fn main() -> i32 {
+    let arr: [i32; 3] = [10, 20, 12];
+    let p = Ptr(i32)::from(&arr[0]);
+    let _q = p.offset(1);
+    0
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+[[case]]
+name = "ptr_write_outside_checked_rejected"
+spec = ["9.2:8"]
+source = """
+fn main() -> i32 {
+    let mut x: i32 = 0;
+    let p = MutPtr(i32)::from(&mut x);
+    p.write(42);
+    x
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
+
+[[case]]
+name = "ptr_copy_from_outside_checked_rejected"
+spec = ["9.2:8"]
+source = """
+fn main() -> i32 {
+    let src: [i32; 3] = [1, 2, 3];
+    let mut dst: [i32; 3] = [0, 0, 0];
+    let sp = Ptr(i32)::from(&src[0]);
+    let dp = MutPtr(i32)::from(&mut dst[0]);
+    dp.copy_from(sp, 3);
+    dst[0]
+}
+"""
+compile_fail = true
+error_contains = "can only be used inside a `checked` block"
