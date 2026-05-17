@@ -403,14 +403,14 @@ carries `Option<Doc>` unconditionally.
       the token spans — no whitespace-token wrangling required. Add
       parser tests and a `gruel-spec` snapshot test for the AST shape.
 
-- [ ] **Phase 3: `gruel-doc` crate + Markdown output.** New crate.
+- [x] **Phase 3: `gruel-doc` crate + Markdown output.** New crate.
       Define `DocSite` (`files: Vec<DocFile>`, each with rendered
       item-level pages). Implement Markdown rendering using only
       `std::fmt` (no external deps yet). Wire the CLI flag `--doc=markdown`
       and `--doc-output-dir`. Snapshot-test the output for a small
       sample tree in `examples/`.
 
-- [ ] **Phase 4: HTML output via pulldown-cmark.** Add the dependency.
+- [x] **Phase 4: HTML output via pulldown-cmark.** Add the dependency.
       Render each item page by piping the user's doc body through
       `pulldown_cmark::Parser` → `pulldown_cmark::html::push_html`
       with the GFM extensions enabled (tables, footnotes, strikethrough,
