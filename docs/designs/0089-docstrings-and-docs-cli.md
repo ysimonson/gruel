@@ -378,7 +378,7 @@ carries `Option<Doc>` unconditionally.
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Lexer recognizes `///`.** Replace the single
+- [x] **Phase 1: Lexer recognizes `///`.** Replace the single
       `#[logos(skip r"//[^\n]*")]` rule with explicit cases that:
       - Match `////…` (four or more slashes) and skip — plain line
         comment, matching Rust.

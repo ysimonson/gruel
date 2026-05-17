@@ -3720,6 +3720,9 @@ impl ChumskyParser {
         let spanned_tokens: Vec<(TokenKind, SimpleSpan)> = tokens
             .into_iter()
             .filter(|t| t.kind != TokenKind::Eof) // Remove EOF, chumsky handles end differently
+            // ADR-0089 Phase 1: drop `LineDoc` tokens at the parser boundary.
+            // Phase 2 wires them onto the AST behind the `docs` preview gate.
+            .filter(|t| !matches!(t.kind, TokenKind::LineDoc(_)))
             .map(|t| {
                 (
                     t.kind,

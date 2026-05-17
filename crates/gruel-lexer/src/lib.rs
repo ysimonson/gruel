@@ -122,6 +122,10 @@ pub enum TokenKind {
     // Builtins
     AtImport(Spur), // @import - contains interned "import" string
 
+    /// `///` line doc comment (ADR-0089). Carries the interned body text
+    /// (after the marker, with at most one leading space stripped).
+    LineDoc(Spur),
+
     // Special
     Eof,
 }
@@ -215,6 +219,7 @@ impl TokenKind {
             TokenKind::Dot => "'.'",
             TokenKind::At => "'@'",
             TokenKind::AtImport(_) => "'@import'",
+            TokenKind::LineDoc(_) => "doc comment",
             TokenKind::Eof => "end of file",
         }
     }
@@ -325,6 +330,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Dot => write!(f, "DOT"),
             TokenKind::At => write!(f, "AT"),
             TokenKind::AtImport(_) => write!(f, "AT_IMPORT"),
+            TokenKind::LineDoc(s) => write!(f, "LINEDOC(sym:{})", s.into_usize()),
             TokenKind::Eof => write!(f, "EOF"),
         }
     }
