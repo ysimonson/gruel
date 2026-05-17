@@ -1,0 +1,136 @@
+==================
+Let with mut
+==================
+
+fn main() -> i32 {
+    let mut x = 0;
+    x = 1;
+    x
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (integer_literal))
+      (assignment_statement
+        target: (identifier)
+        value: (integer_literal))
+      final_expression: (identifier))))
+
+==================
+Let with type annotation
+==================
+
+fn main() -> i32 {
+    let x: i32 = 42;
+    x
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        type: (primitive_type)
+        value: (integer_literal))
+      final_expression: (identifier))))
+
+==================
+Return statement
+==================
+
+fn main() -> i32 {
+    return 42;
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (expression_statement
+        expression: (return_expression
+          (integer_literal))))))
+
+==================
+Field and index assignment
+==================
+
+fn main() -> i32 {
+    let mut p = Point { x: 0, y: 0 };
+    p.x = 1;
+    let mut arr = [1, 2, 3];
+    arr[0] = 99;
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (struct_literal_expression
+          path: (struct_literal_path (identifier))
+          (field_init
+            name: (identifier)
+            value: (integer_literal))
+          (field_init
+            name: (identifier)
+            value: (integer_literal))))
+      (assignment_statement
+        target: (field_expression
+          object: (identifier)
+          field: (identifier))
+        value: (integer_literal))
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (array_literal_expression
+          (integer_literal)
+          (integer_literal)
+          (integer_literal)))
+      (assignment_statement
+        target: (index_expression
+          object: (identifier)
+          index: (integer_literal))
+        value: (integer_literal))
+      final_expression: (integer_literal))))
+
+==================
+Empty statement
+==================
+
+fn main() -> i32 {
+    ;
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (empty_statement)
+      final_expression: (integer_literal))))

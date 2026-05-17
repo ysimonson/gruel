@@ -1,0 +1,31 @@
+[package]
+name = "tree-sitter-gruel"
+description = "Tree-sitter grammar for the Gruel programming language"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+build = "build.rs"
+
+# Standalone crate — not a member of the main gruel workspace. Avoids
+# pulling tree-sitter into every `cargo build` for the compiler.
+[workspace]
+
+# Standalone crate — not a workspace member. Avoids pulling tree-sitter into
+# every `cargo build` for the compiler workspace.
+[lib]
+path = "lib.rs"
+
+[dependencies]
+tree-sitter = "0.25"
+
+[build-dependencies]
+cc = "1.0"
+
+[dev-dependencies]
+gruel-lexer = { path = "../../../crates/gruel-lexer" }
+gruel-parser = { path = "../../../crates/gruel-parser" }
+gruel-util = { path = "../../../crates/gruel-util" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+walkdir = "2"

@@ -6,7 +6,8 @@
         website website-serve website-deploy \
         fuzz fuzz-lexer fuzz-parser fuzz-compiler \
         fuzz-structured-compiler fuzz-structured-invalid \
-        fuzz-comptime-differential \
+        fuzz-comptime-differential fuzz-parser-differential \
+        tree-sitter-generate tree-sitter-test \
         claude
 
 # Detect LLVM 22 on macOS (Homebrew). Set LLVM_SYS_221_PREFIX if not already set.
@@ -41,7 +42,7 @@ doctest:
 
 # Run all tests (unit + doctests + spec + traceability + UI tests + examples).
 # Pass ARGS="pattern" to filter spec/UI/example tests, e.g.: make test ARGS="1.1"
-test: quick-test doctest
+test: quick-test doctest tree-sitter-differential
 	$(TIMEOUT) cargo build -p gruel
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_SPEC_CASES=crates/gruel-spec/cases \
@@ -55,6 +56,15 @@ test: quick-test doctest
 	GRUEL_BINARY=target/debug/gruel \
 	GRUEL_EXAMPLES_DIR=examples \
 	$(TIMEOUT) cargo run -p gruel-test-runner --bin gruel-examples-tests -- --quiet $(ARGS)
+
+# ADR-0090 Part 5: assert that the canonical chumsky parser and the
+# tree-sitter grammar agree on acceptance for every TOML case in
+# crates/gruel-spec/cases/ and crates/gruel-ui-tests/cases/. Runs from
+# the standalone tree-sitter-gruel/bindings/rust crate so the workspace
+# build is unaffected.
+tree-sitter-differential:
+	$(TIMEOUT) cargo test --manifest-path tree-sitter-gruel/bindings/rust/Cargo.toml \
+		--test spec_corpus_differential -- --nocapture
 
 # Format all Rust files.
 fmt:
@@ -162,6 +172,21 @@ fuzz-structured-invalid:
 
 fuzz-comptime-differential:
 	cargo +nightly fuzz run comptime_differential -- -max_total_time=$(FUZZ_TIME)
+
+fuzz-parser-differential:
+	cargo +nightly fuzz run parser_differential -- -max_total_time=$(FUZZ_TIME)
+
+# ADR-0090: regenerate the tree-sitter grammar's parser.c after editing
+# grammar.js. Uses the tree-sitter CLI from tree-sitter-gruel/node_modules
+# (installed by `npm install` inside that directory). Idempotent — produces
+# the same parser.c we already commit, so contributors who only consume the
+# grammar don't need node installed.
+tree-sitter-generate:
+	cd tree-sitter-gruel && HOME=$$(pwd) ./node_modules/.bin/tree-sitter generate
+
+# Run tree-sitter's native corpus tests against the generated parser.
+tree-sitter-test:
+	cd tree-sitter-gruel && HOME=$$(pwd) ./node_modules/.bin/tree-sitter test
 
 # Run Claude in a sandboxed environment.
 claude:

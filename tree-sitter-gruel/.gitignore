@@ -1,0 +1,23 @@
+# tree-sitter CLI installed locally (large, regeneratable).
+node_modules/
+.npm-cache/
+.cache/
+
+# CLI build artefacts.
+build/
+*.dylib
+*.so
+*.dll
+*.wasm
+
+# Rust build outputs for the bindings/rust crate. The Cargo.lock is
+# committed so the differential fuzz target builds reproducibly.
+bindings/rust/target/
+
+# Scratch files used while iterating on the grammar.
+test_simple.gruel
+test_field.gruel
+test_assign.gruel
+test_modpath.gruel
+test_anon_enum.gruel
+test_reserved.gruel

@@ -1,0 +1,137 @@
+==================
+Primitive types
+==================
+
+fn nums(a: i8, b: i16, c: i32, d: i64, e: u8, f: u16, g: u32, h: u64, i: bool, j: char, k: f32, l: f64) -> i32 {
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type))
+      (parameter name: (identifier) type: (primitive_type)))
+    return_type: (primitive_type)
+    body: (block
+      final_expression: (integer_literal))))
+
+==================
+Array type
+==================
+
+fn first(a: [i32; 5]) -> i32 {
+    a[0]
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (array_type
+          (primitive_type)
+          (integer_literal))))
+    return_type: (primitive_type)
+    body: (block
+      final_expression: (index_expression
+        object: (identifier)
+        index: (integer_literal)))))
+
+==================
+Tuple type
+==================
+
+fn pair() -> (i32, bool) {
+    (1, true)
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (tuple_type
+      (primitive_type)
+      (primitive_type))
+    body: (block
+      final_expression: (tuple_expression
+        (integer_literal)
+        (boolean_literal)))))
+
+==================
+Reference types via type call
+==================
+
+fn read(r: Ref(i32)) -> i32 {
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (type_call
+          callee: (identifier)
+          (primitive_type))))
+    return_type: (primitive_type)
+    body: (block
+      final_expression: (integer_literal))))
+
+==================
+Never type return
+==================
+
+fn diverges() -> ! {
+    return 0;
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (never_type)
+    body: (block
+      (expression_statement
+        expression: (return_expression
+          (integer_literal))))))
+
+==================
+Unit return type explicit
+==================
+
+fn unit() -> () {
+    ()
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (unit_type)
+    body: (block
+      final_expression: (unit_literal))))

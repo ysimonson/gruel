@@ -55,6 +55,9 @@ jobs:
       - name: Fuzz comptime differential (5 minutes)
         run: cargo +nightly fuzz run comptime_differential -- -max_total_time=300
 
+      - name: Fuzz parser differential (5 minutes)
+        run: cargo +nightly fuzz run parser_differential -- -max_total_time=300
+
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4

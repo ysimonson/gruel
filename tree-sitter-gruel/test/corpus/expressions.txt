@@ -1,0 +1,411 @@
+==================
+If expression as statement
+==================
+
+fn use_if() -> i32 {
+    let x = 5;
+    if x > 0 {
+        @dbg(x);
+    }
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (integer_literal))
+      (control_flow_statement
+        (if_expression
+          condition: (binary_expression
+            left: (identifier)
+            right: (integer_literal))
+          consequence: (block
+            (expression_statement
+              expression: (intrinsic_call_expression
+                name: (identifier)
+                arguments: (identifier))))))
+      final_expression: (integer_literal))))
+
+==================
+If as final expression
+==================
+
+fn abs(x: i32) -> i32 {
+    if x < 0 { -x } else { x }
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter name: (identifier) type: (primitive_type)))
+    return_type: (primitive_type)
+    body: (block
+      (control_flow_statement
+        (if_expression
+          condition: (binary_expression
+            left: (identifier)
+            right: (integer_literal))
+          consequence: (block
+            final_expression: (unary_expression
+              argument: (identifier)))
+          alternative: (block
+            final_expression: (identifier)))))))
+
+==================
+While loop with mutation
+==================
+
+fn sum_to(n: i32) -> i32 {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter name: (identifier) type: (primitive_type)))
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (integer_literal))
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (integer_literal))
+      (control_flow_statement
+        (while_expression
+          condition: (binary_expression
+            left: (identifier)
+            right: (identifier))
+          body: (block
+            (assignment_statement
+              target: (identifier)
+              value: (binary_expression
+                left: (identifier)
+                right: (identifier)))
+            (assignment_statement
+              target: (identifier)
+              value: (binary_expression
+                left: (identifier)
+                right: (integer_literal))))))
+      final_expression: (identifier))))
+
+==================
+For loop with iterator
+==================
+
+fn count(xs: Iter(i32)) -> i32 {
+    for i in xs {
+        @dbg(i);
+    }
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (type_call
+          callee: (identifier)
+          (primitive_type))))
+    return_type: (primitive_type)
+    body: (block
+      (control_flow_statement
+        (for_expression
+          pattern: (identifier_pattern (identifier))
+          iterable: (identifier)
+          body: (block
+            (expression_statement
+              expression: (intrinsic_call_expression
+                name: (identifier)
+                arguments: (identifier))))))
+      final_expression: (integer_literal))))
+
+==================
+Intrinsic call with type
+==================
+
+fn main() -> i32 {
+    let info = @type_info(i32);
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (intrinsic_call_expression
+          name: (identifier)
+          arguments: (primitive_type_value
+            (primitive_type))))
+      final_expression: (integer_literal))))
+
+==================
+Comptime block
+==================
+
+fn main() -> i32 {
+    comptime {
+        let x = 42;
+        x
+    }
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      final_expression: (comptime_expression
+        (block
+          (let_statement
+            pattern: (identifier_pattern (identifier))
+            value: (integer_literal))
+          final_expression: (identifier))))))
+
+==================
+Tuple expression
+==================
+
+fn pair() -> (i32, bool) {
+    (1, true)
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (tuple_type
+      (primitive_type)
+      (primitive_type))
+    body: (block
+      final_expression: (tuple_expression
+        (integer_literal)
+        (boolean_literal)))))
+
+==================
+Tuple index
+==================
+
+fn first() -> i32 {
+    let t = (1, 2, 3);
+    t.0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (tuple_expression
+          (integer_literal)
+          (integer_literal)
+          (integer_literal)))
+      final_expression: (tuple_index_expression
+        object: (identifier)
+        index: (integer_literal)))))
+
+==================
+Array literal and indexing
+==================
+
+fn second() -> i32 {
+    let a = [10, 20, 30];
+    a[1]
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (array_literal_expression
+          (integer_literal)
+          (integer_literal)
+          (integer_literal)))
+      final_expression: (index_expression
+        object: (identifier)
+        index: (integer_literal)))))
+
+==================
+Reference operators
+==================
+
+fn refs() -> i32 {
+    let v = 42;
+    let rv = &v;
+    let mv = &mut v;
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (integer_literal))
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (unary_expression
+          argument: (identifier)))
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (unary_expression
+          argument: (identifier)))
+      final_expression: (integer_literal))))
+
+==================
+Loop with break/continue
+==================
+
+fn loops() -> i32 {
+    let mut i = 0;
+    loop {
+        if i == 5 {
+            break;
+        }
+        i = i + 1;
+    }
+    i
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (integer_literal))
+      (control_flow_statement
+        (loop_expression
+          body: (block
+            (control_flow_statement
+              (if_expression
+                condition: (binary_expression
+                  left: (identifier)
+                  right: (integer_literal))
+                consequence: (block
+                  (expression_statement
+                    expression: (break_expression)))))
+            (assignment_statement
+              target: (identifier)
+              value: (binary_expression
+                left: (identifier)
+                right: (integer_literal))))))
+      final_expression: (identifier))))
+
+==================
+Method call chain
+==================
+
+fn chain() -> i32 {
+    let c = Counter::new();
+    c.inc().inc().get()
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (call_expression
+          function: (path_expression
+            (identifier)
+            (identifier))))
+      final_expression: (method_call_expression
+        receiver: (method_call_expression
+          receiver: (method_call_expression
+            receiver: (identifier)
+            method: (identifier))
+          method: (identifier))
+        method: (identifier)))))
+
+==================
+Anonymous function expression
+==================
+
+fn make() -> i32 {
+    let f = fn(x: i32) -> i32 { x * 2 };
+    f(21)
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (anonymous_function_expression
+          parameters: (parameter_list
+            (parameter
+              name: (identifier)
+              type: (primitive_type)))
+          return_type: (primitive_type)
+          body: (block
+            final_expression: (binary_expression
+              left: (identifier)
+              right: (integer_literal)))))
+      final_expression: (call_expression
+        function: (identifier)
+        arguments: (integer_literal)))))

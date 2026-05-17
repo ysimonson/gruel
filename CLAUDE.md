@@ -477,6 +477,7 @@ cargo +nightly fuzz list
 # - structured_compiler:  Valid Gruel programs (arbitrary crate)
 # - structured_invalid:   Semantically invalid programs (arbitrary crate)
 # - comptime_differential: Comptime vs. runtime evaluation differential (arbitrary crate)
+# - parser_differential:  Chumsky vs. tree-sitter acceptance differential (ADR-0090)
 ```
 
 #### Running Fuzz Tests
@@ -605,7 +606,14 @@ When all tests pass and the feature is complete:
    - Changes to error message formatting
    - New compiler flags or options
 
-9. **Run `make test`** to verify all tests pass and traceability is maintained
+9. **Update the tree-sitter grammar** in `tree-sitter-gruel/grammar.js` if syntax changed
+   (ADR-0090). After editing, run `make tree-sitter-generate` to refresh `src/parser.c`
+   and commit both files. The spec-corpus differential test in
+   `tree-sitter-gruel/bindings/rust/tests/spec_corpus_differential.rs` (wired into
+   `make test`) fails the build if the tree-sitter and chumsky parsers disagree on
+   acceptance for any spec or UI test case.
+
+10. **Run `make test`** to verify all tests pass and traceability is maintained
 
 ### Doc comments and `gruel doc`
 

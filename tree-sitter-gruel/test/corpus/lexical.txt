@@ -1,0 +1,235 @@
+==================
+Empty file
+==================
+
+---
+
+(source_file)
+
+==================
+Line comment only
+==================
+
+// just a comment
+
+---
+
+(source_file
+  (line_comment))
+
+==================
+Doc comment alone
+==================
+
+/// module-level doc
+
+---
+
+(source_file
+  (doc_comment))
+
+==================
+Integer literal
+==================
+
+fn main() -> i32 { 42 }
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      final_expression: (integer_literal))))
+
+==================
+Float literal
+==================
+
+fn main() -> f64 { 3.14 }
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      final_expression: (float_literal))))
+
+==================
+String literal with escapes
+==================
+
+fn main() -> i32 {
+    let s = "hello\nworld\t\"\\";
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (string_literal
+          (escape_sequence)
+          (escape_sequence)
+          (escape_sequence)
+          (escape_sequence)))
+      final_expression: (integer_literal))))
+
+==================
+Char literal
+==================
+
+fn main() -> char {
+    let c = 'a';
+    c
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (char_literal))
+      final_expression: (identifier))))
+
+==================
+Boolean literals
+==================
+
+fn main() -> bool {
+    let t = true;
+    let f = false;
+    t
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (boolean_literal))
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (boolean_literal))
+      final_expression: (identifier))))
+
+==================
+Unit literal
+==================
+
+fn nothing() {
+    ()
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      final_expression: (unit_literal))))
+
+==================
+Identifiers vs keywords
+==================
+
+fn whileloop() -> i32 {
+    let lets = 1;
+    let _underscore = 2;
+    lets + _underscore
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (integer_literal))
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (integer_literal))
+      final_expression: (binary_expression
+        left: (identifier)
+        right: (identifier)))))
+
+==================
+Binary arithmetic precedence
+==================
+
+fn main() -> i32 {
+    1 + 2 * 3
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      final_expression: (binary_expression
+        left: (integer_literal)
+        right: (binary_expression
+          left: (integer_literal)
+          right: (integer_literal))))))
+
+==================
+Unary operators
+==================
+
+fn main() -> i32 {
+    let a = -1;
+    let b = !true;
+    let c = ~0;
+    a
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (unary_expression
+          argument: (integer_literal)))
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (unary_expression
+          argument: (boolean_literal)))
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (unary_expression
+          argument: (integer_literal)))
+      final_expression: (identifier))))

@@ -1,12 +1,12 @@
 ---
 id: 0090
 title: Tree-sitter Grammar and Parser Differential Fuzzing
-status: proposal
+status: implemented
 tags: [tooling, parser, ide, fuzzing, ci]
 feature-flag: null
 created: 2026-05-17
-accepted:
-implemented:
+accepted: 2026-05-17
+implemented: 2026-05-17
 spec-sections: []
 superseded-by:
 ---
@@ -15,7 +15,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -199,20 +199,20 @@ smoke-fuzz:
 
 ## Implementation Phases
 
-- [ ] **Phase 1: Tree-sitter scaffolding + lexical grammar**
+- [x] **Phase 1: Tree-sitter scaffolding + lexical grammar**
   - Create `tree-sitter-gruel/` with `grammar.js`, `package.json`, `README.md`
   - Define lexical rules: identifiers, keywords, all operator tokens, integer / float / string / char literals, `//` / `///` / `/* */` comments
   - Add `test/corpus/lexical.txt`
   - Wire up `make tree-sitter-generate` and commit generated `src/`
 
-- [ ] **Phase 2: Grammar for items, statements, types**
+- [x] **Phase 2: Grammar for items, statements, types**
   - `fn`, `struct`, `enum`, `impl`, `use`, `@import`
   - `let`, assignment, `return`, expression statements
   - Type expressions (named, `Ref(...)`, `MutRef(...)`, arrays, `comptime T: type`)
   - Item-level `comptime { }` blocks
   - Expand `test/corpus/`
 
-- [ ] **Phase 3: Grammar for expressions**
+- [x] **Phase 3: Grammar for expressions**
   - Pratt-style precedence matching `chumsky_parser.rs`
   - All operator forms, calls, method calls, field access, indexing
   - `if`/`while`/`for`/`match`, blocks
@@ -220,25 +220,25 @@ smoke-fuzz:
   - Struct literals (with the grammar disambiguation against block-expressions)
   - Full `test/corpus/expressions.txt`
 
-- [ ] **Phase 4: Rust bindings + spec-corpus differential test**
+- [x] **Phase 4: Rust bindings + spec-corpus differential test**
   - `tree-sitter-gruel/bindings/rust/` crate with `build.rs` and `lib.rs`
   - Integration test that walks `crates/gruel-spec/cases/` + `crates/gruel-ui-tests/cases/` and asserts acceptance parity
   - Wire into `make test`
   - Fix any genuine grammar gaps surfaced by the spec corpus
 
-- [ ] **Phase 5: Differential fuzz target**
+- [x] **Phase 5: Differential fuzz target**
   - New `fuzz/fuzz_targets/parser_differential.rs`
   - Add `tree-sitter` and `tree-sitter-gruel` to `fuzz/Cargo.toml`
   - Register the binary, run locally for 5 minutes, fix anything found
   - Document the target in `CLAUDE.md` fuzz section
 
-- [ ] **Phase 6: CI smoke-fuzz job**
+- [x] **Phase 6: CI smoke-fuzz job**
   - Add `smoke-fuzz` job to `.github/workflows/ci.yml`
   - 60s per target × 7 targets
   - Corpus caching across runs
   - Make it a required check via repo settings (manual step, noted in PR description)
 
-- [ ] **Phase 7: Editor queries + docs**
+- [x] **Phase 7: Editor queries + docs**
   - `queries/highlights.scm`, `locals.scm`, `indents.scm`, `folds.scm`
   - `tree-sitter-gruel/README.md` with usage from Zed / Neovim / Helix
   - Update `CLAUDE.md` "Modifying the Language" section with: "If you change syntax, also update `tree-sitter-gruel/grammar.js` and regenerate"

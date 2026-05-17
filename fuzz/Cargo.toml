@@ -15,6 +15,11 @@ gruel-parser = { path = "../crates/gruel-parser" }
 gruel-compiler = { path = "../crates/gruel-compiler" }
 gruel-util = { path = "../crates/gruel-util" }
 tempfile = "3"
+# ADR-0090: differential fuzz target uses the tree-sitter Gruel grammar.
+# Path-dep on the standalone tree-sitter-gruel/bindings/rust crate so the
+# main compiler workspace doesn't pull in tree-sitter.
+tree-sitter = "0.25"
+tree-sitter-gruel = { path = "../tree-sitter-gruel/bindings/rust" }
 
 [[bin]]
 name = "lexer"
@@ -51,5 +56,11 @@ doc = false
 [[bin]]
 name = "comptime_differential"
 path = "fuzz_targets/comptime_differential.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "parser_differential"
+path = "fuzz_targets/parser_differential.rs"
 test = false
 doc = false

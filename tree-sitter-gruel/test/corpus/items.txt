@@ -1,0 +1,221 @@
+==================
+Function with no return
+==================
+
+fn nothing() {
+    let x = 1;
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      (let_statement
+        pattern: (identifier_pattern (identifier))
+        value: (integer_literal)))))
+
+==================
+Function with parameters
+==================
+
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (primitive_type))
+      (parameter
+        name: (identifier)
+        type: (primitive_type)))
+    return_type: (primitive_type)
+    body: (block
+      final_expression: (binary_expression
+        left: (identifier)
+        right: (identifier)))))
+
+==================
+Pub function with directive
+==================
+
+@inline(always)
+pub fn fast() -> i32 {
+    0
+}
+
+---
+
+(source_file
+  (function_definition
+    (directive
+      name: (identifier)
+      (identifier))
+    (visibility)
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      final_expression: (integer_literal))))
+
+==================
+Struct declaration with fields and method
+==================
+
+struct Point {
+    x: i32,
+    y: i32,
+
+    fn origin() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+
+---
+
+(source_file
+  (struct_declaration
+    name: (identifier)
+    body: (struct_body
+      (field_declaration
+        name: (identifier)
+        type: (primitive_type))
+      (field_declaration
+        name: (identifier)
+        type: (primitive_type))
+      (method_definition
+        name: (identifier)
+        parameters: (parameter_list)
+        return_type: (self_type)
+        body: (block
+          final_expression: (struct_literal_expression
+            path: (struct_literal_path (self_type_literal))
+            (field_init
+              name: (identifier)
+              value: (integer_literal))
+            (field_init
+              name: (identifier)
+              value: (integer_literal))))))))
+
+==================
+Enum with unit and data variants
+==================
+
+enum Shape {
+    Circle(i32),
+    Rectangle { width: i32, height: i32 },
+    Point,
+}
+
+---
+
+(source_file
+  (enum_declaration
+    name: (identifier)
+    body: (enum_body
+      (enum_variant
+        name: (identifier)
+        (variant_tuple
+          (primitive_type)))
+      (enum_variant
+        name: (identifier)
+        (variant_struct
+          (field_declaration
+            name: (identifier)
+            type: (primitive_type))
+          (field_declaration
+            name: (identifier)
+            type: (primitive_type))))
+      (enum_variant
+        name: (identifier)))))
+
+==================
+Interface declaration
+==================
+
+interface Eq {
+    fn equals(self, other: Self) -> bool;
+}
+
+---
+
+(source_file
+  (interface_declaration
+    name: (identifier)
+    body: (interface_body
+      (interface_method
+        name: (identifier)
+        parameters: (parameter_list
+          (parameter
+            name: (self_literal))
+          (parameter
+            name: (identifier)
+            type: (self_type)))
+        return_type: (primitive_type)))))
+
+==================
+Const declaration with import
+==================
+
+const math = @import("math.gruel");
+
+---
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (import_expression
+      arguments: (string_literal))))
+
+==================
+Link extern block
+==================
+
+link_extern("c") {
+    fn puts(s: u64) -> i32;
+}
+
+---
+
+(source_file
+  (link_extern_block
+    library: (string_literal)
+    (extern_function_declaration
+      name: (identifier)
+      parameters: (parameter_list
+        (parameter
+          name: (identifier)
+          type: (primitive_type)))
+      return_type: (primitive_type))))
+
+==================
+Generic function via comptime
+==================
+
+fn identity(comptime T: type, x: T) -> T {
+    x
+}
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (named_type (identifier)))
+      (parameter
+        name: (identifier)
+        type: (named_type (identifier))))
+    return_type: (named_type (identifier))
+    body: (block
+      final_expression: (identifier))))
