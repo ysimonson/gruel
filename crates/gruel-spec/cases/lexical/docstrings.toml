@@ -1,34 +1,18 @@
 # ADR-0089: docstring lexical/parser behaviour
 #
-# These tests verify the surface behaviour visible to users: `///` is
-# accepted (or quietly skipped without the preview), `////` is a regular
-# comment, and the parser correctly forbids stray doc blocks.
+# Doc comments are part of the stable language: `///` lines are
+# attached to the following item, `////` (four or more slashes) is a
+# regular comment, and stray doc blocks are a parse error.
 
 [section]
 id = "lexical.docstrings"
 spec_chapter = "2.2"
 name = "Doc Comments"
 
-# `///` is silently skipped without the `docs` preview — behaviour is
-# identical to a plain `//` comment.
+# `///` before an item compiles + runs normally.
 [[case]]
-name = "doc_comment_without_preview_is_skipped"
-spec = ["2.2:5"]
-source = """
-/// Docs for main.
-fn main() -> i32 {
-    42
-}
-"""
-exit_code = 42
-
-# With the `docs` preview enabled, a `///`-prefixed block before an item
-# is accepted and the program still compiles + runs unchanged.
-[[case]]
-name = "doc_comment_with_preview_compiles"
+name = "doc_comment_above_item"
 spec = ["2.2:5", "2.2:6", "2.2:7"]
-preview = "docs"
-preview_should_pass = true
 source = """
 /// Docs for main.
 fn main() -> i32 {
@@ -37,13 +21,11 @@ fn main() -> i32 {
 """
 exit_code = 42
 
-# Module-level docs (separated from the first item by a blank line) are
-# accepted alongside an item-level doc.
+# Module-level docs (separated from the first item by a blank line)
+# coexist with an item-level doc.
 [[case]]
 name = "module_doc_then_item_doc"
 spec = ["2.2:7"]
-preview = "docs"
-preview_should_pass = true
 source = """
 /// Module docs.
 
@@ -58,8 +40,6 @@ exit_code = 42
 [[case]]
 name = "four_slashes_is_plain_comment"
 spec = ["2.2:5"]
-preview = "docs"
-preview_should_pass = true
 source = """
 //// Not a doc — plain comment.
 fn main() -> i32 {
@@ -69,12 +49,10 @@ fn main() -> i32 {
 exit_code = 42
 
 # A stray doc block (no item above, no item glued below) is a parse
-# error when the preview is on.
+# error.
 [[case]]
 name = "stray_doc_block_is_error"
 spec = ["2.2:8"]
-preview = "docs"
-preview_should_pass = true
 source = """
 fn helper() -> i32 { 0 }
 

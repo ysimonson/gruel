@@ -810,15 +810,6 @@ fn main() {
     // ADR-0089: `--doc` is an early-return mode that parses sources and
     // writes documentation files; sema/codegen never run.
     if let Some(format) = options.doc {
-        if !options
-            .preview_features
-            .contains(&PreviewFeature::Docs)
-        {
-            eprintln!(
-                "Error: --doc requires --preview docs (the docs feature is unstable)."
-            );
-            std::process::exit(1);
-        }
         run_doc(format, &options, &sources);
         return;
     }

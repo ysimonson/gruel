@@ -15,7 +15,6 @@ use crate::ast::{
     SelfReceiverKind, Statement, StringLit, StructDecl, StructLitExpr, TupleElemPattern, TupleExpr,
     TupleIndexExpr, TypeExpr, TypeLitExpr, UnaryExpr, UnaryOp, UnitLit, Visibility, WhileExpr,
 };
-use gruel_util::PreviewFeature;
 use gruel_util::span::LineIndex;
 use std::collections::HashMap;
 use chumsky::input::{Input as ChumskyInput, MapExtra, Stream, ValueInput};
@@ -3819,22 +3818,21 @@ impl ChumskyParser {
             return Err(CompileErrors::from(errors));
         }
 
-        // ADR-0089: attach doc blocks to AST items if the `docs` preview
-        // feature is enabled. Without it (or without a source), drop them.
-        if self.preview_features.contains(&PreviewFeature::Docs) {
-            if let Some(ref source) = self.source {
-                let mut doc_errors = Vec::new();
-                attach_docs(
-                    &mut ast,
-                    &self.raw_tokens,
-                    source,
-                    self.file_id,
-                    &self.interner,
-                    &mut doc_errors,
-                );
-                if !doc_errors.is_empty() {
-                    return Err(CompileErrors::from(doc_errors));
-                }
+        // ADR-0089 (stable): always attach docs when source is provided.
+        // Call sites that pre-date this and don't pass `with_source()`
+        // simply have no docs on their AST (same as the Phase 1 drop).
+        if let Some(ref source) = self.source {
+            let mut doc_errors = Vec::new();
+            attach_docs(
+                &mut ast,
+                &self.raw_tokens,
+                source,
+                self.file_id,
+                &self.interner,
+                &mut doc_errors,
+            );
+            if !doc_errors.is_empty() {
+                return Err(CompileErrors::from(doc_errors));
             }
         }
 
@@ -6108,17 +6106,15 @@ mod tests {
     fn parse_with_docs(source: &str) -> MultiErrorResult<ParseResult> {
         let lexer = Lexer::new(source);
         let (tokens, interner) = lexer.tokenize().map_err(CompileErrors::from)?;
-        let mut prev = PreviewFeatures::default();
-        prev.insert(PreviewFeature::Docs);
-        let parser = ChumskyParser::new(tokens, interner)
-            .with_preview_features(prev)
-            .with_source(source);
+        let parser = ChumskyParser::new(tokens, interner).with_source(source);
         let (ast, interner) = parser.parse()?;
         Ok(ParseResult { ast, interner })
     }
 
     #[test]
-    fn test_docs_off_drops_line_docs() {
+    fn test_docs_dropped_when_source_not_provided() {
+        // Without `.with_source()`, the parser has no LineIndex and
+        // therefore drops doc tokens at the boundary.
         let source = "/// Module docs.\nfn main() -> i32 { 0 }";
         let result = parse(source).unwrap();
         assert!(result.ast.module_doc.is_none());

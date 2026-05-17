@@ -1,12 +1,11 @@
 ---
 id: 0089
 title: Docstrings and a doc-dump CLI
-status: proposal
+status: implemented
 tags: [docs, lexer, parser, ast, cli, tooling]
-feature-flag: docs
 created: 2026-05-16
-accepted:
-implemented:
+accepted: 2026-05-17
+implemented: 2026-05-17
 spec-sections: ["2.2", "6.1"]
 superseded-by:
 ---
@@ -15,7 +14,7 @@ superseded-by:
 
 ## Status
 
-Proposal
+Implemented
 
 ## Summary
 
@@ -447,7 +446,7 @@ carries `Option<Doc>` unconditionally.
       we want the registry to flow through `gruel-doc` instead of its
       current bespoke generator.
 
-- [ ] **Phase 7: Stabilization.** Remove the `docs` preview gate, add a
+- [x] **Phase 7: Stabilization.** Remove the `docs` preview gate, add a
       reference page in the spec, update CONTRIBUTING/CLAUDE.md, and
       mark this ADR `status: stable`.
 

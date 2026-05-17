@@ -105,6 +105,7 @@ graph LR
 | `gruel-fuzz` | Fuzz testing infrastructure |
 | `gruel-runtime` | Runtime support |
 | `gruel-builtins` | Built-in type definitions (String, future Vec, etc.) |
+| `gruel-doc` | Doc-comment rendering (Markdown + HTML), driven by `gruel --doc` (ADR-0089) |
 
 ### Multi-File Compilation
 
@@ -587,6 +588,32 @@ When all tests pass and the feature is complete:
    - New compiler flags or options
 
 9. **Run `make test`** to verify all tests pass and traceability is maintained
+
+### Doc comments and `--doc`
+
+`///` introduces a doc comment (ADR-0089). Doc blocks attach to the
+following item; a leading doc block separated from the first item by a
+blank line becomes the module doc. The parser stores them on
+`Option<Doc>` fields of every nameable AST struct (`Function`,
+`StructDecl`, `FieldDecl`, etc.). Sema and later stages ignore the
+field — it's purely for downstream tooling.
+
+The `gruel --doc=<markdown|html>` early-return mode walks the parsed
+AST and writes a `cargo doc`-style site under `target/doc/`. The
+generator lives in `gruel-doc`; the binary's `run_doc` wrapper drives
+it. Sema is not run, so `--doc` works on code that doesn't yet
+type-check.
+
+To refresh the website's bundled stdlib/prelude pages after editing a
+docstring:
+
+```bash
+make gen-stdlib-docs   # writes docs/generated/{stdlib,prelude}/
+git add docs/generated # commit the regenerated files
+```
+
+`make check` runs `check-stdlib-docs`, which fails if the committed
+tree drifts from what `make gen-stdlib-docs` would produce now.
 
 ### Adding a new intrinsic
 

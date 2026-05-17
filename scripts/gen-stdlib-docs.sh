@@ -35,7 +35,7 @@ mkdir -p "$STDLIB_OUT" "$PRELUDE_OUT"
 
 # stdlib: just `std/math.gruel` for now. Adding more std modules is a
 # matter of listing them here.
-"$GRUEL" --preview docs --doc markdown --doc-output-dir "$STDLIB_OUT" \
+"$GRUEL" --doc markdown --doc-output-dir "$STDLIB_OUT" \
     std/math.gruel
 
 # prelude: every `prelude/*.gruel` that isn't the root or auto-private.
@@ -47,7 +47,7 @@ PRELUDE_SOURCES=(
     prelude/vec.gruel
 )
 
-"$GRUEL" --preview docs --doc markdown --doc-output-dir "$PRELUDE_OUT" \
+"$GRUEL" --doc markdown --doc-output-dir "$PRELUDE_OUT" \
     "${PRELUDE_SOURCES[@]}"
 
 echo "wrote stdlib docs to $STDLIB_OUT"
